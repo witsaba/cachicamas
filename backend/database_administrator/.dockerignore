@@ -1,0 +1,28 @@
+# ============================================================================
+# .dockerignore for database_administrator
+# Keeps the build context small — only what the Dockerfile actually needs.
+# ============================================================================
+
+# Build artifacts that should never enter the image.
+bin/
+coverage.out
+coverage.html
+
+# Tooling state.
+.git/
+.gitignore
+.github/
+
+# Editor / OS noise.
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# The Dockerfile itself is fine to leave in context, but anything we don't
+# need from the host fs slows down `docker build` and breaks caching.
+Makefile
+.golangci.yml
+README.md
+CLAUDE.md
+AGENTS.md

@@ -1,0 +1,30 @@
+# golangci-lint v2 configuration
+#
+# KISS: enable the 5 most useful core linters recommended by the Go community.
+# Add more only when a real need shows up — every new linter is a tax.
+#
+# Docs: https://golangci-lint.run/
+
+version: "2"
+
+linters:
+  enable:
+    - govet       # built-in, catches suspicious constructs
+    - errcheck    # catches unchecked errors
+    - staticcheck # bug detector (SA* rules)
+    - unused      # dead code (unused params/vars/funcs/types)
+    - revive      # replacement for the deprecated golint
+
+  settings:
+    # revive uses sensible defaults out of the box; only customize if a real
+    # need shows up. Adding per-rule overrides here has cost, not free.
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true

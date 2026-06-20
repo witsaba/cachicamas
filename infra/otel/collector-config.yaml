@@ -1,0 +1,138 @@
+# ============================================================================
+# Cachicamas — OpenTelemetry Collector configuration
+#
+# Topology:
+#   application (Go) ──OTLP/gRPC──> otel-collector ──OTLP──> jaeger (traces)
+#                                                  └─debug──> stdout
+#
+#   application (Go) ──OTLP/gRPC──> otel-collector ──debug──> stdout (logs)
+#
+# Jaeger v2 does NOT store logs (it is a tracing backend), so the logs
+# pipeline emits only to the debug exporter. The otelslog bridge on the
+# application side attaches trace_id / span_id to every log record, so
+# `docker compose logs otel-collector | jq` shows a TraceID you can paste
+# into the Jaeger UI to jump to the matching span. Swap `debug` for a
+# real logs backend (Loki / Elasticsearch / Datadog Logs) without
+# touching the application code.
+#
+# In production, swap the jaeger exporter for otlp/<vendor> (Tempo, Honeycomb,
+# Datadog, etc.) without touching the application code.
+# ============================================================================
+
+receivers:
+  # Standard OTLP receivers — applications speak these natively.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch is the canonical efficiency processor — required for any non-trivial
+  # traffic. Keep timeout low in dev so traces show up quickly in the UI.
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Memory limiter prevents the collector from being OOM-killed under spikes.
+  # 80% of the container memory limit is a safe default; tune if you bump the
+  # limit in docker-compose.
+  memory_limiter:
+    check_interval: 2s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  # Surface useful attributes as first-class metric labels (env, service name).
+  resource:
+    attributes:
+      - key: deployment.environment
+        from_attribute: deployment.environment
+        action: upsert
+      - key: service.namespace
+        from_attribute: service.namespace
+        action: upsert
+
+  # Resolves a development-quality span when the caller didn't provide one.
+  # Cheap insurance for handlers that forget to instrument.
+  #
+  # `docker` was removed from the detector list: it tries to read
+  # /var/run/docker.sock from inside the container, which is not mounted
+  # in this compose setup, producing "Cannot connect to the Docker daemon"
+  # warnings every 5s. Mounting the socket would expose the host daemon
+  # to the collector (security implication), so we just skip the detector.
+  resourcedetection:
+    detectors: [env]
+    timeout: 2s
+
+exporters:
+  # --------------------------------------------------------------------------
+  # Jaeger v2 — speaks native OTLP. We point at jaeger:4317 (gRPC) inside the
+  # compose network. The jaeger image's OTLP receiver writes straight to its
+  # in-memory store; the UI is exposed on host:16686.
+  # --------------------------------------------------------------------------
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 500ms
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Dev-only: pretty-print spans to stdout so you can `docker compose logs
+  # otel-collector | grep span` and verify telemetry is flowing without
+  # needing to open the Jaeger UI. Comment out in production.
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  # The health endpoint is provided by the OTel Collector's main binary
+  # on the `health_check` extension, but it is unmaintained and scheduled
+  # for deprecation. The docker-compose healthcheck for this service runs
+  # `/otelcol-contrib validate --config=...` instead, which does not need
+  # this extension. Drop it to silence the "Unmaintained component" warn.
+  #
+  # pprof for debugging the collector itself.
+  pprof:
+    endpoint: 0.0.0.0:1777
+  # zPages for at-a-glance pipeline health in dev.
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      # level controls verbosity of the collector's internal metrics
+      # (otelcol_*) which are emitted in-process; expose them on an HTTP
+      # endpoint by adding a `prometheus` exporter + a metrics pipeline
+      # listening on 0.0.0.0:8888 (or use the `service.telemetry`
+      # `self_metrics` extension when running the configserver). For now
+      # we keep the collector self-metrics in-process only.
+      level: basic
+
+  extensions: [pprof, zpages]
+
+  pipelines:
+    traces:
+      receivers:  [otlp]
+      processors: [memory_limiter, resourcedetection, resource, batch]
+      exporters:  [otlp/jaeger, debug]
+    metrics:
+      receivers:  [otlp]
+      processors: [memory_limiter, resourcedetection, resource, batch]
+      exporters:  [debug]   # add prometheus exporter here when you wire metrics UI
+    logs:
+      receivers:  [otlp]
+      processors: [memory_limiter, resourcedetection, resource, batch]
+      exporters:  [debug]   # swap for loki / elasticsearch when you add log UI

@@ -1,0 +1,160 @@
+Cachicamas — Proprietary License
+Copyright (c) 2026 Liwaisi Tech S.A.S. and Witsaba Inc.
+All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+joint intellectual property of Liwaisi Tech S.A.S. and Witsaba Inc.
+(collectively, the "Owners"). The Software is licensed, not sold.
+
+By accessing, copying, downloading, or otherwise using the Software, you
+agree to the terms of this license. If you do not agree, do not use the
+Software.
+
+================================================================================
+1. GRANT OF LICENSE
+================================================================================
+
+Subject to your ongoing compliance with this license, each Owner grants to
+itself and to the other Owner a non-exclusive, non-transferable,
+non-sublicensable, royalty-free license to:
+
+  a. Use, run, and execute the Software internally for any business
+     purpose of the owning entity, including development, testing,
+     staging, and production environments.
+  b. Modify the Software, create derivative works, and merge the
+     Software with other software, provided that such modifications and
+     derivative works remain governed by this license.
+  c. Make copies of the Software as reasonably necessary for the
+     purposes above (including backup, archival, and version control).
+
+No other rights are granted, by implication, estoppel, or otherwise.
+
+================================================================================
+2. RESTRICTIONS
+================================================================================
+
+Except as expressly permitted in Section 1, you must NOT, and must not
+authorize any third party to:
+
+  a. Distribute, publish, sublicense, sell, rent, lease, lend, or
+     otherwise transfer the Software, in whole or in part, to any
+     third party.
+  b. Provide the Software as a hosted service, software-as-a-service,
+     managed service, or any form of service to third parties.
+  c. Reverse engineer, decompile, disassemble, or otherwise attempt to
+     derive the source code, underlying algorithms, or non-public
+     APIs of the Software, except to the extent such restriction is
+     prohibited by applicable law.
+  d. Remove, alter, or obscure any proprietary notices, labels, or
+     markings in the Software.
+  e. Use the Software in violation of any applicable law or regulation,
+     including export control and sanctions laws.
+  f. Use the Software to compete with the Owners, including building
+     a substantially similar product or framework intended for public
+     release.
+
+================================================================================
+3. CONFIDENTIALITY
+================================================================================
+
+The Software, its source code, architecture, design, and any non-public
+documentation are Confidential Information of the Owners. You agree to
+protect them with at least the same degree of care you use to protect
+your own confidential information of similar importance, and in no
+event less than a reasonable standard of care.
+
+================================================================================
+4. OWNERSHIP
+================================================================================
+
+The Owners jointly hold all right, title, and interest in and to the
+Software, including all intellectual property rights. Nothing in this
+license transfers ownership of the Software to you. All rights not
+expressly granted are reserved by the Owners.
+
+Disputes between the Owners regarding joint ownership, contribution
+allocation, or commercialization of the Software are governed by the
+separate Joint Venture Agreement between Liwaisi Tech S.A.S. and
+Witsaba Inc., which controls in case of conflict.
+
+================================================================================
+5. FEEDBACK
+================================================================================
+
+If you provide suggestions, ideas, or feedback regarding the Software
+("Feedback"), you grant each Owner a perpetual, irrevocable, worldwide,
+royalty-free, fully paid-up, sublicensable license to use, modify, and
+incorporate such Feedback into the Software without restriction. You
+waive any moral rights over such Feedback to the extent permitted by law.
+
+================================================================================
+6. TERMINATION
+================================================================================
+
+This license is effective until terminated. It will terminate
+automatically and without notice if you breach any provision of this
+license. Upon termination, you must immediately cease all use of the
+Software and destroy all copies in your possession or control.
+
+================================================================================
+7. NO WARRANTY
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY
+OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+NON-INFRINGEMENT, AND TITLE. THE OWNERS DO NOT WARRANT THAT THE
+SOFTWARE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE OF
+HARMFUL COMPONENTS.
+
+================================================================================
+8. LIMITATION OF LIABILITY
+================================================================================
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL
+THE OWNERS, THEIR AFFILIATES, OFFICERS, DIRECTORS, EMPLOYEES, AGENTS,
+OR LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, INCLUDING LOST PROFITS,
+LOST REVENUE, LOST DATA, OR BUSINESS INTERRUPTION, ARISING OUT OF OR
+RELATED TO THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGES.
+
+THE TOTAL CUMULATIVE LIABILITY OF THE OWNERS UNDER THIS LICENSE WILL
+NOT EXCEED ONE HUNDRED US DOLLARS (USD $100) OR THE EQUIVALENT IN
+YOUR LOCAL CURRENCY.
+
+================================================================================
+9. GOVERNING LAW AND JURISDICTION
+================================================================================
+
+This license is governed by the laws of the Republic of Colombia,
+without regard to its conflict-of-laws principles. Any dispute arising
+from or related to this license will be subject to the exclusive
+jurisdiction of the competent courts of Bogotá D.C., Colombia.
+
+For the Owners' internal resolution of joint-ownership disputes, see
+Section 4 and the Joint Venture Agreement.
+
+================================================================================
+10. ENTIRE AGREEMENT
+================================================================================
+
+This license, together with any Joint Venture Agreement and any other
+written agreement between the Owners referencing the Software,
+constitutes the entire agreement between the parties regarding the
+Software and supersedes all prior or contemporaneous understandings
+on that subject.
+
+================================================================================
+11. CONTACT
+================================================================================
+
+For licensing inquiries, permissions, or commercial use requests
+beyond the scope of this license, contact:
+
+  Liwaisi Tech S.A.S.    — legal@liwaisi.tech
+  Witsaba Inc.           — legal@witsaba.com
+
+================================================================================
+END OF LICENSE
+================================================================================

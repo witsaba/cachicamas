@@ -1,0 +1,73 @@
+# ============================================================================
+# Cachicamas — Jaeger v2 all-in-one configuration
+#
+# This file overrides Jaeger's built-in all-in-one config to:
+#   1. Bind the OTLP receivers to 0.0.0.0 (not the default `localhost`),
+#      so the otel-collector container can reach jaeger:4317/4318 on the
+#      compose network.
+#   2. Bind jaeger_query to 127.0.0.1 inside the container. The compose
+#      `ports:` block still exposes :16686 to the host. This silences
+#      Jaeger's "0.0.0.0 exposes to every interface" DoS warning, which
+#      is noisy in dev and irrelevant since this endpoint sits behind a
+#      compose-managed port mapping.
+#
+# Mounted into the container at /etc/jaeger/config.yaml and referenced
+# via `--config=/etc/jaeger/config.yaml` in the compose command.
+#
+# The remote_sampling extension is intentionally NOT declared — not used
+# in dev, and loading a sampling-strategies.json file would emit a benign
+# "Default operations level strategies will not be included for
+# Ratelimiting..." warn every startup. Add it back if you ever wire
+# adaptive sampling.
+#
+# Source for the bind addresses: https://www.jaegertracing.io/docs/2.dev/deployment/configuration/
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      # Bind to 0.0.0.0 (not the default `localhost`) so the otel-collector
+      # container on the same Docker network can reach jaeger:4317/4318.
+      # This emits Jaeger's "0.0.0.0 exposes to every interface" DoS
+      # warning at startup. The warning is intentional: in this dev
+      # setup the only path to these ports is via the compose `ports:`
+      # mapping or the internal `cachicamas_network`. In a real
+      # deployment, swap to a reverse proxy or run Jaeger behind a
+      # firewall and bind to 127.0.0.1.
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: some_trace_storage
+
+extensions:
+  # In-memory storage for traces. Production should swap this for a real
+  # backend (Badger / Cassandra / Elasticsearch / OpenSearch / Kafka).
+  jaeger_storage:
+    backends:
+      some_trace_storage:
+        memory:
+          max_traces: 100000
+
+  # Bind jaeger_query to 0.0.0.0 so the Jaeger UI is reachable from the
+  # host via the compose `ports:` mapping (16686 → 16686). The "0.0.0.0
+  # exposes to every interface" DoS warning is accepted: in this dev
+  # setup the only network reach is via the compose port mapping.
+  jaeger_query:
+    storage:
+      traces: some_trace_storage
+    grpc:
+      endpoint: 0.0.0.0:16685
+    http:
+      endpoint: 0.0.0.0:16686
+
+service:
+  extensions: [jaeger_storage, jaeger_query]
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger_storage_exporter]

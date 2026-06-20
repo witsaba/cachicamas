@@ -1,0 +1,237 @@
+# ============================================================================
+# Cachicamas — local infrastructure
+#
+# Brings up: postgres, otel-collector (gateway), jaeger, and the
+# database_administrator microservice.
+#
+# Usage:
+#   cp .env.example .env   # edit if needed
+#   docker compose up -d --build
+#   open http://localhost:16686          # Jaeger UI
+#   curl http://localhost:8080/health    # microservice
+#
+# Compose v2 spec (no `version:` key by design).
+# ============================================================================
+
+name: cachicamas
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 18 — primary datastore
+  # --------------------------------------------------------------------------
+  postgres:
+    # Triple-pinned: Postgres 18 + alpine 3.24. The ':18-alpine' (or
+    # ':latest') tag would silently roll forward to whatever alpine the
+    # upstream maintainers publish next. Pin explicitly so security
+    # upgrades are a visible commit.
+    image: postgres:18-alpine3.24
+    container_name: cachicamas-postgres
+    restart: unless-stopped
+    # NOTE: the postgres:18-alpine3.24 image prints a benign
+    # "WARNING: no usable system locales were found" during initdb
+    # because the Alpine base image doesn't ship a `locale` binary.
+    # The cluster itself initializes fine with --locale=C (see the
+    # "database cluster will be initialized with locale C" line right
+    # above the warning). Silencing it would require overriding the
+    # image entrypoint with apk+locale-gen, which is brittle and
+    # not worth the trade-off for a non-fatal warning. Accepted.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
+      # POSTGRES_USER must be a superuser — the official image calls
+      # `CREATE USER ... SUPERUSER` during initdb. The image requires this
+      # account to bootstrap the cluster. The application's DBA role
+      # (`queen`) is provisioned separately by infra/postgres/init/01-init.sql.
+      POSTGRES_USER: ${POSTGRES_USER:-cachicamas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set it in .env)}
+      # --locale=C is rejected by the postgres:18-alpine image with
+      # "no usable system locales were found" because Alpine ships a
+      # minimal musl libc and no locale binary. Set LANG/LC_ALL to
+      # C.UTF-8 (built into glibc/musl on most distros) and pass only
+      # --encoding=UTF8 to initdb. Production should pin a real locale.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---encoding=UTF8}
+      # Password for the DBA role provisioned by infra/postgres/init/01-init.sql.
+      # Read inside the SQL via psql's \getenv QUEEN_PASSWORD.
+      QUEEN_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
+      # postgres:18 stores data under /var/lib/postgresql/18/docker by default.
+      # We keep the default to align with the official image.
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - cachicamas_network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" || exit 1'
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # Jaeger v2 — distributed tracing UI + storage (all-in-one for dev)
+  # --------------------------------------------------------------------------
+  jaeger:
+    # Pin to a specific patch (2.19.0, released 2026-06-03) instead of
+    # 'latest' or a floating tag, so security fixes are an explicit
+    # commit instead of an auto-pull.
+    image: jaegertracing/jaeger:2.19.0
+    container_name: cachicamas-jaeger
+    restart: unless-stopped
+    # Use a custom config file (see infra/jaeger/all-in-one.yaml) instead
+    # of the built-in all-in-one config. The built-in config:
+    #   - binds OTLP receivers to `localhost` (unreachable from the
+    #     otel-collector container on the compose network);
+    #   - binds jaeger_query and remote_sampling to `0.0.0.0` and emits
+    #     DoS-warning logs every startup.
+    # The custom config silences all of that and binds things to the
+    # right interfaces for this compose setup.
+    #
+    # NOTE: COLLECTOR_OTLP_ENABLED was a Jaeger v1 flag and is silently
+    # ignored in v2. Don't rely on it — use the OTLP receivers in the
+    # config file instead.
+    command:
+      - --config=/etc/jaeger/config.yaml
+    volumes:
+      - ./infra/jaeger/all-in-one.yaml:/etc/jaeger/config.yaml:ro
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"      # UI
+      - "${JAEGER_OTLP_GRPC_PORT:-4317}:4317" # OTLP gRPC
+      - "${JAEGER_OTLP_HTTP_PORT:-4318}:4318" # OTLP HTTP
+    networks:
+      - cachicamas_network
+    healthcheck:
+      # Use 127.0.0.1 explicitly. The jaeger_query extension binds to
+      # 127.0.0.1 (see infra/jaeger/all-in-one.yaml), and `localhost`
+      # occasionally resolves weirdly in busybox wget.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:16686/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # OpenTelemetry Collector — gateway
+  # Receives OTLP from apps, batches, exports to Jaeger.
+  # --------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.137.0
+    container_name: cachicamas-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # Host-port for the collector's OTLP gRPC receiver. The collector
+      # itself listens on :4317 inside the container; only the host-side
+      # mapping is shifted to :14317 so it does not collide with Jaeger's
+      # own :4317 publish (Docker Desktop's vpnkit sidecar can hold a
+      # stale :4317 bind across container restarts).
+      - "${OTEL_COLLECTOR_GRPC_PORT:-14317}:4317"   # OTLP gRPC from apps
+      - "${OTEL_COLLECTOR_HTTP_PORT:-14318}:4318"   # OTLP HTTP from apps
+      - "${OTEL_COLLECTOR_HEALTH_PORT:-13133}:13133" # health_check extension
+    networks:
+      - cachicamas_network
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      # The OTel Collector image is a single static binary (no shell, no
+      # wget, no curl). Use that same binary to validate the config — if
+      # the config file stays parseable and the pipeline stays valid,
+      # exit 0; otherwise this fails and the container is marked unhealthy.
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otelcol/config.yaml"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # database_administrator — Go microservice
+  # --------------------------------------------------------------------------
+  database_administrator:
+    build:
+      context: ./backend/database_administrator
+      dockerfile: Dockerfile
+    image: cachicamas/database_administrator:local
+    container_name: cachicamas-database-administrator
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: database_administrator
+      SERVICE_ENV: ${SERVICE_ENV:-development}
+      SERVICE_PORT: ${SERVICE_PORT:-8080}
+      # Database — connects as `queen` (the DBA role provisioned by
+      # infra/postgres/init/01-init.sql). Today this is the only non-
+      # superuser role that exists at boot. To switch to a least-privilege
+      # app role later, create it as queen (see recipe at the bottom of
+      # 01-init.sql) and update POSTGRES_USER / POSTGRES_PASSWORD here.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
+      POSTGRES_USER: ${QUEEN_USER:-queen}
+      POSTGRES_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
+      # OpenTelemetry
+      OTEL_SERVICE_NAME: database_administrator
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    ports:
+      - "${SERVICE_PORT:-8080}:8080"
+    networks:
+      - cachicamas_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      # Disabled on purpose. The runtime image is distroless/static, which
+      # has no shell, no wget, no curl, no nc — verified by extracting
+      # /usr/bin and /bin from the image and listing them (both empty).
+      # A `CMD-SHELL` healthcheck fails with "exec: /bin/sh: no such file
+      # or directory" before the test even runs.
+      #
+      # Verify the service from the host instead:
+      #   curl -sS http://localhost:8080/health
+      #   # → {"status":"ok"}
+      #
+      # If you need a Docker-level healthcheck, the cleanest path is a
+      # tiny static Go binary that does a TCP connect to localhost:8080
+      # and exits 0/1 — copy it into the image and reference it here.
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ----- Shared network ----------------------------------------------------
+networks:
+  cachicamas_network:
+    name: cachicamas_network
+    driver: bridge
+
+# ----- Named volumes -----------------------------------------------------
+volumes:
+  postgres-data:
+    name: cachicamas-postgres-data
