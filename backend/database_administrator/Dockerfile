@@ -2,13 +2,19 @@
 # Cachicamas — database_administrator microservice
 #
 # Multi-stage build:
-#   1. builder   — golang:1.26-bookworm. Compiles a fully-static binary
+#   1. builder   — golang:1.26.4-alpine3.24. Compiles a fully-static binary
 #                  (CGO disabled — the service has no C dependencies: only
 #                  net/http + Echo v5, both pure Go).
 #   2. runtime   — gcr.io/distroless/static-debian12:nonroot. Smallest
 #                  possible image (no shell, no libc, no busybox, no
 #                  package manager). Works because the binary is fully
 #                  static and does not need the dynamic linker.
+#
+# Pinning policy: the builder image is triple-pinned
+# (Go major.minor.patch + alpine3.minor). Floating tags like
+# 'golang:alpine3.24' or 'golang:1.26-alpine' would silently pull
+# new Go releases / new alpine versions on the next build. We want
+# every upgrade to be an explicit commit that we can review.
 #
 # Note on healthchecks: this image has NO shell, NO wget, NO curl, NO nc.
 # The `healthcheck:` block in docker-compose.yaml for this service is
@@ -22,7 +28,7 @@
 # ============================================================================
 
 # ---------- 1. Build stage -------------------------------------------------
-FROM golang:1.26.3-bookworm AS builder
+FROM golang:1.26.4-alpine3.24 AS builder
 
 # Rebuild-triggerable build args. Bumping these busts the cache.
 ARG BUILD_VERSION=dev
