@@ -20,10 +20,14 @@ services:
   # PostgreSQL 18 — primary datastore
   # --------------------------------------------------------------------------
   postgres:
-    image: postgres:18-alpine
+    # Triple-pinned: Postgres 18 + alpine 3.24. The ':18-alpine' (or
+    # ':latest') tag would silently roll forward to whatever alpine the
+    # upstream maintainers publish next. Pin explicitly so security
+    # upgrades are a visible commit.
+    image: postgres:18-alpine3.24
     container_name: cachicamas-postgres
     restart: unless-stopped
-    # NOTE: the postgres:18-alpine image prints a benign
+    # NOTE: the postgres:18-alpine3.24 image prints a benign
     # "WARNING: no usable system locales were found" during initdb
     # because the Alpine base image doesn't ship a `locale` binary.
     # The cluster itself initializes fine with --locale=C (see the
