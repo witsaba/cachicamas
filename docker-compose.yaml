@@ -78,7 +78,10 @@ services:
   # Jaeger v2 — distributed tracing UI + storage (all-in-one for dev)
   # --------------------------------------------------------------------------
   jaeger:
-    image: jaegertracing/jaeger:2.0.0
+    # Pin to a specific patch (2.19.0, released 2026-06-03) instead of
+    # 'latest' or a floating tag, so security fixes are an explicit
+    # commit instead of an auto-pull.
+    image: jaegertracing/jaeger:2.19.0
     container_name: cachicamas-jaeger
     restart: unless-stopped
     # Use a custom config file (see infra/jaeger/all-in-one.yaml) instead
