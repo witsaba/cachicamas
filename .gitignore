@@ -1,0 +1,34 @@
+# ============================================================================
+# cachicamas — top-level .gitignore
+# Service-level ignores live in their own .gitignore files
+# (e.g. backend/database_administrator/.gitignore).
+# ============================================================================
+
+# ----- Secrets & runtime state -------------------------------------------
+.env
+.env.*
+!.env.example
+data/
+*.log
+
+# ----- Docker / Compose artifacts ---------------------------------------
+# Don't ignore docker-compose.yaml or Dockerfile — those are source.
+docker-compose.override.yaml
+docker-compose.override.yml
+*.dockerfile.local
+
+# ----- Editor / OS noise ------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# ----- Build outputs (if someone runs `go build ./...` at the root) -----
+**/bin/
+**/dist/
+
+# ----- Test coverage ----------------------------------------------------
+coverage.out
+coverage.html
+coverage.txt
