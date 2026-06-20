@@ -1,30 +1,47 @@
-#!/usr/bin/env python3
-"""Validate cachicamas compose + infra files without touching docker."""
+#!/usr/bin/env -S uv run --quiet --no-project --with pyyaml python3
+"""Validate cachicamas compose + infra files without touching docker.
+
+Run with:
+    uv run scripts/validate-infra.py
+or directly if uv is on PATH and the shebang is honored:
+    ./scripts/validate-infra.py
+
+Dependencies (managed by uv, no virtualenv needed):
+    pyyaml
+
+Exits 0 if every check passes, 1 otherwise.
+"""
 import sys, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent  # scripts/ -> repo root
 
 # ---- 1. YAML files parse ------------------------------------------------
+# The shebang above pulls pyyaml in via uv; if the script is run with a
+# system python3 that lacks it, fail fast with a clear hint instead of
+# crashing halfway through.
+try:
+    import yaml  # noqa: F401  (provided by the uv shebang / --with flag)
+except ImportError:
+    sys.stderr.write(
+        "validate-infra.py needs PyYAML. Run with `uv run scripts/validate-infra.py` "
+        "so uv can resolve pyyaml automatically.\n"
+    )
+    sys.exit(2)
+
 yaml_files = [
     ROOT / "docker-compose.yaml",
     ROOT / "infra/otel/collector-config.yaml",
+    ROOT / "infra/jaeger/all-in-one.yaml",
 ]
 
-try:
-    import yaml
-except ImportError:
-    print("PyYAML not installed; skipping YAML parse. Install with: pip3 install pyyaml")
-    yaml = None
-
 bad = 0
-if yaml:
-    for f in yaml_files:
-        try:
-            yaml.safe_load(f.read_text())
-            print(f"OK YAML : {f.relative_to(ROOT)}")
-        except yaml.YAMLError as e:
-            print(f"BAD YAML: {f.relative_to(ROOT)}: {e}")
-            bad += 1
+for f in yaml_files:
+    try:
+        yaml.safe_load(f.read_text())
+        print(f"OK YAML : {f.relative_to(ROOT)}")
+    except yaml.YAMLError as e:
+        print(f"BAD YAML: {f.relative_to(ROOT)}: {e}")
+        bad += 1
 
 # ---- 2. Compose semantic check -----------------------------------------
 dc = yaml.safe_load((ROOT / "docker-compose.yaml").read_text())
