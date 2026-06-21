@@ -76,7 +76,7 @@ out of the box. Maps to the 7 requirements in
    │      - num_traces: 50000                         │
    │      - decision_wait: 10s                        │
    │      - policies:                                 │
-   │          keep-errors-and-slows  (composite AND)  │
+   │          keep-errors-and-slows  (composite OR, composite_implicit_OR)  │
    │          probabilistic-happy   (5%)              │
    │          catch-all             (1%)              │
    │ 6. batch (timeout 1s, size 1024)                 │
@@ -101,44 +101,7 @@ The `metrics` and `logs` pipelines are unchanged.
 
 ## Interfaces / Contracts
 
-The change is purely a YAML processor. The relevant OTel Collector Contrib
-`tail_sampling` schema (verifiable at
-`https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/tailsamplingprocessor`):
-
-```yaml
-processors:
-  tail_sampling:
-    decision_wait: 10s
-    num_traces: 50000
-    expected_new_traces_per_sec: 500
-    policies:
-      - name: keep-errors-and-slows
-        type: composite
-        composite:
-          composite_sub_policy:
-            - name: errors
-              type: status_code
-              status_code: { status_codes: [ERROR] }
-            - name: exceptions
-              type: span
-              span: [{ Match: { attributes: [] }, ErrrorConditions: [] }]
-            - name: slow
-              type: latency
-              latency: { threshold_ms: 1000 }
-            - name: http-5xx
-              type: numeric_attribute
-              numeric_attribute: { key: http.response.status_code, min_value: 500, max_value: 599 }
-            - name: grpc-not-ok
-              type: numeric_attribute
-              numeric_attribute: { key: rpc.grpc.status_code, min_value: 1, max_value: 16 }
-          composite_strategy: AND
-      - name: probabilistic-happy
-        type: probabilistic
-        probabilistic: { sampling_percentage: 5 }
-      - name: catch-all
-        type: probabilistic
-        probabilistic: { sampling_percentage: 1 }
-```
+The actual config is in `infra/otel/collector-config.yaml` — it uses the contrib 0.137.0 schema and does not include a `composite_strategy` key (composite sub-policies are OR-implicit; see Decision #3 for the rationale). This design doc does not attempt to replicate the full config inline.
 
 **Boundary check** (Requirement 3, scenario 2): the spec demands a documented
 inclusive/exclusive choice. The implementation uses `>` (strict greater-than):

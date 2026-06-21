@@ -31,7 +31,7 @@ rules:
   apply:
     - Follow existing code patterns (slog+otelslog, OTLP via env-vars)
     - No new top-level deps without an ADR
-    tdd: false
+    tdd: true
     test_command: "go test ./..."
   verify:
     test_command: "go test ./..."

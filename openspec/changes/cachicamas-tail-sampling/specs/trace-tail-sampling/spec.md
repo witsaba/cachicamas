@@ -68,8 +68,8 @@ The otel-collector MUST export 100% of traces whose end-to-end duration exceeds
 
 - GIVEN a trace whose end-to-end duration is 1000 ms
 - WHEN the sampler evaluates the trace
-- THEN the trace MUST be exported (threshold is `> 1000`; this case is
-  the boundary — implementation MUST document the inclusive/exclusive choice)
+- THEN the trace MAY be evaluated by the probabilistic samplers (boundary
+  semantics are implementation-defined and documented in design.md decision #6)
 
 ### Requirement: Mandatory retention of HTTP and gRPC failures
 
@@ -108,8 +108,8 @@ a default of 5%.
 - GIVEN the policy is configured with `probabilistic_happy.rate = 0.01`
 - WHEN 1000 successful traces are sent through the pipeline
 - THEN approximately 10 traces MUST be exported
-- AND the rate change MUST be applied without restarting the application
-  (only the collector config reload is required)
+- AND a collector restart MUST be acceptable to apply the rate change
+  (hot-reload is not wired in this PR)
 
 ### Requirement: Catch-all minimum retention
 

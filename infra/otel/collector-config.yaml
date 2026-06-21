@@ -19,7 +19,7 @@
 #
 # Tail-based sampling (collector contrib ≥ 0.79) keeps:
 #   - 100% of traces with errors, exceptions, HTTP 5xx, gRPC non-OK,
-#     or end-to-end latency > 1000 ms (composite AND policy)
+#     or end-to-end latency > 1000 ms (composite OR policy)
 #   - 5% of successful, fast, uneventful traces (probabilistic)
 #   - 1% catch-all floor for any trace that matches no other policy
 # Tune rates by editing the `probabilistic.sampling_percentage` values
@@ -36,6 +36,13 @@
 #
 # In production, swap the jaeger exporter for otlp/<vendor> (Tempo, Honeycomb,
 # Datadog, etc.) without touching the application code.
+#
+# NOTE: runtime end-to-end verification is currently blocked by an upstream
+# OTel Go exporter bug (opentelemetry-go#5248) that drops 9/10 spans when
+# exporting via OTLP/gRPC or OTLP/HTTP at v1.44.0. The sampler config
+# below is correct on static evidence (YAML parse + otel-collector
+# healthcheck + policy-shape review). End-to-end runtime validation will
+# be re-run when the upstream bug is fixed.
 # ============================================================================
 
 receivers:
@@ -59,7 +66,7 @@ processors:
   # 60% of the container memory limit is a safe default; we lowered it from
   # 80% to leave headroom for the tail_sampling processor's in-memory
   # decision cache (num_traces: 50000 ≈ 100MB working set). Tune if you bump
-  # the container memory limit in docker-compose.
+  # the container memory limit (currently 512m in docker-compose.yaml).
   memory_limiter:
     check_interval: 2s
     limit_percentage: 60
@@ -103,8 +110,8 @@ processors:
     # complete, forcing them to take the catch-all path.
     expected_new_traces_per_sec: 500
     policies:
-      # 100% retention of "interesting" traces. All sub-policies are AND-ed
-      # so a trace is kept only if it matches AT LEAST ONE of them.
+      # 100% retention of "interesting" traces. All sub-policies are OR-ed
+      # (composite_implicit_OR) so a trace is kept if it matches ANY of them.
       - name: keep-errors-and-slows
         type: composite
         composite:
@@ -115,13 +122,18 @@ processors:
               status_code:
                 status_codes: [ERROR]
             - name: exceptions
-              # Span carries an OTel "exception" event → keep.
-              type: string_attribute
-              string_attribute:
-                key: exception.type
-                values: []
-                enabled_regex_matching: false
-                invert_match: false
+              # OTel "exception" event on the span → keep. Uses the `ottl_condition`
+              # policy type with a spanevent filter on `name == "exception"`. This is
+              # the canonical idiom in OTel contrib 0.137.0 for matching OTel exception
+              # events (the contrib `span` policy type referenced in older docs does
+              # not exist in the PolicyType enum). Verified against
+              # opentelemetry-collector-contrib v0.137.0/processor/tailsamplingprocessor
+              # /config.go and v0.137.0 README lines 143–157.
+              type: ottl_condition
+              ottl_condition:
+                error_mode: ignore
+                spanevent:
+                  - 'name == "exception"'
             - name: slow
               # End-to-end duration strictly greater than 1000 ms. The 1000
               # boundary itself is the design choice (see design.md, decision

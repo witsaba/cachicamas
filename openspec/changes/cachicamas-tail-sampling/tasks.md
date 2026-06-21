@@ -30,7 +30,7 @@ Chain strategy: pending
 
 ## Phase 1: Config change (collector)
 
-- [x] 1.1 Edit `infra/otel/collector-config.yaml`: add `tail_sampling` block under `processors:` with `decision_wait: 10s`, `num_traces: 50000`, `expected_new_traces_per_sec: 500`, and the 3 policies (`keep-errors-and-slows` composite AND with 5 sub-policies, `probabilistic-happy` 5%, `catch-all` 1%). Include inline comment per policy explaining what it captures.
+- [x] 1.1 Edit `infra/otel/collector-config.yaml`: add `tail_sampling` block under `processors:` with `decision_wait: 10s`, `num_traces: 50000`, `expected_new_traces_per_sec: 500`, and the 3 policies (`keep-errors-and-slows` composite OR — sub-policies OR-implicit per design decision #3 — with 5 sub-policies, `probabilistic-happy` 5%, `catch-all` 1%). Include inline comment per policy explaining what it captures.
 - [x] 1.2 Edit the same file: lower `memory_limiter.limit_percentage: 80` → `60`. Update the surrounding comment to cite the sampler cache as the reason.
 - [x] 1.3 Edit the same file: reorder the `traces` pipeline's `processors` array to `memory_limiter, resourcedetection, resource, tail_sampling, batch` (insert `tail_sampling` before `batch`).
 - [x] 1.4 Edit the file's top comment block (lines 1–20): update the topology diagram to include `tail_sampling` between collector and Jaeger.
