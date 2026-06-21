@@ -98,6 +98,43 @@ test/cover:  ## Run tests and write coverage.out
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@$(GO) tool cover -func=coverage.out | tail -1
 
+# ---------- Integration tests (postgres-database-migrations, PR-A) ---------
+#
+# Integration tests touch a real Postgres provisioned by docker-compose.
+# They are gated on INTEGRATION=1 inside the test files (see
+# src/migration/postgres/driver_test.go) and booted on demand by this
+# target — the operator does NOT need the full database_administrator
+# container to be running, only Postgres. After the run, the Postgres
+# container is stopped (data is preserved on the named volume so a
+# follow-up `make test` run can re-use it).
+#
+# Pre-reqs:
+#   - docker compose works against the project root's docker-compose.yaml
+#   - the cachicamas-postgres image is already pulled (compose will
+#     download on first run)
+#
+# Wired up by sdd-apply PR-A. Companion change:
+# openspec/changes/postgres-database-migrations/.
+
+COMPOSE_FILE ?= ../../docker-compose.yaml
+COMPOSE      ?= docker compose
+POSTGRES_DB  ?= cachicamas_pg
+POSTGRES_USER ?= cachicamas
+
+## test/integration: boot compose Postgres, run integration tests, stop Postgres
+.PHONY: test/integration
+test/integration:  ## Run integration tests (boots compose Postgres, gated on INTEGRATION=1)
+	@echo ">> booting compose Postgres"
+	$(COMPOSE) -f $(COMPOSE_FILE) up -d postgres
+	@echo ">> waiting for Postgres to accept connections"
+	$(COMPOSE) -f $(COMPOSE_FILE) exec -T postgres \
+		pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@echo ">> running integration tests (INTEGRATION=1)"
+	INTEGRATION=1 $(GO) test -race -v ./...
+	@echo ">> stopping compose Postgres (data volume preserved)"
+	-$(COMPOSE) -f $(COMPOSE_FILE) stop postgres
+	@echo ">> done"
+
 # ---------- Quality -----------------------------------------------------------
 
 ## fmt: run gofmt and goimports (writes files in place)
