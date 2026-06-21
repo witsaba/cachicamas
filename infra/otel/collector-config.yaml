@@ -2,10 +2,29 @@
 # Cachicamas — OpenTelemetry Collector configuration
 #
 # Topology:
-#   application (Go) ──OTLP/gRPC──> otel-collector ──OTLP──> jaeger (traces)
-#                                                  └─debug──> stdout
 #
-#   application (Go) ──OTLP/gRPC──> otel-collector ──debug──> stdout (logs)
+#   application (Go)
+#        │
+#        │  OTLP/gRPC
+#        ▼
+#   otel-collector
+#        │
+#        │  pipeline "traces":
+#        │    otlp → memory_limiter → resourcedetection → resource →
+#        │    tail_sampling (NEW) → batch → otlp/jaeger + debug
+#        │
+#        │  pipeline "logs" / "metrics": otlp → … → batch → debug
+#        ▼
+#   jaeger (traces)   stdout (debug exporter, dev only)
+#
+# Tail-based sampling (collector contrib ≥ 0.79) keeps:
+#   - 100% of traces with errors, exceptions, HTTP 5xx, gRPC non-OK,
+#     or end-to-end latency > 1000 ms (composite AND policy)
+#   - 5% of successful, fast, uneventful traces (probabilistic)
+#   - 1% catch-all floor for any trace that matches no other policy
+# Tune rates by editing the `probabilistic.sampling_percentage` values
+# below. To disable tail sampling without removing the block, comment out
+# the `tail_sampling` entry in the `traces.processor` pipeline.
 #
 # Jaeger v2 does NOT store logs (it is a tracing backend), so the logs
 # pipeline emits only to the debug exporter. The otelslog bridge on the
@@ -37,11 +56,13 @@ processors:
     send_batch_size: 1024
 
   # Memory limiter prevents the collector from being OOM-killed under spikes.
-  # 80% of the container memory limit is a safe default; tune if you bump the
-  # limit in docker-compose.
+  # 60% of the container memory limit is a safe default; we lowered it from
+  # 80% to leave headroom for the tail_sampling processor's in-memory
+  # decision cache (num_traces: 50000 ≈ 100MB working set). Tune if you bump
+  # the container memory limit in docker-compose.
   memory_limiter:
     check_interval: 2s
-    limit_percentage: 80
+    limit_percentage: 60
     spike_limit_percentage: 20
 
   # Surface useful attributes as first-class metric labels (env, service name).
@@ -65,6 +86,88 @@ processors:
   resourcedetection:
     detectors: [env]
     timeout: 2s
+
+  # Tail-based sampling — evaluates each trace after it completes (or after
+  # `decision_wait` expires) and decides whether to keep or drop it.
+  # Must be placed AFTER memory_limiter (to protect the cache) and BEFORE
+  # batch (to avoid paying per-span CPU/memory for traces that get dropped).
+  tail_sampling:
+    # How long to wait for a trace's root span to end before forcing a
+    # decision. 10s is the OTel default and explicit here for visibility.
+    decision_wait: 10s
+    # How many traces the collector can hold in the in-memory decision cache
+    # simultaneously. Sized for dev traffic (≈1k req/min, 3x headroom).
+    num_traces: 50000
+    # Expected new-traces-per-second for cache eviction. Conservative
+    # estimate; undersizing causes the sampler to evict traces before they
+    # complete, forcing them to take the catch-all path.
+    expected_new_traces_per_sec: 500
+    policies:
+      # 100% retention of "interesting" traces. All sub-policies are AND-ed
+      # so a trace is kept only if it matches AT LEAST ONE of them.
+      - name: keep-errors-and-slows
+        type: composite
+        composite:
+          composite_sub_policy:
+            - name: errors
+              # OTel semantic convention: status_code=ERROR forces keep.
+              type: status_code
+              status_code:
+                status_codes: [ERROR]
+            - name: exceptions
+              # Span carries an OTel "exception" event → keep.
+              type: string_attribute
+              string_attribute:
+                key: exception.type
+                values: []
+                enabled_regex_matching: false
+                invert_match: false
+            - name: slow
+              # End-to-end duration strictly greater than 1000 ms. The 1000
+              # boundary itself is the design choice (see design.md, decision
+              # #6): traces exactly at 1000 ms fall through to the
+              # probabilistic samplers.
+              type: latency
+              latency:
+                threshold_ms: 1000
+            - name: http-5xx
+              # HTTP server response codes 500..599. The OTel HTTP semantic
+              # conventions place the status code on `http.response.status_code`.
+              type: numeric_attribute
+              numeric_attribute:
+                key: http.response.status_code
+                min_value: 500
+                max_value: 599
+            - name: grpc-not-ok
+              # gRPC canonical status codes 1..16 are all non-OK. The OTel
+              # gRPC conventions place the code on `rpc.grpc.status_code`.
+              type: numeric_attribute
+              numeric_attribute:
+                key: rpc.grpc.status_code
+                min_value: 1
+                max_value: 16
+          # NOTE: composite sub-policies are OR-ed by default. There is no
+          # `composite_strategy` key in the contrib schema (verified against
+          # opentelemetry-collector-contrib v0.137.0 config.go). A trace is
+          # kept if ANY of the 5 sub-policies above matches.
+          # For AND semantics across sub-policies, use `type: and` with
+          # `and_sub_policy:` instead (NOT what we want here).
+
+      # 5% probabilistic sample of the residual (successful, fast,
+      # uneventful traffic). Provides a baseline for latency-distribution
+      # and error-rate dashboards without retaining every happy-path trace.
+      - name: probabilistic-happy
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5
+
+      # 1% catch-all floor: any trace that does not match any other policy
+      # is still exported at this rate. Prevents the "Jaeger shows zero
+      # traces" silent failure mode when an attribute key changes upstream.
+      - name: catch-all
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 1
 
 exporters:
   # --------------------------------------------------------------------------
@@ -126,7 +229,7 @@ service:
   pipelines:
     traces:
       receivers:  [otlp]
-      processors: [memory_limiter, resourcedetection, resource, batch]
+      processors: [memory_limiter, resourcedetection, resource, tail_sampling, batch]
       exporters:  [otlp/jaeger, debug]
     metrics:
       receivers:  [otlp]
