@@ -1,0 +1,10 @@
+# pnpm 11+ project configuration.
+# The `allowBuilds` key replaces the legacy `onlyBuiltDependencies` from
+# pnpm <= 10. Without this, pnpm refuses to run install/build scripts for
+# the listed packages, which breaks the Qwik dev server.
+#
+# Reference: https://pnpm.io/settings#allowbuilds
+allowBuilds:
+  "@parcel/watcher": true
+  esbuild: true
+  sharp: true
