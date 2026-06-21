@@ -5,7 +5,7 @@
 > **Driver**: braejan
 > **Project**: cachicamas (witsaba)
 > **Base branch**: `feat/add-postgres-database-migrations` (= `main` @ `7939de0`)
-> **Persistence**: hybrid (this file + Engram `sdd/postgres-database-migrations/tasks`)
+> **Persistence**: hybrid (Engram `sdd/postgres-database-migrations/tasks` + filesystem)
 > **Depends on**:
 > - `sdd/postgres-database-migrations/proposal` (Engram id 1586)
 > - `sdd/postgres-database-migrations/spec` (Engram id 1587)
@@ -223,7 +223,7 @@ PR-D is small enough that it could be merged into PR-C; the split keeps review f
 
 ## Pause-for-input block (DECISION NEEDED)
 
-The forecast is HIGH risk (~635 LoC, ~59% over the 400-line PR budget). Per the cached `delivery_strategy: ask-on-risk` and `openspec/config.yaml` rules, I MUST stop and ask the user before `sdd-apply` launches.
+The forecast is HIGH risk (~635 LoC, ~59% over the 400-line PR review budget). Per the cached `delivery_strategy: ask-on-risk` and `openspec/config.yaml` rules, I MUST stop and ask the user before `sdd-apply` launches.
 
 ### What the orchestrator should ask the user
 

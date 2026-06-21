@@ -1,6 +1,6 @@
 # Exploration — postgres-database-migrations
 
-> **Change**: `postgres-database-migrations`
+> **Change**: postgres-database-migrations
 > **Status**: explored
 > **Date**: 2026-06-21
 > **Driver**: braejan
@@ -183,7 +183,6 @@ var migrationsFS embed.FS
 ```
 
 Then in `runner.go`:
-
 ```go
 goose.SetBaseFS(migrationsFS)
 if err := goose.SetDialect("postgres"); err != nil { ... }

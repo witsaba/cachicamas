@@ -136,8 +136,8 @@ This is the only user-facing schema change in this proposal. The exact lines to 
 -- Why in init.sql, not a goose migration:
 --   • init.sql runs in the superuser context; a goose migration runs as
 --     queen (NOSUPERUSER). ALTER DATABASE ... SET timezone is settable by
---     the database owner, so queen CAN run it — but only AFTER she owns
---     the database. Reassigning ownership in a goose migration would be a
+--     the database owner, so queen CAN run it — but only AFTER she owns the
+--     database. Reassigning ownership in a goose migration would be a
 --     chicken-and-egg: the migration cannot run until the DB is owned by
 --     queen, but queen cannot own the DB until a superuser grants it.
 --   • init.sql is the natural place: one file, runs once, and lives in
