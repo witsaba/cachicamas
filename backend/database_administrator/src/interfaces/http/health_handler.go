@@ -6,6 +6,7 @@ package httpiface
 import (
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v5"
 
@@ -23,7 +24,17 @@ func NewHealthHandler(service *application.HealthService) *HealthHandler {
 }
 
 // Check handles GET /health.
+//
+// DEV-ONLY fail injection: if the query string contains `fail=true` AND
+// SERVICE_ENV=development, the handler returns HTTP 500. Used by
+// scripts/human-run-tail-sampling-verify.sh (test 3.1) to generate error
+// spans against a live stack. Has no effect in any other SERVICE_ENV.
 func (h *HealthHandler) Check(c *echo.Context) error {
+	if c.QueryParam("fail") == "true" && os.Getenv("SERVICE_ENV") == "development" {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"status": "fail-injected",
+		})
+	}
 	// slog.Info is called with the request context so the otelslog bridge
 	// can attach trace_id / span_id to the resulting log record. The
 	// record flows through the OTel pipeline and ends up correlated with
