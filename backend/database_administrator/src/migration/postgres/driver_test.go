@@ -181,9 +181,26 @@ func TestApplyPoolSettings(t *testing.T) {
 // TestOpen_Ping verifies that Open(ctx, cfg) returns a usable *sql.DB and
 // that a Ping round-trips against the live Postgres provisioned by
 // docker-compose (see design §6 — fail-fast at Open, not at first query).
+//
+// The test seeds the env from the values the compose stack publishes
+// (POSTGRES_HOST=localhost, POSTGRES_PORT=5432, POSTGRES_DB=cachicamas_pg,
+// POSTGRES_USER=cachicamas). The POSTGRES_PASSWORD matches the
+// docker-compose.yaml default; if you change POSTGRES_PASSWORD locally,
+// set POSTGRES_PASSWORD before running `make test/integration`. The
+// fail-fast ping itself is the actual behavior under test, not the
+// specific credentials.
 func TestOpen_Ping(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+
+	clearPostgresEnv(t)
+	t.Setenv("POSTGRES_HOST", "localhost")
+	t.Setenv("POSTGRES_PORT", "5432")
+	t.Setenv("POSTGRES_DB", "cachicamas_pg")
+	t.Setenv("POSTGRES_USER", "cachicamas")
+	if os.Getenv("POSTGRES_PASSWORD") == "" {
+		t.Setenv("POSTGRES_PASSWORD", "changeme-local-only")
 	}
 
 	cfg, err := LoadConfigFromEnv()
