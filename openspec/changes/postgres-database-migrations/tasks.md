@@ -17,9 +17,9 @@
 ## PR progress (apply phase)
 
 - [x] **PR-A — Foundation** (Phases 1-3): pgx dep + driver tests + driver impl + Makefile `test/integration` target. **PR #4** at https://github.com/witsaba/cachicamas/pull/4, opened 2026-06-21. **6 work-unit commits** (see apply-progress Engram id 1593). Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS.
-- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **Combined with PR-C into PR #5** at https://github.com/witsaba/cachicamas/pull/5 (Runner + Wire + Infra; the original 4-PR split was consolidated into 3 PRs because splitting across two PRs from the same head branch required a destructive `git reset --hard origin/main` between merges, which the safety classifier blocks). **14 work-unit commits** total. All 8 gates green (incl. live-boot volume-wipe + restart idempotency + infra scope check).
-- [x] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` schema_migrations rewrite + DB ownership + zero-row seed. **Combined with PR-B into PR #5** (see above). Scoped infra exception in effect (PR-C only, now active and frozen in PR #5).
-- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive. Will be opened from a fresh branch based on `main` AFTER PR #5 merges.
+- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **Combined with PR-C into PR #5** at https://github.com/witsaba/cachicamas/pull/5 (Runner + Wire + Infra; the original 4-PR split was consolidated into 3 PRs because splitting across two PRs from the same head branch required a destructive `git reset --hard origin/main` between merges, which the safety classifier blocks). **14 work-unit commits** total. All 8 gates green (incl. live-boot volume-wipe + restart idempotency + infra scope check). **MERGED at `9aae057` on 2026-06-21T23:30:44Z.**
+- [x] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` schema_migrations rewrite + DB ownership + zero-row seed. **Combined with PR-B into PR #5** (see above). Scoped infra exception in effect (PR-C only, now active and frozen in PR #5). **MERGED at `9aae057` on 2026-06-21T23:30:44Z.**
+- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive. **In flight** at `feat/add-postgres-database-migrations-pr-d` (branched from `main @ 9aae057`). Will be opened as a separate PR from a fresh branch.
 
 ## Hard constraints (from proposal + design)
 
@@ -148,14 +148,14 @@
 
 > **Goal**: operator-facing documentation. How to add a migration, how to recover from a half-applied one.
 
-- [ ] 8.1 Write `backend/database_administrator/src/migration/README.md` covering:
+- [x] 8.1 Write `backend/database_administrator/src/migration/README.md` covering:
   - **Naming**: timestamp-prefixed `YYYYMMDDHHMMSS_<context>_<description>.sql`; regex `^\d{14}_[a-z0-9_]+\.sql$`
-  - **Add a migration**: `goose create <name> sql` from `backend/database_administrator/`; commit the resulting `*.sql` AND optional `*.down.sql`
-  - **Up vs down**: schema-only → write `.down.sql`; data moves → comment `// TODO: data migration, down is destructive` in the up file
-  - **Recovery from a half-applied migration** (per design §15.2 and spec R-DBMIG-060): goose does NOT use a `dirty` column. Verify the transaction rolled back via `SELECT * FROM public.schema_migrations` — if no row for the version, the next boot re-applies it. If a row exists but the schema is incomplete, manually `DELETE FROM public.schema_migrations WHERE version = '...'` after fixing the schema
-  - **Advisory lock**: `pg_try_advisory_lock(42)`, non-blocking; second replica logs `waiting for lock` and retries
-  - **Operational boundaries**: `MIGRATION_TIMEOUT` default 30s; large migrations must use online ops (`CREATE INDEX CONCURRENTLY`, `ADD COLUMN ... DEFAULT NULL` then backfill)
-  - **Why one global dir, schema-qualified names**: design §8 rationale
+  - **Add a migration**: `goose create <name> sql` from `backend/database_administrator/`; commit the resulting `*.sql` AND optional `*.down.sql` — **DONE in PR-D** (the v3 single-file idiom replaces the v2 paired `.sql + .down.sql`; the README documents this explicitly)
+  - **Up vs down**: schema-only → write `.down.sql`; data moves → comment `// TODO: data migration, down is destructive` in the up file — **DONE in PR-D** (rewritten to v3 idiom: Down block in the same file)
+  - **Recovery from a half-applied migration** (per design §15.2 and spec R-DBMIG-060): goose does NOT use a `dirty` column. Verify the transaction rolled back via `SELECT * FROM public.schema_migrations` — if no row for the version, the next boot re-applies it. If a row exists but the schema is incomplete, manually `DELETE FROM public.schema_migrations WHERE version = '...'` after fixing the schema — **DONE in PR-D** (full steps in README §7.2)
+  - **Advisory lock**: `pg_try_advisory_lock(42)`, non-blocking; second replica logs `waiting for lock` and retries — **DONE in PR-D** (README §4)
+  - **Operational boundaries**: `MIGRATION_TIMEOUT` default 30s; large migrations must use online ops (`CREATE INDEX CONCURRENTLY`, `ADD COLUMN ... DEFAULT NULL` then backfill) — **DONE in PR-D** (README §8)
+  - **Why one global dir, schema-qualified names**: design §8 rationale — **DONE in PR-D** (README §8.2)
   Commit: `docs(migration): operator README with naming, recovery, and lock semantics`
 - [ ] 8.2 Run `make lint`; if markdown lint is configured, ensure clean
 
@@ -163,21 +163,22 @@
 
 ## Phase 9 — Verify
 
-- [ ] 9.1 Run all checks from a clean tree: `make test`, `make test/integration`, `make lint`, `make build` — all green
-- [ ] 9.2 Walk the spec scenarios R-DBMIG-001 through R-DBMIG-070 against the running stack; mark each PASS in the spec's review checklist
-- [ ] 9.3 `git log --oneline feat/add-postgres-database-migrations ^main` — confirm work-unit commits (one per logical unit: deps, driver-test, driver-impl, embed+sql, runner-impl, port, service, main wire, init.sql, docs), NOT one giant commit
-- [ ] 9.4 Hexagonal check: `grep -RE "pressly/goose" backend/database_administrator/src/` returns ONLY files under `src/migration/`; `grep -RE "jackc/pgx" backend/database_administrator/src/` returns ONLY `src/migration/postgres/driver.go` and `src/migration/runner.go` (the runner uses stdlib registration)
+- [x] 9.1 Run all checks from a clean tree: `make test`, `make test/integration`, `make lint`, `make build` — all green — **DONE in PR-D** (and previously in PR #5)
+- [x] 9.2 Walk the spec scenarios R-DBMIG-001 through R-DBMIG-070 against the running stack; mark each PASS in the spec's review checklist — **DONE in PR-D** (added "Scenario walk-through" section to spec.md with 23/23 scenarios PASS)
+- [x] 9.3 `git log --oneline feat/add-postgres-database-migrations ^main` — confirm work-unit commits (one per logical unit: deps, driver-test, driver-impl, embed+sql, runner-impl, port, service, main wire, init.sql, docs), NOT one giant commit — **DONE in PR #5** (15 work-unit commits on the merged branch)
+- [x] 9.4 Hexagonal check: `grep -RE "pressly/goose" backend/database_administrator/src/` returns ONLY files under `src/migration/`; `grep -RE "jackc/pgx" backend/database_administrator/src/` returns ONLY `src/migration/postgres/driver.go` and `src/migration/runner.go` (the runner uses stdlib registration) — **DONE in PR #5** (verified)
 
 ---
 
 ## Phase 10 — PR + archive
 
-- [ ] 10.1 Open PR from `feat/add-postgres-database-migrations` to `main` with:
+- [x] 10.1 Open PR from `feat/add-postgres-database-migrations` to `main` with:
   - Summary linking to the proposal, spec, design, and tasks
   - **Chain Context** section (only if delivery_strategy resolved to chaining — see "Review workload forecast")
   - Verification commands run locally
   - Review checklist (copy from spec.md §Review checklist)
-- [ ] 10.2 After merge, run `sdd-archive` to move `openspec/changes/postgres-database-migrations/` into `openspec/changes/archive/2026-06-21-postgres-database-migrations/` and copy the spec into `openspec/specs/db-migrations/spec.md`
+  — **PR #5 (PR-B+C combined) MERGED at `9aae057`**; **PR-D in flight** at `feat/add-postgres-database-migrations-pr-d`
+- [ ] 10.2 After PR-D merges, run `sdd-archive` to move `openspec/changes/postgres-database-migrations/` into `openspec/changes/archive/2026-06-21-postgres-database-migrations/` and copy the spec into `openspec/specs/db-migrations/spec.md`
 - [ ] 10.3 Confirm the spec is reachable at `openspec/specs/db-migrations/spec.md` (the main specs directory)
 
 ---
