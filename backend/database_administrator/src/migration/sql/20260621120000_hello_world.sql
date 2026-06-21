@@ -1,0 +1,13 @@
+-- Hello-world migration: prove the runner is wired end-to-end.
+--
+-- The body is intentionally a no-op SELECT 1. The point of this
+-- migration is NOT to change schema; it is to verify that
+--   (a) embed.FS picks up the file,
+--   (b) goose sorts it lexicographically,
+--   (c) goose inserts a row into public.schema_migrations, and
+--   (d) the runner wraps the call in an OTel span + slog line.
+--
+-- See proposal §Goals (G1, G3) and spec S-DBMIG-001. Future
+-- bounded-context DDL (catalog, identity, observability) lands as
+-- separate timestamp-prefixed files in this directory.
+SELECT 1;
