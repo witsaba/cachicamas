@@ -162,12 +162,16 @@ test_3_6_volume_reduction() {
   info "baseline trace count: $BASELINE"
 
   info "firing $N_REQUESTS successful requests against $SERVICE_URL/health..."
+  FAIL_COUNT=0
   for i in $(seq 1 "$N_REQUESTS"); do
-    curl -s -o /dev/null "$SERVICE_URL/health" &
+    curl -s -o /dev/null "$SERVICE_URL/health" || FAIL_COUNT=$((FAIL_COUNT + 1)) &
     # Batch 50 in flight to keep the loop fast without overwhelming the server
     if [ $((i % 50)) -eq 0 ]; then wait; fi
   done
   wait
+  if [ "$FAIL_COUNT" -gt 0 ]; then
+    warn "  $FAIL_COUNT / $N_REQUESTS requests had non-zero exit (transient curl errors — does NOT affect the volume assertion below)"
+  fi
   info "all $N_REQUESTS requests completed"
 
   info "waiting 25s for the last batch to flush through the sampler..."

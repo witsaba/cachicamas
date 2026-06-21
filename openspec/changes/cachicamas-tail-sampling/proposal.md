@@ -27,7 +27,7 @@ Esto es aceptable mientras el tráfico sea bajo. Cuando entren en juego más ser
 
 - Agregar el processor `tail_sampling` a `infra/otel/collector-config.yaml` en el pipeline `traces`.
 - Política de muestreo compuesta (combinators `and` / `or`):
-  - **AND alto valor (100% keep)**: error status, exception, latency > 1s, HTTP 5xx, gRPC `code != OK`.
+  - **OR high-value (100% keep)**: error status, exception, latency > 1s, HTTP 5xx, gRPC `code != OK`.
   - **OR tráfico feliz (1–5% probabilistic keep)**: requests exitosos muestreados probabilísticamente.
   - **Política catch-all** (5% probabilistic) para spans que no matchean ninguna.
 - Load balancing extension (`loadbalancing_exporter`) **NO** incluida — sigue siendo single-node.
@@ -90,7 +90,7 @@ El processor `tail_sampling` se inserta **antes** de `batch` (es la posición ca
 5. `probabilistic_happy` (5% rate, attribute filter: no error, latency < 1s) → keep
 6. `catch_all` (1% rate, fallback) → keep
 
-Las políticas 1–4 son AND-ed (todas las condiciones = keep), 5 y 6 son OR-ed con el AND, y la política final catch-all asegura que algo siempre se exporta si ninguna otra matcheó (evita "0 traces" en silencio).
+Las políticas 1–4 son OR-ed (cualquier condición = keep, no todas a la vez), 5 y 6 son OR-ed con las políticas 1–4 (cualquier match en cualquier política retiene el trace), y la política final catch-all asegura que algo siempre se exporta si ninguna otra matcheó (evita "0 traces" en silencio).
 
 **Memoria esperada del collector:** con `num_traces: 50000` y `decision_cache` en memoria, el RSS del collector se mueve de ~80MB a ~200–300MB local. Aceptable para un dev stack. El `memory_limiter` se baja de 80% a 60% para dejar headroom.
 

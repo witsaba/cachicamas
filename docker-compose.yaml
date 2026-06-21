@@ -133,6 +133,11 @@ services:
     image: otel/opentelemetry-collector-contrib:0.137.0
     container_name: cachicamas-otel-collector
     restart: unless-stopped
+    # Pin the container to 512MB so `memory_limiter.limit_percentage: 60`
+    # in collector-config.yaml has a concrete ceiling to operate against.
+    # Without an explicit limit, Docker Desktop (no cgroup limit) makes
+    # `memory_limiter` a no-op — see CR4 in the verify report.
+    mem_limit: 512m
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./infra/otel/collector-config.yaml:/etc/otelcol/config.yaml:ro

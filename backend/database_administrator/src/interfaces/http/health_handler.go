@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -30,7 +31,7 @@ func NewHealthHandler(service *application.HealthService) *HealthHandler {
 // scripts/human-run-tail-sampling-verify.sh (test 3.1) to generate error
 // spans against a live stack. Has no effect in any other SERVICE_ENV.
 func (h *HealthHandler) Check(c *echo.Context) error {
-	if c.QueryParam("fail") == "true" && os.Getenv("SERVICE_ENV") == "development" {
+	if c.QueryParam("fail") == "true" && strings.EqualFold(os.Getenv("SERVICE_ENV"), "development") {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"status": "fail-injected",
 		})
