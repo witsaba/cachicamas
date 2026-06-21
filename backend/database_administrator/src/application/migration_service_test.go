@@ -61,14 +61,8 @@ func (f *fakeRunner) Status(_ context.Context) ([]domain.Version, error) {
 	return f.statusResult, f.statusErr
 }
 
-// recordingLogger returns a slog.Logger writing JSON records into a
-// buffer so the test can assert log content. It also feeds a
-// discard stderr writer so test output is not polluted.
-type recordingLogger struct {
-	mu  sync.Mutex
-	buf *syncBuf
-}
-
+// newRecordingLogger returns a slog.Logger writing JSON records into
+// a buffer so the test can assert log content.
 func newRecordingLogger() (*slog.Logger, *syncBuf) {
 	buf := &syncBuf{}
 	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})), buf
@@ -300,7 +294,7 @@ func TestMigrationService_Status_Delegates(t *testing.T) {
 func attrKeyValue(span sdktrace.ReadOnlySpan) map[string]string {
 	out := make(map[string]string)
 	for _, kv := range span.Attributes() {
-		out[string(kv.Key)] = kv.Value.Emit()
+		out[string(kv.Key)] = kv.Value.String()
 	}
 	return out
 }

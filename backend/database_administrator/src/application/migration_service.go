@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
@@ -53,7 +54,7 @@ func NewMigrationService(r domain.Runner, logger *slog.Logger, tracer trace.Trac
 		logger = slog.Default()
 	}
 	if tracer == nil {
-		tracer = trace.NewNoopTracerProvider().Tracer("application/migration_service")
+		tracer = noop.NewTracerProvider().Tracer("application/migration_service")
 	}
 	return &MigrationService{
 		runner: r,

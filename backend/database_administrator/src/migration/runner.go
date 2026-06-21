@@ -32,16 +32,6 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
 
-// migrationsDir is the path passed to goose as the migration
-// directory. Because we feed goose a SUB-FS whose root is already
-// the migrations folder (see newProvider), "." is the correct value.
-// goose v3.27.1's collectMigrationsFS interprets the second arg
-// relative to the FS root, so passing "sql" against an FS whose
-// root IS the migration folder would look for `sql/sql/` — wrong.
-// Keeping this as a const preserves the option to switch back to a
-// root-level FS by changing the value here AND in newProvider.
-const migrationsDir = "."
-
 // GooseRunner is the goose-backed adapter that satisfies
 // domain.Runner. It holds the *sql.DB it dials through and the name
 // of the bookkeeping table (overriding goose's default
@@ -156,7 +146,7 @@ func (r *GooseRunner) Status(ctx context.Context) ([]domain.Version, error) {
 	if err != nil {
 		return nil, fmt.Errorf("migration.Status: query %s: %w", r.tableName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []domain.Version
 	for rows.Next() {
