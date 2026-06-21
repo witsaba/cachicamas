@@ -165,11 +165,12 @@ Verification: `grep -RE "SET timezone" backend/database_administrator/src/migrat
 
 - GIVEN `infra/postgres/init/01-init.sql`
 - WHEN the orchestrator reads the file
-- THEN the file SHALL contain `ALTER DATABASE current_database() OWNER TO queen;`
-- AND the file SHALL contain `ALTER DATABASE current_database() SET timezone = 'UTC';`
-- AND the two statements SHALL appear in that order
+- THEN the file SHALL execute `ALTER DATABASE <current> OWNER TO queen`
+- AND the file SHALL execute `ALTER DATABASE <current> SET timezone = 'UTC'`
+- AND the two statements SHALL appear in that order (owner first, then timezone)
+- AND they SHALL be wrapped in a `DO $$ ... $$` block using `EXECUTE format('ALTER DATABASE %I ...', current_database(), ...)` because Postgres' `ALTER DATABASE name` parser requires a literal identifier (not a function call) — wrapping in `DO` + `EXECUTE` is the only way to keep the script portable across any `POSTGRES_DB` value
 
-Verification: read the file; both lines are present, ordered correctly, and the timezone line follows the owner change.
+Verification: read the file; the DO $$ block executes both ALTERs in the locked order.
 
 ---
 
@@ -381,20 +382,25 @@ Verification: reproduce the failure (terminate the runner's connection mid-migra
 
 The runner SHALL record applied versions in `public.schema_migrations`
 (overriding goose's default `goose_db_version`). The table SHALL already be
-owned by `queen` after `01-init.sql` (the owner change in `R-DBMIG-011` is
-applied before the table is created in the same file). The `version` column
-SHALL accept the stringified form goose uses for its `version_id`.
+owned by `queen` after `01-init.sql` (the database owner change in
+`R-DBMIG-011` is applied before the table is created, AND the table
+itself is re-owned to queen via `ALTER TABLE public.schema_migrations
+OWNER TO queen` because Postgres 15+ does NOT auto-grant DML to the
+database owner on objects the cluster superuser created during initdb).
+The columns SHALL match goose v3.27.1's expected shape
+(`id BIGSERIAL PK`, `version_id BIGINT`, `is_applied BOOLEAN`,
+`tstamp TIMESTAMPTZ`).
 
 *Implements: G3, G2 (ownership), open question Q7 from proposal.*
 
 #### Scenario: S-DBMIG-070 Reused bookkeeping table accepts goose entries
 
-- GIVEN `public.schema_migrations` exists with `version TEXT` and is owned by `queen`
+- GIVEN `public.schema_migrations` exists with columns `id`, `version_id`, `is_applied`, `tstamp` and is owned by `queen`
 - WHEN the runner applies the hello-world migration
-- THEN a row with `version = '20260621120000'` SHALL be inserted
-- AND the row's `applied_at` SHALL default to `now()`
+- THEN a row with `version_id = 20260621120000` and `is_applied = true` SHALL be inserted
+- AND the row's `tstamp` SHALL default to `now()`
 
-Verification: `SELECT version, applied_at FROM public.schema_migrations` shows the row, and `SELECT pg_catalog.pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'cachicamas_pg'` returns `queen`.
+Verification: `SELECT version_id, is_applied, tstamp FROM public.schema_migrations` shows the row, and `SELECT pg_catalog.pg_get_userbyid(relowner) FROM pg_class WHERE relname = 'schema_migrations'` returns `queen`.
 
 ---
 
