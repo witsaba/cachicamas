@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Go 1.26 (slog + otelslog + OTel SDK) backend in
+    backend/database_administrator; PostgreSQL 18; Jaeger v2 (2.19.0);
+    OpenTelemetry Collector Contrib 0.137.0 (gateway pattern — apps speak
+    OTLP/gRPC to the collector, collector exports OTLP to Jaeger).
+  Architecture: docker-compose v2, single-node local dev stack on
+    `cachicamas_network`. Pinning discipline in effect (every base image
+    triple-pinned). Single Go service today; multi-service expected.
+  Testing: TDD for Go service code; integration tests against compose.
+  Style: ADR-driven decisions; proposals and specs in markdown under
+    `openspec/changes/`; technical decisions bilingual (English
+    frontmatter, Spanish body acceptable for org-facing docs).
+
+rules:
+  proposal:
+    - Include rollback plan for every change
+    - State out-of-scope items explicitly (especially "deferred but related")
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Each scenario MUST be independently verifiable
+  design:
+    - Include sequence/flow diagrams for cross-service changes
+    - Document every config change with the before/after diff rationale
+  tasks:
+    - Group by phase, hierarchical numbering
+    - Each task completable in a single PR
+    - Forecast 400-line PR review budget (chain when risk = High)
+  apply:
+    - Follow existing code patterns (slog+otelslog, OTLP via env-vars)
+    - No new top-level deps without an ADR
+    tdd: false
+    test_command: "go test ./..."
+  verify:
+    test_command: "go test ./..."
+    build_command: "docker compose -f docker-compose.yaml build"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
