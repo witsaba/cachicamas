@@ -164,7 +164,7 @@ func TestApplyPoolSettings(t *testing.T) {
 		ConnectTimeout:  1 * time.Second,
 	}
 	db := sql.OpenDB(nil) // in-memory driver; we never query it
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	applyPoolSettings(db, cfg)
 
@@ -280,6 +280,6 @@ func clearPostgresEnv(t *testing.T) {
 		// calls os.Setenv on cleanup, which is fine — empty DATABASE_URL
 		// is treated as "not set" by LoadConfigFromEnv, but to be safe
 		// we call os.Unsetenv explicitly).
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 }
