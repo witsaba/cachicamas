@@ -221,13 +221,17 @@ func TestRunner_Up_LexicographicOrder(t *testing.T) {
 	// Seed the older version (lexicographically earlier timestamp)
 	// directly. This is what the bookkeeping table would look like
 	// after a hypothetical first boot applied 20260101000000 first.
+	// We mirror goose v3.27.1's actual schema (id, version_id,
+	// is_applied, tstamp) so a follow-up Up() can both insert the
+	// new row and read the existing one.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE public.schema_migrations (
-			version_id BIGINT PRIMARY KEY,
-			is_applied BOOLEAN NOT NULL DEFAULT TRUE,
-			tstamp TIMESTAMPTZ NOT NULL DEFAULT now()
+			id         BIGSERIAL    PRIMARY KEY,
+			version_id BIGINT       NOT NULL,
+			is_applied BOOLEAN      NOT NULL,
+			tstamp     TIMESTAMPTZ  NOT NULL DEFAULT now()
 		)
 	`); err != nil {
 		t.Fatalf("create schema_migrations: %v", err)
