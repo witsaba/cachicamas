@@ -5,8 +5,11 @@
 // of go.sum.
 //
 // This file is a standard Go pattern (used by golangci-lint and many
-// other projects). It will be removed once the consuming code lands
-// (i.e. once runner.go imports pressly/goose and its lock package).
+// other projects). It will be removed once the consuming code lands.
+//
+// As of PR-B the pressly/goose entries are no longer needed (runner.go
+// imports them directly). pgx is kept here as a placeholder for any
+// future stdlib adapter requirement and to mirror PR-A's pattern.
 //
 //go:build tools
 // +build tools
@@ -15,6 +18,4 @@ package tools
 
 import (
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/pressly/goose/v3"
-	_ "github.com/pressly/goose/v3/lock"
 )
