@@ -17,9 +17,9 @@
 ## PR progress (apply phase)
 
 - [x] **PR-A — Foundation** (Phases 1-3): pgx dep + driver tests + driver impl + Makefile `test/integration` target. **PR #4** at https://github.com/witsaba/cachicamas/pull/4, opened 2026-06-21. **6 work-unit commits** (see apply-progress Engram id 1593). Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS.
-- [ ] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. Lands after PR-A merges.
-- [ ] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` two-line change. Scoped infra exception in effect (PR-C only).
-- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive.
+- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **Combined with PR-C into PR #5** at https://github.com/witsaba/cachicamas/pull/5 (Runner + Wire + Infra; the original 4-PR split was consolidated into 3 PRs because splitting across two PRs from the same head branch required a destructive `git reset --hard origin/main` between merges, which the safety classifier blocks). **14 work-unit commits** total. All 8 gates green (incl. live-boot volume-wipe + restart idempotency + infra scope check).
+- [x] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` schema_migrations rewrite + DB ownership + zero-row seed. **Combined with PR-B into PR #5** (see above). Scoped infra exception in effect (PR-C only, now active and frozen in PR #5).
+- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive. Will be opened from a fresh branch based on `main` AFTER PR #5 merges.
 
 ## Hard constraints (from proposal + design)
 
@@ -81,11 +81,11 @@
 
 > **Goal**: the runner tests go green. Hexagonal: this is the ONLY file that imports `goose`.
 
-- [ ] 4.1 Implement `backend/database_administrator/src/migration/embed.go` — `//go:embed sql/*.sql` → exported `MigrationsFS embed.FS`. One tiny file, one variable. Commit: `feat(migration): embed SQL migrations via embed.FS`
-- [ ] 4.2 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.sql` with body `SELECT 1;` and a header comment explaining the no-op. Commit: `feat(migration): add hello-world no-op migration`
-- [ ] 4.3 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.down.sql` with body `SELECT 1;` (no-op down for symmetry, keeps `goose down` working locally). Commit (combined with 4.2 OR separate): `feat(migration): add hello-world no-op down`
-- [ ] 4.4 Implement `backend/database_administrator/src/migration/runner.go` — `GooseRunner` struct with `NewGooseRunner(db *sql.DB, tableName string, logger *slog.Logger) *GooseRunner`. `Up(ctx) ([]domain.Version, error)` calls `goose.SetBaseFS(MigrationsFS)`, `goose.SetDialect("postgres")`, `goose.SetTableName(r.tableName)`, `goose.WithSessionLocker(lock.NewPostgresSessionLocker())`, then `goose.UpContext(ctx, r.db, "sql")`. `Status(ctx) ([]domain.Version, error)` returns goose's current versions. Wraps every `Up` call in OTel span `migration.up` and `slog.Info`. Imports `github.com/pressly/goose/v3` and `github.com/pressly/goose/v3/lock` ONLY in this file. Mark as `— GREEN` (runner_test passes). Commit: `feat(migration): goose runner with advisory lock and OTel span`
-- [ ] 4.5 Run `make test`, `make test/integration`, `make lint` — all green
+- [x] 4.1 Implement `backend/database_administrator/src/migration/embed.go` — `//go:embed sql/*.sql` → exported `MigrationsFS embed.FS`. One tiny file, one variable. Commit: `feat(migration): embed SQL migrations via embed.FS` — **DONE in PR-B** (commit `f3a2b32`)
+- [x] 4.2 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.sql` with body `SELECT 1;` and a header comment explaining the no-op. Commit: `feat(migration): add hello-world no-op migration` — **DONE in PR-B** (commit `7c30d70`, combined with 4.3 — goose v3.27.1 idiom is a SINGLE file with both `-- +goose Up` and `-- +goose Down` blocks; the legacy v2 `XXX.sql` + `XXX.down.sql` pair is rejected as a duplicate version)
+- [x] 4.3 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.down.sql` with body `SELECT 1;` (no-op down for symmetry, keeps `goose down` working locally). Commit (combined with 4.2 OR separate): `feat(migration): add hello-world no-op down` — **DONE in PR-B** (commit `7c30d70`, combined with 4.2 — see 4.2 note about the v3 idiom)
+- [x] 4.4 Implement `backend/database_administrator/src/migration/runner.go` — `GooseRunner` struct with `NewGooseRunner(db *sql.DB, tableName string, logger *slog.Logger) *GooseRunner`. `Up(ctx) ([]domain.Version, error)` calls `goose.SetBaseFS(MigrationsFS)`, `goose.SetDialect("postgres")`, `goose.SetTableName(r.tableName)`, `goose.WithSessionLocker(lock.NewPostgresSessionLocker())`, then `goose.UpContext(ctx, r.db, "sql")`. `Status(ctx) ([]domain.Version, error)` returns goose's current versions. Wraps every `Up` call in OTel span `migration.up` and `slog.Info`. Imports `github.com/pressly/goose/v3` and `github.com/pressly/goose/v3/lock` ONLY in this file. Mark as `— GREEN` (runner_test passes). Commit: `feat(migration): goose runner with advisory lock and OTel span` — **DONE in PR-B** (commit `f096076`, RED in `3d82107`, lint cleanup in `2f49936`). Implementation uses `goose.NewProvider` with `fs.Sub(MigrationsFS, "sql")` per the v3 idiom; the legacy `goose.SetBaseFS` + `goose.UpContext` path does NOT honour `WithSessionLocker` (it's a `ProviderOption`, not an `OptionsFunc`).
+- [x] 4.5 Run `make test`, `make test/integration`, `make lint` — all green — **DONE in PR-B**
 
 ---
 
@@ -93,10 +93,10 @@
 
 > **Goal**: hexagonal port exists; application service wraps the port with OTel/slog. No goose/pgx import here.
 
-- [ ] 5.1 Implement `backend/database_administrator/src/domain/migration.go` — `Version struct { ID int64; Description string; AppliedAt time.Time }` and `Runner interface { Up(ctx context.Context) ([]Version, error); Status(ctx context.Context) ([]Version, error) }`. **No imports from migration package.** Commit: `feat(domain): migration Runner port and Version struct`
-- [ ] 5.2 Write `backend/database_administrator/src/application/migration_service_test.go` — unit test with a fake `domain.Runner` (no live DB). Asserts that `Up` calls the runner, wraps the call in an OTel span, logs the result, and returns any error. Mark as `— RED`
-- [ ] 5.3 Implement `backend/database_administrator/src/application/migration_service.go` — `MigrationService` struct holds `runner domain.Runner`, `logger *slog.Logger`, `tracer trace.Tracer`. `Up(ctx)` wraps `runner.Up(ctx)` in OTel span `migration.up` with attrs `db.system=postgresql`, `migration.dir`, `migration.applied_count`, `migration.duration_ms` (plus `migration.error` and `migration.error.kind` on failure). `slog.Info` on success, `slog.Error` on failure. `Status(ctx)` delegates. **No goose/pgx imports.** Mark as `— GREEN`. Commit: `feat(application): migration service with OTel and slog instrumentation`
-- [ ] 5.4 Run `make test`, `make lint` — all green
+- [x] 5.1 Implement `backend/database_administrator/src/domain/migration.go` — `Version struct { ID int64; Description string; AppliedAt time.Time }` and `Runner interface { Up(ctx context.Context) ([]Version, error); Status(ctx context.Context) ([]Version, error) }`. **No imports from migration package.** Commit: `feat(domain): migration Runner port and Version struct` — **DONE in PR-B** (commit `dcea916`)
+- [x] 5.2 Write `backend/database_administrator/src/application/migration_service_test.go` — unit test with a fake `domain.Runner` (no live DB). Asserts that `Up` calls the runner, wraps the call in an OTel span, logs the result, and returns any error. Mark as `— RED` — **DONE in PR-B** (commit `a9977c5`)
+- [x] 5.3 Implement `backend/database_administrator/src/application/migration_service.go` — `MigrationService` struct holds `runner domain.Runner`, `logger *slog.Logger`, `tracer trace.Tracer`. `Up(ctx)` wraps `runner.Up(ctx)` in OTel span `migration.up` with attrs `db.system=postgresql`, `migration.dir`, `migration.applied_count`, `migration.duration_ms` (plus `migration.error` and `migration.error.kind` on failure). `slog.Info` on success, `slog.Error` on failure. `Status(ctx)` delegates. **No goose/pgx imports.** Mark as `— GREEN`. Commit: `feat(application): migration service with OTel and slog instrumentation` — **DONE in PR-B** (commit `ef049f1`)
+- [x] 5.4 Run `make test`, `make lint` — all green — **DONE in PR-B**
 
 ---
 
@@ -112,22 +112,35 @@
 
 ## Phase 7 — `infra/postgres/init/01-init.sql` (SCOPED EXCEPTION IN EFFECT)
 
-> **Scope**: ONLY this file. Only the two lines specified. Do NOT widen the exception.
+> **Scope**: ONLY this file. The schema_migrations CREATE TABLE rewrite (7.2) and the two ALTER lines (7.3) are both within the exception. Do NOT widen to other infra files.
 
 - [ ] 7.1 Read `infra/postgres/init/01-init.sql` end-to-end; confirm line numbers (queen role ≈ line 75; `CREATE TABLE public.schema_migrations` ≈ line 99)
-- [ ] 7.2 Insert TWO lines AFTER the queen role creation (line 75) and BEFORE `CREATE TABLE public.schema_migrations` (line 99), in this order:
+- [ ] 7.2 **REWRITE** the `CREATE TABLE IF NOT EXISTS public.schema_migrations` block (current lines 99-103) to match **goose v3.27.1's expected schema**:
+  ```sql
+  CREATE TABLE IF NOT EXISTS public.schema_migrations (
+      id         BIGSERIAL    PRIMARY KEY,
+      version_id BIGINT       NOT NULL,
+      is_applied BOOLEAN      NOT NULL,
+      tstamp     TIMESTAMPTZ  NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS schema_migrations_version_id_idx
+      ON public.schema_migrations(version_id);
+  ```
+  **Rationale**: goose v3 stores migration state in columns `(id, version_id, is_applied, tstamp)`. The pre-existing shape `(version TEXT PK, applied_at TIMESTAMPTZ, description TEXT)` is from goose v2 and is INCOMPATIBLE with v3 — boot would fail with `column "version_id" of relation "schema_migrations" does not exist`. PR-B's integration tests work because they DROP/recreate the table; production boot hits the existing table. Commit: `feat(infra): provision public.schema_migrations with goose v3 schema`
+- [ ] 7.3 Insert TWO lines AFTER the queen role creation (line 75) and BEFORE the rewritten `CREATE TABLE public.schema_migrations`, in this order:
   ```sql
   ALTER DATABASE current_database() OWNER TO queen;
   ALTER DATABASE current_database() SET timezone = 'UTC';
   ```
-  Add a short comment block above them explaining the ordering rationale. Commit: `feat(infra): transfer cachicamas_pg ownership to queen and pin timezone to UTC`
-- [ ] 7.3 `git diff infra/postgres/init/01-init.sql` — confirm the ONLY change to this file is the two new lines + the comment block above them. NO other infra files in the diff
-- [ ] 7.4 Wipe the volume and re-test: `docker compose down -v && docker compose up -d --build`. Then verify:
+  Add a short comment block above them explaining the ordering rationale. Commit (combined with 7.2 OR separate): `feat(infra): transfer cachicamas_pg ownership to queen and pin timezone to UTC`
+- [ ] 7.4 `git diff infra/postgres/init/01-init.sql` — confirm the ONLY changes to this file are: (a) the rewritten `CREATE TABLE public.schema_migrations` block, (b) the two new ALTER lines, (c) the comment block above them. NO other infra files in the diff
+- [ ] 7.5 Wipe the volume and re-test: `docker compose down -v && docker compose up -d --build`. Then verify:
   - `docker compose exec postgres psql -U cachicamas -d cachicamas_pg -c "SHOW timezone"` returns `UTC`
   - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SHOW timezone"` returns `UTC` (no explicit SET)
   - `docker compose logs database_administrator | grep migration.up` shows one INFO line, `applied_count=1`
-  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SELECT count(*) FROM public.schema_migrations WHERE version = '20260621120000'"` returns `1`
-- [ ] 7.5 Restart (no volume wipe): `docker compose stop database_administrator && docker compose start database_administrator`. Confirm logs show `migration.applied_count=0` (idempotency)
+  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "\d public.schema_migrations"` shows columns `id, version_id, is_applied, tstamp`
+  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SELECT count(*) FROM public.schema_migrations WHERE is_applied = true AND version_id = 20260621120000"` returns `1`
+- [ ] 7.6 Restart (no volume wipe): `docker compose stop database_administrator && docker compose start database_administrator`. Confirm logs show `migration.applied_count=0` (idempotency)
 
 ---
 
