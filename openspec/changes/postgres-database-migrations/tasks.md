@@ -17,9 +17,9 @@
 ## PR progress (apply phase)
 
 - [x] **PR-A — Foundation** (Phases 1-3): pgx dep + driver tests + driver impl + Makefile `test/integration` target. **PR #4** at https://github.com/witsaba/cachicamas/pull/4, opened 2026-06-21. **6 work-unit commits** (see apply-progress Engram id 1593). Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS.
-- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **PR #5** at https://github.com/witsaba/cachicamas/pull/5, opened 2026-06-21. **9 work-unit commits**. Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS. Hexagonal rule preserved.
-- [ ] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` two-line change. Scoped infra exception in effect (PR-C only).
-- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive.
+- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **Combined with PR-C into PR #5** at https://github.com/witsaba/cachicamas/pull/5 (Runner + Wire + Infra; the original 4-PR split was consolidated into 3 PRs because splitting across two PRs from the same head branch required a destructive `git reset --hard origin/main` between merges, which the safety classifier blocks). **14 work-unit commits** total. All 8 gates green (incl. live-boot volume-wipe + restart idempotency + infra scope check).
+- [x] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` schema_migrations rewrite + DB ownership + zero-row seed. **Combined with PR-B into PR #5** (see above). Scoped infra exception in effect (PR-C only, now active and frozen in PR #5).
+- [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive. Will be opened from a fresh branch based on `main` AFTER PR #5 merges.
 
 ## Hard constraints (from proposal + design)
 
