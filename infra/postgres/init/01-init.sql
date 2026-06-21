@@ -75,6 +75,34 @@ $$;
 ALTER ROLE queen WITH CREATEROLE CREATEDB REPLICATION;
 
 -- ---------------------------------------------------------------------------
+-- Database-level settings — must run AFTER queen exists.
+--
+-- Ordering rationale:
+--   1. The queen role must exist before we can transfer ownership of
+--      `cachicamas_pg` to her (else the ALTER DATABASE fails with
+--      "role \"queen\" does not exist").
+--   2. The timezone pin to 'UTC' must be in place BEFORE the migration
+--      runner connects as queen for the first time, so the first
+--      tstamp written to public.schema_migrations is already in UTC
+--      (no follow-up ALTER DATABASE will retroactively re-stamp rows).
+--
+-- These statements live in init.sql (not in a goose migration) on
+-- purpose — see spec R-DBMIG-011. Running them as the cluster
+-- superuser during initdb is the only context where both succeed.
+--
+-- The DO $$ block is required because Postgres' `ALTER DATABASE name`
+-- syntax does NOT accept `current_database()` as the target — only a
+-- literal identifier. Wrapping in DO + EXECUTE lets us resolve the
+-- name at runtime while still running as superuser.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    EXECUTE format('ALTER DATABASE %I OWNER TO queen', current_database());
+    EXECUTE format('ALTER DATABASE %I SET timezone = %L', current_database(), 'UTC');
+END
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Schemas (logical separation by bounded context)
 --
 -- Owned by queen so future per-context roles can be granted narrowly:
@@ -94,15 +122,63 @@ COMMENT ON SCHEMA identity      IS 'Users, roles, sessions, audit log';
 COMMENT ON SCHEMA observability IS 'Operational state (health, migrations log)';
 
 -- ---------------------------------------------------------------------------
--- Migrations bookkeeping (used by a future migration runner as queen)
+-- Migrations bookkeeping (used by pressly/goose v3.27.1 as queen)
+--
+-- Goose v3 writes rows with column names `id`, `version_id`, `is_applied`,
+-- and `tstamp`; the legacy v2 shape (`version TEXT PK`, `applied_at`,
+-- `description`) is incompatible with v3 and would crash the first boot
+-- with `column "version_id" of relation "schema_migrations" does not
+-- exist`. We provision the v3 shape directly here so the table is
+-- usable on the very first container start.
+--
+-- See design §9 and spec R-DBMIG-070. Index on version_id keeps the
+-- `SELECT MAX(version_id)` lookup fast as the history grows.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.schema_migrations (
-    version     TEXT        PRIMARY KEY,
-    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    description TEXT
+    id         BIGSERIAL    PRIMARY KEY,
+    version_id BIGINT       NOT NULL UNIQUE,
+    is_applied BOOLEAN      NOT NULL,
+    tstamp     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE public.schema_migrations IS 'Append-only log of applied migrations';
+-- Transfer ownership of the bookkeeping table to queen. Without this,
+-- the table owner is the cluster superuser (the POSTGRES_USER from
+-- docker-compose, `cachicamas`), and Postgres 15+ does NOT auto-grant
+-- DML to the database owner on objects the superuser created. The
+-- runner connects as queen, so it must own (or at least have explicit
+-- grants on) this table — otherwise the first boot fails with
+-- `ERROR: permission denied for table schema_migrations (SQLSTATE 42501)`.
+--
+-- We use ALTER TABLE ... OWNER TO (rather than GRANT ALL) so queen is
+-- the future grantor: when a least-privilege role (e.g. cachicamas_app)
+-- is provisioned later, queen can grant narrow DML on this table
+-- without needing superuser. See spec R-DBMIG-070.
+ALTER TABLE public.schema_migrations OWNER TO queen;
+
+-- Seed the bookkeeping table with a zero-version row.
+--
+-- Goose v3.27.1's Up() path checks `ListMigrations` and refuses to
+-- start if the table is empty (error: "missing zero version migration").
+-- Normally goose inserts this row itself when it CREATEs the table on
+-- first boot. We pre-create the table here so the runner doesn't need
+-- CREATE permission on the public schema at runtime — but that means
+-- we must also pre-seed the zero row, otherwise the runner crashes.
+--
+-- The row is marked `is_applied = false` per goose's convention: the
+-- zero row is a marker, not a real applied migration. Goose's
+-- UpVersions() will skip past it and apply every real migration whose
+-- version_id > 0.
+--
+-- ON CONFLICT (version_id) DO NOTHING makes the script idempotent:
+-- re-running init.sql (e.g. after a partial failure) does not duplicate
+-- the row. The version_id column has a unique index (created above)
+-- which provides the conflict target.
+INSERT INTO public.schema_migrations (version_id, is_applied, tstamp)
+    VALUES (0, false, now())
+    ON CONFLICT (version_id) DO NOTHING;
+
+COMMENT ON TABLE public.schema_migrations IS
+    'Append-only log of applied migrations (goose v3 schema: id, version_id, is_applied, tstamp)';
 
 -- ---------------------------------------------------------------------------
 -- Recipe for creating a future application role (e.g. cachicamas_app).
