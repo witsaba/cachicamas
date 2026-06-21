@@ -112,22 +112,35 @@
 
 ## Phase 7 — `infra/postgres/init/01-init.sql` (SCOPED EXCEPTION IN EFFECT)
 
-> **Scope**: ONLY this file. Only the two lines specified. Do NOT widen the exception.
+> **Scope**: ONLY this file. The schema_migrations CREATE TABLE rewrite (7.2) and the two ALTER lines (7.3) are both within the exception. Do NOT widen to other infra files.
 
 - [ ] 7.1 Read `infra/postgres/init/01-init.sql` end-to-end; confirm line numbers (queen role ≈ line 75; `CREATE TABLE public.schema_migrations` ≈ line 99)
-- [ ] 7.2 Insert TWO lines AFTER the queen role creation (line 75) and BEFORE `CREATE TABLE public.schema_migrations` (line 99), in this order:
+- [ ] 7.2 **REWRITE** the `CREATE TABLE IF NOT EXISTS public.schema_migrations` block (current lines 99-103) to match **goose v3.27.1's expected schema**:
+  ```sql
+  CREATE TABLE IF NOT EXISTS public.schema_migrations (
+      id         BIGSERIAL    PRIMARY KEY,
+      version_id BIGINT       NOT NULL,
+      is_applied BOOLEAN      NOT NULL,
+      tstamp     TIMESTAMPTZ  NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS schema_migrations_version_id_idx
+      ON public.schema_migrations(version_id);
+  ```
+  **Rationale**: goose v3 stores migration state in columns `(id, version_id, is_applied, tstamp)`. The pre-existing shape `(version TEXT PK, applied_at TIMESTAMPTZ, description TEXT)` is from goose v2 and is INCOMPATIBLE with v3 — boot would fail with `column "version_id" of relation "schema_migrations" does not exist`. PR-B's integration tests work because they DROP/recreate the table; production boot hits the existing table. Commit: `feat(infra): provision public.schema_migrations with goose v3 schema`
+- [ ] 7.3 Insert TWO lines AFTER the queen role creation (line 75) and BEFORE the rewritten `CREATE TABLE public.schema_migrations`, in this order:
   ```sql
   ALTER DATABASE current_database() OWNER TO queen;
   ALTER DATABASE current_database() SET timezone = 'UTC';
   ```
-  Add a short comment block above them explaining the ordering rationale. Commit: `feat(infra): transfer cachicamas_pg ownership to queen and pin timezone to UTC`
-- [ ] 7.3 `git diff infra/postgres/init/01-init.sql` — confirm the ONLY change to this file is the two new lines + the comment block above them. NO other infra files in the diff
-- [ ] 7.4 Wipe the volume and re-test: `docker compose down -v && docker compose up -d --build`. Then verify:
+  Add a short comment block above them explaining the ordering rationale. Commit (combined with 7.2 OR separate): `feat(infra): transfer cachicamas_pg ownership to queen and pin timezone to UTC`
+- [ ] 7.4 `git diff infra/postgres/init/01-init.sql` — confirm the ONLY changes to this file are: (a) the rewritten `CREATE TABLE public.schema_migrations` block, (b) the two new ALTER lines, (c) the comment block above them. NO other infra files in the diff
+- [ ] 7.5 Wipe the volume and re-test: `docker compose down -v && docker compose up -d --build`. Then verify:
   - `docker compose exec postgres psql -U cachicamas -d cachicamas_pg -c "SHOW timezone"` returns `UTC`
   - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SHOW timezone"` returns `UTC` (no explicit SET)
   - `docker compose logs database_administrator | grep migration.up` shows one INFO line, `applied_count=1`
-  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SELECT count(*) FROM public.schema_migrations WHERE version = '20260621120000'"` returns `1`
-- [ ] 7.5 Restart (no volume wipe): `docker compose stop database_administrator && docker compose start database_administrator`. Confirm logs show `migration.applied_count=0` (idempotency)
+  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "\d public.schema_migrations"` shows columns `id, version_id, is_applied, tstamp`
+  - `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SELECT count(*) FROM public.schema_migrations WHERE is_applied = true AND version_id = 20260621120000"` returns `1`
+- [ ] 7.6 Restart (no volume wipe): `docker compose stop database_administrator && docker compose start database_administrator`. Confirm logs show `migration.applied_count=0` (idempotency)
 
 ---
 

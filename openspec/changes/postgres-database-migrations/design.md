@@ -41,12 +41,11 @@ docker compose up
              |      +-- driver.Open(DATABASE_URL or POSTGRES_* env)
              |      |     <-- jackc/pgx/v5 stdlib adapter
              |      |
-             |      +-- goose.SetBaseFS(migrationsFS)
-             |      +-- goose.SetDialect("postgres")
-             |      +-- goose.SetTableName("schema_migrations")
-             |      +-- goose.WithSessionLocker(lock.NewPostgresSessionLocker())
+             |      +-- goose.NewProvider(DialectPostgres, db, fs.Sub(MigrationsFS, "sql"),
+             |      |                       WithSessionLocker(lock.NewPostgresSessionLocker()),
+             |      |                       WithTableName("schema_migrations"))
              |      |
-             |      +-- goose.Up(db, "sql")
+             |      +-- provider.Up(ctx)
              |             +-- pg_try_advisory_lock(42)
              |             +-- SELECT MAX(version_id) FROM schema_migrations -> 0
              |             +-- INSERT INTO schema_migrations VALUES (20260621120000, ...)
@@ -121,6 +120,7 @@ import (
     "embed"
     "github.com/pressly/goose/v3"
     "github.com/pressly/goose/v3/lock"
+    "io/fs"
     "database/sql"
 )
 
@@ -136,11 +136,10 @@ type GooseRunner struct {
 func NewGooseRunner(db *sql.DB, tableName string, l *slog.Logger) *GooseRunner
 
 func (r *GooseRunner) Up(ctx context.Context) ([]domain.Version, error)
-    // goose.SetBaseFS(migrationsFS)
-    // goose.SetDialect("postgres")
-    // goose.SetTableName(r.tableName)
-    // goose.WithSessionLocker(lock.NewPostgresSessionLocker())
-    // goose.UpContext(ctx, r.db, "sql")
+    // goose.NewProvider(goose.DialectPostgres, r.db, fs.Sub(MigrationsFS, "sql"),
+    //     goose.WithSessionLocker(lock.NewPostgresSessionLocker()),
+    //     goose.WithTableName(r.tableName))
+    // provider.Up(ctx)
 
 func (r *GooseRunner) Status(ctx context.Context) ([]domain.Version, error)
     // goose.GetMigrations ...
@@ -197,11 +196,11 @@ A failed migration returns the error from `goose.Up`; `main.go` calls `slog.Erro
 
 ## 7. Q5 — Down migrations: write for schema-only, comment for data moves (LOCKED)
 
-goose supports both up and down. Default convention:
-- **Schema-only changes** (CREATE TABLE, ALTER TABLE ADD COLUMN): always write a `.down.sql` that reverses the change.
-- **Data moves** (UPDATE that backfills, DELETE that purges): ship a `.down.sql` only if the move is logically reversible; otherwise leave a `// TODO: data migration, down is destructive` comment in the up file.
+goose supports both up and down. **v3 idiom**: ONE file per migration with both `-- +goose Up` and `-- +goose Down` blocks (separated by `-- +goose StatementEnd` + `-- +goose StatementBegin`). The legacy v2 paired `XXX.sql` + `XXX.down.sql` is rejected by v3 with `found duplicate migration version` — see §9.1. Default convention:
+- **Schema-only changes** (CREATE TABLE, ALTER TABLE ADD COLUMN): always include a `-- +goose Down` block that reverses the change.
+- **Data moves** (UPDATE that backfills, DELETE that purges): ship a `-- +goose Down` block only if the move is logically reversible; otherwise leave a `-- TODO: data migration, down is destructive` comment above the Down block.
 
-The hello-world migration ships a no-op `SELECT 1;` down (it costs nothing, keeps `goose down` working locally for tests).
+The hello-world migration ships a no-op `SELECT 1;` Down block (it costs nothing, keeps `goose down` working locally for tests).
 
 ## 8. Q6 — Layout: one global `src/migration/sql/`, schema-qualified names (LOCKED)
 
@@ -212,13 +211,28 @@ All migration files live in `src/migration/sql/`. Filenames are timestamp-prefix
 
 `goose.Up` reads the directory as a flat list; nested subdirectories are not traversed (verified against goose v3.27.1 source).
 
-## 9. Q7 — Bookkeeping column type: keep TEXT (LOCKED)
+## 9. Q7 — Bookkeeping table shape: goose v3 schema (LOCKED)
 
-`01-init.sql` line 99 provisions `public.schema_migrations (version TEXT PRIMARY KEY, ...)`. goose stores its `version_id` as a stringified bigint; the `TEXT` column accepts it. We **do not** ALTER to `BIGINT` in this change.
+`infra/postgres/init/01-init.sql` provisions `public.schema_migrations` with **goose v3.27.1's expected columns**:
 
-**Why**: minimize the diff to `01-init.sql` (scoped exception is narrow). If a follow-up wants BIGINT, it goes in a future `01-init.sql` change with its own scoping.
+```sql
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+    id         BIGSERIAL    PRIMARY KEY,
+    version_id BIGINT       NOT NULL,
+    is_applied BOOLEAN      NOT NULL,
+    tstamp     TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS schema_migrations_version_id_idx
+    ON public.schema_migrations(version_id);
+```
 
-**Trade-off documented**: implicit `text -> bigint` cast on read. If goose's internal representation ever changes, the cast could break. Mitigation: pin goose to `v3.27.1` exactly; upgrade via a deliberate PR with `go.sum` refresh.
+**Why BIGINT, not TEXT**: goose v3's `INSERT` is `INSERT INTO schema_migrations (version_id, is_applied) VALUES ($1, true)` — the column is typed `bigint` in the v3 source. The pre-existing `(version TEXT PK, applied_at TIMESTAMPTZ, description TEXT)` shape was provisioned by `01-init.sql` before this change, was based on the goose v2 column layout, and is **incompatible** with v3: the first `INSERT` would fail with `column "version_id" of relation "schema_migrations" does not exist`. We rewrite the CREATE TABLE block to match v3.
+
+**Trade-off documented**: no implicit cast, but `01-init.sql` is now the source of truth for the v3 schema. Any future goose upgrade that changes column names must be reflected here in the same change. Mitigation: pin goose to `v3.27.1` exactly; upgrade via a deliberate PR with both `go.sum` refresh and `01-init.sql` schema update.
+
+## 9.1 Goose v3 single-file migration idiom (LOCKED)
+
+Each migration is ONE `.sql` file with both `-- +goose Up` and `-- +goose Down` blocks separated by `-- +goose StatementEnd` + `-- +goose StatementBegin` directives. The legacy goose v2 paired `XXX.sql` + `XXX.down.sql` files are **rejected** by v3 with `found duplicate migration version` because both files share the numeric timestamp prefix. Future migrations must follow the single-file shape.
 
 ## 10. Q8 — OTel attributes (LOCKED)
 
