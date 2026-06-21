@@ -17,7 +17,7 @@
 ## PR progress (apply phase)
 
 - [x] **PR-A — Foundation** (Phases 1-3): pgx dep + driver tests + driver impl + Makefile `test/integration` target. **PR #4** at https://github.com/witsaba/cachicamas/pull/4, opened 2026-06-21. **6 work-unit commits** (see apply-progress Engram id 1593). Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS.
-- [ ] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. Lands after PR-A merges.
+- [x] **PR-B — Runner** (Phases 4-5): goose dep + embed.FS + hello-world SQL + runner + domain port + application service. **PR #5** at https://github.com/witsaba/cachicamas/pull/5, opened 2026-06-21. **9 work-unit commits**. Gates: `make test` PASS, `make test/integration` PASS, `make lint` PASS, `make build` PASS. Hexagonal rule preserved.
 - [ ] **PR-C — Wire + infra** (Phases 6-7): `cmd/server/main.go` pre-Echo hook + `01-init.sql` two-line change. Scoped infra exception in effect (PR-C only).
 - [ ] **PR-D — Docs + verify + archive** (Phases 8-10): `migration/README.md` + scenario walk-through + sdd-archive.
 
@@ -81,11 +81,11 @@
 
 > **Goal**: the runner tests go green. Hexagonal: this is the ONLY file that imports `goose`.
 
-- [ ] 4.1 Implement `backend/database_administrator/src/migration/embed.go` — `//go:embed sql/*.sql` → exported `MigrationsFS embed.FS`. One tiny file, one variable. Commit: `feat(migration): embed SQL migrations via embed.FS`
-- [ ] 4.2 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.sql` with body `SELECT 1;` and a header comment explaining the no-op. Commit: `feat(migration): add hello-world no-op migration`
-- [ ] 4.3 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.down.sql` with body `SELECT 1;` (no-op down for symmetry, keeps `goose down` working locally). Commit (combined with 4.2 OR separate): `feat(migration): add hello-world no-op down`
-- [ ] 4.4 Implement `backend/database_administrator/src/migration/runner.go` — `GooseRunner` struct with `NewGooseRunner(db *sql.DB, tableName string, logger *slog.Logger) *GooseRunner`. `Up(ctx) ([]domain.Version, error)` calls `goose.SetBaseFS(MigrationsFS)`, `goose.SetDialect("postgres")`, `goose.SetTableName(r.tableName)`, `goose.WithSessionLocker(lock.NewPostgresSessionLocker())`, then `goose.UpContext(ctx, r.db, "sql")`. `Status(ctx) ([]domain.Version, error)` returns goose's current versions. Wraps every `Up` call in OTel span `migration.up` and `slog.Info`. Imports `github.com/pressly/goose/v3` and `github.com/pressly/goose/v3/lock` ONLY in this file. Mark as `— GREEN` (runner_test passes). Commit: `feat(migration): goose runner with advisory lock and OTel span`
-- [ ] 4.5 Run `make test`, `make test/integration`, `make lint` — all green
+- [x] 4.1 Implement `backend/database_administrator/src/migration/embed.go` — `//go:embed sql/*.sql` → exported `MigrationsFS embed.FS`. One tiny file, one variable. Commit: `feat(migration): embed SQL migrations via embed.FS` — **DONE in PR-B** (commit `f3a2b32`)
+- [x] 4.2 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.sql` with body `SELECT 1;` and a header comment explaining the no-op. Commit: `feat(migration): add hello-world no-op migration` — **DONE in PR-B** (commit `7c30d70`, combined with 4.3 — goose v3.27.1 idiom is a SINGLE file with both `-- +goose Up` and `-- +goose Down` blocks; the legacy v2 `XXX.sql` + `XXX.down.sql` pair is rejected as a duplicate version)
+- [x] 4.3 Create `backend/database_administrator/src/migration/sql/20260621120000_hello_world.down.sql` with body `SELECT 1;` (no-op down for symmetry, keeps `goose down` working locally). Commit (combined with 4.2 OR separate): `feat(migration): add hello-world no-op down` — **DONE in PR-B** (commit `7c30d70`, combined with 4.2 — see 4.2 note about the v3 idiom)
+- [x] 4.4 Implement `backend/database_administrator/src/migration/runner.go` — `GooseRunner` struct with `NewGooseRunner(db *sql.DB, tableName string, logger *slog.Logger) *GooseRunner`. `Up(ctx) ([]domain.Version, error)` calls `goose.SetBaseFS(MigrationsFS)`, `goose.SetDialect("postgres")`, `goose.SetTableName(r.tableName)`, `goose.WithSessionLocker(lock.NewPostgresSessionLocker())`, then `goose.UpContext(ctx, r.db, "sql")`. `Status(ctx) ([]domain.Version, error)` returns goose's current versions. Wraps every `Up` call in OTel span `migration.up` and `slog.Info`. Imports `github.com/pressly/goose/v3` and `github.com/pressly/goose/v3/lock` ONLY in this file. Mark as `— GREEN` (runner_test passes). Commit: `feat(migration): goose runner with advisory lock and OTel span` — **DONE in PR-B** (commit `f096076`, RED in `3d82107`, lint cleanup in `2f49936`). Implementation uses `goose.NewProvider` with `fs.Sub(MigrationsFS, "sql")` per the v3 idiom; the legacy `goose.SetBaseFS` + `goose.UpContext` path does NOT honour `WithSessionLocker` (it's a `ProviderOption`, not an `OptionsFunc`).
+- [x] 4.5 Run `make test`, `make test/integration`, `make lint` — all green — **DONE in PR-B**
 
 ---
 
@@ -93,10 +93,10 @@
 
 > **Goal**: hexagonal port exists; application service wraps the port with OTel/slog. No goose/pgx import here.
 
-- [ ] 5.1 Implement `backend/database_administrator/src/domain/migration.go` — `Version struct { ID int64; Description string; AppliedAt time.Time }` and `Runner interface { Up(ctx context.Context) ([]Version, error); Status(ctx context.Context) ([]Version, error) }`. **No imports from migration package.** Commit: `feat(domain): migration Runner port and Version struct`
-- [ ] 5.2 Write `backend/database_administrator/src/application/migration_service_test.go` — unit test with a fake `domain.Runner` (no live DB). Asserts that `Up` calls the runner, wraps the call in an OTel span, logs the result, and returns any error. Mark as `— RED`
-- [ ] 5.3 Implement `backend/database_administrator/src/application/migration_service.go` — `MigrationService` struct holds `runner domain.Runner`, `logger *slog.Logger`, `tracer trace.Tracer`. `Up(ctx)` wraps `runner.Up(ctx)` in OTel span `migration.up` with attrs `db.system=postgresql`, `migration.dir`, `migration.applied_count`, `migration.duration_ms` (plus `migration.error` and `migration.error.kind` on failure). `slog.Info` on success, `slog.Error` on failure. `Status(ctx)` delegates. **No goose/pgx imports.** Mark as `— GREEN`. Commit: `feat(application): migration service with OTel and slog instrumentation`
-- [ ] 5.4 Run `make test`, `make lint` — all green
+- [x] 5.1 Implement `backend/database_administrator/src/domain/migration.go` — `Version struct { ID int64; Description string; AppliedAt time.Time }` and `Runner interface { Up(ctx context.Context) ([]Version, error); Status(ctx context.Context) ([]Version, error) }`. **No imports from migration package.** Commit: `feat(domain): migration Runner port and Version struct` — **DONE in PR-B** (commit `dcea916`)
+- [x] 5.2 Write `backend/database_administrator/src/application/migration_service_test.go` — unit test with a fake `domain.Runner` (no live DB). Asserts that `Up` calls the runner, wraps the call in an OTel span, logs the result, and returns any error. Mark as `— RED` — **DONE in PR-B** (commit `a9977c5`)
+- [x] 5.3 Implement `backend/database_administrator/src/application/migration_service.go` — `MigrationService` struct holds `runner domain.Runner`, `logger *slog.Logger`, `tracer trace.Tracer`. `Up(ctx)` wraps `runner.Up(ctx)` in OTel span `migration.up` with attrs `db.system=postgresql`, `migration.dir`, `migration.applied_count`, `migration.duration_ms` (plus `migration.error` and `migration.error.kind` on failure). `slog.Info` on success, `slog.Error` on failure. `Status(ctx)` delegates. **No goose/pgx imports.** Mark as `— GREEN`. Commit: `feat(application): migration service with OTel and slog instrumentation` — **DONE in PR-B** (commit `ef049f1`)
+- [x] 5.4 Run `make test`, `make lint` — all green — **DONE in PR-B**
 
 ---
 
