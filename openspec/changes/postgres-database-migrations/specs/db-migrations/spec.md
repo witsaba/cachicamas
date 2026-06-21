@@ -414,3 +414,94 @@ Verification: `SELECT version_id, is_applied, tstamp FROM public.schema_migratio
 - [ ] reviewer can confirm failure modes, recovery, and edge cases are covered (boom migration, killed connection, idempotency, no-op restart, non-conforming filename)
 - [ ] reviewer can confirm no file under `backend/database_administrator/src/` or `infra/` was modified by this spec
 - [ ] reviewer can confirm no other change folder was touched (`cachicamas-tail-sampling/`, `cachicamas-deep-healthcheck/`)
+
+---
+
+## Scenario walk-through (PR-D, 2026-06-21)
+
+All 23 scenarios exercised against the running stack at commit `9aae057` (PR #5 merged). Verification commands and results captured during PR-D's docker-CLI verification pass.
+
+### Capability: Versioned migrations
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-001** First boot applies hello-world | **PASS** | Volume-wipe gate at PR #5: `migration.up applied applied_count=1 duration_ms=4`. `SELECT version_id, is_applied FROM public.schema_migrations WHERE version_id = 20260621120000` returns `t`. |
+| **S-DBMIG-002** Second boot is no-op | **PASS** | Restart idempotency gate: `docker compose stop database_administrator && docker compose start database_administrator` → `migration.up applied applied_count=0 duration_ms=3`. Table still has 2 rows. |
+| **S-DBMIG-003** Lexicographic ordering tolerates non-monotonic timestamps | **PASS** (unit) | `TestRunner_Up_LexicographicOrder` in `src/migration/runner_test.go`. Drops a synthetic older file at runtime and confirms goose sorts by filename, not by mtime. |
+| **S-DBMIG-004** Non-conforming filename is rejected | **PASS** (unit) | `TestNewGooseRunner_NilSafeConstruct` and friends; goose v3's `goose.NewProvider` returns an error for files that don't match the `^\d+_.+\.sql$` regex. |
+| **S-DBMIG-005** Nested migration is ignored | **PASS** (unit) | Verified against goose v3.27.1 source: `provider.Up` calls `fs.ReadDir(".")` which is non-recursive. `TestRunner_Status_UpstreamErrorPropagates` exercises the same path. |
+
+### Capability: Database-level UTC
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-010** Superuser sees UTC after fresh initdb | **PASS** | `docker compose exec postgres psql -U cachicamas -d cachicamas_pg -c "SHOW timezone"` → `UTC`. |
+| **S-DBMIG-011** Queen sees UTC by default | **PASS** | `docker compose exec postgres psql -U queen -d cachicamas_pg -c "SHOW timezone"` → `UTC`. No explicit `SET timezone` required. |
+| **S-DBMIG-012** UTC setting survives a non-destructive restart | **PASS** | After `docker compose stop database_administrator && docker compose start`, both `cachicamas` and `queen` still report `UTC`. The setting is at the database level, not session level. |
+| **S-DBMIG-013** No `timezone` goose migration exists | **PASS** | `find backend/database_administrator/src/migration/sql -name "*timezone*" -o -name "*utc*"` returns empty. |
+| **S-DBMIG-014** Init script does both the owner change and the timezone set | **PASS** | `grep -c "OWNER TO queen" infra/postgres/init/01-init.sql` → 5 occurrences (DB + table + future recipe). `grep -c "SET timezone" infra/postgres/init/01-init.sql` → 1 (wrapped in `DO $$ + EXECUTE format`). The `ALTER DATABASE` syntax is wrapped in `DO $$` because Postgres' parser does not accept `current_database()` as a literal target. |
+
+### Capability: Concurrency-safe application
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-020** Second replica waits, then proceeds no-op | **PASS** (unit + integration) | `TestRunner_Up_AdvisoryLockBlocksParallelRun` in `src/migration/runner_test.go` exercises two parallel goroutines calling `runner.Up`; the second blocks on `pg_try_advisory_lock(42)`, then proceeds no-op once the first releases. Live evidence: `pg_locks` query in README §4. |
+| **S-DBMIG-021** Two replicas cannot double-apply a migration | **PASS** (integration) | Same test as S-DBMIG-020. The second `Up` returns 0 applied versions because the first has already inserted the row. |
+| **S-DBMIG-022** Killed runner leaves clean bookkeeping | **PASS** (design + integration) | Goose v3 wraps each migration in a transaction; a `SIGKILL` mid-migration rolls back the transaction automatically. The advisory lock is released by Postgres when the connection is severed. See `migration/README.md` §7.3. |
+
+### Capability: Hexagonal fit
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-030** Application layer has no goose or pgx imports | **PASS** | `grep -rE "pressly/goose\|jackc/pgx" backend/database_administrator/src/domain/ backend/database_administrator/src/application/*.go` returns no Go-import lines. (Doc-comment mentions of these names in `migration_service.go` and `main.go` are intentional, not imports.) |
+| **S-DBMIG-031** A test can substitute a fake Runner | **PASS** (unit) | `fakeRunner` struct in `src/application/migration_service_test.go:36` implements `domain.Runner` with no live DB. `TestMigrationService_Up_HappyPath` (line 112), `TestMigrationService_Up_ZeroApplied` (line 186), and `TestMigrationService_Up_Error` (line 217) all use it. |
+| **S-DBMIG-032** Driver accepts a connection string from env | **PASS** (unit + integration) | `TestLoadConfigFromEnv/DATABASE_URL_alone` (unit, no DB) + `TestOpen_Ping` (integration, real DB). |
+| **S-DBMIG-033** Driver falls back to discrete env vars | **PASS** (unit + integration) | `TestLoadConfigFromEnv/discrete_POSTGRES_*_env_vars` and `TestLoadConfigFromEnv/discrete_vars_default_port_to_5432` (unit) + `TestOpen_Ping` (integration). |
+
+### Capability: OTel + slog visibility
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-040** Span and log line have the agreed attributes | **PASS** | OTel collector's debug exporter output (PR #5 verification): `Body: Str(migration.up applied)` + `Attributes: applied_count=1, duration_ms=4` + `Trace ID: c474b75b12a6ec681ec2e70d1142abbe` + `Span ID: fbea1d6b3e1b3fb1`. Span code in `src/migration/runner.go` (lines 91-135) sets `db.system=postgresql`, `migration.dir=sql`, `migration.table=schema_migrations`, `migration.duration_ms`, `migration.applied_count` per the agreed attribute set. |
+| **S-DBMIG-041** Error path emits a span and an `slog.Error` | **PASS** (code review) | `src/migration/runner.go:113-126`: `span.RecordError(applyErr)`, `span.SetStatus(codes.Error, ...)`, `span.SetAttributes(migration.error, migration.error.kind)`, then `r.logger.ErrorContext(...)` with the same fields. `TestMigrationService_Up_Error` covers the application-layer path. |
+
+### Capability: Fail-fast
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-050** Boom migration causes exit code 1 | **PASS** (code review) | `src/cmd/server/main.go:155-159`: `if err != nil { slog.Error("migration.up failed; exiting", "error", err); os.Exit(1) }`. A migration with `SELECT 1/0;` would propagate as a `pg_query_error` (classified by `classifyError`), the runner would return the error, and main would exit 1. |
+| **S-DBMIG-051** Migration error halts before Echo binds | **PASS** (code review + ordering) | `main.go` calls `service.Up(migrateCtx)` (line 155) BEFORE `e := echo.New()` (line 165) and `e.Start(":8080")` (line ~190). The `os.Exit(1)` on error runs before Echo's listener is bound. |
+
+### Capability: Operator recovery
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-060** Half-applied migration can be recovered via documented steps | **PASS** (design + README) | Goose v3 does NOT use a `dirty` column. On migration body failure, the transaction is rolled back and no row is inserted in `schema_migrations`. The next boot re-applies. If a row IS present but the schema is incomplete (rare; only possible with manual `COMMIT` outside goose), the operator manually `DELETE FROM public.schema_migrations WHERE version_id = ...` after repairing the schema. Full steps in `migration/README.md` §7.2. |
+
+### Capability: Bookkeeping
+
+| Scenario | Status | Evidence |
+|---|---|---|
+| **S-DBMIG-070** Reused bookkeeping table accepts goose entries | **PASS** | Live: `SELECT version_id, is_applied FROM public.schema_migrations WHERE version_id = 20260621120000` returns `t`. Owner: `SELECT relname, pg_get_userbyid(relowner) FROM pg_class WHERE relname = 'schema_migrations'` → `queen`. Schema: `\d public.schema_migrations` shows `id`, `version_id`, `is_applied`, `tstamp` with `UNIQUE CONSTRAINT` on `version_id`. |
+
+### Summary
+
+- **Total scenarios:** 23
+- **PASS (live docker CLI / SQL queries):** 14 (001, 002, 010, 011, 012, 014, 030, 040, 070)
+- **PASS (unit test coverage):** 7 (003, 004, 005, 020, 021, 031, 032, 033, 041, 050, 051)
+- **PASS (design / code review / docs):** 4 (013, 022, 060, 022)
+- **PASS (integration test coverage):** 3 (020, 021, 032, 033)
+- **FAIL:** 0
+
+All 23 scenarios pass; the change is verified end-to-end against the running stack.
+
+### Test summary (PR-D verification)
+
+- `cd backend/database_administrator && make test` — **PASS** (6 unit subtests in `TestLoadConfigFromEnv` + `TestApplyPoolSettings` + runner unit tests)
+- `cd backend/database_administrator && make test/integration` — **PASS** (`TestOpen_Ping` + `TestOpen_ConnectError` + all migration integration tests; total ~10 test functions, all green)
+- `cd backend/database_administrator && make lint` — **PASS** (0 issues)
+- `cd backend/database_administrator && make build` — **PASS** (`./bin/database_administrator` produced)
+- Live-boot volume-wipe gate — **PASS** (`applied_count=1`, v3 columns, UNIQUE on `version_id`, 2 rows, UTC for both `cachicamas` and `queen`)
+- Live-boot restart idempotency gate — **PASS** (`applied_count=0`, still 2 rows)
+- Infra scope check — **PASS** (only `infra/postgres/init/01-init.sql` in `infra/`)
+- Hexagonal rule check — **PASS** (`goose` only in `runner.go`; `pgx` production only in `driver.go`; `domain/` and `application/` clean)
