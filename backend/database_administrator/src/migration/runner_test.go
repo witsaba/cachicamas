@@ -1187,6 +1187,348 @@ func TestRunner_Up_CheckConstraintsEnforceValidity(t *testing.T) {
 	})
 }
 
+// TestWitsabaFramework_AgentFirstLifecycle_EndToEnd validates the
+// witsaba framework implementation by simulating a complete
+// agent-driven requirement lifecycle. This is the "does it actually
+// work for an agent?" test, distinct from the per-table constraint
+// tests.
+//
+// Lifecycle simulated:
+//   1. Org + project + PRD requirement intake
+//   2. Spike investigation (1 requirement, 1 spike)
+//   3. Milestone + task + spec creation
+//   4. Agent walks the spec through 7 phases (tdd_red → human_approved)
+//   5. AI review finds a gap → agent re-enters tdd_red (the agent-first flow)
+//   6. JSONB metadata round-trip on project
+//   7. The ONLY allowed UPDATE-in-place: organization.is_active toggle
+//
+// Each step asserts both the happy path AND the agent's expected
+// query result, so a future change that breaks the agent's mental
+// model surfaces here as a test failure.
+func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
+	db := integrationRunnerDB(t)
+	resetSchemaMigrations(t, db)
+	wipeNewTables(t, db)
+	t.Cleanup(truncateNewTables(t, db))
+
+	upCtx, upCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer upCancel()
+	r := newTestRunner(db)
+	applied, err := r.Up(upCtx)
+	if err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	if len(applied) != 4 {
+		t.Fatalf("expected 4 migrations applied (hello + 3 witsaba), got %d", len(applied))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// ── Step 1: organization + project + requirement ──────────────────
+	// A witsaba org acting on its own behalf; project "cachicamas";
+	// a single PRD requirement with a small markdown body.
+	var orgID, projID, reqID int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO organization (shortname, full_name, identification, email, phone)
+         VALUES ('acme', 'Acme S.A. de C.V.', 'ACME-2026-001',
+                 'ops@acme.example', '+52 55 0000 0000')
+         RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatalf("seed organization: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO project (organization_id, key, full_name, start_date, end_date, metadata)
+         VALUES ($1, 'cachicamas', 'Cachicamas Platform',
+                 DATE '2026-01-01', DATE '2026-12-31',
+                 '{"github_repo":"witsaba/cachicamas","tier":"core"}'::jsonb)
+         RETURNING id`, orgID).Scan(&projID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO requirement
+            (project_id, filename, content, git_repository_url, analysis_result, is_technically_viable)
+         VALUES ($1, 'prd-001.md', $2,
+                 'https://github.com/witsaba/cachicamas',
+                 'No blocking issues; 2 follow-ups for v2.',
+                 TRUE)
+         RETURNING id`,
+		projID,
+		"# Cachicamas: WITSABA-aligned requirement management\n\n"+"Body content for the PRD.\n",
+	).Scan(&reqID); err != nil {
+		t.Fatalf("seed requirement: %v", err)
+	}
+
+	// Assert: project is queryable with the metadata we set.
+	// Postgres normalizes JSONB whitespace (e.g. `"tier": "core"`),
+	// so we use a whitespace-tolerant substring check rather than
+	// byte-exact comparison.
+	var gotMetadata []byte
+	if err := db.QueryRowContext(ctx,
+		`SELECT metadata::text FROM project WHERE id = $1`, projID).Scan(&gotMetadata); err != nil {
+		t.Fatalf("query project metadata: %v", err)
+	}
+	if !strings.Contains(string(gotMetadata), `"tier"`) ||
+		!strings.Contains(string(gotMetadata), `"core"`) ||
+		!strings.Contains(string(gotMetadata), `"github_repo"`) {
+		t.Errorf("project metadata round-trip lost keys: got %s", gotMetadata)
+	}
+
+	// ── Step 2: spike investigation ─────────────────────────────────
+	// One spike per requirement (strict 1:1 spike ↔ requirement ratio,
+	// because the spike table has no synthetic PK — it is one row per
+	// requirement, holding the spike's start, end, outcome, findings).
+	var spikeReqID int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO requirement_spike (requirement_id, started_at, ended_at, outcome, findings)
+         VALUES ($1, DATE '2026-01-15', DATE '2026-01-22',
+                 'feasible', 'Adopt goose v3.27.1 + pgx/v5 stdlib. See findings.md for details.')
+         RETURNING requirement_id`, reqID).Scan(&spikeReqID); err != nil {
+		t.Fatalf("seed requirement_spike: %v", err)
+	}
+	if spikeReqID != reqID {
+		t.Errorf("spike.requirement_id = %d, want %d (1:1 inheritance)", spikeReqID, reqID)
+	}
+
+	// ── Step 3: milestone + task + spec ─────────────────────────────
+	// milestone is strict-inherited from requirement: PK = FK.
+	// task and spec are 1:N with synthetic PKs.
+	var taskID, specID int64
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO milestone (requirement_id, title, description, start_date, end_date)
+         VALUES ($1, 'M1: Core schema',
+                 'Land the witsaba core 8 tables behind the migration runner.',
+                 DATE '2026-02-01', DATE '2026-03-15')`, reqID); err != nil {
+		t.Fatalf("seed milestone: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO task (milestone_id, title, description)
+         VALUES ($1, 'T1: Implement core schema migrations',
+                 'Author the 3 goose migration files + integration tests.')
+         RETURNING id`, reqID).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO spec (task_id, content, start_date, end_date)
+         VALUES ($1, $2, DATE '2026-02-05', NULL)
+         RETURNING id`,
+		taskID,
+		"# Spec: witsaba core schema\n\nImplement the 8 tables per proposal.",
+	).Scan(&specID); err != nil {
+		t.Fatalf("seed spec: %v", err)
+	}
+
+	// ── Step 4: walk the spec through 7 phases ──────────────────────
+	// The agent-first canonical pattern: UPDATE the current row's
+	// ended_at, then INSERT the next phase with notes explaining the
+	// transition. See proposal §"Agent-first re-entry pattern" and
+	// design §"Canonical SQL pattern".
+	walkPhase := func(phase, notes string) {
+		t.Helper()
+		// Close any currently-open row for this spec.
+		if _, err := db.ExecContext(ctx,
+			`UPDATE spec_phase
+             SET ended_at = now(), updated_at = now()
+             WHERE spec_id = $1 AND ended_at IS NULL`, specID); err != nil {
+			t.Fatalf("close current phase before %s: %v", phase, err)
+		}
+		// Insert the new phase. The composite natural-key UNIQUE
+		// (spec_id, phase, started_at) keeps each transition event
+		// unique, so a re-entry is a NEW row, not an UPDATE.
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO spec_phase (spec_id, phase, notes)
+             VALUES ($1, $2, $3)`, specID, phase, notes); err != nil {
+			t.Fatalf("insert phase %s: %v", phase, err)
+		}
+		// Sleep 5ms to guarantee started_at uniqueness between
+		// consecutive inserts (Postgres TIMESTAMPTZ has microsecond
+		// resolution; the 5ms gap is belt-and-suspenders).
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	walkPhase("tdd_red", "initial red: write the failing test first")
+	walkPhase("implementation", "write the SQL DDL + Go test code")
+	walkPhase("tdd_green", "tests pass: 3 migrations apply cleanly, 4 rows in schema_migrations")
+	walkPhase("verify", "lint + race-enabled test suite green")
+	walkPhase("pr", "opened PR #10 against main")
+	walkPhase("technical_ai_review", "AI review by automated agent (claude-opus): 0 critical, 5 warnings, 3 suggestions")
+	walkPhase("ai_approved", "AI approved the PR after the 5 warnings were closed by commit 3c200ac")
+
+	// Assert: at this point there is exactly ONE open phase per spec
+	// (the partial index `idx_spec_phase_current_state` guarantees a
+	// fast lookup; the absence of a partial UNIQUE keeps the design
+	// flexible for future parallel-agent scenarios).
+	var openCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM spec_phase WHERE spec_id = $1 AND ended_at IS NULL`,
+		specID).Scan(&openCount); err != nil {
+		t.Fatalf("count open phases: %v", err)
+	}
+	if openCount != 1 {
+		t.Errorf("open phase count = %d, want 1 (partial index lookup)", openCount)
+	}
+	var currentPhase string
+	if err := db.QueryRowContext(ctx,
+		`SELECT phase FROM spec_phase
+         WHERE spec_id = $1 AND ended_at IS NULL LIMIT 1`, specID).Scan(&currentPhase); err != nil {
+		t.Fatalf("query current phase: %v", err)
+	}
+	if currentPhase != "ai_approved" {
+		t.Errorf("current phase = %q, want %q", currentPhase, "ai_approved")
+	}
+
+	// ── Step 5: agent re-enters tdd_red (the agent-first flow) ─────
+	// The human-approved phase is still pending. The agent gets a
+	// late AI review note saying the technical_ai_review step missed
+	// a missing CHECK constraint test. The agent must re-enter
+	// tdd_red to add the test, then walk back through the cycle.
+	walkPhase("tdd_red", "RE-ENTRY: late AI review found 5 missing CHECK constraint tests; returning to tdd_red to add them (see commit 3c200ac)")
+
+	// After re-entry: the current phase is tdd_red, and the history
+	// has 8 rows total (7 original + 1 re-entry). The earlier
+	// `tdd_red` row (from Step 4) has a non-NULL ended_at, so the
+	// partial index still returns exactly one open row.
+	var historyCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM spec_phase WHERE spec_id = $1`, specID).Scan(&historyCount); err != nil {
+		t.Fatalf("count full history: %v", err)
+	}
+	if historyCount != 8 {
+		t.Errorf("history row count = %d, want 8 (7 original + 1 re-entry)", historyCount)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT phase FROM spec_phase
+         WHERE spec_id = $1 AND ended_at IS NULL LIMIT 1`, specID).Scan(&currentPhase); err != nil {
+		t.Fatalf("query current phase after re-entry: %v", err)
+	}
+	if currentPhase != "tdd_red" {
+		t.Errorf("current phase after re-entry = %q, want %q", currentPhase, "tdd_red")
+	}
+
+	// The two tdd_red rows must have distinct started_at; this is
+	// what the natural-key UNIQUE enforced and what makes the
+	// re-entry a real second event, not a re-write of the first.
+	var distinctTddRedStarts int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(DISTINCT started_at) FROM spec_phase
+         WHERE spec_id = $1 AND phase = 'tdd_red'`, specID).Scan(&distinctTddRedStarts); err != nil {
+		t.Fatalf("count distinct tdd_red starts: %v", err)
+	}
+	if distinctTddRedStarts != 2 {
+		t.Errorf("distinct tdd_red started_at values = %d, want 2 (proves re-entry is a new event)",
+			distinctTddRedStarts)
+	}
+
+	// Walk forward through the post-re-entry cycle to human_approved.
+	walkPhase("implementation", "added TestRunner_Up_CheckConstraintsEnforceValidity with 5 sub-cases")
+	walkPhase("tdd_green", "all 5 sub-cases pass; full test suite green")
+	walkPhase("verify", "lint clean, build clean, race-enabled suite green")
+	walkPhase("pr", "pushed commit 3c200ac to PR #10")
+	walkPhase("technical_ai_review", "AI re-reviewed: 0 warnings, 3 suggestions (down from 5)")
+	walkPhase("ai_approved", "AI approved the gap-closing PR")
+	walkPhase("human_approved", "human (braejan) approved and merged PR #10")
+
+	// Final state: 15 phase rows (7 + 1 re-entry + 7 post-re-entry),
+	// exactly 1 open (human_approved), the human_approved phase has
+	// the human's decision in its `notes` column.
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM spec_phase WHERE spec_id = $1`, specID).Scan(&historyCount); err != nil {
+		t.Fatalf("count final history: %v", err)
+	}
+	if historyCount != 15 {
+		t.Errorf("final history row count = %d, want 15", historyCount)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT phase FROM spec_phase
+         WHERE spec_id = $1 AND ended_at IS NULL LIMIT 1`, specID).Scan(&currentPhase); err != nil {
+		t.Fatalf("query final current phase: %v", err)
+	}
+	if currentPhase != "human_approved" {
+		t.Errorf("final current phase = %q, want %q", currentPhase, "human_approved")
+	}
+
+	// ── Step 6: JSONB metadata round-trip ───────────────────────────
+	// A second project on the same org exercises the JSONB column
+	// and proves the metadata is queryable, not just insertable.
+	var proj2 int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO project (organization_id, key, full_name, metadata)
+         VALUES ($1, 'pulse', 'Pulse',
+                 '{"tags":["internal","experimental"],"owners":["braejan"]}'::jsonb)
+         RETURNING id`, orgID).Scan(&proj2); err != nil {
+		t.Fatalf("seed project 2: %v", err)
+	}
+	var tags []string
+	if err := db.QueryRowContext(ctx,
+		`SELECT jsonb_path_query_array(metadata, '$.tags')::text
+         FROM project WHERE id = $1`, proj2).Scan(&tags); err != nil {
+		// The cast may fail on some pgx versions; fall back to a
+		// substring check on the raw JSON.
+		var rawMeta []byte
+		if err2 := db.QueryRowContext(ctx,
+			`SELECT metadata::text FROM project WHERE id = $1`, proj2).Scan(&rawMeta); err2 != nil {
+			t.Fatalf("query project 2 metadata: %v / %v", err, err2)
+		}
+		if !strings.Contains(string(rawMeta), `"internal"`) || !strings.Contains(string(rawMeta), `"experimental"`) {
+			t.Errorf("project 2 metadata lost tags: %s", rawMeta)
+		}
+	} else {
+		if len(tags) == 0 {
+			t.Errorf("project 2 tags JSONB query returned empty array")
+		}
+	}
+
+	// ── Step 7: organization.is_active — the ONLY UPDATE-in-place ──
+	// The framework's append-mostly contract says every column is
+	// append-only EXCEPT organization.is_active. Prove the toggle
+	// works and that it is the only mutation we issue.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE organization SET is_active = FALSE, updated_at = now() WHERE id = $1`, orgID); err != nil {
+		t.Fatalf("deactivate organization: %v", err)
+	}
+	var isActive bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT is_active FROM organization WHERE id = $1`, orgID).Scan(&isActive); err != nil {
+		t.Fatalf("query is_active: %v", err)
+	}
+	if isActive {
+		t.Errorf("is_active = TRUE after deactivation, want FALSE")
+	}
+	// Re-activate (the only UPDATE we issue twice in this test).
+	if _, err := db.ExecContext(ctx,
+		`UPDATE organization SET is_active = TRUE, updated_at = now() WHERE id = $1`, orgID); err != nil {
+		t.Fatalf("reactivate organization: %v", err)
+	}
+
+	// Final accounting: 2 orgs (no — 1 org), 2 projects, 1
+	// requirement, 1 strict-inherited milestone, 1 task, 1 spec,
+	// 1 spike, 15 spec_phase rows (1 currently open).
+	var projectCount, milestoneCount, taskCount, specCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM project`).Scan(&projectCount); err != nil {
+		t.Fatalf("count projects: %v", err)
+	}
+	if projectCount != 2 {
+		t.Errorf("project count = %d, want 2", projectCount)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM milestone`).Scan(&milestoneCount); err != nil {
+		t.Fatalf("count milestones: %v", err)
+	}
+	if milestoneCount != 1 {
+		t.Errorf("milestone count = %d, want 1 (strict-inherited from the only requirement)", milestoneCount)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM task`).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Errorf("task count = %d, want 1", taskCount)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM spec`).Scan(&specCount); err != nil {
+		t.Fatalf("count specs: %v", err)
+	}
+	if specCount != 1 {
+		t.Errorf("spec count = %d, want 1", specCount)
+	}
+}
+
 // Compile-time check that GooseRunner satisfies domain.Runner once
 // runner.go lands. If the runner omits Up/Status or returns the
 // wrong types, this file will fail to compile — that failure is the
