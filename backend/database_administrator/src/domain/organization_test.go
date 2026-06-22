@@ -335,7 +335,8 @@ func TestValidate_MultipleFieldsError(t *testing.T) {
 // "not provided" from "empty string". This is what the locked
 // decision #11 in the apply prompt is about.
 func TestOrganization_OptionalFieldsSerializeAsNull(t *testing.T) {
-	// 1. Nil optionals → "null" in JSON.
+	// 1. Nil optionals on a populated struct (no validation
+	// differences — this only exercises the type system).
 	empty := domain.Organization{
 		ID:             42,
 		FullName:       "Acme",
@@ -357,22 +358,22 @@ func TestOrganization_OptionalFieldsSerializeAsNull(t *testing.T) {
 	// instead of becoming JSON null. Inspect the struct field
 	// tags directly so a future contributor who adds `omitempty`
 	// back gets a red test instead of a silent spec violation.
-	if got := jsonTag(t, domain.Organization{}, "ShortName"); got != "shortname" {
+	if got := jsonTag(t, "ShortName"); got != "shortname" {
 		t.Errorf("ShortName json tag = %q, want %q (must NOT include ,omitempty)", got, "shortname")
 	}
-	if got := jsonTag(t, domain.Organization{}, "Email"); got != "email" {
+	if got := jsonTag(t, "Email"); got != "email" {
 		t.Errorf("Email json tag = %q, want %q (must NOT include ,omitempty)", got, "email")
 	}
-	if got := jsonTag(t, domain.Organization{}, "Phone"); got != "phone" {
+	if got := jsonTag(t, "Phone"); got != "phone" {
 		t.Errorf("Phone json tag = %q, want %q (must NOT include ,omitempty)", got, "phone")
 	}
 }
 
 // jsonTag returns the value of the `json` struct tag on a named
-// field, or "" if the tag is absent. Uses reflection so a future
-// rename in the struct is caught by the test runner, not by a
-// silent string-match in the assertion.
-func jsonTag(t *testing.T, _ domain.Organization, fieldName string) string {
+// field of domain.Organization, or "" if the tag is absent. Uses
+// reflection so a future rename in the struct is caught by the
+// test runner, not by a silent string-match in the assertion.
+func jsonTag(t *testing.T, fieldName string) string {
 	t.Helper()
 	v := reflect.TypeOf(domain.Organization{})
 	f, ok := v.FieldByName(fieldName)
