@@ -8,7 +8,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "pnpm lint && pnpm build.types && pnpm fmt.check && pnpm test.unit",
+    "verify": "pnpm lint && pnpm build.types && pnpm fmt.check && pnpm test:ci",
     "build": "qwik build",
     "build.client": "vite build",
     "build.preview": "vite build --ssr src/entry.preview.tsx",
@@ -22,6 +22,7 @@
     "preview": "qwik build preview && vite preview --open",
     "start": "vite --open --mode ssr",
     "test.unit": "vitest components",
+    "test:ci": "vitest components --run",
     "test.unit.ui": "vitest --ui components",
     "qwik": "qwik"
   },
