@@ -8,6 +8,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "verify": "pnpm lint && pnpm build.types && pnpm fmt.check && pnpm test.unit",
     "build": "qwik build",
     "build.client": "vite build",
     "build.preview": "vite build --ssr src/entry.preview.tsx",
