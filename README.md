@@ -13,7 +13,7 @@
       height="280"
       loading="eager"
       decoding="async"
-      style="max-width: 280px; width: 100%; height: auto; display: block; margin: 0 auto;"
+      style="display:block; margin:0 auto; width:280px; height:280px; max-width:80vw; aspect-ratio:1 / 1; border-radius:50%; object-fit:cover;"
     />
   </picture>
 </div>
