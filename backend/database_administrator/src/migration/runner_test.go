@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1029,6 +1030,161 @@ func TestRunner_Status_UpstreamErrorPropagates(t *testing.T) {
 	if errors.Unwrap(err) == nil && err.Error() == "" {
 		t.Errorf("Status error must carry a message")
 	}
+}
+
+// TestRunner_Up_CheckConstraintsEnforceValidity closes the 5 WARNING
+// coverage gaps from sdd-verify. Each subtest exercises the negative
+// case of a CHECK or UNIQUE constraint that the locked DDL enforces
+// but no other test directly asserts. The constraints exist in the
+// migration files; this test pins their runtime behavior so a
+// future contributor who silently weakens a constraint (e.g.,
+// removes `CHECK (ended_at >= started_at)`) will see this test go
+// red.
+//
+// Scenarios closed (see openspec/changes/witsaba-core-tables/specs/.../spec.md):
+//   - W1 = S1: requirement_spike_dates_valid
+//   - W2 = S6: spec_dates_valid
+//   - W3 = M4: milestone_dates_valid
+//   - W4 = SP2: spec_phase_natural_key UNIQUE
+//   - W5 = SP3: spec_phase_dates_valid
+func TestRunner_Up_CheckConstraintsEnforceValidity(t *testing.T) {
+	db := integrationRunnerDB(t)
+	resetSchemaMigrations(t, db)
+	wipeNewTables(t, db)
+	t.Cleanup(truncateNewTables(t, db))
+
+	// Apply migrations so the 8 new tables exist.
+	upCtx, upCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer upCancel()
+	r := newTestRunner(db)
+	if _, err := r.Up(upCtx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	// Seed org -> project -> requirement -> milestone -> task -> spec.
+	// The seeded rows must satisfy every constraint so the only
+	// failure path in each subtest is the violating row itself.
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer setupCancel()
+	var orgID, projID, reqID, taskID, specID int64
+	if err := db.QueryRowContext(setupCtx,
+		`INSERT INTO organization (full_name, identification)
+         VALUES ('Acme Constraints', 'RFC-CONSTRAINTS-001') RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatalf("seed organization: %v", err)
+	}
+	if err := db.QueryRowContext(setupCtx,
+		`INSERT INTO project (organization_id, key, full_name)
+         VALUES ($1, 'constraints', 'Constraints') RETURNING id`, orgID).Scan(&projID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	if err := db.QueryRowContext(setupCtx,
+		`INSERT INTO requirement (project_id, filename, content)
+         VALUES ($1, 'r.md', 'body') RETURNING id`, projID).Scan(&reqID); err != nil {
+		t.Fatalf("seed requirement: %v", err)
+	}
+	if _, err := db.ExecContext(setupCtx,
+		`INSERT INTO milestone (requirement_id, title) VALUES ($1, 'M')`, reqID); err != nil {
+		t.Fatalf("seed milestone: %v", err)
+	}
+	if err := db.QueryRowContext(setupCtx,
+		`INSERT INTO task (milestone_id, title) VALUES ($1, 'T') RETURNING id`, reqID).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := db.QueryRowContext(setupCtx,
+		`INSERT INTO spec (task_id, content) VALUES ($1, 'body') RETURNING id`, taskID).Scan(&specID); err != nil {
+		t.Fatalf("seed spec: %v", err)
+	}
+
+	// expectConstraintViolation runs stmt and asserts the resulting
+	// error carries the named CHECK or UNIQUE constraint. Postgres
+	// reports CHECK violations as SQLSTATE 23514 and UNIQUE
+	// violations as 23505; both embed the constraint name in the
+	// error message, so a substring match is sufficient and stable
+	// across pgx versions.
+	expectConstraintViolation := func(t *testing.T, label, wantConstraint string, run func() error) {
+		t.Helper()
+		err := run()
+		if err == nil {
+			t.Errorf("%s: expected constraint violation of %q, got nil", label, wantConstraint)
+			return
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, wantConstraint) {
+			t.Errorf("%s: error does not mention constraint %q: %v", label, wantConstraint, err)
+			return
+		}
+	}
+
+	t.Run("W1_requirement_spike_dates_valid", func(t *testing.T) {
+		// ended_at (2020-01-01) < started_at (2030-01-01) — invalid.
+		expectConstraintViolation(t, "W1", "requirement_spike_dates_valid", func() error {
+			_, err := db.ExecContext(setupCtx,
+				`INSERT INTO requirement_spike (requirement_id, started_at, ended_at)
+                 VALUES ($1, DATE '2030-01-01', DATE '2020-01-01')`, reqID)
+			return err
+		})
+	})
+
+	t.Run("W2_spec_dates_valid", func(t *testing.T) {
+		// end_date (2020-01-01) < start_date (2030-01-01) — invalid.
+		expectConstraintViolation(t, "W2", "spec_dates_valid", func() error {
+			_, err := db.ExecContext(setupCtx,
+				`INSERT INTO spec (task_id, content, start_date, end_date)
+                 VALUES ($1, 'body', DATE '2030-01-01', DATE '2020-01-01')`, taskID)
+			return err
+		})
+	})
+
+	t.Run("W3_milestone_dates_valid", func(t *testing.T) {
+		// The seed used `INSERT INTO milestone (requirement_id, title)`
+		// so requirement_id is implicit on the FK chain. We insert a
+		// SECOND requirement, then a milestone on it, so we don't
+		// collide with the strict-inheritance 1:1 rule on reqID.
+		var altReqID int64
+		if err := db.QueryRowContext(setupCtx,
+			`INSERT INTO requirement (project_id, filename, content)
+             VALUES ($1, 'r2.md', 'body') RETURNING id`, projID).Scan(&altReqID); err != nil {
+			t.Fatalf("seed alt requirement: %v", err)
+		}
+		expectConstraintViolation(t, "W3", "milestone_dates_valid", func() error {
+			_, err := db.ExecContext(setupCtx,
+				`INSERT INTO milestone (requirement_id, title, start_date, end_date)
+                 VALUES ($1, 'M2', DATE '2030-01-01', DATE '2020-01-01')`, altReqID)
+			return err
+		})
+	})
+
+	t.Run("W4_spec_phase_natural_key", func(t *testing.T) {
+		// Insert one spec_phase row, then a second with the same
+		// (spec_id, phase, started_at) triple. The second must fail
+		// the UNIQUE constraint `spec_phase_natural_key`.
+		if _, err := db.ExecContext(setupCtx,
+			`INSERT INTO spec_phase (spec_id, phase, started_at, notes)
+             VALUES ($1, 'tdd_red', TIMESTAMPTZ '2026-06-22 12:00:00+00', 'first')`, specID); err != nil {
+			t.Fatalf("seed first spec_phase: %v", err)
+		}
+		expectConstraintViolation(t, "W4", "spec_phase_natural_key", func() error {
+			_, err := db.ExecContext(setupCtx,
+				`INSERT INTO spec_phase (spec_id, phase, started_at, notes)
+                 VALUES ($1, 'tdd_red', TIMESTAMPTZ '2026-06-22 12:00:00+00', 'duplicate')`, specID)
+			return err
+		})
+	})
+
+	t.Run("W5_spec_phase_dates_valid", func(t *testing.T) {
+		// ended_at (2020) < started_at (2030) — invalid. Use a
+		// distinct (spec_id, phase, started_at) so this case is
+		// independent of W4's UNIQUE assertion.
+		expectConstraintViolation(t, "W5", "spec_phase_dates_valid", func() error {
+			_, err := db.ExecContext(setupCtx,
+				`INSERT INTO spec_phase (spec_id, phase, started_at, ended_at, notes)
+                 VALUES ($1, 'verify',
+                         TIMESTAMPTZ '2030-01-01 00:00:00+00',
+                         TIMESTAMPTZ '2020-01-01 00:00:00+00',
+                         'invalid date pair')`, specID)
+			return err
+		})
+	})
 }
 
 // Compile-time check that GooseRunner satisfies domain.Runner once
