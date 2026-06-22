@@ -399,3 +399,164 @@ docker compose logs otel-collector | grep "migration.up applied" | grep -oE 'Tra
 - **Tasks** — `openspec/changes/postgres-database-migrations/tasks.md`.
 - **Upstream bug** — `opentelemetry-go#5248` blocks end-to-end OTel trace
   export to Jaeger. Tracked in `infra/otel/collector-config.yaml` lines 40-45.
+
+---
+
+## 11. Schema overview — witsaba core domain
+
+The witsaba framework models the lifecycle of a product requirement as
+8 tables in `public`, landed by 3 goose migration files in dependency
+order. Every table carries `created_at` and `updated_at` (`TIMESTAMPTZ
+NOT NULL DEFAULT now()`) and uses `BIGSERIAL` synthetic primary keys,
+with one deliberate exception.
+
+### 11.1 The 8 tables, in dependency order
+
+```
+organization                 (root, no parents)
+   |
+   +-- project                (1:N; project.organization_id FKs to organization.id)
+         |
+         +-- requirement      (1:N; requirement.project_id FKs to project.id)
+               |
+               +-- requirement_spike   (1:N; multi-spike per requirement)
+               |
+               +-- milestone  (1:1; STRICT INHERITANCE -- PK = FK = requirement_id)
+                     |
+                     +-- task           (1:N; task.milestone_id FKs to milestone.requirement_id)
+                           |
+                           +-- spec      (1:N; spec.task_id FKs to task.id)
+                                 |
+                                 +-- spec_phase  (1:N, append-only history;
+                                                  spec_phase.spec_id FKs to spec.id)
+```
+
+### 11.2 Cardinality — strict inheritance is the EXCEPTION
+
+`milestone` is the ONLY table that uses strict inheritance
+(`requirement_id BIGINT PRIMARY KEY REFERENCES requirement(id)`,
+no synthetic `id`). The PK = FK design lets Postgres enforce the
+1:1 invariant for free: a second milestone for the same
+`requirement_id` fails on `milestone_pkey`. Everywhere else, the
+child has a synthetic `BIGSERIAL PRIMARY KEY` plus a non-PK FK,
+which lets the same parent accumulate multiple children.
+
+Why this asymmetry: a requirement can be re-investigated (`spike`)
+and a milestone can fan out into many tasks, but a requirement has
+exactly one milestone for its lifecycle. The strict-inheritance
+invariant captures that 1:1 in the schema instead of in app code.
+
+### 11.3 Append-only by default
+
+The framework's default convention is **append-mostly**: history is
+the source of truth, and in-place `UPDATE` is allowed ONLY on
+`organization.is_active`. The column comment on
+`organization.is_active` is the documented contract:
+
+```sql
+COMMENT ON COLUMN organization.is_active IS
+    'UPDATE-in-place: this column is the ONLY mutation allowed on organization rows.';
+```
+
+Any data-access layer change (`witsaba-requirements-api` and friends)
+MUST be reviewed against this contract. Concretely:
+
+- `UPDATE organization SET <col> ...` -- only legal when `<col> = is_active`.
+- `UPDATE project SET ...`, `UPDATE requirement SET ...`, etc. --
+  illegal in v1; append a new row or create a new child row instead.
+
+**DB-level enforcement** (REVOKE UPDATE on append-only tables,
+BEFORE UPDATE triggers) is intentionally deferred to follow-up
+changes so the v1 schema stays easy to evolve:
+
+- `witsaba-core-tables-append-only-enforcement` (proposed).
+- `witsaba-core-tables-project-milestone` (proposed; the 1:N escape
+  hatch for the strict-inheritance `milestone`).
+
+### 11.4 The 8 `spec_phase.phase` values (locked)
+
+The CHECK constraint on `spec_phase.phase` enforces EXACTLY these 8
+values (no more, no fewer). Adding a ninth phase requires an
+`ALTER TABLE ... DROP CONSTRAINT ... ADD CONSTRAINT ... CHECK (...)`
+migration; it is intentionally NOT a free-for-all enum extension.
+
+| Value                   | Meaning                                            |
+| ----------------------- | -------------------------------------------------- |
+| `tdd_red`               | Writing failing tests FIRST                        |
+| `implementation`        | Making the tests pass                              |
+| `tdd_green`             | Tests now green; refactor pass begins              |
+| `verify`                | Full test suite + lint + build green               |
+| `pr`                    | PR opened against `main`                           |
+| `technical_ai_review`   | AI peer review (architecture, complexity, tests)   |
+| `ai_approved`           | AI reviewer signed off                             |
+| `human_approved`        | Human maintainer signed off -- PR is mergeable     |
+
+### 11.5 The 256 KiB PRD cap
+
+`requirement.content` is capped at 256 KiB via the CHECK constraint
+`requirement_content_size_cap CHECK (octet_length(content) <= 262144)`.
+A future PR that needs more room must:
+
+```sql
+ALTER TABLE requirement DROP CONSTRAINT requirement_content_size_cap;
+ALTER TABLE requirement ADD CONSTRAINT requirement_content_size_cap
+    CHECK (octet_length(content) <= <new_cap>);
+```
+
+The column comment on `requirement.content` carries the rationale
+and the current limit so contributors see the cap before they hit it.
+
+### 11.6 Agent-first re-entry pattern (canonical SQL)
+
+`spec_phase` is append-only history. An agent's transition algorithm
+on a phase event is:
+
+```sql
+-- 1. Close the current open phase (if any)
+UPDATE spec_phase
+   SET ended_at = now(), updated_at = now()
+ WHERE spec_id = :spec_id AND ended_at IS NULL;
+
+-- 2. Enter the new phase (any of the 8, even an earlier one)
+INSERT INTO spec_phase (spec_id, phase, notes)
+VALUES (:spec_id, 'tdd_red',
+        'AI review at <PR url> found missing test cases for X; returning to TDD red.');
+
+-- 3. Read the spec's current state (single-row read via the partial index)
+SELECT id, phase, started_at, notes
+  FROM spec_phase
+ WHERE spec_id = :spec_id AND ended_at IS NULL;
+
+-- 4. Read the spec's full history (audit trail)
+SELECT phase, started_at, ended_at, notes
+  FROM spec_phase
+ WHERE spec_id = :spec_id
+ ORDER BY started_at;
+```
+
+Key invariants the agent's transition algorithm relies on:
+
+- The `UNIQUE (spec_id, phase, started_at)` constraint lets the
+  agent re-enter an earlier phase (e.g., `tdd_red` after
+  `technical_ai_review`) without losing the prior entry, as long as
+  the new row's `started_at` differs.
+- The `idx_spec_phase_current_state` partial index makes the "what
+  phase is this spec in right now?" query a single B-tree seek.
+- The `notes` column is the agent's reasoning for each transition.
+  Filling it in is the agent-first contract; it makes the audit
+  trail legible to humans AND to the agent on subsequent passes.
+
+### 11.7 What is NOT in v1 (follow-up changes)
+
+The following are intentionally deferred to keep the v1 schema easy
+to evolve:
+
+- **Partial UNIQUE index** on `(spec_id) WHERE ended_at IS NULL` --
+  would prevent two open phases for the same spec at the DB level.
+  Deferred to `witsaba-core-tables-append-only-enforcement` (see
+  design §6.2 for the rationale on app-layer discipline first).
+- **DB-level REVOKE UPDATE** on append-only tables from the `queen`
+  role. Same follow-up change.
+- **`project_milestone`** table for the "deliverable per release
+  channel" cardinality escape hatch. Deferred to
+  `witsaba-core-tables-project-milestone`.
