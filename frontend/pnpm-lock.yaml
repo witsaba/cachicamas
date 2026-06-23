@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      zod:
+        specifier: 3.25.48
+        version: 3.25.48
     devDependencies:
       '@builder.io/qwik':
         specifier: ^1.20.0

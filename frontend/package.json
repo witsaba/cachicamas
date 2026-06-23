@@ -21,9 +21,9 @@
     "lint": "eslint \"src/**/*.ts*\"",
     "preview": "qwik build preview && vite preview --open",
     "start": "vite --open --mode ssr",
-    "test.unit": "vitest components",
-    "test:ci": "vitest components --run",
-    "test.unit.ui": "vitest --ui components",
+    "test.unit": "vitest",
+    "test:ci": "vitest --run",
+    "test.unit.ui": "vitest --ui",
     "qwik": "qwik"
   },
   "devDependencies": {
@@ -46,5 +46,8 @@
     "vite": "7.3.1",
     "vite-tsconfig-paths": "^4.2.1",
     "vitest": "^0.34.6"
+  },
+  "dependencies": {
+    "zod": "3.25.48"
   }
 }

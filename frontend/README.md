@@ -63,3 +63,57 @@ The production build will generate client and server modules by running both cli
 ```shell
 pnpm build # or `pnpm build`
 ```
+
+## First-run onboarding (Organizations)
+
+The frontend ships the very first UI surface: a four-route
+aphantasia-friendly Organizations flow.
+
+| Route                 | Purpose                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`                   | Brand mark + tagline + a single "Get started" CTA to `/organizations`.                                                               |
+| `/organizations`      | List of organizations. Empty state is an instruction (no image, no illustration).                                                    |
+| `/organizations/new`  | Create-organization form. Auto-derives the slug from the full name; user can override; the review field group renders progressively. |
+| `/organizations/{id}` | Read-back of a single organization. The URL is the breadcrumb.                                                                       |
+
+### Aphantasia-friendly layout
+
+- Text-first, single column. No hero images, no carousels, no decorative icons.
+- Single-column form, capped at 42 rem wide (Tailwind `max-w-2xl`).
+- Labels are questions or verbs. Required fields have no `placeholder`.
+- Progressive disclosure: the "Review" field group (short name, email, phone) renders only when the required fields are filled and the user clicks "Add optional details" (or blurs any optional field).
+- Submitting a 409 renders the locked message ("This slug is already taken. Try another.") inline below the slug input. Navigation does not happen on 409.
+
+### Auto-derivation rule
+
+When the user types in the `full_name` field, the `identification` (slug) field is auto-derived after a 200 ms debounce:
+
+1. Lowercase the input.
+2. Replace any character that is NOT `[a-z0-9-]` with `-`.
+3. Collapse runs of `-` into a single `-`.
+4. Strip leading and trailing `-`.
+5. Truncate to 60 chars; if truncation lands on `-`, strip the trailing `-`.
+
+Once the user manually edits the slug field, auto-derivation stops until the field is cleared.
+
+### Out-of-scope follow-up
+
+UX-10 (AI pre-fill from PRD ideas) is a follow-up. A literal
+`TODO(organizations-first-front): UX-10` comment is present
+in the source; the grep test
+`src/__tests__/ux-todo.spec.ts` enforces its presence so a
+future PR cannot ship without addressing it.
+
+### Tests
+
+The frontend uses Vitest with `createDOM()` from
+`@builder.io/qwik/testing`. Run:
+
+```shell
+pnpm test:ci
+```
+
+The runner discovers every `*.spec.{ts,tsx}` file under
+`src/`. The full PR 2 surface (including the 4 routes, the
+form, the empty-state component, and the Zod schema parity
+test) is locked by 56 tests.
