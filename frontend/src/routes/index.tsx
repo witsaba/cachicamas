@@ -1,29 +1,41 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
-import { TailwindProbe } from "~/components/tailwind-probe/tailwind-probe";
 
+/**
+ * Landing route — F-1 (spec §6.2).
+ *
+ * A text-first brand surface for aphantasic users: an <h1> with
+ * the product name, a one-sentence tagline, and a single CTA
+ * pointing to /organizations.  No hero image, no carousel, no
+ * decorative icon.  The CTA is the only navigable affordance.
+ */
 export default component$(() => {
   return (
-    <>
-      <h1 class="text-3xl font-bold text-slate-900">Hi 👋</h1>
-      <div class="mt-2 text-slate-700">
-        Can't wait to see what you build with qwik!
-        <br />
-        Happy coding.
-      </div>
+    <main class="mx-auto max-w-2xl px-4 py-8">
+      <h1 class="text-3xl font-bold text-slate-900">Cachicamas</h1>
+      <p class="mt-2 text-slate-700">
+        Track the organizations, projects, requirements, and milestones that
+        move your work forward.
+      </p>
       <div class="mt-6">
-        <TailwindProbe />
+        <a
+          href="/organizations"
+          class="inline-block rounded bg-slate-900 px-4 py-2 font-semibold text-white underline"
+        >
+          Get started
+        </a>
       </div>
-    </>
+    </main>
   );
 });
 
 export const head: DocumentHead = {
-  title: "Welcome to Qwik",
+  title: "Cachicamas",
   meta: [
     {
       name: "description",
-      content: "Qwik site description",
+      content:
+        "Track organizations, projects, requirements, and milestones — text-first, aphantasia-friendly.",
     },
   ],
 };

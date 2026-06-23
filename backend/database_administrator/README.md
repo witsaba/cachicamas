@@ -1,0 +1,208 @@
+# database_administrator
+
+The Go service that owns the `database_administrator` schema and exposes
+the first cachicamas HTTP API: `/health` (liveness) and `/organizations`
+(CRUD over the `organization` table).
+
+## Layout
+
+```
+src/
+  cmd/server/         composition root (main.go)
+  domain/            pure business types — no framework, no DB
+  application/       use cases — OTel + slog wrappers around the ports
+  infrastructure/    adapters (Postgres / pgx)
+    postgres/        organization repository (pgx stdlib)
+  interfaces/http/   Echo transport adapters (handlers, routes)
+  migration/         goose runner + SQL files
+  otel/              tracing/logging setup
+```
+
+The package boundaries are hexagonal: `domain` imports nothing from the
+outer layers, `application` depends on `domain` only, and
+`infrastructure/postgres` is the only file that imports `jackc/pgx` for
+organization data access (mirroring the existing `migration/postgres`
+rule).
+
+## Run
+
+```bash
+# 1. Boot Postgres + Jaeger (project root).
+docker compose up -d postgres
+
+# 2. Run the binary — migrations apply on first boot, then Echo binds.
+make run
+```
+
+The server listens on `:8080` by default. Override with `SERVICE_PORT=9090
+make run`.
+
+## Tests
+
+```bash
+make test                  # unit tests with race detector
+INTEGRATION=1 make test    # also run the pgx integration tests
+make test/integration      # boot compose Postgres, run integration tests, stop Postgres
+make lint                  # golangci-lint + go vet (requires `make tools` first)
+```
+
+## API
+
+### `GET /health`
+
+Liveness probe. Returns `200 {"status":"ok"}`. Emits an OTel span and a
+slog line per request. Supports a dev-only fail-injection via
+`?fail=true` when `SERVICE_ENV=development`.
+
+### `POST /organizations`
+
+Creates a new organization. Accepts BOTH `Content-Type: application/json`
+AND `Content-Type: application/x-www-form-urlencoded` (the Qwik
+frontend posts form-encoded; programmatic clients post JSON).
+
+```bash
+# JSON
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -d '{"full_name":"Acme","identification":"acme"}' \
+  localhost:8080/organizations
+```
+
+```bash
+# form-encoded
+curl -sS -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data 'full_name=Acme&identification=acme' \
+  localhost:8080/organizations
+```
+
+**Request fields** (JSON keys shown; form fields are identical):
+
+| Field            | Type   | Required | Rule |
+|------------------|--------|----------|------|
+| `full_name`      | string | yes      | 3-120 chars after trim |
+| `identification` | string | yes      | matches `^[a-z0-9][a-z0-9-]{1,58}[a-z0-9]$` |
+| `shortname`      | string | no       | at most 40 chars |
+| `email`          | string | no       | RFC 5322 valid |
+| `phone`          | string | no       | E.164 `^\+[1-9]\d{1,14}$` |
+
+**Responses:**
+
+| Status | Body |
+|--------|------|
+| 201 Created | `OrganizationResponse` (see below); `Location: /organizations/{id}` header. |
+| 400 Bad Request | `{"error":"validation","fields":{...}}` — fields with the failing rule and the locked message string. |
+| 409 Conflict | `{"error":"conflict","message":"This slug is already taken. Try another."}` — `identification` already exists. |
+| 500 Internal Server Error | `{"error":"server","message":"Something went wrong. Please try again."}` — unexpected error. |
+
+### `GET /organizations`
+
+Lists every organization, ordered by `created_at ASC, id ASC`.
+
+```bash
+curl -sS localhost:8080/organizations
+```
+
+**Responses:**
+
+| Status | Body |
+|--------|------|
+| 200 OK | `OrganizationResponse[]` (possibly empty array). |
+| 500 Internal Server Error | Same envelope as `POST /organizations`. |
+
+### `GET /organizations/:id`
+
+Fetches a single organization by integer id.
+
+```bash
+curl -sS localhost:8080/organizations/42
+```
+
+**Responses:**
+
+| Status | Body |
+|--------|------|
+| 200 OK | `OrganizationResponse`. |
+| 400 Bad Request | `{"error":"validation","fields":{"id":"..."}}` — id is not an integer. |
+| 404 Not Found | `{"error":"not_found","message":"Organization not found."}`. |
+| 500 Internal Server Error | Same envelope as `POST /organizations`. |
+
+## Wire shape
+
+```json
+{
+  "id": 42,
+  "full_name": "Acme Industrial S.A.",
+  "identification": "acme-industrial",
+  "shortname": "Acme",
+  "is_active": true,
+  "email": "hello@acme.example",
+  "phone": "+14155552671",
+  "created_at": "2026-06-22T18:00:00Z",
+  "updated_at": "2026-06-22T18:00:00Z"
+}
+```
+
+`id` is `BIGSERIAL` end-to-end (Go `int64`, DDL `BIGSERIAL`, wire
+`integer`). `is_active` defaults to `true`. `created_at` / `updated_at`
+are set by Postgres `DEFAULT now()` and returned via `INSERT ... RETURNING *`.
+
+## Error envelope
+
+Every error response carries one of the four locked envelope shapes.
+The user-facing message strings are pinned to the spec vocabulary; a
+typo in the strings fails the test suite.
+
+```json
+// 400 — validation
+{"error":"validation","fields":{"full_name":"Name is required."}}
+
+// 404 — not found
+{"error":"not_found","message":"Organization not found."}
+
+// 409 — conflict
+{"error":"conflict","message":"This slug is already taken. Try another."}
+
+// 500 — server
+{"error":"server","message":"Something went wrong. Please try again."}
+```
+
+## Observability
+
+Every endpoint emits an OTel span under the same tracer provider as
+`/health` (Jaeger query:
+`service.name = "database_administrator" AND name = "organization.*"`):
+
+| Span name             | HTTP route              | Always-emitted attributes                                |
+|-----------------------|-------------------------|----------------------------------------------------------|
+| `organization.create` | `POST /organizations`   | `http.method=POST`, `http.route=/organizations`, `http.status_code=201` (+ `organization.id` on success) |
+| `organization.list`   | `GET /organizations`    | `http.method=GET`,  `http.route=/organizations`, `http.status_code=200` (+ `organization.count` on success) |
+| `organization.get`    | `GET /organizations/:id`| `http.method=GET`,  `http.route=/organizations/:id`, `http.status_code`, `organization.id` |
+
+Validation failures do NOT emit a span — they short-circuit before
+`tracer.Start`.
+
+## Database access rules
+
+- `src/infrastructure/postgres/organization_repo.go` is the only file
+  that imports `jackc/pgx` for organization data access.
+- All queries are parameterised (`$1, $2, ...`); no string
+  interpolation into SQL.
+- The repository shares the `*sql.DB` the migration runner opened
+  (`migrationpg.Open`); no second pool.
+
+## Configuration
+
+The server reads the following environment variables:
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `DATABASE_URL` | — | Postgres DSN; takes precedence over the `POSTGRES_*` family. |
+| `POSTGRES_HOST` | — | Postgres host. |
+| `POSTGRES_PORT` | `5432` | Postgres port. |
+| `POSTGRES_DB` | — | Database name. |
+| `POSTGRES_USER` | — | Database user. |
+| `POSTGRES_PASSWORD` | — | Database password. |
+| `MIGRATION_TABLE` | `schema_migrations` | goose bookkeeping table. |
+| `MIGRATION_TIMEOUT` | `30s` | Bound on the migration runner. |
+| `SERVICE_PORT` | `8080` | HTTP listener port. |
+| `SERVICE_ENV` | — | Set to `development` to enable the dev-only fail injection on `/health`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/gRPC collector endpoint (traces + logs). |

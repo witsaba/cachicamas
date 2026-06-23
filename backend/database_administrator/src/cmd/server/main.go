@@ -26,6 +26,7 @@ import (
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
 	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
+	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
 	migrationpg "github.com/cachicamas/backend/database_administrator/src/migration/postgres"
 	"github.com/cachicamas/backend/database_administrator/src/otel"
@@ -165,6 +166,14 @@ func main() {
 	e := echo.New()
 	e.Use(otel.Middleware(serviceName))
 	httpiface.RegisterHealthRoute(e)
+
+	// Organizations API: wire the pgx-backed repository (sharing the
+	// same *sql.DB the migration runner just used) into the
+	// application service, then mount the HTTP handler. No new
+	// dependencies; no new pool.
+	orgRepo := postgres.NewPostgresOrgRepo(db)
+	orgService := application.NewOrganizationService(orgRepo, logger, otelglobal.Tracer(serviceName))
+	httpiface.RegisterOrganizationRoutes(e, orgService)
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
