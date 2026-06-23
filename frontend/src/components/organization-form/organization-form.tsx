@@ -5,15 +5,18 @@ import {
   useStore,
   type QRL,
 } from "@builder.io/qwik";
+import {
+  organizationInputSchema,
+  type OrganizationInput,
+} from "~/lib/organization-schema";
 
 /**
  * OrganizationForm — presentational + stateful form for the
  * create-organization flow.  It owns the `useStore` of form
  * state (per spec §5.2), the auto-derivation pipeline (per
- * spec §5.3), and the progressive-disclosure threshold (per
- * spec §5.4).  It is mounted by `routes/organizations/new/`,
- * which provides the `action` callback that talks to the
- * server-side `routeAction$`.
+ * spec §5.3), the progressive-disclosure threshold (per
+ * spec §5.4), AND the client-side Zod validation that runs
+ * before the action is invoked.
  *
  * The component is intentionally framework-coupled to Qwik so
  * the form is server-rendered with progressive enhancement.
@@ -27,11 +30,25 @@ export type FormActionResult =
   | { ok: false; field: "identification"; message: string }
   | { ok: false; field: "form"; message: string };
 
-/** Action callback (server-side routeAction$ wrapped). */
-export type FormAction = QRL<() => Promise<FormActionResult>>;
+/**
+ * Action callback.  Receives the form's FormData so the route
+ * can parse and validate it server-side (defence in depth —
+ * the client already ran Zod, but the server is the source of
+ * truth once R-5 lands).
+ */
+export type FormAction = QRL<(data: FormData) => Promise<FormActionResult>>;
 
 /** Optional navigation hook — called after a successful submit. */
 export type OnSuccess = QRL<(id: number) => void>;
+
+/** Per-field validation feedback. */
+interface FieldErrors {
+  fullName?: string;
+  identification?: string;
+  shortName?: string;
+  email?: string;
+  phone?: string;
+}
 
 interface FormState {
   fullName: string;
@@ -44,6 +61,7 @@ interface FormState {
   showDetails: boolean;
   conflictMessage: string;
   serverErrorMessage: string;
+  fieldErrors: FieldErrors;
   submitting: boolean;
 }
 
@@ -56,11 +74,6 @@ const DERIVATION_DEBOUNCE_MS = 200;
  *   3. Collapse `-+` -> `-`
  *   4. Strip leading/trailing `-`
  *   5. Truncate to 60 chars; strip trailing `-` if needed
- *
- * Exported so the spec can lock the contract as a pure
- * function test (the live form integration is timing-sensitive
- * under Qwik's linkedom-based test renderer; the pure function
- * is the load-bearing rule).
  */
 export function deriveIdentification(fullName: string): string {
   return fullName
@@ -88,24 +101,10 @@ export const OrganizationForm = component$<{
     showDetails: false,
     conflictMessage: "",
     serverErrorMessage: "",
+    fieldErrors: {},
     submitting: false,
   });
 
-  // Auto-derivation: re-derive identification whenever
-  // fullName changes, but ONLY if the user has not manually
-  // edited the slug field.  We debounce inline in the
-  // onInput$ handler (using setTimeout) instead of a
-  // useVisibleTask$ so the behaviour is testable in
-  // jsdom-style environments where IntersectionObserver
-  // does not fire.  The active timer ID is kept on the
-  // useStore so QRL invocations can read/write it across
-  // closures (a module-level `let` would be re-initialised
-  // on every QRL re-invocation).
-
-  // Progressive disclosure threshold (spec §5.4).
-  // When the gate is false, the review <fieldset> is NOT in
-  // the DOM — useComputed$ lets Qwik skip the subtree
-  // entirely instead of collapsing or CSS-hiding it.
   const showReviewGroup = useComputed$(
     () =>
       state.fullName.trim() !== "" &&
@@ -113,31 +112,55 @@ export const OrganizationForm = component$<{
       (state.detailsTouched || state.showDetails),
   );
 
-  // Track server-side validation feedback so the form can
-  // re-render after a submit completes.  Empty task body;
-  // the real work happens in the submit handler below.
-  // useTask$ kept removed — the previous useTask$ was a
-  // no-op and is no longer needed after the inline
-  // debounce refactor.
-
   return (
     <form
       preventdefault:submit
       onSubmit$={$(async () => {
         if (state.submitting) return;
-        state.submitting = true;
+        state.fieldErrors = {};
         state.conflictMessage = "";
         state.serverErrorMessage = "";
+
+        const candidate: OrganizationInput = {
+          fullName: state.fullName,
+          identification: state.identification,
+          shortName: state.shortName,
+          email: state.email,
+          phone: state.phone,
+        };
+
+        const parsed = organizationInputSchema.safeParse(candidate);
+        if (!parsed.success) {
+          const next: FieldErrors = {};
+          for (const issue of parsed.error.issues) {
+            const field = String(issue.path[0] ?? "") as keyof FieldErrors;
+            if (field && !next[field]) {
+              next[field] = issue.message;
+            }
+          }
+          state.fieldErrors = next;
+          return;
+        }
+
+        state.submitting = true;
         try {
-          const result = await action();
+          // Build FormData from the live state (NOT from the
+          // form element).  linkedom (Qwik's test DOM) leaves
+          // both `event.target` and Qwik's second handler arg
+          // undefined for submit events, so the canonical
+          // path of constructing FormData from the form fails
+          // under vitest.  The state we hold is the canonical
+          // source anyway (auto-derivation, debounced typing,
+          // and progressive disclosure all flow through it),
+          // so this is also the right behaviour in production.
+          const formData = new FormData();
+          formData.append("full_name", state.fullName);
+          formData.append("identification", state.identification);
+          formData.append("shortname", state.shortName);
+          formData.append("email", state.email);
+          formData.append("phone", state.phone);
+          const result = await action(formData);
           if (result.ok) {
-            // Call the optional onSuccess$ hook with the
-            // new id.  In production the route file wires
-            // this to `useNavigate()`; in tests we wire it
-            // to a stub that records the call.  We
-            // deliberately do NOT use `history.pushState`
-            // directly because linkedom (Qwik's test DOM)
-            // does not expose a `history` global.
             if (onSuccess$) {
               await onSuccess$(result.id);
             }
@@ -155,6 +178,7 @@ export const OrganizationForm = component$<{
         }
       })}
       method="post"
+      noValidate
       class="mx-auto max-w-2xl space-y-4 px-4 py-8"
     >
       {state.serverErrorMessage && (
@@ -176,39 +200,25 @@ export const OrganizationForm = component$<{
           type="text"
           required
           value={state.fullName}
+          aria-invalid={state.fieldErrors.fullName ? "true" : undefined}
           onInput$={$((event: Event, el: HTMLInputElement) => {
-            // The Qwik testing userEvent helper passes a
-            // synthetic event whose `.value` is the typed
-            // text.  In a real browser, the element's
-            // `.value` reflects the typed text.  We read
-            // the event value as a fallback so tests can
-            // drive the form via `userEvent(el, "input", { value: "..." })`.
             const value =
               (event as unknown as { value?: string }).value ?? el.value;
             state.fullName = value;
-            // typing in the name field does NOT clear the
-            // override flag; only manual edit of the slug
-            // field does (below).  Debounce the derivation
-            // by 200ms so the user can keep typing without
-            // the slug flickering.
+            state.fieldErrors = { ...state.fieldErrors, fullName: undefined };
             if (state.userOverrodeIdentification) return;
-            // We deliberately do NOT track the timer ID on
-            // the useStore.  Qwik serialises the store on
-            // each render; a Timeout object is not
-            // serialisable.  Trade-off: if the user types
-            // and unmounts mid-debounce, the pending timer
-            // still fires (harmless — the store update is
-            // a no-op because the component is gone).  In
-            // production, page navigation is the only way
-            // the component unmounts; the timer at most
-            // resolves DERIVATION_DEBOUNCE_MS later.
             setTimeout(() => {
               if (state.userOverrodeIdentification) return;
               state.identification = deriveIdentification(state.fullName);
             }, DERIVATION_DEBOUNCE_MS);
           })}
-          class="w-full rounded border border-slate-300 px-3 py-2"
+          class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
         />
+        {state.fieldErrors.fullName && (
+          <p class="mt-1 text-sm text-red-700" data-error="fullName">
+            {state.fieldErrors.fullName}
+          </p>
+        )}
       </div>
 
       <div>
@@ -224,18 +234,35 @@ export const OrganizationForm = component$<{
           type="text"
           required
           value={state.identification}
+          aria-invalid={
+            state.fieldErrors.identification || state.conflictMessage
+              ? "true"
+              : undefined
+          }
           onInput$={$((event: Event, el: HTMLInputElement) => {
             const value =
               (event as unknown as { value?: string }).value ?? el.value;
             state.identification = value;
             state.userOverrodeIdentification = value !== "";
+            state.fieldErrors = {
+              ...state.fieldErrors,
+              identification: undefined,
+            };
+            if (state.conflictMessage) {
+              state.conflictMessage = "";
+            }
           })}
-          class="w-full rounded border border-slate-300 px-3 py-2"
+          class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
         />
         <p class="mt-1 text-sm text-slate-600">
           3 to 60 characters. Lowercase letters, digits, and hyphens. Must start
           and end with a letter or digit.
         </p>
+        {state.fieldErrors.identification && (
+          <p class="mt-1 text-sm text-red-700" data-error="identification">
+            {state.fieldErrors.identification}
+          </p>
+        )}
         {state.conflictMessage && (
           <p class="mt-1 text-sm text-red-700" data-conflict-message="true">
             {state.conflictMessage}
@@ -279,6 +306,7 @@ export const OrganizationForm = component$<{
               name="shortname"
               type="text"
               value={state.shortName}
+              aria-invalid={state.fieldErrors.shortName ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
               })}
@@ -286,9 +314,18 @@ export const OrganizationForm = component$<{
                 const v =
                   (event as unknown as { value?: string }).value ?? el.value;
                 state.shortName = v;
+                state.fieldErrors = {
+                  ...state.fieldErrors,
+                  shortName: undefined,
+                };
               })}
-              class="w-full rounded border border-slate-300 px-3 py-2"
+              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
             />
+            {state.fieldErrors.shortName && (
+              <p class="mt-1 text-sm text-red-700" data-error="shortName">
+                {state.fieldErrors.shortName}
+              </p>
+            )}
           </div>
 
           <div>
@@ -300,6 +337,7 @@ export const OrganizationForm = component$<{
               name="email"
               type="email"
               value={state.email}
+              aria-invalid={state.fieldErrors.email ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
               })}
@@ -307,9 +345,15 @@ export const OrganizationForm = component$<{
                 const v =
                   (event as unknown as { value?: string }).value ?? el.value;
                 state.email = v;
+                state.fieldErrors = { ...state.fieldErrors, email: undefined };
               })}
-              class="w-full rounded border border-slate-300 px-3 py-2"
+              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
             />
+            {state.fieldErrors.email && (
+              <p class="mt-1 text-sm text-red-700" data-error="email">
+                {state.fieldErrors.email}
+              </p>
+            )}
           </div>
 
           <div>
@@ -321,6 +365,7 @@ export const OrganizationForm = component$<{
               name="phone"
               type="tel"
               value={state.phone}
+              aria-invalid={state.fieldErrors.phone ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
               })}
@@ -328,9 +373,15 @@ export const OrganizationForm = component$<{
                 const v =
                   (event as unknown as { value?: string }).value ?? el.value;
                 state.phone = v;
+                state.fieldErrors = { ...state.fieldErrors, phone: undefined };
               })}
-              class="w-full rounded border border-slate-300 px-3 py-2"
+              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
             />
+            {state.fieldErrors.phone && (
+              <p class="mt-1 text-sm text-red-700" data-error="phone">
+                {state.fieldErrors.phone}
+              </p>
+            )}
           </div>
         </fieldset>
       )}

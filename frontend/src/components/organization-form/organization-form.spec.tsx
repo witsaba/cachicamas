@@ -3,12 +3,25 @@ import { $ } from "@builder.io/qwik";
 import { describe, test, expect } from "vitest";
 import { OrganizationForm, deriveIdentification } from "./organization-form";
 
+// =========================================================================
+// Test fixtures
+// =========================================================================
+//
+// The form's `action` prop is now a QRL that receives the
+// form's FormData and returns a FormActionResult.  The form
+// also runs Zod validation client-side BEFORE the action is
+// invoked, so a stub action that returns 201 will only be
+// reached for payloads that are already valid by the Zod
+// schema.  To exercise server-side error paths, the test
+// passes a payload the client accepts and the stub rejects.
+
 // Helper: wrap an action in $() so the JSX prop is a QRL
 // (Qwik requires serializable props).
-const okAction = () => $(async () => ({ ok: true as const, id: 1 }));
+const okAction = () =>
+  $(async (_data: FormData) => ({ ok: true as const, id: 1 }));
 const conflictAction = () =>
   $(
-    async () =>
+    async (_data: FormData) =>
       ({
         ok: false as const,
         field: "identification" as const,
@@ -21,16 +34,41 @@ const conflictAction = () =>
  * QRL serialiser can resolve it consistently across tests.
  */
 let __lastSubmittedActionCalls = 0;
+let __lastSubmittedFormData: FormData | null = null;
 let __lastNavigatedId: number | undefined;
 const recordingOkAction = () =>
-  $(async () => {
+  $(async (data: FormData) => {
     __lastSubmittedActionCalls++;
+    __lastSubmittedFormData = data;
     return { ok: true as const, id: 42 };
   });
 const recordingOnSuccess = () =>
   $(async (id: number) => {
     __lastNavigatedId = id;
   });
+
+/** Expand the review group (progressive-disclosure gate). */
+async function expandDetails(
+  screen: Awaited<ReturnType<typeof createDOM>>["screen"],
+  userEvent: Awaited<ReturnType<typeof createDOM>>["userEvent"],
+  fullName = "Acme",
+  identification = "acme",
+) {
+  const fullNameInput = screen.querySelector(
+    "input[id=\"fullName\"]",
+  ) as HTMLInputElement;
+  const identificationInput = screen.querySelector(
+    "input[id=\"identification\"]",
+  ) as HTMLInputElement;
+  await userEvent(fullNameInput, "input", { value: fullName });
+  await userEvent(identificationInput, "input", { value: identification });
+  const showDetailsBtn = screen.querySelector(
+    "button[data-action=\"show-details\"]",
+  ) as HTMLButtonElement;
+  if (showDetailsBtn) {
+    await userEvent(showDetailsBtn, "click");
+  }
+}
 
 // =========================================================================
 // F-4 / UX-1 / UX-3 / UX-5 / UX-9 — markup invariants
@@ -40,25 +78,7 @@ test("[OrganizationForm]: renders 5 labeled inputs and a submit button (F-4)", a
   const { screen, render, userEvent } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  // F-4 requires all 5 labeled inputs to be reachable.  Per
-  // spec §5.4 (UX-2 progressive disclosure) the 3 optional
-  // fields live inside a review <fieldset> that is NOT in
-  // the DOM until the threshold is met.  The threshold is
-  // met by typing the required fields and either blurring
-  // any optional field or clicking "Add optional details".
-  // We click the "Add optional details" button to expand.
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
-  const identification = screen.querySelector(
-    'input[id="identification"]',
-  ) as HTMLInputElement;
-  // Use userEvent with value payload so Qwik updates the store.
-  await userEvent(fullName, "input", { value: "Acme" });
-  await userEvent(identification, "input", { value: "acme" });
-  const showDetailsBtn = screen.querySelector(
-    'button[data-action="show-details"]',
-  ) as HTMLButtonElement;
-  expect(showDetailsBtn).not.toBeNull();
-  await userEvent(showDetailsBtn, "click");
+  await expandDetails(screen, userEvent);
 
   const labels = screen.querySelectorAll("label");
   expect(labels.length).toBe(5);
@@ -66,7 +86,7 @@ test("[OrganizationForm]: renders 5 labeled inputs and a submit button (F-4)", a
   const inputs = screen.querySelectorAll("input");
   expect(inputs.length).toBe(5);
 
-  const submit = screen.querySelector('button[type="submit"]');
+  const submit = screen.querySelector("button[type=\"submit\"]");
   expect(submit).not.toBeNull();
   expect(submit?.textContent ?? "").toContain("Create organization");
 });
@@ -88,9 +108,9 @@ test("[OrganizationForm]: required inputs (fullName, identification) have no pla
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
   const identification = screen.querySelector(
-    'input[id="identification"]',
+    "input[id=\"identification\"]",
   ) as HTMLInputElement;
   expect(fullName).not.toBeNull();
   expect(identification).not.toBeNull();
@@ -123,12 +143,6 @@ test("[OrganizationForm]: root form has the max-w- Tailwind class (F-8 / UX-5)",
 
   const form = screen.querySelector("form") as HTMLFormElement;
   expect(form).not.toBeNull();
-  // The form root uses the Tailwind v4 utility that caps width
-  // to 42rem (≈ 672px on a 16px base).  The design locked the
-  // exact utility `max-w-2xl` (spec §5.7) so we assert the
-  // class is present.  The literal "640px" number from the
-  // spec scenarios is a historical reference; the Tailwind
-  // utility is the implementation.
   const className = form.className;
   expect(className).toMatch(/max-w-/);
 });
@@ -137,25 +151,18 @@ test("[OrganizationForm]: focusable tab order is fullName, identification, short
   const { screen, render, userEvent } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  // Expand the review group so the 3 optional inputs are
-  // mounted (spec §5.4 + UX-2b).
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
-  const identification = screen.querySelector(
-    'input[id="identification"]',
-  ) as HTMLInputElement;
-  await userEvent(fullName, "input", { value: "Acme" });
-  await userEvent(identification, "input", { value: "acme" });
-  const showDetailsBtn = screen.querySelector(
-    'button[data-action="show-details"]',
-  ) as HTMLButtonElement;
-  await userEvent(showDetailsBtn, "click");
+  await expandDetails(screen, userEvent);
 
   const shortName = screen.querySelector(
-    'input[id="shortName"]',
+    "input[id=\"shortName\"]",
   ) as HTMLInputElement;
-  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
-  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
-  const submit = screen.querySelector('button[type="submit"]') as HTMLButtonElement;
+  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  const submit = screen.querySelector("button[type=\"submit\"]") as HTMLButtonElement;
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const identification = screen.querySelector(
+    "input[id=\"identification\"]",
+  ) as HTMLInputElement;
 
   expect(fullName).not.toBeNull();
   expect(identification).not.toBeNull();
@@ -165,9 +172,6 @@ test("[OrganizationForm]: focusable tab order is fullName, identification, short
   expect(submit).not.toBeNull();
 
   const nodes = [fullName, identification, shortName, email, phone, submit];
-  // DOCUMENT_POSITION_FOLLOWING === 4 per the DOM spec.
-  // linkedom (Qwik's test DOM) does not expose `Node` as a
-  // global so we hard-code the constant.
   const DOCUMENT_POSITION_FOLLOWING = 4;
   for (let i = 1; i < nodes.length; i++) {
     const rel = nodes[i - 1].compareDocumentPosition(nodes[i]);
@@ -195,7 +199,7 @@ test("[OrganizationForm]: review fieldset is not in the DOM when threshold unmet
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fieldsets = screen.querySelectorAll('fieldset[data-review-group="true"]');
+  const fieldsets = screen.querySelectorAll("fieldset[data-review-group=\"true\"]");
   expect(fieldsets.length).toBe(0);
 });
 
@@ -203,42 +207,28 @@ test("[OrganizationForm]: review fieldset IS in the DOM when fullName and identi
   const { screen, render, userEvent } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
   const identification = screen.querySelector(
-    'input[id="identification"]',
+    "input[id=\"identification\"]",
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
 
-  // The "Add optional details" button toggles showDetails=true.
   const showDetailsBtn = screen.querySelector(
-    'button[data-action="show-details"]',
+    "button[data-action=\"show-details\"]",
   ) as HTMLButtonElement;
   expect(showDetailsBtn).not.toBeNull();
   await userEvent(showDetailsBtn, "click");
 
   const fieldsets = screen.querySelectorAll(
-    'fieldset[data-review-group="true"]',
+    "fieldset[data-review-group=\"true\"]",
   );
   expect(fieldsets.length).toBe(1);
 });
 
 // =========================================================================
-// F-5 / F-5b — auto-derivation
-// =========================================================================
-
-// =========================================================================
 // F-5 / F-5b — auto-derivation (locked via pure function)
 // =========================================================================
-//
-// The derivation pipeline is timing-sensitive under Qwik's
-// linkedom-based test renderer (input event propagation and
-// the input.value attribute update are not reliable in jsdom
-// without a real browser).  We lock the behaviour two ways:
-//   1) The pure `deriveIdentification` function — exhaustive
-//      fixtures cover the rules in spec §5.3 verbatim.
-//   2) A wiring smoke test that mounts the form and asserts
-//      `deriveIdentification` is what the form uses.
 
 describe("deriveIdentification (spec §5.3)", () => {
   test("lowercases and replaces disallowed chars with '-' (rule 1+2)", () => {
@@ -261,27 +251,12 @@ describe("deriveIdentification (spec §5.3)", () => {
   });
 
   test("F-5 fixture: 'Acme Industrial S.A.' follows the rules literally", () => {
-    // Spec §5.3 example: "Acme Industrial S.A." → "acme-industrial-sa".
-    // Applying the rules verbatim (replace any non-[a-z0-9-]
-    // with "-", collapse runs of "-", strip leading/trailing
-    // "-") yields "acme-industrial-s-a" because the period in
-    // "S.A." becomes its own "-".  The spec's expected "sa"
-    // requires a more aggressive rule (e.g. "remove
-    // non-alphanumerics before hyphenation").  This test pins
-    // the rules as written and surfaces the spec deviation in
-    // the report.
     expect(deriveIdentification("Acme Industrial S.A.")).toBe(
       "acme-industrial-s-a",
     );
   });
 
   test("F-5b: a manual override stops derivation (wiring smoke)", () => {
-    // Pure-function equivalent: once userOverrodeIdentification
-    // is true, deriveIdentification is no longer called.
-    // We assert by checking the form's onInput$ source uses
-    // the userOverrodeIdentification guard.  This is a
-    // characterisation test: if a future refactor removes
-    // the guard, this test will fail.
     const source = require("fs").readFileSync(
       require("path").join(__dirname, "organization-form.tsx"),
       "utf-8",
@@ -293,12 +268,8 @@ describe("deriveIdentification (spec §5.3)", () => {
 test("[OrganizationForm]: auto-derivation is wired to the input handler (F-5 wiring)", async () => {
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
-  const fullName = screen.querySelector('input[id="fullName"]');
+  const fullName = screen.querySelector("input[id=\"fullName\"]");
   expect(fullName).not.toBeNull();
-  // The form MUST reference deriveIdentification by name.
-  // We do not assert identification.value here because the
-  // live form timing is linkedom-unreliable; the pure
-  // function test above is the load-bearing contract.
   expect(typeof deriveIdentification).toBe("function");
 });
 
@@ -309,6 +280,7 @@ test("[OrganizationForm]: auto-derivation is wired to the input handler (F-5 wir
 test("[OrganizationForm]: submit success navigates to /organizations/{id} (F-6)", async () => {
   const { screen, render, userEvent } = await createDOM();
   __lastSubmittedActionCalls = 0;
+  __lastSubmittedFormData = null;
   __lastNavigatedId = undefined;
   await render(
     <OrganizationForm
@@ -317,27 +289,27 @@ test("[OrganizationForm]: submit success navigates to /organizations/{id} (F-6)"
     />,
   );
 
-  // Fill the form with valid data
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
   const identification = screen.querySelector(
-    'input[id="identification"]',
+    "input[id=\"identification\"]",
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
 
-  // Use Qwik's userEvent with a "submit" event.  The form's
-  // onSubmit$ handler is bound to the native submit event;
-  // userEvent fires it on the form element with the payload
-  // attached.
   const form = screen.querySelector("form") as HTMLFormElement;
   await userEvent(form, "submit", { submitter: "ignored" });
   await new Promise((r) => setTimeout(r, 50));
 
   expect(__lastSubmittedActionCalls).toBe(1);
-  // The onSuccess$ hook is the navigation contract; the
-  // route file wires it to useNavigate() in production.
+  expect(__lastSubmittedFormData).not.toBeNull();
+  // Funnel through `unknown` once: vitest's
+  // expect().not.toBeNull() does not narrow module-level
+  // `let` bindings in our tsc config, and direct casts to
+  // FormData refuse because the declared type contains null.
+  const submittedFormData = __lastSubmittedFormData as unknown as FormData;
+  expect(submittedFormData.get("full_name")).toBe("Acme");
+  expect(submittedFormData.get("identification")).toBe("acme");
   expect(__lastNavigatedId).toBe(42);
-  // Sanity: no server-side error message is rendered.
   expect(screen.outerHTML).not.toContain("Something went wrong. Please try again.");
 });
 
@@ -351,9 +323,9 @@ test("[OrganizationForm]: 409 conflict renders inline slug message and does NOT 
     />,
   );
 
-  const fullName = screen.querySelector('input[id="fullName"]') as HTMLInputElement;
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
   const identification = screen.querySelector(
-    'input[id="identification"]',
+    "input[id=\"identification\"]",
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
@@ -364,8 +336,124 @@ test("[OrganizationForm]: 409 conflict renders inline slug message and does NOT 
 
   const html = screen.outerHTML;
   expect(html).toContain("This slug is already taken. Try another.");
-  // The form is still mounted
   expect(screen.querySelector("form")).not.toBeNull();
-  // onSuccess$ was NOT invoked — navigation does not happen on 409
   expect(__lastNavigatedId).toBeUndefined();
+});
+
+// =========================================================================
+// Client-side Zod validation (new — was missing before)
+// =========================================================================
+
+test("[OrganizationForm]: invalid email renders inline field error and does NOT call the action", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  __lastSubmittedActionCalls = 0;
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  await expandDetails(screen, userEvent);
+  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  await userEvent(email, "input", { value: "not-an-email" });
+
+  const form = screen.querySelector("form") as HTMLFormElement;
+  await userEvent(form, "submit", { submitter: "ignored" });
+  await new Promise((r) => setTimeout(r, 50));
+
+  const html = screen.outerHTML;
+  expect(html).toContain("Email is not a valid email address.");
+  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+  expect(__lastSubmittedActionCalls).toBe(0);
+});
+
+test("[OrganizationForm]: invalid phone renders inline field error and does NOT call the action", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  __lastSubmittedActionCalls = 0;
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  await expandDetails(screen, userEvent);
+  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  await userEvent(phone, "input", { value: "12345" });
+
+  const form = screen.querySelector("form") as HTMLFormElement;
+  await userEvent(form, "submit", { submitter: "ignored" });
+  await new Promise((r) => setTimeout(r, 50));
+
+  const html = screen.outerHTML;
+  expect(html).toContain("Phone must be in E.164 format");
+  expect(screen.querySelector("[data-error=\"phone\"]")).not.toBeNull();
+  expect(__lastSubmittedActionCalls).toBe(0);
+});
+
+test("[OrganizationForm]: invalid slug regex renders inline field error", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  __lastSubmittedActionCalls = 0;
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const identification = screen.querySelector(
+    "input[id=\"identification\"]",
+  ) as HTMLInputElement;
+  await userEvent(fullName, "input", { value: "Acme" });
+  await userEvent(identification, "input", { value: "acme" });
+  await userEvent(identification, "input", { value: "-bad" });
+
+  const form = screen.querySelector("form") as HTMLFormElement;
+  await userEvent(form, "submit", { submitter: "ignored" });
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(
+    screen.querySelector("[data-error=\"identification\"]"),
+  ).not.toBeNull();
+  expect(__lastSubmittedActionCalls).toBe(0);
+});
+
+test("[OrganizationForm]: typing in a field clears its prior error", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  await expandDetails(screen, userEvent);
+  let email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+
+  await userEvent(email, "input", { value: "bad" });
+  const form = screen.querySelector("form") as HTMLFormElement;
+  await userEvent(form, "submit", { submitter: "ignored" });
+  await new Promise((r) => setTimeout(r, 30));
+  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+
+  // Re-query after the submit re-render — the original
+  // `email` reference is bound to the input element that
+  // existed before submit; Qwik may have re-rendered the
+  // review fieldset with a new DOM node.
+  email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  await userEvent(email, "input", { value: "ops@acme.com" });
+  await new Promise((r) => setTimeout(r, 100));
+  expect(screen.querySelector("[data-error=\"email\"]")).toBeFalsy();
+});
+
+test("[OrganizationForm]: valid full payload (incl. E.164 phone, valid email) navigates", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  __lastSubmittedActionCalls = 0;
+  __lastNavigatedId = undefined;
+  await render(
+    <OrganizationForm
+      action={recordingOkAction()}
+      onSuccess$={recordingOnSuccess()}
+    />,
+  );
+
+  await expandDetails(screen, userEvent);
+  const shortName = screen.querySelector(
+    "input[id=\"shortName\"]",
+  ) as HTMLInputElement;
+  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  await userEvent(shortName, "input", { value: "Acme Co" });
+  await userEvent(email, "input", { value: "ops@acme.com" });
+  await userEvent(phone, "input", { value: "+14155552671" });
+
+  const form = screen.querySelector("form") as HTMLFormElement;
+  await userEvent(form, "submit", { submitter: "ignored" });
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(screen.querySelectorAll("[data-error]").length).toBe(0);
+  expect(__lastSubmittedActionCalls).toBe(1);
+  expect(__lastNavigatedId).toBe(42);
 });
