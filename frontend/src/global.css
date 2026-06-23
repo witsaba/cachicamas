@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* -----------------------------------------------------------------------------
+ * Monospace stack — the "agentic" / framework feel.
+ *
+ * Section numbers, code blocks, CLI surface, and footer
+ * signature all use `font-mono`.  We prefer the OS-native
+ * `ui-monospace` (San Francisco Mono on macOS, Cascadia
+ * Mono on Windows, Roboto Mono on Android) and fall back
+ * to a curated set of developer mono faces before the
+ * generic `monospace` keyword.  No external font is loaded
+ * — this stack is text-first by design.
+ * --------------------------------------------------------------------------- */
+@theme {
+  --font-mono:
+    ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
