@@ -14,8 +14,8 @@ export default component$(() => {
     <main class="mx-auto max-w-2xl px-4 py-8">
       <h1 class="text-3xl font-bold text-slate-900">Cachicamas</h1>
       <p class="mt-2 text-slate-700">
-        Track the organizations, projects, requirements, and milestones
-        that move your work forward.
+        Track the organizations, projects, requirements, and milestones that
+        move your work forward.
       </p>
       <div class="mt-6">
         <a
