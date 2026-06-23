@@ -457,3 +457,99 @@ test("[OrganizationForm]: valid full payload (incl. E.164 phone, valid email) na
   expect(__lastSubmittedActionCalls).toBe(1);
   expect(__lastNavigatedId).toBe(42);
 });
+
+// =========================================================================
+// On-blur validation (new — was missing before)
+// =========================================================================
+//
+// The form runs `validateField` on each input's onBlur so
+// the user sees the locked Zod error messages as they tab
+// between fields, without waiting for submit.  This is the
+// pure-function counterpart of the in-form feedback; the
+// actual mount-level wiring is locked by the four tests
+// below.  The pure function is exported from the form
+// module so a future PR can also unit-test the rules
+// without a DOM.
+
+import { validateField } from "./organization-form";
+
+describe("validateField (on-blur helper)", () => {
+  test("fullName: empty -> 'Name is required.'", () => {
+    expect(validateField("fullName", "")).toBe("Name is required.");
+  });
+  test("fullName: too short -> 'Name must be 3–120 characters.'", () => {
+    expect(validateField("fullName", "A")).toBe(
+      "Name must be 3–120 characters.",
+    );
+  });
+  test("fullName: valid -> undefined", () => {
+    expect(validateField("fullName", "Acme")).toBeUndefined();
+  });
+
+  test("identification: empty -> 'Slug is required.'", () => {
+    expect(validateField("identification", "")).toBe("Slug is required.");
+  });
+  test("identification: leading hyphen -> locked slug message", () => {
+    expect(validateField("identification", "-bad")).toContain(
+      "Slug must be 3–60 characters",
+    );
+  });
+  test("identification: valid -> undefined", () => {
+    expect(validateField("identification", "acme")).toBeUndefined();
+  });
+
+  test("email: empty -> undefined (optional)", () => {
+    expect(validateField("email", "")).toBeUndefined();
+  });
+  test("email: missing dot -> 'Email is not a valid email address.'", () => {
+    expect(validateField("email", "liwaisitech@gmailcom")).toBe(
+      "Email is not a valid email address.",
+    );
+  });
+  test("email: valid -> undefined", () => {
+    expect(validateField("email", "ops@acme.com")).toBeUndefined();
+  });
+
+  test("phone: empty -> undefined (optional)", () => {
+    expect(validateField("phone", "")).toBeUndefined();
+  });
+  test("phone: free text -> 'Phone must be in E.164 format …'", () => {
+    expect(validateField("phone", "esto es en serio?")).toBe(
+      "Phone must be in E.164 format (e.g. +14155552671).",
+    );
+  });
+  test("phone: valid E.164 -> undefined", () => {
+    expect(validateField("phone", "+14155552671")).toBeUndefined();
+  });
+});
+
+test("[OrganizationForm]: blurring an invalid email shows the inline error (no submit)", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  __lastSubmittedActionCalls = 0;
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  await expandDetails(screen, userEvent);
+  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  await userEvent(email, "input", { value: "liwaisitech@gmailcom" });
+  await userEvent(email, "blur");
+  // Qwik reactive re-render flush.
+  await new Promise((r) => setTimeout(r, 30));
+
+  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+  // The action must NOT have been called — on-blur is
+  // client-only, the server is still untouched.
+  expect(__lastSubmittedActionCalls).toBe(0);
+});
+
+test("[OrganizationForm]: blurring a valid email does NOT show an error", async () => {
+  const { screen, render, userEvent } = await createDOM();
+  await render(<OrganizationForm action={recordingOkAction()} />);
+
+  await expandDetails(screen, userEvent);
+  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  await userEvent(email, "input", { value: "ops@acme.com" });
+  await userEvent(email, "blur");
+  await new Promise((r) => setTimeout(r, 30));
+
+  expect(screen.querySelector("[data-error=\"email\"]")).toBeFalsy();
+});

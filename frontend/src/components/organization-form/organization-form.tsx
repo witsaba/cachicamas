@@ -86,6 +86,28 @@ export function deriveIdentification(fullName: string): string {
     .replace(/-+$/, "");
 }
 
+/**
+ * Validate a single field against its Zod schema. Returns
+ * the first error message (matching the locked spec strings
+ * in `lib/organization-schema.ts`) or undefined if valid.
+ *
+ * Used by the form's onBlur handlers to give the user
+ * instant feedback as they move between fields, without
+ * firing the full submit path.  This is the client-side
+ * counterpart to the `submitAction` server-side re-validation
+ * — both run the same Zod schema so the messages cannot
+ * diverge.
+ */
+export function validateField(
+  field: "fullName" | "identification" | "shortName" | "email" | "phone",
+  value: string,
+): string | undefined {
+  const fieldSchema = organizationInputSchema.shape[field];
+  const result = fieldSchema.safeParse(value);
+  if (result.success) return undefined;
+  return result.error.issues[0]?.message;
+}
+
 export const OrganizationForm = component$<{
   action: FormAction;
   onSuccess$?: OnSuccess;
@@ -212,6 +234,14 @@ export const OrganizationForm = component$<{
               state.identification = deriveIdentification(state.fullName);
             }, DERIVATION_DEBOUNCE_MS);
           })}
+          onBlur$={$(() => {
+            // Instant feedback on blur.  If the user emptied
+            // the required field we surface the locked
+            // "Name is required." message immediately,
+            // instead of waiting for submit.
+            const error = validateField("fullName", state.fullName);
+            state.fieldErrors = { ...state.fieldErrors, fullName: error };
+          })}
           class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
         />
         {state.fieldErrors.fullName && (
@@ -251,6 +281,17 @@ export const OrganizationForm = component$<{
             if (state.conflictMessage) {
               state.conflictMessage = "";
             }
+          })}
+          onBlur$={$(() => {
+            // Instant feedback on blur.  Surfaces the
+            // locked "Slug is required." or
+            // "Slug must be 3–60 characters, …" message
+            // as soon as the user leaves the field.
+            const error = validateField("identification", state.identification);
+            state.fieldErrors = {
+              ...state.fieldErrors,
+              identification: error,
+            };
           })}
           class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
         />
@@ -309,6 +350,15 @@ export const OrganizationForm = component$<{
               aria-invalid={state.fieldErrors.shortName ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
+                // Instant feedback on blur.  Empty is valid
+                // (the field is optional); we only flag
+                // when the user typed something that fails
+                // the schema (e.g. > 40 chars).
+                const error = validateField("shortName", state.shortName);
+                state.fieldErrors = {
+                  ...state.fieldErrors,
+                  shortName: error,
+                };
               })}
               onInput$={$((event: Event, el: HTMLInputElement) => {
                 const v =
@@ -340,6 +390,13 @@ export const OrganizationForm = component$<{
               aria-invalid={state.fieldErrors.email ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
+                // Instant feedback on blur.  Empty is valid;
+                // non-empty must parse as an email.
+                const error = validateField("email", state.email);
+                state.fieldErrors = {
+                  ...state.fieldErrors,
+                  email: error,
+                };
               })}
               onInput$={$((event: Event, el: HTMLInputElement) => {
                 const v =
@@ -368,6 +425,13 @@ export const OrganizationForm = component$<{
               aria-invalid={state.fieldErrors.phone ? "true" : undefined}
               onBlur$={$(() => {
                 state.detailsTouched = true;
+                // Instant feedback on blur.  Empty is valid;
+                // non-empty must match E.164.
+                const error = validateField("phone", state.phone);
+                state.fieldErrors = {
+                  ...state.fieldErrors,
+                  phone: error,
+                };
               })}
               onInput$={$((event: Event, el: HTMLInputElement) => {
                 const v =
