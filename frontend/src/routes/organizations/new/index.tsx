@@ -5,30 +5,36 @@ import {
   type FormAction,
   type FormActionResult,
 } from "~/components/organization-form/organization-form";
-import { organizationInputSchema } from "~/lib/organization-schema";
+import { createOrganization } from "~/lib/api";
 
 /**
  * /organizations/new — create-organization form route.
  *
- * The form's `onSuccess$` hook is wired to `useNavigate()` so
- * the URL becomes the breadcrumb (UX-7) after a 201.
+ * The form's `onSuccess$` hook is wired to `useNavigate()` so the
+ * URL becomes the breadcrumb (UX-7) after a 201.
  *
- * SUBMIT ACTION (smart stub, dev mode)
- * ------------------------------------
- * Until the Qwik SSR + Go binary single-process wiring ships
- * (locked R-5 in design §10), this action stands in for the
- * real `application.OrganizationService.Create` call.  It
- * parses the form body with the same Zod schema the client
- * uses, so:
+ * SUBMIT ACTION
+ * -------------
+ * The submit action proxies the form to the database_administrator
+ * Go binary at `PUBLIC_API_BASE_URL` (default
+ * `http://localhost:8080`).  It uses Locked #3 form-encoded
+ * bodies — same field names the Qwik form already collects — so
+ * the wire shape stays mechanical.
  *
- *   - Invalid payload  → 400 with the field error
- *   - Valid payload    → 201 with a deterministic fake id
+ * The Go binary's locked error envelope
+ * (`{ error, fields?, message? }`) is mapped to the form's
+ * discriminated `FormActionResult`:
  *
- * The 409 (slug conflict) path is intentionally NOT simulated
- * here; it will be exercised by the real backend the moment
- * R-5 lands.  The form component still handles a 409 result
- * type correctly (see the locked F-6b test) so the contract
- * is forward-compatible.
+ *   - 201 → { ok: true, id }                     → navigate (UX-7)
+ *   - 400 validation → { ok: false, field: "form", message }
+ *                                                   → top-level alert
+ *   - 400 with identification field error
+ *                       → { ok: false, field: "identification", message }
+ *                                                   → inline slug error
+ *   - 409 conflict    → { ok: false, field: "identification", message }
+ *                                                   → inline conflict msg
+ *   - 5xx or network → { ok: false, field: "form", message }
+ *                                                   → top-level alert
  *
  * For the form's own tests, see
  * `src/components/organization-form/organization-form.spec.tsx`.
@@ -36,39 +42,56 @@ import { organizationInputSchema } from "~/lib/organization-schema";
 
 const submitAction: FormAction = $(
   async (data: FormData): Promise<FormActionResult> => {
-    // Re-validate server-side.  Defence in depth: the client
-    // already ran the same schema, but a malicious or buggy
-    // client could bypass it.  The Go binary will own this
-    // check post-R-5; for now we mirror it here so dev-mode
-    // behaviour is honest.
-    const raw = {
-      fullName: String(data.get("full_name") ?? ""),
-      identification: String(data.get("identification") ?? ""),
-      shortName: String(data.get("shortname") ?? ""),
-      email: String(data.get("email") ?? ""),
-      phone: String(data.get("phone") ?? ""),
-    };
-    const parsed = organizationInputSchema.safeParse(raw);
-    if (!parsed.success) {
-      const first = parsed.error.issues[0];
-      const field = String(first?.path[0] ?? "");
-      const message = first?.message ?? "Invalid form data.";
-      if (field === "identification") {
-        return { ok: false, field: "identification", message };
-      }
-      return { ok: false, field: "form", message };
+    const fullName = String(data.get("full_name") ?? "");
+    const identification = String(data.get("identification") ?? "");
+    const shortname = String(data.get("shortname") ?? "");
+    const email = String(data.get("email") ?? "");
+    const phone = String(data.get("phone") ?? "");
+
+    const result = await createOrganization({
+      fullName,
+      identification,
+      ...(shortname ? { shortName: shortname } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    });
+
+    if (result.ok) {
+      return { ok: true, id: result.value.id };
     }
-    // Dev-mode success.  Deterministic-ish fake id: a small
-    // positive integer so the URL `/organizations/{id}` is
-    // human-readable.  Real ids are BIGSERIAL.
-    const id =
-      Math.abs(
-        Array.from(parsed.data.fullName).reduce(
-          (acc, ch) => (acc * 31 + ch.charCodeAt(0)) | 0,
-          7,
-        ),
-      ) || 1;
-    return { ok: true, id };
+
+    if (result.kind === "validation") {
+      // Find the first field-level message and either attach it
+      // to the `identification` slot (which the form already
+      // renders inline for slug conflicts) or surface it as a
+      // generic form error.  Anything beyond identification is
+      // a structural bug caught by client-side Zod first, so
+      // the generic bucket is the safe default.
+      const identificationMessage = result.fields.identification;
+      if (identificationMessage) {
+        return {
+          ok: false,
+          field: "identification",
+          message: identificationMessage,
+        };
+      }
+      const firstField = Object.entries(result.fields)[0];
+      return {
+        ok: false,
+        field: "form",
+        message: firstField
+          ? `${firstField[0]}: ${firstField[1]}`
+          : "Invalid form data.",
+      };
+    }
+
+    if (result.kind === "conflict") {
+      return { ok: false, field: "identification", message: result.message };
+    }
+
+    // server / offline / not_found — anything we can't map onto
+    // a field bubbles up as a top-level form alert.
+    return { ok: false, field: "form", message: result.message };
   },
 );
 
