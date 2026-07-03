@@ -55,15 +55,15 @@ async function expandDetails(
   identification = "acme",
 ) {
   const fullNameInput = screen.querySelector(
-    "input[id=\"fullName\"]",
+    'input[id="fullName"]',
   ) as HTMLInputElement;
   const identificationInput = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   await userEvent(fullNameInput, "input", { value: fullName });
   await userEvent(identificationInput, "input", { value: identification });
   const showDetailsBtn = screen.querySelector(
-    "button[data-action=\"show-details\"]",
+    'button[data-action="show-details"]',
   ) as HTMLButtonElement;
   if (showDetailsBtn) {
     await userEvent(showDetailsBtn, "click");
@@ -86,7 +86,7 @@ test("[OrganizationForm]: renders 5 labeled inputs and a submit button (F-4)", a
   const inputs = screen.querySelectorAll("input");
   expect(inputs.length).toBe(5);
 
-  const submit = screen.querySelector("button[type=\"submit\"]");
+  const submit = screen.querySelector('button[type="submit"]');
   expect(submit).not.toBeNull();
   expect(submit?.textContent ?? "").toContain("Create organization");
 });
@@ -108,9 +108,11 @@ test("[OrganizationForm]: required inputs (fullName, identification) have no pla
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   expect(fullName).not.toBeNull();
   expect(identification).not.toBeNull();
@@ -154,14 +156,18 @@ test("[OrganizationForm]: focusable tab order is fullName, identification, short
   await expandDetails(screen, userEvent);
 
   const shortName = screen.querySelector(
-    "input[id=\"shortName\"]",
+    'input[id="shortName"]',
   ) as HTMLInputElement;
-  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
-  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
-  const submit = screen.querySelector("button[type=\"submit\"]") as HTMLButtonElement;
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
+  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
+  const submit = screen.querySelector(
+    'button[type="submit"]',
+  ) as HTMLButtonElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
 
   expect(fullName).not.toBeNull();
@@ -199,7 +205,9 @@ test("[OrganizationForm]: review fieldset is not in the DOM when threshold unmet
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fieldsets = screen.querySelectorAll("fieldset[data-review-group=\"true\"]");
+  const fieldsets = screen.querySelectorAll(
+    'fieldset[data-review-group="true"]',
+  );
   expect(fieldsets.length).toBe(0);
 });
 
@@ -207,21 +215,23 @@ test("[OrganizationForm]: review fieldset IS in the DOM when fullName and identi
   const { screen, render, userEvent } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
 
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
 
   const showDetailsBtn = screen.querySelector(
-    "button[data-action=\"show-details\"]",
+    'button[data-action="show-details"]',
   ) as HTMLButtonElement;
   expect(showDetailsBtn).not.toBeNull();
   await userEvent(showDetailsBtn, "click");
 
   const fieldsets = screen.querySelectorAll(
-    "fieldset[data-review-group=\"true\"]",
+    'fieldset[data-review-group="true"]',
   );
   expect(fieldsets.length).toBe(1);
 });
@@ -268,7 +278,7 @@ describe("deriveIdentification (spec §5.3)", () => {
 test("[OrganizationForm]: auto-derivation is wired to the input handler (F-5 wiring)", async () => {
   const { screen, render } = await createDOM();
   await render(<OrganizationForm action={okAction()} />);
-  const fullName = screen.querySelector("input[id=\"fullName\"]");
+  const fullName = screen.querySelector('input[id="fullName"]');
   expect(fullName).not.toBeNull();
   expect(typeof deriveIdentification).toBe("function");
 });
@@ -289,9 +299,11 @@ test("[OrganizationForm]: submit success navigates to /organizations/{id} (F-6)"
     />,
   );
 
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
@@ -310,7 +322,9 @@ test("[OrganizationForm]: submit success navigates to /organizations/{id} (F-6)"
   expect(submittedFormData.get("full_name")).toBe("Acme");
   expect(submittedFormData.get("identification")).toBe("acme");
   expect(__lastNavigatedId).toBe(42);
-  expect(screen.outerHTML).not.toContain("Something went wrong. Please try again.");
+  expect(screen.outerHTML).not.toContain(
+    "Something went wrong. Please try again.",
+  );
 });
 
 test("[OrganizationForm]: 409 conflict renders inline slug message and does NOT navigate (F-6b)", async () => {
@@ -323,9 +337,11 @@ test("[OrganizationForm]: 409 conflict renders inline slug message and does NOT 
     />,
   );
 
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
@@ -350,7 +366,7 @@ test("[OrganizationForm]: invalid email renders inline field error and does NOT 
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
   await userEvent(email, "input", { value: "not-an-email" });
 
   const form = screen.querySelector("form") as HTMLFormElement;
@@ -359,7 +375,7 @@ test("[OrganizationForm]: invalid email renders inline field error and does NOT 
 
   const html = screen.outerHTML;
   expect(html).toContain("Email is not a valid email address.");
-  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+  expect(screen.querySelector('[data-error="email"]')).toBeTruthy();
   expect(__lastSubmittedActionCalls).toBe(0);
 });
 
@@ -369,12 +385,14 @@ test("[OrganizationForm]: phone with too many digits shows E.164 error (after pa
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
   // Paste a number that is too long for E.164 (max 15
   // digits total).  The smart-paste handler splits into
   // dial + national; the national part is 16 digits which
   // makes the composed value too long.
-  await userEvent(phone, "paste", { clipboardData: { getData: () => "1234567890123456" } });
+  await userEvent(phone, "paste", {
+    clipboardData: { getData: () => "1234567890123456" },
+  });
   await new Promise((r) => setTimeout(r, 30));
 
   const form = screen.querySelector("form") as HTMLFormElement;
@@ -383,7 +401,7 @@ test("[OrganizationForm]: phone with too many digits shows E.164 error (after pa
 
   const html = screen.outerHTML;
   expect(html).toContain("Phone must be in E.164 format");
-  expect(screen.querySelector("[data-error=\"phone\"]")).toBeTruthy();
+  expect(screen.querySelector('[data-error="phone"]')).toBeTruthy();
   expect(__lastSubmittedActionCalls).toBe(0);
 });
 
@@ -392,9 +410,11 @@ test("[OrganizationForm]: invalid slug regex renders inline field error", async 
   __lastSubmittedActionCalls = 0;
   await render(<OrganizationForm action={recordingOkAction()} />);
 
-  const fullName = screen.querySelector("input[id=\"fullName\"]") as HTMLInputElement;
+  const fullName = screen.querySelector(
+    'input[id="fullName"]',
+  ) as HTMLInputElement;
   const identification = screen.querySelector(
-    "input[id=\"identification\"]",
+    'input[id="identification"]',
   ) as HTMLInputElement;
   await userEvent(fullName, "input", { value: "Acme" });
   await userEvent(identification, "input", { value: "acme" });
@@ -404,9 +424,7 @@ test("[OrganizationForm]: invalid slug regex renders inline field error", async 
   await userEvent(form, "submit", { submitter: "ignored" });
   await new Promise((r) => setTimeout(r, 50));
 
-  expect(
-    screen.querySelector("[data-error=\"identification\"]"),
-  ).not.toBeNull();
+  expect(screen.querySelector('[data-error="identification"]')).not.toBeNull();
   expect(__lastSubmittedActionCalls).toBe(0);
 });
 
@@ -415,22 +433,22 @@ test("[OrganizationForm]: typing in a field clears its prior error", async () =>
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  let email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  let email = screen.querySelector('input[id="email"]') as HTMLInputElement;
 
   await userEvent(email, "input", { value: "bad" });
   const form = screen.querySelector("form") as HTMLFormElement;
   await userEvent(form, "submit", { submitter: "ignored" });
   await new Promise((r) => setTimeout(r, 30));
-  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+  expect(screen.querySelector('[data-error="email"]')).toBeTruthy();
 
   // Re-query after the submit re-render — the original
   // `email` reference is bound to the input element that
   // existed before submit; Qwik may have re-rendered the
   // review fieldset with a new DOM node.
-  email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  email = screen.querySelector('input[id="email"]') as HTMLInputElement;
   await userEvent(email, "input", { value: "ops@acme.com" });
   await new Promise((r) => setTimeout(r, 100));
-  expect(screen.querySelector("[data-error=\"email\"]")).toBeFalsy();
+  expect(screen.querySelector('[data-error="email"]')).toBeFalsy();
 });
 
 test("[OrganizationForm]: valid full payload (incl. E.164 phone, valid email) navigates", async () => {
@@ -446,10 +464,10 @@ test("[OrganizationForm]: valid full payload (incl. E.164 phone, valid email) na
 
   await expandDetails(screen, userEvent);
   const shortName = screen.querySelector(
-    "input[id=\"shortName\"]",
+    'input[id="shortName"]',
   ) as HTMLInputElement;
-  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
-  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
+  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
   await userEvent(shortName, "input", { value: "Acme Co" });
   await userEvent(email, "input", { value: "ops@acme.com" });
   await userEvent(phone, "input", { value: "+14155552671" });
@@ -534,13 +552,13 @@ test("[OrganizationForm]: blurring an invalid email shows the inline error (no s
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
   await userEvent(email, "input", { value: "liwaisitech@gmailcom" });
   await userEvent(email, "blur");
   // Qwik reactive re-render flush.
   await new Promise((r) => setTimeout(r, 30));
 
-  expect(screen.querySelector("[data-error=\"email\"]")).toBeTruthy();
+  expect(screen.querySelector('[data-error="email"]')).toBeTruthy();
   // The action must NOT have been called — on-blur is
   // client-only, the server is still untouched.
   expect(__lastSubmittedActionCalls).toBe(0);
@@ -551,12 +569,12 @@ test("[OrganizationForm]: blurring a valid email does NOT show an error", async 
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  const email = screen.querySelector("input[id=\"email\"]") as HTMLInputElement;
+  const email = screen.querySelector('input[id="email"]') as HTMLInputElement;
   await userEvent(email, "input", { value: "ops@acme.com" });
   await userEvent(email, "blur");
   await new Promise((r) => setTimeout(r, 30));
 
-  expect(screen.querySelector("[data-error=\"email\"]")).toBeFalsy();
+  expect(screen.querySelector('[data-error="email"]')).toBeFalsy();
 });
 
 // =========================================================================
@@ -657,7 +675,7 @@ test("[OrganizationForm]: phone input renders a country-code selector + national
   await expandDetails(screen, userEvent);
 
   const country = screen.querySelector("[data-phone-country]");
-  const national = screen.querySelector("input[id=\"phone\"]");
+  const national = screen.querySelector('input[id="phone"]');
   const e164 = screen.querySelector("[data-phone-e164]");
 
   expect(country).not.toBeNull();
@@ -674,7 +692,7 @@ test("[OrganizationForm]: typing digits in the national input updates the E.164 
   await render(<OrganizationForm action={recordingOkAction()} />);
 
   await expandDetails(screen, userEvent);
-  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
   await userEvent(phone, "input", { value: "4155552671" });
   await new Promise((r) => setTimeout(r, 30));
 
@@ -703,7 +721,7 @@ test("[OrganizationForm]: form submit sends the composed E.164 in FormData (defa
   );
 
   await expandDetails(screen, userEvent);
-  const phone = screen.querySelector("input[id=\"phone\"]") as HTMLInputElement;
+  const phone = screen.querySelector('input[id="phone"]') as HTMLInputElement;
   await userEvent(phone, "input", { value: "4155552671" });
 
   const form = screen.querySelector("form") as HTMLFormElement;

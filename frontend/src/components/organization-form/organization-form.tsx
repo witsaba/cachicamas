@@ -434,7 +434,7 @@ export const OrganizationForm = component$<{
             onClick$={$(() => {
               state.showDetails = true;
             })}
-            class="rounded border border-slate-300 px-3 py-1 text-slate-700 underline"
+            class="cursor-pointer rounded border border-slate-300 px-3 py-1 text-slate-700 underline"
           >
             Add optional details
           </button>
@@ -650,7 +650,7 @@ export const OrganizationForm = component$<{
         <button
           type="submit"
           disabled={state.submitting}
-          class="rounded bg-slate-900 px-4 py-2 font-semibold text-white underline disabled:opacity-50"
+          class="cursor-pointer rounded bg-slate-900 px-4 py-2 font-semibold text-white underline not-disabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {state.submitting ? "Creating organization…" : "Create organization"}
         </button>
