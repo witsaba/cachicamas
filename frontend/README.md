@@ -117,3 +117,32 @@ The runner discovers every `*.spec.{ts,tsx}` file under
 `src/`. The full PR 2 surface (including the 4 routes, the
 form, the empty-state component, and the Zod schema parity
 test) is locked by 56 tests.
+
+#### End-to-end tests
+
+For the wire contract between Qwik and the database_administrator
+Go binary we use [Playwright](https://playwright.dev). The e2e
+specs live under `frontend/e2e/` and drive a real Chromium
+browser against the full local stack:
+
+```shell
+pnpm test:e2e
+```
+
+Pre-requisites:
+
+- `docker compose up` (Postgres + database_administrator healthy)
+- `pnpm dev` running in another terminal (Playwright's
+  `webServer.reuseExistingServer: true` reuses it locally; in CI
+  it starts the dev server itself)
+
+The first time, install the Chromium browser binary:
+
+```shell
+pnpm exec playwright install chromium
+```
+
+The current spec (`e2e/create-organization.spec.ts`) is a
+regression guard for the CORS bug fixed in commit `81f16fb` —
+if `Access-Control-Allow-Origin` is ever missing on the Go
+bin's responses again, this test fails immediately.

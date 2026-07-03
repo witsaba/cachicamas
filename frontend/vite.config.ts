@@ -2,7 +2,7 @@
  * This is the base config for vite.
  * When building, the adapter config is used which loads this file and extends it.
  */
-import { defineConfig, type UserConfig } from "vite";
+import { defineConfig, type UserConfig } from "vitest/config";
 import { qwikVite } from "@builder.io/qwik/optimizer";
 import { qwikCity } from "@builder.io/qwik-city/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -27,6 +27,18 @@ export default defineConfig(({ command, mode }): UserConfig => {
       tsconfigPaths({ root: "." }),
       tailwindcss(),
     ],
+    // Vitest picks up `**/*.spec.{ts,tsx}` by default; the e2e
+    // tests live under `frontend/e2e/` and use Playwright's
+    // `test()` API, which collides with Vitest's globals.  Keep
+    // them out of `pnpm test:ci`.
+    test: {
+      exclude: [
+        "e2e/**",
+        "node_modules/**",
+        "dist/**",
+        ".rollup.cache/**",
+      ],
+    },
     // This tells Vite which dependencies to pre-build in dev mode.
     optimizeDeps: {
       // Put problematic deps that break bundling here, mostly those with binaries.

@@ -42,3 +42,7 @@ lerna-debug.log*
 !.yarn/releases
 # Local Pi runtime state
 .atl/
+
+# Playwright artifacts (see playwright.config.ts)
+test-results
+playwright-report

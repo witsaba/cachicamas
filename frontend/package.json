@@ -24,12 +24,15 @@
     "test.unit": "vitest",
     "test:ci": "vitest --run",
     "test.unit.ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test.e2e.ui": "playwright test --ui",
     "qwik": "qwik"
   },
   "devDependencies": {
     "@builder.io/qwik": "^1.20.0",
     "@builder.io/qwik-city": "^1.20.0",
     "@eslint/js": "^9",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.1.4",
     "@types/node": "20.19.0",
     "@vitest/ui": "^0.34.6",
