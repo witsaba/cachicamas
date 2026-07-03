@@ -9,8 +9,9 @@
   "type": "module",
   "scripts": {
     "verify": "pnpm lint && pnpm build.types && pnpm fmt.check && pnpm test:ci",
-    "build": "qwik build",
+    "build": "pnpm build.types && pnpm build.client && pnpm build.server",
     "build.client": "vite build",
+    "build.server": "vite build -c adapters/node-server/vite.config.ts",
     "build.preview": "vite build --ssr src/entry.preview.tsx",
     "build.types": "tsc --incremental --noEmit",
     "deploy": "echo 'Run \"npm run qwik add\" to install a server adapter'",

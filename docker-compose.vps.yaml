@@ -1,0 +1,205 @@
+# ============================================================================
+# Cachicamas — VPS override file.
+#
+# IMPORTANTE: este archivo redefine los servicios para deploy en VPS.
+# Mantener sincronizado con docker-compose.yaml. Para validar que compone
+# correctamente:
+#   docker compose -f docker-compose.yaml -f docker-compose.vps.yaml config
+#
+# Comportamiento:
+#   - Solo el servicio `frontend` mantiene su `ports:` (3015:80).
+#   - Los servicios internos (postgres, jaeger, otel-collector,
+#     database_administrator) pierden su `ports:` → quedan accesibles
+#     solo dentro de cachicamas_network.
+#   - El Go bin se reconfigura con SERVICE_ENV=production (apaga el
+#     default de CORS en dev) y CORS_ALLOW_ORIGINS (opt-in para casos
+#     de borde como debugging directo al Go bin).
+#
+# LIMITACIÓN CONOCIDA de compose v2: `ports:` es una "mergeable sequence"
+# y SE CONCATENA con el base file, no se sobrescribe. Por eso este archivo
+# REDEFINE los servicios completos (no solo `ports:`) — la única forma de
+# efectivamente vaciar el `ports:` de un servicio es redefinir el bloque
+# entero. El trade-off: duplicación de config. Mitigación: si el base
+# cambia (imagen, env, volumes), hay que actualizar el override también.
+# Verificación automática: el `docker compose config` de abajo debe
+# mostrar solo `frontend` con `ports:`.
+#
+# Uso:
+#   docker compose -f docker-compose.yaml -f docker-compose.vps.yaml \
+#     up -d --build
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # postgres — internal only (sin ports:)
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine3.24
+    container_name: cachicamas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
+      POSTGRES_USER: ${POSTGRES_USER:-cachicamas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (set it in .env)}
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---encoding=UTF8}
+      QUEEN_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - cachicamas_network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" || exit 1'
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # jaeger — internal only (sin ports:)
+  # --------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/jaeger:2.19.0
+    container_name: cachicamas-jaeger
+    restart: unless-stopped
+    command:
+      - --config=/etc/jaeger/config.yaml
+    volumes:
+      - ./infra/jaeger/all-in-one.yaml:/etc/jaeger/config.yaml:ro
+    networks:
+      - cachicamas_network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:16686/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # otel-collector — internal only (sin ports:)
+  # --------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.137.0
+    container_name: cachicamas-otel-collector
+    restart: unless-stopped
+    mem_limit: 512m
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - cachicamas_network
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/otelcol-contrib",
+          "validate",
+          "--config=/etc/otelcol/config.yaml",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # database_administrator — internal only (sin ports:), prod env
+  # --------------------------------------------------------------------------
+  database_administrator:
+    build:
+      context: ./backend/database_administrator
+      dockerfile: Dockerfile
+    image: cachicamas/database_administrator:local
+    container_name: cachicamas-database-administrator
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: database_administrator
+      SERVICE_ENV: production
+      SERVICE_PORT: ${SERVICE_PORT:-8080}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
+      POSTGRES_USER: ${QUEEN_USER:-queen}
+      POSTGRES_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
+      OTEL_SERVICE_NAME: database_administrator
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=production
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3015,https://cachicamas.example.com}
+    networks:
+      - cachicamas_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # frontend — ÚNICO servicio con ports: publicado al host (3015:3000).
+  # Node SSR (no nginx). El reverse-proxy /api/* está dentro del server.
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
+        ORIGIN: ${ORIGIN:-http://localhost:3015}
+    image: cachicamas/frontend:local
+    container_name: cachicamas-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3015}:3000"
+    networks:
+      - cachicamas_network
+    depends_on:
+      database_administrator:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'node -e "require(\"http\").get(\"http://127.0.0.1:3000/\",r=>process.exit(r.statusCode<400?0:1)).on(\"error\",()=>process.exit(1))"'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # networks + volumes — heredados del base via merge
+  # --------------------------------------------------------------------------
+  # Nota: `networks:` y `volumes:` top-level también se MERGEAN con el base,
+  # así que no hace falta redefinirlos acá.

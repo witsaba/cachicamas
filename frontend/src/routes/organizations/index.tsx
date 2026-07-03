@@ -9,18 +9,19 @@ import { listOrganizations } from "~/lib/api";
 /**
  * /organizations — list or empty state.
  *
- * The `routeLoader$` proxies to the database_administrator Go
- * binary's `GET /organizations` endpoint.  Empty arrays are
- * preserved so the EmptyState still renders (spec F-2); transport
- * failures surface as `[]` plus a top-level banner so the
- * list/empty tests stay green and the user gets a hint instead
- * of a silent failure.
+ * Uses `routeLoader$` (server-side) so the data is fetched during SSR.
+ * With the Node SSR adapter, this runs on every request (not at build
+ * time like the static SSG adapter). The browser receives fully
+ * populated HTML and the client just hydrates.
  *
- * For tests, see `routes/organizations/index.spec.tsx` — it
- * renders the presentational `OrganizationList` component
- * directly with stubbed data, sidestepping the loader plumbing.
+ * Empty arrays preserve the empty state (spec F-2). Transport failures
+ * surface as [] plus a top-level alert with the offline or error message.
+ *
+ * For the Vitest tests (which render the presentational `OrganizationList`
+ * component directly), see `routes/organizations/index.spec.tsx`. The
+ * refactor does not affect those tests — the component itself is
+ * unchanged.
  */
-
 export const useOrganizationsLoader = routeLoader$(async () => {
   const result = await listOrganizations();
   if (result.ok) {

@@ -1,0 +1,13 @@
+node_modules
+dist
+test-results
+tmp
+e2e/test-results
+.atl
+.git
+.gitignore
+.DS_Store
+*.log
+.env.local
+.env.*.local
+playwright-report

@@ -105,7 +105,7 @@ services:
     volumes:
       - ./infra/jaeger/all-in-one.yaml:/etc/jaeger/config.yaml:ro
     ports:
-      - "${JAEGER_UI_PORT:-16686}:16686"      # UI
+      - "${JAEGER_UI_PORT:-16686}:16686" # UI
       - "${JAEGER_OTLP_GRPC_PORT:-4317}:4317" # OTLP gRPC
       - "${JAEGER_OTLP_HTTP_PORT:-4318}:4318" # OTLP HTTP
     networks:
@@ -147,8 +147,8 @@ services:
       # mapping is shifted to :14317 so it does not collide with Jaeger's
       # own :4317 publish (Docker Desktop's vpnkit sidecar can hold a
       # stale :4317 bind across container restarts).
-      - "${OTEL_COLLECTOR_GRPC_PORT:-14317}:4317"   # OTLP gRPC from apps
-      - "${OTEL_COLLECTOR_HTTP_PORT:-14318}:4318"   # OTLP HTTP from apps
+      - "${OTEL_COLLECTOR_GRPC_PORT:-14317}:4317" # OTLP gRPC from apps
+      - "${OTEL_COLLECTOR_HTTP_PORT:-14318}:4318" # OTLP HTTP from apps
       - "${OTEL_COLLECTOR_HEALTH_PORT:-13133}:13133" # health_check extension
     networks:
       - cachicamas_network
@@ -160,7 +160,13 @@ services:
       # wget, no curl). Use that same binary to validate the config — if
       # the config file stays parseable and the pipeline stays valid,
       # exit 0; otherwise this fails and the container is marked unhealthy.
-      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otelcol/config.yaml"]
+      test:
+        [
+          "CMD",
+          "/otelcol-contrib",
+          "validate",
+          "--config=/etc/otelcol/config.yaml",
+        ]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -224,6 +230,51 @@ services:
       # tiny static Go binary that does a TCP connect to localhost:8080
       # and exits 0/1 — copy it into the image and reference it here.
       disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # frontend — Qwik Node SSR (no nginx, single Node process).
+  # Multi-stage Dockerfile: node:22-alpine builder + node:22-alpine runner.
+  # El Qwik server:
+  #   - Sirve los static assets (dist/) con cache headers.
+  #   - Reverse-proxy /api/* → http://database_administrator:8080 (strip prefix).
+  #   - SSR para todas las rutas, incluyendo dinámicas (/organizations/{id}/).
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # URL que el browser usa para hablar con el Go bin.
+        # Default: /api (relativo — el Qwik server hace el reverse proxy).
+        # Override para saltar el proxy: PUBLIC_API_BASE_URL=http://localhost:8080.
+        PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
+        # Origin canónico (canonical/OG tags, CSRF).
+        ORIGIN: ${ORIGIN:-http://localhost:3015}
+    image: cachicamas/frontend:local
+    container_name: cachicamas-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3015}:3000"
+    networks:
+      - cachicamas_network
+    depends_on:
+      database_administrator:
+        condition: service_started
+    healthcheck:
+      # node:22-alpine NO trae wget/curl. Usamos node inline para
+      # hacer un fetch al endpoint raíz y exit 0/1 según status.
+      test:
+        - CMD-SHELL
+        - 'node -e "require(\"http\").get(\"http://127.0.0.1:3000/\",r=>process.exit(r.statusCode<400?0:1)).on(\"error\",()=>process.exit(1))"'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     logging:
       driver: json-file
       options:

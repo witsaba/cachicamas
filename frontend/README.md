@@ -146,3 +146,32 @@ The current spec (`e2e/create-organization.spec.ts`) is a
 regression guard for the CORS bug fixed in commit `81f16fb` —
 if `Access-Control-Allow-Origin` is ever missing on the Go
 bin's responses again, this test fails immediately.
+
+#### Dual mode (dev / container / VPS)
+
+The Playwright runner is env-driven via `E2E_BASE_URL`. The same
+spec runs against three different targets without any code change:
+
+```bash
+# Dev local (default). Playwright starts `pnpm dev` on :5173 and
+# the spec runs against the Vite dev server. Same as before.
+pnpm test:e2e
+
+# Dockerized stack (CI / post-deploy validation). Playwright does
+# NOT start a webServer — it trusts that the compose is up. The
+# frontend is the dockerized nginx serving the Qwik SSG build.
+docker compose -f ../docker-compose.yaml -f ../docker-compose.vps.yaml up -d
+E2E_BASE_URL=http://localhost:3015 pnpm test:e2e
+
+# VPS production (or any reachable URL). The spec validates the
+# real public surface end-to-end.
+E2E_BASE_URL=https://cachicamas.example.com pnpm test:e2e
+```
+
+Pre-requisites by mode:
+
+| Mode             | Pre-requisite                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------- |
+| dev (no env var) | `docker compose up` (Postgres + Go bin) + Playwright auto-starts `pnpm dev`                       |
+| container        | `docker compose -f docker-compose.yaml -f docker-compose.vps.yaml up -d` (all 5 services healthy) |
+| VPS              | Reachable URL; the stack is assumed to be running on the target host                              |
