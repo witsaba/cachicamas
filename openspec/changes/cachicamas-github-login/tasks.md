@@ -46,37 +46,37 @@ Merge order: PR-1 → PR-2 → PR-3.
 ## Dependency graph
 
 ```text
-PR-1 (Schema + identity domain + ADRs)
-├── T1.1  migrate: up (sql)
-├── T1.2  migrate: down (sql)
-├── T1.3  docs/adr/0001
-├── T1.4  docs/adr/0002
-├── T1.5  domain/identity.go + test
-├── T1.6  application/identity_service.go + test
-└── T1.7  infrastructure/postgres/identity_repository.go + integration test
+PR-1 (Schema + identity domain + ADRs) — COMPLETE (commit a96a224 on feat/cachicamas-github-login-pr1-schema-identity)
+├── [x] T1.1  migrate: up (sql)                — backend/database_administrator/src/migration/sql/20260703120000_github_login.sql
+├── [x] T1.2  migrate: down (sql)              — same file (-- +goose Down section)
+├── [x] T1.3  docs/adr/0001-accept-authjs-qwik.md
+├── [x] T1.4  docs/adr/0002-promote-lestrrat-jwx-for-jwe.md
+├── [x] T1.5  domain/identity.go + test        — backend/database_administrator/src/domain/identity.go + identity_test.go
+├── [x] T1.6  application/identity_service.go + test  — backend/database_administrator/src/application/identity_service.go + identity_service_test.go
+├── [x] T1.7  infrastructure/postgres/identity_repository.go + integration test  — same dir
 
 PR-2 (Frontend Auth.js integration + e2e)
-├── T2.1  frontend/package.json: +@auth/qwik, +@panva/hkdf
-├── T2.2  frontend/vite.config.ts: +optimizeDeps.include
-├── T2.3  frontend/src/routes/plugin@auth.ts
-├── T2.4  frontend/src/lib/sign-in-callback.ts
-├── T2.5  frontend/src/components/sign-in-button/*
-├── T2.6  frontend/src/routes/profile/index.tsx + index.spec.tsx
-├── T2.7  frontend/src/routes/index.tsx: +<SignInButton/>
-├── T2.8  .env.example: +5 AUTH_* keys (frontend block)
-├── T2.9  docker-compose.yaml: +5 env vars (frontend service)
-├── T2.10 frontend/Dockerfile: +COPY --from=builder for @auth/qwik + @auth/core
-├── T2.11 frontend/e2e/specs (5 files)
-└── T2.12 frontend/README.md: +"Auth.js / GitHub login" section
+├── [ ] T2.1  frontend/package.json: +@auth/qwik, +@panva/hkdf
+├── [ ] T2.2  frontend/vite.config.ts: +optimizeDeps.include
+├── [ ] T2.3  frontend/src/routes/plugin@auth.ts
+├── [ ] T2.4  frontend/src/lib/sign-in-callback.ts
+├── [ ] T2.5  frontend/src/components/sign-in-button/*
+├── [ ] T2.6  frontend/src/routes/profile/index.tsx + index.spec.tsx
+├── [ ] T2.7  frontend/src/routes/index.tsx: +<SignInButton/>
+├── [ ] T2.8  .env.example: +5 AUTH_* keys (frontend block)
+├── [ ] T2.9  docker-compose.yaml: +5 env vars (frontend service)
+├── [ ] T2.10 frontend/Dockerfile: +COPY --from=builder for @auth/qwik + @auth/core
+├── [ ] T2.11 frontend/e2e/specs (5 files)
+└── [ ] T2.12 frontend/README.md: +"Auth.js / GitHub login" section
 
 PR-3 (Backend JWE verifier + protected endpoint)
-├── T3.1  backend/go.mod: +lestrrat-go/jwx/v2, +golang.org/x/crypto
-├── T3.2  backend/src/interfaces/http/auth_middleware.go + test
-├── T3.3  backend/scripts/regenerate_authjs_testdata.sh
-├── T3.4  backend/src/interfaces/http/testdata/authjs_session_token.jwe (fixture)
-├── T3.5  backend/src/cmd/server/main.go: +load AUTH_SECRET, +wire middleware
-├── T3.6  backend/README.md: +callback URL table
-└── T3.7  compose stack end-to-end smoke (PR-3 acceptance)
+├── [ ] T3.1  backend/go.mod: +lestrrat-go/jwx/v2, +golang.org/x/crypto
+├── [ ] T3.2  backend/src/interfaces/http/auth_middleware.go + test
+├── [ ] T3.3  backend/scripts/regenerate_authjs_testdata.sh
+├── [ ] T3.4  backend/src/interfaces/http/testdata/authjs_session_token.jwe (fixture)
+├── [ ] T3.5  backend/src/cmd/server/main.go: +load AUTH_SECRET, +wire middleware
+├── [ ] T3.6  backend/README.md: +callback URL table
+└── [ ] T3.7  compose stack end-to-end smoke (PR-3 acceptance)
 ```
 
 ---
