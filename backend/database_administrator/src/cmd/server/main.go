@@ -216,7 +216,7 @@ func main() {
 	// same *sql.DB the migration runner just used) into the
 	// application service, then mount the HTTP handler. No new
 	// dependencies; no new pool.
-	orgRepo := postgres.NewPostgresOrgRepo(db)
+	orgRepo := postgres.NewOrgRepo(db)
 	orgService := application.NewOrganizationService(orgRepo, logger, otelglobal.Tracer(serviceName))
 	httpiface.RegisterOrganizationRoutes(e, orgService)
 

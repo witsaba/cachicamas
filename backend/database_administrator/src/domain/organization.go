@@ -87,25 +87,36 @@ type OrganizationRepository interface {
 // ---------------------------------------------------------------------------
 
 const (
-	// Field-level validation messages.
-	MsgNameRequired    = "Name is required."
-	MsgNameLength      = "Name must be 3–120 characters."
-	MsgSlugRequired    = "Slug is required."
-	MsgSlugFormat      = "Slug must be 3–60 characters, lowercase letters, digits, and hyphens; must start and end with a letter or digit."
+	// MsgNameRequired is the field-level error message for missing full_name.
+	MsgNameRequired = "Name is required."
+	// MsgNameLength is the field-level error message for full_name length.
+	MsgNameLength = "Name must be 3–120 characters."
+	// MsgSlugRequired is the field-level error message for missing identification (slug).
+	MsgSlugRequired = "Slug is required."
+	// MsgSlugFormat is the field-level error message for identification (slug) format.
+	MsgSlugFormat = "Slug must be 3–60 characters, lowercase letters, digits, and hyphens; must start and end with a letter or digit."
+	// MsgShortnameLength is the field-level error message for shortname length.
 	MsgShortnameLength = "Short name must be 40 characters or fewer."
-	MsgEmailFormat     = "Email is not a valid email address."
-	MsgPhoneFormat     = "Phone must be in E.164 format (e.g. +14155552671)."
+	// MsgEmailFormat is the field-level error message for email RFC 5322 validity.
+	MsgEmailFormat = "Email is not a valid email address."
+	// MsgPhoneFormat is the field-level error message for phone E.164 format.
+	MsgPhoneFormat = "Phone must be in E.164 format (e.g. +14155552671)."
 
-	// Error envelope "message" values for non-field responses.
-	MsgConflictSlug  = "This slug is already taken. Try another."
-	MsgNotFound      = "Organization not found."
+	// MsgConflictSlug is the message shown when an organization identification is already taken.
+	MsgConflictSlug = "This slug is already taken. Try another."
+	// MsgNotFound is the message shown when an organization does not exist.
+	MsgNotFound = "Organization not found."
+	// MsgServerFailure is the message shown for an unexpected, non-categorized failure.
 	MsgServerFailure = "Something went wrong. Please try again."
 
-	// Locked code strings (handler maps these to HTTP status + envelope).
+	// CodeValidation is the locked vocabulary for field-level validation failures.
 	CodeValidation = "validation"
-	CodeConflict   = "conflict"
-	CodeNotFound   = "not_found"
-	CodeServer     = "server"
+	// CodeConflict is the locked vocabulary for unique-constraint violations.
+	CodeConflict = "conflict"
+	// CodeNotFound is the locked vocabulary for missing-row responses.
+	CodeNotFound = "not_found"
+	// CodeServer is the locked vocabulary for unexpected internal failures.
+	CodeServer = "server"
 )
 
 // ---------------------------------------------------------------------------
@@ -220,7 +231,9 @@ func (e *ValidationError) Error() string {
 	return "validation failed"
 }
 
+// Code returns the CodeValidation string (handler maps to 422 envelope).
 func (e *ValidationError) Code() string { return CodeValidation }
+
 
 // ConflictError signals a uniqueness violation on a field that
 // the database guards (e.g. organization.identification). The
@@ -237,7 +250,9 @@ func (e *ConflictError) Error() string {
 	return "conflict"
 }
 
+// Code returns the CodeConflict string (handler maps to 409 envelope).
 func (e *ConflictError) Code() string { return CodeConflict }
+
 
 // NotFoundError signals that a row lookup returned no rows. The
 // Resource names which entity was missing (e.g. "organization").
@@ -250,7 +265,9 @@ type NotFoundError struct {
 
 func (e *NotFoundError) Error() string { return e.Resource + " not found" }
 
+// Code returns the CodeNotFound string (handler maps to 404 envelope).
 func (e *NotFoundError) Code() string { return CodeNotFound }
+
 
 // InternalError signals an unexpected failure the application
 // did not categorize. The Cause is logged via slog; the
@@ -267,7 +284,9 @@ func (e *InternalError) Error() string {
 	return "internal error"
 }
 
+// Code returns the CodeServer string (handler maps to 500 envelope).
 func (e *InternalError) Code() string { return CodeServer }
+
 
 // trim removes leading and trailing whitespace from a string.
 // Using strings.TrimSpace would add an import; the implementation

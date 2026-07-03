@@ -88,8 +88,6 @@ func (f *fakeRepo) SelectByID(_ context.Context, id int64) (*domain.Organization
 	return nil, &domain.NotFoundError{Resource: "organization"}
 }
 
-func stringPtr(s string) *string { return &s }
-
 // newTestService wires a real *application.OrganizationService
 // against a fakeRepo and a no-op tracer. The OTel test below
 // uses a real in-memory exporter; everything else can pass nil.
