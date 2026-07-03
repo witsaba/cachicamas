@@ -1224,13 +1224,13 @@ func TestRunner_Up_CheckConstraintsEnforceValidity(t *testing.T) {
 // tests.
 //
 // Lifecycle simulated:
-//   1. Org + project + PRD requirement intake
-//   2. Spike investigation (1 requirement, 1 spike)
-//   3. Milestone + task + spec creation
-//   4. Agent walks the spec through 7 phases (tdd_red → human_approved)
-//   5. AI review finds a gap → agent re-enters tdd_red (the agent-first flow)
-//   6. JSONB metadata round-trip on project
-//   7. The ONLY allowed UPDATE-in-place: organization.is_active toggle
+//  1. Org + project + PRD requirement intake
+//  2. Spike investigation (1 requirement, 1 spike)
+//  3. Milestone + task + spec creation
+//  4. Agent walks the spec through 7 phases (tdd_red → human_approved)
+//  5. AI review finds a gap → agent re-enters tdd_red (the agent-first flow)
+//  6. JSONB metadata round-trip on project
+//  7. The ONLY allowed UPDATE-in-place: organization.is_active toggle
 //
 // Each step asserts both the happy path AND the agent's expected
 // query result, so a future change that breaks the agent's mental

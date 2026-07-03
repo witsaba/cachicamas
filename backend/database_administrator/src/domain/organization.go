@@ -134,11 +134,11 @@ var e164Regex = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
 
 // Length caps (spec §2.3).
 const (
-	fullNameMinLen   = 3
-	fullNameMaxLen   = 120
-	shortnameMaxLen  = 40
-	slugMinLen       = 3
-	slugMaxLen       = 60
+	fullNameMinLen  = 3
+	fullNameMaxLen  = 120
+	shortnameMaxLen = 40
+	slugMinLen      = 3
+	slugMaxLen      = 60
 )
 
 // Validate runs every rule from spec §2.3 against the input and
@@ -234,7 +234,6 @@ func (e *ValidationError) Error() string {
 // Code returns the CodeValidation string (handler maps to 422 envelope).
 func (e *ValidationError) Code() string { return CodeValidation }
 
-
 // ConflictError signals a uniqueness violation on a field that
 // the database guards (e.g. organization.identification). The
 // Cause wraps the original pgx error so slog can log it; the
@@ -253,7 +252,6 @@ func (e *ConflictError) Error() string {
 // Code returns the CodeConflict string (handler maps to 409 envelope).
 func (e *ConflictError) Code() string { return CodeConflict }
 
-
 // NotFoundError signals that a row lookup returned no rows. The
 // Resource names which entity was missing (e.g. "organization").
 // The handler currently ignores Resource and uses the generic
@@ -267,7 +265,6 @@ func (e *NotFoundError) Error() string { return e.Resource + " not found" }
 
 // Code returns the CodeNotFound string (handler maps to 404 envelope).
 func (e *NotFoundError) Code() string { return CodeNotFound }
-
 
 // InternalError signals an unexpected failure the application
 // did not categorize. The Cause is logged via slog; the
@@ -286,7 +283,6 @@ func (e *InternalError) Error() string {
 
 // Code returns the CodeServer string (handler maps to 500 envelope).
 func (e *InternalError) Code() string { return CodeServer }
-
 
 // trim removes leading and trailing whitespace from a string.
 // Using strings.TrimSpace would add an import; the implementation
