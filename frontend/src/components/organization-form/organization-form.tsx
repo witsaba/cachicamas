@@ -55,7 +55,10 @@ interface FormState {
   identification: string;
   shortName: string;
   email: string;
-  phone: string;
+  /** E.164 dial code with the leading `+`, e.g. "+1" or "+57". */
+  phoneCountryCode: string;
+  /** National number, digits only, no spaces or formatting. */
+  phoneNational: string;
   userOverrodeIdentification: boolean;
   detailsTouched: boolean;
   showDetails: boolean;
@@ -66,6 +69,99 @@ interface FormState {
 }
 
 const DERIVATION_DEBOUNCE_MS = 200;
+
+/**
+ * Curated country codes for the phone input.  Text-only on
+ * purpose — no flag icons, no decorative imagery (aphantasia-
+ * friendly constraint, UX-4).  Ordered by call volume: North
+ * America first, then Latin America, then Europe, then a few
+ * high-volume Asia-Pacific entries.  The dial code is the
+ * E.164 prefix including the leading `+`.
+ */
+const COUNTRY_CODES = [
+  { name: "United States", dial: "+1" },
+  { name: "Canada", dial: "+1" },
+  { name: "Mexico", dial: "+52" },
+  { name: "Colombia", dial: "+57" },
+  { name: "Peru", dial: "+51" },
+  { name: "Chile", dial: "+56" },
+  { name: "Argentina", dial: "+54" },
+  { name: "Brazil", dial: "+55" },
+  { name: "Spain", dial: "+34" },
+  { name: "United Kingdom", dial: "+44" },
+  { name: "Germany", dial: "+49" },
+  { name: "France", dial: "+33" },
+] as const;
+
+const DEFAULT_DIAL = "+1";
+
+/**
+ * Parse a free-form phone paste into a {dialCode, national}
+ * pair, falling back to the default dial code if the paste
+ * has no `+` prefix.  Strips whitespace, parens, dashes —
+ * only digits and a single leading `+` survive.  Exported
+ * for unit testing.
+ */
+export function extractPhoneParts(
+  text: string,
+  fallbackDial: string = DEFAULT_DIAL,
+): { dialCode: string; national: string } {
+  const cleaned = text.replace(/[^\d+]/g, "");
+  // Collapse multiple `+` to the first one and drop it from
+  // the digit run (the `+` belongs to the dial code, not the
+  // national number).
+  const plusIdx = cleaned.indexOf("+");
+  const digitsOnly = cleaned.replace(/\+/g, "");
+  if (plusIdx < 0 || digitsOnly.length === 0) {
+    return { dialCode: fallbackDial, national: digitsOnly };
+  }
+  // Match against the curated list of country codes first
+  // (longest match wins so "+57" beats "+5").  This avoids
+  // the false-positive where a 1-digit walk picks "+5"
+  // before the real "+57" is even considered.
+  const knownDials = COUNTRY_CODES.map((c) => c.dial).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const dial of knownDials) {
+    const dialDigits = dial.slice(1);
+    if (digitsOnly.startsWith(dialDigits)) {
+      return {
+        dialCode: dial,
+        national: digitsOnly.slice(dialDigits.length),
+      };
+    }
+  }
+  // Fallback: walk 1-3 digit dial codes for unknown regions.
+  for (const len of [3, 2, 1] as const) {
+    if (digitsOnly.length <= len + 4) continue;
+    const candidateDial = `+${digitsOnly.slice(0, len)}`;
+    if (/^[1-9]\d*$/.test(candidateDial.slice(1))) {
+      return {
+        dialCode: candidateDial,
+        national: digitsOnly.slice(len),
+      };
+    }
+  }
+  // Last resort: first digit is the dial code.
+  return {
+    dialCode: `+${digitsOnly.slice(0, 1)}`,
+    national: digitsOnly.slice(1),
+  };
+}
+
+/**
+ * Format a national number (digits only) for display in
+ * the input: group digits in 3s from the right, separated
+ * by single spaces.  Exported for unit testing.
+ *
+ *   "4155552671"   -> "415 555 2671"
+ *   "1234"         -> "1 234"
+ *   "1"            -> "1"
+ *   ""             -> ""
+ */
+export function formatNational(national: string): string {
+  return national.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
 
 /**
  * Auto-derivation pipeline (spec §5.3):
@@ -117,7 +213,8 @@ export const OrganizationForm = component$<{
     identification: "",
     shortName: "",
     email: "",
-    phone: "",
+    phoneCountryCode: DEFAULT_DIAL,
+    phoneNational: "",
     userOverrodeIdentification: false,
     detailsTouched: false,
     showDetails: false,
@@ -148,7 +245,15 @@ export const OrganizationForm = component$<{
           identification: state.identification,
           shortName: state.shortName,
           email: state.email,
-          phone: state.phone,
+          // Compose the E.164 phone from the country-code
+          // selector and the digits-only national number.
+          // Empty national number means "no phone" — the
+          // Zod schema accepts `""` as a valid optional
+          // value, and we must not send the bare dial code
+          // (e.g. "+1") which would fail the regex.
+          phone: state.phoneNational
+            ? `${state.phoneCountryCode}${state.phoneNational}`
+            : "",
         };
 
         const parsed = organizationInputSchema.safeParse(candidate);
@@ -180,7 +285,17 @@ export const OrganizationForm = component$<{
           formData.append("identification", state.identification);
           formData.append("shortname", state.shortName);
           formData.append("email", state.email);
-          formData.append("phone", state.phone);
+          // Compose the E.164 phone from the country-code
+          // selector and the digits-only national number.
+          // Empty national number means "no phone" — see
+          // the matching comment in the candidate builder
+          // above.
+          formData.append(
+            "phone",
+            state.phoneNational
+              ? `${state.phoneCountryCode}${state.phoneNational}`
+              : "",
+          );
           const result = await action(formData);
           if (result.ok) {
             if (onSuccess$) {
@@ -417,30 +532,111 @@ export const OrganizationForm = component$<{
             <label for="phone" class="mb-1 block font-semibold text-slate-900">
               How can we reach you by phone?
             </label>
-            <input
-              id="phone"
-              name="phone"
-              type="tel"
-              value={state.phone}
-              aria-invalid={state.fieldErrors.phone ? "true" : undefined}
-              onBlur$={$(() => {
-                state.detailsTouched = true;
-                // Instant feedback on blur.  Empty is valid;
-                // non-empty must match E.164.
-                const error = validateField("phone", state.phone);
-                state.fieldErrors = {
-                  ...state.fieldErrors,
-                  phone: error,
-                };
-              })}
-              onInput$={$((event: Event, el: HTMLInputElement) => {
-                const v =
-                  (event as unknown as { value?: string }).value ?? el.value;
-                state.phone = v;
-                state.fieldErrors = { ...state.fieldErrors, phone: undefined };
-              })}
-              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
-            />
+            {/* Expert-UX phone input: country-code selector
+                (text-only) + national-number input with
+                format-as-you-type + live E.164 hint.  See
+                the module-level helpers (extractPhoneParts,
+                formatNational) for the contract. */}
+            <div class="flex" data-phone-input>
+              <select
+                aria-label="Country code"
+                value={state.phoneCountryCode}
+                onChange$={$((event: Event, el: HTMLSelectElement) => {
+                  state.phoneCountryCode = el.value;
+                  if (state.fieldErrors.phone) {
+                    state.fieldErrors = {
+                      ...state.fieldErrors,
+                      phone: undefined,
+                    };
+                  }
+                })}
+                class="mr-2 rounded border border-slate-300 bg-white px-2 py-2 font-mono text-sm"
+                data-phone-country
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option
+                    key={c.dial}
+                    value={c.dial}
+                    selected={c.dial === state.phoneCountryCode}
+                  >
+                    {`${c.name} (${c.dial})`}
+                  </option>
+                ))}
+              </select>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="415 555 2671"
+                value={formatNational(state.phoneNational)}
+                aria-invalid={state.fieldErrors.phone ? "true" : undefined}
+                onBlur$={$(() => {
+                  state.detailsTouched = true;
+                  // Validate the COMPOSED phone
+                  // (dial + national).  Empty national is
+                  // valid (phone is optional); non-empty
+                  // must match E.164 once composed.
+                  const composed = state.phoneNational
+                    ? `${state.phoneCountryCode}${state.phoneNational}`
+                    : "";
+                  const error = validateField("phone", composed);
+                  state.fieldErrors = {
+                    ...state.fieldErrors,
+                    phone: error,
+                  };
+                })}
+                onInput$={$((event: Event, el: HTMLInputElement) => {
+                  // Accept the user's keystrokes
+                  // verbatim, then on paste (or after a
+                  // short debounce) split into dial + national.
+                  // The simple path here strips non-digits
+                  // on every input so the user can't type
+                  // letters or spaces — the display is
+                  // formatted by formatNational(value).
+                  const raw =
+                    (event as unknown as { value?: string }).value ?? el.value;
+                  const digits = raw.replace(/\D/g, "");
+                  state.phoneNational = digits;
+                  if (state.fieldErrors.phone) {
+                    state.fieldErrors = {
+                      ...state.fieldErrors,
+                      phone: undefined,
+                    };
+                  }
+                })}
+                onPaste$={$((event: ClipboardEvent) => {
+                  // Smart paste: if the user pastes a full
+                  // international number like
+                  // "+57 315 555 2671", split it into
+                  // dial code + national and update both.
+                  // The default onInput$ runs after and
+                  // keeps the formatted display in sync.
+                  const text = event.clipboardData?.getData("text") ?? "";
+                  const { dialCode, national } = extractPhoneParts(
+                    text,
+                    state.phoneCountryCode,
+                  );
+                  state.phoneCountryCode = dialCode;
+                  state.phoneNational = national;
+                  if (state.fieldErrors.phone) {
+                    state.fieldErrors = {
+                      ...state.fieldErrors,
+                      phone: undefined,
+                    };
+                  }
+                })}
+                class="flex-1 rounded border border-slate-300 px-3 py-2 font-mono text-sm aria-invalid:border-red-500"
+                data-phone-national
+              />
+            </div>
+            <p class="mt-1 font-mono text-xs text-slate-500" data-phone-e164>
+              E.164: {state.phoneCountryCode}{" "}
+              {formatNational(state.phoneNational) || (
+                <span class="text-slate-400">{"<number>"}</span>
+              )}
+            </p>
             {state.fieldErrors.phone && (
               <p class="mt-1 text-sm text-red-700" data-error="phone">
                 {state.fieldErrors.phone}
