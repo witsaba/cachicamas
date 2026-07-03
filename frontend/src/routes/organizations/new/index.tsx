@@ -5,36 +5,95 @@ import {
   type FormAction,
   type FormActionResult,
 } from "~/components/organization-form/organization-form";
+import { createOrganization } from "~/lib/api";
 
 /**
  * /organizations/new — create-organization form route.
  *
- * Per locked decision #5, the `routeAction$` body calls the
- * application service directly (no HTTP round-trip from
- * action to handler).  For tests, see
- * `src/components/organization-form/organization-form.spec.tsx`
- * — the form component is testable in isolation with a
- * stubbed action.
+ * The form's `onSuccess$` hook is wired to `useNavigate()` so the
+ * URL becomes the breadcrumb (UX-7) after a 201.
  *
- * The form's `onSuccess$` hook is wired to `useNavigate()`
- * so the URL becomes the breadcrumb (UX-7) after a 201.
+ * SUBMIT ACTION
+ * -------------
+ * The submit action proxies the form to the database_administrator
+ * Go binary at `PUBLIC_API_BASE_URL` (default
+ * `http://localhost:8080`).  It uses Locked #3 form-encoded
+ * bodies — same field names the Qwik form already collects — so
+ * the wire shape stays mechanical.
+ *
+ * The Go binary's locked error envelope
+ * (`{ error, fields?, message? }`) is mapped to the form's
+ * discriminated `FormActionResult`:
+ *
+ *   - 201 → { ok: true, id }                     → navigate (UX-7)
+ *   - 400 validation → { ok: false, field: "form", message }
+ *                                                   → top-level alert
+ *   - 400 with identification field error
+ *                       → { ok: false, field: "identification", message }
+ *                                                   → inline slug error
+ *   - 409 conflict    → { ok: false, field: "identification", message }
+ *                                                   → inline conflict msg
+ *   - 5xx or network → { ok: false, field: "form", message }
+ *                                                   → top-level alert
+ *
+ * For the form's own tests, see
+ * `src/components/organization-form/organization-form.spec.tsx`.
  */
 
-const submitAction: FormAction = $(async (): Promise<FormActionResult> => {
-  // TODO(organizations-first-front): parse the form-encoded
-  // body via the shared Zod schema (src/lib/organization-schema.ts),
-  // then call the in-process application.OrganizationService.Create.
-  // Until the Qwik SSR + Go binary single-process wiring ships
-  // (locked R-5 in design §10), this action returns the
-  // locked 409 to exercise the inline error path in tests.
-  // The form component tests cover the success + 409 branches
-  // via stubbed actions.
-  return {
-    ok: false,
-    field: "identification",
-    message: "This slug is already taken. Try another.",
-  };
-});
+const submitAction: FormAction = $(
+  async (data: FormData): Promise<FormActionResult> => {
+    const fullName = String(data.get("full_name") ?? "");
+    const identification = String(data.get("identification") ?? "");
+    const shortname = String(data.get("shortname") ?? "");
+    const email = String(data.get("email") ?? "");
+    const phone = String(data.get("phone") ?? "");
+
+    const result = await createOrganization({
+      fullName,
+      identification,
+      ...(shortname ? { shortName: shortname } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    });
+
+    if (result.ok) {
+      return { ok: true, id: result.value.id };
+    }
+
+    if (result.kind === "validation") {
+      // Find the first field-level message and either attach it
+      // to the `identification` slot (which the form already
+      // renders inline for slug conflicts) or surface it as a
+      // generic form error.  Anything beyond identification is
+      // a structural bug caught by client-side Zod first, so
+      // the generic bucket is the safe default.
+      const identificationMessage = result.fields.identification;
+      if (identificationMessage) {
+        return {
+          ok: false,
+          field: "identification",
+          message: identificationMessage,
+        };
+      }
+      const firstField = Object.entries(result.fields)[0];
+      return {
+        ok: false,
+        field: "form",
+        message: firstField
+          ? `${firstField[0]}: ${firstField[1]}`
+          : "Invalid form data.",
+      };
+    }
+
+    if (result.kind === "conflict") {
+      return { ok: false, field: "identification", message: result.message };
+    }
+
+    // server / offline / not_found — anything we can't map onto
+    // a field bubbles up as a top-level form alert.
+    return { ok: false, field: "form", message: result.message };
+  },
+);
 
 export default component$(() => {
   const nav = useNavigate();

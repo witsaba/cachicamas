@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,6 +69,33 @@ func envString(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// resolveCORSAllowOrigins picks the CORS allowlist for this run.
+// Activation rules (see httpiface/cors.go):
+//
+//   - CORS_ALLOW_ORIGINS set   → split on `,`, trim, keep non-empty.
+//                                 Works regardless of SERVICE_ENV;
+//                                 safest knob for production-like
+//                                 staging where you need a specific
+//                                 allowlist.
+//   - SERVICE_ENV=development  → default to http://localhost:5173
+//                                 so `pnpm dev` Just Works.
+//   - Anything else            → returns nil (CORS disabled).
+func resolveCORSAllowOrigins() []string {
+	if v := os.Getenv("CORS_ALLOW_ORIGINS"); v != "" {
+		var out []string
+		for _, o := range strings.Split(v, ",") {
+			if s := strings.TrimSpace(o); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	if envString("SERVICE_ENV", "development") == "development" {
+		return []string{"http://localhost:5173"}
+	}
+	return nil
 }
 
 func main() {
@@ -166,6 +194,23 @@ func main() {
 	e := echo.New()
 	e.Use(otel.Middleware(serviceName))
 	httpiface.RegisterHealthRoute(e)
+
+	// CORS: cross-origin requests from the Qwik dev server
+	// (http://localhost:5173 by default) need an explicit allowlist
+	// so the browser doesn't block the POST round-trip.  See
+	// httpiface/cors.go for the activation rules.
+	corsOrigins := resolveCORSAllowOrigins()
+	if len(corsOrigins) > 0 {
+		slog.Info("cors enabled",
+			"service_env", envString("SERVICE_ENV", "development"),
+			"allowed_origins", corsOrigins,
+		)
+		e.Use(httpiface.CORS(httpiface.CORSMiddlewareConfig{AllowOrigins: corsOrigins}))
+	} else {
+		slog.Info("cors disabled (same-origin expected)",
+			"service_env", envString("SERVICE_ENV", "development"),
+		)
+	}
 
 	// Organizations API: wire the pgx-backed repository (sharing the
 	// same *sql.DB the migration runner just used) into the

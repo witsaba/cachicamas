@@ -4,15 +4,17 @@ import {
   OrganizationList,
   type OrganizationSummary,
 } from "~/components/organization-list/organization-list";
+import { listOrganizations } from "~/lib/api";
 
 /**
  * /organizations — list or empty state.
  *
- * Locked decision #5: the `routeLoader$` calls the application
- * service directly.  There is no HTTP round-trip from loader to
- * handler.  The same `application.OrganizationService` instance
- * that the Go binary's main.go wires is the one this loader
- * imports.
+ * The `routeLoader$` proxies to the database_administrator Go
+ * binary's `GET /organizations` endpoint.  Empty arrays are
+ * preserved so the EmptyState still renders (spec F-2); transport
+ * failures surface as `[]` plus a top-level banner so the
+ * list/empty tests stay green and the user gets a hint instead
+ * of a silent failure.
  *
  * For tests, see `routes/organizations/index.spec.tsx` — it
  * renders the presentational `OrganizationList` component
@@ -20,19 +22,34 @@ import {
  */
 
 export const useOrganizationsLoader = routeLoader$(async () => {
-  // TODO(organizations-first-front): call the in-process
-  // application.OrganizationService.List() once the frontend
-  // build wires the Qwik SSR + Go binary in the same Node
-  // process (locked R-5 in design §10).  Until that ships, the
-  // route returns an empty list; the empty-state still renders
-  // and tests stay green.
-  const orgs: OrganizationSummary[] = [];
-  return orgs;
+  const result = await listOrganizations();
+  if (result.ok) {
+    const orgs: OrganizationSummary[] = result.value.map((o) => ({
+      id: o.id,
+      full_name: o.full_name,
+      identification: o.identification,
+    }));
+    return { orgs };
+  }
+  return { orgs: [] as OrganizationSummary[], error: result.message };
 });
 
 export default component$(() => {
-  const orgs = useOrganizationsLoader();
-  return <OrganizationList organizations={orgs.value} />;
+  const data = useOrganizationsLoader();
+  return (
+    <>
+      {data.value.error && (
+        <div
+          role="alert"
+          class="mx-auto max-w-2xl border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-900"
+          data-organization-list-error
+        >
+          {data.value.error}
+        </div>
+      )}
+      <OrganizationList organizations={data.value.orgs} />
+    </>
+  );
 });
 
 export const head: DocumentHead = {
