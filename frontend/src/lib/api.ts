@@ -93,16 +93,45 @@ export type ApiResult<T> =
 const DEFAULT_BASE_URL = "http://localhost:8080";
 
 /**
- * Resolve the API base URL.  Reads `PUBLIC_API_BASE_URL` (Qwik/Vite
- * inlines PUBLIC_* at build time).  Falls back to localhost so a
- * fresh `pnpm dev` works without an env file when docker compose
- * is up on the default port.
+ * Resolve the API base URL.
+ *
+ * Two paths:
+ *   - **Browser**: uses `import.meta.env.PUBLIC_API_BASE_URL` (Vite-inlined
+ *     at build time). A RELATIVE URL like `/api` works because the
+ *     browser resolves it against the page origin. This avoids
+ *     cross-origin requests from the browser to the Go bin.
+ *
+ *   - **Node SSR (server)**: uses `process.env.SERVER_API_BASE_URL`
+ *     (set via env var in the Dockerfile, e.g.
+ *     `SERVER_API_BASE_URL=http://database_administrator:8080`).
+ *     Node's `fetch` REQUIRES an absolute URL — a relative one throws
+ *     `TypeError: Failed to parse URL`. The server-side absolute URL
+ *     uses the compose network DNS name; no CORS issue because the
+ *     browser doesn't see this fetch.
+ *
+ * Falls back to `DEFAULT_BASE_URL` for local dev (no env vars set).
  */
 export function apiBaseUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined"
-      ? process.env.PUBLIC_API_BASE_URL
-      : undefined;
+  // Detect Node SSR context. In Node, `process` is defined and
+  // `import.meta.env` may not be populated the same way.
+  const isNode =
+    typeof process !== "undefined" &&
+    typeof (process as { versions?: unknown }).versions !== "undefined";
+
+  if (isNode) {
+    const fromServerEnv = process.env.SERVER_API_BASE_URL;
+    return (
+      fromServerEnv && fromServerEnv.trim().length > 0
+        ? fromServerEnv
+        : DEFAULT_BASE_URL
+    ).replace(/\/+$/, "");
+  }
+
+  // Browser: PUBLIC_* env vars are Vite-inlined at build time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fromEnv = (import.meta as any).env?.PUBLIC_API_BASE_URL as
+    | string
+    | undefined;
   return (
     fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_BASE_URL
   ).replace(/\/+$/, "");

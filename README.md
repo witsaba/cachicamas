@@ -37,7 +37,7 @@ The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-a
 ## Resumed Table of Contents
 
 | # | Topic | TL;DR |
-|---|-------|-------|
+| --- | ------- | ------- |
 | 1 | [What is cachicamas?](#1-what-is-cachicamas) | Witsaba's SDLC framework, v0.0.1, wraps `/sdd-*` as its per-task engine. |
 | 2 | [Why does it exist?](#2-why-does-it-exist) | To enable a competitive engineering org with many internal companies, all running the same playbook. |
 | 3 | [v0.0.1 Scope](#3-v001-scope) | Thin slice: schema + PRD intake + metadata analysis + 1:1 milestone→task decomposition. |
@@ -79,7 +79,7 @@ The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-a
 It is NOT a replacement for the SDD pipeline. The SDD pipeline (explore → propose → spec → design → tasks → apply → verify → archive) is the **execution engine** cachicamas drives. cachicamas adds the **missing upper layer**: organization → project → PRD → milestone → task → spec → phase hierarchy, intake, analysis, and decomposition.
 
 | Identity | Value |
-|----------|-------|
+| ---------- | ------- |
 | Project | `cachicamas` |
 | Repo | [`witsaba/cachicamas`](https://github.com/witsaba/cachicamas) |
 | Primary branch | `main` |
@@ -107,7 +107,7 @@ v0.0.1 is intentionally a **thin slice**. We want the smallest useful product th
 **Out of scope (deferred to v0.0.2 → v0.1.0):**
 
 | Item | Why deferred |
-|------|--------------|
+| ------ | -------------- |
 | R1 | Frozen interface spec — needs more usages before freezing |
 | R2 | Skip self-analysis when repo == framework — needs framework-comparison logic |
 | R3 | Golden fixtures for PRD-comparison mode — needs reference PRDs |
@@ -124,7 +124,7 @@ These live in `openspec/changes/prd-orchestrator/proposal.md` → "Out of Scope"
 The framework is built as **hexagonal Go services** sharing a Postgres database. Each service owns its own HTTP layer, application layer, domain layer, and adapters — and communicates only through Postgres (no service-to-service HTTP).
 
 | Service | Purpose | Status |
-|---------|---------|--------|
+| --------- | --------- | -------- |
 | `database_administrator` | Migration runner + observability scaffolding. Owns all schema migrations under `src/migration/sql/`. | Live on `main` |
 | `prd_orchestrator` | The framework. PRD intake, analysis, decomposition. v0.0.1 thin slice. | In development (PR #11 open, chained-PR strategy) |
 | `frontend` (Qwik 1.20.0) | Operator UI for the orchestrator. | Scaffolded on `feat/qwik-frontend` worktree branch |
@@ -161,7 +161,7 @@ organization
 ## 5. Repository Layout
 
 | Path | Contents |
-|------|----------|
+| ------ | ---------- |
 | `backend/` | Go services. `database_administrator/` (live) and `prd_orchestrator/` (in flight). |
 | `frontend/` | Qwik 1.20.0 app. Scaffolded on the `feat/qwik-frontend` worktree branch. |
 | `openspec/` | OpenSpec artifacts. `project.md` (bootstrap), `AGENTS.md`, `config.yaml`, `changes/<change>/`, `specs/`. |
@@ -179,7 +179,7 @@ organization
 ## 6. Tech Stack
 
 | Layer | Tool | Version |
-|-------|------|---------|
+| ------- | ------ | --------- |
 | Language (backend) | Go | 1.26.3 |
 | HTTP framework | `github.com/labstack/echo/v5` | v5.2.1 |
 | Database | PostgreSQL (alpine) | 18-alpine3.24 |
@@ -202,7 +202,7 @@ organization
 cachicamas runs **on top of** the `/sdd-*` pipeline. Each cachicamas block delegates to one or more SDD phases. The orchestrator owns the *state machine*; the SDD sub-agents own the *artifact production*.
 
 | cachicamas block | SDD phase(s) | Output |
-|------------------|--------------|--------|
+| ------------------ | -------------- | -------- |
 | 1. Intake | `sdd-explore` | Exploration report |
 | 2. Proposal | `sdd-propose` | `proposal.md` |
 | 3. Design (PRD level) | `sdd-design` | `design.md` |
@@ -232,7 +232,7 @@ These are the standing rules. They are not aspirational — they are enforced.
 Strict TDD is **enabled**. This is non-negotiable for every change.
 
 | Capability | Value |
-|------------|-------|
+| ------------ | ------- |
 | Test runner | `go test ./...` (Makefile target: `make test` adds `-race -v`) |
 | Coverage command | `make test/cover` (writes `coverage.out`, atomic mode) |
 | Linter command | `make lint` (auto-installs `golangci-lint` if missing) |
@@ -278,6 +278,20 @@ open http://localhost:16686
 
 If `pnpm` is missing: `npm i -g pnpm` (Corepack is not installed on this machine — known issue, recorded in engram).
 
+## 10.1 Deploy to VPS
+
+The compose stack supports a **VPS profile** that exposes only the frontend (port 3015) to the host. All other services (Postgres, Go binary, Jaeger, OTel collector) stay on the private `cachicamas_network`. nginx inside the frontend container reverse-proxies `/api/*` to the Go binary, so the browser only sees one origin.
+
+```bash
+# Dev local (all services published, full debug surface):
+docker compose up -d --build
+
+# VPS (only the frontend in :3015; rest in the private network):
+docker compose -f docker-compose.yaml -f docker-compose.vps.yaml up -d --build
+```
+
+For VPS production, adjust `CORS_ALLOW_ORIGINS` in `.env` to the real public domain (`https://cachicamas.example.com`). The frontend stays accessible at `http://<host>:3015/`. The browser talks to the Go binary via the internal nginx reverse-proxy (`/api/*`); no cross-origin from the browser's perspective, so CORS is a non-issue in the normal flow.
+
 ## 11. The Agent-First Doc Pattern
 
 The pattern this README follows is **portable**. Three passes, top to bottom, so an agent (or a hurried human) can find what it needs at the level of detail it needs.
@@ -285,7 +299,7 @@ The pattern this README follows is **portable**. Three passes, top to bottom, so
 ### The three passes
 
 | Pass | What | Purpose | Cost to read |
-|------|------|---------|--------------|
+| ------ | ------ | --------- | -------------- |
 | **Pass 1: Resumed TOC** | A small table with one row per topic and a one-line answer. | Scan everything at a glance. Decide whether to keep reading. | One screen. |
 | **Pass 2: Full TOC** | The complete structured index with anchors. | Jump straight to a specific section. | One screen. |
 | **Pass 3: Content** | The detailed sections, each self-contained. | Read the depth you actually need. | Variable. |
@@ -293,7 +307,7 @@ The pattern this README follows is **portable**. Three passes, top to bottom, so
 ### Adapting to any document
 
 | Doc type | Pass 1 (Resumed TOC) | Pass 2 (TOC) | Pass 3 (Content) |
-|----------|----------------------|--------------|------------------|
+| ---------- | ---------------------- | -------------- | ------------------ |
 | README | Topic table with one-line answers | Anchor-linked headings | Detailed sections |
 | Architecture doc | Decision summary table | Section index | Trade-off analysis |
 | Onboarding guide | What you'll learn table | Step-by-step index | Step instructions |
@@ -306,7 +320,7 @@ The pattern this README follows is **portable**. Three passes, top to bottom, so
 For code, the same three passes apply — the "resumed TOC" becomes a **module/file summary**, the "full TOC" becomes a **symbol index**, and "content" is the **implementation**.
 
 | Pass | In a Go file | In a package | In a service |
-|------|--------------|--------------|--------------|
+| ------ | -------------- | -------------- | -------------- |
 | **Pass 1: Resumed view** | One-line `// Package ...` doc comment above the package + a 3–5 row table at the top of `main.go` listing each top-level symbol with its purpose | Package-level `doc.go` with a symbol summary table | Service `README.md` (this very pattern) + `application/services.go` index |
 | **Pass 2: Symbol index** | Comment header listing exported symbols (`// Exported: NewX, DoY, ZType`) | `package_symbols.go` (or generated) listing every symbol with a one-line summary | Service `Makefile` targets + `cmd/server/main.go` wiring |
 | **Pass 3: Implementation** | The actual functions and types | The actual `.go` files | The actual hex layout |
