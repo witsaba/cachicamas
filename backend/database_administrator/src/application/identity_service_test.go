@@ -44,6 +44,23 @@ type fakeIdentityRepo struct {
 	lastLookupArg string
 }
 
+func (f *fakeIdentityRepo) LookupByProviderAccountID(_ context.Context, provider, providerAccountID string) (*domain.Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookupCalls++
+	f.lastLookupArg = provider + "/" + providerAccountID
+	if f.byErr != nil {
+		return nil, f.byErr
+	}
+	for _, got := range f.byEmail {
+		if got.Provider == provider && got.ProviderAccountID == providerAccountID {
+			dup := *got
+			return &dup, nil
+		}
+	}
+	return nil, &domain.IdentityNotFoundError{Email: provider + "/" + providerAccountID}
+}
+
 func (f *fakeIdentityRepo) LookupByEmail(_ context.Context, email string) (*domain.Identity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

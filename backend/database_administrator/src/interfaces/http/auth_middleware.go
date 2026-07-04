@@ -29,9 +29,11 @@ package httpiface
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -86,6 +88,12 @@ type IdentityMiddlewareConfig struct {
 // authJSCookiePayload mirrors the canonical Auth.js JWT claims the
 // middleware reads. Field names are LOCKED — they match @auth/core's
 // Encode<JWT>() shape (sub/email/name/picture/exp/iat/jti).
+//
+// `sub` is the GitHub user ID (string) when the cookie was minted
+// by the GitHub OAuth provider without an Auth.js database adapter.
+// When an adapter is added, `sub` will be the adapter's user.id —
+// the verifier uses LookupByProviderAccountID either way, which is
+// stable across email changes.
 type authJSCookiePayload struct {
 	Sub     string `json:"sub,omitempty"`
 	Email   string `json:"email,omitempty"`
@@ -96,6 +104,18 @@ type authJSCookiePayload struct {
 	Exp     int64  `json:"exp,omitempty"`
 	Iat     int64  `json:"iat,omitempty"`
 	Jti     string `json:"jti,omitempty"`
+}
+
+// providerAccountIDForClaims returns the canonical (provider,
+// account_id) pair for the JWE claims, or "" when the claims don't
+// carry the data needed for the canonical lookup path. Currently
+// the slice is GitHub-only (provider = "github"), but the helper
+// is structured to accept a future provider list.
+func providerAccountIDForClaims(claims *authJSCookiePayload) (provider, accountID string) {
+	if claims.Sub == "" {
+		return "", ""
+	}
+	return "github", claims.Sub
 }
 
 // IdentityFromCookie returns an Echo middleware that reads the
@@ -181,8 +201,11 @@ func IdentityFromCookie(cfg IdentityMiddlewareConfig) echo.MiddlewareFunc {
 				return nil
 			}
 
-			// 4. Resolve the identity.user row.
-			identity, err := cfg.IdentityRepo.LookupByEmail(ctx, claims.Email)
+			// 4. Resolve the identity.user row. Prefer the canonical
+			//    (provider, account_id) lookup — stable across email
+			//    changes and forward-compatible for multi-provider.
+			//    Fall back to email when the JWE doesn't carry a sub.
+			identity, err := resolveIdentity(ctx, cfg.IdentityRepo, &claims)
 			if err != nil {
 				// Distinguish "not found" (configurable in the future)
 				// from "db down" (always 401 for the middleware path,
@@ -236,6 +259,38 @@ func writeUnauthorized(c *echo.Context, span trace.Span, logger *slog.Logger, re
 	// Use a stable envelope shape; the locked "code=unauthorized"
 	// matches the PR-3 spec scenario S-BAM-011/012.
 	_, _ = io.WriteString(c.Response(), `{"code":"unauthorized","message":"authentication required"}`)
+}
+
+// resolveIdentity implements the lookup-preference ordering documented
+// in the design (cachicamas-github-login design.md §2.1):
+//   1. If the JWE carries a (provider, account_id) pair (i.e.,
+//      claims.Sub is non-empty), call LookupByProviderAccountID first.
+//      This is the canonical path; it's stable across email changes
+//      and works for multi-provider.
+//   2. If the (provider, account_id) lookup misses, fall back to
+//      LookupByEmail. This handles the edge case where the JWE was
+//      minted before identity.account was populated (e.g., during
+//      a migration).
+//   3. If email is missing and no (provider, account_id) is present,
+//      return an error; the caller logs it as 401.
+func resolveIdentity(ctx context.Context, repo domain.IdentityRepository, claims *authJSCookiePayload) (*domain.Identity, error) {
+	provider, accountID := providerAccountIDForClaims(claims)
+	if provider != "" {
+		id, err := repo.LookupByProviderAccountID(ctx, provider, accountID)
+		if err == nil {
+			return id, nil
+		}
+		var notFound *domain.IdentityNotFoundError
+		if !errors.As(err, &notFound) {
+			// Real error (db down, etc.); propagate.
+			return nil, err
+		}
+		// Miss on the canonical lookup; fall through to email.
+	}
+	if claims.Email != "" {
+		return repo.LookupByEmail(ctx, claims.Email)
+	}
+	return nil, fmt.Errorf("auth_middleware: no identity lookup path available (no sub, no email)")
 }
 
 // deriveEncryptionKey applies the HKDF-SHA256 contract from
