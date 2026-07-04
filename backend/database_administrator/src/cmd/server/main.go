@@ -220,6 +220,32 @@ func main() {
 	orgService := application.NewOrganizationService(orgRepo, logger, otelglobal.Tracer(serviceName))
 	httpiface.RegisterOrganizationRoutes(e, orgService)
 
+	// Identity (cachicamas-github-login PR-3): wire the identity
+	// repository + the JWE-cookie verifier middleware. The middleware
+	// is registered AFTER CORS and BEFORE the protected route group,
+	// so a missing / tampered cookie short-circuits with 401 before
+	// the handler is invoked. AUTH_SECRET is the same value the
+	// frontend uses to encrypt the cookie (per ADR 0002 byte-level
+	// envelope contract).
+	authSecret := envString("AUTH_SECRET", "")
+	if authSecret == "" {
+		slog.Error("AUTH_SECRET must be set; exiting (cachicamas-github-login S-BAM-080)")
+		os.Exit(1)
+	}
+	cookieName := envString("AUTH_COOKIE_NAME", "authjs.session-token")
+	if httpiface.IsLikelyHTTPS(envString("ORIGIN", "")) {
+		cookieName = "__Secure-authjs.session-token"
+	}
+	identityRepo := postgres.NewIdentityRepo(db)
+	identityService := application.NewIdentityService(identityRepo, logger, otelglobal.Tracer(serviceName))
+	httpiface.RegisterProtectedWhoAmIRoute(e, identityService, httpiface.IdentityMiddlewareConfig{
+		AuthSecret:     authSecret,
+		CookieName:     cookieName,
+		IdentityRepo:   identityRepo,
+		Logger:         logger,
+		TracerProvider: otelglobal.GetTracerProvider(),
+	})
+
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
 	slog.Info("database_administrator listening",
