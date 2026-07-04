@@ -218,44 +218,38 @@ test("[routes/layout]: skip-to-main link is the first focusable element of <head
   expect(pos & 0x04).toBeTruthy();
 });
 
-test("[routes/layout]: registers a popstate listener on window that forces window.location.reload (UAT-8)", async () => {
-  // UAT-8 (2026-07-04): the layout registers a `popstate`
-  // listener via `useOnWindow` that calls
-  // `window.location.reload()`. This bypasses Qwik City's
-  // SPA router cache when the user clicks the browser back
-  // button after signing out — otherwise they see their
-  // cached authenticated /profile render.
-  //
-  // We CAN'T assert the runtime registration directly:
-  // createDOM() runs in vitest's `node` env and does NOT
-  // expose a global `window` or `document`, so a
-  // `vi.spyOn(window, "addEventListener")` fails. The
-  // listener registration is verified manually by signing
-  // out and clicking browser back (the user lands on /,
-  // clicks back, sees the anon surface, not the cached
-  // /profile render).
-  //
-  // What we CAN assert here is the static source: the
-  // layout file MUST contain the useOnWindow("popstate", ...)
-  // registration (NOT useOnDocument — popstate fires on
-  // window, not document, and the wrong hook means the
-  // listener never fires). This guards against the listener
-  // being accidentally removed or moved to the wrong hook
-  // by a future refactor.
-  const layoutPath = resolve(__dirname, "./layout.tsx");
-  const layoutSrc = readFileSync(layoutPath, "utf-8");
-expect(layoutSrc).toMatch(/useOnWindow\(\s*"popstate"/);
-  // Note: we don't add a `not.toMatch(/useOnDocument(...popstate...)/)`
-  // regression guard because the layout's own comment mentions the
-  // symbol historically. The positive `useOnWindow` assertion is
-  // sufficient — if a future contributor moves the listener to
-  // `useOnDocument`, the positive assertion still passes (because
-  // useOnWindow isn't replaced), but the live behavior regresses.
-  // Live verification (sign out -> click back -> anon surface)
-  // is the right surface for this regression class.
-  expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
-  // Sanity: the layout still renders the header with session
-  // chrome (the popstate listener shouldn't break SSR).
-  const screen = await renderWithSession(ANON_SESSION);
-  expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
-});
+
+  test("[routes/layout]: registers a capture-phase popstate listener that reloads (UAT-8 r4)", async () => {
+    // UAT-8 r4 (2026-07-04): the layout registers a capture-phase
+    // popstate listener on `window` via `useTask$` + raw
+    // `window.addEventListener(..., { capture: true })` that calls
+    // `e.stopImmediatePropagation()` + `window.location.reload()`.
+    // The capture phase is critical: Qwik City's own popstate
+    // listener for SPA navigation runs in the bubble phase, and
+    // if we run in the same phase we race with it -- Qwik often
+    // serves its cached component$ render before our reload takes
+    // effect. Running in capture + stopImmediatePropagation gives
+    // us a clean "block Qwik, then hard-reload" sequence.
+    //
+    // Static-source assertions (the runtime registration can't
+    // be verified in createDOM -- vitest's node env doesn't
+    // expose a global window).
+    const layoutPath = resolve(__dirname, "./layout.tsx");
+    const layoutSrc = readFileSync(layoutPath, "utf-8");
+    expect(layoutSrc).toMatch(/useTask\$/);
+    // Capture-phase raw addEventListener (bubble-phase default
+    // races with Qwik's own popstate handler for SPA navigation).
+    expect(
+      layoutSrc,
+    ).toMatch(
+      /window\.addEventListener\(\s*"popstate"\s*,\s*[^)]+,\s*\{\s*capture:\s*true\s*\}/,
+    );
+    // stopImmediatePropagation blocks Qwik's bubble-phase
+    // popstate listener from running and serving the cached
+    // component$ render.
+    expect(layoutSrc).toMatch(/stopImmediatePropagation/);
+    expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
+    // Sanity: layout still renders the header chrome.
+    const screen = await renderWithSession(ANON_SESSION);
+    expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
+  });

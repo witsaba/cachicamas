@@ -35,7 +35,7 @@
  * is good enough for the shell context; the per-route origins
  * stay on the page itself.
  */
-import { $, component$, Slot, useOnWindow } from "@builder.io/qwik";
+import { component$, Slot, useTask$ } from "@builder.io/qwik";
 import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
@@ -47,38 +47,52 @@ export default component$(() => {
   const isAuthenticated =
     session.value?.user !== null && session.value?.user !== undefined;
 
-  // UAT-8 (2026-07-04): re-validate session on browser back/forward.
-  // Without this, Qwik City's SPA router serves the CACHED component$
-  // render from the browser history when the user navigates back to
-  // a route they visited before signing out. The user lands on /,
-  // clicks "back", sees their cached /profile page with their own
-  // name/email/avatar — as if they were still signed in — until they
-  // refresh, at which point the server-side session check correctly
-  // sees the cleared cookie and renders the anon surface.
+  // UAT-8 revision 4 (2026-07-04): re-validate session on browser
+  // back/forward navigation. Without this, Qwik City's SPA router
+  // serves the CACHED component$ render from browser history when
+  // the user navigates back to a route they visited before signing
+  // out — their name/email/avatar still visible as if signed in,
+  // until they manually refresh (which re-runs the server-side
+  // session check correctly).
   //
-  // Forcing a hard reload on popstate makes the browser re-fetch the
-  // current URL from the server, which re-runs the session check
-  // against the latest cookie. The trade-off is that EVERY back/
-  // forward navigation triggers a full reload (not just post-logout),
-  // but the cost is minor (the page renders fast) and the correctness
-  // win is large (no stale authenticated renders after sign-out).
+  // Strategy: register a `popstate` listener on `window` IN THE
+  // CAPTURE PHASE via `useTask$` + raw `window.addEventListener`.
+  // This bypasses Qwik's `useOnWindow` (which uses bubble phase
+  // and races with Qwik's own popstate listener for SPA navigation)
+  // and runs BEFORE Qwik's listener, so the reload happens before
+  // Qwik can serve its cached component$ render. Calling
+  // `e.stopImmediatePropagation()` in capture phase also prevents
+  // Qwik from running its handler.
   //
-  // IMPORTANT: popstate fires on `window`, NOT on `document`. The
-  // first attempt used the document hook but the listener never
-  // fired because `document` and `window` are sibling roots, not
-  // ancestors — events don't bubble from window to document.
-  // `useOnWindow` is the right hook for window-level events.
-  // (See UAT-8 revision 2: 2026-07-04.)
-  useOnWindow(
-    "popstate",
-    $(() => {
-      // `window` is only defined in the browser; QRL handlers run
-      // client-side so the guard is belt-and-suspenders.
-      if (typeof window !== "undefined") {
-        window.location.reload();
-      }
-    }),
-  );
+  // Revision history (so a future contributor doesn't regress):
+  //   r1: useOnDocument("popstate", reload) — broken: popstate
+  //       fires on window, not document; sibling roots, no bubble.
+  //   r2: useOnWindow("popstate", reload) — registered in bubble
+  //       phase, races with Qwik's own popstate handler. Qwik
+  //       often serves the cached component$ before the reload
+  //       can take effect.
+  //   r3: useNavigate + forceReload — broken: useNavigate needs
+  //       qc-l context that createDOM() doesn't provide, fails
+  //       the layout spec.
+  //   r4 (current): useTask$ + raw addEventListener({ capture:
+  //       true }) + e.stopImmediatePropagation(). Runs before
+  //       Qwik's bubble-phase listener, blocks it, hard reloads.
+  useTask$(({ cleanup }) => {
+    if (typeof window === "undefined") return;
+    const handler = (e: PopStateEvent) => {
+      console.log("[UAT-8 r4] popstate fired in capture phase, reloading");
+      // Prevent Qwik's own popstate listener from running and
+      // serving the cached component$ render.
+      e.stopImmediatePropagation();
+      window.location.reload();
+    };
+    // { capture: true } ensures we run BEFORE Qwik's bubble-phase
+    // popstate listener for SPA navigation.
+    window.addEventListener("popstate", handler, { capture: true });
+    cleanup(() =>
+      window.removeEventListener("popstate", handler, { capture: true }),
+    );
+  });
 
   // S-AS-050: the skip link is the very first focusable element
   // of the document. It is visually hidden until focused (the
