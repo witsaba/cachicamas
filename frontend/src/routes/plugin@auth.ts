@@ -23,9 +23,6 @@
  */
 import { QwikAuth$ } from "@auth/qwik";
 import GitHub from "@auth/qwik/providers/github";
-import type { Account, User } from "@auth/core/types";
-import { handleSignIn, type SignInAccount, type SignInUser } from "~/lib/sign-in-callback";
-import { getSql } from "~/lib/db";
 
 export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
   (ev) => {
@@ -113,54 +110,15 @@ export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
               }
             : {}),
         }),
-          ],
-          // Required for non-Vercel/Netlify/Cloudflare deploys (qwik.dev docs
-          // are explicit). Without this, the Qwik Node server can refuse to
-          // construct correct callback URLs in compose / on the VPS.
-          trustHost: true,
-          // The same AUTH_SECRET the Go verifier uses to decrypt the JWE
-          // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
-          // envelope must match `@auth/core@0.34.3` (and forwards) exactly.
-          secret: ev.env.get("AUTH_SECRET"),
-          // cachicamas-github-login (R-FA-010..R-FA-030) — persist the
-          // GitHub identity to `identity.user` + `identity.account` on
-          // every successful sign-in. Best-effort: a transient SQL error
-          // is logged and swallowed so the OAuth roundtrip completes and
-          // the JWE cookie is still minted. Losing one persisted row is
-          // strictly better than refusing a successful GitHub sign-in.
-          //
-          // Auth.js's `events.signIn` signature declares `account` as
-          // optional and a `void` return. The GitHub OAuth flow always
-          // provides an account, so we early-return when missing (e.g.
-          // a JWT-only sign-in) and otherwise forward to handleSignIn.
-          // The `handleSignIn` boolean (used by its unit tests to deny
-          // sign-in on missing email) is intentionally discarded here:
-          // at this point in the Auth.js lifecycle the OAuth roundtrip
-          // has already succeeded, and the spec is best-effort.
-          events: {
-            signIn: async ({
-              user,
-              account,
-            }: {
-              user: User;
-              account?: Account | null;
-            }) => {
-              if (!account) {
-                return;
-              }
-              try {
-                await handleSignIn(await getSql(), {
-                  user: user as SignInUser,
-                  account: account as unknown as SignInAccount,
-                });
-              } catch (err) {
-                console.error(
-                  "[cachicamas] events.signIn persistence failed",
-                  err,
-                );
-              }
-            },
-          },
-        };
+      ],
+      // Required for non-Vercel/Netlify/Cloudflare deploys (qwik.dev docs
+      // are explicit). Without this, the Qwik Node server can refuse to
+      // construct correct callback URLs in compose / on the VPS.
+      trustHost: true,
+      // The same AUTH_SECRET the Go verifier uses to decrypt the JWE
+      // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
+      // envelope must match `@auth/core@0.34.3` (and forwards) exactly.
+      secret: ev.env.get("AUTH_SECRET"),
+    };
   },
 );

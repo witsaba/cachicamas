@@ -285,15 +285,6 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
       AUTH_TRUST_HOST: "true"
       AUTH_URL: ${AUTH_URL:-http://localhost:3015}
-      # cachicamas-github-login (PR-followup) — events.signIn callback
-      # uses porsager/postgres to UPSERT into identity.user +
-      # identity.account. The URL is constructed from the same
-      # QUEEN_USER/QUEEN_PASSWORD/POSTGRES_DB/POSTGRES_PORT that
-      # already gate the database_administrator service so the
-      # frontend and the Go verifier resolve to the same row.
-      # Mirror the fail-fast `${VAR:?msg}` posture used by the other
-      # compose vars above; QUEEN_PASSWORD is the actual gate.
-      IDENTITY_DATABASE_URL: postgres://${QUEEN_USER:-queen}:${QUEEN_PASSWORD:?QUEEN_PASSWORD is required to wire IDENTITY_DATABASE_URL for the frontend events.signIn callback}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-cachicamas_pg}
     ports:
       - "${FRONTEND_PORT:-3015}:3000"
     networks:
