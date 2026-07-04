@@ -20,9 +20,25 @@
  * per request via `ev.env.get(...)`, never at module load. This lets
  * the same Docker image be re-used across dev/staging/prod without a
  * rebuild when the operator rotates `AUTH_SECRET` or `AUTH_GITHUB_SECRET`.
+ *
+ * `events.signIn` persistence (cachicamas-identity-signin-callback):
+ *   The previous slice (PR #29, now superseded) wired this callback
+ *   to a direct Postgres client (`porsager/postgres`). That
+ *   architecture is wrong — the frontend and the backend shared the
+ *   same DB role + credentials, and the Vite bundler needed a stub
+ *   plugin to keep `postgres` out of the client bundle.
+ *
+ *   This slice (see ADR 0003) replaces it with an HMAC-signed POST
+ *   to the database_administrator Go service. The frontend's
+ *   identity-callback-client.ts handles canonicalization + signing
+ *   + dispatch. This callback just forwards the Auth.js event.
  */
 import { QwikAuth$ } from "@auth/qwik";
 import GitHub from "@auth/qwik/providers/github";
+import {
+  postIdentityCallback,
+  type SignInEvent,
+} from "~/lib/identity-callback-client";
 
 export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
   (ev) => {
@@ -119,6 +135,27 @@ export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
       // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
       // envelope must match `@auth/core@0.34.3` (and forwards) exactly.
       secret: ev.env.get("AUTH_SECRET"),
+      // Identity persistence: forward each successful GitHub sign-in
+      // to the database_administrator Go service so the
+      // identity.user + identity.account rows are persisted there
+      // (no longer from the Node SSR — see ADR 0003). The forwarding
+      // is best-effort: a service error is logged + swallowed so a
+      // successful OAuth roundtrip is never blocked by an identity
+      // persistence failure. The same posture PR #29 took (now
+      // superseded) — kept here because it is strictly better than
+      // refusing a successful GitHub sign-in.
+      events: {
+        signIn: async (event: SignInEvent) => {
+          try {
+            await postIdentityCallback(event);
+          } catch (err) {
+            console.error(
+              "[plugin@auth] identity signin-callback failed (best-effort; OAuth session is still valid):",
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        },
+      },
     };
   },
 );
