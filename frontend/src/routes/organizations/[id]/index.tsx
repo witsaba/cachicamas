@@ -1,10 +1,17 @@
 import { component$ } from "@builder.io/qwik";
-import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
+import {
+  routeLoader$,
+  type DocumentHead,
+  useLocation,
+} from "@builder.io/qwik-city";
 import {
   OrganizationReadback,
   type OrganizationReadbackProps,
 } from "~/components/organization-readback/organization-readback";
+import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { getOrganization } from "~/lib/api";
+import { requireSession } from "~/lib/require-session";
+import { useSession, useSignIn } from "~/routes/plugin@auth";
 
 /**
  * /organizations/{id} — read-back de una sola organización.
@@ -45,6 +52,28 @@ export const useOrganizationLoader = routeLoader$<{
 });
 
 export default component$(() => {
+  // cachicamas-login-ux (R-PR-003): anon visitors see the sign-in card
+  // BEFORE the loader hits the database_administrator API. Same pattern
+  // as the list route — guard first, fetch second.
+  const loc = useLocation();
+  const session = useSession();
+  const signIn = useSignIn();
+  // The current path (e.g. /organizations/123) is read from the request
+  // location so the card's `redirectTo` round-trips the user back to
+  // this specific org after sign-in.
+  const guard = requireSession(
+    session.value,
+    loc.url.pathname || "/organizations",
+  );
+  if (guard.kind === "anon") {
+    return (
+      <SignInRequiredCard
+        signIn={signIn}
+        description="Sign in to view this organization."
+        redirectTo={guard.pathname}
+      />
+    );
+  }
   const data = useOrganizationLoader();
   if (data.value.error || !data.value.org) {
     const message = data.value.error ?? "Organization not found.";

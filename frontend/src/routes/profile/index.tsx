@@ -27,12 +27,28 @@
  */
 import { $, component$ } from "@builder.io/qwik";
 import { type DocumentHead } from "@builder.io/qwik-city";
-import { useSession, useSignOut } from "~/routes/plugin@auth";
 import { ProfileView } from "~/components/profile-view/profile-view";
+import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
+import { requireSession } from "~/lib/require-session";
+import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
 
 export default component$(() => {
   const sessionSig = useSession();
+  const signInAction = useSignIn();
   const signOutAction = useSignOut();
+  // Guard first. The card is the anon surface; `ProfileView` is the
+  // authenticated one. We pass `useSignIn` straight through to the
+  // card so the post-signin roundtrip still works.
+  const guard = requireSession(sessionSig.value, "/profile");
+  if (guard.kind === "anon") {
+    return (
+      <SignInRequiredCard
+        signIn={signInAction}
+        description="Sign in to view your profile."
+        redirectTo={guard.pathname}
+      />
+    );
+  }
   // Wrap the Qwik Action's `.submit()` so the click handler has the
   // FormData shape Auth.js expects. Auth.js looks at the form fields
   // for the optional `redirectTo` (post-signout destination); we
