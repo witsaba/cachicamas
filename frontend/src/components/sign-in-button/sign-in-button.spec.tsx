@@ -50,74 +50,74 @@ function makeFakeSignIn(): {
 
 describe("components/sign-in-button", () => {
   it("renders a <form> with the default label and the GitHub provider hidden field", async () => {
-        const { action } = makeFakeSignIn();
-        const { screen, render } = await createDOM();
-        await render(<SignInButton signIn={action} />);
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} />);
 
-        const form = screen.querySelector("form");
-        expect(form).toBeTruthy();
-        expect(form?.getAttribute("data-testid")).toBe("sign-in-button");
+    const form = screen.querySelector("form");
+    expect(form).toBeTruthy();
+    expect(form?.getAttribute("data-testid")).toBe("sign-in-button");
 
-        // Hidden providerId must be "github" so Auth.js picks the right provider.
-        const providerIdInput = form?.querySelector(
-          'input[name="providerId"]',
-        ) as HTMLInputElement | null;
-        expect(providerIdInput).toBeTruthy();
-        expect(providerIdInput?.type).toBe("hidden");
-        expect(providerIdInput?.value).toBe("github");
+    // Hidden providerId must be "github" so Auth.js picks the right provider.
+    const providerIdInput = form?.querySelector(
+      'input[name="providerId"]',
+    ) as HTMLInputElement | null;
+    expect(providerIdInput).toBeTruthy();
+    expect(providerIdInput?.type).toBe("hidden");
+    expect(providerIdInput?.value).toBe("github");
 
-        // Default redirectTo must be /profile.
-        const redirectToInput = form?.querySelector(
-          'input[name="redirectTo"]',
-        ) as HTMLInputElement | null;
-        expect(redirectToInput).toBeTruthy();
-        expect(redirectToInput?.value).toBe("/profile");
+    // Default redirectTo must be /profile.
+    const redirectToInput = form?.querySelector(
+      'input[name="redirectTo"]',
+    ) as HTMLInputElement | null;
+    expect(redirectToInput).toBeTruthy();
+    expect(redirectToInput?.value).toBe("/profile");
 
-        // Submit button must carry the default label (short, per UX-4
-        // amendment — the brand mark carries the provider identification).
-        // We use .includes() because textContent now includes the <path d="...">
-        // SVG path commands; the visible text is wrapped in a <span>.
-        const button = screen.querySelector('button[type="submit"]');
-        expect(button).toBeTruthy();
-        const labelSpan = button?.querySelector("span");
-        expect(labelSpan).toBeTruthy();
-        expect(labelSpan?.textContent?.trim()).toBe("Sign in");
-      });
+    // Submit button must carry the default label (short, per UX-4
+    // amendment — the brand mark carries the provider identification).
+    // We use .includes() because textContent now includes the <path d="...">
+    // SVG path commands; the visible text is wrapped in a <span>.
+    const button = screen.querySelector('button[type="submit"]');
+    expect(button).toBeTruthy();
+    const labelSpan = button?.querySelector("span");
+    expect(labelSpan).toBeTruthy();
+    expect(labelSpan?.textContent?.trim()).toBe("Sign in");
+  });
 
-      it("renders the GitHub Octocat inline <svg> as a recognizable brand anchor (UX-4 amendment)", async () => {
-        const { action } = makeFakeSignIn();
-        const { screen, render } = await createDOM();
-        await render(<SignInButton signIn={action} />);
+  it("renders the GitHub Octocat inline <svg> as a recognizable brand anchor (UX-4 amendment)", async () => {
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} />);
 
-        // The brand mark MUST be present in the button as an inline SVG
-        // (no external <img src="..."> — aphantasia-friendly and self-
-        // contained). data-testid guards the lookup against future
-        // expansion. aria-hidden="true" so screen readers announce the
-        // visible "Sign in" text label, not the SVG.
-        const form = screen.querySelector("form");
-        expect(form).toBeTruthy();
-        const mark = form?.querySelector(
-          'svg[data-testid="sign-in-button-github-mark"]',
-        );
-        expect(mark).toBeTruthy();
-        expect(mark?.getAttribute("aria-hidden")).toBe("true");
-        // The SVG MUST carry at least one <path> child (the Octocat
-        // silhouette). Asserting the path-element existence is sufficient
-        // — asserting exact path data is brittle and ties the test to the
-        // upstream logo file rather than the consumer contract.
-        const path = mark?.querySelector("path");
-        expect(path).toBeTruthy();
-      });
+    // The brand mark MUST be present in the button as an inline SVG
+    // (no external <img src="..."> — aphantasia-friendly and self-
+    // contained). data-testid guards the lookup against future
+    // expansion. aria-hidden="true" so screen readers announce the
+    // visible "Sign in" text label, not the SVG.
+    const form = screen.querySelector("form");
+    expect(form).toBeTruthy();
+    const mark = form?.querySelector(
+      'svg[data-testid="sign-in-button-github-mark"]',
+    );
+    expect(mark).toBeTruthy();
+    expect(mark?.getAttribute("aria-hidden")).toBe("true");
+    // The SVG MUST carry at least one <path> child (the Octocat
+    // silhouette). Asserting the path-element existence is sufficient
+    // — asserting exact path data is brittle and ties the test to the
+    // upstream logo file rather than the consumer contract.
+    const path = mark?.querySelector("path");
+    expect(path).toBeTruthy();
+  });
 
-      it("honors a custom label override", async () => {
-        const { action } = makeFakeSignIn();
-        const { screen, render } = await createDOM();
-        await render(<SignInButton signIn={action} label="Iniciar sesión" />);
+  it("honors a custom label override", async () => {
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} label="Iniciar sesión" />);
 
-        const button = screen.querySelector('button[type="submit"]');
-        const labelSpan = button?.querySelector("span");
-        expect(labelSpan?.textContent?.trim()).toBe("Iniciar sesión");
-      });
+    const button = screen.querySelector('button[type="submit"]');
+    const labelSpan = button?.querySelector("span");
+    expect(labelSpan?.textContent?.trim()).toBe("Iniciar sesión");
+  });
 
   it("honors a custom redirectTo override", async () => {
     const { action } = makeFakeSignIn();
@@ -167,5 +167,35 @@ describe("components/sign-in-button", () => {
 
     const imgs = screen.querySelectorAll("form img");
     expect(imgs.length).toBe(0);
+  });
+
+  it("renders with cursor-pointer + hover/transition affordances (UAT-3 mouse UX)", async () => {
+    // UAT-3 (2026-07-04): the button lacked an explicit pointer
+    // cursor on some OSes (where <button> elements don't get one
+    // automatically) and the hover state was an instant bg flip
+    // with no transition. We now declare cursor-pointer explicitly
+    // + transition the chrome (bg / border / shadow) over 150ms
+    // + provide a subtle active-state press-down. We assert the
+    // classes are present in jsdom (no real CSS is computed in
+    // createDOM); visual verification is the UAT burden.
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} />);
+
+    const button = screen.querySelector('button[type="submit"]');
+    expect(button).toBeTruthy();
+    const cls = (button as HTMLElement).className;
+    // explicit cursor for cross-OS consistency (some browsers/OSes
+    // do NOT apply cursor: pointer to <button> automatically)
+    expect(cls).toMatch(/cursor-pointer/);
+    // hover bg still there
+    expect(cls).toMatch(/hover:bg-zinc-800/);
+    // new: hover shadow + hover border emphasis
+    expect(cls).toMatch(/hover:shadow-md/);
+    expect(cls).toMatch(/hover:border-zinc-600/);
+    // transition (without it the hover state is an instant flip)
+    expect(cls).toMatch(/transition-/);
+    // active-state press-down for click feedback
+    expect(cls).toMatch(/active:translate-y-px/);
   });
 });
