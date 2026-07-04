@@ -25,17 +25,16 @@
  *   from the JWT cookie payload, which Auth.js populates from the
  *   GitHub OAuth userinfo endpoint.
  */
-import { $, component$ } from "@builder.io/qwik";
+import { component$ } from "@builder.io/qwik";
 import { type DocumentHead } from "@builder.io/qwik-city";
 import { ProfileView } from "~/components/profile-view/profile-view";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { requireSession } from "~/lib/require-session";
-import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
+import { useSession, useSignIn } from "~/routes/plugin@auth";
 
 export default component$(() => {
   const sessionSig = useSession();
   const signInAction = useSignIn();
-  const signOutAction = useSignOut();
   // Guard first. The card is the anon surface; `ProfileView` is the
   // authenticated one. We pass `useSignIn` straight through to the
   // card so the post-signin roundtrip still works.
@@ -49,16 +48,13 @@ export default component$(() => {
       />
     );
   }
-  // Wrap the Qwik Action's `.submit()` so the click handler has the
-  // FormData shape Auth.js expects. Auth.js looks at the form fields
-  // for the optional `redirectTo` (post-signout destination); we
-  // default to `/` (the landing page).
-  const onSignOut$ = $(() => {
-    const fd = new FormData();
-    fd.set("redirectTo", "/");
-    return signOutAction.submit(fd);
-  });
-  return <ProfileView session={sessionSig.value} onSignOut$={onSignOut$} />;
+  // UAT-5 (2026-07-04): ProfileView no longer takes an `onSignOut$`
+  // callback — the avatar dropdown's Sign out entry (rendered by
+  // routes/layout.tsx via AvatarDropdown) is the sole sign-out
+  // affordance. Removing the duplication eliminated a redundant
+  // button from /profile. We deliberately do NOT call `useSignOut`
+  // here any more — the dropdown owns the action wiring.
+  return <ProfileView session={sessionSig.value} />;
 });
 
 export const head: DocumentHead = {

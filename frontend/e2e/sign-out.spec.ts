@@ -61,29 +61,23 @@ test.describe("GitHub sign-out", () => {
     );
     expect(session, "session cookie should be set after sign-in").toBeDefined();
 
-    // PR-4 (cachicamas-login-ux, T4.4.2): prefer the avatar
-    // dropdown's sign-out (the canonical path through the
-    // shell's avatar affordance). Fall back to the legacy
-    // /profile Sign out button if the dropdown isn't rendered
-    // (e.g. on tests that target the legacy route surface).
+    // UAT-5 (2026-07-04): the profile no longer renders its own
+    // Sign out button — the avatar dropdown's Sign out entry
+    // ([data-testid="avatar-menu-signout"]) is the sole sign-out
+    // affordance across the app. This e2e was previously a
+    // dual-path (avatar-dropdown preferred, profile button as a
+    // fallback); the fallback is removed because the button
+    // doesn't exist any more.
     const avatarTrigger = page.locator(
       'button[data-testid="avatar-dropdown"]',
     );
-    const avatarTriggerVisible = (await avatarTrigger.count()) > 0;
-    if (avatarTriggerVisible) {
-      await avatarTrigger.click();
-      const menuSignOut = page.locator(
-        '[data-testid="avatar-menu-signout"]',
-      );
-      await expect(menuSignOut).toBeVisible();
-      await menuSignOut.click();
-    } else {
-      const signOutBtn = page.locator(
-        '[data-testid="profile-sign-out"]',
-      );
-      await expect(signOutBtn).toBeVisible();
-      await signOutBtn.click();
-    }
+    await expect(avatarTrigger).toBeVisible();
+    await avatarTrigger.click();
+    const menuSignOut = page.locator(
+      '[data-testid="avatar-menu-signout"]',
+    );
+    await expect(menuSignOut).toBeVisible();
+    await menuSignOut.click();
 
     // 3. Wait for navigation away from /profile. Auth.js typically
     //    redirects to /auth/signout then to /; we tolerate either

@@ -10,13 +10,9 @@
  *   - Render ProfileView with various session shapes.
  *   - Assert the rendered text and the data-testid markers.
  */
-import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
-import {
-  ProfileView,
-  type ProfileSession,
-} from "./profile-view";
+import { ProfileView, type ProfileSession } from "./profile-view";
 
 describe("components/profile-view", () => {
   it("renders the user's name in <h1> when session is non-null (R-FA-058 brand-mark)", async () => {
@@ -33,20 +29,28 @@ describe("components/profile-view", () => {
     // F-1 (spec §6.2) + R-FA-058: exactly one <h1> on the page.
     expect(screen.querySelectorAll("h1").length).toBe(1);
     expect(screen.querySelector('[data-testid="profile-name"]')).toBeTruthy();
-    expect(screen.querySelector('[data-testid="profile-email"]')?.textContent).toBe(
-      "octo@example.com",
-    );
+    expect(
+      screen.querySelector('[data-testid="profile-email"]')?.textContent,
+    ).toBe("octo@example.com");
   });
 
   it("renders the user's avatar image only when session.user.image is non-empty", async () => {
     const withImage: ProfileSession = {
-      user: { name: "Octocat", email: "octo@example.com", image: "https://github.com/avatars/octo.png" },
+      user: {
+        name: "Octocat",
+        email: "octo@example.com",
+        image: "https://github.com/avatars/octo.png",
+      },
     };
     const { screen, render } = await createDOM();
     await render(<ProfileView session={withImage} />);
-    const img = screen.querySelector('[data-testid="profile-image"]') as HTMLImageElement | null;
+    const img = screen.querySelector(
+      '[data-testid="profile-image"]',
+    ) as HTMLImageElement | null;
     expect(img).toBeTruthy();
-    expect(img?.getAttribute("src")).toBe("https://github.com/avatars/octo.png");
+    expect(img?.getAttribute("src")).toBe(
+      "https://github.com/avatars/octo.png",
+    );
   });
 
   it("omits the <img> when session.user.image is null or empty", async () => {
@@ -64,8 +68,12 @@ describe("components/profile-view", () => {
     // The component renders null when there's no authenticated user.
     // The /profile route renders <SignInRequiredCard> in this case
     // (PR-1b #33), so ProfileView doesn't compete with its own CTA.
-    expect(screen.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
-    expect(screen.querySelector('[data-testid="profile-signed-in"]')).toBeFalsy();
+    expect(
+      screen.querySelector('[data-testid="profile-signed-out"]'),
+    ).toBeFalsy();
+    expect(
+      screen.querySelector('[data-testid="profile-signed-in"]'),
+    ).toBeFalsy();
     // And no SignInButton form either — the parent route owns the
     // sign-in affordance.
     expect(
@@ -73,68 +81,27 @@ describe("components/profile-view", () => {
     ).toBeFalsy();
   });
 
-  it("renders a Sign out button when onSignOut$ is provided", async () => {
-    const session: ProfileSession = {
-      user: { name: "Octocat", email: "octo@example.com", image: null },
-    };
-    // The onSignOut$ callback is wired at the call-site (routes/profile)
-    // and is invoked by Qwik's event handler, which we don't simulate in
-    // vitest. We just assert the structural presence + that the
-    // button text matches the locked copy.
-    const onSignOut$ = $(() => {}) as QRL<() => unknown>;
-    const { screen, render } = await createDOM();
-    await render(<ProfileView session={session} onSignOut$={onSignOut$} />);
-
-    const signOutBtn = screen.querySelector(
-      '[data-testid="profile-sign-out"]',
-    ) as HTMLButtonElement | null;
-    expect(signOutBtn).toBeTruthy();
-    // Label is wrapped in a <span> (UX-4 amendment 2026-07-04) so we
-    // assert the span's textContent instead of the button's (which
-    // also contains the SVG <path> commands).
-    const labelSpan = signOutBtn?.querySelector("span");
-    expect(labelSpan?.textContent?.trim()).toBe("Sign out");
-  });
-
-it("Sign out button renders the Lucide log-out icon + cursor-pointer + hover affordances (UAT-4)", async () => {
-  // UAT-4 (2026-07-04): mirror of the UAT-3 fix applied to the
-  // SignInButton — the profile's Sign out button was a text-only
-  // <button> with cursor defaulting to text-caret and an instant
-  // bg flip. We now render the Lucide "log-out" inline SVG as a
-  // functional visual anchor + cursor-pointer + smooth transition
-  // + subtle shadow + active press-down, matching the SignInButton
-  // pattern.
-  const session: ProfileSession = {
-    user: { name: "Octocat", email: "octo@example.com", image: null },
-  };
-  const onSignOut$ = $(() => {}) as QRL<() => unknown>;
-  const { screen, render } = await createDOM();
-  await render(<ProfileView session={session} onSignOut$={onSignOut$} />);
-
-  const button = screen.querySelector(
-    '[data-testid="profile-sign-out"]',
-  ) as HTMLButtonElement | null;
-  expect(button).toBeTruthy();
-  // Lucide log-out icon present + aria-hidden
-  const icon = button?.querySelector('svg[data-testid="sign-out-icon"]');
-  expect(icon).toBeTruthy();
-  expect(icon?.getAttribute("aria-hidden")).toBe("true");
-  // cursor-pointer + transition + hover chrome + active press-down
-  const cls = button?.className ?? "";
-  expect(cls).toMatch(/cursor-pointer/);
-  expect(cls).toMatch(/transition-/);
-  expect(cls).toMatch(/hover:shadow-md/);
-  expect(cls).toMatch(/hover:border-zinc-600/);
-  expect(cls).toMatch(/active:translate-y-px/);
-});
-
-  it("does not render a Sign out button when onSignOut$ is omitted (read-only mode)", async () => {
+it("does NOT render a Sign out button (UAT-5 — avatar dropdown is the sole sign-out affordance)", async () => {
+    // UAT-5 (2026-07-04): the profile previously rendered its own
+    // Sign out button. That affordance is now duplicated by the
+    // avatar dropdown's Sign out entry (data-testid="avatar-menu-signout"),
+    // which is reachable from any signed-in surface via the shell.
+    // Keeping two sign-out affordances was duplicative chrome; the
+    // profile's button was retired. The avatar dropdown's chrome
+    // is asserted in components/avatar-dropdown/avatar-dropdown.spec.tsx
+    // (S-AS-042).
     const session: ProfileSession = {
       user: { name: "Octocat", email: "octo@example.com", image: null },
     };
     const { screen, render } = await createDOM();
     await render(<ProfileView session={session} />);
-    expect(screen.querySelector('[data-testid="profile-sign-out"]')).toBeFalsy();
+    expect(
+      screen.querySelector('[data-testid="profile-sign-out"]'),
+    ).toBeFalsy();
+    // The sign-out-icon SVG was retired with the button.
+    expect(
+      screen.querySelector('svg[data-testid="sign-out-icon"]'),
+    ).toBeFalsy();
   });
 
   it("renders an empty name gracefully when session.user.name is null", async () => {
@@ -253,13 +220,17 @@ it("Sign out button renders the Lucide log-out icon + cursor-pointer + hover aff
     // rather than its own CTA competing with the card.
     const { screen: screen1, render: render1 } = await createDOM();
     await render1(<ProfileView session={null} />);
-    expect(screen1.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
+    expect(
+      screen1.querySelector('[data-testid="profile-signed-out"]'),
+    ).toBeFalsy();
 
     // Empty user object — same rule: render nothing.
     const empty: ProfileSession = { user: null };
     const { screen: screen2, render: render2 } = await createDOM();
     await render2(<ProfileView session={empty} />);
-    expect(screen2.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
+    expect(
+      screen2.querySelector('[data-testid="profile-signed-out"]'),
+    ).toBeFalsy();
 
     // Populated user object — also never renders signed-out.
     const populated: ProfileSession = {
@@ -267,6 +238,8 @@ it("Sign out button renders the Lucide log-out icon + cursor-pointer + hover aff
     };
     const { screen: screen3, render: render3 } = await createDOM();
     await render3(<ProfileView session={populated} />);
-    expect(screen3.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
+    expect(
+      screen3.querySelector('[data-testid="profile-signed-out"]'),
+    ).toBeFalsy();
   });
 });

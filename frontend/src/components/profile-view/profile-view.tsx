@@ -5,7 +5,6 @@
  *   R-PH-001 — renders the user's name as <h1> (the brand mark).
  *   R-PH-002 — renders email and avatar (when present).
  *   R-PH-003 — renders a github.com anchor when github_login is set.
- *   R-PH-004 — renders the SignOutButton when onSignOut$ is provided.
  *   R-PH-005 — renders a "Manage organizations" link to /organizations/new.
  *
  * Reference: `openspec/changes/cachicamas-login-ux/specs/app-shell/spec.md`
@@ -25,11 +24,18 @@
  * Aphantasic-friendly (UX-4, amended 2026-07-04):
  *   Text-first. The user's name is the visual hero; the email is a
  *   secondary line; the avatar <img> is the user's own identity
- *   (per UX-4, identity imagery is the one allowed <img>). The
- *   Sign out button renders a Lucide-style "log-out" inline <svg>
- *   (door + arrow, MIT-licensed) alongside the label as a
- *   functional visual anchor — same UX-4 carve-out as the
- *   SignInButton brand mark. No decorative iconography elsewhere.
+ *   (per UX-4, identity imagery is the one allowed <img>). No
+ *   decorative iconography elsewhere.
+ *
+ * UAT-5 (2026-07-04): this component previously rendered a Sign out
+ * button alongside the avatar block. That affordance is REDUNDANT
+ * with the avatar dropdown's Sign out entry (R-AS-005 + S-AS-042 in
+ * `app-shell/spec.md`), which is reachable from every signed-in
+ * surface via the shell's identity affordance. Keeping two sign-out
+ * affordances was duplicative chrome. The profile's Sign out button
+ * has been REMOVED; the avatar dropdown is the sole sign-out entry
+ * point. The `onSignOut$` prop + the Lucide log-out icon + the
+ * `data-testid="profile-sign-out"` were all retired with it.
  *   decorative icons.
  *
  * PR-4 history:
@@ -45,7 +51,7 @@
  *          now treats `session.user === null/empty` as "render
  *          nothing" — the parent route owns the anon surface.
  */
-import { component$, type QRL } from "@builder.io/qwik";
+import { component$ } from "@builder.io/qwik";
 import { safeAvatarSrc } from "~/lib/safe-avatar-src";
 
 /**
@@ -72,8 +78,6 @@ export interface ProfileSession {
 
 export interface ProfileViewProps {
   session: ProfileSession | null;
-  /** Optional QRL fired when the user clicks "Sign out". */
-  onSignOut$?: QRL<() => unknown>;
 }
 
 /**
@@ -83,103 +87,75 @@ export interface ProfileViewProps {
  * renders its own signed-out CTA (T4.3 — the branch was
  * unreachable post PR-1b).
  */
-export const ProfileView = component$<ProfileViewProps>(
-  ({ session, onSignOut$ }) => {
-    // T4.3: no signed-out branch. If session.user is missing, the
-    // route has already rendered SignInRequiredCard, so we just
-    // produce an empty root. Returning null from a component is
-    // the idiomatic Qwik pattern for "no content here".
-    if (!session?.user) {
-      return null;
-    }
+export const ProfileView = component$<ProfileViewProps>(({ session }) => {
+  // T4.3: no signed-out branch. If session.user is missing, the
+  // route has already rendered SignInRequiredCard, so we just
+  // produce an empty root. Returning null from a component is
+  // the idiomatic Qwik pattern for "no content here".
+  if (!session?.user) {
+    return null;
+  }
 
-    const user = session.user;
-    const userName = user.name ?? "";
-    const userEmail = user.email ?? "";
-    const userGithubLogin = user.github_login ?? "";
-    // Reuse the safeAvatarSrc allowlist (PR-2a #34). The same
-    // helper backs the AvatarDropdown's avatar; keeping the helper
-    // in one place means a future tightening of the allowlist
-    // (e.g., add a domain blocklist) applies at both surfaces at
-    // once.
-    const safeImage = safeAvatarSrc(user.image);
+  const user = session.user;
+  const userName = user.name ?? "";
+  const userEmail = user.email ?? "";
+  const userGithubLogin = user.github_login ?? "";
+  // Reuse the safeAvatarSrc allowlist (PR-2a #34). The same
+  // helper backs the AvatarDropdown's avatar; keeping the helper
+  // in one place means a future tightening of the allowlist
+  // (e.g., add a domain blocklist) applies at both surfaces at
+  // once.
+  const safeImage = safeAvatarSrc(user.image);
 
-    return (
-      <main class="mx-auto max-w-xl px-6 py-12" data-testid="profile-signed-in">
-        <h1 class="mb-2 text-2xl font-semibold" data-testid="profile-name">
-          {userName}
-        </h1>
-        <p class="mb-1 text-sm text-zinc-400" data-testid="profile-email">
-          {userEmail}
-        </p>
-        {userGithubLogin ? (
-          <p class="mb-6 text-sm">
-            <a
-              href={`https://github.com/${encodeURIComponent(userGithubLogin)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="font-mono text-sm text-zinc-300 underline hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
-              data-testid="profile-github-login"
-            >
-              @{userGithubLogin}
-            </a>
-          </p>
-        ) : null}
-        {safeImage ? (
-          <img
-            src={safeImage}
-            alt=""
-            width={64}
-            height={64}
-            class="mb-6 h-16 w-16 rounded-full"
-            data-testid="profile-image"
-          />
-        ) : null}
-        {onSignOut$ ? (
-          <button
-            type="button"
-            onClick$={onSignOut$}
-            class="mb-6 inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 shadow-sm transition-[background-color,box-shadow,transform,border-color] duration-150 hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 active:translate-y-px"
-            data-testid="profile-sign-out"
+  return (
+    <main class="mx-auto max-w-xl px-6 py-12" data-testid="profile-signed-in">
+      <h1 class="mb-2 text-2xl font-semibold" data-testid="profile-name">
+        {userName}
+      </h1>
+      <p class="mb-1 text-sm text-zinc-400" data-testid="profile-email">
+        {userEmail}
+      </p>
+      {userGithubLogin ? (
+        <p class="mb-6 text-sm">
+          <a
+            href={`https://github.com/${encodeURIComponent(userGithubLogin)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-mono text-sm text-zinc-300 underline hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+            data-testid="profile-github-login"
           >
-            {/*
-                  Functional visual anchor for "log out" (UX-4
-                  amendment, 2026-07-04) — Lucide's log-out icon
-                  (door + arrow, MIT-licensed). aria-hidden because
-                  the visible <span>Sign out</span> text label
-                  already announces the affordance. fill="none" +
-                  stroke="currentColor" matches the menu-item style
-                  from AvatarDropdown.
-                */}
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              width="14"
-              height="14"
-              aria-hidden="true"
-              focusable="false"
-              data-testid="sign-out-icon"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            <span>Sign out</span>
-          </button>
-        ) : null}
-        <hr class="my-4 border-zinc-800" />
-        <a
-          href="/organizations/new"
-          class="inline-block rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-100 underline hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
-          data-testid="profile-manage-orgs"
-        >
-          Manage organizations
-        </a>
-      </main>
-    );
-  },
-);
+            @{userGithubLogin}
+          </a>
+        </p>
+      ) : null}
+      {safeImage ? (
+        <img
+          src={safeImage}
+          alt=""
+          width={64}
+          height={64}
+          class="mb-6 h-16 w-16 rounded-full"
+          data-testid="profile-image"
+        />
+      ) : null}
+      {/*
+          UAT-5 (2026-07-04): the profile no longer renders its own
+          Sign out button — the avatar dropdown's Sign out entry
+          (data-testid="avatar-menu-signout" in the shell's identity
+          affordance) is the sole sign-out entry point. Keeping the
+          affordance only in the dropdown ensures there's one
+          discoverable sign-out path from any signed-in surface.
+          The `data-testid="profile-sign-out"` affordance was
+          retired with this change.
+        */}
+      <hr class="my-4 border-zinc-800" />
+      <a
+        href="/organizations/new"
+        class="inline-block rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-100 underline hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+        data-testid="profile-manage-orgs"
+      >
+        Manage organizations
+      </a>
+    </main>
+  );
+});
