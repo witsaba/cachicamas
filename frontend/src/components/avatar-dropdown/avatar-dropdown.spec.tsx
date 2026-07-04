@@ -140,18 +140,56 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       "Manage organizations",
     );
 
-    const form = screen.querySelector(
+const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',
     );
     expect(form).toBeTruthy();
     const button = screen.querySelector('[data-testid="avatar-menu-signout"]');
     expect(button).toBeTruthy();
-    expect((button as HTMLElement).textContent ?? "").toContain("Sign out");
+    // Label is wrapped in a <span> (UX-4 amendment 2026-07-04).
+    const labelSpan = button?.querySelector("span");
+    expect(labelSpan?.textContent?.trim()).toBe("Sign out");
 
     const redirectTo = form?.querySelector(
       'input[name="redirectTo"]',
     ) as HTMLInputElement | null;
     expect(redirectTo?.value).toBe("/");
+  });
+
+  it("Sign out menu item renders the Lucide log-out icon + cursor-pointer + hover/transition affordances (UAT-4)", async () => {
+    // UAT-4 (2026-07-04): the Sign out menu item had the same UX
+    // issues as the SignInButton before UAT-2/3 — no icon (so the
+    // functional meaning is text-only and weaker for aphantasic
+    // users), no explicit cursor-pointer, and an instant bg hover
+    // with no transition. We now:
+    //   - render the Lucide "log-out" inline SVG (functional visual
+    //     anchor per the UX-4 amendment that now covers both brand
+    //     marks and functional icons)
+    //   - add cursor-pointer + transition-* + active:translate-y-px
+    const { render, screen } = await createDOM();
+    const session: SessionShape = {
+      user: {
+    name: "Braejan Jan",
+    email: "braejan@example.com",
+    image: "https://avatars.githubusercontent.com/u/12345?v=4",
+      },
+    };
+    await render(
+      <AvatarDropdown session={session} signOut={fakeSignOut()} forceOpen />,
+    );
+    const button = screen.querySelector('[data-testid="avatar-menu-signout"]');
+    expect(button).toBeTruthy();
+    // Lucide icon present + aria-hidden (label does the talking)
+    const icon = button?.querySelector(
+      'svg[data-testid="sign-out-icon"]',
+    );
+    expect(icon).toBeTruthy();
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    // cursor-pointer + transition + active press-down
+    const cls = (button as HTMLElement).className;
+    expect(cls).toMatch(/cursor-pointer/);
+    expect(cls).toMatch(/transition-/);
+    expect(cls).toMatch(/active:translate-y-px/);
   });
 
   it("panel displays the user's name and email as a header (S-AS-040)", async () => {
@@ -185,7 +223,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("is text-first inside the panel (UX-4 / aphantasic-friendly)", async () => {
+it("is text-first inside the panel except for the Sign out icon (UX-4 / aphantasic-friendly)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -199,11 +237,14 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     );
     const panel = screen.querySelector('[role="menu"]') as HTMLElement | null;
     expect(panel).toBeTruthy();
-    // No decorative SVG inside the panel. (The avatar image is on the
-    // trigger, not in the panel.)
-    expect(panel?.querySelectorAll("svg").length).toBe(0);
-    // The only <img> in the panel should be... none, because the
-    // panel is text-only — the avatar image is in the trigger.
+    // UX-4 (amended 2026-07-04): no decorative imagery except
+    // functional icons as visual anchors. Exactly ONE <svg> is
+    // allowed in the panel — the Sign out Lucide log-out icon.
+    // (The avatar <img> lives on the trigger, NOT in the panel.)
+    const svgs = panel?.querySelectorAll("svg") ?? [];
+    expect(svgs.length).toBe(1);
+    expect(svgs[0]?.getAttribute("data-testid")).toBe("sign-out-icon");
+    // No <img> anywhere in the panel.
     expect(panel?.querySelectorAll("img").length).toBe(0);
   });
 });

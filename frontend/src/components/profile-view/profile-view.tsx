@@ -22,10 +22,14 @@
  *   tests inject any session shape they want. The same pattern as
  *   SignInButton.
  *
- * Aphantasic-friendly (UX-4):
+ * Aphantasic-friendly (UX-4, amended 2026-07-04):
  *   Text-first. The user's name is the visual hero; the email is a
  *   secondary line; the avatar <img> is the user's own identity
- *   (per UX-4, identity imagery is the one allowed <img>). No
+ *   (per UX-4, identity imagery is the one allowed <img>). The
+ *   Sign out button renders a Lucide-style "log-out" inline <svg>
+ *   (door + arrow, MIT-licensed) alongside the label as a
+ *   functional visual anchor — same UX-4 carve-out as the
+ *   SignInButton brand mark. No decorative iconography elsewhere.
  *   decorative icons.
  *
  * PR-4 history:
@@ -135,10 +139,36 @@ export const ProfileView = component$<ProfileViewProps>(
           <button
             type="button"
             onClick$={onSignOut$}
-            class="mb-6 rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+            class="mb-6 inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 shadow-sm transition-[background-color,box-shadow,transform,border-color] duration-150 hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 active:translate-y-px"
             data-testid="profile-sign-out"
           >
-            Sign out
+            {/*
+                  Functional visual anchor for "log out" (UX-4
+                  amendment, 2026-07-04) — Lucide's log-out icon
+                  (door + arrow, MIT-licensed). aria-hidden because
+                  the visible <span>Sign out</span> text label
+                  already announces the affordance. fill="none" +
+                  stroke="currentColor" matches the menu-item style
+                  from AvatarDropdown.
+                */}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="14"
+              height="14"
+              aria-hidden="true"
+              focusable="false"
+              data-testid="sign-out-icon"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Sign out</span>
           </button>
         ) : null}
         <hr class="my-4 border-zinc-800" />

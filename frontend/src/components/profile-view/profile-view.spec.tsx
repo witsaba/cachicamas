@@ -89,8 +89,44 @@ describe("components/profile-view", () => {
       '[data-testid="profile-sign-out"]',
     ) as HTMLButtonElement | null;
     expect(signOutBtn).toBeTruthy();
-    expect(signOutBtn?.textContent?.trim()).toBe("Sign out");
+    // Label is wrapped in a <span> (UX-4 amendment 2026-07-04) so we
+    // assert the span's textContent instead of the button's (which
+    // also contains the SVG <path> commands).
+    const labelSpan = signOutBtn?.querySelector("span");
+    expect(labelSpan?.textContent?.trim()).toBe("Sign out");
   });
+
+it("Sign out button renders the Lucide log-out icon + cursor-pointer + hover affordances (UAT-4)", async () => {
+  // UAT-4 (2026-07-04): mirror of the UAT-3 fix applied to the
+  // SignInButton — the profile's Sign out button was a text-only
+  // <button> with cursor defaulting to text-caret and an instant
+  // bg flip. We now render the Lucide "log-out" inline SVG as a
+  // functional visual anchor + cursor-pointer + smooth transition
+  // + subtle shadow + active press-down, matching the SignInButton
+  // pattern.
+  const session: ProfileSession = {
+    user: { name: "Octocat", email: "octo@example.com", image: null },
+  };
+  const onSignOut$ = $(() => {}) as QRL<() => unknown>;
+  const { screen, render } = await createDOM();
+  await render(<ProfileView session={session} onSignOut$={onSignOut$} />);
+
+  const button = screen.querySelector(
+    '[data-testid="profile-sign-out"]',
+  ) as HTMLButtonElement | null;
+  expect(button).toBeTruthy();
+  // Lucide log-out icon present + aria-hidden
+  const icon = button?.querySelector('svg[data-testid="sign-out-icon"]');
+  expect(icon).toBeTruthy();
+  expect(icon?.getAttribute("aria-hidden")).toBe("true");
+  // cursor-pointer + transition + hover chrome + active press-down
+  const cls = button?.className ?? "";
+  expect(cls).toMatch(/cursor-pointer/);
+  expect(cls).toMatch(/transition-/);
+  expect(cls).toMatch(/hover:shadow-md/);
+  expect(cls).toMatch(/hover:border-zinc-600/);
+  expect(cls).toMatch(/active:translate-y-px/);
+});
 
   it("does not render a Sign out button when onSignOut$ is omitted (read-only mode)", async () => {
     const session: ProfileSession = {
