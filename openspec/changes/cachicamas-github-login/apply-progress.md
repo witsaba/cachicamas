@@ -306,3 +306,72 @@ the staging area for the spec-promotion merge back to main.
 ### Next action
 
 PR-3 (`feat/cachicamas-github-login-pr3-backend-verifier`) is queued in its own worktree. Implementation starts in the next focused turn. The Go-side JWE verifier middleware uses `lestrrat-go/jwx/v2` and shares `AUTH_SECRET` with the frontend (per ADR 0002 byte-level envelope contract).
+
+---
+
+## PR-3 work-in-progress (2026-07-04)
+
+### Slice scope shipped
+
+- `interfaces/http/auth_middleware.go` — `IdentityFromCookie(cfg) echo.MiddlewareFunc` Echo middleware.
+  Reads the configured JWE cookie, decrypts with `lestrrat-go/jwx/v2`
+  using the locked envelope (alg=dir, enc=A256CBC-HS512, HKDF-SHA256
+  over AUTH_SECRET with salt=cookieName, length=64). Resolves the
+  identity.user row via `IdentityRepository.LookupByEmail`, populates
+  `c.Set("identity", *Identity)`, and emits a 401 envelope on any
+  failure. The HKDF derivation is verified against `@auth/core@0.41.2`
+  source (`src/jwt.ts`) byte-for-byte.
+
+- `interfaces/http/auth_middleware_test.go` — 8 unit tests + 4 sub-tests
+  covering R-BAM-001..R-BAM-031 (S-BAM-010..S-BAM-110):
+  - Valid cookie populates identity
+  - Tampered cookie returns 401
+  - Missing cookie returns 401
+  - Decryption shape (S-BAM-020)
+  - No Set-Cookie header on any code path (S-BAM-030)
+  - OTel span + slog line + PII-safe email_hash (S-BAM-070..072)
+  - Missing AUTH_SECRET panics at startup (S-BAM-080)
+  - Too-short AUTH_SECRET panics at startup (S-BAM-081)
+
+- `interfaces/http/whoami_handler.go` — demo `/api/v1/protected/whoami`
+  endpoint behind `IdentityFromCookie` middleware. Returns the
+  resolved identity's id/email/name/provider as JSON. Exposes
+  `IsLikelyHTTPS(origin)` helper for `main.go` cookie-name selection.
+
+- `interfaces/http/testdata/authjs_session_token.jwe` — committed
+  fixture produced by `scripts/regenerate_authjs_testdata.sh`.
+  The fixture is the byte-level cross-tooling evidence for the
+  JWE envelope contract (design §3).
+
+- `scripts/regenerate_authjs_testdata.sh` — regenerates the fixture
+  using `@auth/core`'s encoder with a known AUTH_SECRET + known
+  payload, then writes the JWE to testdata/.
+
+- `cmd/server/main.go` — wires AUTH_SECRET loading (with
+  fail-fast on missing/short), cookie-name selection (dev:
+  `authjs.session-token`, prod: `__Secure-authjs.session-token`),
+  `postgres.NewIdentityRepo` construction, and
+  `RegisterProtectedWhoAmIRoute` mounting AFTER CORS.
+
+- `go.mod` — `github.com/lestrrat-go/jwx/v2 v2.1.7`,
+  `golang.org/x/crypto v0.53.0` (for HKDF).
+
+### Gates green
+
+- `cd backend/database_administrator && make lint` → 0 issues.
+- `cd backend/database_administrator && make build` → 20MB binary.
+- `go test -race ./...` → all packages PASS (8 new auth tests,
+  including 4 sub-tests under TestIdentityFromCookie_NeverEmitsSetCookie).
+- `docker build backend/database_administrator` → succeeded.
+- Fixture round-trip: regenerated via `@auth/core@0.41.2` and read
+  by the Go verifier (alg=dir, enc=A256CBC-HS512) — plaintext
+  decoded successfully and identity lookup succeeded.
+
+### Open follow-ups
+
+- Integration test against live compose (currently the migration +
+  identity integration tests need a running postgres; deferred to
+  a follow-up turn that brings up compose for the e2e verification).
+- `tests/mocks-github-oauth/` unit tests (deferred from PR-2).
+- `e2e/sign-in-cookie-attrs.spec.ts`, `sign-in-denied.spec.ts`,
+  `sign-out.spec.ts` (deferred from PR-2).
