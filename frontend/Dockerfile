@@ -34,9 +34,13 @@ RUN corepack enable
 
 WORKDIR /app
 
+# CI=true disables pnpm's TTY-only confirmations for non-interactive builds.
+ENV CI=true
+
 # Copiamos solo los manifests primero para aprovechar el cache de Docker.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+# .npmrc MUST come along so pnpm reads shamefully-hoist=true before install.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+RUN pnpm install --frozen-lockfile --shamefully-hoist
 
 # Recién ahora copiamos el resto.
 COPY . .
@@ -52,7 +56,7 @@ ARG ORIGIN=http://localhost:3015
 ENV ORIGIN=${ORIGIN}
 
 # Genera el client bundle + el server bundle (SSR + reverse proxy).
-RUN pnpm build
+RUN CI=true pnpm build
 
 # ─── Stage 2: runner ────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
@@ -64,26 +68,16 @@ WORKDIR /app
 # deps que se importan dinámicamente (e.g., `undici` para fetch/HttpRequest)
 # y no se bundlean. Las copiamos desde el builder stage (donde pnpm
 # instaló todo el árbol de deps).
-# Solo copiamos `undici` para mantener la imagen liviana (~10MB extra).
-COPY --from=builder /app/node_modules/undici ./node_modules/undici
-
+#
 # cachicamas-github-login (PR-2): Auth.js for Qwik imports its peer
-# packages (@auth/core, @panva/hkdf, postgres) dynamically in places
-# that Vite can't statically resolve (lazy QRL boundary, jose ESM
-# graph). Mirror the undici pattern above. Total image weight added
-# is roughly +20MB; acceptable for the auth-shipping slice.
-COPY --from=builder /app/node_modules/@auth/qwik ./node_modules/@auth/qwik
-COPY --from=builder /app/node_modules/@auth/core ./node_modules/@auth/core
-COPY --from=builder /app/node_modules/@panva ./node_modules/@panva
-COPY --from=builder /app/node_modules/postgres ./node_modules/postgres
-# Auth.js' static-but-ESM transitive deps: jose (JWT sign/verify),
-# oauth4webapi (OAuth2 flow primitives), set-cookie-parser (cookie
-# parsing for the verifier middleware). These are bundled by Vite
-# but the resulting bundle dynamically imports them in the SSR
-# cold path, so the resolver needs them on disk.
-COPY --from=builder /app/node_modules/jose ./node_modules/jose
-COPY --from=builder /app/node_modules/oauth4webapi ./node_modules/oauth4webapi
-COPY --from=builder /app/node_modules/set-cookie-parser ./node_modules/set-cookie-parser
+# packages (@auth/core, @panva/hkdf, postgres, jose, oauth4webapi,
+# set-cookie-parser, preact-render-to-string) dynamically in places
+# that Vite can't statically resolve (lazy QRL boundary, ESM graph).
+# We COPY the entire node_modules from the builder (running pnpm with
+# shamefully-hoist=true via .npmrc) so all transitive deps are present
+# at runtime. Image weight is ~+30MB vs. the selective COPY approach;
+# acceptable for the auth-shipping slice.
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copiamos los artefactos del builder.
 COPY --from=builder /app/dist ./dist

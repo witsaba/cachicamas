@@ -26,15 +26,23 @@ import GitHub from "@auth/qwik/providers/github";
 
 export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
   (ev) => {
-    // GitHub OAuth URLs can be overridden via AUTH_GITHUB_BASE_URL.
+    // GitHub OAuth URLs can be overridden via AUTH_GITHUB_BASE_URL
+    // (browser-facing) and AUTH_GITHUB_API_BASE_URL (server-facing).
     // Production (unset) → https://github.com (canonical). Tests
     // (set) → the mocks-github-oauth compose service, e.g.
-    // http://mocks-github-oauth:3016. This keeps the same OAuth
-    // roundtrip wiring for both modes; only the upstream host differs.
+    //   browser:  http://localhost:3016 (host-published port)
+    //   server:   http://cachicamas-mocks-github-oauth:3016 (compose DNS)
+    // The two URLs are required because the BROWSER follows redirect
+    // URLs from the host's perspective, while the Node SSR fetches
+    // token / userinfo from the container network. AUTH_GITHUB_BASE_URL
+    // is the public-facing one (used for authorization.url);
+    // AUTH_GITHUB_API_BASE_URL is the server-facing one (used for
+    // token + userinfo). If only AUTH_GITHUB_BASE_URL is set, the
+    // server-facing URLs default to it for backward compatibility.
     const githubBaseUrl =
       ev.env.get("AUTH_GITHUB_BASE_URL") ?? "https://github.com";
     const githubApiBaseUrl =
-      ev.env.get("AUTH_GITHUB_API_BASE_URL") ?? "https://api.github.com";
+      ev.env.get("AUTH_GITHUB_API_BASE_URL") ?? githubBaseUrl;
     return {
       providers: [
         GitHub({
@@ -49,7 +57,7 @@ export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
                   url: `${githubBaseUrl}/login/oauth/authorize`,
                   params: { scope: "read:user user:email" },
                 },
-                token: `${githubBaseUrl}/login/oauth/access_token`,
+                token: `${githubApiBaseUrl}/login/oauth/access_token`,
                 userinfo: {
                   url: `${githubApiBaseUrl}/user`,
                   async request({
