@@ -84,7 +84,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
         <button
           ref={triggerRef}
           type="button"
-          class="h-10 w-10 overflow-hidden rounded-full ring-1 ring-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          class="h-10 w-10 cursor-pointer overflow-hidden rounded-full ring-1 ring-slate-200 transition-[box-shadow,transform] duration-150 hover:shadow-md hover:ring-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:scale-95"
           aria-haspopup="menu"
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}

@@ -92,7 +92,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(trigger?.querySelectorAll("img").length).toBe(0);
   });
 
-  it("rejects non-https avatar URLs (S-AS-022 / ADR-0009)", async () => {
+it("rejects non-https avatar URLs (S-AS-022 / ADR-0009)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -106,6 +106,42 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     // The trigger is still rendered; the avatar <img> is omitted.
     expect(trigger).toBeTruthy();
     expect(trigger?.querySelectorAll("img").length).toBe(0);
+  });
+
+  it("avatar trigger renders cursor-pointer + hover ring + transition + active scale (UAT-7)", async () => {
+    // UAT-7 (2026-07-04): the avatar dropdown trigger (the small
+    // circular button in the shell's identity affordance) had the
+    // same UX gap as the SignInButton before UAT-3 — no explicit
+    // cursor-pointer (some OSes don't switch on <button>),
+    // instant ring/border changes with no transition, and no
+    // press feedback. We now:
+    //   - add cursor-pointer for cross-OS consistency
+    //   - transition the ring + shadow chrome over 150ms
+    //   - deepen the ring color on hover (slate-200 → slate-400)
+    //   - add hover:shadow-md for subtle depth
+    //   - add active:scale-95 for a press-in feel appropriate
+    //     for a circular target (better than translate-y-px here
+    //     — circular buttons "compress" rather than slide down)
+    const { render, screen } = await createDOM();
+    const session: SessionShape = {
+      user: {
+        name: "Braejan Jan",
+        email: "braejan@example.com",
+        image: "https://avatars.githubusercontent.com/u/12345?v=4",
+      },
+    };
+    await render(<AvatarDropdown session={session} signOut={fakeSignOut()} />);
+    const trigger = screen.querySelector(
+      'button[data-testid="avatar-dropdown"]',
+    ) as HTMLButtonElement | null;
+    expect(trigger).toBeTruthy();
+    const cls = trigger?.className ?? "";
+    // cursor + transition + hover ring + active press-in
+    expect(cls).toMatch(/cursor-pointer/);
+    expect(cls).toMatch(/transition-/);
+    expect(cls).toMatch(/hover:ring-slate-400/);
+    expect(cls).toMatch(/hover:shadow-md/);
+    expect(cls).toMatch(/active:scale-95/);
   });
 
   it("panel lists Profile, Manage organizations, and Sign out entries (S-AS-040)", async () => {
@@ -140,7 +176,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       "Manage organizations",
     );
 
-const form = screen.querySelector(
+    const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',
     );
     expect(form).toBeTruthy();
@@ -169,9 +205,9 @@ const form = screen.querySelector(
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
-    name: "Braejan Jan",
-    email: "braejan@example.com",
-    image: "https://avatars.githubusercontent.com/u/12345?v=4",
+        name: "Braejan Jan",
+        email: "braejan@example.com",
+        image: "https://avatars.githubusercontent.com/u/12345?v=4",
       },
     };
     await render(
@@ -180,9 +216,7 @@ const form = screen.querySelector(
     const button = screen.querySelector('[data-testid="avatar-menu-signout"]');
     expect(button).toBeTruthy();
     // Lucide icon present + aria-hidden (label does the talking)
-    const icon = button?.querySelector(
-      'svg[data-testid="sign-out-icon"]',
-    );
+    const icon = button?.querySelector('svg[data-testid="sign-out-icon"]');
     expect(icon).toBeTruthy();
     expect(icon?.getAttribute("aria-hidden")).toBe("true");
     // cursor-pointer + transition + active press-down
@@ -223,7 +257,7 @@ const form = screen.querySelector(
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
   });
 
-it("is text-first inside the panel except for the Sign out icon (UX-4 / aphantasic-friendly)", async () => {
+  it("is text-first inside the panel except for the Sign out icon (UX-4 / aphantasic-friendly)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
