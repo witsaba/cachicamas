@@ -375,3 +375,71 @@ PR-3 (`feat/cachicamas-github-login-pr3-backend-verifier`) is queued in its own 
 - `tests/mocks-github-oauth/` unit tests (deferred from PR-2).
 - `e2e/sign-in-cookie-attrs.spec.ts`, `sign-in-denied.spec.ts`,
   `sign-out.spec.ts` (deferred from PR-2).
+
+---
+
+## PR-3 merged (post-merge housekeeping, 2026-07-04)
+
+### Git state
+
+| Item | Value |
+| --- | --- |
+| Merge commit on `origin/main` | `c4b89d4` "feat(backend): github_login PR-3 Go JWE verifier middleware (#22)" |
+| Merge method | Squash (PR button on GitHub) |
+| Local worktree | `cachicamas.post-pr3` on `post-pr3-archive` branch (per user rule: never edit `main` directly) |
+| PR-3 branch on origin | `feat/cachicamas-github-login-pr3-backend-verifier` (deleted by --delete-branch on merge) |
+
+### Spec promotion + archive
+
+- **backend-auth-middleware**: PR-3 slice is now live. The delta
+  `openspec/changes/cachicamas-github-login/specs/backend-auth-middleware/spec.md`
+  was **promoted to canonical** at
+  `openspec/specs/backend-auth-middleware/spec.md`. The delta is
+  preserved for the change history (under the archived folder).
+
+- **sdd-archive**: the entire change folder
+  `openspec/changes/cachicamas-github-login/` is moved to
+  `openspec/changes/archive/2026-07-04-cachicamas-github-login/`,
+  following the convention of
+  `openspec/changes/archive/2026-07-03-cachicamas-frontend-dockerize/`.
+  A `verify-report.md` is added that summarizes the implementation
+  walkthrough across the 3 chained PRs.
+
+### Canonical specs now under `openspec/specs/`
+
+- `db-migrations/`
+- `frontend-compose-and-cors/`
+- `frontend-e2e-and-client-data/`
+- `frontend-runtime/`
+- `identity-schema/` (PR-1 promoted)
+- `frontend-auth/` (PR-2 promoted)
+- `backend-auth-middleware/` (PR-3 promoted this turn)
+
+### Backend-auth-middleware canonical spec — quick reference
+
+- Capability: backend-auth-middleware
+- Domain: backend-auth
+- 17 scenarios (S-BAM-010..S-BAM-110) under `openspec/specs/backend-auth-middleware/spec.md`
+- Middleware: `IdentityFromCookie(cfg)` in `backend/database_administrator/src/interfaces/http/auth_middleware.go`
+- Demo endpoint: `/api/v1/protected/whoami` (returns identity as JSON)
+- Envelope contract (locked by ADR 0002): alg=dir, enc=A256CBC-HS512, HKDF-SHA256 over AUTH_SECRET with salt=cookieName, length=64. Verified byte-for-byte against `@auth/core@0.41.2/src/jwt.ts`.
+- Cross-tooling evidence: `backend/database_administrator/src/interfaces/http/testdata/authjs_session_token.jwe` (committed fixture produced by `@auth/core`'s encoder).
+
+### Change shipped: cachicamas-github-login
+
+All 3 chained PRs merged into `main`:
+
+| PR | Title | Commit | LOC |
+| --- | --- | --- | --- |
+| #18 | feat(identity): github_login schema + identity domain + ADRs | `69429c4` | +1,316 |
+| #20 | feat(frontend): github_login PR-2 frontend Auth.js UX | `7ea621a` | +1,968 |
+| #21 | chore(openspec): promote frontend-auth to canonical | `1f99796` | +343 |
+| #22 | feat(backend): github_login PR-3 Go JWE verifier | `c4b89d4` | +1,086 |
+
+### Forward notes (deferred to follow-up PRs)
+
+- 3 PR-2 e2e specs (`sign-in-cookie-attrs`, `sign-in-denied`,
+  `sign-out`).
+- Live-compose integration test for migration + identity_repo end-to-end.
+- `LookupByProviderAccountID` method on the IdentityRepository port
+  (for multi-provider support).
