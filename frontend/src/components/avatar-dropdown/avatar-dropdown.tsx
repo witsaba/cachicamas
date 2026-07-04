@@ -33,6 +33,7 @@
  *   (which the Qwik testing harness cannot synchronously fire).
  */
 import { component$ } from "@builder.io/qwik";
+import { Form } from "@builder.io/qwik-city";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
 import { safeAvatarSrc } from "~/lib/safe-avatar-src";
 import { useClickOutside } from "./use-click-outside";
@@ -137,11 +138,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
               </li>
             </ul>
             <hr class="my-3 border-slate-200" />
-            <form
-              method="post"
-              action={signOut.actionPath}
-              data-testid="avatar-menu-signout-form"
-            >
+            <Form action={signOut} data-testid="avatar-menu-signout-form">
               <input type="hidden" name="redirectTo" value="/" />
               <button
                 type="submit"
@@ -176,7 +173,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                 </svg>
                 <span>Sign out</span>
               </button>
-            </form>
+            </Form>
           </div>
         ) : null}
       </div>
