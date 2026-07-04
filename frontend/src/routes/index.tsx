@@ -1,5 +1,7 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
+import { useSignIn } from "~/routes/plugin@auth";
+import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 
 /**
  * Landing page — the front door of cachicamas.
@@ -50,6 +52,7 @@ const FEATURES = [
 ] as const;
 
 export default component$(() => {
+  const signIn = useSignIn();
   return (
     <main class="min-h-screen bg-white text-slate-900">
       {/* Subtle gradient accent — the only decorative
@@ -77,7 +80,7 @@ export default component$(() => {
           move your software forward — with agents in the loop. Text-first,
           built for clarity, designed for the AI era.
         </p>
-        <div class="mt-8 flex flex-wrap gap-3">
+        <div class="mt-8 flex flex-wrap items-center gap-3">
           <a
             href="/organizations/new"
             data-cta="get-started"
@@ -92,6 +95,15 @@ export default component$(() => {
           >
             See the interface
           </a>
+          {/* cachicamas-github-login (R-FA-040): GitHub OAuth sign-in CTA.
+                  Renders a <Form action={signIn}> with hidden providerId="github".
+                  Landing shows this regardless of session state — the user can
+                  sign in at any time to claim ownership of their work. */}
+          <SignInButton
+            signIn={signIn}
+            label="Sign in with GitHub"
+            redirectTo="/profile"
+          />
         </div>
       </section>
 
