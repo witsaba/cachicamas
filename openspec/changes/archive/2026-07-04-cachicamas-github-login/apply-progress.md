@@ -443,3 +443,39 @@ All 3 chained PRs merged into `main`:
 - Live-compose integration test for migration + identity_repo end-to-end.
 - `LookupByProviderAccountID` method on the IdentityRepository port
   (for multi-provider support).
+
+---
+
+## PR-24 merged (followup slice, 2026-07-04)
+
+### Merge state
+
+| Item | Value |
+| --- | --- |
+| Merge commit on `origin/main` | `ae61ceb` "test(frontend): cachicamas-github-login followup — 3 e2e specs + mocks unit tests (#24)" |
+| Merge method | Squash (PR button on GitHub) |
+
+### Slice shipped
+
+- 3 PR-2 e2e specs (deferred from PR-2 forward notes):
+  - `e2e/sign-in-cookie-attrs.spec.ts` (2 tests; R-FA-060..066)
+  - `e2e/sign-in-denied.spec.ts` (1 test; R-FA-070..076)
+  - `e2e/sign-out.spec.ts` (1 test; R-FA-080..086)
+- 1 PR-3 mocks unit-test file (deferred from PR-3 forward notes):
+  - `src/__tests__/mocks-github-oauth.test.ts` (10 tests)
+
+### Gates green post-merge
+
+- `pnpm test:ci` → **129 tests pass** (was 119 before PR #24; +10 mocks tests).
+- `pnpm lint` → 0 issues.
+- `pnpm fmt.check` → clean.
+- `pnpm build.types` → no TS errors.
+
+### Forward notes closed
+
+✅ 3 PR-2 e2e specs.
+✅ mocks-github-oauth unit tests.
+
+### Forward notes still open (1 remaining)
+
+- **Live Playwright run against the dockerized stack**: the 3 e2e specs are wired but only exercised locally. A full compose-up run would drive the OAuth roundtrip end-to-end through mocks + database_administrator + frontend. Documented as the last deferred item from the change.
