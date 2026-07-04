@@ -246,6 +246,26 @@ func main() {
 		TracerProvider: otelglobal.GetTracerProvider(),
 	})
 
+	// Identity signin-callback (cachicamas-identity-signin-callback):
+	// HMAC-signed POST endpoint from the Qwik frontend's events.signIn
+	// callback. Mounted on the public/internal route group; NOT under
+	// the JWE verifier middleware (PR-3) — this endpoint has its own
+	// HMAC + timestamp anti-replay window. See
+	// docs/adr/0003-add-identity-callback-hmac.md for the wire contract.
+	callbackSecret := envString("IDENTITY_CALLBACK_SECRET", "")
+	if callbackSecret == "" {
+		slog.Error("IDENTITY_CALLBACK_SECRET must be set; exiting (cachicamas-identity-signin-callback)")
+		os.Exit(1)
+	}
+	if len(callbackSecret) < 32 {
+		slog.Error("IDENTITY_CALLBACK_SECRET must be at least 32 raw bytes; exiting",
+			"length", len(callbackSecret),
+			"hint", "generate with `openssl rand -base64 32`",
+		)
+		os.Exit(1)
+	}
+	httpiface.RegisterIdentityCallbackRoute(e, identityService, callbackSecret, logger)
+
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
 	slog.Info("database_administrator listening",

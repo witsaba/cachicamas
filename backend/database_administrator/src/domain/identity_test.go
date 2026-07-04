@@ -101,6 +101,18 @@ func identityFieldNames[T any](t *testing.T, _ T) []string {
 	return out
 }
 
+// TestIdentityEvent_StructFields locks the field list of
+// domain.IdentityEvent (added in cachicamas-identity-signin-callback).
+// The handler depends on this shape; any rename or removal is a
+// deliberate spec amendment.
+func TestIdentityEvent_StructFields(t *testing.T) {
+	want := []string{"Email", "Name", "ImageURL", "Provider", "ProviderAccountID"}
+	got := identityFieldNames(t, domain.IdentityEvent{})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("IdentityEvent field list drift:\n got  = %v\n want = %v", got, want)
+	}
+}
+
 // Compile-time guard: the sentinel/typed error that the
 // infrastructure layer MUST return on a not-found row must be
 // reachable via errors.As. (This is documentation as much as test —

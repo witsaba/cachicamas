@@ -148,6 +148,31 @@ func (r *fakeIdentityRepo) LookupByEmail(_ context.Context, email string) (*doma
 	return id, nil
 }
 
+func (r *fakeIdentityRepo) Upsert(_ context.Context, ev domain.IdentityEvent) (*domain.Identity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byProviderCalls++
+	r.lastProviderCall = ev.Provider
+	r.lastProviderIDCall = ev.ProviderAccountID
+	if r.lookupErr != nil {
+		return nil, r.lookupErr
+	}
+	for _, id := range r.byEmail {
+		if id.Provider == ev.Provider && id.ProviderAccountID == ev.ProviderAccountID {
+			dup := *id
+			return &dup, nil
+		}
+	}
+	return &domain.Identity{
+		ID:                int64(len(r.byEmail) + 1),
+		Email:             ev.Email,
+		Name:              ev.Name,
+		ImageURL:          ev.ImageURL,
+		Provider:          ev.Provider,
+		ProviderAccountID: ev.ProviderAccountID,
+	}, nil
+}
+
 // newCapturingLogger returns an slog.Logger whose output is captured
 // into a buffer the test can inspect.
 func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
