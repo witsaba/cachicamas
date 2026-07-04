@@ -74,11 +74,41 @@ test.describe("GitHub OAuth roundtrip (mocks mode)", () => {
     await expect(nameH1).toBeVisible();
     await expect(nameH1).toHaveText("Octocat");
 
-    // The email line should carry the test user's primary email.
-    const emailLine = page.locator('[data-testid="profile-email"]');
-    await expect(emailLine).toHaveText("octocat@example.com");
+        // The email line should carry the test user's primary email.
+        const emailLine = page.locator('[data-testid="profile-email"]');
+        await expect(emailLine).toHaveText("octocat@example.com");
 
-    // The authjs.session-token cookie should be set with HttpOnly.
+        // PR-4 (cachicamas-login-ux, T4.4.1): the github_login
+        // anchor MUST render with the mocks user's login
+        // (TEST_USER.login = "octocat" in scripts/mocks-github-oauth
+        // /server.mjs). The href is hard-coded to
+        // https://github.com/{login} per R-PH-003.
+        const githubLoginLink = page.locator(
+          'a[data-testid="profile-github-login"]',
+        );
+        await expect(githubLoginLink).toBeVisible();
+        await expect(githubLoginLink).toHaveAttribute(
+          "href",
+          "https://github.com/octocat",
+        );
+        await expect(githubLoginLink).toHaveAttribute("target", "_blank");
+        await expect(githubLoginLink).toHaveAttribute(
+          "rel",
+          "noopener noreferrer",
+        );
+
+        // PR-4 (cachicamas-login-ux, T4.4.1): the manage-orgs link
+        // is part of the /profile enrichment (R-PH-005).
+        const manageOrgsLink = page.locator(
+          'a[data-testid="profile-manage-orgs"]',
+        );
+        await expect(manageOrgsLink).toBeVisible();
+        await expect(manageOrgsLink).toHaveAttribute(
+          "href",
+          "/organizations/new",
+        );
+
+        // The authjs.session-token cookie should be set with HttpOnly.
     const cookies = await context.cookies();
     const session = cookies.find(
       (c) => c.name === "authjs.session-token" || c.name === "__Secure-authjs.session-token",

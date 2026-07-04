@@ -12,27 +12,11 @@
  */
 import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   ProfileView,
   type ProfileSession,
-  type ProfileViewProps,
 } from "./profile-view";
-import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
-
-function fakeSignIn(): SignInActionLike {
-  return {
-    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-      (formData: FormData) => unknown
-    >,
-    actionPath: "/auth/signin",
-    isRunning: false,
-    formData: undefined,
-    value: undefined,
-    submitted: false,
-    status: undefined,
-  } as unknown as SignInActionLike;
-}
 
 describe("components/profile-view", () => {
   it("renders the user's name in <h1> when session is non-null (R-FA-058 brand-mark)", async () => {
@@ -74,22 +58,19 @@ describe("components/profile-view", () => {
     expect(screen.querySelectorAll("img").length).toBe(0);
   });
 
-  it("renders the signed-out CTA + SignInButton when session is null", async () => {
-    const signIn = fakeSignIn();
+  it("renders nothing when session is null (T4.3 — anon path is the route's SignInRequiredCard, not this component)", async () => {
     const { screen, render } = await createDOM();
-    await render(<ProfileView session={null} signIn={signIn} />);
-
-    expect(screen.querySelector('[data-testid="profile-signed-out"]')).toBeTruthy();
+    await render(<ProfileView session={null} />);
+    // The component renders null when there's no authenticated user.
+    // The /profile route renders <SignInRequiredCard> in this case
+    // (PR-1b #33), so ProfileView doesn't compete with its own CTA.
+    expect(screen.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
     expect(screen.querySelector('[data-testid="profile-signed-in"]')).toBeFalsy();
-    // SignInButton's data-testid is on the form element.
-    const signInForm = screen.querySelector(
-      'form[data-testid="sign-in-button"]',
-    );
-    expect(signInForm).toBeTruthy();
-    const providerIdInput = signInForm?.querySelector(
-      'input[name="providerId"]',
-    ) as HTMLInputElement | null;
-    expect(providerIdInput?.value).toBe("github");
+    // And no SignInButton form either — the parent route owns the
+    // sign-in affordance.
+    expect(
+      screen.querySelector('form[data-testid="sign-in-button"]'),
+    ).toBeFalsy();
   });
 
   it("renders a Sign out button when onSignOut$ is provided", async () => {
@@ -130,5 +111,126 @@ describe("components/profile-view", () => {
     // matches the locked domain.Identity.Name = string zero-value.
     const h1 = screen.querySelector("h1");
     expect(h1?.textContent ?? "").toBe("");
+  });
+
+  // ============================================================
+  // PR-4 of cachicamas-login-ux — /profile enrichment
+  // R-PH-003 — github_login link
+  // ============================================================
+
+  it("R-PH-003: renders a github.com link when session.user.github_login is set", async () => {
+    const session: ProfileSession = {
+      user: {
+        name: "Octocat",
+        email: "octo@example.com",
+        image: null,
+        github_login: "witsaba",
+      },
+    };
+    const { screen, render } = await createDOM();
+    await render(<ProfileView session={session} />);
+
+    const link = screen.querySelector(
+      'a[data-testid="profile-github-login"]',
+    ) as HTMLAnchorElement | null;
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute("href")).toBe("https://github.com/witsaba");
+    // The anchor opens in a new tab and is hardened against
+    // tabnabbing (target=_blank without rel="noopener" lets the
+    // opened page access window.opener).
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("R-PH-003: omits the github_login link when session.user.github_login is null/empty", async () => {
+    const session: ProfileSession = {
+      user: {
+        name: "Octocat",
+        email: "octo@example.com",
+        image: null,
+        github_login: null,
+      },
+    };
+    const { screen, render } = await createDOM();
+    await render(<ProfileView session={session} />);
+    expect(
+      screen.querySelector('a[data-testid="profile-github-login"]'),
+    ).toBeFalsy();
+  });
+
+  // ============================================================
+  // PR-4 of cachicamas-login-ux — /profile enrichment
+  // R-PH-005 — Manage organizations link
+  // ============================================================
+
+  it("R-PH-005: renders a 'Manage organizations' link pointing at /organizations/new", async () => {
+    const session: ProfileSession = {
+      user: {
+        name: "Octocat",
+        email: "octo@example.com",
+        image: null,
+      },
+    };
+    const { screen, render } = await createDOM();
+    await render(<ProfileView session={session} />);
+
+    const link = screen.querySelector(
+      'a[data-testid="profile-manage-orgs"]',
+    ) as HTMLAnchorElement | null;
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute("href")).toBe("/organizations/new");
+    expect((link?.textContent ?? "").trim()).toContain("Manage organizations");
+  });
+
+  // ============================================================
+  // PR-4 of cachicamas-login-ux — /profile enrichment
+  // R-AS-022 / ADR-0009 — non-https avatar URLs are sanitized
+  // ============================================================
+
+  it("R-AS-022: omits the avatar <img> when the URL is non-https (ADR-0009 / safeAvatarSrc)", async () => {
+    const session: ProfileSession = {
+      user: {
+        name: "Octocat",
+        email: "octo@example.com",
+        image: "javascript:alert(1)",
+      },
+    };
+    const { screen, render } = await createDOM();
+    await render(<ProfileView session={session} />);
+    // The dangerous scheme MUST NOT reach the DOM. The component
+    // reuses safeAvatarSrc() from PR-2a (#34) so the shape is the
+    // same as AvatarDropdown's avatar handling.
+    expect(screen.querySelectorAll("img").length).toBe(0);
+  });
+
+  // ============================================================
+  // PR-4 of cachicamas-login-ux — /profile enrichment
+  // T4.3 — ProfileView no longer renders the signed-out CTA.
+  // The /profile route now uses SignInRequiredCard for anon visitors
+  // (PR-1b), so the component's signed-out branch is unreachable.
+  // ============================================================
+
+  it("T4.3: never renders the signed-out CTA under any session shape", async () => {
+    // Null session — the parent route handles this via
+    // SignInRequiredCard. The component should treat the session as
+    // "no authenticated content to show" and render nothing,
+    // rather than its own CTA competing with the card.
+    const { screen: screen1, render: render1 } = await createDOM();
+    await render1(<ProfileView session={null} />);
+    expect(screen1.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
+
+    // Empty user object — same rule: render nothing.
+    const empty: ProfileSession = { user: null };
+    const { screen: screen2, render: render2 } = await createDOM();
+    await render2(<ProfileView session={empty} />);
+    expect(screen2.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
+
+    // Populated user object — also never renders signed-out.
+    const populated: ProfileSession = {
+      user: { name: "Octocat", email: "octo@example.com", image: null },
+    };
+    const { screen: screen3, render: render3 } = await createDOM();
+    await render3(<ProfileView session={populated} />);
+    expect(screen3.querySelector('[data-testid="profile-signed-out"]')).toBeFalsy();
   });
 });
