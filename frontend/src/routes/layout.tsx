@@ -35,7 +35,7 @@
  * is good enough for the shell context; the per-route origins
  * stay on the page itself.
  */
-import { component$, Slot } from "@builder.io/qwik";
+import { $, component$, Slot, useOnDocument } from "@builder.io/qwik";
 import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
@@ -46,6 +46,32 @@ export default component$(() => {
   const signOut = useSignOut();
   const isAuthenticated =
     session.value?.user !== null && session.value?.user !== undefined;
+
+  // UAT-8 (2026-07-04): re-validate session on browser back/forward.
+  // Without this, Qwik City's SPA router serves the CACHED component$
+  // render from the browser history when the user navigates back to
+  // a route they visited before signing out. The user lands on /,
+  // clicks "back", sees their cached /profile page with their own
+  // name/email/avatar — as if they were still signed in — until they
+  // refresh, at which point the server-side session check correctly
+  // sees the cleared cookie and renders the anon surface.
+  //
+  // Forcing a hard reload on popstate makes the browser re-fetch the
+  // current URL from the server, which re-runs the session check
+  // against the latest cookie. The trade-off is that EVERY back/
+  // forward navigation triggers a full reload (not just post-logout),
+  // but the cost is minor (the page renders fast) and the correctness
+  // win is large (no stale authenticated renders after sign-out).
+  useOnDocument(
+    "popstate",
+    $(() => {
+      // `window` is only defined in the browser; QRL handlers run
+      // client-side so the guard is belt-and-suspenders.
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
+    }),
+  );
 
   // S-AS-050: the skip link is the very first focusable element
   // of the document. It is visually hidden until focused (the

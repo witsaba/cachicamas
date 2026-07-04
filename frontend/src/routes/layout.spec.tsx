@@ -159,14 +159,16 @@ test("[routes/layout]: auth shell renders AvatarDropdown with avatar image + ari
   expect(img?.getAttribute("src")).toBe(
     "https://avatars.githubusercontent.com/u/12345",
   );
-  expect(
-    (trigger as HTMLButtonElement).getAttribute("aria-label"),
-  ).toBe("Braejan menu");
+  expect((trigger as HTMLButtonElement).getAttribute("aria-label")).toBe(
+    "Braejan menu",
+  );
 });
 
 test("[routes/layout]: auth shell does NOT render SignInButton (S-AS-021)", async () => {
   const screen = await renderWithSession(AUTH_SESSION);
-  expect(screen.querySelector('form[data-testid="sign-in-button"]')).toBeFalsy();
+  expect(
+    screen.querySelector('form[data-testid="sign-in-button"]'),
+  ).toBeFalsy();
 });
 
 test("[routes/layout]: non-https avatar URL is sanitized (S-AS-022, ADR-0009)", async () => {
@@ -197,21 +199,53 @@ test("[routes/layout]: non-https avatar URL is sanitized (S-AS-022, ADR-0009)", 
 });
 
 test("[routes/layout]: skip-to-main link is the first focusable element of <header>'s parent (S-AS-050)", async () => {
-  const screen = await renderWithSession(ANON_SESSION);
-  // The skip link is `<a href="#main">Skip to main content</a>`.
-  const skip = screen.querySelector(
-    'a[href="#main"][data-testid="skip-to-main"]',
-  );
-  expect(skip).toBeTruthy();
-  const header = screen.querySelector("header");
-  expect(header).toBeTruthy();
-  // The skip link MUST precede the header in document order. We
-  // assert via compareDocumentPosition so the test is robust to
-  // Qwik's createDOM host wrapper (which inserts an intermediate
-  // <q:host> around the rendered tree, so the parent isn't
-  // literally <body>).
-  const pos = (skip as Node).compareDocumentPosition(header as Node);
-  // DOCUMENT_POSITION_FOLLOWING = 0x04. If pos & 4 == true, the
-  // header comes AFTER the skip link in document order.
-  expect(pos & 0x04).toBeTruthy();
-});
+      const screen = await renderWithSession(ANON_SESSION);
+      // The skip link is `<a href="#main">Skip to main content</a>`.
+      const skip = screen.querySelector(
+        'a[href="#main"][data-testid="skip-to-main"]',
+      );
+      expect(skip).toBeTruthy();
+      const header = screen.querySelector("header");
+      expect(header).toBeTruthy();
+      // The skip link MUST precede the header in document order. We
+      // assert via compareDocumentPosition so the test is robust to
+      // Qwik's createDOM host wrapper (which inserts an intermediate
+      // <q:host> around the rendered tree, so the parent isn't
+      // literally <body>).
+      const pos = (skip as Node).compareDocumentPosition(header as Node);
+      // DOCUMENT_POSITION_FOLLOWING = 0x04. If pos & 4 == true, the
+      // header comes AFTER the skip link in document order.
+      expect(pos & 0x04).toBeTruthy();
+    });
+
+    test("[routes/layout]: registers a popstate listener that forces window.location.reload (UAT-8)", async () => {
+      // UAT-8 (2026-07-04): the layout registers a `popstate`
+      // listener via `useOnDocument` that calls
+      // `window.location.reload()`. This bypasses Qwik City's
+      // SPA router cache when the user clicks the browser back
+      // button after signing out — otherwise they see their
+      // cached authenticated /profile render.
+      //
+      // We CAN'T assert the runtime registration directly:
+      // createDOM() runs in vitest's `node` env and does NOT
+      // expose a global `document`, so a `vi.spyOn(document,
+      // "addEventListener")` fails. The listener registration
+      // is verified manually by reloading the page after sign-out
+      // (the user lands on /, clicks back, sees the anon
+      // surface, not the cached /profile render).
+      //
+      // What we CAN assert here is the static source: the
+      // layout file MUST contain the useOnDocument("popstate", ...)
+      // registration. This guards against the listener being
+      // accidentally removed by a future refactor.
+      const layoutPath = resolve(__dirname, "./layout.tsx");
+      const layoutSrc = readFileSync(layoutPath, "utf-8");
+      expect(layoutSrc).toMatch(/useOnDocument\(\s*"popstate"/);
+      expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
+      // Sanity: the layout still renders the header with session
+      // chrome (the popstate listener shouldn't break SSR).
+      const screen = await renderWithSession(ANON_SESSION);
+      expect(
+        screen.querySelector('[data-testid="app-shell-header"]'),
+      ).toBeTruthy();
+    });
