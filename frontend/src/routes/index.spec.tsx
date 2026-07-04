@@ -155,3 +155,50 @@ test("[routes/index]: T2.12/2.13 — SignInButton is present in the hero CTA sec
   ) as HTMLInputElement | null;
   expect(providerIdInput?.value).toBe("github");
 });
+
+test("[routes/index]: PR-3 — SignInButton is hidden in the hero when the visitor is authenticated (cachicamas-login-ux T3.2)", async () => {
+  // PR-3 of cachicamas-login-ux wraps the landing's SignInButton
+  // in `if (!session)` so authenticated visitors do not see a
+  // stale sign-in CTA competing with the shell's AvatarDropdown.
+  // We place this test LAST because the vi.doMock + resetModules
+  // pattern leaks state into subsequent tests if applied earlier.
+  vi.doMock("~/routes/plugin@auth", () => ({
+    useSession: () => ({
+      value: {
+        user: {
+          name: "Braejan",
+          email: "braejan@example.com",
+          image: "https://avatars.githubusercontent.com/u/12345",
+        },
+      },
+    }),
+    useSignIn: () => ({
+      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+        (formData: FormData) => unknown
+      >,
+      actionPath: "/auth/signin",
+    }),
+    useSignOut: () => ({
+      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+        (formData: FormData) => unknown
+      >,
+      actionPath: "/auth/signout",
+    }),
+    onRequest: () => Promise.resolve(),
+  }));
+  vi.resetModules();
+  const { default: AuthedIndex } = await import("./index");
+  const { screen, render } = await createDOM();
+  await render(<AuthedIndex />);
+  // No sign-in form in the landing hero — the shell's
+  // AvatarDropdown (PR-2b) is the identity affordance for
+  // authenticated visitors.
+  const signInForm = screen.querySelector(
+    'form[data-testid="sign-in-button"]',
+  );
+  expect(signInForm).toBeFalsy();
+  // The "Get started" primary CTA is still present — it points
+  // at /organizations/new, not the sign-in flow.
+  const cta = screen.querySelector('a[data-cta="get-started"]');
+  expect(cta).toBeTruthy();
+});

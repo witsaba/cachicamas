@@ -1,6 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
-import { useSignIn } from "~/routes/plugin@auth";
+import { useSession, useSignIn } from "~/routes/plugin@auth";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 
 /**
@@ -53,6 +53,9 @@ const FEATURES = [
 
 export default component$(() => {
   const signIn = useSignIn();
+  const session = useSession();
+  const isAuthenticated =
+    session.value?.user !== null && session.value?.user !== undefined;
   return (
     <main class="min-h-screen bg-white text-slate-900">
       {/* Subtle gradient accent — the only decorative
@@ -96,14 +99,19 @@ export default component$(() => {
             See the interface
           </a>
           {/* cachicamas-github-login (R-FA-040): GitHub OAuth sign-in CTA.
-                  Renders a <Form action={signIn}> with hidden providerId="github".
-                  Landing shows this regardless of session state — the user can
-                  sign in at any time to claim ownership of their work. */}
-          <SignInButton
-            signIn={signIn}
-            label="Sign in with GitHub"
-            redirectTo="/profile"
-          />
+                      Renders a <Form action={signIn}> with hidden providerId="github".
+                      Landing shows this for anonymous visitors — once the
+                      visitor has signed in, the shell's AvatarDropdown
+                      (introduced in PR-3 of cachicamas-login-ux) replaces
+                      this affordance. Wrapping in if(!session) avoids the
+                      stale sign-in CTA competing with the avatar dropdown. */}
+          {!isAuthenticated ? (
+            <SignInButton
+              signIn={signIn}
+              label="Sign in with GitHub"
+              redirectTo="/profile"
+            />
+          ) : null}
         </div>
       </section>
 
