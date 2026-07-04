@@ -28,29 +28,29 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
 
-// PostgresOrgRepo is the pgx-backed adapter that satisfies
+// OrgRepo is the pgx-backed adapter that satisfies
 // domain.OrganizationRepository. It uses the stdlib database/sql
 // interface so the rest of the system (handler, service) does not
 // need to know about pgx directly.
-type PostgresOrgRepo struct {
+type OrgRepo struct {
 	db *sql.DB
 }
 
-// NewPostgresOrgRepo constructs a PostgresOrgRepo. The caller
+// NewOrgRepo constructs a OrgRepo. The caller
 // passes in an already-opened *sql.DB (typically produced by
 // migration/postgres.Open in the composition root). The
 // constructor is cheap and side-effect-free; the first
 // repo.Insert / repo.SelectByID / repo.SelectAll is what
 // actually touches the database.
-func NewPostgresOrgRepo(db *sql.DB) *PostgresOrgRepo {
-	return &PostgresOrgRepo{db: db}
+func NewOrgRepo(db *sql.DB) *OrgRepo {
+	return &OrgRepo{db: db}
 }
 
-// Compile-time check that PostgresOrgRepo satisfies the
+// Compile-time check that OrgRepo satisfies the
 // domain.OrganizationRepository port. Mirrors the pattern in
 // migration/runner.go: if the public surface drifts the build
 // breaks here, not in a downstream consumer.
-var _ domain.OrganizationRepository = (*PostgresOrgRepo)(nil)
+var _ domain.OrganizationRepository = (*OrgRepo)(nil)
 
 // ---------------------------------------------------------------------------
 // Locked query constants. Magic strings become compile-time
@@ -76,7 +76,7 @@ const (
 // A unique-violation on identification (Postgres SQLSTATE 23505)
 // is translated into *domain.ConflictError so the handler does
 // not need to import pgx.
-func (r *PostgresOrgRepo) Insert(ctx context.Context, o *domain.Organization) (*domain.Organization, error) {
+func (r *OrgRepo) Insert(ctx context.Context, o *domain.Organization) (*domain.Organization, error) {
 	row := r.db.QueryRowContext(ctx,
 		`INSERT INTO organization (`+orgInsertColumnList+`)
          VALUES ($1, $2, $3, TRUE, $4, $5)
@@ -102,7 +102,7 @@ func (r *PostgresOrgRepo) Insert(ctx context.Context, o *domain.Organization) (*
 // The deterministic order is required by spec §3.2 so the
 // snapshot tests for the list endpoint are stable. Returns an
 // empty slice (NOT nil) when zero rows exist.
-func (r *PostgresOrgRepo) SelectAll(ctx context.Context) ([]domain.Organization, error) {
+func (r *OrgRepo) SelectAll(ctx context.Context) ([]domain.Organization, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+orgColumnList+` FROM `+orgTableName+` ORDER BY created_at ASC, id ASC`,
 	)
@@ -129,7 +129,7 @@ func (r *PostgresOrgRepo) SelectAll(ctx context.Context) ([]domain.Organization,
 // *domain.NotFoundError when no row matches. SQLSTATE-mapped
 // errors are returned wrapped in *domain.NotFoundError so the
 // handler does not need to import pgx.
-func (r *PostgresOrgRepo) SelectByID(ctx context.Context, id int64) (*domain.Organization, error) {
+func (r *OrgRepo) SelectByID(ctx context.Context, id int64) (*domain.Organization, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT `+orgColumnList+` FROM `+orgTableName+` WHERE id = $1`,
 		id,

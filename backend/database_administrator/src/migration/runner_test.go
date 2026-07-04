@@ -429,8 +429,12 @@ func truncateNewTables(t *testing.T, db *sql.DB) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// identity.account truncates cleanly even when empty; CASCADE
+		// handles the FK to identity.user. organization.owner_user_id
+		// is included in the truncate so a future FK violation is also
+		// cleared when a test rewinds.
 		_, _ = db.ExecContext(ctx,
-			"TRUNCATE TABLE spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
+			"TRUNCATE TABLE identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
 	}
 }
 
@@ -450,6 +454,11 @@ func wipeNewTables(t *testing.T, db *sql.DB) {
 		"DROP TABLE IF EXISTS requirement_spike CASCADE",
 		"DROP TABLE IF EXISTS requirement CASCADE",
 		"DROP TABLE IF EXISTS project CASCADE",
+		// identity.* tables must drop BEFORE organization so the FK
+		// on organization.owner_user_id can resolve. organization
+		// is dropped last to satisfy any FK from project.
+		"DROP TABLE IF EXISTS identity.account CASCADE",
+		"DROP TABLE IF EXISTS identity.user CASCADE",
 		"DROP TABLE IF EXISTS organization CASCADE",
 	}
 	for _, s := range stmts {
@@ -478,10 +487,18 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 4 {
-		t.Fatalf("Up applied %d migrations, want 4 (got %+v)", len(applied), applied)
+	// 5 migrations: hello_world, orgs_and_projects,
+	// requirements_and_milestones, tasks_and_specs, github_login.
+	if len(applied) != 5 {
+		t.Fatalf("Up applied %d migrations, want 5 (got %+v)", len(applied), applied)
 	}
-	wantVersions := []int64{20260621120000, 20260622120000, 20260622120001, 20260622120002}
+	wantVersions := []int64{
+		20260621120000,
+		20260622120000,
+		20260622120001,
+		20260622120002,
+		20260703120000, // cachicamas-github-login (identity.user + identity.account + organization.owner_user_id)
+	}
 	for i, want := range wantVersions {
 		if applied[i].ID != want {
 			t.Errorf("applied[%d].ID = %d, want %d", i, applied[i].ID, want)
@@ -937,9 +954,15 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// After this Up, all 4 witsaba versions must be in the bookkeeping
-	// table in chronological order.
-	wantVersions := []int64{20260621120000, 20260622120000, 20260622120001, 20260622120002}
+	// After this Up, all 5 witsaba versions must be in the bookkeeping
+	// table in chronological order (5th = cachicamas-github-login).
+	wantVersions := []int64{
+		20260621120000,
+		20260622120000,
+		20260622120001,
+		20260622120002,
+		20260703120000, // cachicamas-github-login
+	}
 	if len(applied) != len(wantVersions) {
 		t.Errorf("Up applied %d migrations, want %d (got %+v)", len(applied), len(wantVersions), applied)
 	}
@@ -950,7 +973,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 	}
 	// The older seeded row (20260101000000) must NOT have been
 	// re-applied. Read every row by version_id and assert the set is
-	// exactly the 5 expected values.
+	// exactly the 6 expected values (1 seeded + 5 witsaba).
 	rows, err := db.QueryContext(ctx,
 		`SELECT version_id FROM public.schema_migrations ORDER BY version_id`)
 	if err != nil {
@@ -968,7 +991,14 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows err: %v", err)
 	}
-	wantSet := []int64{20260101000000, 20260621120000, 20260622120000, 20260622120001, 20260622120002}
+	wantSet := []int64{
+		20260101000000,
+		20260621120000,
+		20260622120000,
+		20260622120001,
+		20260622120002,
+		20260703120000, // cachicamas-github-login
+	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
 	} else {
@@ -1194,13 +1224,13 @@ func TestRunner_Up_CheckConstraintsEnforceValidity(t *testing.T) {
 // tests.
 //
 // Lifecycle simulated:
-//   1. Org + project + PRD requirement intake
-//   2. Spike investigation (1 requirement, 1 spike)
-//   3. Milestone + task + spec creation
-//   4. Agent walks the spec through 7 phases (tdd_red → human_approved)
-//   5. AI review finds a gap → agent re-enters tdd_red (the agent-first flow)
-//   6. JSONB metadata round-trip on project
-//   7. The ONLY allowed UPDATE-in-place: organization.is_active toggle
+//  1. Org + project + PRD requirement intake
+//  2. Spike investigation (1 requirement, 1 spike)
+//  3. Milestone + task + spec creation
+//  4. Agent walks the spec through 7 phases (tdd_red → human_approved)
+//  5. AI review finds a gap → agent re-enters tdd_red (the agent-first flow)
+//  6. JSONB metadata round-trip on project
+//  7. The ONLY allowed UPDATE-in-place: organization.is_active toggle
 //
 // Each step asserts both the happy path AND the agent's expected
 // query result, so a future change that breaks the agent's mental
@@ -1218,8 +1248,8 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 4 {
-		t.Fatalf("expected 4 migrations applied (hello + 3 witsaba), got %d", len(applied))
+	if len(applied) != 5 {
+		t.Fatalf("expected 5 migrations applied (hello + 3 witsaba + cachicamas-github-login), got %d", len(applied))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

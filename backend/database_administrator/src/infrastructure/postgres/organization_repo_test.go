@@ -9,8 +9,8 @@
 // sdd-init/cachicamas): this file was written BEFORE
 // organization_repo.go existed. Running
 // `INTEGRATION=1 go test ./src/infrastructure/postgres/...` with
-// no PostgresOrgRepo type must fail with
-// "undefined: PostgresOrgRepo" — that failure IS the RED step.
+// no OrgRepo type must fail with
+// "undefined: OrgRepo" — that failure IS the RED step.
 package postgres_test
 
 import (
@@ -127,7 +127,7 @@ func TestRepo_Insert_AndSelectByID_RoundTrip(t *testing.T) {
 	ensureMigrations(t, db)
 	truncateOrgs(t, db)
 
-	repo := postgres.NewPostgresOrgRepo(db)
+	repo := postgres.NewOrgRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -196,7 +196,7 @@ func TestRepo_Insert_DuplicateIdentification_ReturnsConflictError(t *testing.T) 
 	ensureMigrations(t, db)
 	truncateOrgs(t, db)
 
-	repo := postgres.NewPostgresOrgRepo(db)
+	repo := postgres.NewOrgRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -234,7 +234,7 @@ func TestRepo_SelectAll_EmptyAndOrdered(t *testing.T) {
 	ensureMigrations(t, db)
 	truncateOrgs(t, db)
 
-	repo := postgres.NewPostgresOrgRepo(db)
+	repo := postgres.NewOrgRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -291,7 +291,7 @@ func TestRepo_SelectByID_NotFound_ReturnsNotFoundError(t *testing.T) {
 	ensureMigrations(t, db)
 	truncateOrgs(t, db)
 
-	repo := postgres.NewPostgresOrgRepo(db)
+	repo := postgres.NewOrgRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
