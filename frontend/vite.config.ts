@@ -21,12 +21,60 @@ errorOnDuplicatesPkgDeps(devDependencies, dependencies);
 
 export default defineConfig(({ command, mode }): UserConfig => {
   return {
-    plugins: [
-      qwikCity(),
-      qwikVite(),
-      tsconfigPaths({ root: "." }),
-      tailwindcss(),
-    ],
+        plugins: [
+          qwikCity(),
+          qwikVite(),
+          tsconfigPaths({ root: "." }),
+          tailwindcss(),
+          // Inline plugin: stub `postgres` (and its sub-paths) for the CLIENT
+          // build only. The SSR build (`-c adapters/node-server/vite.config.ts`)
+          // sees the real package; the client build sees a no-op stub that
+          // throws if accidentally called from the browser.
+          //
+          // Why this is required:
+          //   `frontend/src/lib/db.ts` does
+          //     `const { default: postgres } = await import("postgres")`
+          //   behind `if (!import.meta.env.SSR)` so the import is unreachable
+          //   in the client bundle at runtime. Rollup is conservative about
+          //   dynamic imports and walks `postgres`'s module graph anyway,
+          //   hitting `import { performance } from "perf_hooks"` and
+          //   failing the client build with
+          //     "performance" is not exported by "__vite-browser-external".
+          //   This plugin intercepts the resolveId before Rollup sees the
+          //   package, keeping both graphs (client and SSR) sound.
+          {
+            name: "cachicamas-stub-server-only-deps",
+            enforce: "pre",
+            resolveId(id, _importer, options) {
+              if (
+                options?.ssr === false &&
+                (id === "postgres" || id.startsWith("postgres/"))
+              ) {
+                return {
+                  id: "\0cachicamas-postgres-client-stub",
+                  moduleSideEffects: false,
+                };
+              }
+              return null;
+            },
+            load(id) {
+              if (id === "\0cachicamas-postgres-client-stub") {
+                return [
+                  "// Auto-generated stub. `postgres` is server-only;",
+                  "// see vite.config.ts and frontend/src/lib/db.ts.",
+                  "function notInBrowser() {",
+                  "  throw new Error(",
+                  '    "[cachicamas] postgres is server-only. The events.signIn callback must not run in the browser context."',
+                  "  );",
+                  "}",
+                  "export default notInBrowser;",
+                  "export { notInBrowser as postgres };",
+                ].join("\n");
+              }
+              return null;
+            },
+          },
+        ],
     // Vitest picks up `**/*.spec.{ts,tsx}` by default; the e2e
     // tests live under `frontend/e2e/` and use Playwright's
     // `test()` API, which collides with Vitest's globals.  Keep
@@ -39,16 +87,24 @@ export default defineConfig(({ command, mode }): UserConfig => {
         ".rollup.cache/**",
       ],
     },
-// This tells Vite which dependencies to pre-build in dev mode.
-    optimizeDeps: {
-      // Put problematic deps that break bundling here, mostly those with binaries.
-      // For example ['better-sqlite3'] if you use that in server functions.
-      exclude: [],
-      // Pre-bundle the auth stack so dev-mode cold start doesn't choke on
-      // @auth/qwik's deep ESM graph. Mirrors the project's pre-build list
-      // discipline. (cachicamas-github-login PR-2)
-      include: ["@auth/qwik", "@auth/core", "@panva/hkdf"],
-    },
+    // This tells Vite which dependencies to pre-build in dev mode.
+        optimizeDeps: {
+          // Put problematic deps that break bundling here, mostly those with binaries.
+          // For example ['better-sqlite3'] if you use that in server functions.
+          //
+          // cachicamas-github-login events.signIn (PR-followup): `postgres`
+          // uses Node built-ins (perf_hooks, stream, crypto) that do not
+          // exist in the browser. Skip dev pre-bundling so Vite does not
+          // try to resolve its module graph in the browser context. The
+          // CLIENT build still walks the graph; the
+          // `cachicamas-stub-server-only-deps` plugin (above) handles
+          // that by resolving `postgres` to a stub for non-SSR builds.
+          exclude: ["postgres"],
+          // Pre-bundle the auth stack so dev-mode cold start doesn't choke on
+          // @auth/qwik's deep ESM graph. Mirrors the project's pre-build list
+          // discipline. (cachicamas-github-login PR-2)
+          include: ["@auth/qwik", "@auth/core", "@panva/hkdf"],
+        },
     /**
      * This is an advanced setting. It improves the bundling of your server code. To use it, make sure you understand when your consumed packages are dependencies or dev dependencies. (otherwise things will break in production)
      */
