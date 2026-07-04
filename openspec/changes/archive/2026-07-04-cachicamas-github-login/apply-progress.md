@@ -533,3 +533,84 @@ The byte-level HKDF + JWE envelope contract between Auth.js (Qwik/Node) and `les
 | Canonical specs promoted: `identity-schema`, `frontend-auth`, `backend-auth-middleware` | ✅ shipped |
 
 **Single outstanding follow-up**: live Playwright compose exercise (automation path) — orthogonal to the change's correctness; the real-browser verification above is the higher-fidelity signal.
+
+---
+
+## Post-archive closure: identity persistence via `events.signIn`
+
+This slice was discovered during post-archive mapping (parent's frontend auth surface scout, 2026-07-04). The `handleSignIn(sql, event)` function in `frontend/src/lib/sign-in-callback.ts` shipped with 6 passing unit tests on PR #20, but the Auth.js config in `frontend/src/routes/plugin@auth.ts` never wired it as `events.signIn` — so every real GitHub sign-in since 2026-07-04 left `identity.user` + `identity.account` empty. The OAuth roundtrip visually worked because `/profile` reads the JWE claims directly, not from the DB.
+
+Closing this gap required two PRs and one revert.
+
+### PR #29 (`[SUPERSEDED]`, reverted) — direct Postgres from the frontend
+
+Branch `feat/cachicamas-github-login-events-signin`. Wired `events.signIn → handleSignIn(getSql(), event)` via a new `frontend/src/lib/db.ts` (singleton porsager/postgres client) + `IDENTITY_DATABASE_URL` env var. Required a Vite plugin (`cachicamas-stub-server-only-deps`) to keep `postgres` out of the client bundle.
+
+The implementation worked (138/138 tests green, real-browser verified) but was **architecturally wrong**: frontend and backend shared the same DB role (`queen`) and credentials (`IDENTITY_DATABASE_URL` interpolated `QUEEN_PASSWORD`), creating credential sprawl, privilege-boundary violation, schema duplication, and a fragile Rollup workaround.
+
+### Architecture pivot — HMAC backend callback
+
+Reviewed and validated as a real anti-pattern. The pivot moved persistence back through the backend via a new authenticated endpoint:
+
+- `POST /api/v1/identity/signin-callback` (database_administrator)
+- Auth: `X-Cachicamas-Timestamp: <unix_ms>` + `X-Cachicamas-Signature: base64(HMAC_SHA256(IDENTITY_CALLBACK_SECRET, ${ts}.${canonical_json}))`
+- Anti-replay: backend rejects if `|now - ts| > 300s`; constant-time compare via `crypto/hmac.Equal`.
+- Both sides share an identical canonical JSON serializer (sorted keys, recursive, no whitespace).
+- ADR 0003 (`docs/adr/0003-add-identity-callback-hmac.md`) documents the protocol decision, threat model (compose internal trust boundary), and rejected alternatives (JWT, mTLS).
+
+### PR #30 (merged) — backend callback path
+
+Branch `feat/cachicamas-identity-signin-callback`. Squashed into commit `f651835` on main.
+
+**Touch**:
+
+- Backend (`database_administrator`): `IdentityEvent` domain type, `IdentityService.UpsertFromOAuth`, `IdentityRepository.Upsert` (mirrors the SQL from `frontend/src/lib/sign-in-callback.ts`), `identity_handler.go` + tests (HMAC known-vector, bad-signature 401, expired-timestamp 401, replay-within-window 204, schema-validation 422, success-path integration test). 13.9 KB handler, 22.2 KB tests.
+- Frontend: `identity-callback-client.ts` + tests (canonicalizer, HMAC over `node:crypto`, fetch headers/body, error paths). 12.3 KB client, 14.9 KB tests. `plugin@auth.ts:events.signIn` now calls `postIdentityCallback(event)` instead of `getSql()`.
+- DELETED: `frontend/src/lib/db.ts`, `frontend/src/lib/sign-in-callback.ts` (and their `.test.ts`). The Vite plugin workaround reverted.
+- Compose + `.env.example`: removed `IDENTITY_DATABASE_URL`; added `IDENTITY_CALLBACK_SECRET` to BOTH `frontend` and `database_administrator` env blocks with `${VAR:?msg}` fail-fast posture.
+- `docs/adr/0003-add-identity-callback-hmac.md` (new).
+
+### PR #29 → revert → PR #30 timeline
+
+| Commit | Action |
+| --- | --- |
+| `78dc0c8` | Pre-PR-29 main (PR #28 verification commit) |
+| `cb570ed` | PR #29 merge (the wrong one — user merge action picked the `[SUPERSEDED]` PR in the UI) |
+| `03c35cf` | `Revert "[SUPERSEDED] ..." (#29)` — restores main to PR #28 + clean audit trail |
+| `f651835` | PR #30 squash merge — the correct HMAC backend callback architecture |
+
+### Gates green post-merge
+
+- Frontend `pnpm test:ci` → 138/138 pass.
+- Frontend `pnpm lint` → 0 issues.
+- Frontend `pnpm build.types` → exit 0.
+- Frontend `pnpm build` (client + SSR) → exit 0. **No `postgres` chunk in any bundle** (the Rollup error from PR #29 is gone because the dependency is gone).
+- Backend `go test ./...` → PASS.
+- Backend `bin/golangci-lint run` → 0 issues.
+- Backend `go build` → exit 0.
+- `docker compose build frontend database_administrator` → both images built; `IDENTITY_CALLBACK_SECRET` interpolation matches across services.
+
+### Forward notes still open (after PR #30, in priority order)
+
+1. **`mTLS / SPIFFE upgrade path`** — HMAC + timestamp is sufficient for compose's internal network but doesn't survive widening trust boundary (multi-cluster, external services). Replace HMAC with mTLS or SPIFFE when the trust boundary widens.
+2. **Nonce-based replay protection** — HMAC + ±5 min timestamp allows replay within the window. Add a server-side nonce store if sub-second replay protection is needed.
+3. **`identity_writer` least-privilege role** — backend still writes via `queen` (GRANT INSERT/UPDATE/SELECT on everything). An `identity_writer` role with INSERT/SELECT only on `identity.*` is the next properization slice.
+4. **Audit log** — add OTel span `auth.identity_callback.outcome` with `success|401|422|500` attributes per sign-in, and/or write to a future `identity.audit` table.
+5. **Live Playwright against dockerized stack** — the existing playwright specs are mocks-only; the automation path for the full compose-up + Playwright e2e is still deferred (orthogonal to the changes above).
+
+### Change shipped: cachicamas-github-login — FINAL (supersedes "FINAL" above)
+
+| Aspect | Status |
+| --- | --- |
+| Schema + identity domain (PR #18, #26) | ✅ shipped |
+| Frontend Auth.js UX (PR #20) + URL split (PR #27) | ✅ shipped |
+| Backend Go JWE verifier (PR #22) | ✅ shipped |
+| 3 e2e specs + mocks unit tests (PR #24) | ✅ shipped |
+| Compose env wiring | ✅ shipped (PR #28 verification) |
+| Real-browser OAuth roundtrip against github.com | ✅ verified 2026-07-04 |
+| Identity persistence at `events.signIn` (PR #30 — HMAC backend callback) | ✅ shipped (post-archive closure) |
+| ADR 0003 (HMAC identity callback protocol) | ✅ shipped |
+| Archived to `openspec/changes/archive/2026-07-04-cachicamas-github-login/` (PR #23) | ✅ shipped |
+| Canonical specs promoted: `identity-schema`, `frontend-auth`, `backend-auth-middleware` | ✅ shipped |
+
+**Five outstanding follow-ups** (all orthogonal to the change's correctness; see the numbered list above).
