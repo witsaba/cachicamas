@@ -235,7 +235,7 @@ the staging area for the spec-promotion merge back to main.
 - `Dockerfile` COPY additions for @auth/qwik, @auth/core, @panva,
   postgres, jose, oauth4webapi, set-cookie-parser.
 - `scripts/mocks-github-oauth/` Node service (Dockerfile + server.mjs
-  + package.json).
+  - package.json).
 - `e2e/sign-in-landing.spec.ts` (visible CTA check).
 - `e2e/github-sign-in.spec.ts` (full OAuth roundtrip; runs in mocks
   mode only — `test.skip` when AUTH_GITHUB_BASE_URL is unset).
@@ -478,4 +478,58 @@ All 3 chained PRs merged into `main`:
 
 ### Forward notes still open (1 remaining)
 
-- **Live Playwright run against the dockerized stack**: the 3 e2e specs are wired but only exercised locally. A full compose-up run would drive the OAuth roundtrip end-to-end through mocks + database_administrator + frontend. Documented as the last deferred item from the change.
+- **Live Playwright run against the dockerized stack** (automation path): the 3 e2e specs are wired but only exercised locally. A full compose-up + Playwright run would drive the OAuth roundtrip end-to-end through mocks + database_administrator + frontend and produce CI-friendly artifacts. Documented as the last deferred automation item from the change.
+
+> **Note**: the real-browser GitHub OAuth roundtrip was verified end-to-end on 2026-07-04 against the dockerized stack (see next section). The Playwright-automation version of the same flow is still the only outstanding follow-up.
+
+## Real GitHub OAuth login verified end-to-end (2026-07-04)
+
+This is the closing slice: the live OAuth roundtrip was driven against the real `https://github.com` OAuth provider, not the in-process mocks.
+
+### What was verified
+
+- ✅ Created OAuth App at <https://github.com/settings/developers> → "cachicamas-local" with callback `http://localhost:3015/auth/callback/github`.
+- ✅ Captured real Client ID (`Iv1.*` 20-char hex) and Client Secret (one-time display, base64-ish).
+- ✅ Generated fresh `AUTH_SECRET=$(openssl rand -base64 32)` (44-char base64) and confirmed both containers pick up the same value.
+- ✅ Edited `.env` to populate the real credentials and removed the `AUTH_GITHUB_BASE_URL` override (lets `@auth/qwik` default to canonical `github.com`).
+- ✅ `docker compose down -v && docker compose up -d --build` — stack came up clean (PR #27's YAML indentation fix was needed first; the pre-fix compose file failed to parse).
+- ✅ `docker exec cachicamas-frontend printenv | grep ^AUTH_` → all 5 AUTH_* keys present.
+- ✅ `docker inspect cachicamas-database-administrator --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ^AUTH_SECRET` → same AUTH_SECRET as frontend.
+- ✅ Browser roundtrip on <http://localhost:3015>: clicked "Sign in with GitHub" → GitHub consent screen with scopes `read:user user:email` → authorized → redirect back to `http://localhost:3015/auth/callback/github?code=...` → Auth.js exchanged code for token → fetched userinfo via `https://api.github.com/user` → set JWE session cookie → session active.
+- ✅ Backend verifier on `database_administrator:8080` accepted the JWE cookie on subsequent SSR-rendered requests (Go verifier uses the same `AUTH_SECRET` per ADR 0002).
+
+### Discovery while bringing the stack up
+
+Two pre-existing bugs were hit and fixed before the real login could be exercised:
+
+1. **YAML parse error** in `docker-compose.yaml` frontend `healthcheck:` block: `start_period: 10s` was at 4 leading spaces (top-level under `services.frontend`) instead of 6 (inside `healthcheck:`); `logging:` was at 12 spaces instead of 4. Fixed as a side effect of PR #27 (`feat(auth): split AUTH_GITHUB_BASE_URL into browser + server URLs`).
+2. **Stale local `main`** at `82b0a09`, 8 PRs behind `origin/main` (`29f1246`). The `AUTH_*` env wiring was already shipped on origin/main (cachicamas-github-login PR-2 + PR-3) but the stale local compose file didn't have it — so `docker compose up` from the stale checkout produced containers with no `AUTH_*` env at all. Fixed by `git fetch origin && git reset --hard origin/main` (preserves `.env` because it's gitignored).
+
+Both discoveries saved to Engram under `cachicamas/stale-local-main-blocks-env-wiring` and `cachicamas/compose-frontend-healthcheck-indentation`.
+
+### Gates green post-verification
+
+- Frontend: HTTP 200 on `/` (26.9 KB SSR response).
+- `database_administrator:8080/health` → `{"status":"ok"}`.
+- All 6 containers healthy (frontend, database_administrator, otel-collector, postgres, jaeger, mocks-github-oauth).
+- OTel collector receiving logs from `database_administrator` (visible in debug exporter).
+- Jaeger UI at `:16686` shows the OAuth roundtrip trace (browser → frontend → GitHub → backend).
+
+### Cross-tooling envelope contract (ADR 0002) — verified
+
+The byte-level HKDF + JWE envelope contract between Auth.js (Qwik/Node) and `lestrrat-go/jwx/v2` (Go verifier) is exercised end-to-end with real GitHub credentials. The Playwright mocks path (forward note still open) covers the same contract in an automated way; the real-browser verification proves the same contract works against real `github.com`.
+
+### Change shipped: cachicamas-github-login — FINAL
+
+| Aspect | Status |
+| --- | --- |
+| Schema + identity domain (PR #18, #26) | ✅ shipped |
+| Frontend Auth.js UX (PR #20) + URL split (PR #27) | ✅ shipped |
+| Backend Go JWE verifier (PR #22) | ✅ shipped |
+| 3 e2e specs + mocks unit tests (PR #24) | ✅ shipped |
+| Compose env wiring (was always on origin/main, was masked by stale local main) | ✅ now wired + verified |
+| Real-browser OAuth roundtrip against github.com | ✅ verified 2026-07-04 |
+| Archived to `openspec/changes/archive/2026-07-04-cachicamas-github-login/` (PR #23) | ✅ shipped |
+| Canonical specs promoted: `identity-schema`, `frontend-auth`, `backend-auth-middleware` | ✅ shipped |
+
+**Single outstanding follow-up**: live Playwright compose exercise (automation path) — orthogonal to the change's correctness; the real-browser verification above is the higher-fidelity signal.
