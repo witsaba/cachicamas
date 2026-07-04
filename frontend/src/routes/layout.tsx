@@ -35,7 +35,7 @@
  * is good enough for the shell context; the per-route origins
  * stay on the page itself.
  */
-import { $, component$, Slot, useOnDocument } from "@builder.io/qwik";
+import { $, component$, Slot, useOnWindow } from "@builder.io/qwik";
 import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
@@ -62,7 +62,14 @@ export default component$(() => {
   // forward navigation triggers a full reload (not just post-logout),
   // but the cost is minor (the page renders fast) and the correctness
   // win is large (no stale authenticated renders after sign-out).
-  useOnDocument(
+  //
+  // IMPORTANT: popstate fires on `window`, NOT on `document`. The
+  // first attempt used the document hook but the listener never
+  // fired because `document` and `window` are sibling roots, not
+  // ancestors — events don't bubble from window to document.
+  // `useOnWindow` is the right hook for window-level events.
+  // (See UAT-8 revision 2: 2026-07-04.)
+  useOnWindow(
     "popstate",
     $(() => {
       // `window` is only defined in the browser; QRL handlers run
