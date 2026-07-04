@@ -175,3 +175,71 @@ Pre-requisites by mode:
 | dev (no env var) | `docker compose up` (Postgres + Go bin) + Playwright auto-starts `pnpm dev`                       |
 | container        | `docker compose -f docker-compose.yaml -f docker-compose.vps.yaml up -d` (all 5 services healthy) |
 | VPS              | Reachable URL; the stack is assumed to be running on the target host                              |
+
+## Authentication (cachicamas-github-login)
+
+The frontend authenticates users via GitHub OAuth using
+[Auth.js for Qwik](https://qwik.authjs.dev) (`@auth/qwik@0.9.2`).
+The integration lives in `src/routes/plugin@auth.ts` and persists
+the GitHub identity to the local `identity.user` + `identity.account`
+Postgres tables via `src/lib/sign-in-callback.ts` on each successful
+sign-in. PR-3 adds the Go-side JWE cookie verifier middleware.
+
+### Prerequisites (one-time)
+
+1. **Create a GitHub OAuth App** at
+   <https://github.com/settings/developers> → "New OAuth App". Use the
+   callback URL that matches your `AUTH_URL` environment variable plus
+   `/auth/callback/github`. For local dev: `http://localhost:3015/auth/callback/github`.
+2. **Generate `AUTH_SECRET`** — a 32-byte base64 string used to sign
+   and encrypt the JWE session cookie. The same secret is consumed by
+   the Go verifier middleware (PR-3) for cookie decryption.
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+3. **Populate `.env`** from `.env.example` and set the five auth vars:
+
+   ```bash
+   AUTH_GITHUB_ID=...           # GitHub OAuth App client_id
+   AUTH_GITHUB_SECRET=...       # GitHub OAuth App client_secret
+   AUTH_SECRET=...              # 32-byte base64 (from openssl rand)
+   AUTH_TRUST_HOST=true         # required for non-Vercel/Netlify
+   AUTH_URL=http://localhost:3015
+   ```
+
+### Production (real GitHub)
+
+When `AUTH_GITHUB_BASE_URL` is **unset** (the default), the OAuth
+flow points at the canonical `https://github.com/login/oauth/...`
+URLs. No additional configuration is required.
+
+### Tests (mocks-github-oauth)
+
+For the Playwright e2e suite, point the OAuth URLs at the in-process
+`mocks-github-oauth` compose service:
+
+```bash
+AUTH_GITHUB_BASE_URL=http://mocks-github-oauth:3016
+AUTH_GITHUB_API_BASE_URL=http://mocks-github-oauth:3016
+```
+
+The simulator (`scripts/mocks-github-oauth/server.mjs`) exposes
+`/login/oauth/authorize`, `/login/oauth/access_token`, `/user`, and
+`/user/emails` endpoints that return a canned test user
+(`octocat@example.com`). See `frontend/e2e/sign-in-landing.spec.ts`
+and `frontend/e2e/github-sign-in.spec.ts` for the running tests.
+
+### Architecture notes
+
+- The session is a **stateless signed JWE cookie** — there is no
+  `identity.session` table. The Go verifier (PR-3) decrypts the
+  same cookie via `lestrrat-go/jwx/v2`, using HKDF-SHA256 with the
+  locked envelope contract documented in `docs/adr/0002-promote-lestrrat-jwx-for-jwe.md`.
+- The `signIn` callback (in `lib/sign-in-callback.ts`) implements
+  **auto-link-on-email-match**: if a row with the same email already
+  exists, a new `identity.account` row is attached to it instead of
+  creating a duplicate `identity.user`.
+- The exact pin of `@auth/qwik@0.9.2` is enforced per
+  `docs/adr/0001-accept-authjs-qwik.md` (pre-1.0 mitigation).

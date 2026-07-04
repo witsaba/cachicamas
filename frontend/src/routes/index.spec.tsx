@@ -1,6 +1,33 @@
 import { createDOM } from "@builder.io/qwik/testing";
-import { test, expect } from "vitest";
+import { $, type QRL } from "@builder.io/qwik";
+import { test, expect, vi } from "vitest";
 import Index from "./index";
+
+/**
+ * Mock `routes/plugin@auth.ts` so the route's `useSignIn()` call doesn't
+ * require the Qwik City request context (useContext(qc-l)) that the
+ * vitest `createDOM()` harness does not set up. The SignInButton unit
+ * spec covers the form shape in detail; this mock just unblocks the
+ * landing-page rendering.
+ */
+vi.mock("~/routes/plugin@auth", () => {
+  return {
+    useSession: () => ({ value: null }),
+    useSignIn: () => ({
+      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+        (formData: FormData) => unknown
+      >,
+      actionPath: "/auth/signin",
+    }),
+    useSignOut: () => ({
+      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+        (formData: FormData) => unknown
+      >,
+      actionPath: "/auth/signout",
+    }),
+    onRequest: () => Promise.resolve(),
+  };
+});
 
 // F-1 (spec §6.2) + UX-4: the landing page is the front
 // door of cachicamas.  Text-first, no decorative imagery,
@@ -111,4 +138,20 @@ test("[routes/index]: no carousel, no hero <img>, no decorative imagery (UX-4)",
   expect(pictures.length).toBe(0);
   const svgs = screen.querySelectorAll("svg");
   expect(svgs.length).toBe(0);
+});
+
+test("[routes/index]: T2.12/2.13 — SignInButton is present in the hero CTA section (cachicamas-github-login R-FA-040)", async () => {
+  // R-FA-040: the landing CTA MUST include a SignInButton. Auth.js
+  // for Qwik wires /auth/signin, /auth/callback/github, /auth/signout
+  // via plugin@auth.ts; the SignInButton's <Form action={signIn}>
+  // hits that route. The test asserts the form is reachable from /
+  // without a logged-in session.
+  const { screen, render } = await createDOM();
+  await render(<Index />);
+  const signInForm = screen.querySelector('form[data-testid="sign-in-button"]');
+  expect(signInForm).toBeTruthy();
+  const providerIdInput = signInForm?.querySelector(
+    'input[name="providerId"]',
+  ) as HTMLInputElement | null;
+  expect(providerIdInput?.value).toBe("github");
 });

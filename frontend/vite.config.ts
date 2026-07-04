@@ -39,11 +39,15 @@ export default defineConfig(({ command, mode }): UserConfig => {
         ".rollup.cache/**",
       ],
     },
-    // This tells Vite which dependencies to pre-build in dev mode.
+// This tells Vite which dependencies to pre-build in dev mode.
     optimizeDeps: {
       // Put problematic deps that break bundling here, mostly those with binaries.
       // For example ['better-sqlite3'] if you use that in server functions.
       exclude: [],
+      // Pre-bundle the auth stack so dev-mode cold start doesn't choke on
+      // @auth/qwik's deep ESM graph. Mirrors the project's pre-build list
+      // discipline. (cachicamas-github-login PR-2)
+      include: ["@auth/qwik", "@auth/core", "@panva/hkdf"],
     },
     /**
      * This is an advanced setting. It improves the bundling of your server code. To use it, make sure you understand when your consumed packages are dependencies or dev dependencies. (otherwise things will break in production)
@@ -91,9 +95,15 @@ function errorOnDuplicatesPkgDeps(
   const duplicateDeps = Object.keys(devDependencies).filter(
     (dep) => dependencies[dep],
   );
-  // include any known qwik packages
-  const qwikPkg = Object.keys(dependencies).filter((value) =>
-    /qwik/i.test(value),
+  // include any known qwik framework packages. `@auth/qwik` is NOT a
+  // framework package (it's an auth library that runs at runtime in the
+  // Node SSR), so we explicitly exclude it from this check.
+  const qwikPkg = Object.keys(dependencies).filter(
+    (value) =>
+      /^@builder\.io\/qwik/.test(value) ||
+      // Catch the framework-only qwik names that don't start with @builder.io.
+      value === "qwik" ||
+      value === "qwik-city",
   );
   // any errors for missing "qwik-city-plan"
   // [PLUGIN_ERROR]: Invalid module "@qwik-city-plan" is not a valid package

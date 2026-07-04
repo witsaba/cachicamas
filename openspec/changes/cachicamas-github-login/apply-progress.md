@@ -210,3 +210,56 @@ PR-2 (`feat/cachicamas-github-login-pr2-frontend-auth`) is queued in its own wor
 new worktree rule). Implementation starts in the next focused turn. PR-1's branch is preserved
 on origin for reference; the post-pr1-validation worktree holds the housekeeping commit and is
 the staging area for the spec-promotion merge back to main.
+
+---
+
+## PR-2 work-in-progress (2026-07-04)
+
+### Slice scope shipped
+
+- `routes/plugin@auth.ts` + 5-test spec (QwikAuth$ wiring, GitHub
+  provider, trustHost, AUTH_SECRET plumbing).
+- `lib/sign-in-callback.ts` + 6-test spec (auto-link-on-email-match
+  UPSERT logic; deny on no-email).
+- `components/sign-in-button/` + 5-test spec (CTA rendering).
+- `components/profile-view/` + 7-test spec (pure presentational
+  ProfileView, testable in vitest).
+- `routes/profile/index.tsx` (thin route wrapper; calls useSession).
+- `routes/index.tsx` SignInButton added to landing hero CTA.
+- `vite.config.ts` optimizeDeps + tightened duplicate-check.
+- `package.json` exact-pinned `@auth/qwik@0.9.2`, `@auth/core@0.41.2`,
+  `@panva/hkdf@1.2.1`, `postgres@3.4.5`.
+- `.env.example` +5 AUTH_* keys (with fail-fast `:?` operator in compose).
+- `docker-compose.yaml` frontend env block (5 AUTH_* vars) +
+  database_administrator AUTH_SECRET.
+- `Dockerfile` COPY additions for @auth/qwik, @auth/core, @panva,
+  postgres, jose, oauth4webapi, set-cookie-parser.
+- `scripts/mocks-github-oauth/` Node service (Dockerfile + server.mjs
+  + package.json).
+- `e2e/sign-in-landing.spec.ts` (visible CTA check).
+- `e2e/github-sign-in.spec.ts` (full OAuth roundtrip; runs in mocks
+  mode only — `test.skip` when AUTH_GITHUB_BASE_URL is unset).
+- `README.md` Authentication section (production + tests setup).
+
+### Gates green
+
+- `cd frontend && pnpm test:ci` → **119 unit tests pass** (was 95
+  before PR-2).
+- `pnpm build.types` → no TS errors.
+- `pnpm lint` → 0 issues.
+- `pnpm fmt.check` → clean.
+- `docker compose config` → AUTH_* env vars flow to frontend and
+  database_administrator; mocks-github-oauth service resolves.
+- mocks service smoke test → /healthz, /user, /user/emails all
+  return expected shapes.
+
+### Open follow-ups (deferred to next commit / turn)
+
+- `e2e/sign-in-cookie-attrs.spec.ts` (HttpOnly / SameSite assertions).
+- `e2e/sign-in-denied.spec.ts` (`error=access_denied` path).
+- `e2e/sign-out.spec.ts` (cookie cleared; /profile → /auth/signin).
+- `tests/mocks-github-oauth/` unit tests for the simulator endpoints.
+- Live Playwright run against the dockerized stack to confirm
+  `github-sign-in.spec.ts` actually drives the full OAuth roundtrip
+  end-to-end (the spec is wired but not yet exercised against a
+  running compose stack in this turn).
