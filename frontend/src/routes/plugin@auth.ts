@@ -25,20 +25,92 @@ import { QwikAuth$ } from "@auth/qwik";
 import GitHub from "@auth/qwik/providers/github";
 
 export const { onRequest, useSession, useSignIn, useSignOut } = QwikAuth$(
-  (ev) => ({
-    providers: [
-      GitHub({
-        clientId: ev.env.get("AUTH_GITHUB_ID"),
-        clientSecret: ev.env.get("AUTH_GITHUB_SECRET"),
-      }),
-    ],
-    // Required for non-Vercel/Netlify/Cloudflare deploys (qwik.dev docs
-    // are explicit). Without this, the Qwik Node server can refuse to
-    // construct correct callback URLs in compose / on the VPS.
-    trustHost: true,
-    // The same AUTH_SECRET the Go verifier uses to decrypt the JWE
-    // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
-    // envelope must match `@auth/core@0.34.3` (and forwards) exactly.
-    secret: ev.env.get("AUTH_SECRET"),
-  }),
+  (ev) => {
+    // GitHub OAuth URLs can be overridden via AUTH_GITHUB_BASE_URL.
+    // Production (unset) → https://github.com (canonical). Tests
+    // (set) → the mocks-github-oauth compose service, e.g.
+    // http://mocks-github-oauth:3016. This keeps the same OAuth
+    // roundtrip wiring for both modes; only the upstream host differs.
+    const githubBaseUrl =
+      ev.env.get("AUTH_GITHUB_BASE_URL") ?? "https://github.com";
+    const githubApiBaseUrl =
+      ev.env.get("AUTH_GITHUB_API_BASE_URL") ?? "https://api.github.com";
+    return {
+      providers: [
+        GitHub({
+          clientId: ev.env.get("AUTH_GITHUB_ID"),
+          clientSecret: ev.env.get("AUTH_GITHUB_SECRET"),
+          // Override the GitHub URLs only when AUTH_GITHUB_BASE_URL is
+          // explicitly set. The default (no override) preserves the
+          // canonical github.com behaviour.
+          ...(githubBaseUrl !== "https://github.com"
+            ? {
+                authorization: {
+                  url: `${githubBaseUrl}/login/oauth/authorize`,
+                  params: { scope: "read:user user:email" },
+                },
+                token: `${githubBaseUrl}/login/oauth/access_token`,
+                userinfo: {
+                  url: `${githubApiBaseUrl}/user`,
+                  async request({
+                    tokens,
+                    provider,
+                  }: {
+                    tokens: { access_token?: string };
+                    provider: { userinfo?: { url?: string } };
+                  }) {
+                    const profile = (await fetch(
+                      provider.userinfo?.url as string,
+                      {
+                        headers: {
+                          Authorization: `Bearer ${tokens.access_token}`,
+                        },
+                      },
+                    ).then((r) => r.json())) as {
+                      id?: number;
+                      login?: string;
+                      name?: string;
+                      email?: string | null;
+                      avatar_url?: string;
+                    };
+                    // Augment with the verified primary email when
+                    // /user/emails is reachable (mocks + github).
+                    if (tokens.access_token) {
+                      const emails = (await fetch(
+                        `${githubApiBaseUrl}/user/emails`,
+                        {
+                          headers: {
+                            Authorization: `Bearer ${tokens.access_token}`,
+                          },
+                        },
+                      )
+                        .then((r) => (r.ok ? r.json() : []))
+                        .catch(() => [])) as Array<{
+                        email?: string;
+                        primary?: boolean;
+                      }>;
+                      const primary = Array.isArray(emails)
+                        ? emails.find((e) => e.primary)
+                        : null;
+                      if (primary && !profile.email) {
+                        profile.email = primary.email ?? null;
+                      }
+                    }
+                    return profile;
+                  },
+                },
+              }
+            : {}),
+        }),
+      ],
+      // Required for non-Vercel/Netlify/Cloudflare deploys (qwik.dev docs
+      // are explicit). Without this, the Qwik Node server can refuse to
+      // construct correct callback URLs in compose / on the VPS.
+      trustHost: true,
+      // The same AUTH_SECRET the Go verifier uses to decrypt the JWE
+      // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
+      // envelope must match `@auth/core@0.34.3` (and forwards) exactly.
+      secret: ev.env.get("AUTH_SECRET"),
+    };
+  },
 );

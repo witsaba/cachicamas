@@ -1,0 +1,13 @@
+{
+  "name": "@cachicamas/mocks-github-oauth",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Minimal GitHub OAuth simulator for cachicamas PR-2 Playwright e2e suite",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -67,6 +67,24 @@ WORKDIR /app
 # Solo copiamos `undici` para mantener la imagen liviana (~10MB extra).
 COPY --from=builder /app/node_modules/undici ./node_modules/undici
 
+# cachicamas-github-login (PR-2): Auth.js for Qwik imports its peer
+# packages (@auth/core, @panva/hkdf, postgres) dynamically in places
+# that Vite can't statically resolve (lazy QRL boundary, jose ESM
+# graph). Mirror the undici pattern above. Total image weight added
+# is roughly +20MB; acceptable for the auth-shipping slice.
+COPY --from=builder /app/node_modules/@auth/qwik ./node_modules/@auth/qwik
+COPY --from=builder /app/node_modules/@auth/core ./node_modules/@auth/core
+COPY --from=builder /app/node_modules/@panva ./node_modules/@panva
+COPY --from=builder /app/node_modules/postgres ./node_modules/postgres
+# Auth.js' static-but-ESM transitive deps: jose (JWT sign/verify),
+# oauth4webapi (OAuth2 flow primitives), set-cookie-parser (cookie
+# parsing for the verifier middleware). These are bundled by Vite
+# but the resulting bundle dynamically imports them in the SSR
+# cold path, so the resolver needs them on disk.
+COPY --from=builder /app/node_modules/jose ./node_modules/jose
+COPY --from=builder /app/node_modules/oauth4webapi ./node_modules/oauth4webapi
+COPY --from=builder /app/node_modules/set-cookie-parser ./node_modules/set-cookie-parser
+
 # Copiamos los artefactos del builder.
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server

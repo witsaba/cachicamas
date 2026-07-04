@@ -201,10 +201,18 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
       POSTGRES_USER: ${QUEEN_USER:-queen}
       POSTGRES_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
-      # OpenTelemetry
+# OpenTelemetry
       OTEL_SERVICE_NAME: database_administrator
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      # cachicamas-github-login (PR-3) — JWE cookie verification.
+      # The Go service uses the SAME AUTH_SECRET as the frontend
+      # to decrypt the Auth.js session cookie. Without this env
+      # the verifier middleware (PR-3) refuses to start; PR-2
+      # already fails the same way if the frontend env block is
+      # missing these vars (fail-fast posture, consistent with
+      # the project's db-migrations R-DBMIG-050).
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
     ports:
       - "${SERVICE_PORT:-8080}:8080"
@@ -258,6 +266,25 @@ services:
     image: cachicamas/frontend:local
     container_name: cachicamas-frontend
     restart: unless-stopped
+    environment:
+      # Runtime env (post-build). Cachicamas-github-login (PR-2):
+      # Auth.js + GitHub OAuth requires these at process start so the
+      # Node SSR server can read them per-request via ev.env.get(...).
+      # All four AUTH_* keys are required (compose refuses to start if
+      # any is missing — see the :?msg suffix below).
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      API_TARGET: http://database_administrator:8080
+      PUBLIC_API_BASE_URL: /api
+      SERVER_API_BASE_URL: http://database_administrator:8080
+      ORIGIN: ${ORIGIN:-http://localhost:3015}
+      # cachicamas-github-login — Auth.js + GitHub OAuth (PR-2)
+      AUTH_GITHUB_ID: ${AUTH_GITHUB_ID:?AUTH_GITHUB_ID must be set in .env}
+      AUTH_GITHUB_SECRET: ${AUTH_GITHUB_SECRET:?AUTH_GITHUB_SECRET must be set in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
+      AUTH_TRUST_HOST: "true"
+      AUTH_URL: ${AUTH_URL:-http://localhost:3015}
     ports:
       - "${FRONTEND_PORT:-3015}:3000"
     networks:
@@ -274,14 +301,47 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 10s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+start_period: 10s
+        logging:
+          driver: json-file
+          options:
+            max-size: "10m"
+            max-file: "3"
 
-# ----- Shared network ----------------------------------------------------
+      # --------------------------------------------------------------------------
+      # mocks-github-oauth — minimal GitHub OAuth simulator for the Playwright
+      # e2e suite (cachicamas-github-login PR-2 T2.20). NOT for production.
+      # The frontend's AUTH_GITHUB_BASE_URL / AUTH_GITHUB_API_BASE_URL env vars
+      # point here in the test profile; production (no override) hits real
+      # github.com.
+      # --------------------------------------------------------------------------
+      mocks-github-oauth:
+        build:
+          context: ./scripts/mocks-github-oauth
+          dockerfile: Dockerfile
+        image: cachicamas/mocks-github-oauth:local
+        container_name: cachicamas-mocks-github-oauth
+        restart: "no"
+        environment:
+          MOCKS_HOST: 0.0.0.0
+          MOCKS_PORT: 3016
+        ports:
+          # Host-side port for browser-driven e2e tests when running
+          # compose WITHOUT the dockerized frontend (e.g., pnpm dev
+          # locally + docker compose up for postgres/db-admin/mocks).
+          - "3016:3016"
+        networks:
+          - cachicamas_network
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - 'node -e "require(\"http\").get(\"http://127.0.0.1:3016/healthz\",r=>process.exit(r.statusCode===200?0:1)).on(\"error\",()=>process.exit(1))"'
+          interval: 10s
+          timeout: 5s
+          retries: 6
+          start_period: 5s
+
+    # ----- Shared network ----------------------------------------------------
 networks:
   cachicamas_network:
     name: cachicamas_network
