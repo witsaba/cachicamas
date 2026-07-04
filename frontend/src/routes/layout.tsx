@@ -75,7 +75,11 @@ export default component$(() => {
           {isAuthenticated && session.value ? (
             <AvatarDropdown session={session.value} signOut={signOut} />
           ) : (
-            <SignInButton signIn={signIn} label="Sign in with GitHub" />
+            // UX-4 amendment (2026-07-04): the default SignInButton
+            // label is "Sign in" + the GitHub Octocat brand mark
+            // (rendered by the component itself). No explicit label
+            // override needed.
+            <SignInButton signIn={signIn} />
           )}
         </div>
       </header>

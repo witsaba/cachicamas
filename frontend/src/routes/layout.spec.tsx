@@ -126,6 +126,25 @@ test("[routes/layout]: anon shell renders SignInButton with providerId=github (S
   expect(providerId?.value).toBe("github");
 });
 
+test("[routes/layout]: anon SignInButton includes the GitHub Octocat brand mark + short label (UX-4 amendment)", async () => {
+  // UX-4 was amended on 2026-07-04 (UAT-2) to permit RECOGNIZABLE
+  // BRAND MARKS as visible visual anchors. The SignInButton MUST
+  // render the GitHub Octocat inline <svg> alongside a short label
+  // ("Sign in"), not "Sign in with GitHub".
+  const screen = await renderWithSession(ANON_SESSION);
+  const form = screen.querySelector('form[data-testid="sign-in-button"]');
+  expect(form).toBeTruthy();
+  const mark = form?.querySelector(
+    'svg[data-testid="sign-in-button-github-mark"]',
+  );
+  expect(mark).toBeTruthy();
+  expect(mark?.getAttribute("aria-hidden")).toBe("true");
+  const button = form?.querySelector('button[type="submit"]');
+  expect(button).toBeTruthy();
+  const labelSpan = button?.querySelector("span");
+  expect(labelSpan?.textContent?.trim()).toBe("Sign in");
+});
+
 test("[routes/layout]: anon shell does NOT render AvatarDropdown (S-AS-011)", async () => {
   const screen = await renderWithSession(ANON_SESSION);
   expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
