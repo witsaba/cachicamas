@@ -118,7 +118,7 @@ describe("lib/db — singleton Postgres client factory", () => {
     expect((postgresCalls[0].opts as { prepare?: boolean }).prepare).toBe(
       false,
     );
-    resetSqlForTest();
+    await resetSqlForTest();
   });
 
   it("resetSqlForTest() clears the cache so the next call returns a fresh instance", async () => {
@@ -127,7 +127,7 @@ describe("lib/db — singleton Postgres client factory", () => {
     const { getSql, resetSqlForTest } = await import("./db");
     const a = await getSql();
     expect(postgresCalls.length).toBe(1);
-    resetSqlForTest();
+    await resetSqlForTest();
     // Cache is empty; the next call instantiates a fresh client.
     const b = await getSql();
     expect(postgresCalls.length).toBe(2);
@@ -137,7 +137,7 @@ describe("lib/db — singleton Postgres client factory", () => {
     // The `end()` method on the prior client MUST have been called
     // so the pool can drain before the process exits.
     expect(postgresInstances[0].end).toHaveBeenCalled();
-    resetSqlForTest();
+    await resetSqlForTest();
   });
 
   it("throws a clear error if called twice without reset, even when env is set, only if the second call would re-instantiate", async () => {
@@ -149,6 +149,46 @@ describe("lib/db — singleton Postgres client factory", () => {
     const { getSql, resetSqlForTest } = await import("./db");
     for (let i = 0; i < 5; i += 1) await getSql();
     expect(postgresCalls.length).toBe(1);
-    resetSqlForTest();
+    await resetSqlForTest();
+  });
+
+  it("recovers from a thrown `postgres()` constructor: a follow-up getSql() with a valid URL succeeds (R3-4)", async () => {
+    // First call: the mock factory throws synchronously (simulates a
+    // driver misconfiguration / malformed URL). The factory MUST set
+    // `cached = null` so a subsequent call with a valid URL can
+    // succeed instead of silently returning a stale or `null` handle.
+    postgresInstances.length = 0;
+    postgresCalls.length = 0;
+
+    const postgresModule = await import("postgres");
+    const realDefault = postgresModule.default;
+    let n = 0;
+        (postgresModule as unknown as { default: unknown }).default = (
+          url: string,
+          opts: unknown,
+        ) => {
+          n += 1;
+          if (n === 1) {
+            throw new Error("synthetic driver bootstrap failure");
+          }
+          return (realDefault as unknown as (u: string, o: unknown) => unknown)(
+            url,
+            opts,
+          );
+    };
+
+    process.env.IDENTITY_DATABASE_URL =
+      "postgres://queen:secret@postgres:5432/cachicamas_pg";
+    const { getSql, resetSqlForTest } = await import("./db");
+    await expect(getSql()).rejects.toThrow(/synthetic driver bootstrap/);
+    // The driver MUST NOT be cached after a throw — `cached` should
+    // be re-attemptable.
+    const recovered = await getSql();
+    expect(typeof recovered).toBe("function");
+    expect(n).toBe(2);
+    await resetSqlForTest();
+
+    // Restore the original export so other tests are unaffected.
+    (postgresModule as unknown as { default: unknown }).default = realDefault;
   });
 });

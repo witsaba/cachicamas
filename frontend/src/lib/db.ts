@@ -69,26 +69,45 @@ export async function getSql(): Promise<SqlClient> {
         "must not run in the browser context.",
     );
   }
-  // Dynamic import — see the file-level comment above. Vite code-splits
-  // the `postgres` driver into a server-only chunk; the client bundle
-  // never references it.
-  const { default: postgres } = await import("postgres");
-  const client = postgres(url, { max: 4, prepare: false });
-  cached = {
-    sql: client as unknown as SqlClient,
-    client: client as unknown as { end: (opts?: unknown) => Promise<void> },
-  };
-  return cached.sql;
-}
+      // Dynamic import — see the file-level comment above. Vite code-splits
+      // the `postgres` driver into a server-only chunk; the client bundle
+      // never references it.
+      const { default: postgres } = await import("postgres");
+      // R3-4 (4R review): wrap construction in try/catch so a synchronous
+      // throw from `postgres()` (malformed URL, driver version mismatch)
+      // does not leave `cached` holding a stale or partial reference.
+      // Without this, a follow-up call with a fixed URL would silently
+      // return the prior client (or `null`) and mask the underlying error.
+      let client: ReturnType<typeof postgres>;
+      try {
+        client = postgres(url, { max: 4, prepare: false });
+      } catch (err) {
+        cached = null;
+        throw err;
+      }
+      cached = {
+        sql: client as unknown as SqlClient,
+        client: client as unknown as { end: (opts?: unknown) => Promise<void> },
+      };
+      return cached.sql;
+    }
 
-/**
- * Drop the cached client so the next `getSql()` call creates a fresh
- * one. Intended for test teardown — `client.end({ timeout: 1 })` lets
- * the pool drain before the test process exits.
- */
-export function resetSqlForTest(): void {
-  if (cached) {
-    void cached.client.end({ timeout: 1 });
-    cached = null;
-  }
-}
+    /**
+     * Drop the cached client so the next `getSql()` call creates a fresh
+     * one. Returns a Promise that resolves once the pool drain attempt
+     * completes (or after a 100ms safety timeout — a wedged socket
+     * must not hang the test). R3-5 (4R review): originally returned
+     * `void` and called `client.end({ timeout: 1 })` fire-and-forget;
+     * callers now `await` this helper to avoid TIME_WAIT socket leaks
+     * polluting sibling tests under parallel Vitest.
+     */
+    export async function resetSqlForTest(): Promise<void> {
+      if (cached) {
+        const c = cached.client;
+        cached = null;
+        await Promise.race([
+          c.end({ timeout: 1 }),
+          new Promise<void>((r) => setTimeout(r, 100)),
+        ]);
+      }
+    }

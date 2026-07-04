@@ -294,7 +294,19 @@ const githubFactoryCalls: Array<Record<string, unknown>> = [];
         ).resolves.toBeUndefined();
         expect(consoleErrSpy).toHaveBeenCalled();
         const firstCallArgs = consoleErrSpy.mock.calls[0] ?? [];
-        expect(String(firstCallArgs[0] ?? "")).toMatch(/events\.signIn/);
+        // The first arg MUST carry the [cachicamas] prefix + the
+        // event identity (`events.signIn`) so an operator can find
+        // this log line in production. R3-12 (4R review): also
+        // assert the actual Error is passed (not just a string), so
+        // a future regression that logs only the prefix without the
+        // error details is caught.
+        expect(String(firstCallArgs[0] ?? "")).toMatch(
+          /\[cachicamas\] events\.signIn/,
+        );
+        expect(firstCallArgs[1]).toBeInstanceOf(Error);
+        expect(String((firstCallArgs[1] as Error).message)).toBe(
+          "network glitch",
+        );
         consoleErrSpy.mockRestore();
       });
 
