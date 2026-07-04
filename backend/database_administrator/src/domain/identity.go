@@ -62,9 +62,39 @@ type Identity struct {
 //     emails; the result MUST be the same.
 //
 //   - All methods honour ctx.
+//
+// Upsert (added in cachicamas-identity-signin-callback): the
+// service layer passes a closed IdentityEvent value (the slice's
+// HTTP handler validates and canonicalizes the wire body, then
+// builds an IdentityEvent and dispatches). The repo selects the
+// identity.user row by case-insensitive email, INSERTs a new
+// identity.user row when missing, then INSERTs an identity.account
+// row with ON CONFLICT (provider, provider_account_id) DO NOTHING.
+// Returns the resolved Identity (new or reused).
 type IdentityRepository interface {
 	LookupByEmail(ctx context.Context, email string) (*Identity, error)
 	LookupByProviderAccountID(ctx context.Context, provider, providerAccountID string) (*Identity, error)
+	Upsert(ctx context.Context, ev IdentityEvent) (*Identity, error)
+}
+
+// IdentityEvent is the closed value type the HTTP handler hands
+// to the application service for an OAuth-driven identity
+// persistence roundtrip. The fields mirror the wire contract
+// (docs/adr/0003-add-identity-callback-hmac.md): the handler
+// validates + canonicalizes the body, then extracts these fields
+// and never holds the raw OAuth tokens (they are discarded after
+// HMAC verification; the identity.account schema does not store
+// tokens in this slice — see ADR 0003 §"Forward notes").
+//
+// The field list is LOCKED for this slice (handler depends on it
+// by reflection-free direct construction; future additions need a
+// spec amendment + new IdentityEvent fields + new repo signature).
+type IdentityEvent struct {
+	Email             string
+	Name              string
+	ImageURL          string
+	Provider          string
+	ProviderAccountID string
 }
 
 // IdentityNotFoundError signals that an identity lookup returned no

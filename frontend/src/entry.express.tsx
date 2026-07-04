@@ -63,7 +63,19 @@ const { router, notFound, staticFile } = createQwikCity({
 });
 
 /**
- * Reverse-proxy a request to the Go binary. The /api prefix is stripped.
+ * Reverse-proxy a request to the Go binary. The /api prefix is stripped
+ * for legacy routes (e.g., /api/organizations → /organizations), but
+ * PRESERVED for routes that include /api in their backend path
+ * (e.g., /api/v1/identity/signin-callback → /api/v1/identity/signin-callback).
+ *
+ * Why the exception: the identity callback slice
+ * (cachicamas-identity-signin-callback, see ADR 0003) exposes its
+ * endpoint under /api/v1/* on the Go side. The Qwik Node SSR can also
+ * reach the backend directly via SERVER_API_BASE_URL (compose DNS),
+ * but in `pnpm dev` mode the fallback uses the proxy. The proxy
+ * therefore forwards /api/v1/* as-is and strips /api only for the
+ * legacy routes that the Go binary registers at the root.
+ *
  * Uses Node's http.request (no extra deps) to forward the request body
  * and pipe the response back.
  */
@@ -71,8 +83,13 @@ function proxyToApi(
   req: import("node:http").IncomingMessage,
   res: import("node:http").ServerResponse,
 ): void {
-  // Strip the /api prefix. So /api/organizations/1 → /organizations/1.
-  const newPath = req.url?.replace(/^\/api/, "") ?? "/";
+  // Path-shape detection: legacy routes (no /api in the backend path)
+  // have /api/* stripped; identity-callback-style routes (backend has
+  // /api/v1/* paths) keep the /api prefix intact.
+  const keepApiPrefix = req.url?.startsWith("/api/v1/") ?? false;
+  const newPath = keepApiPrefix
+    ? (req.url ?? "/")
+    : (req.url?.replace(/^\/api/, "") ?? "/");
   const target = new URL(newPath, API_TARGET);
 
   const headers = { ...req.headers, host: target.host };

@@ -61,6 +61,30 @@ func (f *fakeIdentityRepo) LookupByProviderAccountID(_ context.Context, provider
 	return nil, &domain.IdentityNotFoundError{Email: provider + "/" + providerAccountID}
 }
 
+func (f *fakeIdentityRepo) Upsert(_ context.Context, ev domain.IdentityEvent) (*domain.Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookupCalls++
+	f.lastLookupArg = ev.Email + "/" + ev.Provider + "/" + ev.ProviderAccountID
+	if f.byErr != nil {
+		return nil, f.byErr
+	}
+	got, ok := f.byEmail[ev.Email]
+	if !ok {
+		got = &domain.Identity{
+			ID:                int64(len(f.byEmail) + 1),
+			Email:             ev.Email,
+			Name:              ev.Name,
+			ImageURL:          ev.ImageURL,
+			Provider:          ev.Provider,
+			ProviderAccountID: ev.ProviderAccountID,
+		}
+		f.byEmail[ev.Email] = got
+	}
+	dup := *got
+	return &dup, nil
+}
+
 func (f *fakeIdentityRepo) LookupByEmail(_ context.Context, email string) (*domain.Identity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -172,5 +196,79 @@ func TestIdentityService_LookupByEmail_RepoError(t *testing.T) {
 	}
 	if repo.lookupCalls != 1 {
 		t.Errorf("expected exactly one LookupByEmail call; got %d", repo.lookupCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpsertFromOAuth (cachicamas-identity-signin-callback slice)
+// ---------------------------------------------------------------------------
+
+// TestIdentityService_UpsertFromOAuth_Hit covers the happy path: a
+// repo that returns a known Identity for the event. The service
+// propagates it unchanged AND emits an OTel span with the locked
+// `identity.upsert` name + the PII-safe email_hash attribute.
+func TestIdentityService_UpsertFromOAuth_Hit(t *testing.T) {
+	ev := domain.IdentityEvent{
+		Email:             "braejan@example.com",
+		Name:              "braejan",
+		ImageURL:          "https://example.com/avatar.png",
+		Provider:          "github",
+		ProviderAccountID: "12345",
+	}
+	repo := &fakeIdentityRepo{
+		byEmail: map[string]*domain.Identity{
+			"braejan@example.com": {
+				ID:                42,
+				Email:             "braejan@example.com",
+				Name:              "braejan",
+				ImageURL:          "https://example.com/avatar.png",
+				Provider:          "github",
+				ProviderAccountID: "12345",
+			},
+		},
+	}
+	svc, rec := newServiceWithRecorder(t, repo)
+
+	got, err := svc.UpsertFromOAuth(context.Background(), ev)
+	if err != nil {
+		t.Fatalf("UpsertFromOAuth: unexpected error: %v", err)
+	}
+	if got.ID != 42 {
+		t.Errorf("Identity.ID:\n got  = %d\n want = %d", got.ID, 42)
+	}
+
+	// OTel span `identity.upsert` was emitted with the expected attrs.
+	spans := rec.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("expected exactly one ended span; got %d", len(spans))
+	}
+	if name := spans[0].Name(); name != "identity.upsert" {
+		t.Errorf("span name:\n got  = %q\n want = %q", name, "identity.upsert")
+	}
+
+	// The fake's Upsert was called exactly once with the right event.
+	if repo.lookupCalls != 1 {
+		t.Errorf("expected one repo.Upsert call; got %d", repo.lookupCalls)
+	}
+	if repo.lastLookupArg != ev.Email+"/"+ev.Provider+"/"+ev.ProviderAccountID {
+		t.Errorf("repo saw wrong args:\n got  = %q\n want = %q", repo.lastLookupArg, ev.Email+"/"+ev.Provider+"/"+ev.ProviderAccountID)
+	}
+}
+
+// TestIdentityService_UpsertFromOAuth_RepoError covers a repo error
+// (e.g., DB down). The service must propagate it unchanged so the
+// HTTP handler can map to a 500 envelope.
+func TestIdentityService_UpsertFromOAuth_RepoError(t *testing.T) {
+	boom := errors.New("connection refused")
+	repo := &fakeIdentityRepo{byErr: boom}
+	svc, _ := newServiceWithRecorder(t, repo)
+
+	_, err := svc.UpsertFromOAuth(context.Background(), domain.IdentityEvent{
+		Email:             "any@example.com",
+		Provider:          "github",
+		ProviderAccountID: "abc",
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected error to wrap boom; got %v", err)
 	}
 }

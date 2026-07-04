@@ -17,6 +17,8 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 
@@ -31,6 +33,11 @@ import (
 // design §2.2). Centralised so any future caller that wants to
 // record the same span uses the same string.
 const spanNameIdentityLookup = "identity.lookup"
+
+// Locked OTel span name (cachicamas-identity-signin-callback slice).
+// Centralised so the handler / repository / tests share the same
+// string for the OAuth-driven UPSERT path.
+const spanNameIdentityUpsert = "identity.upsert"
 
 // IdentityService is the use case facade for identity lookups. It
 // is the ONLY caller of domain.IdentityRepository in the
@@ -88,4 +95,51 @@ func (s *IdentityService) LookupByEmail(ctx context.Context, email string) (*dom
 		attribute.String("identity.provider", out.Provider),
 	)
 	return out, nil
+}
+
+// UpsertFromOAuth persists an OAuth identity event into identity.user
+// + identity.account. The handler (interfaces/http/identity_handler.go)
+// is the only production caller; the HTTP transport validates +
+// canonicalizes + verifies the HMAC, then dispatches a closed
+// domain.IdentityEvent to this method.
+//
+// Behaviour:
+//   - identity.user row is selected by case-insensitive email; if
+//     missing, INSERT a new row.
+//   - identity.account row is INSERTed with the resolved user_id, ON
+//     CONFLICT (provider, provider_account_id) DO NOTHING.
+//   - Returns the resolved *Identity (new or reused).
+//
+// The OTel span `identity.upsert` carries `auth.email_hash`
+// (sha256 first 12 hex chars) so observability never logs raw email
+// PII. The hash attribute is always set, even on error (with the
+// requested email's hash) so the operator can correlate.
+func (s *IdentityService) UpsertFromOAuth(ctx context.Context, ev domain.IdentityEvent) (*domain.Identity, error) {
+	ctx, span := s.tracer.Start(ctx, spanNameIdentityUpsert)
+	defer span.End()
+
+	emailHash := sha256Hex12(ev.Email)
+	span.SetAttributes(attribute.String("auth.email_hash", emailHash))
+
+	out, err := s.repo.Upsert(ctx, ev)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "repo_error")
+		return nil, err
+	}
+	span.SetAttributes(
+		attribute.Int64("identity.id", out.ID),
+		attribute.String("identity.provider", out.Provider),
+		attribute.String("identity.outcome", "upserted"),
+	)
+	return out, nil
+}
+
+// sha256Hex12 returns sha256(s) truncated to 12 hex chars. The same
+// shape the JWE verifier middleware uses for PII-safe email hashing
+// (interfaces/http/auth_middleware.go); keeping the format identical
+// makes log-line grepping across the two slices trivial.
+func sha256Hex12(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])[:12]
 }

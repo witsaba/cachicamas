@@ -143,3 +143,87 @@ func (r *IdentityRepo) LookupByProviderAccountID(ctx context.Context, provider, 
 	}
 	return &out, nil
 }
+
+// identityUpsertUser selects an identity.user row by case-insensitive
+// email; if missing, INSERTs a new row and returns the new id. The
+// second statement is split out so the SELECT and the conditional
+// INSERT can run as a single round-trip (CTE) without the application
+// layer orchestrating two queries. We use a WITH ... SELECT / INSERT
+// pattern that mirrors what porsager/postgres would have done on the
+// frontend side in PR #29 (rejected architecture).
+const identityUpsertUser = `
+WITH existing AS (
+    SELECT id FROM identity.user WHERE lower(email) = lower($1) LIMIT 1
+), inserted AS (
+    INSERT INTO identity.user (email, name, image_url)
+    SELECT $1, $2, $3
+    WHERE NOT EXISTS (SELECT 1 FROM existing)
+    RETURNING id
+)
+SELECT id FROM existing
+UNION ALL
+SELECT id FROM inserted
+LIMIT 1`
+
+// identityInsertAccount is the second half of the Upsert path. It
+// INSERTs an identity.account row using the resolved user_id, with
+// ON CONFLICT (provider, provider_account_id) DO NOTHING so a
+// returning user does not error out on the unique constraint. The
+// resolved identity.account row is then JOINed to identity.user so the
+// returned *domain.Identity has all six fields populated.
+const identityInsertAccount = `
+INSERT INTO identity.account (user_id, provider, provider_account_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (provider, provider_account_id) DO NOTHING
+RETURNING user_id`
+
+// Upsert persists an OAuth identity event into identity.user +
+// identity.account. Behaviour (mirrors PR #29's sign-in-callback.ts
+// semantics — auto-link on email match, idempotent on (provider,
+// provider_account_id)):
+//
+//   1. CTE upserts identity.user keyed by case-insensitive email.
+//   2. INSERTs identity.account with ON CONFLICT DO NOTHING.
+//
+// Returns the resolved *domain.Identity (new or reused) with the
+// account row's provider + provider_account_id populated.
+//
+// Errors:
+//   - Any DB-level error is wrapped with a `postgres.` prefix and
+//     returned unchanged. The handler maps to 5xx.
+//
+// OAuth tokens (access_token, refresh_token, expires_at, token_type,
+// scope) are intentionally NOT persisted: the identity.account schema
+// does not store tokens in this slice (cachicamas-identity-signin-
+// callback ADR 0003 §"Forward notes"). The handler accepts them in
+// the wire body for cross-tooling compatibility but discards them
+// after HMAC verification.
+func (r *IdentityRepo) Upsert(ctx context.Context, ev domain.IdentityEvent) (*domain.Identity, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var userID int64
+	if err := tx.QueryRowContext(ctx, identityUpsertUser, ev.Email, ev.Name, ev.ImageURL).Scan(&userID); err != nil {
+		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: user upsert: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, identityInsertAccount, userID, ev.Provider, ev.ProviderAccountID); err != nil {
+		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: account insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: commit: %w", err)
+	}
+
+	// Re-read so the returned *Identity reflects the persisted row
+	// (name, image_url, provider, provider_account_id are all locked
+	// fields the verifier middleware depends on).
+	out, err := r.LookupByProviderAccountID(ctx, ev.Provider, ev.ProviderAccountID)
+	if err != nil {
+		// The row was just inserted; a miss here means a concurrent
+		// DELETE on identity.account (rare). Wrap and return.
+		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: post-insert lookup: %w", err)
+	}
+	return out, nil
+}

@@ -192,3 +192,252 @@ func TestIdentityRepository_LookupByEmail_CaseInsensitive(t *testing.T) {
 		t.Errorf("case-insensitive lookup returned the wrong row:\n got  = %d\n want = %d", got.ID, userID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Upsert (cachicamas-identity-signin-callback slice)
+// ---------------------------------------------------------------------------
+//
+// The TRIANGULATE step: the handler-level tests cover HMAC + schema
+// validation against a fake service. These tests exercise the real
+// Postgres UPSERT path against the live compose instance. They are
+// gated on INTEGRATION=1 like the LookupByEmail tests.
+//
+// Strict TDD discipline: this block was written BEFORE the Upsert
+// method on IdentityRepo existed. Running these tests with no Upsert
+// method must fail with "undefined: (*IdentityRepo).Upsert" — that
+// failure IS the RED step.
+
+// TestIdentityRepository_Upsert_NewUser covers the first-time GitHub
+// sign-in: the email is new, no identity.user row exists, the repo
+// INSERTs one and returns the new identity with provider + provider
+// account id populated.
+func TestIdentityRepository_Upsert_NewUser(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "upsert-new@example.com"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	got, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "Upsert New",
+		ImageURL:          "https://example.com/new.png",
+		Provider:          "github",
+		ProviderAccountID: "upsert-new-id-1",
+	})
+	if err != nil {
+		t.Fatalf("Upsert: unexpected error: %v", err)
+	}
+	if got.Email != email {
+		t.Errorf("Email:\n got  = %q\n want = %q", got.Email, email)
+	}
+	if got.Name != "Upsert New" {
+		t.Errorf("Name:\n got  = %q\n want = %q", got.Name, "Upsert New")
+	}
+	if got.ImageURL != "https://example.com/new.png" {
+		t.Errorf("ImageURL:\n got  = %q\n want = %q", got.ImageURL, "https://example.com/new.png")
+	}
+	if got.Provider != "github" {
+		t.Errorf("Provider:\n got  = %q\n want = %q", got.Provider, "github")
+	}
+	if got.ProviderAccountID != "upsert-new-id-1" {
+		t.Errorf("ProviderAccountID:\n got  = %q\n want = %q", got.ProviderAccountID, "upsert-new-id-1")
+	}
+	if got.ID == 0 {
+		t.Errorf("expected non-zero ID; got 0")
+	}
+
+	// Verify the row was actually written.
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.user WHERE email = $1`, email,
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.user: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 identity.user row; got %d", n)
+	}
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.account WHERE provider = $1 AND provider_account_id = $2`,
+		"github", "upsert-new-id-1",
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.account: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 identity.account row; got %d", n)
+	}
+}
+
+// TestIdentityRepository_Upsert_ExistingUser_ReusesAccount covers the
+// returning-GitHub-signin case: an identity.user row exists AND an
+// identity.account row exists for the same (provider, account_id).
+// The Upsert must be idempotent — second call returns the same user
+// id and the account row count stays at 1 (ON CONFLICT DO NOTHING).
+func TestIdentityRepository_Upsert_ExistingUser_ReusesAccount(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "upsert-existing@example.com"
+	const accountID = "upsert-existing-id-1"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	ev := domain.IdentityEvent{
+		Email:             email,
+		Name:              "Upsert Existing",
+		ImageURL:          "https://example.com/existing.png",
+		Provider:          "github",
+		ProviderAccountID: accountID,
+	}
+
+	// First call inserts.
+	got1, err := repo.Upsert(context.Background(), ev)
+	if err != nil {
+		t.Fatalf("Upsert first call: unexpected error: %v", err)
+	}
+	// Second call is a no-op for identity.account (ON CONFLICT), but
+	// identity.user is also a no-op because the email already exists.
+	got2, err := repo.Upsert(context.Background(), ev)
+	if err != nil {
+		t.Fatalf("Upsert second call: unexpected error: %v", err)
+	}
+	if got1.ID != got2.ID {
+		t.Errorf("Upsert is not idempotent on identity.user:\n first  = %d\n second = %d", got1.ID, got2.ID)
+	}
+
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.user WHERE email = $1`, email,
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.user: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected exactly 1 identity.user row after idempotent re-call; got %d", n)
+	}
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.account WHERE provider = $1 AND provider_account_id = $2`,
+		"github", accountID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.account: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected exactly 1 identity.account row after idempotent re-call; got %d", n)
+	}
+}
+
+// TestIdentityRepository_Upsert_SameEmailDifferentAccount covers the
+// auto-link-on-email-match slice: the email already has an
+// identity.user row, but a NEW (provider, account_id) arrives (the
+// user signed in with a different GitHub account but kept the email).
+// The repo MUST reuse the existing identity.user and INSERT a new
+// identity.account row (NOT update the existing account row).
+func TestIdentityRepository_Upsert_SameEmailDifferentAccount(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "link-test@example.com"
+	const firstAccount = "link-first-id"
+	const secondAccount = "link-second-id"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	// First sign-in: providerAccountId=firstAccount.
+	got1, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "Link Tester",
+		ImageURL:          "https://example.com/link.png",
+		Provider:          "github",
+		ProviderAccountID: firstAccount,
+	})
+	if err != nil {
+		t.Fatalf("Upsert first: unexpected error: %v", err)
+	}
+	firstUserID := got1.ID
+
+	// Second sign-in: same email, different providerAccountId.
+	got2, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "Link Tester",
+		ImageURL:          "https://example.com/link.png",
+		Provider:          "github",
+		ProviderAccountID: secondAccount,
+	})
+	if err != nil {
+		t.Fatalf("Upsert second: unexpected error: %v", err)
+	}
+
+	if got1.ID != got2.ID {
+		t.Errorf("auto-link did not reuse identity.user:\n first  = %d\n second = %d", got1.ID, got2.ID)
+	}
+	if got1.ID != firstUserID {
+		t.Errorf("expected user ID to stay at %d; got %d", firstUserID, got1.ID)
+	}
+
+	// Two distinct identity.account rows for the same user.
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.account WHERE user_id = $1 AND provider = 'github'`,
+		firstUserID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.account: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 identity.account rows for the linked user; got %d", n)
+	}
+}
+
+// TestIdentityRepository_Upsert_CaseInsensitiveEmail covers the
+// CITEXT column on identity.user: an Upsert with a different-case
+// email MUST reuse the existing row (case-insensitive match).
+func TestIdentityRepository_Upsert_CaseInsensitiveEmail(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	const seededEmail = "Case-Test@Example.com"
+	const accountID = "case-test-id"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, seededEmail)
+	})
+
+	// Seed with mixed case via the repo.
+	got1, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             seededEmail,
+		Name:              "Case Test",
+		ImageURL:          "",
+		Provider:          "github",
+		ProviderAccountID: accountID,
+	})
+	if err != nil {
+		t.Fatalf("Upsert seeded: unexpected error: %v", err)
+	}
+
+	// Upsert again with all-lowercase email.
+	got2, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             "case-test@example.com",
+		Name:              "Case Test",
+		ImageURL:          "",
+		Provider:          "github",
+		ProviderAccountID: accountID,
+	})
+	if err != nil {
+		t.Fatalf("Upsert lowercase: unexpected error: %v", err)
+	}
+	if got1.ID != got2.ID {
+		t.Errorf("case-insensitive UPSERT did not reuse identity.user:\n got  = %d\n want = %d", got2.ID, got1.ID)
+	}
+
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM identity.user WHERE lower(email) = lower($1)`,
+		seededEmail,
+	).Scan(&n); err != nil {
+		t.Fatalf("count identity.user: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected exactly 1 identity.user row after case-insensitive re-call; got %d", n)
+	}
+}

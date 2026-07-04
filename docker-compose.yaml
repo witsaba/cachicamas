@@ -213,6 +213,12 @@ services:
       # missing these vars (fail-fast posture, consistent with
       # the project's db-migrations R-DBMIG-050).
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
+      # cachicamas-identity-signin-callback — HMAC-SHA256 secret for
+      # the identity signin-callback endpoint. MUST be the same
+      # value the frontend uses to sign requests (set in its env
+      # block below). Different from AUTH_SECRET (purpose + rotation
+      # cadence differ). Generate with `openssl rand -base64 32`.
+      IDENTITY_CALLBACK_SECRET: ${IDENTITY_CALLBACK_SECRET:?IDENTITY_CALLBACK_SECRET must be set in .env (openssl rand -base64 32)}
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
     ports:
       - "${SERVICE_PORT:-8080}:8080"
@@ -285,6 +291,13 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
       AUTH_TRUST_HOST: "true"
       AUTH_URL: ${AUTH_URL:-http://localhost:3015}
+      # cachicamas-identity-signin-callback — HMAC-SHA256 secret
+      # used by frontend/src/lib/identity-callback-client.ts to sign
+      # requests to database_administrator:8080/api/v1/identity/signin-callback.
+      # MUST equal the IDENTITY_CALLBACK_SECRET in the
+      # database_administrator env block above (same value, same
+      # rotation cadence). Generate with `openssl rand -base64 32`.
+      IDENTITY_CALLBACK_SECRET: ${IDENTITY_CALLBACK_SECRET:?IDENTITY_CALLBACK_SECRET must be set in .env (openssl rand -base64 32)}
     ports:
       - "${FRONTEND_PORT:-3015}:3000"
     networks:

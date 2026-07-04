@@ -237,9 +237,60 @@ and `frontend/e2e/github-sign-in.spec.ts` for the running tests.
   `identity.session` table. The Go verifier (PR-3) decrypts the
   same cookie via `lestrrat-go/jwx/v2`, using HKDF-SHA256 with the
   locked envelope contract documented in `docs/adr/0002-promote-lestrrat-jwx-for-jwe.md`.
-- The `signIn` callback (in `lib/sign-in-callback.ts`) implements
-  **auto-link-on-email-match**: if a row with the same email already
-  exists, a new `identity.account` row is attached to it instead of
-  creating a duplicate `identity.user`.
-- The exact pin of `@auth/qwik@0.9.2` is enforced per
-  `docs/adr/0001-accept-authjs-qwik.md` (pre-1.0 mitigation).
+
+#### Identity persistence (via backend callback)
+
+The Qwik frontend does NOT talk to Postgres directly. On each
+successful GitHub sign-in, the `events.signIn` callback forwards
+the Auth.js event to the database_administrator Go service via an
+HMAC-signed POST:
+
+```
+POST /api/v1/identity/signin-callback
+Headers:
+  Content-Type: application/json
+  X-Cachicamas-Timestamp: <unix_ms>
+  X-Cachicamas-Signature: base64(HMAC_SHA256(IDENTITY_CALLBACK_SECRET,
+                                              timestamp + "." + canonical_json))
+Body:
+  { "user": { "id": "...", "email": "...", "name": "...", "image": null },
+    "account": { "provider": "github", "providerAccountId": "...",
+                  "accessToken": "...", "refreshToken": null, ... } }
+```
+
+**Canonical JSON** (locked, cross-tooling with the Go side):
+keys sorted lexicographically; no whitespace; no padding.
+The algorithm is implemented in `src/lib/identity-callback-client.ts`
+(TS) and `backend/database_administrator/src/interfaces/http/identity_handler.go`
+(Go). A shared test oracle pins a known input → known output vector
+on both sides so future drift is caught immediately.
+
+**Anti-replay**: 5-minute window. The backend rejects timestamps
+outside `|now - ts| <= 5min` with 401, and uses `crypto/subtle`
+constant-time compare for the signature itself.
+
+**Threat model**: HMAC + timestamp is sufficient because the trust
+boundary is the compose internal network. If the network becomes
+hostile (e.g., multi-tenant, public-facing), switch to mTLS / SPIFFE
+— see ADR 0003 §"Threat model".
+
+**Env vars**:
+
+- `IDENTITY_CALLBACK_SECRET` — required in BOTH the `frontend` and
+  `database_administrator` compose env blocks. Same value, same
+  rotation cadence. Generate with `openssl rand -base64 32`.
+  Different from `AUTH_SECRET` (different purpose + cadence).
+- `SERVER_API_BASE_URL` — compose direct-call path
+  (`http://database_administrator:8080`).
+- `ORIGIN` — dev reverse-proxy fallback
+  (`http://localhost:3015`).
+
+**Failure mode**: the callback is best-effort. A successful GitHub
+OAuth roundtrip is NEVER blocked by an identity persistence
+failure; errors are logged + swallowed in `plugin@auth.ts`. This
+posture was approved by the inline 4R review of the previous
+(PR #29) slice as R4-1 [LOW] and is preserved here.
+
+The exact pin of `@auth/qwik@0.9.2` is enforced per
+`docs/adr/0001-accept-authjs-qwik.md` (pre-1.0 mitigation).
+ADR 0003 documents the HMAC wire protocol in detail.
