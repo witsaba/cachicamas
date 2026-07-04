@@ -49,6 +49,14 @@ type Identity struct {
 //     handler maps that error to a 404 envelope (code=not_found)
 //     without importing pgx itself.
 //
+//   - LookupByProviderAccountID(ctx, provider, accountID) MUST
+//     return *domain.IdentityNotFoundError when no row matches.
+//     This is the canonical lookup path for the JWE verifier
+//     middleware (PR-3 IdentityFromCookie) — it's stable across
+//     email changes and forward-compatible for multi-provider
+//     support. Callers SHOULD prefer it over LookupByEmail when
+//     the JWE claims carry the provider + account_id.
+//
 //   - Email matching MUST be case-insensitive (Postgres CITEXT
 //     column does this natively). Callers MAY pass mixed-case
 //     emails; the result MUST be the same.
@@ -56,6 +64,7 @@ type Identity struct {
 //   - All methods honour ctx.
 type IdentityRepository interface {
 	LookupByEmail(ctx context.Context, email string) (*Identity, error)
+	LookupByProviderAccountID(ctx context.Context, provider, providerAccountID string) (*Identity, error)
 }
 
 // IdentityNotFoundError signals that an identity lookup returned no

@@ -90,9 +90,14 @@ func loadFixtureJWE(t *testing.T) string {
 // fakeIdentityRepo is the in-memory IdentityRepository used by these
 // tests.
 type fakeIdentityRepo struct {
-	mu        sync.Mutex
-	byEmail   map[string]*domain.Identity
-	lookupErr error
+	mu                 sync.Mutex
+	byEmail            map[string]*domain.Identity
+	lookupErr          error
+	byProviderCalls    int
+	byEmailCalls       int
+	lastProviderCall   string
+	lastProviderIDCall string
+	lastEmailCall      string
 }
 
 func newFakeIdentityRepo() *fakeIdentityRepo {
@@ -110,9 +115,29 @@ func newFakeIdentityRepo() *fakeIdentityRepo {
 	}
 }
 
+func (r *fakeIdentityRepo) LookupByProviderAccountID(_ context.Context, provider, providerAccountID string) (*domain.Identity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byProviderCalls++
+	r.lastProviderCall = provider
+	r.lastProviderIDCall = providerAccountID
+	if r.lookupErr != nil {
+		return nil, r.lookupErr
+	}
+	for _, id := range r.byEmail {
+		if id.Provider == provider && id.ProviderAccountID == providerAccountID {
+			dup := *id
+			return &dup, nil
+		}
+	}
+	return nil, &domain.IdentityNotFoundError{Email: provider + "/" + providerAccountID}
+}
+
 func (r *fakeIdentityRepo) LookupByEmail(_ context.Context, email string) (*domain.Identity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.byEmailCalls++
+	r.lastEmailCall = email
 	if r.lookupErr != nil {
 		return nil, r.lookupErr
 	}
@@ -462,3 +487,96 @@ func TestIdentityFromCookie_Requires32ByteAuthSecret(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 var _ = time.Second
+
+// ---------------------------------------------------------------------------
+// Lookup preference (R-BAM-010 + design §2.1):
+// the middleware prefers LookupByProviderAccountID when the JWE carries
+// `sub`; falls back to LookupByEmail when the canonical lookup misses.
+// ---------------------------------------------------------------------------
+
+func TestIdentityFromCookie_PrefersProviderAccountIDLookup(t *testing.T) {
+	// R-BAM-010 + S-BAM-010 / S-BAM-041: when the JWE carries sub, the
+	// middleware calls LookupByProviderAccountID first, NOT
+	// LookupByEmail. The fake repo records both call counts so the
+	// test asserts the ordering.
+	jweValue := loadFixtureJWE(t)
+	repo := newFakeIdentityRepo()
+	logger, _ := newCapturingLogger()
+	_, tp := newSpanRecorder()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	e := newRouterWithAuth(IdentityMiddlewareConfig{
+		AuthSecret:     fixtureAuthSecret,
+		CookieName:     fixtureCookieName,
+		IdentityRepo:   repo,
+		Logger:         logger,
+		TracerProvider: tp,
+	})
+	req := newRequestWithCookie(t, jweValue)
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%q", rec2.Code, rec2.Body.String())
+	}
+	if repo.byProviderCalls != 1 {
+		t.Errorf("expected LookupByProviderAccountID called once; got %d", repo.byProviderCalls)
+	}
+	if repo.byEmailCalls != 0 {
+		t.Errorf("expected LookupByEmail NOT called (canonical lookup hit); got %d", repo.byEmailCalls)
+	}
+	if repo.lastProviderCall != "github" {
+		t.Errorf("expected provider=github; got %q", repo.lastProviderCall)
+	}
+	if repo.lastProviderIDCall != "12345" {
+		t.Errorf("expected accountID=12345; got %q", repo.lastProviderIDCall)
+	}
+}
+
+func TestIdentityFromCookie_FallsBackToEmailOnProviderMiss(t *testing.T) {
+	// When LookupByProviderAccountID misses (e.g., a stale cookie
+	// minted before identity.account was populated), the middleware
+	// falls back to LookupByEmail. This protects users during the
+	// rollout window when PR-3 ships before all sessions refresh.
+	jweValue := loadFixtureJWE(t)
+	repo := newFakeIdentityRepo()
+	// Force LookupByProviderAccountID to miss by emptying the fake's
+	// map. LookupByEmail still has the fixture email.
+	repo.byEmail = map[string]*domain.Identity{
+		fixtureExpectedEmail: {
+			ID:                42,
+			Email:             fixtureExpectedEmail,
+			Name:              "Octocat",
+			ImageURL:          "https://github.com/avatars/octo.png",
+			Provider:          "github",
+			ProviderAccountID: "DIFFERENT_FROM_FIXTURE", // ensures provider lookup misses
+		},
+	}
+	logger, _ := newCapturingLogger()
+	_, tp := newSpanRecorder()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	e := newRouterWithAuth(IdentityMiddlewareConfig{
+		AuthSecret:     fixtureAuthSecret,
+		CookieName:     fixtureCookieName,
+		IdentityRepo:   repo,
+		Logger:         logger,
+		TracerProvider: tp,
+	})
+	req := newRequestWithCookie(t, jweValue)
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%q", rec2.Code, rec2.Body.String())
+	}
+	if repo.byProviderCalls != 1 {
+		t.Errorf("expected LookupByProviderAccountID tried once; got %d", repo.byProviderCalls)
+	}
+	if repo.byEmailCalls != 1 {
+		t.Errorf("expected LookupByEmail tried once as fallback; got %d", repo.byEmailCalls)
+	}
+	if repo.lastEmailCall != fixtureExpectedEmail {
+		t.Errorf("expected email=%q; got %q", fixtureExpectedEmail, repo.lastEmailCall)
+	}
+}
