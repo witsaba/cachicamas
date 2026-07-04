@@ -263,3 +263,46 @@ the staging area for the spec-promotion merge back to main.
   `github-sign-in.spec.ts` actually drives the full OAuth roundtrip
   end-to-end (the spec is wired but not yet exercised against a
   running compose stack in this turn).
+
+---
+
+## PR-2 merged (post-merge housekeeping, 2026-07-04)
+
+### Git state
+
+| Item | Value |
+| --- | --- |
+| Merge commit on `origin/main` | `7ea621a` "feat(frontend): github_login PR-2 frontend Auth.js UX + mocks + e2e (#20)" |
+| Merge method | Squash (PR button on GitHub) |
+| Local worktree | `cachicamas.post-pr2` on `post-pr2-canonical` branch (per user rule: never edit `main` directly) |
+| PR-2 branch on origin | `feat/cachicamas-github-login-pr2-frontend-auth` (deleted by --delete-branch on merge) |
+
+### Spec promotion
+
+- **frontend-auth**: PR-2 slice is now live. The delta `openspec/changes/cachicamas-github-login/specs/frontend-auth/spec.md` was **promoted to canonical** at `openspec/specs/frontend-auth/spec.md`. The delta is preserved for the change history.
+- **backend-auth-middleware** (delta): NOT yet promoted — PR-3 work is pending.
+- **identity-schema** (delta): was promoted to canonical after PR-1 merged (commit `e67dac4`). The delta remains under `openspec/changes/.../specs/identity-schema/` for change history.
+
+### Canonical specs now under `openspec/specs/`
+
+- `db-migrations/`
+- `frontend-compose-and-cors/`
+- `frontend-e2e-and-client-data/`
+- `frontend-runtime/`
+- `identity-schema/` (PR-1 promoted)
+- `frontend-auth/` (PR-2 promoted this turn)
+
+### Frontend-auth canonical spec — quick reference
+
+- Capability: frontend-auth
+- Domain: frontend
+- 18 scenarios (S-FA-001..S-FA-058) under `openspec/specs/frontend-auth/spec.md`
+- Components introduced: `SignInButton`, `ProfileView`, `routes/plugin@auth.ts`, `routes/profile/`, `lib/sign-in-callback.ts`
+- Env bindings: `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `AUTH_URL`, `AUTH_GITHUB_BASE_URL` (test-only override)
+- Cookie name: `authjs.session-token` (dev) / `__Secure-authjs.session-token` (prod, when AUTH_URL is HTTPS)
+- Strategy: stateless JWE cookie; auto-link-on-email-match on the events.signIn callback
+- Mocks simulator: `scripts/mocks-github-oauth/` (compose service `mocks-github-oauth`)
+
+### Next action
+
+PR-3 (`feat/cachicamas-github-login-pr3-backend-verifier`) is queued in its own worktree. Implementation starts in the next focused turn. The Go-side JWE verifier middleware uses `lestrrat-go/jwx/v2` and shares `AUTH_SECRET` with the frontend (per ADR 0002 byte-level envelope contract).
