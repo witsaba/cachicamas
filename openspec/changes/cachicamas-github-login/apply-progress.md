@@ -165,3 +165,48 @@ PR-3 (`feat/cachicamas-github-login-pr3-backend-verifier`): Go JWE verifier + pr
 After PR-3 merges, `sdd-verify` collects the walkthrough for `verify-report.md`; `sdd-sync` adds the
 identity and middleware specs to `openspec/specs/`; `sdd-archive` moves the folder under
 `openspec/changes/archive/2026-07-03-cachicamas-github-login/`.
+
+---
+
+## PR-1 merged (post-merge housekeeping, 2026-07-04)
+
+### Git state
+
+| Item | Value |
+| --- | --- |
+| Merge commit on `origin/main` | `69429c4` "feat(identity): github_login schema + identity domain + ADRs (#18)" |
+| Merge method | Squash via PR button (visible from "Closed" comment) |
+| Local worktree | `cachicamas.post-pr1` on `post-pr1-validation` branch (per user rule: never edit `main` directly) |
+| PR-1 branch on origin | `feat/cachicamas-github-login-pr1-schema-identity` (kept for traceability; safe to delete after PR-3 ships) |
+
+### Post-merge gate validation (all green)
+
+- `cd backend/database_administrator && make lint` → `0 issues`
+- `cd backend/database_administrator && make build` → `bin/database_administrator` produced
+- `INTEGRATION=1 make test` → all packages PASS, including:
+  - `domain`: `TestIdentity_StructFields`, `TestIdentityNotFoundError_AppError`, `TestIdentityRepository_PortShape`, `TestIdentityRepository_LookupByEmail_IsContextFirst`
+  - `application`: `TestIdentityService_LookupByEmail_{Hit,Miss,RepoError}`
+  - `infrastructure/postgres`: `TestIdentityRepository_LookupByEmail_{Hit,Miss,CaseInsensitive}`
+  - `migration`: `TestRunner_Up_AllNewMigrationsApply` (now 5 migrations), `TestWitsabaFramework_AgentFirstLifecycle_EndToEnd`
+
+### Spec promotion
+
+- **identity-schema**: PR-1 slice is now live. The delta `openspec/changes/cachicamas-github-login/specs/identity-schema/spec.md` was **promoted to canonical** at `openspec/specs/identity-schema/spec.md`. The delta is preserved for the change history.
+- **frontend-auth** (delta): NOT yet promoted — PR-2 work is pending.
+- **backend-auth-middleware** (delta): NOT yet promoted — PR-3 work is pending.
+
+### Identity-schema canonical spec — quick reference
+
+- Capability: identity-schema
+- Domain: identity
+- 15 scenarios (S-IS-010 → S-IS-080) under `openspec/specs/identity-schema/spec.md`
+- Tables introduced: `identity.user`, `identity.account`, plus `organization.owner_user_id` (nullable FK)
+- Constraints: CITEXT UNIQUE on email; UNIQUE(provider, provider_account_id) on account; ON DELETE CASCADE on account.user_id (forward note: see §R1 of the 4R inline review)
+- Migration: `backend/database_administrator/src/migration/sql/20260703120000_github_login.sql` (Up + Down, reversible)
+
+### Next action
+
+PR-2 (`feat/cachicamas-github-login-pr2-frontend-auth`) is queued in its own worktree (per the
+new worktree rule). Implementation starts in the next focused turn. PR-1's branch is preserved
+on origin for reference; the post-pr1-validation worktree holds the housekeeping commit and is
+the staging area for the spec-promotion merge back to main.
