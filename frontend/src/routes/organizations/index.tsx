@@ -4,7 +4,10 @@ import {
   OrganizationList,
   type OrganizationSummary,
 } from "~/components/organization-list/organization-list";
+import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { listOrganizations } from "~/lib/api";
+import { requireSession } from "~/lib/require-session";
+import { useSession, useSignIn } from "~/routes/plugin@auth";
 
 /**
  * /organizations — list or empty state.
@@ -36,6 +39,23 @@ export const useOrganizationsLoader = routeLoader$(async () => {
 });
 
 export default component$(() => {
+  // cachicamas-login-ux (R-PR-003): gate anonymous visitors with the
+  // inline SignInRequiredCard before the loader runs. We avoid touching
+  // the database_administrator API on the anon path (less work for
+  // anonymous traffic; aligned with the "landing is the only thing
+  // visible when not logged in" intent).
+  const session = useSession();
+  const signIn = useSignIn();
+  const guard = requireSession(session.value, "/organizations");
+  if (guard.kind === "anon") {
+    return (
+      <SignInRequiredCard
+        signIn={signIn}
+        description="Sign in to browse organizations."
+        redirectTo={guard.pathname}
+      />
+    );
+  }
   const data = useOrganizationsLoader();
   return (
     <>

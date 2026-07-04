@@ -5,7 +5,10 @@ import {
   type FormAction,
   type FormActionResult,
 } from "~/components/organization-form/organization-form";
+import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { createOrganization } from "~/lib/api";
+import { requireSession } from "~/lib/require-session";
+import { useSession, useSignIn } from "~/routes/plugin@auth";
 
 /**
  * /organizations/new — create-organization form route.
@@ -97,6 +100,18 @@ const submitAction: FormAction = $(
 
 export default component$(() => {
   const nav = useNavigate();
+  const session = useSession();
+  const signIn = useSignIn();
+  const guard = requireSession(session.value, "/organizations/new");
+  if (guard.kind === "anon") {
+    return (
+      <SignInRequiredCard
+        signIn={signIn}
+        description="Sign in to configure a new organization."
+        redirectTo={guard.pathname}
+      />
+    );
+  }
   return (
     <OrganizationForm
       action={submitAction}
