@@ -10,12 +10,14 @@
  *   - Render the SignInButton with a fake `signIn` action prop.
  *   - Assert the form is a `<form>` element with the right hidden
  *     inputs and submit button.
+ *   - Assert the GitHub Octocat inline SVG is present (UX-4 amendment
+ *     2026-07-04 — recognizable brand marks as visual anchors).
  *   - Click the submit button → the fake action's `submit` is invoked
  *     with the FormData containing providerId=github + redirectTo.
  */
 import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { SignInButton, type SignInActionLike } from "./sign-in-button";
 
 /**
@@ -71,19 +73,50 @@ describe("components/sign-in-button", () => {
     expect(redirectToInput).toBeTruthy();
     expect(redirectToInput?.value).toBe("/profile");
 
-    // Submit button must carry the default label.
-    const button = form?.querySelector('button[type="submit"]');
+    // Submit button must carry the default label (short, per UX-4
+    // amendment — the brand mark carries the provider identification).
+    // We use .includes() because textContent now includes the <path d="...">
+    // SVG path commands; the visible text is wrapped in a <span>.
+    const button = screen.querySelector('button[type="submit"]');
     expect(button).toBeTruthy();
-    expect(button?.textContent?.trim()).toBe("Sign in with GitHub");
+    const labelSpan = button?.querySelector("span");
+    expect(labelSpan).toBeTruthy();
+    expect(labelSpan?.textContent?.trim()).toBe("Sign in");
+  });
+
+  it("renders the GitHub Octocat inline <svg> as a recognizable brand anchor (UX-4 amendment)", async () => {
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} />);
+
+    // The brand mark MUST be present in the button as an inline SVG
+    // (no external <img src="..."> — aphantasia-friendly and self-
+    // contained). data-testid guards the lookup against future
+    // expansion. aria-hidden="true" so screen readers announce the
+    // visible "Sign in" text label, not the SVG.
+    const form = screen.querySelector("form");
+    expect(form).toBeTruthy();
+    const mark = form?.querySelector(
+      'svg[data-testid="sign-in-button-github-mark"]',
+    );
+    expect(mark).toBeTruthy();
+    expect(mark?.getAttribute("aria-hidden")).toBe("true");
+    // The SVG MUST carry at least one <path> child (the Octocat
+    // silhouette). Asserting the path-element existence is sufficient
+    // — asserting exact path data is brittle and ties the test to the
+    // upstream logo file rather than the consumer contract.
+    const path = mark?.querySelector("path");
+    expect(path).toBeTruthy();
   });
 
   it("honors a custom label override", async () => {
     const { action } = makeFakeSignIn();
     const { screen, render } = await createDOM();
-    await render(<SignInButton signIn={action} label="Iniciar sesión con GitHub" />);
+    await render(<SignInButton signIn={action} label="Iniciar sesión" />);
 
     const button = screen.querySelector('button[type="submit"]');
-    expect(button?.textContent?.trim()).toBe("Iniciar sesión con GitHub");
+    const labelSpan = button?.querySelector("span");
+    expect(labelSpan?.textContent?.trim()).toBe("Iniciar sesión");
   });
 
   it("honors a custom redirectTo override", async () => {
@@ -122,15 +155,47 @@ describe("components/sign-in-button", () => {
     expect(button).toBeTruthy();
   });
 
-  it("does NOT include any decorative icon <img> (UX-4 / R-FA-046)", async () => {
+  it("does NOT include any external <img> asset (no asset URL dependency)", async () => {
+    // UX-4 amendment (2026-07-04): an inline SVG brand mark is allowed,
+    // but loading the GitHub Octocat from an external <img src="...">
+    // is still banned — it would couple the affordance to a third-
+    // party CDN, break in offline scenarios, and reintroduce the
+    // mental-imagery problem for aphantasic users.
     const { action } = makeFakeSignIn();
     const { screen, render } = await createDOM();
     await render(<SignInButton signIn={action} />);
 
-    // The sign-in CTA is text-only; no <img> elements anywhere in the
-    // form subtree. The landing page spec §6.2 (UX-4) bans decorative
-    // imagery that carries meaning.
     const imgs = screen.querySelectorAll("form img");
     expect(imgs.length).toBe(0);
+  });
+
+  it("renders with cursor-pointer + hover/transition affordances (UAT-3 mouse UX)", async () => {
+    // UAT-3 (2026-07-04): the button lacked an explicit pointer
+    // cursor on some OSes (where <button> elements don't get one
+    // automatically) and the hover state was an instant bg flip
+    // with no transition. We now declare cursor-pointer explicitly
+    // + transition the chrome (bg / border / shadow) over 150ms
+    // + provide a subtle active-state press-down. We assert the
+    // classes are present in jsdom (no real CSS is computed in
+    // createDOM); visual verification is the UAT burden.
+    const { action } = makeFakeSignIn();
+    const { screen, render } = await createDOM();
+    await render(<SignInButton signIn={action} />);
+
+    const button = screen.querySelector('button[type="submit"]');
+    expect(button).toBeTruthy();
+    const cls = (button as HTMLElement).className;
+    // explicit cursor for cross-OS consistency (some browsers/OSes
+    // do NOT apply cursor: pointer to <button> automatically)
+    expect(cls).toMatch(/cursor-pointer/);
+    // hover bg still there
+    expect(cls).toMatch(/hover:bg-zinc-800/);
+    // new: hover shadow + hover border emphasis
+    expect(cls).toMatch(/hover:shadow-md/);
+    expect(cls).toMatch(/hover:border-zinc-600/);
+    // transition (without it the hover state is an instant flip)
+    expect(cls).toMatch(/transition-/);
+    // active-state press-down for click feedback
+    expect(cls).toMatch(/active:translate-y-px/);
   });
 });

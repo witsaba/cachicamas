@@ -18,8 +18,13 @@
  *     non-https URLs (e.g. `javascript:`) from reaching the DOM.
  *   - Renders the panel as `<div role="menu">` with three entries
  *     (Profile link, Manage organizations link, Sign out form).
- *   - Aphantasic-friendly (UX-4) — text-only inside the panel. The
- *     avatar image on the trigger is identity, not decoration.
+ *   - Aphantasic-friendly (UX-4, amended 2026-07-04) — inside the
+ *     panel, the entries are text-only EXCEPT for the Sign out
+ *     affordance, which renders a Lucide-style "log-out" inline
+ *     <svg> (door + arrow, MIT-licensed) as a functional visual
+ *     anchor. The avatar image on the trigger is identity, not
+ *     decoration. See `openspec/specs/app-shell/spec.md` UX-4
+ *     glossary entry for the functional-icon carve-out.
  *
  * Test escape hatch:
  *   `forceOpen` is a test-only prop. Production consumers use
@@ -28,6 +33,7 @@
  *   (which the Qwik testing harness cannot synchronously fire).
  */
 import { component$ } from "@builder.io/qwik";
+import { Form } from "@builder.io/qwik-city";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
 import { safeAvatarSrc } from "~/lib/safe-avatar-src";
 import { useClickOutside } from "./use-click-outside";
@@ -78,7 +84,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
         <button
           ref={triggerRef}
           type="button"
-          class="h-10 w-10 overflow-hidden rounded-full ring-1 ring-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          class="h-10 w-10 cursor-pointer overflow-hidden rounded-full ring-1 ring-slate-200 transition-[box-shadow,transform] duration-150 hover:shadow-md hover:ring-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:scale-95"
           aria-haspopup="menu"
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}
@@ -132,20 +138,42 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
               </li>
             </ul>
             <hr class="my-3 border-slate-200" />
-            <form
-              method="post"
-              action={signOut.actionPath}
-              data-testid="avatar-menu-signout-form"
-            >
+            <Form action={signOut} data-testid="avatar-menu-signout-form">
               <input type="hidden" name="redirectTo" value="/" />
               <button
                 type="submit"
                 data-testid="avatar-menu-signout"
-                class="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                class="inline-flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-slate-700 transition-[background-color,box-shadow,transform,border-color] duration-150 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:translate-y-px"
               >
-                Sign out
+                {/*
+                    Functional visual anchor for "log out" (UX-4
+                    amendment, 2026-07-04) — Lucide's log-out icon
+                    (door + arrow, MIT-licensed). aria-hidden because
+                    the visible <span>Sign out</span> text label
+                    already announces the affordance. stroke="currentColor"
+                    so the icon inherits the button's text color in
+                    both light (slate-700) and dark contexts.
+                  */}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                  focusable="false"
+                  data-testid="sign-out-icon"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Sign out</span>
               </button>
-            </form>
+            </Form>
           </div>
         ) : null}
       </div>

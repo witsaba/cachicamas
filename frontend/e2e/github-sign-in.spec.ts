@@ -66,17 +66,21 @@ test.describe("GitHub OAuth roundtrip (mocks mode)", () => {
     // cookie, and redirects to /profile.
     await signInForm.locator('button[type="submit"]').click();
 
-    // Wait for the URL to become /profile (or /auth/signin if denied).
-    await page.waitForURL(/\/profile(\?|$)/, { timeout: 15_000 });
+// Wait for the URL to become /profile (or /auth/signin if denied).
+        await page.waitForURL(/\/profile(\?|$)/, { timeout: 15_000 });
 
-    // The profile view should render the test user's name in <h1>.
-    const nameH1 = page.locator('[data-testid="profile-name"]');
-    await expect(nameH1).toBeVisible();
-    await expect(nameH1).toHaveText("Octocat");
-
-        // The email line should carry the test user's primary email.
-        const emailLine = page.locator('[data-testid="profile-email"]');
-        await expect(emailLine).toHaveText("octocat@example.com");
+        // UAT-9 (2026-07-04): /profile renders a personalized welcome
+        // heading instead of a standalone name <h1>. The mocks user's
+        // name is "Octocat" (single token) — firstName() returns it
+        // as-is, so the heading reads "Welcome back, Octocat!".
+        // The retired data-testid="profile-name" / "profile-email" /
+        // "profile-image" no longer exist on /profile — the shell's
+        // AvatarDropdown panel header is the sole identity surface.
+        const welcomeHeading = page.locator(
+          '[data-testid="profile-welcome"]',
+        );
+        await expect(welcomeHeading).toBeVisible();
+        await expect(welcomeHeading).toHaveText("Welcome back, Octocat!");
 
         // PR-4 (cachicamas-login-ux, T4.4.1): the github_login
         // anchor MUST render with the mocks user's login

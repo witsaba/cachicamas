@@ -126,6 +126,25 @@ test("[routes/layout]: anon shell renders SignInButton with providerId=github (S
   expect(providerId?.value).toBe("github");
 });
 
+test("[routes/layout]: anon SignInButton includes the GitHub Octocat brand mark + short label (UX-4 amendment)", async () => {
+  // UX-4 was amended on 2026-07-04 (UAT-2) to permit RECOGNIZABLE
+  // BRAND MARKS as visible visual anchors. The SignInButton MUST
+  // render the GitHub Octocat inline <svg> alongside a short label
+  // ("Sign in"), not "Sign in with GitHub".
+  const screen = await renderWithSession(ANON_SESSION);
+  const form = screen.querySelector('form[data-testid="sign-in-button"]');
+  expect(form).toBeTruthy();
+  const mark = form?.querySelector(
+    'svg[data-testid="sign-in-button-github-mark"]',
+  );
+  expect(mark).toBeTruthy();
+  expect(mark?.getAttribute("aria-hidden")).toBe("true");
+  const button = form?.querySelector('button[type="submit"]');
+  expect(button).toBeTruthy();
+  const labelSpan = button?.querySelector("span");
+  expect(labelSpan?.textContent?.trim()).toBe("Sign in");
+});
+
 test("[routes/layout]: anon shell does NOT render AvatarDropdown (S-AS-011)", async () => {
   const screen = await renderWithSession(ANON_SESSION);
   expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
@@ -140,14 +159,16 @@ test("[routes/layout]: auth shell renders AvatarDropdown with avatar image + ari
   expect(img?.getAttribute("src")).toBe(
     "https://avatars.githubusercontent.com/u/12345",
   );
-  expect(
-    (trigger as HTMLButtonElement).getAttribute("aria-label"),
-  ).toBe("Braejan menu");
+  expect((trigger as HTMLButtonElement).getAttribute("aria-label")).toBe(
+    "Braejan menu",
+  );
 });
 
 test("[routes/layout]: auth shell does NOT render SignInButton (S-AS-021)", async () => {
   const screen = await renderWithSession(AUTH_SESSION);
-  expect(screen.querySelector('form[data-testid="sign-in-button"]')).toBeFalsy();
+  expect(
+    screen.querySelector('form[data-testid="sign-in-button"]'),
+  ).toBeFalsy();
 });
 
 test("[routes/layout]: non-https avatar URL is sanitized (S-AS-022, ADR-0009)", async () => {
@@ -196,3 +217,39 @@ test("[routes/layout]: skip-to-main link is the first focusable element of <head
   // header comes AFTER the skip link in document order.
   expect(pos & 0x04).toBeTruthy();
 });
+
+
+  test("[routes/layout]: registers a capture-phase popstate listener that reloads (UAT-8 r4)", async () => {
+    // UAT-8 r4 (2026-07-04): the layout registers a capture-phase
+    // popstate listener on `window` via `useTask$` + raw
+    // `window.addEventListener(..., { capture: true })` that calls
+    // `e.stopImmediatePropagation()` + `window.location.reload()`.
+    // The capture phase is critical: Qwik City's own popstate
+    // listener for SPA navigation runs in the bubble phase, and
+    // if we run in the same phase we race with it -- Qwik often
+    // serves its cached component$ render before our reload takes
+    // effect. Running in capture + stopImmediatePropagation gives
+    // us a clean "block Qwik, then hard-reload" sequence.
+    //
+    // Static-source assertions (the runtime registration can't
+    // be verified in createDOM -- vitest's node env doesn't
+    // expose a global window).
+    const layoutPath = resolve(__dirname, "./layout.tsx");
+    const layoutSrc = readFileSync(layoutPath, "utf-8");
+    expect(layoutSrc).toMatch(/useTask\$/);
+    // Capture-phase raw addEventListener (bubble-phase default
+    // races with Qwik's own popstate handler for SPA navigation).
+    expect(
+      layoutSrc,
+    ).toMatch(
+      /window\.addEventListener\(\s*"popstate"\s*,\s*[^)]+,\s*\{\s*capture:\s*true\s*\}/,
+    );
+    // stopImmediatePropagation blocks Qwik's bubble-phase
+    // popstate listener from running and serving the cached
+    // component$ render.
+    expect(layoutSrc).toMatch(/stopImmediatePropagation/);
+    expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
+    // Sanity: layout still renders the header chrome.
+    const screen = await renderWithSession(ANON_SESSION);
+    expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
+  });

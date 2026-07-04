@@ -7,9 +7,12 @@
  *   "Sign in to continue", the description paragraph, and the
  *   SignInButton configured with `redirectTo`.
  *
- * Aphantasic-friendly (UX-4, archived spec):
- *   Text-first. No icons. The signal is the heading + the description
- *   + a single primary action.
+ * Aphantasic-friendly (UX-4, archived spec, amended 2026-07-04):
+ *   Text-first. No imagery that requires mental visualization.
+ *   Recognizable brand marks (the GitHub Octocat inline SVG inside
+ *   the embedded SignInButton) are aphantasia-friendly visual
+ *   anchors per the UX-4 amendment — see the SignInButton docstring
+ *   and `openspec/specs/app-shell/spec.md` UX-4 entry.
  *
  * The component is standalone — no `useSession()`, no `routeLoader$`.
  * The parent route already determined "this is anonymous" via
@@ -51,11 +54,7 @@ export const SignInRequiredCard = component$<SignInRequiredCardProps>(
         </h1>
         <p class="mt-2 text-sm text-slate-600">{description}</p>
         <div class="mt-6">
-          <SignInButton
-            signIn={signIn}
-            label="Sign in with GitHub"
-            redirectTo={redirectTo}
-          />
+          <SignInButton signIn={signIn} redirectTo={redirectTo} />
         </div>
       </section>
     );

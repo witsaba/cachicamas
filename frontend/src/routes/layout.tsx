@@ -35,7 +35,7 @@
  * is good enough for the shell context; the per-route origins
  * stay on the page itself.
  */
-import { component$, Slot } from "@builder.io/qwik";
+import { component$, Slot, useTask$ } from "@builder.io/qwik";
 import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
@@ -46,6 +46,53 @@ export default component$(() => {
   const signOut = useSignOut();
   const isAuthenticated =
     session.value?.user !== null && session.value?.user !== undefined;
+
+  // UAT-8 revision 4 (2026-07-04): re-validate session on browser
+  // back/forward navigation. Without this, Qwik City's SPA router
+  // serves the CACHED component$ render from browser history when
+  // the user navigates back to a route they visited before signing
+  // out — their name/email/avatar still visible as if signed in,
+  // until they manually refresh (which re-runs the server-side
+  // session check correctly).
+  //
+  // Strategy: register a `popstate` listener on `window` IN THE
+  // CAPTURE PHASE via `useTask$` + raw `window.addEventListener`.
+  // This bypasses Qwik's `useOnWindow` (which uses bubble phase
+  // and races with Qwik's own popstate listener for SPA navigation)
+  // and runs BEFORE Qwik's listener, so the reload happens before
+  // Qwik can serve its cached component$ render. Calling
+  // `e.stopImmediatePropagation()` in capture phase also prevents
+  // Qwik from running its handler.
+  //
+  // Revision history (so a future contributor doesn't regress):
+  //   r1: useOnDocument("popstate", reload) — broken: popstate
+  //       fires on window, not document; sibling roots, no bubble.
+  //   r2: useOnWindow("popstate", reload) — registered in bubble
+  //       phase, races with Qwik's own popstate handler. Qwik
+  //       often serves the cached component$ before the reload
+  //       can take effect.
+  //   r3: useNavigate + forceReload — broken: useNavigate needs
+  //       qc-l context that createDOM() doesn't provide, fails
+  //       the layout spec.
+  //   r4 (current): useTask$ + raw addEventListener({ capture:
+  //       true }) + e.stopImmediatePropagation(). Runs before
+  //       Qwik's bubble-phase listener, blocks it, hard reloads.
+  useTask$(({ cleanup }) => {
+    if (typeof window === "undefined") return;
+    const handler = (e: PopStateEvent) => {
+      console.log("[UAT-8 r4] popstate fired in capture phase, reloading");
+      // Prevent Qwik's own popstate listener from running and
+      // serving the cached component$ render.
+      e.stopImmediatePropagation();
+      window.location.reload();
+    };
+    // { capture: true } ensures we run BEFORE Qwik's bubble-phase
+    // popstate listener for SPA navigation.
+    window.addEventListener("popstate", handler, { capture: true });
+    cleanup(() =>
+      window.removeEventListener("popstate", handler, { capture: true }),
+    );
+  });
 
   // S-AS-050: the skip link is the very first focusable element
   // of the document. It is visually hidden until focused (the
@@ -75,7 +122,11 @@ export default component$(() => {
           {isAuthenticated && session.value ? (
             <AvatarDropdown session={session.value} signOut={signOut} />
           ) : (
-            <SignInButton signIn={signIn} label="Sign in with GitHub" />
+            // UX-4 amendment (2026-07-04): the default SignInButton
+            // label is "Sign in" + the GitHub Octocat brand mark
+            // (rendered by the component itself). No explicit label
+            // override needed.
+            <SignInButton signIn={signIn} />
           )}
         </div>
       </header>

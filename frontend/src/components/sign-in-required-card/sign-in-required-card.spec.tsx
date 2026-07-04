@@ -102,7 +102,12 @@ describe("components/sign-in-required-card", () => {
     expect(redirectToInput?.value).toBe("/");
   });
 
-  it("is text-first — no decorative icons (UX-4 / aphantasic-friendly)", async () => {
+  it("is text-first — no decorative icons except the SignInButton brand mark (UX-4 / aphantasic-friendly)", async () => {
+    // UX-4 was amended on 2026-07-04 (UAT-2): recognizable brand marks
+    // as visible visual anchors are aphantasia-friendly. The card
+    // embeds a SignInButton which renders the GitHub Octocat inline
+    // SVG; that ONE <svg> is allowed. No other SVG/icon imagery
+    // should appear in the card chrome (heading, description, layout).
     const signIn = fakeSignIn();
     const { screen, render } = await createDOM();
     await render(
@@ -115,7 +120,15 @@ describe("components/sign-in-required-card", () => {
     const card = screen.querySelector(
       '[data-testid="sign-in-required-card"]',
     );
+    // No <img> elements anywhere — brand marks are inline SVG.
     expect(card?.querySelectorAll("img").length).toBe(0);
-    expect(card?.querySelectorAll("svg").length).toBe(0);
+    // Exactly ONE <svg>: the GitHub Octocat brand mark inside the
+    // embedded SignInButton. Any other SVG would be decoration and
+    // violate UX-4.
+    const svgs = card?.querySelectorAll("svg") ?? [];
+    expect(svgs.length).toBe(1);
+    expect(svgs[0]?.getAttribute("data-testid")).toBe(
+      "sign-in-button-github-mark",
+    );
   });
 });

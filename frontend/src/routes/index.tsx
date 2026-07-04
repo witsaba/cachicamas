@@ -1,7 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
-import { useSession, useSignIn } from "~/routes/plugin@auth";
-import { SignInButton } from "~/components/sign-in-button/sign-in-button";
+import { useSession } from "~/routes/plugin@auth";
 
 /**
  * Landing page — the front door of cachicamas.
@@ -52,10 +51,15 @@ const FEATURES = [
 ] as const;
 
 export default component$(() => {
-  const signIn = useSignIn();
+  // useSession is read so the landing is co-located with auth-aware
+  // routes in the routing tree and so the layout's identity
+  // affordance (SignInButton for anon, AvatarDropdown for auth) is
+  // the single source of truth for the visitor's sign-in entry
+  // point.  Do NOT add a SignInButton here — UAT-1 (2026-07-04)
+  // observed that the duplicate body CTA competed with the header
+  // and made the chrome feel noisy.  See `routes/layout.tsx`.
   const session = useSession();
-  const isAuthenticated =
-    session.value?.user !== null && session.value?.user !== undefined;
+  void session.value;
   return (
     <main class="min-h-screen bg-white text-slate-900">
       {/* Subtle gradient accent — the only decorative
@@ -98,20 +102,6 @@ export default component$(() => {
           >
             See the interface
           </a>
-          {/* cachicamas-github-login (R-FA-040): GitHub OAuth sign-in CTA.
-                      Renders a <Form action={signIn}> with hidden providerId="github".
-                      Landing shows this for anonymous visitors — once the
-                      visitor has signed in, the shell's AvatarDropdown
-                      (introduced in PR-3 of cachicamas-login-ux) replaces
-                      this affordance. Wrapping in if(!session) avoids the
-                      stale sign-in CTA competing with the avatar dropdown. */}
-          {!isAuthenticated ? (
-            <SignInButton
-              signIn={signIn}
-              label="Sign in with GitHub"
-              redirectTo="/profile"
-            />
-          ) : null}
         </div>
       </section>
 
