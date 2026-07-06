@@ -257,50 +257,6 @@ export async function createOrganization(
   );
 }
 
-/** GET /organizations/{id}. */
-export async function getOrganization(
-  id: number,
-): Promise<ApiResult<OrganizationReadModel>> {
-  let res: Response;
-  try {
-    res = await fetch(`${apiBaseUrl()}/organizations/${id}`);
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  return envelopeToResult(
-    res,
-    async () => (await res.json()) as OrganizationReadModel,
-  );
-}
-
-/**
- * GET /organizations.  Always resolves to an array (defensive:
- * a wire-level `null` would otherwise propagate to the loader
- * value and break the list render).
- */
-export async function listOrganizations(): Promise<
-  ApiResult<OrganizationReadModel[]>
-> {
-  let res: Response;
-  try {
-    res = await fetch(`${apiBaseUrl()}/organizations`);
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  return envelopeToResult(res, async () => {
-    const body = (await res.json()) as OrganizationReadModel[] | null;
-    return Array.isArray(body) ? body : [];
-  });
-}
-
 /**
  * GET /setup-state.
  *

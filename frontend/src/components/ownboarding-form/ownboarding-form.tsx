@@ -111,7 +111,7 @@ export const OwnboardingForm = component$<{
     },
   );
 
-const onSubmit = $(async () => {
+  const onSubmit = $(async () => {
     // Default form submission is prevented via the
     // `preventdefault:submit` attribute on the <form> element.
     // Do NOT call `event.preventDefault()` here — qwik's

@@ -16,7 +16,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -32,15 +31,11 @@ import (
 // caller that wants to record these spans uses the same string.
 const (
 	spanNameCreate     = "organization.create"
-	spanNameList       = "organization.list"
-	spanNameGet        = "organization.get"
 	spanNameSetupState = "organization.setup_state"
 )
 
 // Locked HTTP route strings for span attributes.
 const (
-	httpRouteList        = "/organizations"
-	httpRouteGet         = "/organizations/:id"
 	httpRoutePost        = "/organizations"
 	httpRouteSetupState  = "/setup-state"
 )
@@ -145,58 +140,11 @@ func (s *OrganizationService) Create(ctx context.Context, in domain.CreateOrgani
 	return persisted, nil
 }
 
-// List returns every organization, ordered by (created_at ASC,
-// id ASC). On success the span carries organization.count so a
-// Jaeger query can chart list-size without a separate metric.
-func (s *OrganizationService) List(ctx context.Context) ([]domain.Organization, error) {
-	ctx, span := s.tracer.Start(ctx, spanNameList)
-	defer span.End()
-
-	setHTTPRouteAttrs(span, "GET", httpRouteList)
-
-	orgs, err := s.repo.SelectAll(ctx)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	span.SetAttributes(attribute.Int("organization.count", len(orgs)))
-	setHTTPStatus(span, 200)
-	s.logger.InfoContext(ctx, "organization.list ok",
-		slog.Int("organization.count", len(orgs)),
-	)
-	return orgs, nil
-}
-
-// Get returns a single organization by id. The id is a path
-// param, so the span always carries organization.id (whether or
-// not the row exists) — this is what spec §3.4 says.
-func (s *OrganizationService) Get(ctx context.Context, id int64) (*domain.Organization, error) {
-	ctx, span := s.tracer.Start(ctx, spanNameGet)
-	defer span.End()
-
-	setHTTPRouteAttrs(span, "GET", httpRouteGet)
-	span.SetAttributes(attribute.Int64("organization.id", id))
-
-	org, err := s.repo.SelectByID(ctx, id)
-	if err != nil {
-		var nerr *domain.NotFoundError
-		if errors.As(err, &nerr) {
-			setHTTPStatus(span, 404)
-		} else {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		return nil, err
-	}
-
-	setHTTPStatus(span, 200)
-	s.logger.InfoContext(ctx, "organization.get ok",
-		slog.Int64("organization.id", org.ID),
-	)
-	return org, nil
-}
+// List and Get methods were removed in the 2026-07-06 ownboarding
+// change. The /organizations list and get-by-id endpoints are gone;
+// only POST /organizations (ownboarding submit) and GET /setup-state
+// remain. The corresponding spanNameList, spanNameGet, httpRouteList,
+// and httpRouteGet constants are gone too.
 
 // ---------------------------------------------------------------------------
 // Helpers — kept unexported and small so the three use cases
@@ -251,12 +199,10 @@ func (s *OrganizationService) GetSetupState(ctx context.Context) (SetupState, er
 	return SetupState{HasOrganization: exists}, nil
 }
 
-// Compile-time check that the service struct exposes the four
+// Compile-time check that the service struct exposes the two
 // use cases the handler needs. If a method is renamed, the build
 // breaks here.
 var _ interface {
 	Create(ctx context.Context, in domain.CreateOrganizationInput) (*domain.Organization, error)
-	List(ctx context.Context) ([]domain.Organization, error)
-	Get(ctx context.Context, id int64) (*domain.Organization, error)
 	GetSetupState(ctx context.Context) (SetupState, error)
 } = (*OrganizationService)(nil)

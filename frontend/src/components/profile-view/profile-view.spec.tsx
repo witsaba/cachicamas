@@ -129,7 +129,7 @@ describe("components/profile-view", () => {
     ).toBeFalsy();
   });
 
-  it("renders a body paragraph explaining what cachicamas is", async () => {
+it("renders a body paragraph explaining what cachicamas is", async () => {
     const session: ProfileSession = {
       user: { name: "Braejan", email: "b@e.com", image: null },
     };
@@ -138,7 +138,10 @@ describe("components/profile-view", () => {
     const body = screen.querySelector('[data-testid="profile-body"]');
     expect(body).toBeTruthy();
     expect(body?.textContent ?? "").toContain("cachicamas");
-    expect(body?.textContent ?? "").toContain("organizations");
+    // 2026-07-06 ownboarding: single-tenant model — body now
+    // references "your organization's" rather than the plural
+    // multi-tenant framing.
+    expect(body?.textContent ?? "").toMatch(/your organization/);
   });
 
   it("uses first-name extraction on multi-word names", async () => {
@@ -176,27 +179,13 @@ describe("components/profile-view", () => {
     ).toBe("Welcome back!");
   });
 
-  // ============================================================
-  // R-PH-005 — Manage organizations link (preserved from PR-4)
-  // ============================================================
-
-  it("R-PH-005: renders a 'Manage organizations' link pointing at /organizations/new", async () => {
-    const session: ProfileSession = {
-      user: { name: "Braejan", email: "b@e.com", image: null },
-    };
-    const { screen, render } = await createDOM();
-    await render(<ProfileView session={session} />);
-
-    const link = screen.querySelector(
-      'a[data-testid="profile-manage-orgs"]',
-    ) as HTMLAnchorElement | null;
-    expect(link).toBeTruthy();
-    expect(link?.getAttribute("href")).toBe("/organizations/new");
-    expect(link?.textContent ?? "").toContain("Manage organizations");
-    // UX polish (UAT-3 pattern): cursor-pointer + transition chrome
-    expect(link?.className ?? "").toMatch(/cursor-pointer/);
-    expect(link?.className ?? "").toMatch(/transition-/);
-  });
+// R-PH-005 (Manage organizations link) was removed in the
+  // 2026-07-06 ownboarding change. The /organizations surface
+  // was deleted (single-tenant model); users now reach the
+  // setup page via /ownboarding on first sign-in only, not
+  // via a persistent "Manage organizations" entry on /profile.
+  // See openspec/changes/2026-07-06-ownboarding/spec.md
+  // R-OW-010 (S-OW-093).
 
   // ============================================================
   // R-PH-003 — github_login external link (preserved from PR-4)

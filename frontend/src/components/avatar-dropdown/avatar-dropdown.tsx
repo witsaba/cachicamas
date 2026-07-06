@@ -17,7 +17,8 @@
  *     is non-null. The `safeAvatarSrc` allowlist (ADR-0009) prevents
  *     non-https URLs (e.g. `javascript:`) from reaching the DOM.
  *   - Renders the panel as `<div role="menu">` with three entries
- *     (Profile link, Manage organizations link, Sign out form).
+ *     (Profile link, Sign out form). The Manage organizations link
+ *     was removed in the 2026-07-06 ownboarding change.
  *   - Aphantasic-friendly (UX-4, amended 2026-07-04) — inside the
  *     panel, the entries are text-only EXCEPT for the Sign out
  *     affordance, which renders a Lucide-style "log-out" inline
@@ -125,15 +126,6 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   class="block rounded px-2 py-1.5 text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   Profile
-                </a>
-              </li>
-              <li>
-                <a
-                  href="/organizations/new"
-                  data-testid="avatar-menu-orgs"
-                  class="block rounded px-2 py-1.5 text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                  Manage organizations
                 </a>
               </li>
             </ul>

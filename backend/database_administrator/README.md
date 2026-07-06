@@ -87,7 +87,7 @@ curl -sS -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
 **Responses:**
 
 | Status | Body |
-|--------|------|
+| -------- | ------ |
 | 201 Created | `OrganizationResponse` (see below); `Location: /organizations/{id}` header. |
 | 400 Bad Request | `{"error":"validation","fields":{...}}` — fields with the failing rule and the locked message string. |
 | 409 Conflict | `{"error":"conflict","message":"This slug is already taken. Try another."}` — `identification` already exists. |
@@ -95,35 +95,42 @@ curl -sS -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
 
 ### `GET /organizations`
 
-Lists every organization, ordered by `created_at ASC, id ASC`.
-
-```bash
-curl -sS localhost:8080/organizations
-```
-
-**Responses:**
-
-| Status | Body |
-|--------|------|
-| 200 OK | `OrganizationResponse[]` (possibly empty array). |
-| 500 Internal Server Error | Same envelope as `POST /organizations`. |
+REMOVED 2026-07-06 ownboarding. The list endpoint was deleted as
+part of the single-tenant model. Use `GET /setup-state` to detect
+whether an organization exists at all (the only check the
+ownboarding flow needs).
 
 ### `GET /organizations/:id`
 
-Fetches a single organization by integer id.
+REMOVED 2026-07-06 ownboarding. The get-by-id endpoint was deleted.
+There is no longer a UI surface that needs to look up an organization
+by id — the unique org is created via `POST /organizations` (the
+ownboarding submit) and consumed via the `/home` route (which gates
+on `/setup-state`).
+
+### `GET /setup-state`
+
+Returns the install-level "is there at least one organization?" boolean.
+The ownboarding gate (frontend `requireOwnboarding` helper) reads
+this to decide whether the user lands on `/home` or `/ownboarding`
+after authentication.
 
 ```bash
-curl -sS localhost:8080/organizations/42
+curl -sS localhost:8080/setup-state
 ```
 
 **Responses:**
 
 | Status | Body |
 |--------|------|
-| 200 OK | `OrganizationResponse`. |
-| 400 Bad Request | `{"error":"validation","fields":{"id":"..."}}` — id is not an integer. |
-| 404 Not Found | `{"error":"not_found","message":"Organization not found."}`. |
-| 500 Internal Server Error | Same envelope as `POST /organizations`. |
+| 200 OK | `{"hasOrganization": true}` or `{"hasOrganization": false}`. |
+| 500 Internal Server Error | `{"error":"server","message":"Something went wrong. Please try again."}` — DB query failed. |
+
+**Implementation note**: uses `SELECT EXISTS (SELECT 1 FROM organizations)`
+under the hood — the cheapest possible Postgres query (short-circuits at
+the first row, no row materialization). See
+`src/application/organization_service.go` (GetSetupState) and
+`src/infrastructure/postgres/organization_repo.go` (HasOrganization).
 
 ## Wire shape
 
@@ -174,8 +181,7 @@ Every endpoint emits an OTel span under the same tracer provider as
 | Span name             | HTTP route              | Always-emitted attributes                                |
 |-----------------------|-------------------------|----------------------------------------------------------|
 | `organization.create` | `POST /organizations`   | `http.method=POST`, `http.route=/organizations`, `http.status_code=201` (+ `organization.id` on success) |
-| `organization.list`   | `GET /organizations`    | `http.method=GET`,  `http.route=/organizations`, `http.status_code=200` (+ `organization.count` on success) |
-| `organization.get`    | `GET /organizations/:id`| `http.method=GET`,  `http.route=/organizations/:id`, `http.status_code`, `organization.id` |
+| `organization.setup_state` | `GET /setup-state` | `http.method=GET`, `http.route=/setup-state`, `http.status_code=200` (+ `has_organization` on success) |
 
 Validation failures do NOT emit a span — they short-circuit before
 `tracer.Start`.
@@ -194,7 +200,7 @@ Validation failures do NOT emit a span — they short-circuit before
 The server reads the following environment variables:
 
 | Var | Default | Purpose |
-|-----|---------|---------|
+| ----- | --------- | --------- |
 | `DATABASE_URL` | — | Postgres DSN; takes precedence over the `POSTGRES_*` family. |
 | `POSTGRES_HOST` | — | Postgres host. |
 | `POSTGRES_PORT` | `5432` | Postgres port. |
