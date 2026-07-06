@@ -23,13 +23,13 @@ import (
 // organization.go re-exports them so a typo in one place cannot
 // diverge from the spec.
 const (
-	msgNameRequired        = "Name is required."
-	msgNameLength          = "Name must be 3–120 characters."
-	msgSlugRequired        = "Slug is required."
-	msgSlugFormat          = "Slug must be 3–60 characters, lowercase letters, digits, and hyphens; must start and end with a letter or digit."
-	msgShortnameLength     = "Short name must be 40 characters or fewer."
-	msgEmailFormat         = "Email is not a valid email address."
-	msgPhoneFormat         = "Phone must be in E.164 format (e.g. +14155552671)."
+	msgNameRequired    = "Name is required."
+	msgNameLength      = "Name must be 3–120 characters."
+	msgSlugRequired    = "Slug is required."
+	msgSlugFormat      = "Slug must be 3–60 characters, lowercase letters, digits, and hyphens; must start and end with a letter or digit."
+	msgShortnameLength = "Short name must be 40 characters or fewer."
+	msgEmailFormat     = "Email is not a valid email address."
+	msgPhoneFormat     = "Phone must be in E.164 format (e.g. +14155552671)."
 )
 
 // TestValidate_FullName covers spec §2.3 rule 1: full_name is
