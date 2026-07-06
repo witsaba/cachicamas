@@ -102,11 +102,15 @@ func identityFieldNames[T any](t *testing.T, _ T) []string {
 }
 
 // TestIdentityEvent_StructFields locks the field list of
-// domain.IdentityEvent (added in cachicamas-identity-signin-callback).
-// The handler depends on this shape; any rename or removal is a
-// deliberate spec amendment.
+// domain.IdentityEvent (added in cachicamas-identity-signin-callback;
+// extended in 2026-07-06-workspaces PR1a with the 5 OAuth token
+// fields). The handler depends on this shape; any rename or removal
+// is a deliberate spec amendment.
 func TestIdentityEvent_StructFields(t *testing.T) {
-	want := []string{"Email", "Name", "ImageURL", "Provider", "ProviderAccountID"}
+	want := []string{
+		"Email", "Name", "ImageURL", "Provider", "ProviderAccountID",
+		"AccessToken", "RefreshToken", "ExpiresAt", "TokenType", "Scope",
+	}
 	got := identityFieldNames(t, domain.IdentityEvent{})
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("IdentityEvent field list drift:\n got  = %v\n want = %v", got, want)

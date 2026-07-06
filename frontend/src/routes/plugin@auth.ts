@@ -95,7 +95,14 @@ const auth = QwikAuth$((ev) => {
           ? {
               authorization: {
                 url: `${githubBaseUrl}/login/oauth/authorize`,
-                params: { scope: "read:user user:email" },
+                // 2026-07-06-workspaces PR1a: scope=repo + access_type=offline
+                // so the GitHub API proxy and the (future) clone feature
+                // can call /user/repos and clone private repos. Locked
+                // decision in sdd-proposal §"Technical decisions".
+                // access_type=offline is what makes Auth.js populate
+                // refresh_token + expires_at on the signIn event so the
+                // backend can persist them in identity.account.
+                params: { scope: "repo", access_type: "offline" },
               },
               token: `${githubApiBaseUrl}/login/oauth/access_token`,
               userinfo: {

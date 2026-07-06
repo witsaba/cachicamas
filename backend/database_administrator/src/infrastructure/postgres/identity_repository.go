@@ -23,6 +23,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
@@ -171,19 +172,26 @@ LIMIT 1`
 // returning user does not error out on the unique constraint. The
 // resolved identity.account row is then JOINed to identity.user so the
 // returned *domain.Identity has all six fields populated.
+//
+// PR1a: the 8 $N placeholders are user_id, provider,
+// provider_account_id, access_token, refresh_token, expires_at,
+// token_type, scope. The 5 trailing columns are nullable so a
+// pre-PR1a event (or any event that omits them) stores NULL.
 const identityInsertAccount = `
-INSERT INTO identity.account (user_id, provider, provider_account_id)
-VALUES ($1, $2, $3)
-ON CONFLICT (provider, provider_account_id) DO NOTHING
-RETURNING user_id`
+    INSERT INTO identity.account (user_id, provider, provider_account_id,
+                                   access_token, refresh_token, expires_at,
+                                   token_type, scope)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT (provider, provider_account_id) DO NOTHING
+    RETURNING user_id`
 
 // Upsert persists an OAuth identity event into identity.user +
 // identity.account. Behaviour (mirrors PR #29's sign-in-callback.ts
 // semantics — auto-link on email match, idempotent on (provider,
 // provider_account_id)):
 //
-//   1. CTE upserts identity.user keyed by case-insensitive email.
-//   2. INSERTs identity.account with ON CONFLICT DO NOTHING.
+//  1. CTE upserts identity.user keyed by case-insensitive email.
+//  2. INSERTs identity.account with ON CONFLICT DO NOTHING.
 //
 // Returns the resolved *domain.Identity (new or reused) with the
 // account row's provider + provider_account_id populated.
@@ -198,6 +206,14 @@ RETURNING user_id`
 // callback ADR 0003 §"Forward notes"). The handler accepts them in
 // the wire body for cross-tooling compatibility but discards them
 // after HMAC verification.
+//
+// PR1a (2026-07-06-workspaces) update: identity.account NOW stores
+// the 5 OAuth token columns (migration 20260706120000). The handler
+// forwards them via identity-callback-client.ts; the service passes
+// them through; the repo writes them. The columns are nullable so
+// pre-PR1a events (and any future provider that does not grant
+// offline access) keep NULL. Workspaces feature (PR1c-i) reads
+// AccessToken from this column to call the GitHub API.
 func (r *IdentityRepo) Upsert(ctx context.Context, ev domain.IdentityEvent) (*domain.Identity, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -209,7 +225,14 @@ func (r *IdentityRepo) Upsert(ctx context.Context, ev domain.IdentityEvent) (*do
 	if err := tx.QueryRowContext(ctx, identityUpsertUser, ev.Email, ev.Name, ev.ImageURL).Scan(&userID); err != nil {
 		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: user upsert: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, identityInsertAccount, userID, ev.Provider, ev.ProviderAccountID); err != nil {
+	if _, err := tx.ExecContext(ctx, identityInsertAccount,
+		userID, ev.Provider, ev.ProviderAccountID,
+		nullableAccountString(ev.AccessToken),
+		nullableAccountString(ev.RefreshToken),
+		nullableAccountTime(ev.ExpiresAt),
+		nullableAccountString(ev.TokenType),
+		nullableAccountString(ev.Scope),
+	); err != nil {
 		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: account insert: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -226,4 +249,31 @@ func (r *IdentityRepo) Upsert(ctx context.Context, ev domain.IdentityEvent) (*do
 		return nil, fmt.Errorf("postgres.IdentityRepo.Upsert: post-insert lookup: %w", err)
 	}
 	return out, nil
+}
+
+// nullableAccountString returns the value of a *string as an
+// `any`-compatible type. When s is nil it returns untyped nil so the
+// database/sql driver writes SQL NULL instead of the empty string.
+// Defined here (rather than imported from organization_repo.go's
+// nullableString) so the identity adapter stays self-contained and
+// the two files can evolve independently. The name is suffixed to
+// avoid colliding with the package-level nullableString used by the
+// organization adapter (both live in `package postgres`).
+func nullableAccountString(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+// nullableAccountTime is the *time.Time analogue of nullableAccountString:
+// returns untyped nil for a nil pointer so the pgx driver writes
+// SQL NULL instead of the zero time. PR1a added the symmetric pair so
+// OAuth timestamps persist as NULL when not provided (pre-PR1a
+// events, providers without expires_at, etc.).
+func nullableAccountTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return *t
 }
