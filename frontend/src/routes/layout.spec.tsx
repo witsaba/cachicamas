@@ -52,8 +52,7 @@ vi.mock("~/routes/plugin@auth", () => ({
 // session swap below).
 vi.mock("~/lib/api", () => ({
   getCurrentOrganization: () => Promise.resolve(null),
-  getSetupState: () =>
-    Promise.resolve({ hasOrganization: false }),
+  getSetupState: () => Promise.resolve({ hasOrganization: false }),
   createOrganization: () =>
     Promise.resolve({ ok: false, kind: "server", message: "test stub" }),
 }));

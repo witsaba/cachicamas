@@ -387,60 +387,60 @@ var _ = bytes.NewBuffer
 // returns 200 with the org's full_name + identification when one exists.
 // This is what the frontend org pill reads.
 func TestOrganization_GetOrganization_Found(t *testing.T) {
-repo := &fakeRepo{
-firstResult: &domain.Organization{
-ID:             1,
-FullName:       "Acme Industrial",
-Identification: "acme",
-IsActive:       true,
-CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-},
-}
-svc := newTestService(repo)
-e := newTestRouter(svc)
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme Industrial",
+			Identification: "acme",
+			IsActive:       true,
+			CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	svc := newTestService(repo)
+	e := newTestRouter(svc)
 
-req := httptest.NewRequest(http.MethodGet, "/organization", nil)
-rec := httptest.NewRecorder()
-e.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/organization", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
 
-if rec.Code != http.StatusOK {
-t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-}
-var got map[string]any
-if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-t.Fatalf("unmarshal body: %v", err)
-}
-if got["full_name"] != "Acme Industrial" {
-t.Errorf("full_name = %v, want %q", got["full_name"], "Acme Industrial")
-}
-if got["identification"] != "acme" {
-t.Errorf("identification = %v, want %q", got["identification"], "acme")
-}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if got["full_name"] != "Acme Industrial" {
+		t.Errorf("full_name = %v, want %q", got["full_name"], "Acme Industrial")
+	}
+	if got["identification"] != "acme" {
+		t.Errorf("identification = %v, want %q", got["identification"], "acme")
+	}
 }
 
 // TestOrganization_GetOrganization_NotFound verifies that GET /organization
 // returns the locked 404 envelope when no organization exists. The
 // frontend org pill maps this to the "No organization yet" empty state.
 func TestOrganization_GetOrganization_NotFound(t *testing.T) {
-repo := &fakeRepo{} // firstResult unset -> repo returns NotFoundError
-svc := newTestService(repo)
-e := newTestRouter(svc)
+	repo := &fakeRepo{} // firstResult unset -> repo returns NotFoundError
+	svc := newTestService(repo)
+	e := newTestRouter(svc)
 
-req := httptest.NewRequest(http.MethodGet, "/organization", nil)
-rec := httptest.NewRecorder()
-e.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/organization", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
 
-if rec.Code != http.StatusNotFound {
-t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-}
-var got map[string]any
-if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-t.Fatalf("unmarshal body: %v", err)
-}
-if got["error"] != domain.CodeNotFound {
-t.Errorf("error = %v, want %q", got["error"], domain.CodeNotFound)
-}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if got["error"] != domain.CodeNotFound {
+		t.Errorf("error = %v, want %q", got["error"], domain.CodeNotFound)
+	}
 }
 
 // ---------------------------------------------------------------------------

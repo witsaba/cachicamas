@@ -54,8 +54,8 @@ type fakeRepo struct {
 
 	// byID maps id -> *Organization for SelectByID. If an id is not
 	// present, the adapter returns *domain.NotFoundError.
-	byID   map[int64]*domain.Organization
-	byErr  error // optional: returned for a particular id lookup
+	byID     map[int64]*domain.Organization
+	byErr    error // optional: returned for a particular id lookup
 	getCalls int
 
 	// hasOrganizationResult / hasOrganizationErr are returned by
@@ -337,39 +337,39 @@ var _ = io.EOF
 // when an org exists, the use case returns it with the DB row
 // verbatim (no field rewrites).
 func TestOrganizationService_GetCurrentOrganization_Found(t *testing.T) {
-repo := &fakeRepo{
-firstResult: &domain.Organization{
-ID:             1,
-FullName:       "Acme Industrial",
-Identification: "acme",
-IsActive:       true,
-CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-},
-}
-tracer, _ := newTestTracer()
-logger, _ := newRecordingLogger()
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme Industrial",
+			Identification: "acme",
+			IsActive:       true,
+			CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
 
-svc := application.NewOrganizationService(repo, logger, tracer)
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-got, err := svc.GetCurrentOrganization(ctx)
-if err != nil {
-t.Fatalf("GetCurrentOrganization: %v", err)
-}
-if got == nil {
-t.Fatalf("GetCurrentOrganization returned nil, want *Organization")
-}
-if got.FullName != "Acme Industrial" {
-t.Errorf("FullName = %q, want %q", got.FullName, "Acme Industrial")
-}
-if got.Identification != "acme" {
-t.Errorf("Identification = %q, want %q", got.Identification, "acme")
-}
-if repo.firstCalls != 1 {
-t.Errorf("SelectFirst calls = %d, want 1", repo.firstCalls)
-}
+	got, err := svc.GetCurrentOrganization(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentOrganization: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("GetCurrentOrganization returned nil, want *Organization")
+	}
+	if got.FullName != "Acme Industrial" {
+		t.Errorf("FullName = %q, want %q", got.FullName, "Acme Industrial")
+	}
+	if got.Identification != "acme" {
+		t.Errorf("Identification = %q, want %q", got.Identification, "acme")
+	}
+	if repo.firstCalls != 1 {
+		t.Errorf("SelectFirst calls = %d, want 1", repo.firstCalls)
+	}
 }
 
 // TestOrganizationService_GetCurrentOrganization_Empty verifies that
@@ -377,25 +377,25 @@ t.Errorf("SelectFirst calls = %d, want 1", repo.firstCalls)
 // *domain.NotFoundError. The handler maps the error to HTTP 404 so
 // the frontend can render the "No organization yet" empty state.
 func TestOrganizationService_GetCurrentOrganization_Empty(t *testing.T) {
-repo := &fakeRepo{} // firstResult unset -> fake returns NotFoundError
-tracer, _ := newTestTracer()
-logger, _ := newRecordingLogger()
+	repo := &fakeRepo{} // firstResult unset -> fake returns NotFoundError
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
 
-svc := application.NewOrganizationService(repo, logger, tracer)
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-got, err := svc.GetCurrentOrganization(ctx)
-if got != nil {
-t.Errorf("GetCurrentOrganization returned %v, want nil on empty DB", got)
-}
-if err == nil {
-t.Fatalf("GetCurrentOrganization: expected *NotFoundError, got nil")
-}
-var nerr *domain.NotFoundError
-if !errors.As(err, &nerr) {
-t.Errorf("err = %T, want *NotFoundError", err)
-}
+	got, err := svc.GetCurrentOrganization(ctx)
+	if got != nil {
+		t.Errorf("GetCurrentOrganization returned %v, want nil on empty DB", got)
+	}
+	if err == nil {
+		t.Fatalf("GetCurrentOrganization: expected *NotFoundError, got nil")
+	}
+	var nerr *domain.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Errorf("err = %T, want *NotFoundError", err)
+	}
 }
 
 // TestOrganizationService_GetCurrentOrganization_OpensSpan verifies the
@@ -403,42 +403,42 @@ t.Errorf("err = %T, want *NotFoundError", err)
 // http.method=GET, http.route=/organization, http.status_code=200.
 // Mirrors the span-shape assertions used by Create + GetSetupState.
 func TestOrganizationService_GetCurrentOrganization_OpensSpan(t *testing.T) {
-repo := &fakeRepo{
-firstResult: &domain.Organization{
-ID:             1,
-FullName:       "Acme",
-Identification: "acme",
-IsActive:       true,
-},
-}
-tracer, sr := newTestTracer()
-logger, _ := newRecordingLogger()
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme",
+			Identification: "acme",
+			IsActive:       true,
+		},
+	}
+	tracer, sr := newTestTracer()
+	logger, _ := newRecordingLogger()
 
-svc := application.NewOrganizationService(repo, logger, tracer)
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-if _, err := svc.GetCurrentOrganization(ctx); err != nil {
-t.Fatalf("GetCurrentOrganization: %v", err)
-}
+	if _, err := svc.GetCurrentOrganization(ctx); err != nil {
+		t.Fatalf("GetCurrentOrganization: %v", err)
+	}
 
-spans := sr.Ended()
-if len(spans) != 1 {
-t.Fatalf("ended spans = %d, want 1", len(spans))
-}
-if got := spans[0].Name(); got != "organization.current" {
-t.Errorf("span name = %q, want %q", got, "organization.current")
-}
-attrs := attrKeyValue(spans[0])
-if attrs["http.method"] != "GET" {
-t.Errorf("http.method = %q, want GET", attrs["http.method"])
-}
-if attrs["http.route"] != "/organization" {
-t.Errorf("http.route = %q, want /organization", attrs["http.route"])
-}
-if attrs["http.status_code"] != "200" {
-t.Errorf("http.status_code = %q, want 200", attrs["http.status_code"])
-}
+	spans := sr.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if got := spans[0].Name(); got != "organization.current" {
+		t.Errorf("span name = %q, want %q", got, "organization.current")
+	}
+	attrs := attrKeyValue(spans[0])
+	if attrs["http.method"] != "GET" {
+		t.Errorf("http.method = %q, want GET", attrs["http.method"])
+	}
+	if attrs["http.route"] != "/organization" {
+		t.Errorf("http.route = %q, want /organization", attrs["http.route"])
+	}
+	if attrs["http.status_code"] != "200" {
+		t.Errorf("http.status_code = %q, want 200", attrs["http.status_code"])
+	}
 }
 
 // ---------------------------------------------------------------------------

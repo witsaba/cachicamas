@@ -33,7 +33,7 @@
  * component resumes (refetch after navigation). Optimistic
  * fallback on fetch failure: treat the same as 404 (no org yet).
  */
-import { component$, useResource$ } from "@builder.io/qwik";
+import { component$, useSignal, useTask$ } from "@builder.io/qwik";
 import { useClickOutside } from "~/components/avatar-dropdown/use-click-outside";
 import { getCurrentOrganization, type OrganizationReadModel } from "~/lib/api";
 
@@ -70,52 +70,55 @@ export function orgMonogram(org: OrganizationReadModel | null): string {
 
 export const OrgPill = component$<OrgPillProps>(
   ({ forceOpen = false, organization: orgOverride }) => {
-    // Qwik component$ props are exposed as signals. Read the value
-    // out of the signal so the comparison `!== undefined` actually
-    // reflects the prop's runtime value, not the signal wrapper.
+    // Qwik component$ props are exposed as the value directly (the
+    // TypeScript prop type matches the runtime value). The signal
+    // wrapping is an internal optimization that Qwik unwraps when
+    // the prop is read inside the component$ body.
     const overrideValue = orgOverride;
 
-    // useResource$ runs on the server (SSR) and on the client when
-    // the component resumes. The `organization` signal exposes the
-    // resolved value (or undefined while loading).
-    const orgResource = useResource$(async ({ track }) => {
-      // Re-run on resume (the resource is suspended + serialized once,
-      // and the track() call is what makes the resume hook re-evaluate
-      // when the client navigates back to a route containing the pill).
+    // useSignal holds the resolved org. Starts as undefined
+    // (loading). useTask$ below populates it — runs on the server
+    // during SSR AND on the client when the component resumes (the
+    // task body re-runs because the `track` subscription fires
+    // when the signal is set, triggering a re-render of the
+    // component).
+    //
+    // Why useSignal + useTask$ instead of useResource$:
+    //   useResource$ is supposed to be awaited during SSR, but in
+    //   practice with this Qwik 1.20 build the resource sometimes
+    //   serializes as unresolved (the SSR HTML shows the loading
+    //   state forever — the client never receives a resolved value
+    //   because the server-side resolution never made it into the
+    //   serialized state). useTask$ populates a plain signal, which
+    //   Qwik serializes into the SSR HTML the same way it does any
+    //   other signal — no async-resource serialization layer to
+    //   misbehave.
+    const org = useSignal<OrganizationReadModel | null | undefined>(
+      undefined,
+    );
+
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useTask$(async ({ track }) => {
+      // track the override so a future change to the prop re-runs
+      // the task. Same pattern as the resource-based version.
       track(() => overrideValue);
       if (overrideValue !== undefined) {
         // Test escape hatch: skip the fetch entirely.
-        return overrideValue;
+        org.value = overrideValue;
+        return;
       }
       try {
-        const org = await getCurrentOrganization();
-        return org;
+        const fetched = await getCurrentOrganization();
+        org.value = fetched;
       } catch {
         // Optimistic fallback: a transient backend hiccup must not
         // break the chrome. Treat as "no org yet" — the pill renders
         // its empty state.
-        return null;
+        org.value = null;
       }
     });
 
-    const rawValue = orgResource.value;
-    // useResource$ exposes the loading Promise as part of the value
-    // union on the first render (before the async callback resolves).
-    // Detect it via the duck-typed `.then` so we can render the
-    // loading state instead of forwarding a Promise object to
-    // OrgPillInteractive (which would crash on .full_name.trim()).
-    const isLoadingPromise =
-      rawValue !== undefined &&
-      rawValue !== null &&
-      typeof (rawValue as { then?: unknown }).then === "function";
-
-    const resolvedOrg: OrganizationReadModel | null | undefined =
-      overrideValue !== undefined
-        ? overrideValue
-        : isLoadingPromise
-          ? undefined // still loading
-          : (rawValue as unknown as OrganizationReadModel | null | undefined);
-    const organization: OrganizationReadModel | null | undefined = resolvedOrg;
+    const organization: OrganizationReadModel | null | undefined = org.value;
 
     // While loading (first render, no override), render a neutral
     // pill that takes the same space so the chrome doesn't reflow.

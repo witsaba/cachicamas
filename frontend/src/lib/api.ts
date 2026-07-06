@@ -336,7 +336,10 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
   if (typeof body.full_name !== "string" || body.full_name.length === 0) {
     throw new Error("organization: malformed response (full_name missing)");
   }
-  if (typeof body.identification !== "string" || body.identification.length === 0) {
+  if (
+    typeof body.identification !== "string" ||
+    body.identification.length === 0
+  ) {
     throw new Error(
       "organization: malformed response (identification missing)",
     );

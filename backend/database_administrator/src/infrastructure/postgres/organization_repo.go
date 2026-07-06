@@ -194,10 +194,10 @@ type rowScanner interface {
 // orgColumnList.
 func scanOrganization(row rowScanner) (*domain.Organization, error) {
 	var (
-		o          domain.Organization
-		shortname  sql.NullString
-		email      sql.NullString
-		phone      sql.NullString
+		o         domain.Organization
+		shortname sql.NullString
+		email     sql.NullString
+		phone     sql.NullString
 	)
 	if err := row.Scan(
 		&o.ID,
