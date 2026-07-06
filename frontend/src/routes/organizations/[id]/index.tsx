@@ -10,8 +10,15 @@ import {
 } from "~/components/organization-readback/organization-readback";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { getOrganization } from "~/lib/api";
+import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
+
+// 2026-07-06 native-auth-UI: anon visitors are redirected to the
+// native /auth/signin page with `?callbackUrl=/organizations/{id}`
+// (including any query string, e.g. `?tab=members`). The inline
+// SignInRequiredCard below is defence-in-depth.
+export { requireAuthRedirect as onRequest };
 
 /**
  * /organizations/{id} — read-back de una sola organización.

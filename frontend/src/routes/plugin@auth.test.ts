@@ -161,4 +161,85 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
     expect(last.clientId).toBe("test-id");
     expect(last.clientSecret).toBe("test-secret");
   });
+
+  // 2026-07-06 regression: the custom onRequest skips @auth/core
+  // interception for the native /auth/signin and /auth/signout page
+  // renders. The skip MUST match both `/auth/signin` AND
+  // `/auth/signin/`, because Qwik City auto-redirects the former
+  // to the latter (trailing-slash canonicalisation) BEFORE our
+  // middleware runs. A check that only matched the no-slash form
+  // caused an infinite redirect loop in the browser:
+  //   /auth/signin → 301 → /auth/signin/ → library.onRequest
+  //   → 302 → /auth/signin?callbackUrl=... → 301 → /auth/signin/?cb=...
+  //   → loop. Fix: normalise the path by stripping trailing slashes
+  //   before comparing. These tests drive the implementation with
+  // minimal synthetic requests (only `request.method` and
+  // `url.pathname` are populated — the custom onRequest short-
+  // circuits before touching anything else) and assert it returns
+  // without throwing or calling the library's onRequest.
+  it("custom onRequest SKIPS @auth/core for /auth/signin (no trailing slash)", async () => {
+    const mod = await import("./plugin@auth");
+    const req = makeNativeReq("/auth/signin", "GET");
+    await expect(
+      mod.onRequest(req as unknown as Parameters<typeof mod.onRequest>[0]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("custom onRequest SKIPS @auth/core for /auth/signin/ (trailing slash) — regression guard", async () => {
+    // Same as above but with the trailing-slash form. This is the
+    // shape Qwik City sends us after its canonicalisation redirect.
+    const mod = await import("./plugin@auth");
+    const req = makeNativeReq("/auth/signin/", "GET");
+    await expect(
+      mod.onRequest(req as unknown as Parameters<typeof mod.onRequest>[0]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("custom onRequest SKIPS @auth/core for /auth/signout (no trailing slash)", async () => {
+    const mod = await import("./plugin@auth");
+    const req = makeNativeReq("/auth/signout", "GET");
+    await expect(
+      mod.onRequest(req as unknown as Parameters<typeof mod.onRequest>[0]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("custom onRequest SKIPS @auth/core for /auth/signout/ (trailing slash)", async () => {
+    const mod = await import("./plugin@auth");
+    const req = makeNativeReq("/auth/signout/", "GET");
+    await expect(
+      mod.onRequest(req as unknown as Parameters<typeof mod.onRequest>[0]),
+    ).resolves.toBeUndefined();
+  });
 });
+
+/**
+ * Build a synthetic `RequestEventCommon`-shaped object for unit-testing
+ * the onRequest middleware's path-matching logic. Only the fields the
+ * implementation reads are populated: `request.method` and `url.pathname`.
+ *
+ * The library's onRequest signature is `(req: RequestEventCommon) => ...`
+ * and it touches `req.url`, `req.request`, `req.env`, `req.sharedMap`,
+ * `req.headers`, `req.cookie`, `req.send`. We satisfy only what the
+ * custom onRequest reads; everything else is left as a stub that the
+ * library code never reaches because the custom onRequest short-circuits.
+ */
+/**
+ * Build a synthetic minimal `RequestEventCommon`-shaped object for
+ * unit-testing the onRequest middleware's path-matching logic. Only
+ * `request.method` and `url.pathname` are populated — the custom
+ * onRequest short-circuits before touching anything else. The cast
+ * to `RequestEventCommon` happens at the call site via `as unknown as`
+ * because TS structurally rejects our partial stub.
+ */
+function makeNativeReq(
+  pathname: string,
+  method: string,
+): {
+  request: Request;
+  url: URL;
+} {
+  return {
+    request: new Request(`http://localhost${pathname}`, { method }),
+    url: new URL(`http://localhost${pathname}`),
+  };
+}

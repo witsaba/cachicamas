@@ -99,3 +99,68 @@ Four residual risks (all Low/Low):
 ## Change lifecycle: complete
 
 `init → explore → proposal → spec → design → tasks → apply → verify → sync → archive` — all phases delivered. The change is ready for human review, commit, and PR.
+
+---
+
+## Appendix — PR #39 bundle (2026-07-06)
+
+This SDD change was archived on 2026-07-05 with PR #39 already open
+(<https://github.com/witsaba/cachicamas/pull/39>). On 2026-07-06 the user
+asked for two follow-up fixes which were applied to the SAME branch
+(`feat/home-page-placeholder-v2`) and bundled into PR #39:
+
+1. **Native auth UI**: the `/auth/signin` and `/auth/signout` pages
+   rendered `@auth/core`'s built-in HTML (dark on prefers-color-scheme:
+   dark browsers, off-brand against the rest of cachicamas). Replaced
+   with native Qwik routes that match the design system.
+
+2. **Protected-route redirect**: anonymous visitors on `/home`,
+   `/profile`, `/organizations`, `/organizations/new`,
+   `/organizations/[id]` saw an inline `SignInRequiredCard`. Replaced
+   with a server-side redirect to `/auth/signin?callbackUrl=<original>`
+   so the OAuth roundtrip returns them to the originally-requested URL.
+
+The bundle decision was explicit (user selected "en el branch actual"
+when offered a separate worktree). The home-page-placeholder artifacts
+above remain accurate for THIS slice; the bundle is documented here as
+a PR-level note and in full in the Engram observations listed below.
+
+### Bundle files (added on top of the home-page-placeholder slice)
+
+| File | Change |
+| --- | --- |
+| `frontend/src/routes/auth/signin/index.tsx` | NEW — native signin page (white bg, slate-900 text, reads `?callbackUrl`, open-redirect defence) |
+| `frontend/src/routes/auth/signin/index.spec.tsx` | NEW — 10 behavioural tests |
+| `frontend/src/routes/auth/signout/index.tsx` | NEW — native signout confirmation page |
+| `frontend/src/routes/auth/signout/index.spec.tsx` | NEW — 6 behavioural tests |
+| `frontend/src/lib/require-auth-redirect.ts` | NEW — server-side redirect helper for protected routes |
+| `frontend/src/lib/require-auth-redirect.spec.ts` | NEW — 10 unit tests for the helper |
+| `frontend/src/routes/plugin@auth.ts` | MODIFIED — custom `onRequest` that skips `@auth/core` for native page renders; trailing-slash normalisation |
+| `frontend/src/routes/plugin@auth.test.ts` | MODIFIED — 4 new regression tests for the custom onRequest |
+| `frontend/src/routes/home/index.tsx` | MODIFIED — wires `requireAuthRedirect as onRequest` |
+| `frontend/src/routes/profile/index.tsx` | MODIFIED — wires `requireAuthRedirect as onRequest` |
+| `frontend/src/routes/organizations/index.tsx` | MODIFIED — wires `requireAuthRedirect as onRequest` |
+| `frontend/src/routes/organizations/new/index.tsx` | MODIFIED — wires `requireAuthRedirect as onRequest` |
+| `frontend/src/routes/organizations/[id]/index.tsx` | MODIFIED — wires `requireAuthRedirect as onRequest` |
+
+### Bundle test deltas (additive to the 215 listed above)
+
+- Before bundle: 215 tests across 26 files.
+- After bundle: 245 tests across 29 files (+30 tests across +3 files).
+- New tests: 10 in `routes/auth/signin`, 6 in `routes/auth/signout`,
+  10 in `lib/require-auth-redirect`, 4 in `routes/plugin@auth.test.ts`.
+- All 245/245 passing; lint clean; format clean.
+
+### Reference (bundle)
+
+- Engram observations:
+  - `cachicamas/auth/anatomy` — what `@auth/qwik` actually provides vs. what we replaced.
+  - `cachicamas/auth/ux-research` — distilled UX principles for auth pages.
+  - `cachicamas/auth/trailing-slash-redirect-loop` — the bugfix (trailing-slash + `pages.signIn` interaction).
+  - `cachicamas/auth/protected-redirect-pattern` — the requireAuthRedirect pattern + open-redirect defence.
+  - `cachicamas/auth/adr-0010-native-auth-ui` — ADR accepting native pages over `@auth/core` built-in.
+  - `cachicamas/auth/adr-0011-redirect-on-anon` — ADR accepting server-side redirect over inline `<SignInRequiredCard>`.
+- Bundle implementation: `frontend/src/routes/auth/`,
+  `frontend/src/lib/require-auth-redirect.ts`,
+  `frontend/src/routes/plugin@auth.ts` (custom `onRequest`).
+- Bundle applies to the 5 protected routes listed above.

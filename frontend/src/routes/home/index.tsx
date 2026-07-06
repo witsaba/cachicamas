@@ -28,8 +28,18 @@
 import { component$ } from "@builder.io/qwik";
 import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
+import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
+
+// 2026-07-06 native-auth-UI: anon visitors are redirected to the
+// native /auth/signin page BEFORE this route's component renders.
+// The redirect carries `?callbackUrl=/home` so Auth.js returns the
+// visitor here after signing in. The inline SignInRequiredCard below
+// is defence-in-depth — the onRequest throws first, so this branch
+// never fires in production, but we keep it as a fallback for tests
+// that render the component$ directly (without the HTTP middleware).
+export { requireAuthRedirect as onRequest };
 
 // SSR-time auth plumbing: this loader runs in the request context and
 // gives Qwik City a hook for the SSR pass. Session resolution still
