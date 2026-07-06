@@ -289,6 +289,32 @@ test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", 
   expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/");
 });
 
+test("[routes/layout]: anon shell does NOT render the OrgPill (R-FIX-003)", async () => {
+  // R-FIX-003 (2026-07-06): anonymous visitors have no org
+  // context to surface. The "No organization yet" empty state
+  // is only meaningful for authed users during ownboarding.
+  // Hiding the pill on anon also avoids the SSR fetch on
+  // every anonymous page load.
+  const screen = await renderWithSession(ANON_SESSION);
+  // No OrgPill in any state.
+  expect(
+screen.querySelector('[data-testid="org-pill"]'),
+  ).toBeFalsy();
+  expect(
+screen.querySelector('[data-testid="org-pill-empty"]'),
+  ).toBeFalsy();
+  expect(
+screen.querySelector('[data-testid="org-pill-loading"]'),
+  ).toBeFalsy();
+  expect(
+screen.querySelector('[data-testid="app-shell-right"]'),
+  ).toBeTruthy();
+  // The identity widget is still there (sign-in button).
+  expect(
+screen.querySelector('form[data-testid="sign-in-button"]'),
+  ).toBeTruthy();
+});
+
 test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)", async () => {
   // R-FIX-001 (2026-07-06): a signed-in visitor who clicks the
   // cachicamas brand in the header must be taken to the authed-only

@@ -112,27 +112,33 @@ export default component$(() => {
         data-testid="app-shell-header"
         class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4"
       >
-        <a
-          href={isAuthenticated ? "/home/" : "/"}
-          class="font-mono text-sm font-bold tracking-tight"
-          data-testid="app-shell-brand"
-        >
-          cachicamas
-        </a>
-        <div class="flex items-center gap-3" data-testid="app-shell-right">
-          {/*
+<a
+              href={isAuthenticated ? "/home/" : "/"}
+              class="font-mono text-sm font-bold tracking-tight"
+              data-testid="app-shell-brand"
+            >
+              cachicamas
+            </a>
+            <div class="flex items-center gap-3" data-testid="app-shell-right">
+              {/*
                 R-FIX-002 (2026-07-06): the org pill surfaces the
                 current organization context. Mirrors the
                 Slack/Linear/PatternFly context-selector pattern.
                 Single-tenant: NOT a switcher, just a passive display
                 of full_name + a first-letter monogram. Empty state
                 ("No organization yet") is rendered by the pill
-                itself when the backend returns 404. The pill does
-                its own SSR + client-side fetch via useResource$ —
-                the layout does not need a routeLoader$ for this.
+                itself when the backend returns 404.
+
+                R-FIX-003 (2026-07-06 follow-up): the pill is auth-
+                gated. Anonymous visitors see no pill at all — there
+                is no org context to surface for someone who isn't
+                signed in. The "No organization yet" empty state is
+                only meaningful during ownboarding (authed user,
+                no org yet). Hiding the pill on / also avoids the
+                SSR fetch on every anon page load.
               */}
-          <OrgPill />
-          <div data-testid="app-shell-identity">
+              {isAuthenticated ? <OrgPill /> : null}
+              <div data-testid="app-shell-identity">
             {isAuthenticated && session.value ? (
               <AvatarDropdown session={session.value} signOut={signOut} />
             ) : (

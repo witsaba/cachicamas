@@ -93,9 +93,7 @@ export const OrgPill = component$<OrgPillProps>(
     //   Qwik serializes into the SSR HTML the same way it does any
     //   other signal — no async-resource serialization layer to
     //   misbehave.
-    const org = useSignal<OrganizationReadModel | null | undefined>(
-      undefined,
-    );
+    const org = useSignal<OrganizationReadModel | null | undefined>(undefined);
 
     // eslint-disable-next-line qwik/no-use-visible-task
     useTask$(async ({ track }) => {
