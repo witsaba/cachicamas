@@ -33,18 +33,20 @@ const mockedGetSetupState = vi.mocked(getSetupState);
  * Build a minimal RequestEvent stub that satisfies the helper's
  * surface (url + redirect). The redirect method captures the call
  * and rethrows an Error so the test can assert the exact redirect.
+ *
+ * Cast through `unknown` because `RequestEventCommon` is a wide
+ * interface (status, locale, rewrite, error, ...) and the helper
+ * only reads `url` + calls `redirect`. The test is structurally
+ * isolated; it never depends on the other surface.
  */
-function makeEvent(pathname: string): {
-  url: URL;
-  redirect: (status: number, location: string) => never;
-} {
+function makeEvent(pathname: string) {
   const url = new URL(`http://localhost${pathname}`);
   return {
     url,
     redirect: ((status: number, location: string) => {
       throw new Error(`REDIRECT ${status} ${location}`);
     }) as never,
-  };
+  } as unknown as Parameters<typeof requireOwnboarding>[0];
 }
 
 describe("requireOwnboarding", () => {
