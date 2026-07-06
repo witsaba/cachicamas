@@ -58,16 +58,17 @@ test("[routes/index]: renders a single <h1> brand mark (F-1)", async () => {
   expect(brandText.length).toBeGreaterThan(0);
 });
 
-test("[routes/index]: primary CTA points to /organizations/new with 'Get started' label (F-3, this iteration)", async () => {
+test("[routes/index]: primary CTA points to /ownboarding with 'Get started' label (F-3, 2026-07-06 ownboarding)", async () => {
   const { screen, render } = await createDOM();
   await render(<Index />);
 
-  // The first-run flow is home → /organizations/new.  The
-  // /organizations list remains reachable by direct URL.
+  // The first-run flow is landing → /ownboarding (which redirects
+  // to /home on success). The /organizations surface was removed
+  // in the 2026-07-06 ownboarding change.
   const cta = screen.querySelector('a[data-cta="get-started"]');
   expect(cta).not.toBeNull();
   expect((cta as HTMLAnchorElement).getAttribute("href")).toBe(
-    "/organizations/new",
+    "/ownboarding",
   );
   expect((cta as HTMLAnchorElement).textContent ?? "").toContain(
     "Get started",

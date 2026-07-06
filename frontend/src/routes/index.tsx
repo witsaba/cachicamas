@@ -21,17 +21,19 @@ import { useSession } from "~/routes/plugin@auth";
  * Locked decisions honoured:
  *   - F-1 / UX-1: brand mark is the <h1> (unique on the page).
  *   - UX-4: zero <img> elements.
- *   - F-3 (locked this iteration): primary CTA points to
- *     /organizations/new so the first-run experience is
- *     home → create.  The /organizations list is reachable
- *     by direct URL but not by the landing CTA.
+ *   - F-3 (locked this iteration, updated 2026-07-06 ownboarding):
+ *     primary CTA points to /ownboarding so the first-run experience
+ *     is landing → sign-in → setup-state gate → /ownboarding (if no
+ *     organization exists) → /home. The /ownboarding form collects
+ *     the unique organization's full_name + identification, then
+ *     redirects to /home on success.
  */
 
 const FEATURES = [
   {
     num: "01",
-    title: "Organizations",
-    body: "The tenant that owns the work. Each org is an independent root for projects, requirements, and milestones.",
+    title: "Your organization",
+    body: "The single tenant that owns the work. Set it up once on first sign-in — projects, requirements, and milestones all hang off it.",
   },
   {
     num: "02",
@@ -89,7 +91,7 @@ export default component$(() => {
         </p>
         <div class="mt-8 flex flex-wrap items-center gap-3">
           <a
-            href="/organizations/new"
+            href="/ownboarding"
             data-cta="get-started"
             class="inline-block rounded bg-slate-900 px-5 py-2.5 font-semibold text-white underline"
           >
