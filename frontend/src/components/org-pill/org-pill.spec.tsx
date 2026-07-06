@@ -40,6 +40,18 @@ vi.mock("~/lib/api", () => ({
   getCurrentOrganization: vi.fn(() => Promise.resolve(null)),
 }));
 
+// Mock useLocation so the OrgPill's URL-tracking useTask$ can run
+// in createDOM. The real useLocation reads the Qwik City `qc-l`
+// context, which the createDOM harness does not set up. We return
+// a stub with the same shape (`url: URL, ...`) so the `.url.pathname`
+// access in the task body works.
+vi.mock("@builder.io/qwik-city", () => ({
+  useLocation: () => ({
+    url: new URL("http://localhost/"),
+    params: {},
+  }),
+}));
+
 async function renderPill(
   organization: typeof ACME_ORG | null | undefined,
   forceOpen = false,

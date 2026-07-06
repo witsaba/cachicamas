@@ -112,15 +112,15 @@ export default component$(() => {
         data-testid="app-shell-header"
         class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4"
       >
-<a
-              href={isAuthenticated ? "/home/" : "/"}
-              class="font-mono text-sm font-bold tracking-tight"
-              data-testid="app-shell-brand"
-            >
-              cachicamas
-            </a>
-            <div class="flex items-center gap-3" data-testid="app-shell-right">
-              {/*
+        <a
+          href={isAuthenticated ? "/home/" : "/"}
+          class="font-mono text-sm font-bold tracking-tight"
+          data-testid="app-shell-brand"
+        >
+          cachicamas
+        </a>
+        <div class="flex items-center gap-3" data-testid="app-shell-right">
+          {/*
                 R-FIX-002 (2026-07-06): the org pill surfaces the
                 current organization context. Mirrors the
                 Slack/Linear/PatternFly context-selector pattern.
@@ -137,8 +137,8 @@ export default component$(() => {
                 no org yet). Hiding the pill on / also avoids the
                 SSR fetch on every anon page load.
               */}
-              {isAuthenticated ? <OrgPill /> : null}
-              <div data-testid="app-shell-identity">
+          {isAuthenticated ? <OrgPill /> : null}
+          <div data-testid="app-shell-identity">
             {isAuthenticated && session.value ? (
               <AvatarDropdown session={session.value} signOut={signOut} />
             ) : (

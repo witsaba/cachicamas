@@ -34,6 +34,7 @@
  * fallback on fetch failure: treat the same as 404 (no org yet).
  */
 import { component$, useSignal, useTask$ } from "@builder.io/qwik";
+import { useLocation } from "@builder.io/qwik-city";
 import { useClickOutside } from "~/components/avatar-dropdown/use-click-outside";
 import { getCurrentOrganization, type OrganizationReadModel } from "~/lib/api";
 
@@ -95,11 +96,20 @@ export const OrgPill = component$<OrgPillProps>(
     //   misbehave.
     const org = useSignal<OrganizationReadModel | null | undefined>(undefined);
 
+    // Track the current URL so the task re-fires on SPA navigation.
+    // The pill lives in the layout (which does NOT re-mount when the
+    // route changes), so useTask$ would otherwise only run once on
+    // the initial mount. Tracking `loc.url.pathname` makes the task
+    // re-run after `nav('/home')` from OwnboardingForm's onSuccess$,
+    // so the pill picks up the freshly-created org without a manual
+    // refresh. (R-FIX-004, 2026-07-06 follow-up to R-FIX-002.)
+    const loc = useLocation();
     // eslint-disable-next-line qwik/no-use-visible-task
     useTask$(async ({ track }) => {
       // track the override so a future change to the prop re-runs
-      // the task. Same pattern as the resource-based version.
+      // the task. Track the URL so SPA navigation re-runs the task.
       track(() => overrideValue);
+      track(() => loc.url.pathname);
       if (overrideValue !== undefined) {
         // Test escape hatch: skip the fetch entirely.
         org.value = overrideValue;

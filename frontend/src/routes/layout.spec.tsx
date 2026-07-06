@@ -57,6 +57,31 @@ vi.mock("~/lib/api", () => ({
     Promise.resolve({ ok: false, kind: "server", message: "test stub" }),
 }));
 
+// Stub useLocation so the OrgPill (rendered in authed tests via
+    // R-FIX-002) can run its URL-tracking useTask$ in createDOM. The
+    // real useLocation reads the Qwik City `qc-l` context which
+    // createDOM does not set up. The stub returns the same shape
+    // (`url: URL, params: {}`) so `.url.pathname` works in the
+    // task body.
+    //
+    // Use vi.importActual to keep the rest of the module intact
+    // (Form, routeLoader$, useNavigate, etc. are imported by other
+    // components like AvatarDropdown and the signin route — replacing
+    // the entire module would break those).
+    vi.mock("@builder.io/qwik-city", async () => {
+      const actual =
+        await vi.importActual<typeof import("@builder.io/qwik-city")>(
+          "@builder.io/qwik-city",
+        );
+      return {
+        ...actual,
+        useLocation: () => ({
+          url: new URL("http://localhost/"),
+          params: {},
+        }),
+      };
+    });
+
 // Helper — render the layout with a stubbed session. The
 // `sessionState` is captured by the stub at module-load time,
 // so to swap between anon and auth we have to re-import the
@@ -297,21 +322,13 @@ test("[routes/layout]: anon shell does NOT render the OrgPill (R-FIX-003)", asyn
   // every anonymous page load.
   const screen = await renderWithSession(ANON_SESSION);
   // No OrgPill in any state.
-  expect(
-screen.querySelector('[data-testid="org-pill"]'),
-  ).toBeFalsy();
-  expect(
-screen.querySelector('[data-testid="org-pill-empty"]'),
-  ).toBeFalsy();
-  expect(
-screen.querySelector('[data-testid="org-pill-loading"]'),
-  ).toBeFalsy();
-  expect(
-screen.querySelector('[data-testid="app-shell-right"]'),
-  ).toBeTruthy();
+  expect(screen.querySelector('[data-testid="org-pill"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="org-pill-empty"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="org-pill-loading"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="app-shell-right"]')).toBeTruthy();
   // The identity widget is still there (sign-in button).
   expect(
-screen.querySelector('form[data-testid="sign-in-button"]'),
+    screen.querySelector('form[data-testid="sign-in-button"]'),
   ).toBeTruthy();
 });
 
