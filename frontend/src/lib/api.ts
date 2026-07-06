@@ -67,6 +67,25 @@ export interface CreateOrganizationInput {
   phone?: string;
 }
 
+/**
+ * `SetupState` is the install-level "is there at least one
+ * organization in the database?" boolean. Used by the
+ * `requireOwnboarding` helper (frontend/src/lib/require-ownboarding.ts)
+ * to decide whether the user lands on /home or /ownboarding after
+ * authentication.
+ *
+ * Wire shape (matches backend `application.SetupState`):
+ *   { hasOrganization: boolean }
+ *
+ * Why a dedicated interface instead of reusing `OrganizationReadModel`:
+ * the setup state is structurally different (no id, no name, no
+ * timestamps) and the contract is independent of any single org.
+ * Keeping the types separate makes the wire shape self-documenting.
+ */
+export interface SetupState {
+  hasOrganization: boolean;
+}
+
 export type ApiErrorKind =
   | "validation"
   | "conflict"
@@ -280,4 +299,44 @@ export async function listOrganizations(): Promise<
     const body = (await res.json()) as OrganizationReadModel[] | null;
     return Array.isArray(body) ? body : [];
   });
+}
+
+/**
+ * GET /setup-state.
+ *
+ * Reference: openspec/changes/2026-07-06-ownboarding/specs/ownboarding/spec.md
+ *   R-OW-005 (S-OW-040..044) — backend endpoint contract.
+ *   R-OW-008 (S-OW-070..073) — failure-mode fallback semantics.
+ *
+ * Returns { hasOrganization: boolean } on success.
+ *
+ * Throws an Error on any failure path — the caller
+ * (`requireOwnboarding`) is responsible for the optimistic
+ * no-throw fallback. This split keeps the API client honest about
+ * failures (no swallowing errors) while letting the guard decide
+ * whether to redirect or render normally.
+ *
+ * Failure modes:
+ *   - Network error / fetch throws     → throws Error("setup-state fetch failed: ...")
+ *   - Non-200 HTTP status              → throws Error("setup-state failed: HTTP <code>")
+ *   - Malformed JSON / wrong shape     → throws Error("setup-state: malformed response ...")
+ */
+export async function getSetupState(): Promise<SetupState> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/setup-state`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unknown";
+    throw new Error(`setup-state fetch failed: ${detail}`);
+  }
+  if (!res.ok) {
+    throw new Error(`setup-state failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as Partial<SetupState>;
+  if (typeof body.hasOrganization !== "boolean") {
+    throw new Error(
+      "setup-state: malformed response (hasOrganization not boolean)",
+    );
+  }
+  return { hasOrganization: body.hasOrganization };
 }

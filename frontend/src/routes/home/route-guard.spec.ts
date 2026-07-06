@@ -47,8 +47,24 @@ describe("[routes/home] protected-route wiring", () => {
     expect(source).toContain("Welcome");
   });
 
-  it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
+it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain('data-testid="home-paragraph"');
+  });
+
+  // R-OW-007 / S-OW-063 — ownboarding helper wired in.
+  it("imports requireOwnboarding (R-OW-007 / S-OW-063)", () => {
+    const source = readFileSync(routePath, "utf8");
+    expect(source).toMatch(
+/from\s+["']~\/lib\/require-ownboarding["']/,
+    );
+  });
+
+  // R-OW-007 / S-OW-064 — routeLoader$ that calls the helper.
+  it("declares useSetupLoader as a routeLoader$ that calls requireOwnboarding (R-OW-007 / S-OW-064)", () => {
+    const source = readFileSync(routePath, "utf8");
+    expect(source).toMatch(/routeLoader\$\s*\(/);
+    expect(source).toContain("useSetupLoader");
+    expect(source).toContain("await requireOwnboarding(event)");
   });
 });

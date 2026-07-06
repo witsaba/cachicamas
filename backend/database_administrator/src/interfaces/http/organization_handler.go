@@ -33,15 +33,15 @@ func NewOrganizationHandler(service *application.OrganizationService) *Organizat
 	return &OrganizationHandler{service: service}
 }
 
-// RegisterOrganizationRoutes wires the three organization routes
-// on the given Echo instance. Exported so tests can build a
-// minimal app without booting a real server, mirroring
-// RegisterHealthRoute.
+// RegisterOrganizationRoutes wires the four organization-adjacent
+// routes on the given Echo instance. The /setup-state endpoint
+// powers the ownboarding gate (R-OW-005).
 func RegisterOrganizationRoutes(e *echo.Echo, svc *application.OrganizationService) {
 	h := NewOrganizationHandler(svc)
 	e.POST("/organizations", h.Create)
 	e.GET("/organizations", h.List)
 	e.GET("/organizations/:id", h.Get)
+	e.GET("/setup-state", h.SetupState)
 }
 
 // Create handles POST /organizations. Accepts JSON or
@@ -93,6 +93,17 @@ func (h *OrganizationHandler) Get(c *echo.Context) error {
 		return writeError(c, err)
 	}
 	return c.JSON(http.StatusOK, org)
+}
+
+// SetupState handles GET /setup-state. Returns 200 with
+// {"hasOrganization": <bool>} on success. Errors return the locked
+// HTTP envelope via writeError (R-OW-005).
+func (h *OrganizationHandler) SetupState(c *echo.Context) error {
+	state, err := h.service.GetSetupState(c.Request().Context())
+	if err != nil {
+		return writeError(c, err)
+	}
+	return c.JSON(http.StatusOK, state)
 }
 
 // ---------------------------------------------------------------------------

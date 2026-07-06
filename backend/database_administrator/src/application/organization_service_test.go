@@ -18,6 +18,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +57,12 @@ type fakeRepo struct {
 	byID   map[int64]*domain.Organization
 	byErr  error // optional: returned for a particular id lookup
 	getCalls int
+
+	// hasOrganizationResult / hasOrganizationErr are returned by
+	// HasOrganization. Defaults to (false, nil) when unset.
+	hasOrganizationResult bool
+	hasOrganizationErr    error
+	hasOrganizationCalls  int
 }
 
 func (f *fakeRepo) Insert(_ context.Context, o *domain.Organization) (*domain.Organization, error) {
@@ -87,6 +94,13 @@ func (f *fakeRepo) SelectAll(_ context.Context) ([]domain.Organization, error) {
 	defer f.mu.Unlock()
 	f.listCalls++
 	return f.listResult, f.listErr
+}
+
+func (f *fakeRepo) HasOrganization(_ context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hasOrganizationCalls++
+	return f.hasOrganizationResult, f.hasOrganizationErr
 }
 
 func (f *fakeRepo) SelectByID(_ context.Context, id int64) (*domain.Organization, error) {
@@ -427,3 +441,122 @@ func TestOrganizationService_Get_Found(t *testing.T) {
 // file imports it (kept here as a hint that some helpers may
 // grow to read from an io.Reader in the future).
 var _ = io.EOF
+
+// ---------------------------------------------------------------------------
+// Tests for GetSetupState (R-OW-005 / S-OW-040..043)
+//
+// The setup-state use case returns the install-level
+// "is there at least one organization?" boolean. The ownboarding gate
+// (frontend requireOwnboarding helper) reads this to decide whether
+// the user lands on /home or /ownboarding after authentication.
+// ---------------------------------------------------------------------------
+
+// TestOrganizationService_GetSetupState_Empty verifies that when no
+// organization exists in the database, GetSetupState returns
+// {HasOrganization: false} (S-OW-040).
+func TestOrganizationService_GetSetupState_Empty(t *testing.T) {
+	repo := &fakeRepo{hasOrganizationResult: false}
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := svc.GetSetupState(ctx)
+	if err != nil {
+		t.Fatalf("GetSetupState: %v", err)
+	}
+	if got.HasOrganization {
+		t.Errorf("HasOrganization = true, want false (empty DB)")
+	}
+	if repo.hasOrganizationCalls != 1 {
+		t.Errorf("HasOrganization calls = %d, want 1", repo.hasOrganizationCalls)
+	}
+}
+
+// TestOrganizationService_GetSetupState_WithOrg verifies that when at
+// least one organization exists, GetSetupState returns
+// {HasOrganization: true} (S-OW-041). The boolean collapses any
+// count > 0 (S-OW-042).
+func TestOrganizationService_GetSetupState_WithOrg(t *testing.T) {
+	repo := &fakeRepo{hasOrganizationResult: true}
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := svc.GetSetupState(ctx)
+	if err != nil {
+		t.Fatalf("GetSetupState: %v", err)
+	}
+	if !got.HasOrganization {
+		t.Errorf("HasOrganization = false, want true (org present)")
+	}
+}
+
+// TestOrganizationService_GetSetupState_RepoError verifies that a
+// repo-level error is wrapped and propagated (S-OW-043). The handler
+// maps the wrapped error to the locked HTTP 500 envelope.
+func TestOrganizationService_GetSetupState_RepoError(t *testing.T) {
+	repo := &fakeRepo{
+		hasOrganizationResult: false,
+		hasOrganizationErr:    errors.New("db connection lost"),
+	}
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := svc.GetSetupState(ctx)
+	if err == nil {
+		t.Fatalf("GetSetupState: expected error from repo, got nil")
+	}
+	if !strings.Contains(err.Error(), "db connection lost") {
+		t.Errorf("error = %q, want it to wrap the repo error", err.Error())
+	}
+	if !strings.Contains(err.Error(), "get setup state") {
+		t.Errorf("error = %q, want it to include 'get setup state' prefix", err.Error())
+	}
+}
+
+// TestOrganizationService_GetSetupState_OpensSpan verifies that the
+// use case opens an OTel span named "organization.setup_state" with
+// the locked HTTP route attributes (http.method, http.route,
+// http.status_code=200). Mirrors the span-shape assertions used by
+// the Create/List/Get tests.
+func TestOrganizationService_GetSetupState_OpensSpan(t *testing.T) {
+	repo := &fakeRepo{hasOrganizationResult: true}
+	tracer, sr := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := svc.GetSetupState(ctx); err != nil {
+		t.Fatalf("GetSetupState: %v", err)
+	}
+
+	spans := sr.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if got := spans[0].Name(); got != "organization.setup_state" {
+		t.Errorf("span name = %q, want %q", got, "organization.setup_state")
+	}
+	attrs := attrKeyValue(spans[0])
+	if attrs["http.method"] != "GET" {
+		t.Errorf("http.method = %q, want GET", attrs["http.method"])
+	}
+	if attrs["http.route"] != "/setup-state" {
+		t.Errorf("http.route = %q, want /setup-state", attrs["http.route"])
+	}
+	if attrs["http.status_code"] != "200" {
+		t.Errorf("http.status_code = %q, want 200", attrs["http.status_code"])
+	}
+}
