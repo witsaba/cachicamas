@@ -126,7 +126,10 @@ export default component$(() => {
             // label is "Sign in" + the GitHub Octocat brand mark
             // (rendered by the component itself). No explicit label
             // override needed.
-            <SignInButton signIn={signIn} />
+            // R-HP-004 (S-HP-030): after a successful GitHub OAuth
+            // roundtrip, the anonymous visitor lands on the new
+            // authed-only Home Page (/home) instead of /profile.
+            <SignInButton signIn={signIn} redirectTo="/home" />
           )}
         </div>
       </header>
