@@ -260,7 +260,33 @@ test("[routes/layout]: registers a capture-phase popstate listener that reloads 
   // component$ render.
   expect(layoutSrc).toMatch(/stopImmediatePropagation/);
   expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
-  // Sanity: layout still renders the header chrome.
+// Sanity: layout still renders the header chrome.
   const screen = await renderWithSession(ANON_SESSION);
   expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
+});
+
+test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", async () => {
+  // R-FIX-001 (2026-07-06): an anonymous visitor who clicks the
+  // cachicamas brand in the header must be taken to the landing
+  // page (/) -- NOT to /home (which would bounce them through
+  // the sign-in redirect chain). The landing page is the
+  // canonical entry point for new visitors.
+  const screen = await renderWithSession(ANON_SESSION);
+  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  expect(brand).toBeTruthy();
+  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/");
+});
+
+test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)", async () => {
+  // R-FIX-001 (2026-07-06): a signed-in visitor who clicks the
+  // cachicamas brand in the header must be taken to the authed-only
+  // Home Page (/home/), not the landing page (/). The landing
+  // page has no auth check and would happily render its
+  // marketing copy to a signed-in user, which is the wrong UX:
+  // the Home Page is where their dashboard (and ownboarding
+  // redirect) lives.
+  const screen = await renderWithSession(AUTH_SESSION);
+  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  expect(brand).toBeTruthy();
+  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/home/");
 });

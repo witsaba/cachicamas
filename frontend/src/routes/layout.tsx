@@ -112,7 +112,7 @@ export default component$(() => {
         class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4"
       >
         <a
-          href="/"
+          href={isAuthenticated ? "/home/" : "/"}
           class="font-mono text-sm font-bold tracking-tight"
           data-testid="app-shell-brand"
         >
