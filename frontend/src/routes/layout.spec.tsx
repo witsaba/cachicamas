@@ -58,29 +58,28 @@ vi.mock("~/lib/api", () => ({
 }));
 
 // Stub useLocation so the OrgPill (rendered in authed tests via
-    // R-FIX-002) can run its URL-tracking useTask$ in createDOM. The
-    // real useLocation reads the Qwik City `qc-l` context which
-    // createDOM does not set up. The stub returns the same shape
-    // (`url: URL, params: {}`) so `.url.pathname` works in the
-    // task body.
-    //
-    // Use vi.importActual to keep the rest of the module intact
-    // (Form, routeLoader$, useNavigate, etc. are imported by other
-    // components like AvatarDropdown and the signin route — replacing
-    // the entire module would break those).
-    vi.mock("@builder.io/qwik-city", async () => {
-      const actual =
-        await vi.importActual<typeof import("@builder.io/qwik-city")>(
-          "@builder.io/qwik-city",
-        );
-      return {
-        ...actual,
-        useLocation: () => ({
-          url: new URL("http://localhost/"),
-          params: {},
-        }),
-      };
-    });
+// R-FIX-002) can run its URL-tracking useTask$ in createDOM. The
+// real useLocation reads the Qwik City `qc-l` context which
+// createDOM does not set up. The stub returns the same shape
+// (`url: URL, params: {}`) so `.url.pathname` works in the
+// task body.
+//
+// Use vi.importActual to keep the rest of the module intact
+// (Form, routeLoader$, useNavigate, etc. are imported by other
+// components like AvatarDropdown and the signin route — replacing
+// the entire module would break those).
+vi.mock("@builder.io/qwik-city", async () => {
+  const actual = await vi.importActual<typeof import("@builder.io/qwik-city")>(
+    "@builder.io/qwik-city",
+  );
+  return {
+    ...actual,
+    useLocation: () => ({
+      url: new URL("http://localhost/"),
+      params: {},
+    }),
+  };
+});
 
 // Helper — render the layout with a stubbed session. The
 // `sessionState` is captured by the stub at module-load time,
