@@ -69,12 +69,10 @@ pnpm build # or `pnpm build`
 The frontend ships the very first UI surface: a four-route
 aphantasia-friendly Organizations flow.
 
-| Route                 | Purpose                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `/`                   | Brand mark + tagline + a single "Get started" CTA to `/organizations`.                                                               |
-| `/organizations`      | List of organizations. Empty state is an instruction (no image, no illustration).                                                    |
-| `/organizations/new`  | Create-organization form. Auto-derives the slug from the full name; user can override; the review field group renders progressively. |
-| `/organizations/{id}` | Read-back of a single organization. The URL is the breadcrumb.                                                                       |
+| Route          | Purpose                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/`            | Brand mark + tagline + a single "Get started" CTA to `/ownboarding`.                                                               |
+| `/ownboarding` | First-run setup form. Collects `full_name` + `identification` to create the unique organization. On success, redirects to `/home`. |
 
 ### Aphantasia-friendly layout
 
