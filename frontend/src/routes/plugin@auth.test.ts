@@ -162,6 +162,44 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
     expect(last.clientSecret).toBe("test-secret");
   });
 
+  // 2026-07-06-workspaces PR1a: the OAuth provider MUST request
+  // scope=repo + access_type=offline so the GitHub API proxy
+  // (PR1c-i) can list /user/repos and (future) clone private repos.
+  // The previous scope was `read:user user:email` which did not grant
+  // those permissions. The new scope is locked in the proposal
+  // (§"Technical decisions"). Existing users see the updated consent
+  // screen on next sign-in; no active session is invalidated.
+  it("GitHub provider requests scope=repo + access_type=offline (PR1a workspaces)", async () => {
+    // Capture the override path config: the GitHub provider object
+    // our implementation renders only carries `authorization.params`
+    // when AUTH_GITHUB_BASE_URL is set to the mocks test URL.
+    // Production (unset) hits the canonical github.com path with no
+    // override, so we cannot assert `authorization.params` there. The
+    // test therefore exercises the mocks path explicitly.
+    const call = qwikAuthCalls[0];
+    expect(call).toBeDefined();
+    const resolved = (await call.resolveConfig({
+      AUTH_GITHUB_ID: "test-id",
+      AUTH_GITHUB_SECRET: "test-secret",
+      AUTH_SECRET: "test-secret-base64",
+      AUTH_TRUST_HOST: "true",
+      AUTH_URL: "http://localhost:3015",
+      // Force the mocks path so the override block is exercised.
+      AUTH_GITHUB_BASE_URL: "http://localhost:3016",
+      AUTH_GITHUB_API_BASE_URL: "http://mocks-github-oauth:3016",
+    })) as {
+      providers: Array<{ authorization?: { params?: Record<string, string> } }>;
+    };
+    expect(resolved.providers).toHaveLength(1);
+    const params = resolved.providers[0].authorization?.params;
+    expect(params).toBeDefined();
+    // The new scope MUST be exactly "repo" (not "read:user user:email").
+    expect(params!.scope).toBe("repo");
+    // access_type MUST be "offline" so Auth.js populates
+    // refresh_token + expires_at on the signIn event.
+    expect(params!.access_type).toBe("offline");
+  });
+
   // 2026-07-06 regression: the custom onRequest skips @auth/core
   // interception for the native /auth/signin and /auth/signout page
   // renders. The skip MUST match both `/auth/signin` AND

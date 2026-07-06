@@ -10,12 +10,12 @@
 //
 // Wire protocol (locked at docs/adr/0003-add-identity-callback-hmac.md):
 //
-//   POST /api/v1/identity/signin-callback
-//   Headers:
-//     Content-Type: application/json
-//     X-Cachicamas-Timestamp: <unix_ms string>
-//     X-Cachicamas-Signature: base64(HMAC_SHA256(secret, ts + "." + canonical_json))
-//   Body: { user: {...}, account: {...} }  (see ADR 0003 §"Wire protocol")
+//	POST /api/v1/identity/signin-callback
+//	Headers:
+//	  Content-Type: application/json
+//	  X-Cachicamas-Timestamp: <unix_ms string>
+//	  X-Cachicamas-Signature: base64(HMAC_SHA256(secret, ts + "." + canonical_json))
+//	Body: { user: {...}, account: {...} }  (see ADR 0003 §"Wire protocol")
 //
 // Canonical JSON (RFC 8785-lite): keys sorted lexicographically,
 // lowercased, no whitespace, no padding. The implementation in
@@ -122,10 +122,10 @@ func RegisterIdentityCallbackRoute(e *echo.Echo, svc IdentityUpserter, secret st
 // HMAC verification (see ADR 0003 §"Forward notes" on OAuth tokens).
 type signInCallbackBody struct {
 	User struct {
-		ID        string  `json:"id"`
-		Email     string  `json:"email"`
-		Name      *string `json:"name"`
-		Image     *string `json:"image"`
+		ID    string  `json:"id"`
+		Email string  `json:"email"`
+		Name  *string `json:"name"`
+		Image *string `json:"image"`
 	} `json:"user"`
 	Account struct {
 		Provider          string  `json:"provider"`
@@ -228,15 +228,26 @@ func (h *IdentityHandler) HandleSignInCallback(c *echo.Context) error {
 		return h.writeUnprocessable(c, "account.provider and account.providerAccountId are required")
 	}
 
-	// 7. Extract the IdentityEvent and dispatch. OAuth tokens are
-	//    NOT persisted (identity.account has no token columns in this
-	//    slice; documented in ADR 0003 §"Forward notes").
+	// 7. Extract the IdentityEvent and dispatch. The 5 OAuth token
+	//    fields ARE persisted as of PR1a (2026-07-06-workspaces):
+	//    identity.account gained access_token, refresh_token,
+	//    expires_at, token_type, scope (migration 20260706120000). The
+	//    frontend (identity-callback-client.ts) has been forwarding
+	//    these fields since cachicamas-identity-signin-callback; this
+	//    slice wires the persistence path end-to-end. R-WS-096 forbids
+	//    any of these fields from appearing in an HTTP response — the
+	//    workspace handler and this handler NEVER serialize them out.
 	ev := domain.IdentityEvent{
 		Email:             body.User.Email,
 		Name:              stringPtrOrEmpty(body.User.Name),
 		ImageURL:          stringPtrOrEmpty(body.User.Image),
 		Provider:          body.Account.Provider,
 		ProviderAccountID: body.Account.ProviderAccountID,
+		AccessToken:       body.Account.AccessToken,
+		RefreshToken:      body.Account.RefreshToken,
+		ExpiresAt:         int64PtrToTimePtr(body.Account.ExpiresAt),
+		TokenType:         body.Account.TokenType,
+		Scope:             body.Account.Scope,
 	}
 	if _, err := h.svc.UpsertFromOAuth(req.Context(), ev); err != nil {
 		h.logger.ErrorContext(req.Context(), "identity signin-callback: service error",
@@ -260,6 +271,20 @@ func stringPtrOrEmpty(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// int64PtrToTimePtr converts the wire-shape unix-seconds pointer
+// (Auth.js convention) into a *time.Time in UTC. Returns nil for a
+// nil pointer so the persistence layer writes SQL NULL. PR1a added
+// this helper when identity.account.expires_at (TIMESTAMPTZ) was
+// introduced; pre-PR1a events that do not carry expires_at keep
+// NULL.
+func int64PtrToTimePtr(unixSec *int64) *time.Time {
+	if unixSec == nil {
+		return nil
+	}
+	t := time.Unix(*unixSec, 0).UTC()
+	return &t
 }
 
 // writeUnauthorized emits the locked 401 envelope and logs the reason.
