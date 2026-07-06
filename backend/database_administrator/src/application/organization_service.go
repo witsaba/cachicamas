@@ -17,6 +17,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -30,17 +31,27 @@ import (
 // Locked OTel span names (spec §3.4). Centralised so any future
 // caller that wants to record these spans uses the same string.
 const (
-	spanNameCreate = "organization.create"
-	spanNameList   = "organization.list"
-	spanNameGet    = "organization.get"
+	spanNameCreate     = "organization.create"
+	spanNameList       = "organization.list"
+	spanNameGet        = "organization.get"
+	spanNameSetupState = "organization.setup_state"
 )
 
 // Locked HTTP route strings for span attributes.
 const (
-	httpRouteList  = "/organizations"
-	httpRouteGet   = "/organizations/:id"
-	httpRoutePost  = "/organizations"
+	httpRouteList        = "/organizations"
+	httpRouteGet         = "/organizations/:id"
+	httpRoutePost        = "/organizations"
+	httpRouteSetupState  = "/setup-state"
 )
+
+// SetupState is the wire shape returned by GetSetupState. JSON tag
+// matches the backend endpoint contract (R-OW-005 / S-OW-040):
+//
+//	{ "hasOrganization": <bool> }
+type SetupState struct {
+	HasOrganization bool `json:"hasOrganization"`
+}
 
 // OrganizationService is the use case facade for organization
 // CRUD. It is the ONLY caller of domain.OrganizationRepository in
@@ -211,11 +222,41 @@ func setHTTPStatus(span trace.Span, status int) {
 	span.SetAttributes(attribute.Int("http.status_code", status))
 }
 
-// Compile-time check that the service struct exposes the three
+// GetSetupState returns the install-level "is there at least one
+// organization?" boolean. The ownboarding gate (frontend
+// requireOwnboarding helper) reads this to decide whether to redirect
+// the user to /ownboarding or let them land on /home.
+//
+// Why a service method instead of calling the repo from the handler:
+// keeps the hexagonal boundary (handler depends on application, not
+// on the repo adapter) and gives us a single place to add SPAN
+// observability + slog logging for the setup-state check.
+func (s *OrganizationService) GetSetupState(ctx context.Context) (SetupState, error) {
+	ctx, span := s.tracer.Start(ctx, spanNameSetupState)
+	defer span.End()
+
+	setHTTPRouteAttrs(span, "GET", httpRouteSetupState)
+
+	exists, err := s.repo.HasOrganization(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return SetupState{}, fmt.Errorf("get setup state: %w", err)
+	}
+
+	setHTTPStatus(span, 200)
+	s.logger.InfoContext(ctx, "organization.setup_state ok",
+		slog.Bool("has_organization", exists),
+	)
+	return SetupState{HasOrganization: exists}, nil
+}
+
+// Compile-time check that the service struct exposes the four
 // use cases the handler needs. If a method is renamed, the build
 // breaks here.
 var _ interface {
 	Create(ctx context.Context, in domain.CreateOrganizationInput) (*domain.Organization, error)
 	List(ctx context.Context) ([]domain.Organization, error)
 	Get(ctx context.Context, id int64) (*domain.Organization, error)
+	GetSetupState(ctx context.Context) (SetupState, error)
 } = (*OrganizationService)(nil)

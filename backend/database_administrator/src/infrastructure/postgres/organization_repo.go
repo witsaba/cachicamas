@@ -46,6 +46,21 @@ func NewOrgRepo(db *sql.DB) *OrgRepo {
 	return &OrgRepo{db: db}
 }
 
+// HasOrganization reports whether the organizations table contains
+// at least one row. Cheap implementation: SELECT EXISTS short-circuits
+// at the first row and never materializes anything. Used by the
+// setup-state endpoint to decide whether the ownboarding form should
+// render (R-OW-005 / S-OW-044).
+func (r *OrgRepo) HasOrganization(ctx context.Context) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM `+orgTableName+`)`,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("postgres.OrganizationRepo.HasOrganization: %w", err)
+	}
+	return exists, nil
+}
+
 // Compile-time check that OrgRepo satisfies the
 // domain.OrganizationRepository port. Mirrors the pattern in
 // migration/runner.go: if the public surface drifts the build

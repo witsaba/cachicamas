@@ -16,6 +16,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -308,5 +309,94 @@ func TestRepo_SelectByID_NotFound_ReturnsNotFoundError(t *testing.T) {
 	}
 	if nerr.Resource != "organization" {
 		t.Errorf("Resource = %q, want %q", nerr.Resource, "organization")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for HasOrganization (R-OW-005 / S-OW-040..044)
+//
+// The HasOrganization repo method backs the /setup-state endpoint.
+// Implementation uses SELECT EXISTS (SELECT 1 FROM organization) so
+// the query short-circuits at the first row and never materializes
+// the result set (S-OW-044).
+// ---------------------------------------------------------------------------
+
+// TestRepo_HasOrganization_EmptyTable verifies that an empty
+// organizations table yields (false, nil) (S-OW-040).
+func TestRepo_HasOrganization_EmptyTable(t *testing.T) {
+	db := integrationDB(t)
+	ensureMigrations(t, db)
+	truncateOrgs(t, db)
+
+	repo := postgres.NewOrgRepo(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := repo.HasOrganization(ctx)
+	if err != nil {
+		t.Fatalf("HasOrganization (empty): %v", err)
+	}
+	if got {
+		t.Errorf("HasOrganization (empty) = true, want false")
+	}
+}
+
+// TestRepo_HasOrganization_OneRow verifies that a single row yields
+// (true, nil) (S-OW-041).
+func TestRepo_HasOrganization_OneRow(t *testing.T) {
+	db := integrationDB(t)
+	ensureMigrations(t, db)
+	truncateOrgs(t, db)
+
+	if _, err := db.ExecContext(
+		context.Background(),
+		`INSERT INTO organization (shortname, full_name, identification, is_active) VALUES ($1, $2, $3, TRUE)`,
+		"only", "Only Org", "ord-only-has",
+	); err != nil {
+		t.Fatalf("insert only org: %v", err)
+	}
+
+	repo := postgres.NewOrgRepo(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := repo.HasOrganization(ctx)
+	if err != nil {
+		t.Fatalf("HasOrganization (one row): %v", err)
+	}
+	if !got {
+		t.Errorf("HasOrganization (one row) = false, want true")
+	}
+}
+
+// TestRepo_HasOrganization_ManyRows verifies that any number of rows
+// greater than zero collapses to (true, nil) (S-OW-042). This
+// protects against an implementation that returns the count and
+// then compares > 0 with the wrong operator.
+func TestRepo_HasOrganization_ManyRows(t *testing.T) {
+	db := integrationDB(t)
+	ensureMigrations(t, db)
+	truncateOrgs(t, db)
+
+	for i, id := range []string{"ord-multi-a", "ord-multi-b", "ord-multi-c"} {
+		if _, err := db.ExecContext(
+			context.Background(),
+			`INSERT INTO organization (shortname, full_name, identification, is_active) VALUES ($1, $2, $3, TRUE)`,
+			nil, fmt.Sprintf("Org %d", i), id,
+		); err != nil {
+			t.Fatalf("insert org %d: %v", i, err)
+		}
+	}
+
+	repo := postgres.NewOrgRepo(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := repo.HasOrganization(ctx)
+	if err != nil {
+		t.Fatalf("HasOrganization (many rows): %v", err)
+	}
+	if !got {
+		t.Errorf("HasOrganization (many rows) = false, want true")
 	}
 }

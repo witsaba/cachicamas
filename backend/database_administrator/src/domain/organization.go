@@ -78,6 +78,7 @@ type OrganizationRepository interface {
 	Insert(ctx context.Context, o *Organization) (*Organization, error)
 	SelectAll(ctx context.Context) ([]Organization, error)
 	SelectByID(ctx context.Context, id int64) (*Organization, error)
+	HasOrganization(ctx context.Context) (bool, error)
 }
 
 // ---------------------------------------------------------------------------

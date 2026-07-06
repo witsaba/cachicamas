@@ -29,6 +29,7 @@ import { component$ } from "@builder.io/qwik";
 import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
+import { requireOwnboarding } from "~/lib/require-ownboarding";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
@@ -41,14 +42,13 @@ import { useSession, useSignIn } from "~/routes/plugin@auth";
 // that render the component$ directly (without the HTTP middleware).
 export { requireAuthRedirect as onRequest };
 
-// SSR-time auth plumbing: this loader runs in the request context and
-// gives Qwik City a hook for the SSR pass. Session resolution still
-// happens via `useSession()` inside the component$, so this loader is
-// a no-op for now (returns null). It is exported so the route tree
-// declares the SSR contract explicitly (mirrors routes/profile/index.tsx).
-export const useHomeSession = routeLoader$(({ cookie, env }) => {
-  void cookie;
-  void env;
+// 2026-07-06 ownboarding (R-OW-007 / S-OW-060..062): SSR-time
+// setup-state guard. Reads GET /setup-state and throws a 302 redirect
+// to /ownboarding when hasOrganization=false. On transport error or
+// hasOrganization=true, the loader is a no-op (optimistic fallback).
+// See `lib/require-ownboarding.ts` for the no-redirect-loop guard.
+export const useSetupLoader = routeLoader$(async (event) => {
+  await requireOwnboarding(event);
   return null;
 });
 
