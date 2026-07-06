@@ -32,16 +32,18 @@ func NewOrganizationHandler(service *application.OrganizationService) *Organizat
 	return &OrganizationHandler{service: service}
 }
 
-// RegisterOrganizationRoutes wires the two organization-adjacent
+// RegisterOrganizationRoutes wires the three organization-adjacent
 // routes on the given Echo instance. The /setup-state endpoint
 // powers the ownboarding gate (R-OW-005); POST /organizations is
-// the ownboarding submit endpoint. The old GET /organizations
-// (list) and GET /organizations/:id (get-by-id) routes were
-// removed in the 2026-07-06 ownboarding change.
+// the ownboarding submit endpoint; GET /organization returns the
+// current org for the header pill (R-FIX-002). The old GET
+// /organizations (list) and GET /organizations/:id (get-by-id)
+// routes were removed in the 2026-07-06 ownboarding change.
 func RegisterOrganizationRoutes(e *echo.Echo, svc *application.OrganizationService) {
 	h := NewOrganizationHandler(svc)
 	e.POST("/organizations", h.Create)
 	e.GET("/setup-state", h.SetupState)
+	e.GET("/organization", h.GetOrganization)
 }
 
 // Create handles POST /organizations. Accepts JSON or
@@ -71,6 +73,18 @@ func (h *OrganizationHandler) SetupState(c *echo.Context) error {
 		return writeError(c, err)
 	}
 	return c.JSON(http.StatusOK, state)
+}
+
+// GetOrganization handles GET /organization. Returns 200 with the
+// full *domain.Organization on success, or 404 (locked envelope)
+// when no organization exists yet (R-FIX-002). The frontend
+// layout's org-pill loader reads this at SSR time on every page.
+func (h *OrganizationHandler) GetOrganization(c *echo.Context) error {
+	org, err := h.service.GetCurrentOrganization(c.Request().Context())
+	if err != nil {
+		return writeError(c, err)
+	}
+	return c.JSON(http.StatusOK, org)
 }
 
 // ---------------------------------------------------------------------------

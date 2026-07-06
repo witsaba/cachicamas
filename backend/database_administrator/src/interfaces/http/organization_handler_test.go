@@ -57,6 +57,9 @@ type fakeRepo struct {
 
 	hasOrganizationResult bool
 	hasOrganizationErr    error
+
+	firstResult *domain.Organization
+	firstErr    error
 }
 
 func (f *fakeRepo) Insert(_ context.Context, o *domain.Organization) (*domain.Organization, error) {
@@ -96,6 +99,19 @@ func (f *fakeRepo) HasOrganization(_ context.Context) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.hasOrganizationResult, f.hasOrganizationErr
+}
+
+func (f *fakeRepo) SelectFirst(_ context.Context) (*domain.Organization, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.firstErr != nil {
+		return nil, f.firstErr
+	}
+	if f.firstResult != nil {
+		out := *f.firstResult
+		return &out, nil
+	}
+	return nil, &domain.NotFoundError{Resource: "organization"}
 }
 
 // newTestService wires a real *application.OrganizationService
@@ -358,6 +374,74 @@ func TestOrganizationHandler_EmitsSpans(t *testing.T) {
 // this file uses it (kept as a hint that some tests may grow to
 // inspect request bodies via bytes.Buffer).
 var _ = bytes.NewBuffer
+
+// ---------------------------------------------------------------------------
+// Tests for GET /organization (R-FIX-002)
+//
+// The header org pill reads this endpoint at SSR time on every page
+// to render the current org's full_name + identification. Single-tenant
+// model: there is at most one row. Returns 200 + org, or 404 when none.
+// ---------------------------------------------------------------------------
+
+// TestOrganization_GetOrganization_Found verifies that GET /organization
+// returns 200 with the org's full_name + identification when one exists.
+// This is what the frontend org pill reads.
+func TestOrganization_GetOrganization_Found(t *testing.T) {
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme Industrial",
+			Identification: "acme",
+			IsActive:       true,
+			CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	svc := newTestService(repo)
+	e := newTestRouter(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/organization", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if got["full_name"] != "Acme Industrial" {
+		t.Errorf("full_name = %v, want %q", got["full_name"], "Acme Industrial")
+	}
+	if got["identification"] != "acme" {
+		t.Errorf("identification = %v, want %q", got["identification"], "acme")
+	}
+}
+
+// TestOrganization_GetOrganization_NotFound verifies that GET /organization
+// returns the locked 404 envelope when no organization exists. The
+// frontend org pill maps this to the "No organization yet" empty state.
+func TestOrganization_GetOrganization_NotFound(t *testing.T) {
+	repo := &fakeRepo{} // firstResult unset -> repo returns NotFoundError
+	svc := newTestService(repo)
+	e := newTestRouter(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/organization", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if got["error"] != domain.CodeNotFound {
+		t.Errorf("error = %v, want %q", got["error"], domain.CodeNotFound)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Tests for GET /setup-state (R-OW-005 / S-OW-040..043)

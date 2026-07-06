@@ -37,6 +37,7 @@
  */
 import { component$, Slot, useTask$ } from "@builder.io/qwik";
 import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
+import { OrgPill } from "~/components/org-pill/org-pill";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
 
@@ -112,25 +113,45 @@ export default component$(() => {
         class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4"
       >
         <a
-          href="/"
+          href={isAuthenticated ? "/home/" : "/"}
           class="font-mono text-sm font-bold tracking-tight"
           data-testid="app-shell-brand"
         >
           cachicamas
         </a>
-        <div data-testid="app-shell-identity">
-          {isAuthenticated && session.value ? (
-            <AvatarDropdown session={session.value} signOut={signOut} />
-          ) : (
-            // UX-4 amendment (2026-07-04): the default SignInButton
-            // label is "Sign in" + the GitHub Octocat brand mark
-            // (rendered by the component itself). No explicit label
-            // override needed.
-            // R-HP-004 (S-HP-030): after a successful GitHub OAuth
-            // roundtrip, the anonymous visitor lands on the new
-            // authed-only Home Page (/home) instead of /profile.
-            <SignInButton signIn={signIn} redirectTo="/home" />
-          )}
+        <div class="flex items-center gap-3" data-testid="app-shell-right">
+          {/*
+                R-FIX-002 (2026-07-06): the org pill surfaces the
+                current organization context. Mirrors the
+                Slack/Linear/PatternFly context-selector pattern.
+                Single-tenant: NOT a switcher, just a passive display
+                of full_name + a first-letter monogram. Empty state
+                ("No organization yet") is rendered by the pill
+                itself when the backend returns 404.
+
+                R-FIX-003 (2026-07-06 follow-up): the pill is auth-
+                gated. Anonymous visitors see no pill at all — there
+                is no org context to surface for someone who isn't
+                signed in. The "No organization yet" empty state is
+                only meaningful during ownboarding (authed user,
+                no org yet). Hiding the pill on / also avoids the
+                SSR fetch on every anon page load.
+              */}
+          {isAuthenticated ? <OrgPill /> : null}
+          <div data-testid="app-shell-identity">
+            {isAuthenticated && session.value ? (
+              <AvatarDropdown session={session.value} signOut={signOut} />
+            ) : (
+              // UX-4 amendment (2026-07-04): the default SignInButton
+              // label is "Sign in" + the GitHub Octocat brand mark
+              // (rendered by the component itself). No explicit label
+              // override needed.
+              // R-HP-004 (S-HP-030): after a successful GitHub OAuth
+              // roundtrip, the anonymous visitor lands on the new
+              // authed-only Home Page (/home) instead of /profile.
+              <SignInButton signIn={signIn} redirectTo="/home" />
+            )}
+          </div>
         </div>
       </header>
 

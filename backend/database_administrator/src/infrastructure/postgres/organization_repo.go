@@ -159,6 +159,27 @@ func (r *OrgRepo) SelectByID(ctx context.Context, id int64) (*domain.Organizatio
 	return org, nil
 }
 
+// SelectFirst returns the canonical "current" organization. In
+// the single-tenant model (R-FIX-002) this is the one row in the
+// table; ORDER BY (created_at ASC, id ASC) keeps the choice
+// deterministic if a future multitenancy ticket is in flight and
+// the table happens to have more than one row. Returns
+// *domain.NotFoundError when the table is empty.
+func (r *OrgRepo) SelectFirst(ctx context.Context) (*domain.Organization, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT `+orgColumnList+` FROM `+orgTableName+
+			` ORDER BY created_at ASC, id ASC LIMIT 1`,
+	)
+	org, err := scanOrganization(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: orgTableName}
+		}
+		return nil, fmt.Errorf("postgres.OrganizationRepo.SelectFirst: %w", err)
+	}
+	return org, nil
+}
+
 // rowScanner is the small interface satisfied by both *sql.Row
 // (from QueryRowContext) and *sql.Rows (from QueryContext). The
 // scan helper accepts either so Insert (single row via RETURNING)
@@ -173,10 +194,10 @@ type rowScanner interface {
 // orgColumnList.
 func scanOrganization(row rowScanner) (*domain.Organization, error) {
 	var (
-		o          domain.Organization
-		shortname  sql.NullString
-		email      sql.NullString
-		phone      sql.NullString
+		o         domain.Organization
+		shortname sql.NullString
+		email     sql.NullString
+		phone     sql.NullString
 	)
 	if err := row.Scan(
 		&o.ID,

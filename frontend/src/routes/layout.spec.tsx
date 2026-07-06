@@ -45,6 +45,42 @@ vi.mock("~/routes/plugin@auth", () => ({
   onRequest: () => Promise.resolve(),
 }));
 
+// Stub the API client so the OrgPill's useResource$ fetch
+// resolves without a real backend. Tests that want to exercise
+// the "org exists" path should override this via vi.doMock + a
+// dynamic import of the layout (the same pattern used for the
+// session swap below).
+vi.mock("~/lib/api", () => ({
+  getCurrentOrganization: () => Promise.resolve(null),
+  getSetupState: () => Promise.resolve({ hasOrganization: false }),
+  createOrganization: () =>
+    Promise.resolve({ ok: false, kind: "server", message: "test stub" }),
+}));
+
+// Stub useLocation so the OrgPill (rendered in authed tests via
+// R-FIX-002) can run its URL-tracking useTask$ in createDOM. The
+// real useLocation reads the Qwik City `qc-l` context which
+// createDOM does not set up. The stub returns the same shape
+// (`url: URL, params: {}`) so `.url.pathname` works in the
+// task body.
+//
+// Use vi.importActual to keep the rest of the module intact
+// (Form, routeLoader$, useNavigate, etc. are imported by other
+// components like AvatarDropdown and the signin route — replacing
+// the entire module would break those).
+vi.mock("@builder.io/qwik-city", async () => {
+  const actual = await vi.importActual<typeof import("@builder.io/qwik-city")>(
+    "@builder.io/qwik-city",
+  );
+  return {
+    ...actual,
+    useLocation: () => ({
+      url: new URL("http://localhost/"),
+      params: {},
+    }),
+  };
+});
+
 // Helper — render the layout with a stubbed session. The
 // `sessionState` is captured by the stub at module-load time,
 // so to swap between anon and auth we have to re-import the
@@ -263,4 +299,48 @@ test("[routes/layout]: registers a capture-phase popstate listener that reloads 
   // Sanity: layout still renders the header chrome.
   const screen = await renderWithSession(ANON_SESSION);
   expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
+});
+
+test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", async () => {
+  // R-FIX-001 (2026-07-06): an anonymous visitor who clicks the
+  // cachicamas brand in the header must be taken to the landing
+  // page (/) -- NOT to /home (which would bounce them through
+  // the sign-in redirect chain). The landing page is the
+  // canonical entry point for new visitors.
+  const screen = await renderWithSession(ANON_SESSION);
+  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  expect(brand).toBeTruthy();
+  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/");
+});
+
+test("[routes/layout]: anon shell does NOT render the OrgPill (R-FIX-003)", async () => {
+  // R-FIX-003 (2026-07-06): anonymous visitors have no org
+  // context to surface. The "No organization yet" empty state
+  // is only meaningful for authed users during ownboarding.
+  // Hiding the pill on anon also avoids the SSR fetch on
+  // every anonymous page load.
+  const screen = await renderWithSession(ANON_SESSION);
+  // No OrgPill in any state.
+  expect(screen.querySelector('[data-testid="org-pill"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="org-pill-empty"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="org-pill-loading"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="app-shell-right"]')).toBeTruthy();
+  // The identity widget is still there (sign-in button).
+  expect(
+    screen.querySelector('form[data-testid="sign-in-button"]'),
+  ).toBeTruthy();
+});
+
+test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)", async () => {
+  // R-FIX-001 (2026-07-06): a signed-in visitor who clicks the
+  // cachicamas brand in the header must be taken to the authed-only
+  // Home Page (/home/), not the landing page (/). The landing
+  // page has no auth check and would happily render its
+  // marketing copy to a signed-in user, which is the wrong UX:
+  // the Home Page is where their dashboard (and ownboarding
+  // redirect) lives.
+  const screen = await renderWithSession(AUTH_SESSION);
+  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  expect(brand).toBeTruthy();
+  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/home/");
 });

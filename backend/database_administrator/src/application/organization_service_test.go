@@ -54,8 +54,8 @@ type fakeRepo struct {
 
 	// byID maps id -> *Organization for SelectByID. If an id is not
 	// present, the adapter returns *domain.NotFoundError.
-	byID   map[int64]*domain.Organization
-	byErr  error // optional: returned for a particular id lookup
+	byID     map[int64]*domain.Organization
+	byErr    error // optional: returned for a particular id lookup
 	getCalls int
 
 	// hasOrganizationResult / hasOrganizationErr are returned by
@@ -63,6 +63,14 @@ type fakeRepo struct {
 	hasOrganizationResult bool
 	hasOrganizationErr    error
 	hasOrganizationCalls  int
+
+	// firstResult / firstErr are returned by SelectFirst (added for
+	// the org pill use case, R-FIX-002). Defaults to (nil, nil)
+	// which makes the adapter return *domain.NotFoundError so tests
+	// can exercise the "no org yet" path.
+	firstResult *domain.Organization
+	firstErr    error
+	firstCalls  int
 }
 
 func (f *fakeRepo) Insert(_ context.Context, o *domain.Organization) (*domain.Organization, error) {
@@ -101,6 +109,22 @@ func (f *fakeRepo) HasOrganization(_ context.Context) (bool, error) {
 	defer f.mu.Unlock()
 	f.hasOrganizationCalls++
 	return f.hasOrganizationResult, f.hasOrganizationErr
+}
+
+func (f *fakeRepo) SelectFirst(_ context.Context) (*domain.Organization, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.firstCalls++
+	if f.firstErr != nil {
+		return nil, f.firstErr
+	}
+	if f.firstResult != nil {
+		out := *f.firstResult
+		return &out, nil
+	}
+	// Default: no org yet. Mirrors the "empty DB" behavior the real
+	// adapter exhibits when the organizations table has zero rows.
+	return nil, &domain.NotFoundError{Resource: "organization"}
 }
 
 func (f *fakeRepo) SelectByID(_ context.Context, id int64) (*domain.Organization, error) {
@@ -298,6 +322,124 @@ func TestOrganizationService_Create_DuplicateReturnsConflictError(t *testing.T) 
 // file imports it (kept here as a hint that some helpers may
 // grow to read from an io.Reader in the future).
 var _ = io.EOF
+
+// ---------------------------------------------------------------------------
+// Tests for GetCurrentOrganization (R-FIX-002)
+//
+// The header org pill needs to render the current org's full_name +
+// identification on every page. Single-tenant model: there is at
+// most one row in the organization table. The use case returns
+// *domain.Organization (nil + *NotFoundError when empty) so the
+// frontend can render the "No organization yet" empty state.
+// ---------------------------------------------------------------------------
+
+// TestOrganizationService_GetCurrentOrganization_Found verifies that
+// when an org exists, the use case returns it with the DB row
+// verbatim (no field rewrites).
+func TestOrganizationService_GetCurrentOrganization_Found(t *testing.T) {
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme Industrial",
+			Identification: "acme",
+			IsActive:       true,
+			CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := svc.GetCurrentOrganization(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentOrganization: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("GetCurrentOrganization returned nil, want *Organization")
+	}
+	if got.FullName != "Acme Industrial" {
+		t.Errorf("FullName = %q, want %q", got.FullName, "Acme Industrial")
+	}
+	if got.Identification != "acme" {
+		t.Errorf("Identification = %q, want %q", got.Identification, "acme")
+	}
+	if repo.firstCalls != 1 {
+		t.Errorf("SelectFirst calls = %d, want 1", repo.firstCalls)
+	}
+}
+
+// TestOrganizationService_GetCurrentOrganization_Empty verifies that
+// when the organizations table is empty, the use case returns nil +
+// *domain.NotFoundError. The handler maps the error to HTTP 404 so
+// the frontend can render the "No organization yet" empty state.
+func TestOrganizationService_GetCurrentOrganization_Empty(t *testing.T) {
+	repo := &fakeRepo{} // firstResult unset -> fake returns NotFoundError
+	tracer, _ := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := svc.GetCurrentOrganization(ctx)
+	if got != nil {
+		t.Errorf("GetCurrentOrganization returned %v, want nil on empty DB", got)
+	}
+	if err == nil {
+		t.Fatalf("GetCurrentOrganization: expected *NotFoundError, got nil")
+	}
+	var nerr *domain.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Errorf("err = %T, want *NotFoundError", err)
+	}
+}
+
+// TestOrganizationService_GetCurrentOrganization_OpensSpan verifies the
+// locked OTel shape: span name "organization.current", attributes
+// http.method=GET, http.route=/organization, http.status_code=200.
+// Mirrors the span-shape assertions used by Create + GetSetupState.
+func TestOrganizationService_GetCurrentOrganization_OpensSpan(t *testing.T) {
+	repo := &fakeRepo{
+		firstResult: &domain.Organization{
+			ID:             1,
+			FullName:       "Acme",
+			Identification: "acme",
+			IsActive:       true,
+		},
+	}
+	tracer, sr := newTestTracer()
+	logger, _ := newRecordingLogger()
+
+	svc := application.NewOrganizationService(repo, logger, tracer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := svc.GetCurrentOrganization(ctx); err != nil {
+		t.Fatalf("GetCurrentOrganization: %v", err)
+	}
+
+	spans := sr.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if got := spans[0].Name(); got != "organization.current" {
+		t.Errorf("span name = %q, want %q", got, "organization.current")
+	}
+	attrs := attrKeyValue(spans[0])
+	if attrs["http.method"] != "GET" {
+		t.Errorf("http.method = %q, want GET", attrs["http.method"])
+	}
+	if attrs["http.route"] != "/organization" {
+		t.Errorf("http.route = %q, want /organization", attrs["http.route"])
+	}
+	if attrs["http.status_code"] != "200" {
+		t.Errorf("http.status_code = %q, want 200", attrs["http.status_code"])
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Tests for GetSetupState (R-OW-005 / S-OW-040..043)
