@@ -296,3 +296,50 @@ export async function getSetupState(): Promise<SetupState> {
   }
   return { hasOrganization: body.hasOrganization };
 }
+
+/**
+ * GET /organization.
+ *
+ * Reference: openspec/changes/2026-07-06-ownboarding/specs/ownboarding/spec.md
+ *   R-FIX-002 — header org pill use case.
+ *
+ * Returns the current (single) organization on success, or null when
+ * 404 (no org yet). Throws on any other failure path — the caller
+ * (layout `useOrgLoader`) is responsible for the optimistic no-throw
+ * fallback.
+ *
+ * Failure modes:
+ *   - Network error / fetch throws     → throws Error("organization fetch failed: ...")
+ *   - HTTP 404                         → returns null (no org yet — not an error)
+ *   - Other non-200 HTTP status        → throws Error("organization failed: HTTP <code>")
+ *   - Malformed JSON                   → throws Error("organization: malformed response ...")
+ */
+export async function getCurrentOrganization(): Promise<OrganizationReadModel | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/organization`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unknown";
+    throw new Error(`organization fetch failed: ${detail}`);
+  }
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`organization failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as Partial<OrganizationReadModel>;
+  // Minimal wire-shape sanity check. The OrgPill only needs full_name
+  // + identification, but the layout may pass the whole record to a
+  // future settings page — validate just the two fields the pill
+  // actually reads.
+  if (typeof body.full_name !== "string" || body.full_name.length === 0) {
+    throw new Error("organization: malformed response (full_name missing)");
+  }
+  if (typeof body.identification !== "string" || body.identification.length === 0) {
+    throw new Error(
+      "organization: malformed response (identification missing)",
+    );
+  }
+  return body as OrganizationReadModel;
+}

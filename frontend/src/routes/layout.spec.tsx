@@ -45,6 +45,19 @@ vi.mock("~/routes/plugin@auth", () => ({
   onRequest: () => Promise.resolve(),
 }));
 
+// Stub the API client so the OrgPill's useResource$ fetch
+// resolves without a real backend. Tests that want to exercise
+// the "org exists" path should override this via vi.doMock + a
+// dynamic import of the layout (the same pattern used for the
+// session swap below).
+vi.mock("~/lib/api", () => ({
+  getCurrentOrganization: () => Promise.resolve(null),
+  getSetupState: () =>
+    Promise.resolve({ hasOrganization: false }),
+  createOrganization: () =>
+    Promise.resolve({ ok: false, kind: "server", message: "test stub" }),
+}));
+
 // Helper — render the layout with a stubbed session. The
 // `sessionState` is captured by the stub at module-load time,
 // so to swap between anon and auth we have to re-import the
@@ -260,7 +273,7 @@ test("[routes/layout]: registers a capture-phase popstate listener that reloads 
   // component$ render.
   expect(layoutSrc).toMatch(/stopImmediatePropagation/);
   expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
-// Sanity: layout still renders the header chrome.
+  // Sanity: layout still renders the header chrome.
   const screen = await renderWithSession(ANON_SESSION);
   expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
 });

@@ -73,11 +73,17 @@ type CreateOrganizationInput struct {
 //     ASC) so the result is deterministic across calls.
 //   - SelectByID(ctx, id) returns *NotFoundError when no row
 //     matches. The handler maps NotFoundError to HTTP 404.
-//   - All three methods honour the context.
+//   - SelectFirst(ctx) returns the canonical "current" organization.
+//     In the single-tenant model (R-FIX-002) this is the one row in
+//     the table, ordered by (created_at ASC, id ASC) for determinism.
+//     Returns *NotFoundError when the table is empty so the handler
+//     can map it to the locked 404 envelope.
+//   - All methods honour the context.
 type OrganizationRepository interface {
 	Insert(ctx context.Context, o *Organization) (*Organization, error)
 	SelectAll(ctx context.Context) ([]Organization, error)
 	SelectByID(ctx context.Context, id int64) (*Organization, error)
+	SelectFirst(ctx context.Context) (*Organization, error)
 	HasOrganization(ctx context.Context) (bool, error)
 }
 

@@ -16,6 +16,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -32,12 +33,14 @@ import (
 const (
 	spanNameCreate     = "organization.create"
 	spanNameSetupState = "organization.setup_state"
+	spanNameCurrent    = "organization.current"
 )
 
 // Locked HTTP route strings for span attributes.
 const (
-	httpRoutePost        = "/organizations"
-	httpRouteSetupState  = "/setup-state"
+	httpRoutePost         = "/organizations"
+	httpRouteSetupState   = "/setup-state"
+	httpRouteCurrent      = "/organization"
 )
 
 // SetupState is the wire shape returned by GetSetupState. JSON tag
@@ -180,29 +183,66 @@ func setHTTPStatus(span trace.Span, status int) {
 // on the repo adapter) and gives us a single place to add SPAN
 // observability + slog logging for the setup-state check.
 func (s *OrganizationService) GetSetupState(ctx context.Context) (SetupState, error) {
-	ctx, span := s.tracer.Start(ctx, spanNameSetupState)
-	defer span.End()
+ctx, span := s.tracer.Start(ctx, spanNameSetupState)
+defer span.End()
 
-	setHTTPRouteAttrs(span, "GET", httpRouteSetupState)
+setHTTPRouteAttrs(span, "GET", httpRouteSetupState)
 
-	exists, err := s.repo.HasOrganization(ctx)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return SetupState{}, fmt.Errorf("get setup state: %w", err)
-	}
-
-	setHTTPStatus(span, 200)
-	s.logger.InfoContext(ctx, "organization.setup_state ok",
-		slog.Bool("has_organization", exists),
-	)
-	return SetupState{HasOrganization: exists}, nil
+exists, err := s.repo.HasOrganization(ctx)
+if err != nil {
+span.RecordError(err)
+span.SetStatus(codes.Error, err.Error())
+return SetupState{}, fmt.Errorf("get setup state: %w", err)
 }
 
-// Compile-time check that the service struct exposes the two
+setHTTPStatus(span, 200)
+s.logger.InfoContext(ctx, "organization.setup_state ok",
+slog.Bool("has_organization", exists),
+)
+return SetupState{HasOrganization: exists}, nil
+}
+
+// GetCurrentOrganization returns the canonical "current" organization
+// for the single-tenant install (R-FIX-002). The header org pill
+// reads this at SSR time on every page to render the org's
+// full_name + identification. When the table is empty the function
+// returns (nil, *domain.NotFoundError) and the handler maps that to
+// HTTP 404 so the frontend can render the "No organization yet"
+// empty state.
+func (s *OrganizationService) GetCurrentOrganization(ctx context.Context) (*domain.Organization, error) {
+ctx, span := s.tracer.Start(ctx, spanNameCurrent)
+defer span.End()
+
+setHTTPRouteAttrs(span, "GET", httpRouteCurrent)
+
+org, err := s.repo.SelectFirst(ctx)
+if err != nil {
+// Propagate *domain.NotFoundError unchanged so the handler
+// can map to HTTP 404. Wrap any other failure as an
+// *InternalError so the user-facing message stays generic
+// while slog captures the underlying cause.
+span.RecordError(err)
+span.SetStatus(codes.Error, err.Error())
+var nerr *domain.NotFoundError
+if errors.As(err, &nerr) {
+return nil, err
+}
+return nil, fmt.Errorf("get current organization: %w", err)
+}
+
+setHTTPStatus(span, 200)
+s.logger.InfoContext(ctx, "organization.current ok",
+slog.Int64("organization.id", org.ID),
+slog.String("identification", org.Identification),
+)
+return org, nil
+}
+
+// Compile-time check that the service struct exposes the three
 // use cases the handler needs. If a method is renamed, the build
 // breaks here.
 var _ interface {
-	Create(ctx context.Context, in domain.CreateOrganizationInput) (*domain.Organization, error)
-	GetSetupState(ctx context.Context) (SetupState, error)
+Create(ctx context.Context, in domain.CreateOrganizationInput) (*domain.Organization, error)
+GetSetupState(ctx context.Context) (SetupState, error)
+GetCurrentOrganization(ctx context.Context) (*domain.Organization, error)
 } = (*OrganizationService)(nil)
