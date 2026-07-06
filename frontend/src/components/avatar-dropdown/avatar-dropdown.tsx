@@ -139,7 +139,12 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
             </ul>
             <hr class="my-3 border-slate-200" />
             <Form action={signOut} data-testid="avatar-menu-signout-form">
-              <input type="hidden" name="redirectTo" value="/" />
+              {/*
+                    R-HP-005 (S-HP-040): after sign-out the user lands on
+                    the Auth.js sign-in surface (/auth/signin), not the
+                    public landing. See proposal decision #5.
+                  */}
+              <input type="hidden" name="redirectTo" value="/auth/signin" />
               <button
                 type="submit"
                 data-testid="avatar-menu-signout"

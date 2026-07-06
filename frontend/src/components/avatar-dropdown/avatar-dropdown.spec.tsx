@@ -92,7 +92,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(trigger?.querySelectorAll("img").length).toBe(0);
   });
 
-it("rejects non-https avatar URLs (S-AS-022 / ADR-0009)", async () => {
+  it("rejects non-https avatar URLs (S-AS-022 / ADR-0009)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -189,7 +189,7 @@ it("rejects non-https avatar URLs (S-AS-022 / ADR-0009)", async () => {
     const redirectTo = form?.querySelector(
       'input[name="redirectTo"]',
     ) as HTMLInputElement | null;
-    expect(redirectTo?.value).toBe("/");
+    expect(redirectTo?.value).toBe("/auth/signin");
   });
 
   it("Sign out menu item renders the Lucide log-out icon + cursor-pointer + hover/transition affordances (UAT-4)", async () => {

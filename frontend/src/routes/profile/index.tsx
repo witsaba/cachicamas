@@ -29,8 +29,15 @@ import { component$ } from "@builder.io/qwik";
 import { type DocumentHead } from "@builder.io/qwik-city";
 import { ProfileView } from "~/components/profile-view/profile-view";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
+import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
+
+// 2026-07-06 native-auth-UI: anon visitors are redirected to the
+// native /auth/signin page with `?callbackUrl=/profile`. The inline
+// SignInRequiredCard below is defence-in-depth (never reached in
+// production — the onRequest throws first).
+export { requireAuthRedirect as onRequest };
 
 export default component$(() => {
   const sessionSig = useSession();

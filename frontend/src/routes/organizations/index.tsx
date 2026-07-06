@@ -6,8 +6,16 @@ import {
 } from "~/components/organization-list/organization-list";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { listOrganizations } from "~/lib/api";
+import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
+
+// 2026-07-06 native-auth-UI: anon visitors are redirected to the
+// native /auth/signin page with `?callbackUrl=/organizations`. The
+// inline SignInRequiredCard below is defence-in-depth — the
+// onRequest throws first, so the loader never fires on the anon
+// path (no DB hit).
+export { requireAuthRedirect as onRequest };
 
 /**
  * /organizations — list or empty state.

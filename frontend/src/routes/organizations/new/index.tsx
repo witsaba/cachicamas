@@ -7,8 +7,14 @@ import {
 } from "~/components/organization-form/organization-form";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { createOrganization } from "~/lib/api";
+import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
+
+// 2026-07-06 native-auth-UI: anon visitors are redirected to the
+// native /auth/signin page with `?callbackUrl=/organizations/new`.
+// The inline SignInRequiredCard below is defence-in-depth.
+export { requireAuthRedirect as onRequest };
 
 /**
  * /organizations/new — create-organization form route.
