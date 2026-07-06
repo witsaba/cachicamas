@@ -107,3 +107,47 @@ The change ships with vitest coverage for every behavioral requirement above and
 - No new auth providers, no session shape changes.
 - No `/profile` or `/organizations/*` changes.
 - No i18n / locale handling.
+
+## Amendments
+
+### 2026-07-06 ownboarding change
+
+The ownboarding change (`openspec/changes/2026-07-06-ownboarding/specs/ownboarding/spec.md`)
+adds a setup-state gate to the home page: when no organization exists in
+the database, the home loader redirects to `/ownboarding`. The home spec
+gains a new requirement to document this behavior.
+
+### R-HP-009 — Home Page loader redirects to /ownboarding when no organization exists
+
+The home route's `routeLoader$` calls `requireOwnboarding(event)`
+(see `frontend/src/lib/require-ownboarding.ts`). The helper reads
+`GET /setup-state` and throws a 302 redirect to `/ownboarding` when
+`hasOrganization=false`. On `hasOrganization=true` or any failure mode
+(network error, malformed response), the helper is a no-op and the
+home page renders normally.
+
+**Scenarios**
+
+- S-HP-090 — `GET /setup-state` returns `{ hasOrganization: false }` →
+  the home loader throws `event.redirect(302, "/ownboarding")`; the
+  browser navigates to `/ownboarding`; the home page JSX is never
+  rendered.
+- S-HP-091 — `GET /setup-state` returns `{ hasOrganization: true }` →
+  the helper is a no-op; the home page renders the personalised
+  greeting + paragraph placeholder (R-HP-001, R-HP-002 unchanged).
+- S-HP-092 — `GET /setup-state` rejects (network error, 5xx, timeout)
+  → the helper logs a warning via `console.warn` and returns normally;
+  the home page renders. Optimistic fallback — a transient backend
+  hiccup does NOT trap the user on `/ownboarding`.
+- S-HP-093 — `GET /setup-state` resolves with an unexpected shape
+  (non-object, missing `hasOrganization`, wrong type) → the helper
+  logs a warning and returns normally. Defensive against backend
+  schema drift.
+
+The `requireOwnboarding` helper has its own dedicated spec at
+`frontend/src/lib/require-ownboarding.spec.ts` (R-OW-006, R-OW-008)
+which covers the redirect, the optimistic fallback, and the
+no-redirect-loop guard (S-OW-054) at the unit level. The structural
+wiring is asserted in `frontend/src/routes/home/route-guard.spec.ts`
+which is updated in the ownboarding change to verify the import and
+the loader call.

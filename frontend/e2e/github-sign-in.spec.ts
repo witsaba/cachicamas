@@ -101,16 +101,15 @@ test.describe("GitHub OAuth roundtrip (mocks mode)", () => {
           "noopener noreferrer",
         );
 
-        // PR-4 (cachicamas-login-ux, T4.4.1): the manage-orgs link
-        // is part of the /profile enrichment (R-PH-005).
+// 2026-07-06 ownboarding (R-OW-010 / S-OW-094): the
+        // manage-orgs link was removed from /profile when the
+        // /organizations surface was deleted. The dashboard
+        // header now shows only the avatar (with Profile + Sign
+        // out in the dropdown).
         const manageOrgsLink = page.locator(
           'a[data-testid="profile-manage-orgs"]',
         );
-        await expect(manageOrgsLink).toBeVisible();
-        await expect(manageOrgsLink).toHaveAttribute(
-          "href",
-          "/organizations/new",
-        );
+        await expect(manageOrgsLink).toHaveCount(0);
 
         // The authjs.session-token cookie should be set with HttpOnly.
     const cookies = await context.cookies();

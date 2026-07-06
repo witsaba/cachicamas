@@ -8,7 +8,9 @@
  * Reference: `openspec/changes/cachicamas-login-ux/specs/profile-home/spec.md`
  *   R-PH-008 — the page opens with a personalized welcome heading.
  *   R-PH-003 — renders a github.com anchor when github_login is set.
- *   R-PH-005 — renders a "Manage organizations" link to /organizations/new.
+ *   R-PH-005 — REMOVED 2026-07-06 ownboarding. The /organizations
+ *     surface was deleted (single-tenant model). Users reach the
+ *     setup page via /ownboarding on first sign-in only.
  *
  * Reference: `openspec/changes/cachicamas-login-ux/specs/app-shell/spec.md`
  *   R-AS-005 — the shell's AvatarDropdown already shows the user's
@@ -37,7 +39,11 @@
  *                  sign-out button).
  *   T4.1 — added `github_login` field + `profile-github-login`
  *          anchor (R-PH-003).
- *   T4.2 — added `profile-manage-orgs` link (R-PH-005).
+ *   T4.2 — REMOVED 2026-07-06 ownboarding. The `profile-manage-orgs`
+ *     link was part of the /profile enrichment. After the ownboarding
+ *     change, the /organizations surface is gone; the link is replaced
+ *     by an implicit redirect to /home (which itself gates on
+ *     setup-state).
  *   T4.3 — dropped the signed-out branch (T4.3); /profile uses
  *          `SignInRequiredCard` (PR-1b #33) for anon.
  *
@@ -140,22 +146,12 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
         class="mt-4 max-w-lg text-base text-slate-700"
         data-testid="profile-body"
       >
-        cachicamas is your home for tracking the organizations, projects,
-        requirements, and milestones that move your work forward. From here you
-        can manage your organizations or open your GitHub profile.
+        cachicamas is your home for tracking your organization's projects,
+        requirements, and milestones. From here you can open your GitHub
+        profile.
       </p>
 
       <div class="mt-8 flex flex-wrap gap-3">
-        {/* Primary action: internal navigation to the org config. */}
-        <a
-          href="/organizations/new"
-          class="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-[background-color,box-shadow,transform,border-color] duration-150 hover:border-slate-400 hover:bg-slate-50 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:translate-y-px"
-          data-testid="profile-manage-orgs"
-        >
-          Manage organizations
-          <span aria-hidden="true">→</span>
-        </a>
-
         {/* Secondary action: external link to the user's GitHub
             profile. Renders only when github_login is set (the
             Auth.js GitHub provider populates it from the OAuth

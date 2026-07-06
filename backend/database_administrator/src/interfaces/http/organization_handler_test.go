@@ -267,100 +267,11 @@ func TestOrganizationHandler_Post_DuplicateIdentification(t *testing.T) {
 	}
 }
 
-// TestOrganizationHandler_List_Empty covers spec B-5.
-func TestOrganizationHandler_List_Empty(t *testing.T) {
-	repo := &fakeRepo{listResult: []domain.Organization{}}
-	svc := newTestService(repo)
-	e := newTestRouter(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/organizations", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-	}
-	body := strings.TrimSpace(rec.Body.String())
-	if body != "[]" {
-		t.Errorf("body = %q, want %q", body, "[]")
-	}
-}
-
-// TestOrganizationHandler_List_NonEmpty covers spec B-5b.
-func TestOrganizationHandler_List_NonEmpty(t *testing.T) {
-	repo := &fakeRepo{listResult: []domain.Organization{
-		{ID: 1, FullName: "A", Identification: "a", IsActive: true},
-		{ID: 2, FullName: "B", Identification: "b", IsActive: true},
-	}}
-	svc := newTestService(repo)
-	e := newTestRouter(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/organizations", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-	}
-	var got []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(got) != 2 {
-		t.Errorf("body length = %d, want 2", len(got))
-	}
-}
-
-// TestOrganizationHandler_Get_Found covers spec B-6.
-func TestOrganizationHandler_Get_Found(t *testing.T) {
-	repo := &fakeRepo{
-		byID: map[int64]*domain.Organization{
-			1: {ID: 1, FullName: "Acme", Identification: "acme", IsActive: true},
-		},
-	}
-	svc := newTestService(repo)
-	e := newTestRouter(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/organizations/1", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if id, ok := got["id"].(float64); !ok || int64(id) != 1 {
-		t.Errorf("body.id = %v, want 1", got["id"])
-	}
-}
-
-// TestOrganizationHandler_Get_NotFound covers spec B-6b.
-func TestOrganizationHandler_Get_NotFound(t *testing.T) {
-	repo := &fakeRepo{byID: map[int64]*domain.Organization{}}
-	svc := newTestService(repo)
-	e := newTestRouter(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/organizations/9999", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got["error"] != "not_found" {
-		t.Errorf("body.error = %v, want %q", got["error"], "not_found")
-	}
-	if got["message"] != "Organization not found." {
-		t.Errorf("body.message = %v, want %q", got["message"], "Organization not found.")
-	}
-}
+// TestOrganizationHandler_List_Empty and TestOrganizationHandler_List_NonEmpty
+// were removed in the 2026-07-06 ownboarding change. The GET /organizations
+// list endpoint was deleted (single-tenant model).
+// TestOrganizationHandler_Get_Found and TestOrganizationHandler_Get_NotFound
+// were also removed. The GET /organizations/:id get-by-id endpoint was deleted.
 
 // TestOrganizationHandler_Post_FormEncoded covers the dual
 // content-type contract from locked #3: POST with
@@ -415,9 +326,6 @@ func TestOrganizationHandler_EmitsSpans(t *testing.T) {
 			CreatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
 			UpdatedAt:      time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
 		},
-		byID: map[int64]*domain.Organization{
-			7: {ID: 7, FullName: "Acme", Identification: "acme", IsActive: true},
-		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1}))
 	svc := application.NewOrganizationService(repo, logger, tp.Tracer("database_administrator/test"))
@@ -433,29 +341,13 @@ func TestOrganizationHandler_EmitsSpans(t *testing.T) {
 		t.Fatalf("POST status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
 	}
 
-	// GET /organizations
-	req2 := httptest.NewRequest(http.MethodGet, "/organizations", nil)
-	rec2 := httptest.NewRecorder()
-	e.ServeHTTP(rec2, req2)
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("GET list status = %d, want 200", rec2.Code)
-	}
-
-	// GET /organizations/7
-	req3 := httptest.NewRequest(http.MethodGet, "/organizations/7", nil)
-	rec3 := httptest.NewRecorder()
-	e.ServeHTTP(rec3, req3)
-	if rec3.Code != http.StatusOK {
-		t.Fatalf("GET single status = %d, want 200", rec3.Code)
-	}
-
 	// Allow the recorder to receive finished spans.
 	spans := sr.Ended()
 	gotNames := map[string]bool{}
 	for _, s := range spans {
 		gotNames[s.Name()] = true
 	}
-	for _, want := range []string{"organization.create", "organization.list", "organization.get"} {
+	for _, want := range []string{"organization.create"} {
 		if !gotNames[want] {
 			t.Errorf("recorder did not see span %q (got %v)", want, gotNames)
 		}

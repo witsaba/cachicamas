@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/labstack/echo/v5"
 
@@ -33,14 +32,15 @@ func NewOrganizationHandler(service *application.OrganizationService) *Organizat
 	return &OrganizationHandler{service: service}
 }
 
-// RegisterOrganizationRoutes wires the four organization-adjacent
+// RegisterOrganizationRoutes wires the two organization-adjacent
 // routes on the given Echo instance. The /setup-state endpoint
-// powers the ownboarding gate (R-OW-005).
+// powers the ownboarding gate (R-OW-005); POST /organizations is
+// the ownboarding submit endpoint. The old GET /organizations
+// (list) and GET /organizations/:id (get-by-id) routes were
+// removed in the 2026-07-06 ownboarding change.
 func RegisterOrganizationRoutes(e *echo.Echo, svc *application.OrganizationService) {
 	h := NewOrganizationHandler(svc)
 	e.POST("/organizations", h.Create)
-	e.GET("/organizations", h.List)
-	e.GET("/organizations/:id", h.Get)
 	e.GET("/setup-state", h.SetupState)
 }
 
@@ -60,39 +60,6 @@ func (h *OrganizationHandler) Create(c *echo.Context) error {
 
 	c.Response().Header().Set("Location", fmt.Sprintf("/organizations/%d", org.ID))
 	return c.JSON(http.StatusCreated, org)
-}
-
-// List handles GET /organizations. Returns 200 with an array
-// (possibly empty).
-func (h *OrganizationHandler) List(c *echo.Context) error {
-	orgs, err := h.service.List(c.Request().Context())
-	if err != nil {
-		return writeError(c, err)
-	}
-	// Echo's c.JSON on a nil slice writes "null"; we want "[]" for
-	// empty lists (spec B-5). Force a stable shape.
-	if orgs == nil {
-		orgs = []domain.Organization{}
-	}
-	return c.JSON(http.StatusOK, orgs)
-}
-
-// Get handles GET /organizations/:id. Returns 200 on hit, 404 on
-// miss.
-func (h *OrganizationHandler) Get(c *echo.Context) error {
-	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		return writeError(c, &domain.ValidationError{
-			Fields: map[string]string{"id": "Organization ID must be an integer."},
-		})
-	}
-
-	org, err := h.service.Get(c.Request().Context(), id)
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, org)
 }
 
 // SetupState handles GET /setup-state. Returns 200 with

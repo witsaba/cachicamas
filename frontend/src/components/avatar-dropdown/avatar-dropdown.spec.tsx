@@ -144,7 +144,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(cls).toMatch(/active:scale-95/);
   });
 
-  it("panel lists Profile, Manage organizations, and Sign out entries (S-AS-040)", async () => {
+it("panel lists Profile and Sign out entries (S-AS-040, 2026-07-06 ownboarding)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -167,14 +167,12 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     );
     expect((profile as HTMLElement).textContent ?? "").toContain("Profile");
 
+    // 2026-07-06 ownboarding (R-OW-010 / S-OW-094): the
+    // "Manage organizations" entry was removed because the
+    // /organizations surface was deleted. The panel now
+    // contains only Profile + Sign out.
     const orgs = screen.querySelector('[data-testid="avatar-menu-orgs"]');
-    expect(orgs).toBeTruthy();
-    expect((orgs as HTMLAnchorElement).getAttribute("href")).toBe(
-      "/organizations/new",
-    );
-    expect((orgs as HTMLElement).textContent ?? "").toContain(
-      "Manage organizations",
-    );
+    expect(orgs).toBeFalsy();
 
     const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',
