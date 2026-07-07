@@ -362,7 +362,106 @@ describe("lib/identity-callback-client — postIdentityCallback", () => {
     ).rejects.toThrow(/ECONNREFUSED/);
   });
 
-  it("uses the timestamp from the moment of the call (no replay window on the client)", async () => {
+      // 2026-07-06-workspaces PR1a: the 5 OAuth token fields ARE
+      // forwarded. The previous slice parsed them in the handler but
+      // discarded them; this slice wires them through to the backend
+      // so identity.account can persist them. These tests pin the
+      // forwarding contract; if a future contributor silently drops
+      // any of the 5, the workspaces feature (PR1c-i) breaks because
+      // the GitHub proxy has no access_token to call /user/repos.
+
+      it("forwards access_token / refresh_token / expires_at / token_type / scope in the wire body (PR1a)", async () => {
+        process.env.IDENTITY_CALLBACK_SECRET = "test-secret-32-bytes-or-more-please-okay";
+        process.env.SERVER_API_BASE_URL = "http://db:8080";
+
+        const mod = await import("./identity-callback-client");
+        await mod.postIdentityCallback({
+          user: {
+            id: "12345",
+            email: "octocat@example.com",
+            name: "Octocat",
+            image: null,
+          },
+          account: {
+            provider: "github",
+            providerAccountId: "12345",
+            access_token: "gho_pr1a_test",
+            refresh_token: "ghr_pr1a_test",
+            expires_at: 1735689600, // 2025-01-01 UTC
+            token_type: "bearer",
+            scope: "repo",
+          },
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [, calledInit] = fetchMock.mock.calls[0];
+        const parsed = JSON.parse(calledInit.body);
+        expect(parsed.account.accessToken).toBe("gho_pr1a_test");
+        expect(parsed.account.refreshToken).toBe("ghr_pr1a_test");
+        expect(parsed.account.expiresAt).toBe(1735689600);
+        expect(parsed.account.tokenType).toBe("bearer");
+        expect(parsed.account.scope).toBe("repo");
+      });
+
+      it("preserves null for token fields that the provider omits (pre-PR1a signIn events stay compatible)", async () => {
+        process.env.IDENTITY_CALLBACK_SECRET = "test-secret-32-bytes-or-more-please-okay";
+        process.env.SERVER_API_BASE_URL = "http://db:8080";
+
+        const mod = await import("./identity-callback-client");
+        await mod.postIdentityCallback({
+          user: { id: "1", email: "x@y.com", name: null, image: null },
+          account: {
+            provider: "github",
+            providerAccountId: "1",
+            // All 5 token fields deliberately null. The body MUST
+            // still carry them as null keys (not omit them) so the
+            // backend's IdentityEvent receives 5 nil pointers and
+            // persists SQL NULLs.
+            access_token: null,
+            refresh_token: null,
+            expires_at: null,
+            token_type: null,
+            scope: null,
+          },
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [, calledInit] = fetchMock.mock.calls[0];
+        const parsed = JSON.parse(calledInit.body);
+        expect(Object.prototype.hasOwnProperty.call(parsed.account, "accessToken")).toBe(true);
+        expect(parsed.account.accessToken).toBeNull();
+        expect(parsed.account.refreshToken).toBeNull();
+        expect(parsed.account.expiresAt).toBeNull();
+        expect(parsed.account.tokenType).toBeNull();
+        expect(parsed.account.scope).toBeNull();
+      });
+
+      it("preserves expires_at as a number (Auth.js convention: unix seconds, no string conversion)", async () => {
+        process.env.IDENTITY_CALLBACK_SECRET = "test-secret-32-bytes-or-more-please-okay";
+        process.env.SERVER_API_BASE_URL = "http://db:8080";
+
+        const mod = await import("./identity-callback-client");
+        await mod.postIdentityCallback({
+          user: { id: "1", email: "x@y.com", name: null, image: null },
+          account: {
+            provider: "github",
+            providerAccountId: "1",
+            access_token: null,
+            refresh_token: null,
+            expires_at: 1234567890,
+            token_type: null,
+            scope: null,
+          },
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [, calledInit] = fetchMock.mock.calls[0];
+        const parsed = JSON.parse(calledInit.body);
+        expect(typeof parsed.account.expiresAt).toBe("number");
+        expect(parsed.account.expiresAt).toBe(1234567890);
+      });
+
+      it("uses the timestamp from the moment of the call (no replay window on the client)", async () => {
     process.env.IDENTITY_CALLBACK_SECRET = "test-secret-32-bytes-or-more-please-okay";
     process.env.SERVER_API_BASE_URL = "http://db:8080";
 

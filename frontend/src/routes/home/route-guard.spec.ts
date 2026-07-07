@@ -47,7 +47,7 @@ describe("[routes/home] protected-route wiring", () => {
     expect(source).toContain("Welcome");
   });
 
-it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
+  it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain('data-testid="home-paragraph"');
   });
@@ -55,16 +55,23 @@ it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)",
   // R-OW-007 / S-OW-063 — ownboarding helper wired in.
   it("imports requireOwnboarding (R-OW-007 / S-OW-063)", () => {
     const source = readFileSync(routePath, "utf8");
-    expect(source).toMatch(
-/from\s+["']~\/lib\/require-ownboarding["']/,
-    );
+    expect(source).toMatch(/from\s+["']~\/lib\/require-ownboarding["']/);
   });
 
-  // R-OW-007 / S-OW-064 — routeLoader$ that calls the helper.
-  it("declares useSetupLoader as a routeLoader$ that calls requireOwnboarding (R-OW-007 / S-OW-064)", () => {
+  // R-OW-007 / S-OW-064 amended (S-WS-AUTH-CHAIN-SSR-001):
+  //   The ownboarding guard moved out of a routeLoader$ and into the
+  //   onRequest middleware so the SSR cookie context can be captured
+  //   first. The route still must call `requireOwnboarding(event)`
+  //   for the guard to fire — we assert the call site instead of
+  //   the old routeLoader$ shape.
+  it("calls requireOwnboarding in the onRequest middleware chain (R-OW-007 / S-OW-064 amended)", () => {
     const source = readFileSync(routePath, "utf8");
-    expect(source).toMatch(/routeLoader\$\s*\(/);
-    expect(source).toContain("useSetupLoader");
-    expect(source).toContain("await requireOwnboarding(event)");
+    expect(source).toContain("onRequest");
+    expect(source).toContain("requireOwnboarding(event)");
+    // Captures the inbound cookie BEFORE the guards run so SSR
+    // fetches in useTask$ can re-attach it.
+    expect(source).toContain(
+      'setSsrCookieHeader(event.request.headers.get("cookie") ?? "")',
+    );
   });
 });

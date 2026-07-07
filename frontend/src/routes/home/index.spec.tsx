@@ -214,11 +214,12 @@ test("[routes/home]: authed render contains exactly one <p> placeholder (R-HP-00
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  const paragraphs = screen.querySelectorAll("p");
-  expect(paragraphs.length).toBe(1);
-  const p = paragraphs[0];
-  expect(p.getAttribute("data-testid")).toBe("home-paragraph");
-  const text = (p.textContent ?? "").trim();
+  // R-WS-015: the home page now includes the workspaces section
+  // after the home-paragraph; the paragraph anchor still renders
+  // (R-HP-002 invariant) but is no longer the only <p>.
+  const p = screen.querySelector('[data-testid="home-paragraph"]');
+  expect(p).toBeTruthy();
+  const text = (p?.textContent ?? "").trim();
   expect(text.length).toBeGreaterThan(0);
   expect(text.length).toBeLessThanOrEqual(200);
 });

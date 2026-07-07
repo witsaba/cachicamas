@@ -26,8 +26,10 @@ import (
 	otelglobal "go.opentelemetry.io/otel"
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
-	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
+	"github.com/cachicamas/backend/database_administrator/src/domain"
+	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
+	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
 	migrationpg "github.com/cachicamas/backend/database_administrator/src/migration/postgres"
 	"github.com/cachicamas/backend/database_administrator/src/otel"
@@ -75,12 +77,12 @@ func envString(key, def string) string {
 // Activation rules (see httpiface/cors.go):
 //
 //   - CORS_ALLOW_ORIGINS set   → split on `,`, trim, keep non-empty.
-//                                 Works regardless of SERVICE_ENV;
-//                                 safest knob for production-like
-//                                 staging where you need a specific
-//                                 allowlist.
+//     Works regardless of SERVICE_ENV;
+//     safest knob for production-like
+//     staging where you need a specific
+//     allowlist.
 //   - SERVICE_ENV=development  → default to http://localhost:5173
-//                                 so `pnpm dev` Just Works.
+//     so `pnpm dev` Just Works.
 //   - Anything else            → returns nil (CORS disabled).
 func resolveCORSAllowOrigins() []string {
 	if v := os.Getenv("CORS_ALLOW_ORIGINS"); v != "" {
@@ -245,6 +247,73 @@ func main() {
 		Logger:         logger,
 		TracerProvider: otelglobal.GetTracerProvider(),
 	})
+
+	// Workspaces (2026-07-06): auth middleware chain MUST be
+	// IdentityFromCookie → loadGitHubTokenForIdentity → ... route
+	// registrations. The chain is built once and passed to
+	// RegisterAuthenticatedWorkspaceRoutes; the function mounts the
+	// 8 workspace endpoints + /github/repos inside an Echo sub-group
+	// that runs the chain before the handlers. This is the
+	// COMPILER-enforced wire contract — the old `e.Use(tokenMW)` +
+	// `RegisterWorkspaceRoutes(e,...)` shape silently omitted
+	// IdentityFromCookie and let anonymous requests reach the
+	// handlers (symptom: 400 "auth: Authentication required." on
+	// /home, observed 2026-07-07).
+	tokenFetcher := postgres.NewTokenFetcher(db)
+	identityMW := httpiface.IdentityFromCookie(httpiface.IdentityMiddlewareConfig{
+		AuthSecret:     authSecret,
+		CookieName:     cookieName,
+		IdentityRepo:   identityRepo,
+		Logger:         logger,
+		TracerProvider: otelglobal.GetTracerProvider(),
+	})
+	authChain := []echo.MiddlewareFunc{
+		identityMW,
+		httpiface.LoadGitHubTokenMiddleware(tokenFetcher, logger),
+	}
+
+	// Workspaces HTTP routes: 8 endpoints + the github proxy.
+	// Wire the pgx-backed WorkspaceRepo → WorkspaceService →
+	// WorkspaceHandler, then the GitHub client + cache →
+	// GitHubHandler. The githubClient is wrapped in a WorkspaceGitHubAccessor
+	// adapter so WorkspaceService (which doesn't import http) can call it.
+	workspaceRepo := postgres.NewWorkspaceRepo(db)
+	githubClient := githubinfra.NewClient()
+	workspaceService := application.NewWorkspaceService(
+		workspaceRepo,
+		httpiface.NewWorkspaceGitHubAccessor(githubClient),
+		logger,
+		otelglobal.Tracer(serviceName),
+	)
+
+	// GitHub repos proxy (R-WS-009): 5-min in-memory cache keyed by
+	// user_id. Cache TTL configurable via GITHUB_REPOS_CACHE_TTL env
+	// (default 5m).
+	cacheTTL := envDuration("GITHUB_REPOS_CACHE_TTL", 5*time.Minute)
+	repoCache := githubinfra.NewRepoCache(cacheTTL)
+	githubHandler := httpiface.NewGitHubHandler(
+		repoCache,
+		githubClient,
+		func(c *echo.Context) (int64, bool) {
+			raw := c.Get(httpiface.IdentityContextKey)
+			id, ok := raw.(*domain.Identity)
+			if !ok {
+				return 0, false
+			}
+			return id.ID, true
+		},
+		logger,
+	)
+
+	// Compile-time guarantee that every workspace + GitHub-proxy
+	// route runs the full auth chain (see the regression test in
+	// src/interfaces/http/workspaces_auth_chain_test.go).
+	httpiface.RegisterAuthenticatedWorkspaceRoutes(
+		e, workspaceService, githubHandler, authChain, logger,
+	)
+
+	// Single-tenant resolver hook (used by the workspace handlers).
+	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })
 
 	// Identity signin-callback (cachicamas-identity-signin-callback):
 	// HMAC-signed POST endpoint from the Qwik frontend's events.signIn

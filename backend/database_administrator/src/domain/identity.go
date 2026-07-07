@@ -15,6 +15,7 @@ package domain
 
 import (
 	"context"
+	"time"
 )
 
 // Identity is the domain entity for the `identity.user` table (DDL:
@@ -89,12 +90,27 @@ type IdentityRepository interface {
 // The field list is LOCKED for this slice (handler depends on it
 // by reflection-free direct construction; future additions need a
 // spec amendment + new IdentityEvent fields + new repo signature).
+//
+// PR1a (2026-07-06-workspaces) extended the struct with 5 OAuth
+// token fields (AccessToken, RefreshToken, ExpiresAt, TokenType,
+// Scope). These are persisted in identity.account columns added
+// by migration 20260706120000; pre-PR1a rows have NULL columns, so
+// handlers can rely on no-op niltolerance. The handler accepts the
+// fields in the wire body (the previous slice already forwarded
+// them through identity-callback-client.ts to match the Go-side
+// request struct); this slice wires persistence all the way through
+// domain -> service -> repo -> SQL.
 type IdentityEvent struct {
 	Email             string
 	Name              string
 	ImageURL          string
 	Provider          string
 	ProviderAccountID string
+	AccessToken       *string
+	RefreshToken      *string
+	ExpiresAt         *time.Time
+	TokenType         *string
+	Scope             *string
 }
 
 // IdentityNotFoundError signals that an identity lookup returned no

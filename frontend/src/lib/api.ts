@@ -161,6 +161,133 @@ function offlineMessage(err: unknown): string {
   return `Couldn't reach the backend at ${apiBaseUrl()}. Is docker compose up? (${detail})`;
 }
 
+// ---------------------------------------------------------------------------
+// SSR cookie-forwarding helpers
+// ---------------------------------------------------------------------------
+//
+// Why this section exists (S-WS-AUTH-CHAIN-SSR-001):
+//
+// Qwik's `routeLoader$` runs at SSR (server-side) BEFORE the response is
+// sent, and at resumption on the client. The browser auto-sends the
+// `authjs.session-token` cookie with same-origin fetches, but Node's
+// `fetch` (used by routeLoader$ during SSR) does NOT — the inbound
+// request's cookies are NOT automatically forwarded to outgoing
+// fetches. So when a routeLoader$ calls
+// `${SERVER_API_BASE_URL}/workspaces`, the backend's
+// IdentityFromCookie middleware sees no cookie and returns 401.
+//
+// The fix: the route's `onRequest` middleware (see `withSsrCookieContext`)
+// captures the inbound Cookie header into AsyncLocalStorage scoped to
+// the current request. Each api.ts fetch helper reads from that store
+// and re-attaches the cookie to its outgoing fetch on SSR. Browser-side
+// calls (after hydration) bypass this path because AsyncLocalStorage
+// has nothing to read — the same fetch goes through the relative `/api`
+// URL where the browser auto-attaches the cookie.
+// ---------------------------------------------------------------------------
+
+import { getSsrCookieHeader } from "./ssr-cookie-context";
+
+function ssrBaseUrl(): string {
+  const v = process.env.SERVER_API_BASE_URL;
+  const base = v && v.trim().length > 0 ? v : DEFAULT_BASE_URL;
+  return base.replace(/\/+$/, "");
+}
+
+/**
+ * Attach the inbound Cookie header if running inside an SSR cookie
+ * context. Browser-side calls (no context set) get no extra header
+ * and the regular same-origin behaviour applies.
+ */
+function withSsrCookieHeader(init?: RequestInit): RequestInit {
+  const cookie = getSsrCookieHeader();
+  if (!cookie) return init ?? {};
+  return {
+    ...(init ?? {}),
+    headers: {
+      ...(init?.headers ?? {}),
+      cookie,
+    },
+  };
+}
+
+async function ssrFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${ssrBaseUrl()}${path}`, withSsrCookieHeader(init));
+}
+
+/**
+ * Detect Node SSR (vs browser hydration).
+ */
+function isServerRuntime(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    typeof (process as { versions?: unknown }).versions !== "undefined"
+  );
+}
+
+/**
+ * Fetch wrapper used by the SSR helpers. Picks the right transport
+ * based on runtime:
+ *
+ *   - Node SSR: hits the backend directly and forwards the inbound
+ *     Cookie header so the IdentityFromCookie middleware can
+ *     authenticate. SERVER_API_BASE_URL points at
+ *     database_administrator:8080.
+ *
+ *   - Browser hydration: useTask$ also runs during client hydration.
+ *     Direct fetch to http://localhost:8080 is CROSS-ORIGIN and the
+ *     browser blocks it with "Load failed". We hit the relative
+ *     `/api` path — same origin, the Qwik Node server proxies to
+ *     the backend with cookies auto-attached by the browser.
+ */
+async function serverAwareFetch(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  if (isServerRuntime()) {
+    return ssrFetch(path, init);
+  }
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  return fetch(`${base}/api${path}`, init);
+}
+
+/** List workspaces. SSR path goes direct; browser path goes via /api. */
+export async function listWorkspacesSSR(): Promise<
+  ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
+> {
+  let res: Response;
+  try {
+    res = await serverAwareFetch("/workspaces");
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      workspaces: WorkspaceSummary[];
+      truncated?: boolean;
+    };
+    return {
+      workspaces: body.workspaces ?? [],
+      truncated: body.truncated ?? false,
+    };
+  });
+}
+
+/** Get one workspace. Same dual-runtime path as listWorkspacesSSR. */
+export async function getWorkspaceSSR(
+  id: number,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await serverAwareFetch(`/workspaces/${id}`);
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as WorkspaceDetail;
+    return body;
+  });
+}
+
 async function envelopeToResult<T>(
   res: Response,
   parseBody: () => Promise<T>,
@@ -176,7 +303,10 @@ async function envelopeToResult<T>(
   }
   const err = body.error as string | undefined;
   const message = body.message as string | undefined;
-  if (res.status === 400 && err === "validation") {
+  // 400 OR 422 with envelope.error === "validation" both map to kind=validation
+  // (the workspace handler returns 422 for inaccessible-repo / business-rule
+  // validation; the legacy organization handler returns 400).
+  if ((res.status === 400 || res.status === 422) && err === "validation") {
     const fields = (body.fields ?? {}) as Record<string, string>;
     const firstEntry = Object.entries(fields)[0];
     const synthesized = firstEntry
@@ -345,4 +475,244 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
     );
   }
   return body as OrganizationReadModel;
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces (2026-07-06 PR2-i)
+// ---------------------------------------------------------------------------
+
+/**
+ * Repository is the locked wire shape for the workspace's repository.
+ * 2026-07-08-workspaces-simplify: renamed from Repository —
+ * in the 1:1 model there is no longer a contrast with a
+ * "secondary" repo, so the prefix was misleading. Mirrors
+ * `backend/.../src/domain/workspace.go::Repository`.
+ */
+export interface Repository {
+  github_id: number;
+  full_name: string;
+  owner: string;
+  name: string;
+}
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  repository: Repository;
+  created_at: string;
+}
+
+export interface WorkspaceDetail {
+  id: number;
+  name: string;
+  repository: Repository;
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /workspaces (R-WS-002). */
+export async function listWorkspaces(): Promise<
+  ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
+> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      workspaces: WorkspaceSummary[];
+      truncated?: boolean;
+    };
+    return {
+      workspaces: body.workspaces ?? [],
+      truncated: body.truncated ?? false,
+    };
+  });
+}
+
+/** GET /workspaces/:id (R-WS-003). */
+export async function getWorkspace(
+  id: number,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as WorkspaceDetail,
+  );
+}
+
+/** DELETE /workspaces/:id (R-WS-005, soft delete on the backend). */
+export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => null);
+}
+
+/**
+ * CreateWorkspaceInput — wire shape for POST /workspaces (R-WS-001).
+ *
+ * The backend validates: name 3..60 chars + primary_repository fields
+ * all required (T7: server-side GitHub accessibility check). The frontend
+ * Zod schema mirrors these rules for client-side early validation.
+ */
+export interface CreateWorkspaceInput {
+  name: string;
+  repository: Repository;
+}
+
+/**
+ * POST /workspaces (R-WS-001).
+ *
+ * Returns ApiResult<WorkspaceDetail>:
+ *   - 201 → ok with the new workspace detail
+ *   - 400 with fields.name → kind=validation
+ *   - 422 with fields.repository → kind=validation (repo not accessible)
+ *   - 409 → kind=server (duplicate name)
+ *   - 401 / 5xx / network → offline/server
+ *
+ * 2026-07-08-workspaces-simplify: wire field renamed from
+ * `primary_repository` to `repository`.
+ */
+export async function createWorkspace(
+  input: CreateWorkspaceInput,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: input.name,
+        repository: {
+          github_id: input.repository.github_id,
+          full_name: input.repository.full_name,
+          owner: input.repository.owner,
+          name: input.repository.name,
+        },
+      }),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as WorkspaceDetail,
+  );
+}
+
+/**
+ * GitHubRepo is the projection the GitHub proxy returns. Mirrors the
+ * backend `github.Repo` shape (id, full_name, owner_login, name, private,
+ * description, html_url, updated_at, stargazers_count).
+ */
+export interface GitHubRepo {
+  id: number;
+  full_name: string;
+  owner_login: string;
+  name: string;
+  private: boolean;
+  description: string;
+  html_url: string;
+  updated_at: string;
+  stargazers_count: number;
+}
+
+/**
+ * ListGitHubReposOptions — query parameters for GET /github/repos.
+ */
+export interface ListGitHubReposOptions {
+  bustCache?: boolean;
+  page?: number;
+  perPage?: number;
+}
+
+/**
+ * GET /github/repos (R-WS-009).
+ *
+ * Server-side proxy through the backend. The frontend never sees the
+ * OAuth access_token; the backend loads it from identity.account and
+ * calls the GitHub API. Cache is 5-min in-memory per user.
+ *
+ * Returns ApiResult<{ repositories, hasNext }>:
+ *   - 200 → ok with the repos + hasNext
+ *   - 401 github_not_connected → kind=server with reconnect message
+ *   - 502 github_unauthorized / rate_limited / unreachable → kind=server
+ *   - network → kind=offline
+ */
+export async function listGitHubRepos(
+  options: ListGitHubReposOptions = {},
+): Promise<ApiResult<{ repositories: GitHubRepo[]; hasNext: boolean }>> {
+  const params = new URLSearchParams();
+  if (options.bustCache) params.set("bust_cache", "true");
+  if (options.page) params.set("page", String(options.page));
+  if (options.perPage) params.set("per_page", String(options.perPage));
+  const qs = params.toString();
+  const url = `${apiBaseUrl()}/github/repos${qs ? `?${qs}` : ""}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  // 401 with code=github_not_connected: surface a clear reconnect message.
+  if (res.status === 401) {
+    let code = "";
+    try {
+      const body = (await res.json()) as { error?: string };
+      code = body.error ?? "";
+    } catch {
+      // body not JSON; fall through with empty code.
+    }
+    if (code === "github_not_connected") {
+      return {
+        ok: false,
+        kind: "server",
+        message: "Reconnect GitHub to list repositories.",
+      };
+    }
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      repositories: GitHubRepo[];
+      has_next?: boolean;
+    };
+    return {
+      repositories: body.repositories ?? [],
+      hasNext: body.has_next ?? false,
+    };
+  });
 }

@@ -390,6 +390,193 @@ func TestIdentityRepository_Upsert_SameEmailDifferentAccount(t *testing.T) {
 	}
 }
 
+// TestIdentityRepository_Upsert_PersistsOAuthTokenFields is the
+// PR1a (2026-07-06-workspaces) RED step: when the IdentityEvent
+// carries the 5 OAuth token fields (AccessToken, RefreshToken,
+// ExpiresAt, TokenType, Scope), the repo MUST persist all 5 on the
+// identity.account row. Pre-PR1a the struct had no such fields;
+// this test pins the new persistence path end-to-end.
+//
+// The test reads the row back via a direct SELECT (not via the
+// repo) so the test does not depend on a not-yet-extended
+// LookupByProviderAccountID surface — it is purely about the
+// write side, which is what the workspaces feature (PR1c-i)
+// depends on for retrieving the access_token from the DB.
+func TestIdentityRepository_Upsert_PersistsOAuthTokenFields(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "tokens-new@example.com"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	at := "gho_pr1a_test"
+	rt := "ghr_pr1a_test"
+	exp := time.Unix(1234567890, 0).UTC()
+	tt := "bearer"
+	sc := "repo"
+
+	got, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "Token Persister",
+		ImageURL:          "https://example.com/t.png",
+		Provider:          "github",
+		ProviderAccountID: "tokens-new-id-1",
+		AccessToken:       &at,
+		RefreshToken:      &rt,
+		ExpiresAt:         &exp,
+		TokenType:         &tt,
+		Scope:             &sc,
+	})
+	if err != nil {
+		t.Fatalf("Upsert: unexpected error: %v", err)
+	}
+	if got.ID == 0 {
+		t.Fatalf("expected non-zero identity.user id; got 0")
+	}
+
+	// Read the row back via direct SQL and assert all 5 token columns
+	// match the values we wrote.
+	row := db.QueryRowContext(context.Background(),
+		`SELECT access_token, refresh_token, expires_at, token_type, scope
+               FROM identity.account
+              WHERE provider = $1 AND provider_account_id = $2`,
+		"github", "tokens-new-id-1",
+	)
+	var (
+		gotAT, gotRT, gotTT, gotSC sql.NullString
+		gotEX                      sql.NullTime
+	)
+	if err := row.Scan(&gotAT, &gotRT, &gotEX, &gotTT, &gotSC); err != nil {
+		t.Fatalf("scan identity.account: %v", err)
+	}
+	if !gotAT.Valid || gotAT.String != at {
+		t.Errorf("access_token:\n got  = %v\n want = %q", gotAT, at)
+	}
+	if !gotRT.Valid || gotRT.String != rt {
+		t.Errorf("refresh_token:\n got  = %v\n want = %q", gotRT, rt)
+	}
+	if !gotEX.Valid {
+		t.Errorf("expires_at: expected non-NULL, got NULL")
+	} else if !gotEX.Time.Equal(exp) {
+		t.Errorf("expires_at:\n got  = %v\n want = %v (UTC)", gotEX.Time, exp)
+	}
+	if !gotTT.Valid || gotTT.String != tt {
+		t.Errorf("token_type:\n got  = %v\n want = %q", gotTT, tt)
+	}
+	if !gotSC.Valid || gotSC.String != sc {
+		t.Errorf("scope:\n got  = %v\n want = %q", gotSC, sc)
+	}
+}
+
+// TestIdentityRepository_Upsert_AllTokenFieldsNil covers the
+// TRIANGULATE case where the IdentityEvent omits all 5 token
+// fields. Pre-PR1a code paths (and any future provider that does
+// not grant offline access) must still work: every column must
+// accept NULL without erroring.
+func TestIdentityRepository_Upsert_AllTokenFieldsNil(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "tokens-nil@example.com"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	got, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "Nil Token User",
+		ImageURL:          "",
+		Provider:          "github",
+		ProviderAccountID: "tokens-nil-id-1",
+		// AccessToken / RefreshToken / ExpiresAt / TokenType / Scope
+		// intentionally left nil — must persist as SQL NULL.
+	})
+	if err != nil {
+		t.Fatalf("Upsert with nil tokens: %v", err)
+	}
+	if got.ID == 0 {
+		t.Fatalf("expected non-zero identity.user id; got 0")
+	}
+
+	row := db.QueryRowContext(context.Background(),
+		`SELECT access_token, refresh_token, expires_at, token_type, scope
+               FROM identity.account
+              WHERE user_id = $1 AND provider = 'github'`, got.ID,
+	)
+	var (
+		gotAT, gotRT, gotTT, gotSC sql.NullString
+		gotEX                      sql.NullTime
+	)
+	if err := row.Scan(&gotAT, &gotRT, &gotEX, &gotTT, &gotSC); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if gotAT.Valid {
+		t.Errorf("access_token: expected NULL, got %q", gotAT.String)
+	}
+	if gotRT.Valid {
+		t.Errorf("refresh_token: expected NULL, got %q", gotRT.String)
+	}
+	if gotEX.Valid {
+		t.Errorf("expires_at: expected NULL, got %v", gotEX.Time)
+	}
+	if gotTT.Valid {
+		t.Errorf("token_type: expected NULL, got %q", gotTT.String)
+	}
+	if gotSC.Valid {
+		t.Errorf("scope: expected NULL, got %q", gotSC.String)
+	}
+}
+
+// TestIdentityRepository_Upsert_OnlyAccessToken covers another
+// TRIANGULATE case: only one of the 5 token fields is populated.
+// The repo MUST persist just that one and leave the rest NULL —
+// important because GitHub sometimes omits refresh_token when
+// access_type != "offline".
+func TestIdentityRepository_Upsert_OnlyAccessToken(t *testing.T) {
+	db := identityIntegrationDB(t)
+	repo := postgres.NewIdentityRepo(db)
+
+	email := "tokens-only-at@example.com"
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM identity.user WHERE email = $1`, email)
+	})
+
+	at := "gho_only_at"
+	got, err := repo.Upsert(context.Background(), domain.IdentityEvent{
+		Email:             email,
+		Name:              "AT Only",
+		ImageURL:          "",
+		Provider:          "github",
+		ProviderAccountID: "tokens-only-at-id-1",
+		AccessToken:       &at,
+		// RefreshToken / ExpiresAt / TokenType / Scope left nil.
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	row := db.QueryRowContext(context.Background(),
+		`SELECT access_token, refresh_token, expires_at, token_type, scope
+               FROM identity.account
+              WHERE user_id = $1`, got.ID,
+	)
+	var (
+		gotAT, gotRT, gotTT, gotSC sql.NullString
+		gotEX                      sql.NullTime
+	)
+	if err := row.Scan(&gotAT, &gotRT, &gotEX, &gotTT, &gotSC); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !gotAT.Valid || gotAT.String != at {
+		t.Errorf("access_token: expected %q, got %v", at, gotAT)
+	}
+	if gotRT.Valid || gotEX.Valid || gotTT.Valid || gotSC.Valid {
+		t.Errorf("expected the other 4 columns NULL; got RT=%v EX=%v TT=%v SC=%v",
+			gotRT, gotEX, gotTT, gotSC)
+	}
+}
+
 // TestIdentityRepository_Upsert_CaseInsensitiveEmail covers the
 // CITEXT column on identity.user: an Upsert with a different-case
 // email MUST reuse the existing row (case-insensitive match).
