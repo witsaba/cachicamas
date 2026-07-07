@@ -26,6 +26,8 @@ import (
 	otelglobal "go.opentelemetry.io/otel"
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
+	"github.com/cachicamas/backend/database_administrator/src/domain"
+	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
@@ -245,6 +247,52 @@ func main() {
 		Logger:         logger,
 		TracerProvider: otelglobal.GetTracerProvider(),
 	})
+
+	// Workspaces (2026-07-06): auth middleware chain MUST be
+	// IdentityFromCookie → loadGitHubTokenForIdentity → ... route
+	// registrations. Register the token loader on Echo's USE chain
+	// BEFORE the workspace + github route registrations so every
+	// authenticated request carries the access_token in its context.
+	tokenFetcher := postgres.NewTokenFetcher(db)
+	e.Use(httpiface.LoadGitHubTokenMiddleware(tokenFetcher, logger))
+
+	// Workspaces HTTP routes: 8 endpoints + the github proxy.
+	// Wire the pgx-backed WorkspaceRepo → WorkspaceService →
+	// WorkspaceHandler, then the GitHub client + cache →
+	// GitHubHandler. The githubClient is wrapped in a WorkspaceGitHubAccessor
+	// adapter so WorkspaceService (which doesn't import http) can call it.
+	workspaceRepo := postgres.NewWorkspaceRepo(db)
+	githubClient := githubinfra.NewClient()
+	workspaceService := application.NewWorkspaceService(
+		workspaceRepo,
+		httpiface.NewWorkspaceGitHubAccessor(githubClient),
+		logger,
+		otelglobal.Tracer(serviceName),
+	)
+	httpiface.RegisterWorkspaceRoutes(e, workspaceService, logger)
+
+	// GitHub repos proxy (R-WS-009): 5-min in-memory cache keyed by
+	// user_id. Cache TTL configurable via GITHUB_REPOS_CACHE_TTL env
+	// (default 5m).
+	cacheTTL := envDuration("GITHUB_REPOS_CACHE_TTL", 5*time.Minute)
+	repoCache := githubinfra.NewRepoCache(cacheTTL)
+	githubHandler := httpiface.NewGitHubHandler(
+		repoCache,
+		githubClient,
+		func(c *echo.Context) (int64, bool) {
+			raw := c.Get(httpiface.IdentityContextKey)
+			id, ok := raw.(*domain.Identity)
+			if !ok {
+				return 0, false
+			}
+			return id.ID, true
+		},
+		logger,
+	)
+	httpiface.RegisterGitHubRoutes(e, githubHandler)
+
+	// Single-tenant resolver hook (used by the workspace handlers).
+	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })
 
 	// Identity signin-callback (cachicamas-identity-signin-callback):
 	// HMAC-signed POST endpoint from the Qwik frontend's events.signIn
