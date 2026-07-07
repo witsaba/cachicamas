@@ -168,12 +168,8 @@ export default component$(() => {
           >
             {ws.name}
           </h1>
-          <p
-            data-testid="workspace-detail-repo"
-            class="text-sm text-slate-600"
-          >
-            Repository:{" "}
-            <span class="font-mono">{repo.full_name}</span>
+          <p data-testid="workspace-detail-repo" class="text-sm text-slate-600">
+            Repository: <span class="font-mono">{repo.full_name}</span>
           </p>
         </header>
 
