@@ -176,7 +176,13 @@ async function envelopeToResult<T>(
   }
   const err = body.error as string | undefined;
   const message = body.message as string | undefined;
-  if (res.status === 400 && err === "validation") {
+  // 400 OR 422 with envelope.error === "validation" both map to kind=validation
+  // (the workspace handler returns 422 for inaccessible-repo / business-rule
+  // validation; the legacy organization handler returns 400).
+  if (
+    (res.status === 400 || res.status === 422) &&
+    err === "validation"
+  ) {
     const fields = (body.fields ?? {}) as Record<string, string>;
     const firstEntry = Object.entries(fields)[0];
     const synthesized = firstEntry
@@ -452,4 +458,90 @@ export async function listLinkedRepos(
     const body = (await res.json()) as { repositories: LinkedRepository[] };
     return { repositories: body.repositories ?? [] };
   });
+}
+
+/**
+ * Input for `addRepoToWorkspace` (R-WS-006).
+ *
+ * Backend validates the github_id against the user's accessible
+ * /user/repos set on the server (T7 in design); the frontend passes
+ * the user's selected repo through verbatim.
+ */
+export interface AddRepoInput {
+  github_id: number;
+  github_full_name: string;
+  github_owner: string;
+  github_name: string;
+}
+
+/** POST /workspaces/:id/repositories (R-WS-006). */
+export async function addRepoToWorkspace(
+  workspaceID: number,
+  repo: AddRepoInput,
+): Promise<ApiResult<LinkedRepository>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${workspaceID}/repositories`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        github_id: repo.github_id,
+        github_full_name: repo.github_full_name,
+        github_owner: repo.github_owner,
+        github_name: repo.github_name,
+      }),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as LinkedRepository,
+  );
+}
+
+/** DELETE /workspaces/:id/repositories/:repoId (R-WS-007). */
+export async function removeRepoFromWorkspace(
+  workspaceID: number,
+  repoID: number,
+): Promise<ApiResult<null>> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories/${repoID}`,
+      { method: "DELETE" },
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  // 204 No Content — body is empty; envelopeToResult guards against a
+  // missing body, returning ok: true with null value.
+  return envelopeToResult(res, async () => null);
+}
+
+/** DELETE /workspaces/:id (R-WS-005, soft delete on the backend). */
+export async function deleteWorkspace(
+  id: number,
+): Promise<ApiResult<null>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => null);
 }
