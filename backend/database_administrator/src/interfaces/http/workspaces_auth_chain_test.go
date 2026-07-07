@@ -7,10 +7,10 @@
 // global Echo instance WITHOUT any auth middleware, while only
 // IdentityFromCookie itself was wired onto /whoami. Result:
 //
-//   curl /workspaces  -> handler hits identityFromContext() == nil ->
-//     400/422 validation envelope with field "auth: Authentication
-//     required." (handler soft-fail)  INSTEAD OF 401 + code=unauthorized
-//     from IdentityFromCookie (middleware short-circuit).
+//	curl /workspaces  -> handler hits identityFromContext() == nil ->
+//	  400/422 validation envelope with field "auth: Authentication
+//	  required." (handler soft-fail)  INSTEAD OF 401 + code=unauthorized
+//	  from IdentityFromCookie (middleware short-circuit).
 //
 // S-REWORK-01..S-REWORK-04 below codify the contract: every route under
 // /workspaces/* and /github/* must be 401-protected by middleware, not
@@ -48,9 +48,9 @@ import (
 // called, so a regression that bypasses the auth chain AND reaches the
 // service layer surfaces as a panic instead of a silent green test.
 type fakeWorkspaceRepo struct {
-	mu       sync.Mutex
-	byOrg    map[int64][]domain.Workspace
-	nextID   int64
+	mu     sync.Mutex
+	byOrg  map[int64][]domain.Workspace
+	nextID int64
 }
 
 func newFakeWorkspaceRepo() *fakeWorkspaceRepo {
@@ -126,15 +126,15 @@ func (fakeGitHubAccessorForChain) IsRepoAccessible(_ context.Context, _ int64) (
 // string) when given a (provider, account_id). Echoes the calls back
 // so the test can assert that the auth chain REACHED it.
 type fakeTokenFetcher struct {
-	mu      sync.Mutex
-	fixed   string
-	err     error
+	mu       sync.Mutex
+	fixed    string
+	err      error
 	gotCalls []tokenCall
 }
 
 type tokenCall struct {
-	Provider   string
-	AccountID  string
+	Provider  string
+	AccountID string
 }
 
 func (f *fakeTokenFetcher) AccessTokenForIdentity(_ context.Context, provider, accountID string) (string, error) {
@@ -150,9 +150,9 @@ func (f *fakeTokenFetcher) AccessTokenForIdentity(_ context.Context, provider, a
 // newWiringEcho is the mini composition root. It mirrors main.go's
 // chain order verbatim so a regression in either direction is caught:
 //
-//   IdentityFromCookie
-//   → LoadGitHubTokenMiddleware
-//   → (workspace + github routes)
+//	IdentityFromCookie
+//	→ LoadGitHubTokenMiddleware
+//	→ (workspace + github routes)
 //
 // /health and /identity-callback remain unmounted because they have
 // their own wiring (and are unaffected by the workspaces bug).

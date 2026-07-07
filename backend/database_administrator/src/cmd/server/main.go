@@ -28,8 +28,8 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/application"
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
-	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
+	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
 	migrationpg "github.com/cachicamas/backend/database_administrator/src/migration/postgres"
 	"github.com/cachicamas/backend/database_administrator/src/otel"
@@ -77,12 +77,12 @@ func envString(key, def string) string {
 // Activation rules (see httpiface/cors.go):
 //
 //   - CORS_ALLOW_ORIGINS set   → split on `,`, trim, keep non-empty.
-//                                 Works regardless of SERVICE_ENV;
-//                                 safest knob for production-like
-//                                 staging where you need a specific
-//                                 allowlist.
+//     Works regardless of SERVICE_ENV;
+//     safest knob for production-like
+//     staging where you need a specific
+//     allowlist.
 //   - SERVICE_ENV=development  → default to http://localhost:5173
-//                                 so `pnpm dev` Just Works.
+//     so `pnpm dev` Just Works.
 //   - Anything else            → returns nil (CORS disabled).
 func resolveCORSAllowOrigins() []string {
 	if v := os.Getenv("CORS_ALLOW_ORIGINS"); v != "" {

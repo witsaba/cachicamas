@@ -85,7 +85,7 @@ const auth = QwikAuth$((ev) => {
     ev.env.get("AUTH_GITHUB_API_BASE_URL") ?? githubBaseUrl;
   return {
     providers: [
-GitHub({
+      GitHub({
         clientId: ev.env.get("AUTH_GITHUB_ID"),
         clientSecret: ev.env.get("AUTH_GITHUB_SECRET"),
         // 2026-07-06-workspaces PR1a: scope=repo + access_type=offline

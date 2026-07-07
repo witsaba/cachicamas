@@ -239,7 +239,10 @@ function isServerRuntime(): boolean {
  *     `/api` path — same origin, the Qwik Node server proxies to
  *     the backend with cookies auto-attached by the browser.
  */
-async function serverAwareFetch(path: string, init?: RequestInit): Promise<Response> {
+async function serverAwareFetch(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
   if (isServerRuntime()) {
     return ssrFetch(path, init);
   }

@@ -1,13 +1,14 @@
 // Package httpiface — workspace_handler.go implements the workspace
 // HTTP transport. Wires 8 endpoints:
-//   POST   /workspaces
-//   GET    /workspaces
-//   GET    /workspaces/:id
-//   PATCH  /workspaces/:id
-//   DELETE /workspaces/:id
-//   POST   /workspaces/:id/repositories
-//   DELETE /workspaces/:id/repositories/:repoId
-//   GET    /workspaces/:id/repositories
+//
+//	POST   /workspaces
+//	GET    /workspaces
+//	GET    /workspaces/:id
+//	PATCH  /workspaces/:id
+//	DELETE /workspaces/:id
+//	POST   /workspaces/:id/repositories
+//	DELETE /workspaces/:id/repositories/:repoId
+//	GET    /workspaces/:id/repositories
 //
 // Errors are mapped to the locked HTTP envelope via writeWorkspaceError.
 // PR1c-ii (this file): no token field is ever serialized.
@@ -65,7 +66,9 @@ func NewWorkspaceHandler(service *application.WorkspaceService, logger *slog.Log
 // Any code that wants to skip the chain has no public surface to do so.
 //
 // In production, main.go passes:
-//   [{IdentityFromCookie(cfg)}, {LoadGitHubTokenMiddleware(fetcher, logger)}]
+//
+//	[{IdentityFromCookie(cfg)}, {LoadGitHubTokenMiddleware(fetcher, logger)}]
+//
 // In tests, callers pass the `IdentityContextKey`-seeding middleware
 // directly (see workspace_handler_test.go).
 func RegisterAuthenticatedWorkspaceRoutes(
@@ -125,7 +128,7 @@ func RegisterAuthenticatedWorkspaceRoutes(
 
 // createWorkspaceRequest is the wire shape for POST /workspaces.
 type createWorkspaceRequest struct {
-	Name string `json:"name"`
+	Name              string `json:"name"`
 	PrimaryRepository struct {
 		GitHubID int64  `json:"github_id"`
 		FullName string `json:"full_name"`
@@ -136,13 +139,13 @@ type createWorkspaceRequest struct {
 
 // workspaceResponse is the wire shape for a single workspace.
 type workspaceResponse struct {
-	ID                int64                 `json:"id"`
-	OrganizationID    int64                 `json:"organization_id"`
-	OwnerUserID       *int64                `json:"owner_user_id"`
-	Name              string                `json:"name"`
-	PrimaryRepository primaryRepoResponse  `json:"primary_repository"`
-	CreatedAt         string                `json:"created_at"`
-	UpdatedAt         string                `json:"updated_at"`
+	ID                int64               `json:"id"`
+	OrganizationID    int64               `json:"organization_id"`
+	OwnerUserID       *int64              `json:"owner_user_id"`
+	Name              string              `json:"name"`
+	PrimaryRepository primaryRepoResponse `json:"primary_repository"`
+	CreatedAt         string              `json:"created_at"`
+	UpdatedAt         string              `json:"updated_at"`
 }
 
 type primaryRepoResponse struct {
@@ -153,28 +156,28 @@ type primaryRepoResponse struct {
 }
 
 type linkedRepoResponse struct {
-	ID           int64  `json:"id"`
-	GitHubID     int64  `json:"github_id"`
-	FullName     string `json:"full_name"`
-	Owner        string `json:"owner"`
-	Name         string `json:"name"`
-	AddedAt      string `json:"added_at"`
+	ID       int64  `json:"id"`
+	GitHubID int64  `json:"github_id"`
+	FullName string `json:"full_name"`
+	Owner    string `json:"owner"`
+	Name     string `json:"name"`
+	AddedAt  string `json:"added_at"`
 }
 
 // workspacesListResponse wraps a slice for the locked envelope shape.
 type workspacesListResponse struct {
 	Workspaces []workspaceSummaryResponse `json:"workspaces"`
-	Truncated  bool                      `json:"truncated"`
+	Truncated  bool                       `json:"truncated"`
 }
 
 // workspaceSummaryResponse is the list-item shape (no CreatedAt to
 // keep the list compact; the detail endpoint returns the full row).
 type workspaceSummaryResponse struct {
-	ID                int64                `json:"id"`
-	Name              string               `json:"name"`
+	ID                int64               `json:"id"`
+	Name              string              `json:"name"`
 	PrimaryRepository primaryRepoResponse `json:"primary_repository"`
-	LinkedReposCount  int                  `json:"linked_repos_count"`
-	CreatedAt         string               `json:"created_at"`
+	LinkedReposCount  int                 `json:"linked_repos_count"`
+	CreatedAt         string              `json:"created_at"`
 }
 
 // linkedReposListResponse wraps the linked repos slice.
@@ -186,7 +189,7 @@ type linkedReposListResponse struct {
 // `primary_repository` is accepted for forward compatibility but
 // silently dropped (locked design decision).
 type updateWorkspaceRequest struct {
-	Name             *string `json:"name,omitempty"`
+	Name              *string `json:"name,omitempty"`
 	PrimaryRepository *struct {
 		GitHubID int64  `json:"github_id"`
 		FullName string `json:"full_name"`
@@ -197,10 +200,10 @@ type updateWorkspaceRequest struct {
 
 // addRepoRequest is the wire shape for POST /workspaces/:id/repositories.
 type addRepoRequest struct {
-	GitHubID    int64  `json:"github_id"`
-	FullName    string `json:"full_name"`
-	Owner       string `json:"owner"`
-	Name        string `json:"name"`
+	GitHubID int64  `json:"github_id"`
+	FullName string `json:"full_name"`
+	Owner    string `json:"owner"`
+	Name     string `json:"name"`
 }
 
 // ---------------------------------------------------------------------------
@@ -267,8 +270,8 @@ func (h *WorkspaceHandler) List(c *echo.Context) error {
 			return writeWorkspaceError(c, err)
 		}
 		summaries = append(summaries, workspaceSummaryResponse{
-			ID:       w.ID,
-			Name:     w.Name,
+			ID:   w.ID,
+			Name: w.Name,
 			PrimaryRepository: primaryRepoResponse{
 				GitHubID: w.PrimaryRepoGitHubID,
 				FullName: w.PrimaryRepoFullName,
@@ -311,10 +314,10 @@ func (h *WorkspaceHandler) Get(c *echo.Context) error {
 	}
 
 	resp := struct {
-		Workspace         workspaceResponse        `json:"workspace"`
-		LinkedRepositories []linkedRepoResponse    `json:"linked_repositories"`
+		Workspace          workspaceResponse    `json:"workspace"`
+		LinkedRepositories []linkedRepoResponse `json:"linked_repositories"`
 	}{
-		Workspace:         toWorkspaceResponse(w),
+		Workspace:          toWorkspaceResponse(w),
 		LinkedRepositories: toLinkedRepoResponses(repos),
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -550,12 +553,12 @@ func toWorkspaceResponse(w *domain.Workspace) workspaceResponse {
 
 func toLinkedRepoResponse(r *domain.LinkedRepository) linkedRepoResponse {
 	return linkedRepoResponse{
-		ID:        r.ID,
-		GitHubID:  r.GitHubID,
-		FullName:  r.FullName,
-		Owner:     r.Owner,
-		Name:      r.Name,
-		AddedAt:   r.AddedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		ID:       r.ID,
+		GitHubID: r.GitHubID,
+		FullName: r.FullName,
+		Owner:    r.Owner,
+		Name:     r.Name,
+		AddedAt:  r.AddedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
 	}
 }
 

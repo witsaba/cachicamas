@@ -70,6 +70,8 @@ describe("[routes/home] protected-route wiring", () => {
     expect(source).toContain("requireOwnboarding(event)");
     // Captures the inbound cookie BEFORE the guards run so SSR
     // fetches in useTask$ can re-attach it.
-    expect(source).toContain("setSsrCookieHeader(event.request.headers.get(\"cookie\") ?? \"\")");
+    expect(source).toContain(
+      'setSsrCookieHeader(event.request.headers.get("cookie") ?? "")',
+    );
   });
 });

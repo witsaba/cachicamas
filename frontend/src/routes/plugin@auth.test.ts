@@ -162,7 +162,7 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
     expect(last.clientSecret).toBe("test-secret");
   });
 
-// 2026-07-06-workspaces PR1a: the OAuth provider MUST request
+  // 2026-07-06-workspaces PR1a: the OAuth provider MUST request
   // scope=repo + access_type=offline so the GitHub API proxy
   // (PR1c-i) can list /user/repos and (future) clone private repos.
   // The previous scope was `read:user user:email` which did not grant

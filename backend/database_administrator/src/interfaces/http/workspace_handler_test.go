@@ -39,13 +39,13 @@ type fakeRepo struct {
 	insertResult *domain.Workspace
 	insertErr    error
 
-	byID         map[int64]*domain.Workspace
-	listByOrg    map[int64][]domain.Workspace
-	linkedRepos  map[int64][]domain.LinkedRepository
-	deletedIDs   map[int64]bool // soft-deleted
-	updateErr    error
+	byID          map[int64]*domain.Workspace
+	listByOrg     map[int64][]domain.Workspace
+	linkedRepos   map[int64][]domain.LinkedRepository
+	deletedIDs    map[int64]bool // soft-deleted
+	updateErr     error
 	softDeleteErr error
-	addRepoErr   error
+	addRepoErr    error
 	addRepoResult *domain.LinkedRepository
 }
 
@@ -200,9 +200,9 @@ func (f *fakeRepo) SelectLinkedRepos(_ context.Context, workspaceID int64) ([]do
 
 // fakeGitHubAccessor — in-memory map of accessible repo IDs.
 type fakeGitHubAccessor struct {
-	mu          sync.Mutex
-	accessible  map[int64]bool
-	err         error
+	mu         sync.Mutex
+	accessible map[int64]bool
+	err        error
 }
 
 func (a *fakeGitHubAccessor) IsRepoAccessible(_ context.Context, id int64) (bool, error) {

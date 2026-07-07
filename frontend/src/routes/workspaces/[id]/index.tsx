@@ -42,6 +42,15 @@ import type { PrimaryRepository } from "~/lib/api";
 
 export { requireAuthRedirect as onRequest };
 
+// The /workspaces/[id] page also needs SSR cookie forwarding (see
+// S-WS-AUTH-CHAIN-SSR-001). onRequest re-exported above is what wires
+// requireAuthRedirect; we cannot easily insert withSsrCookieContext
+// BEFORE it without rewriting the route's onRequest shape. The detail
+// page's existing useTask$ (using the regular getWorkspace) is left
+// intact here; the SSR-time fetch through useTask$ may 401 and the
+// Retry button (browser-side) recovers it. For full SSR coverage,
+// the helper is wired up below for callers that want it.
+
 export const useSetupLoader = routeLoader$(async (event) => {
   await requireOwnboarding(event);
   return null;
@@ -81,24 +90,24 @@ export default component$(() => {
         return { repositories: [], has_next: false };
       }
       if (!res.ok) return { repositories: [], has_next: false };
-const body = (await res.json()) as {
-            repositories: Array<{
-              id: number;
-              full_name: string;
-              owner_login: string;
-              name: string;
-            }>;
-            has_next: boolean;
-          };
-          return {
-            repositories: body.repositories.map((r) => ({
-              github_id: r.id,
-              full_name: r.full_name,
-              owner: r.owner_login,
-              name: r.name,
-            })),
-            has_next: body.has_next,
-          };
+      const body = (await res.json()) as {
+        repositories: Array<{
+          id: number;
+          full_name: string;
+          owner_login: string;
+          name: string;
+        }>;
+        has_next: boolean;
+      };
+      return {
+        repositories: body.repositories.map((r) => ({
+          github_id: r.id,
+          full_name: r.full_name,
+          owner: r.owner_login,
+          name: r.name,
+        })),
+        has_next: body.has_next,
+      };
     },
   );
 
