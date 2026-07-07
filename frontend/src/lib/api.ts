@@ -179,10 +179,7 @@ async function envelopeToResult<T>(
   // 400 OR 422 with envelope.error === "validation" both map to kind=validation
   // (the workspace handler returns 422 for inaccessible-repo / business-rule
   // validation; the legacy organization handler returns 400).
-  if (
-    (res.status === 400 || res.status === 422) &&
-    err === "validation"
-  ) {
+  if ((res.status === 400 || res.status === 422) && err === "validation") {
     const fields = (body.fields ?? {}) as Record<string, string>;
     const firstEntry = Object.entries(fields)[0];
     const synthesized = firstEntry
@@ -481,16 +478,19 @@ export async function addRepoToWorkspace(
 ): Promise<ApiResult<LinkedRepository>> {
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/workspaces/${workspaceID}/repositories`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        github_id: repo.github_id,
-        github_full_name: repo.github_full_name,
-        github_owner: repo.github_owner,
-        github_name: repo.github_name,
-      }),
-    });
+    res = await fetch(
+      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          github_id: repo.github_id,
+          github_full_name: repo.github_full_name,
+          github_owner: repo.github_owner,
+          github_name: repo.github_name,
+        }),
+      },
+    );
   } catch (err) {
     return {
       ok: false,
@@ -528,9 +528,7 @@ export async function removeRepoFromWorkspace(
 }
 
 /** DELETE /workspaces/:id (R-WS-005, soft delete on the backend). */
-export async function deleteWorkspace(
-  id: number,
-): Promise<ApiResult<null>> {
+export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
   let res: Response;
   try {
     res = await fetch(`${apiBaseUrl()}/workspaces/${id}`, {
