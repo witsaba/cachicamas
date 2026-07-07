@@ -495,9 +495,9 @@ export interface PrimaryRepository {
 export interface LinkedRepository {
   id: number;
   github_id: number;
-  github_full_name: string;
-  github_owner: string;
-  github_name: string;
+  full_name: string;
+  owner: string;
+  name: string;
   added_at: string;
 }
 
@@ -593,9 +593,9 @@ export async function listLinkedRepos(
  */
 export interface AddRepoInput {
   github_id: number;
-  github_full_name: string;
-  github_owner: string;
-  github_name: string;
+  full_name: string;
+  owner: string;
+  name: string;
 }
 
 /** POST /workspaces/:id/repositories (R-WS-006). */
@@ -610,11 +610,11 @@ export async function addRepoToWorkspace(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+body: JSON.stringify({
           github_id: repo.github_id,
-          github_full_name: repo.github_full_name,
-          github_owner: repo.github_owner,
-          github_name: repo.github_name,
+          full_name: repo.full_name,
+          owner: repo.owner,
+          name: repo.name,
         }),
       },
     );
@@ -701,13 +701,13 @@ export async function createWorkspace(
     res = await fetch(`${apiBaseUrl()}/workspaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+body: JSON.stringify({
         name: input.name,
         primary_repository: {
           github_id: input.primaryRepository.github_id,
-          github_full_name: input.primaryRepository.full_name,
-          github_owner: input.primaryRepository.owner,
-          github_name: input.primaryRepository.name,
+          full_name: input.primaryRepository.full_name,
+          owner: input.primaryRepository.owner,
+          name: input.primaryRepository.name,
         },
       }),
     });

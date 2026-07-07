@@ -115,13 +115,13 @@ export default component$(() => {
     /* banner state is rendered inline via the picker component */
   });
 
-  const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
+const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
     if (!repo) return;
     const result = await addRepoToWorkspace(id, {
       github_id: repo.github_id,
-      github_full_name: repo.full_name,
-      github_owner: repo.owner,
-      github_name: repo.name,
+      full_name: repo.full_name,
+      owner: repo.owner,
+      name: repo.name,
     });
     if (result.ok && workspace.value) {
       workspace.value = {
@@ -309,7 +309,7 @@ export default component$(() => {
                 class="flex items-center justify-between gap-3 px-4 py-3"
               >
                 <span class="truncate font-mono text-sm">
-                  {r.github_full_name}
+                  {r.full_name}
                 </span>
                 <button
                   type="button"
@@ -341,7 +341,7 @@ export default component$(() => {
             <p class="mt-3 text-sm text-slate-700">
               This will remove{" "}
               <span class="font-mono">
-                {pendingDisconnect.value.github_full_name}
+                {pendingDisconnect.value.full_name}
               </span>{" "}
               from this workspace.
             </p>

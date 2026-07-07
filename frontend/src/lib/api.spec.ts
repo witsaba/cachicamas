@@ -129,13 +129,13 @@ describe("api.ts — workspaces client (PR2-i)", () => {
               owner: "octocat",
               name: "widgets",
             },
-            linked_repositories: [
+linked_repositories: [
               {
                 id: 11,
                 github_id: 201,
-                github_full_name: "octocat/gizmos",
-                github_owner: "octocat",
-                github_name: "gizmos",
+                full_name: "octocat/gizmos",
+                owner: "octocat",
+                name: "gizmos",
                 added_at: "2026-07-02T00:00:00Z",
               },
             ],
@@ -178,7 +178,7 @@ describe("api.ts — workspaces client (PR2-i)", () => {
   // listLinkedRepos (R-WS-008, T-WS-2i-006..007)
   // -------------------------------------------------------------------
 
-  describe("listLinkedRepos", () => {
+describe("listLinkedRepos", () => {
     it("RED-T-WS-2i-006: returns {repositories: [...]} on 200", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(
@@ -187,9 +187,9 @@ describe("api.ts — workspaces client (PR2-i)", () => {
               {
                 id: 11,
                 github_id: 201,
-                github_full_name: "octocat/gizmos",
-                github_owner: "octocat",
-                github_name: "gizmos",
+                full_name: "octocat/gizmos",
+                owner: "octocat",
+                name: "gizmos",
                 added_at: "2026-07-02T00:00:00Z",
               },
             ],
@@ -201,7 +201,7 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.value.repositories).toHaveLength(1);
-      expect(result.value.repositories[0]!.github_full_name).toBe(
+      expect(result.value.repositories[0]!.full_name).toBe(
         "octocat/gizmos",
       );
     });
@@ -224,12 +224,12 @@ describe("api.ts — workspaces client (PR2-i)", () => {
   // addRepoToWorkspace (R-WS-006, T-WS-2ii-001..003)
   // -------------------------------------------------------------------
 
-  describe("addRepoToWorkspace", () => {
+describe("addRepoToWorkspace", () => {
     const repoPayload = {
       github_id: 555,
-      github_full_name: "octocat/widgets",
-      github_owner: "octocat",
-      github_name: "widgets",
+      full_name: "octocat/widgets",
+      owner: "octocat",
+      name: "widgets",
     };
 
     it("RED-T-WS-2ii-001: returns the linked repo on 201", async () => {
@@ -238,9 +238,9 @@ describe("api.ts — workspaces client (PR2-i)", () => {
           JSON.stringify({
             id: 99,
             github_id: 555,
-            github_full_name: "octocat/widgets",
-            github_owner: "octocat",
-            github_name: "widgets",
+            full_name: "octocat/widgets",
+            owner: "octocat",
+            name: "widgets",
             added_at: "2026-07-03T00:00:00Z",
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
@@ -253,7 +253,7 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       if (!result.ok) return;
       expect(result.value.id).toBe(99);
       expect(result.value.github_id).toBe(555);
-      expect(result.value.github_full_name).toBe("octocat/widgets");
+      expect(result.value.full_name).toBe("octocat/widgets");
 
       // Verify the request shape
       const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
@@ -433,13 +433,13 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toMatch(/\/workspaces$/);
       expect(init.method).toBe("POST");
-      expect(JSON.parse(init.body as string)).toEqual({
+expect(JSON.parse(init.body as string)).toEqual({
         name: "ws-one",
         primary_repository: {
           github_id: 12345,
-          github_full_name: "octocat/hello",
-          github_owner: "octocat",
-          github_name: "hello",
+          full_name: "octocat/hello",
+          owner: "octocat",
+          name: "hello",
         },
       });
     });
