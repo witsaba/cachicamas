@@ -31,7 +31,7 @@ import {
 import {
   addRepoToWorkspace,
   deleteWorkspace,
-  getWorkspace,
+  getWorkspaceSSR,
   removeRepoFromWorkspace,
   type LinkedRepository,
   type WorkspaceDetail,
@@ -186,7 +186,7 @@ export default component$(() => {
     loading.value = true;
     notFound.value = false;
     error.value = null;
-    const result = await getWorkspace(id);
+    const result = await getWorkspaceSSR(id);
     if (result.ok) {
       workspace.value = result.value;
     } else if (
