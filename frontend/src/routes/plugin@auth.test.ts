@@ -162,20 +162,27 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
     expect(last.clientSecret).toBe("test-secret");
   });
 
-  // 2026-07-06-workspaces PR1a: the OAuth provider MUST request
+// 2026-07-06-workspaces PR1a: the OAuth provider MUST request
   // scope=repo + access_type=offline so the GitHub API proxy
   // (PR1c-i) can list /user/repos and (future) clone private repos.
   // The previous scope was `read:user user:email` which did not grant
   // those permissions. The new scope is locked in the proposal
   // (§"Technical decisions"). Existing users see the updated consent
   // screen on next sign-in; no active session is invalidated.
-  it("GitHub provider requests scope=repo + access_type=offline (PR1a workspaces)", async () => {
-    // Capture the override path config: the GitHub provider object
-    // our implementation renders only carries `authorization.params`
-    // when AUTH_GITHUB_BASE_URL is set to the mocks test URL.
-    // Production (unset) hits the canonical github.com path with no
-    // override, so we cannot assert `authorization.params` there. The
-    // test therefore exercises the mocks path explicitly.
+  //
+  // 2026-07-07 regression: this MUST apply on BOTH production
+  // (AUTH_GITHUB_BASE_URL unset → github.com) AND mocks (AUTH_GITHUB_BASE_URL
+  // set → mocks URL). The earlier PR1a code put the `authorization` block
+  // INSIDE a ternary gated by `githubBaseUrl !== "https://github.com"`,
+  // which meant production used Auth.js's default `read:user user:email`
+  // scope. Symptom: the workspace repo picker only listed the user's
+  // own repos because /user/repos needed `repo` scope to return
+  // anything else. Fix: move `authorization` out of the ternary so
+  // both paths carry scope=repo + access_type=offline.
+  it("GitHub provider requests scope=repo + access_type=offline (PR1a workspaces) — production path", async () => {
+    // NO AUTH_GITHUB_BASE_URL set → canonical github.com path.
+    // Pre-fix this resolved to Auth.js's default
+    // `read:user user:email` scope. Post-fix it MUST be `repo`.
     const call = qwikAuthCalls[0];
     expect(call).toBeDefined();
     const resolved = (await call.resolveConfig({
@@ -184,7 +191,30 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
       AUTH_SECRET: "test-secret-base64",
       AUTH_TRUST_HOST: "true",
       AUTH_URL: "http://localhost:3015",
-      // Force the mocks path so the override block is exercised.
+      // NOTE: deliberately NOT setting AUTH_GITHUB_BASE_URL so the
+      // production path is exercised.
+    })) as {
+      providers: Array<{ authorization?: { params?: Record<string, string> } }>;
+    };
+    expect(resolved.providers).toHaveLength(1);
+    const params = resolved.providers[0].authorization?.params;
+    expect(params).toBeDefined();
+    expect(params!.scope).toBe("repo");
+    expect(params!.access_type).toBe("offline");
+  });
+
+  it("GitHub provider requests scope=repo + access_type=offline (PR1a workspaces) — mocks path", async () => {
+    // Mocks path: AUTH_GITHUB_BASE_URL set. Pre-fix this DID carry
+    // the override (the ternary returned the override branch); post-fix
+    // it still must — both paths are now equivalent for the scope.
+    const call = qwikAuthCalls[0];
+    expect(call).toBeDefined();
+    const resolved = (await call.resolveConfig({
+      AUTH_GITHUB_ID: "test-id",
+      AUTH_GITHUB_SECRET: "test-secret",
+      AUTH_SECRET: "test-secret-base64",
+      AUTH_TRUST_HOST: "true",
+      AUTH_URL: "http://localhost:3015",
       AUTH_GITHUB_BASE_URL: "http://localhost:3016",
       AUTH_GITHUB_API_BASE_URL: "http://mocks-github-oauth:3016",
     })) as {
@@ -193,10 +223,7 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
     expect(resolved.providers).toHaveLength(1);
     const params = resolved.providers[0].authorization?.params;
     expect(params).toBeDefined();
-    // The new scope MUST be exactly "repo" (not "read:user user:email").
     expect(params!.scope).toBe("repo");
-    // access_type MUST be "offline" so Auth.js populates
-    // refresh_token + expires_at on the signIn event.
     expect(params!.access_type).toBe("offline");
   });
 
@@ -300,11 +327,7 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
   // canonicalises paths in some flows.
   it("custom onRequest SKIPS @auth/core for POST /auth/signin/q-data.json/?qaction=...", async () => {
     const mod = await import("./plugin@auth");
-    const req = makeAuthActionReq(
-      "/auth/signin/",
-      "POST",
-      "xjVnyrcqS90",
-    );
+    const req = makeAuthActionReq("/auth/signin/", "POST", "xjVnyrcqS90");
     await expect(
       mod.onRequest(req as unknown as Parameters<typeof mod.onRequest>[0]),
     ).resolves.toBeUndefined();
@@ -363,44 +386,44 @@ describe("routes/plugin@auth — Auth.js for Qwik wiring", () => {
  * to `RequestEventCommon` happens at the call site via `as unknown as`
  * because TS structurally rejects our partial stub.
  */
-    function makeNativeReq(
-      pathname: string,
-      method: string,
-    ): {
-      request: Request;
-      url: URL;
-    } {
-      return {
-        request: new Request(`http://localhost${pathname}`, { method }),
-        url: new URL(`http://localhost${pathname}`),
-      };
-    }
+function makeNativeReq(
+  pathname: string,
+  method: string,
+): {
+  request: Request;
+  url: URL;
+} {
+  return {
+    request: new Request(`http://localhost${pathname}`, { method }),
+    url: new URL(`http://localhost${pathname}`),
+  };
+}
 
-    /**
-     * Build a synthetic minimal request that mimics a Qwik Form action
-     * POST. The signature the custom onRequest reads:
-     *   - `url.pathname`  (the path WITHOUT the query string)
-     *   - `url.searchParams.has("qaction")`  (the Qwik action id marker)
-     *   - `request.method`  (POST)
-     *
-     * Qwik's Form action handler computes the actual fetch URL as
-     * `<base>/q-data.json?qaction=<id>` (see getClientDataPath in
-     * @builder.io/qwik-city). We pass the full pathname including the
-     * `/q-data.json` segment so the unit test mirrors the real wire
-     * request.
-     */
-    function makeAuthActionReq(
-      pathname: string,
-      method: string,
-      qactionId: string,
-    ): {
-      request: Request;
-      url: URL;
-    } {
-      const url = new URL(`http://localhost${pathname}`);
-      url.searchParams.set("qaction", qactionId);
-      return {
-        request: new Request(url.toString(), { method }),
-        url,
-      };
-    }
+/**
+ * Build a synthetic minimal request that mimics a Qwik Form action
+ * POST. The signature the custom onRequest reads:
+ *   - `url.pathname`  (the path WITHOUT the query string)
+ *   - `url.searchParams.has("qaction")`  (the Qwik action id marker)
+ *   - `request.method`  (POST)
+ *
+ * Qwik's Form action handler computes the actual fetch URL as
+ * `<base>/q-data.json?qaction=<id>` (see getClientDataPath in
+ * @builder.io/qwik-city). We pass the full pathname including the
+ * `/q-data.json` segment so the unit test mirrors the real wire
+ * request.
+ */
+function makeAuthActionReq(
+  pathname: string,
+  method: string,
+  qactionId: string,
+): {
+  request: Request;
+  url: URL;
+} {
+  const url = new URL(`http://localhost${pathname}`);
+  url.searchParams.set("qaction", qactionId);
+  return {
+    request: new Request(url.toString(), { method }),
+    url,
+  };
+}
