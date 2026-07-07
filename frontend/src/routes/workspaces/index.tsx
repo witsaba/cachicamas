@@ -14,20 +14,36 @@
  *   - error → alert with "Retry" button
  *   - empty → "No workspaces yet" + CTA to /workspaces/new
  *   - populated → list of WorkspaceCard
+ *
+ * SSR cookie forwarding (S-WS-AUTH-CHAIN-SSR-001):
+ *   `onRequest` runs first and captures the inbound Cookie header into
+ *   AsyncLocalStorage. `listWorkspacesSSR` (called from useTask$)
+ *   reads from that store and re-attaches the cookie to the outgoing
+ *   SSR fetch to the backend. Without this forwarding the backend's
+ *   IdentityFromCookie middleware (commit fbe62c0) would 401 the
+ *   request and the page would render an error block.
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
-import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
-import { listWorkspaces, type WorkspaceSummary } from "~/lib/api";
+import { type DocumentHead, type RequestHandler } from "@builder.io/qwik-city";
+import {
+  listWorkspaces,
+  listWorkspacesSSR,
+  type WorkspaceSummary,
+} from "~/lib/api";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
+import { withSsrCookieContext } from "~/lib/with-ssr-cookie";
 import { WorkspaceCard } from "~/components/workspace-card/workspace-card";
 
-export { requireAuthRedirect as onRequest };
-
-export const useSetupLoader = routeLoader$(async (event) => {
-  await requireOwnboarding(event);
-  return null;
-});
+// Capture inbound cookie first (for SSR-time api fetches), then run
+// the auth + ownboarding guards. Plain RequestHandler — no routeLoader
+// needed because cookies flow through AsyncLocalStorage.
+export const onRequest: RequestHandler = (event) => {
+  return withSsrCookieContext(event, () => {
+    requireAuthRedirect(event);
+    requireOwnboarding(event);
+  });
+};
 
 export default component$(() => {
   const workspaces = useSignal<WorkspaceSummary[]>([]);
@@ -47,7 +63,18 @@ export default component$(() => {
   });
 
   useTask$(async () => {
-    await load();
+    loading.value = true;
+    error.value = null;
+    // listWorkspacesSSR reads the cookie from AsyncLocalStorage in SSR.
+    // Browser-side calls fall through to the regular listWorkspaces
+    // (relative /api, browser auto-attaches cookie).
+    const result = await listWorkspacesSSR();
+    if (result.ok) {
+      workspaces.value = result.value.workspaces;
+    } else {
+      error.value = result.message;
+    }
+    loading.value = false;
   });
 
   if (loading.value) {

@@ -161,6 +161,101 @@ function offlineMessage(err: unknown): string {
   return `Couldn't reach the backend at ${apiBaseUrl()}. Is docker compose up? (${detail})`;
 }
 
+// ---------------------------------------------------------------------------
+// SSR cookie-forwarding helpers
+// ---------------------------------------------------------------------------
+//
+// Why this section exists (S-WS-AUTH-CHAIN-SSR-001):
+//
+// Qwik's `routeLoader$` runs at SSR (server-side) BEFORE the response is
+// sent, and at resumption on the client. The browser auto-sends the
+// `authjs.session-token` cookie with same-origin fetches, but Node's
+// `fetch` (used by routeLoader$ during SSR) does NOT — the inbound
+// request's cookies are NOT automatically forwarded to outgoing
+// fetches. So when a routeLoader$ calls
+// `${SERVER_API_BASE_URL}/workspaces`, the backend's
+// IdentityFromCookie middleware sees no cookie and returns 401.
+//
+// The fix: the route's `onRequest` middleware (see `withSsrCookieContext`)
+// captures the inbound Cookie header into AsyncLocalStorage scoped to
+// the current request. Each api.ts fetch helper reads from that store
+// and re-attaches the cookie to its outgoing fetch on SSR. Browser-side
+// calls (after hydration) bypass this path because AsyncLocalStorage
+// has nothing to read — the same fetch goes through the relative `/api`
+// URL where the browser auto-attaches the cookie.
+// ---------------------------------------------------------------------------
+
+import { getSsrCookieHeader } from "./ssr-cookie-context";
+
+function ssrBaseUrl(): string {
+  const v = process.env.SERVER_API_BASE_URL;
+  const base =
+    v && v.trim().length > 0 ? v : DEFAULT_BASE_URL;
+  return base.replace(/\/+$/, "");
+}
+
+/**
+ * Attach the inbound Cookie header if running inside an SSR cookie
+ * context. Browser-side calls (no context set) get no extra header
+ * and the regular same-origin behaviour applies.
+ */
+function withSsrCookieHeader(init?: RequestInit): RequestInit {
+  const cookie = getSsrCookieHeader();
+  if (!cookie) return init ?? {};
+  return {
+    ...(init ?? {}),
+    headers: {
+      ...(init?.headers ?? {}),
+      cookie,
+    },
+  };
+}
+
+async function ssrFetch(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  return fetch(`${ssrBaseUrl()}${path}`, withSsrCookieHeader(init));
+}
+
+/** SSR-time GET /workspaces with the inbound request's cookies (when in SSR). */
+export async function listWorkspacesSSR(): Promise<
+  ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
+> {
+  let res: Response;
+  try {
+    res = await ssrFetch("/workspaces");
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      workspaces: WorkspaceSummary[];
+      truncated?: boolean;
+    };
+    return {
+      workspaces: body.workspaces ?? [],
+      truncated: body.truncated ?? false,
+    };
+  });
+}
+
+/** SSR-time GET /workspaces/:id with the inbound request's cookies (when in SSR). */
+export async function getWorkspaceSSR(
+  id: number,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await ssrFetch(`/workspaces/${id}`);
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as WorkspaceDetail;
+    return body;
+  });
+}
+
 async function envelopeToResult<T>(
   res: Response,
   parseBody: () => Promise<T>,
