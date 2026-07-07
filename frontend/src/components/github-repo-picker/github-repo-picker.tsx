@@ -27,7 +27,7 @@
  * The "Reconnect" state uses plain text + a link.
  */
 import { $, component$, useSignal, useTask$, type QRL } from "@builder.io/qwik";
-import type { PrimaryRepository } from "~/lib/api";
+import type { Repository } from "~/lib/api";
 
 /**
  * Caller-supplied fetcher. Wraps the API client so the component can
@@ -35,7 +35,7 @@ import type { PrimaryRepository } from "~/lib/api";
  */
 export type GitHubRepoFetcher = QRL<
   (opts: { page: number; perPage: number; bustCache?: boolean }) => Promise<{
-    repositories: PrimaryRepository[];
+    repositories: Repository[];
     has_next: boolean;
   }>
 >;
@@ -43,13 +43,13 @@ export type GitHubRepoFetcher = QRL<
 export interface GitHubRepoPickerProps {
   fetcher: GitHubRepoFetcher;
   /** Currently selected repo (controlled). `null` means none. */
-  value: PrimaryRepository | null;
+  value: Repository | null;
   /** Called whenever the user picks or clears a repo. */
-  onChange$: QRL<(repo: PrimaryRepository | null) => void>;
+  onChange$: QRL<(repo: Repository | null) => void>;
   /** Test-only: when true, skip the initial fetch (for render-only tests). */
   skipInitialFetch?: boolean;
   /** Test-only: initial repos to seed the picker with. */
-  initialRepos?: PrimaryRepository[];
+  initialRepos?: Repository[];
 }
 
 const PER_PAGE = 100;
@@ -57,7 +57,7 @@ const DEBOUNCE_MS = 300;
 
 export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
   ({ fetcher, value, onChange$, skipInitialFetch = false, initialRepos }) => {
-    const repos = useSignal<PrimaryRepository[]>(initialRepos ?? []);
+    const repos = useSignal<Repository[]>(initialRepos ?? []);
     const page = useSignal(1);
     const hasNext = useSignal(true);
     const loading = useSignal(false);
@@ -88,7 +88,7 @@ export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
       loading.value = false;
     });
 
-    const onSelectRepo$ = $((repo: PrimaryRepository) => {
+    const onSelectRepo$ = $((repo: Repository) => {
       onChange$(repo);
     });
 

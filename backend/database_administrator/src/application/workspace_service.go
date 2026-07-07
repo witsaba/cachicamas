@@ -1,8 +1,18 @@
 // Package application contains the use cases of the database
-// administrator service. This file implements the workspace use cases:
-// Create, List, Get, Update, Delete, AddRepository, RemoveRepository,
-// ListRepositories. Each use case opens an OTel span (locked names
-// from spec §3.4) and emits a structured slog line on success.
+// administrator service. This file implements the workspace use cases
+// for the 1:1 model (post-2026-07-08-workspaces-simplify):
+//
+//   - Create, List, Get, Update, Delete
+//
+// Each use case opens an OTel span (locked names from spec §3.4) and
+// emits a structured slog line on success.
+//
+// 2026-07-08-workspaces-simplify changelog:
+//   - Dropped AddRepository, RemoveRepository, ListRepositories
+//     (the workspace_repository table no longer exists)
+//   - Dropped the matching span names + http route constants
+//   - Renamed PrimaryRepo* field accesses to Repository* (the
+//     domain type is now Repository, not PrimaryRepository)
 //
 // Hexagonal boundary (design §4):
 //
@@ -33,27 +43,28 @@ import (
 )
 
 // Locked OTel span names (spec §3.4 + design T-table).
+//
+// 2026-07-08-workspaces-simplify: removed spanNameWorkspaceAddRepo /
+// spanNameWorkspaceRemoveRepo / spanNameWorkspaceListRepos (the
+// linked-repos sub-feature no longer exists).
 const (
-	spanNameWorkspaceCreate     = "workspace.create"
-	spanNameWorkspaceList       = "workspace.list"
-	spanNameWorkspaceGet        = "workspace.get"
-	spanNameWorkspaceUpdate     = "workspace.update"
-	spanNameWorkspaceDelete     = "workspace.delete"
-	spanNameWorkspaceAddRepo    = "workspace.add_repo"
-	spanNameWorkspaceRemoveRepo = "workspace.remove_repo"
-	spanNameWorkspaceListRepos  = "workspace.list_repos"
+	spanNameWorkspaceCreate = "workspace.create"
+	spanNameWorkspaceList   = "workspace.list"
+	spanNameWorkspaceGet    = "workspace.get"
+	spanNameWorkspaceUpdate = "workspace.update"
+	spanNameWorkspaceDelete = "workspace.delete"
 )
 
 // Locked HTTP route strings for span attributes.
+//
+// 2026-07-08-workspaces-simplify: removed the linked-repo routes
+// (/workspaces/:id/repositories and /workspaces/:id/repositories/:repoId).
 const (
-	httpRouteWorkspaceList       = "/workspaces"
-	httpRouteWorkspaceCreate     = "/workspaces"
-	httpRouteWorkspaceGet        = "/workspaces/:id"
-	httpRouteWorkspaceUpdate     = "/workspaces/:id"
-	httpRouteWorkspaceDelete     = "/workspaces/:id"
-	httpRouteWorkspaceAddRepo    = "/workspaces/:id/repositories"
-	httpRouteWorkspaceRemoveRepo = "/workspaces/:id/repositories/:repoId"
-	httpRouteWorkspaceListRepos  = "/workspaces/:id/repositories"
+	httpRouteWorkspaceList   = "/workspaces"
+	httpRouteWorkspaceCreate = "/workspaces"
+	httpRouteWorkspaceGet    = "/workspaces/:id"
+	httpRouteWorkspaceUpdate = "/workspaces/:id"
+	httpRouteWorkspaceDelete = "/workspaces/:id"
 )
 
 // GitHubAccessor is the hexagonal port the application layer uses to
@@ -64,10 +75,12 @@ type GitHubAccessor interface {
 	IsRepoAccessible(ctx context.Context, githubID int64) (bool, error)
 }
 
-// WorkspaceService is the use case facade for workspace CRUD +
-// linked-repo management. It is the ONLY caller of
-// domain.WorkspaceRepository in the application layer; main.go is the
-// composition root that wires the port to a concrete adapter.
+// WorkspaceService is the use case facade for workspace CRUD. It is
+// the ONLY caller of domain.WorkspaceRepository in the application
+// layer; main.go is the composition root that wires the port to a
+// concrete adapter.
+//
+// 2026-07-08-workspaces-simplify: no longer manages linked repos.
 type WorkspaceService struct {
 	repo         domain.WorkspaceRepository
 	githubClient GitHubAccessor
@@ -112,8 +125,8 @@ func (noopGitHubAccessor) IsRepoAccessible(_ context.Context, _ int64) (bool, er
 }
 
 // requireGitHubToken returns the token from the context, or a
-// *domain.GitHubNotConnectedError if the token is missing/empty. Used
-// by Create and AddRepository to gate the GitHub accessibility check.
+// *domain.GitHubNotConnectedError if the token is missing/empty.
+// Used by Create to gate the GitHub accessibility check.
 func requireGitHubToken(ctx context.Context) (string, error) {
 	token, ok := tokenctx.GitHubTokenFromContext(ctx)
 	if !ok || token == "" {
@@ -122,10 +135,10 @@ func requireGitHubToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-// Create validates the input, verifies the primary repo is accessible
-// to the signed-in user (via the GitHub accessor), and delegates
-// persistence to the repo. On success the returned *Workspace carries
-// the DB-assigned id + Postgres-set timestamps.
+// Create validates the input, verifies the repo is accessible to the
+// signed-in user (via the GitHub accessor), and delegates persistence
+// to the repo. On success the returned *Workspace carries the
+// DB-assigned id + Postgres-set timestamps.
 //
 // OTel attributes (spec §3.4):
 //
@@ -146,11 +159,15 @@ func requireGitHubToken(ctx context.Context) (string, error) {
 // wraps the underlying error and returns it; the handler maps to 500.
 //
 // On a GitHub "not accessible" answer (boolean false) the function
-// returns a *ValidationError with fields.primary_repository set to the
+// returns a *ValidationError with fields.repository set to the
 // locked MsgRepoNotAccessible message — the handler maps to 422.
 //
 // On a unique-violation from the repo (name already exists), the
 // *ConflictError propagates as-is so the handler can map to 409.
+//
+// 2026-07-08-workspaces-simplify: in.Repository (was in.PrimaryRepo)
+// and the workspace row's Repo* fields (were PrimaryRepo*). The
+// validation error key is "repository" (was "primary_repository").
 func (s *WorkspaceService) Create(ctx context.Context, in domain.CreateWorkspaceInput) (*domain.Workspace, error) {
 	if err := domain.ValidateCreateWorkspace(in); err != nil {
 		return nil, err
@@ -168,30 +185,30 @@ func (s *WorkspaceService) Create(ctx context.Context, in domain.CreateWorkspace
 
 	setHTTPRouteAttrs(span, "POST", httpRouteWorkspaceCreate)
 
-	// Verify primary repo is accessible (design T7). We do NOT call
+	// Verify repo is accessible (design T7). We do NOT call
 	// requireGitHubToken again here because the pre-flight above is
 	// authoritative for the span.
-	accessible, err := s.githubClient.IsRepoAccessible(ctx, in.PrimaryRepo.GitHubID)
+	accessible, err := s.githubClient.IsRepoAccessible(ctx, in.Repository.GitHubID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("verify primary repo: %w", err)
+		return nil, fmt.Errorf("verify repo: %w", err)
 	}
 	if !accessible {
-		span.SetStatus(codes.Error, "primary repo not accessible")
+		span.SetStatus(codes.Error, "repo not accessible")
 		return nil, &domain.ValidationError{Fields: map[string]string{
-			"primary_repository": domain.MsgRepoNotAccessible,
+			"repository": domain.MsgRepoNotAccessible,
 		}}
 	}
 
 	w := &domain.Workspace{
-		OrganizationID:      in.OrganizationID,
-		OwnerUserID:         in.OwnerUserID,
-		Name:                in.Name,
-		PrimaryRepoGitHubID: in.PrimaryRepo.GitHubID,
-		PrimaryRepoFullName: in.PrimaryRepo.FullName,
-		PrimaryRepoOwner:    in.PrimaryRepo.Owner,
-		PrimaryRepoName:     in.PrimaryRepo.Name,
+		OrganizationID: in.OrganizationID,
+		OwnerUserID:    in.OwnerUserID,
+		Name:           in.Name,
+		RepoGitHubID:   in.Repository.GitHubID,
+		RepoFullName:   in.Repository.FullName,
+		RepoOwner:      in.Repository.Owner,
+		RepoName:       in.Repository.Name,
 	}
 
 	persisted, err := s.repo.Insert(ctx, w)
@@ -206,7 +223,7 @@ func (s *WorkspaceService) Create(ctx context.Context, in domain.CreateWorkspace
 	s.logger.InfoContext(ctx, "workspace.create ok",
 		slog.Int64("workspace.id", persisted.ID),
 		slog.String("name", persisted.Name),
-		slog.Int64("primary_repo_github_id", persisted.PrimaryRepoGitHubID),
+		slog.Int64("repo_github_id", persisted.RepoGitHubID),
 	)
 	return persisted, nil
 }
@@ -261,11 +278,11 @@ func (s *WorkspaceService) Get(ctx context.Context, id int64) (*domain.Workspace
 	return w, nil
 }
 
-// Update renames a workspace. Per design T9, the primary_repository
-// field on the input is silently dropped — the primary repo is the
-// workspace's identity and cannot be changed post-create. The locked
-// invariant is preserved at the application layer so the handler does
-// not need to filter the input.
+// Update renames a workspace. Per design T9, the repository field on
+// the input is silently dropped — the repo is the workspace's identity
+// and cannot be changed post-create. The locked invariant is
+// preserved at the application layer so the handler does not need to
+// filter the input.
 //
 // On a unique-violation (duplicate name), the *ConflictError propagates
 // unchanged so the handler can map to HTTP 409.
@@ -295,10 +312,11 @@ func (s *WorkspaceService) Update(ctx context.Context, id int64, in domain.Updat
 	return w, nil
 }
 
-// Delete soft-deletes the workspace (sets deleted_at = now()) and
-// cascades the linked workspace_repository rows. The repo runs both
-// statements in one transaction (see repo contract). Returns
+// Delete soft-deletes the workspace (sets deleted_at = now()). Returns
 // *NotFoundError if the row is already soft-deleted or never existed.
+//
+// 2026-07-08-workspaces-simplify: no longer cascades into
+// workspace_repository (the table no longer exists).
 func (s *WorkspaceService) Delete(ctx context.Context, id int64) error {
 	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceDelete)
 	defer span.End()
@@ -319,129 +337,17 @@ func (s *WorkspaceService) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// AddRepository verifies the repo is accessible to the signed-in user
-// (via the GitHub accessor) and then adds the linked row to the
-// workspace. Duplicate (workspace_id, github_id) → *ConflictError; repo
-// not accessible → *ValidationError; not connected → *GitHubNotConnectedError.
-func (s *WorkspaceService) AddRepository(ctx context.Context, workspaceID int64, in domain.AddRepositoryInput) (*domain.LinkedRepository, error) {
-	if _, err := requireGitHubToken(ctx); err != nil {
-		return nil, err
-	}
-
-	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceAddRepo)
-	defer span.End()
-
-	setHTTPRouteAttrs(span, "POST", httpRouteWorkspaceAddRepo)
-
-	accessible, err := s.githubClient.IsRepoAccessible(ctx, in.GitHubID)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("verify linked repo: %w", err)
-	}
-	if !accessible {
-		span.SetStatus(codes.Error, "linked repo not accessible")
-		return nil, &domain.ValidationError{Fields: map[string]string{
-			"primary_repository": domain.MsgRepoNotAccessible,
-		}}
-	}
-
-	repo := &domain.LinkedRepository{
-		WorkspaceID: workspaceID,
-		GitHubID:    in.GitHubID,
-		FullName:    in.FullName,
-		Owner:       in.Owner,
-		Name:        in.Name,
-	}
-
-	persisted, err := s.repo.AddLinkedRepo(ctx, repo)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	span.SetAttributes(
-		attribute.Int64("workspace.id", workspaceID),
-		attribute.Int64("workspace_repository.id", persisted.ID),
-		attribute.Int64("workspace_repository.github_id", persisted.GitHubID),
-	)
-	setHTTPStatus(span, 201)
-	s.logger.InfoContext(ctx, "workspace.add_repo ok",
-		slog.Int64("workspace.id", workspaceID),
-		slog.Int64("workspace_repository.id", persisted.ID),
-		slog.Int64("github_id", persisted.GitHubID),
-	)
-	return persisted, nil
-}
-
-// RemoveRepository removes one linked repo from a workspace. Returns
-// *NotFoundError if the repo is not linked (or already removed).
-func (s *WorkspaceService) RemoveRepository(ctx context.Context, workspaceID, repoID int64) error {
-	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceRemoveRepo)
-	defer span.End()
-
-	setHTTPRouteAttrs(span, "DELETE", httpRouteWorkspaceRemoveRepo)
-
-	if err := s.repo.RemoveLinkedRepo(ctx, workspaceID, repoID); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return err
-	}
-
-	span.SetAttributes(
-		attribute.Int64("workspace.id", workspaceID),
-		attribute.Int64("workspace_repository.id", repoID),
-	)
-	setHTTPStatus(span, 204)
-	s.logger.InfoContext(ctx, "workspace.remove_repo ok",
-		slog.Int64("workspace.id", workspaceID),
-		slog.Int64("workspace_repository.id", repoID),
-	)
-	return nil
-}
-
-// ListRepositories returns the linked repos of a workspace in
-// chronological order (added_at ASC). Soft-deleted workspaces return
-// *NotFoundError from the repo's SelectByID check (the handler is
-// expected to verify the workspace exists first; this method trusts
-// the caller and does NOT do a second SelectByID round-trip).
-func (s *WorkspaceService) ListRepositories(ctx context.Context, workspaceID int64) ([]domain.LinkedRepository, error) {
-	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceListRepos)
-	defer span.End()
-
-	setHTTPRouteAttrs(span, "GET", httpRouteWorkspaceListRepos)
-
-	out, err := s.repo.SelectLinkedRepos(ctx, workspaceID)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
-	}
-
-	span.SetAttributes(
-		attribute.Int64("workspace.id", workspaceID),
-		attribute.Int("workspace_repository.count", len(out)),
-	)
-	setHTTPStatus(span, 200)
-	s.logger.InfoContext(ctx, "workspace.list_repos ok",
-		slog.Int64("workspace.id", workspaceID),
-		slog.Int("count", len(out)),
-	)
-	return out, nil
-}
-
-// Compile-time check that the service struct exposes all 8 use cases
+// Compile-time check that the service struct exposes the 5 use cases
 // the handler needs. If a method is renamed, the build breaks here.
+//
+// 2026-07-08-workspaces-simplify: 5 methods (was 8); the linked-repo
+// use cases are gone.
 var _ interface {
 	Create(ctx context.Context, in domain.CreateWorkspaceInput) (*domain.Workspace, error)
 	List(ctx context.Context, orgID int64, limit int) ([]domain.Workspace, error)
 	Get(ctx context.Context, id int64) (*domain.Workspace, error)
 	Update(ctx context.Context, id int64, in domain.UpdateWorkspaceInput) (*domain.Workspace, error)
 	Delete(ctx context.Context, id int64) error
-	AddRepository(ctx context.Context, workspaceID int64, in domain.AddRepositoryInput) (*domain.LinkedRepository, error)
-	RemoveRepository(ctx context.Context, workspaceID, repoID int64) error
-	ListRepositories(ctx context.Context, workspaceID int64) ([]domain.LinkedRepository, error)
 } = (*WorkspaceService)(nil)
 
 // Compile-time guard: GitHubNotConnectedError must implement AppError so

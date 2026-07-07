@@ -4,7 +4,7 @@
  * Reference: openspec/changes/2026-07-06-workspaces/specs
  *   R-WS-002 (S-WS-010..013) — listWorkspaces contract.
  *   R-WS-003 (S-WS-020..022) — getWorkspace contract.
- *   R-WS-008 (S-WS-070..071) — listLinkedRepos contract.
+ *   R-WS-008 — REMOVED in 2026-07-08-workspaces-simplify (the workspace_repository table is gone).
  *
  * Strict TDD posture: tests cover the locked wire shapes only. Server
  * implementation lives in backend/database_administrator.
@@ -13,9 +13,6 @@ import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
 import {
   listWorkspaces,
   getWorkspace,
-  listLinkedRepos,
-  addRepoToWorkspace,
-  removeRepoFromWorkspace,
   deleteWorkspace,
   createWorkspace,
   listGitHubRepos,
@@ -45,13 +42,13 @@ describe("api.ts — workspaces client (PR2-i)", () => {
               {
                 id: 1,
                 name: "alpha",
-                primary_repository: {
+                repository: {
                   github_id: 100,
                   full_name: "octocat/hello-world",
                   owner: "octocat",
                   name: "hello-world",
                 },
-                linked_repos_count: 2,
+
                 created_at: "2026-07-01T00:00:00Z",
               },
             ],
@@ -67,10 +64,9 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       if (!result.ok) return;
       expect(result.value.workspaces).toHaveLength(1);
       expect(result.value.workspaces[0]!.name).toBe("alpha");
-      expect(result.value.workspaces[0]!.primary_repository.full_name).toBe(
+expect(result.value.workspaces[0]!.repository.full_name).toBe(
         "octocat/hello-world",
       );
-      expect(result.value.workspaces[0]!.linked_repos_count).toBe(2);
       expect(result.value.truncated).toBe(false);
     });
 
@@ -123,23 +119,13 @@ describe("api.ts — workspaces client (PR2-i)", () => {
           JSON.stringify({
             id: 7,
             name: "beta",
-            primary_repository: {
+            repository: {
               github_id: 200,
               full_name: "octocat/widgets",
               owner: "octocat",
               name: "widgets",
             },
-linked_repositories: [
-              {
-                id: 11,
-                github_id: 201,
-                full_name: "octocat/gizmos",
-                owner: "octocat",
-                name: "gizmos",
-                added_at: "2026-07-02T00:00:00Z",
-              },
-            ],
-            created_at: "2026-07-01T00:00:00Z",
+created_at: "2026-07-01T00:00:00Z",
             updated_at: "2026-07-02T00:00:00Z",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -150,7 +136,7 @@ linked_repositories: [
       if (!result.ok) return;
       expect(result.value.id).toBe(7);
       expect(result.value.name).toBe("beta");
-      expect(result.value.linked_repositories).toHaveLength(1);
+      // linked_repositories field removed in 2026-07-08-workspaces-simplify.
     });
 
     it("TRIANGULATE-T-WS-2i-005(a): 404 not_found → kind=server (or not_found)", async () => {
@@ -176,179 +162,6 @@ linked_repositories: [
 
   // -------------------------------------------------------------------
   // listLinkedRepos (R-WS-008, T-WS-2i-006..007)
-  // -------------------------------------------------------------------
-
-describe("listLinkedRepos", () => {
-    it("RED-T-WS-2i-006: returns {repositories: [...]} on 200", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            repositories: [
-              {
-                id: 11,
-                github_id: 201,
-                full_name: "octocat/gizmos",
-                owner: "octocat",
-                name: "gizmos",
-                added_at: "2026-07-02T00:00:00Z",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-      const result = await listLinkedRepos(7);
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.repositories).toHaveLength(1);
-      expect(result.value.repositories[0]!.full_name).toBe(
-        "octocat/gizmos",
-      );
-    });
-
-    it("TRIANGULATE-T-WS-2i-007: empty repositories array is ok", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ repositories: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-      const result = await listLinkedRepos(7);
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.repositories).toEqual([]);
-    });
-  });
-
-  // -------------------------------------------------------------------
-  // addRepoToWorkspace (R-WS-006, T-WS-2ii-001..003)
-  // -------------------------------------------------------------------
-
-describe("addRepoToWorkspace", () => {
-    const repoPayload = {
-      github_id: 555,
-      full_name: "octocat/widgets",
-      owner: "octocat",
-      name: "widgets",
-    };
-
-    it("RED-T-WS-2ii-001: returns the linked repo on 201", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            id: 99,
-            github_id: 555,
-            full_name: "octocat/widgets",
-            owner: "octocat",
-            name: "widgets",
-            added_at: "2026-07-03T00:00:00Z",
-          }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-
-      const result = await addRepoToWorkspace(7, repoPayload);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.id).toBe(99);
-      expect(result.value.github_id).toBe(555);
-      expect(result.value.full_name).toBe("octocat/widgets");
-
-      // Verify the request shape
-      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toContain("/workspaces/7/repositories");
-      expect(init.method).toBe("POST");
-      const body = JSON.parse(init.body as string) as Record<string, unknown>;
-      expect(body).toEqual(repoPayload);
-    });
-
-    it("TRIANGULATE-T-WS-2ii-003(a): 409 conflict → kind=conflict", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: "conflict",
-            message: "This repository is already linked.",
-          }),
-          { status: 409 },
-        ),
-      );
-      const result = await addRepoToWorkspace(7, repoPayload);
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.kind).toBe("conflict");
-      expect(result.message).toContain("already linked");
-    });
-
-    it("TRIANGULATE-T-WS-2ii-003(b): 422 with fields.primary_repository → kind=validation", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: "validation",
-            fields: {
-              primary_repository: "Selected repository is not accessible.",
-            },
-          }),
-          { status: 422 },
-        ),
-      );
-      const result = await addRepoToWorkspace(7, repoPayload);
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.kind).toBe("validation");
-      if (result.kind === "validation") {
-        expect(result.fields.primary_repository).toContain("not accessible");
-      }
-    });
-  });
-
-  // -------------------------------------------------------------------
-  // removeRepoFromWorkspace (R-WS-007, T-WS-2ii-004..005)
-  // -------------------------------------------------------------------
-
-  describe("removeRepoFromWorkspace", () => {
-    it("RED-T-WS-2ii-004: 204 returns ok with null", async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(new Response(null, { status: 204 }));
-
-      const result = await removeRepoFromWorkspace(7, 99);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value).toBeNull();
-
-      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toContain("/workspaces/7/repositories/99");
-      expect(init.method).toBe("DELETE");
-    });
-
-    it("TRIANGULATE-T-WS-2ii-005: 404 → kind=server", async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              error: "not_found",
-              message: "Workspace not found.",
-            }),
-            { status: 404 },
-          ),
-        );
-      const result = await removeRepoFromWorkspace(7, 99);
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(["server", "not_found"]).toContain(result.kind);
-    });
-  });
-
-  // -------------------------------------------------------------------
-  // deleteWorkspace (R-WS-005, T-WS-2ii-006..007)
-  // -------------------------------------------------------------------
-
   describe("deleteWorkspace", () => {
     it("RED-T-WS-2ii-006: 204 returns ok with null", async () => {
       globalThis.fetch = vi
@@ -368,17 +181,15 @@ describe("addRepoToWorkspace", () => {
     });
 
     it("TRIANGULATE-T-WS-2ii-007: 404 (already deleted) → kind=server", async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              error: "not_found",
-              message: "Workspace not found.",
-            }),
-            { status: 404 },
-          ),
-        );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "not_found",
+            message: "Workspace not found.",
+          }),
+          { status: 404 },
+        ),
+      );
       const result = await deleteWorkspace(7);
       expect(result.ok).toBe(false);
       if (result.ok) return;
@@ -400,16 +211,15 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
 
   describe("createWorkspace", () => {
     it("RED-T-WS-2iii-001: 201 + body → ok with the new workspace detail", async () => {
-      const body = {
+const body = {
         id: 99,
         name: "ws-one",
-        primary_repository: {
+        repository: {
           github_id: 12345,
           full_name: "octocat/hello",
           owner: "octocat",
           name: "hello",
         },
-        linked_repositories: [],
         created_at: "2026-07-06T00:00:00Z",
         updated_at: "2026-07-06T00:00:00Z",
       };
@@ -418,7 +228,7 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
         .mockResolvedValue(new Response(JSON.stringify(body), { status: 201 }));
       const result = await createWorkspace({
         name: "ws-one",
-        primaryRepository: {
+        repository: {
           github_id: 12345,
           full_name: "octocat/hello",
           owner: "octocat",
@@ -433,9 +243,9 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toMatch(/\/workspaces$/);
       expect(init.method).toBe("POST");
-expect(JSON.parse(init.body as string)).toEqual({
+      expect(JSON.parse(init.body as string)).toEqual({
         name: "ws-one",
-        primary_repository: {
+        repository: {
           github_id: 12345,
           full_name: "octocat/hello",
           owner: "octocat",
@@ -456,7 +266,7 @@ expect(JSON.parse(init.body as string)).toEqual({
       );
       const result = await createWorkspace({
         name: "ab",
-        primaryRepository: {
+        repository: {
           github_id: 1,
           full_name: "o/r",
           owner: "o",
@@ -483,7 +293,7 @@ expect(JSON.parse(init.body as string)).toEqual({
       );
       const result = await createWorkspace({
         name: "ws-one",
-        primaryRepository: {
+        repository: {
           github_id: 1,
           full_name: "o/r",
           owner: "o",
@@ -496,13 +306,13 @@ expect(JSON.parse(init.body as string)).toEqual({
       expect(result.message).toBe("A workspace with this name already exists.");
     });
 
-    it("TRIANGULATE-T-WS-2iii-003c: 422 with fields.primary_repository → kind=validation", async () => {
+    it("TRIANGULATE-T-WS-2iii-003c: 422 with fields.repository → kind=validation", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
             error: "validation",
             fields: {
-              primary_repository: "Selected repository is not accessible.",
+              repository: "Selected repository is not accessible.",
             },
           }),
           { status: 422 },
@@ -510,7 +320,7 @@ expect(JSON.parse(init.body as string)).toEqual({
       );
       const result = await createWorkspace({
         name: "ws-one",
-        primaryRepository: {
+        repository: {
           github_id: 1,
           full_name: "o/r",
           owner: "o",
@@ -521,7 +331,7 @@ expect(JSON.parse(init.body as string)).toEqual({
       if (result.ok) return;
       expect(result.kind).toBe("validation");
       if (result.kind === "validation") {
-        expect(result.fields.primary_repository).toBe(
+        expect(result.fields.repository).toBe(
           "Selected repository is not accessible.",
         );
       }
@@ -531,7 +341,7 @@ expect(JSON.parse(init.body as string)).toEqual({
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
       const result = await createWorkspace({
         name: "ws-one",
-        primaryRepository: {
+        repository: {
           github_id: 1,
           full_name: "o/r",
           owner: "o",

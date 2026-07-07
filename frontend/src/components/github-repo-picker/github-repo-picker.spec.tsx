@@ -11,27 +11,27 @@
 import { createDOM } from "@builder.io/qwik/testing";
 import { $ } from "@builder.io/qwik";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import type { PrimaryRepository } from "~/lib/api";
+import type { Repository } from "~/lib/api";
 import { GitHubRepoPicker } from "./github-repo-picker";
 
 // =========================================================================
 // Test fixtures
 // =========================================================================
 
-const FAKE_REPOS: PrimaryRepository[] = [
+const FAKE_REPOS: Repository[] = [
   { github_id: 1, full_name: "octocat/hello-world", owner: "octocat", name: "hello-world" },
   { github_id: 2, full_name: "octocat/widgets", owner: "octocat", name: "widgets" },
   { github_id: 3, full_name: "rails/rails", owner: "rails", name: "rails" },
 ];
 
-function stubFetcher(repos: PrimaryRepository[], hasNext = false) {
+function stubFetcher(repos: Repository[], hasNext = false) {
   return $(async (_opts: { page: number; perPage: number; bustCache?: boolean }) => ({
     repositories: repos,
     has_next: hasNext,
   }));
 }
 
-const noopChange = $(async (_: PrimaryRepository | null) => {
+const noopChange = $(async (_: Repository | null) => {
   /* noop */
 });
 noopChange;

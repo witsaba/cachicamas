@@ -41,10 +41,10 @@ const submitAction: WorkspaceFormAction = $(
   async (data: FormData): Promise<WorkspaceFormActionResult> => {
     const name = String(data.get("name") ?? "");
     const primaryRepo = {
-      github_id: Number(data.get("primary_repository_id") ?? "0"),
-      full_name: String(data.get("primary_repository_full_name") ?? ""),
-      owner: String(data.get("primary_repository_owner") ?? ""),
-      name: String(data.get("primary_repository_name") ?? ""),
+      github_id: Number(data.get("repository_id") ?? "0"),
+      full_name: String(data.get("repository_full_name") ?? ""),
+      owner: String(data.get("repository_owner") ?? ""),
+      name: String(data.get("repository_name") ?? ""),
     };
     if (
       !primaryRepo.full_name ||
@@ -54,13 +54,13 @@ const submitAction: WorkspaceFormAction = $(
     ) {
       return {
         ok: false,
-        field: "primary_repository",
-        message: "Pick a primary repository.",
+        field: "repository",
+        message: "Pick a the GitHub repository.",
       };
     }
     const result = await createWorkspace({
       name,
-      primaryRepository: primaryRepo,
+      repository: primaryRepo,
     });
     if (result.ok) {
       return { ok: true, id: result.value.id };
@@ -74,11 +74,11 @@ const submitAction: WorkspaceFormAction = $(
           message: nameMessage,
         };
       }
-      const primaryRepoMessage = result.fields.primary_repository;
+      const primaryRepoMessage = result.fields.repository;
       if (primaryRepoMessage) {
         return {
           ok: false,
-          field: "primary_repository",
+          field: "repository",
           message: primaryRepoMessage,
         };
       }
@@ -143,9 +143,8 @@ export default component$(() => {
   return (
     <main class="mx-auto max-w-3xl px-4 py-16">
       <h1 class="text-3xl font-bold text-slate-900">Create a workspace</h1>
-      <p class="mt-3 text-slate-700">
-        Pick a name and a primary GitHub repository. You can connect more
-        repositories to the workspace after it's created.
+<p class="mt-3 text-slate-700">
+        Pick a name and the GitHub repository for this workspace.
       </p>
       <div class="mt-8">
         <WorkspaceForm

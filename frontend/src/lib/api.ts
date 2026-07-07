@@ -482,38 +482,30 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
 // ---------------------------------------------------------------------------
 
 /**
- * PrimaryRepository is the locked wire shape for the primary repo stored
- * on every workspace. Mirrors `backend/.../src/domain/workspace.go`.
+ * Repository is the locked wire shape for the workspace's repository.
+ * 2026-07-08-workspaces-simplify: renamed from Repository —
+ * in the 1:1 model there is no longer a contrast with a
+ * "secondary" repo, so the prefix was misleading. Mirrors
+ * `backend/.../src/domain/workspace.go::Repository`.
  */
-export interface PrimaryRepository {
+export interface Repository {
   github_id: number;
   full_name: string;
   owner: string;
   name: string;
-}
-
-export interface LinkedRepository {
-  id: number;
-  github_id: number;
-  full_name: string;
-  owner: string;
-  name: string;
-  added_at: string;
 }
 
 export interface WorkspaceSummary {
   id: number;
   name: string;
-  primary_repository: PrimaryRepository;
-  linked_repos_count: number;
+  repository: Repository;
   created_at: string;
 }
 
 export interface WorkspaceDetail {
   id: number;
   name: string;
-  primary_repository: PrimaryRepository;
-  linked_repositories: LinkedRepository[];
+  repository: Repository;
   created_at: string;
   updated_at: string;
 }
@@ -564,96 +556,6 @@ export async function getWorkspace(
   );
 }
 
-/** GET /workspaces/:id/repositories (R-WS-008). */
-export async function listLinkedRepos(
-  workspaceID: number,
-): Promise<ApiResult<{ repositories: LinkedRepository[] }>> {
-  let res: Response;
-  try {
-    res = await fetch(`${apiBaseUrl()}/workspaces/${workspaceID}/repositories`);
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  return envelopeToResult(res, async () => {
-    const body = (await res.json()) as { repositories: LinkedRepository[] };
-    return { repositories: body.repositories ?? [] };
-  });
-}
-
-/**
- * Input for `addRepoToWorkspace` (R-WS-006).
- *
- * Backend validates the github_id against the user's accessible
- * /user/repos set on the server (T7 in design); the frontend passes
- * the user's selected repo through verbatim.
- */
-export interface AddRepoInput {
-  github_id: number;
-  full_name: string;
-  owner: string;
-  name: string;
-}
-
-/** POST /workspaces/:id/repositories (R-WS-006). */
-export async function addRepoToWorkspace(
-  workspaceID: number,
-  repo: AddRepoInput,
-): Promise<ApiResult<LinkedRepository>> {
-  let res: Response;
-  try {
-    res = await fetch(
-      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-body: JSON.stringify({
-          github_id: repo.github_id,
-          full_name: repo.full_name,
-          owner: repo.owner,
-          name: repo.name,
-        }),
-      },
-    );
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  return envelopeToResult(
-    res,
-    async () => (await res.json()) as LinkedRepository,
-  );
-}
-
-/** DELETE /workspaces/:id/repositories/:repoId (R-WS-007). */
-export async function removeRepoFromWorkspace(
-  workspaceID: number,
-  repoID: number,
-): Promise<ApiResult<null>> {
-  let res: Response;
-  try {
-    res = await fetch(
-      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories/${repoID}`,
-      { method: "DELETE" },
-    );
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  // 204 No Content — body is empty; envelopeToResult guards against a
-  // missing body, returning ok: true with null value.
-  return envelopeToResult(res, async () => null);
-}
-
 /** DELETE /workspaces/:id (R-WS-005, soft delete on the backend). */
 export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
   let res: Response;
@@ -680,7 +582,7 @@ export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
  */
 export interface CreateWorkspaceInput {
   name: string;
-  primaryRepository: PrimaryRepository;
+  repository: Repository;
 }
 
 /**
@@ -689,9 +591,12 @@ export interface CreateWorkspaceInput {
  * Returns ApiResult<WorkspaceDetail>:
  *   - 201 → ok with the new workspace detail
  *   - 400 with fields.name → kind=validation
- *   - 422 with fields.primary_repository → kind=validation (repo not accessible)
+ *   - 422 with fields.repository → kind=validation (repo not accessible)
  *   - 409 → kind=server (duplicate name)
  *   - 401 / 5xx / network → offline/server
+ *
+ * 2026-07-08-workspaces-simplify: wire field renamed from
+ * `primary_repository` to `repository`.
  */
 export async function createWorkspace(
   input: CreateWorkspaceInput,
@@ -701,13 +606,13 @@ export async function createWorkspace(
     res = await fetch(`${apiBaseUrl()}/workspaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-body: JSON.stringify({
+      body: JSON.stringify({
         name: input.name,
-        primary_repository: {
-          github_id: input.primaryRepository.github_id,
-          full_name: input.primaryRepository.full_name,
-          owner: input.primaryRepository.owner,
-          name: input.primaryRepository.name,
+        repository: {
+          github_id: input.repository.github_id,
+          full_name: input.repository.full_name,
+          owner: input.repository.owner,
+          name: input.repository.name,
         },
       }),
     });

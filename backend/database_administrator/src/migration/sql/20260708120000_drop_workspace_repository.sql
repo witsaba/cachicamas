@@ -1,0 +1,31 @@
+-- +goose Up
+-- +goose StatementBegin
+-- 2026-07-08-workspaces-simplify: drop the workspace_repository table.
+--
+-- The workspaces feature was simplified from 1:many (workspace + N linked
+-- repos) to 1:1 (workspace = one repo). The linked-repos sub-feature was
+-- never exercised in UAT (see openspec/changes/archive/2026-07-08-workspaces-simplify/proposal.md).
+-- Dropping the table + its indexes removes a non-trivial surface that
+-- future schema reviews would otherwise have to keep reasoning about.
+--
+-- CASCADE: the FK from workspace_repository.workspace_id to workspace.id
+-- was defined ON DELETE CASCADE; the partial unique index on the parent
+-- (workspace_org_name_live_key) and the secondary indexes on workspace
+-- are unaffected. The dropped table leaves no orphaned constraints.
+--
+-- Idempotency: IF EXISTS guards make the migration safe to re-run.
+--
+-- Data loss: the workspace_repository table was empty at the time of
+-- deployment (UAT had no linked repos). In a future production deploy
+-- that still holds data, snapshot the table to a backup relation before
+-- running this migration; recovery is a manual reload from backup.
+DROP TABLE IF EXISTS workspace_repository;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- Forward-only migration per openspec/AGENTS.md. The Down block is left
+-- intentionally empty (the project's goose driver treats empty Down as
+-- a no-op). To revert this change operationally, restore the table from
+-- a snapshot taken before the Up ran.
+-- +goose StatementEnd

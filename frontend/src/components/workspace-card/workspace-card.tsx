@@ -1,14 +1,21 @@
 /**
  * WorkspaceCard — list card for the /workspaces page.
  *
- * Reference: openspec/changes/2026-07-06-workspaces/specs
- *   R-WS-011 (S-WS-100..103) — list card contract.
+ * Reference: openspec/changes/2026-07-08-workspaces-simplify/specs/workspaces/spec.md
+ *   R-WS-002 — list card contract (post-1:1)
+ *
+ * 2026-07-08-workspaces-simplify changelog:
+ *   - Dropped the linked_repos_count display + the "No linked repos"
+ *     / "N linked repos" label. In the 1:1 model the workspace IS
+ *     the repo; there is nothing else to count.
+ *   - Renamed `primary_repository` -> `repository` to match the new
+ *     WorkspaceSummary wire shape.
  *
  * Design system rule (cachicamas UAT catch): the primary CTAs use
  * bg-slate-900 (project monochrome). Tinted "open" link.
  *
- * Aphantasic-friendly (UX-4): text-first. Renders name + primary repo +
- * linked count + an "Open" link to /workspaces/:id. No decorative iconography.
+ * Aphantasic-friendly (UX-4): text-first. Renders name + repository +
+ * an "Open" link to /workspaces/:id. No decorative iconography.
  */
 import { component$ } from "@builder.io/qwik";
 import type { WorkspaceSummary } from "~/lib/api";
@@ -18,14 +25,8 @@ export interface WorkspaceCardProps {
 }
 
 export const WorkspaceCard = component$<WorkspaceCardProps>(({ workspace }) => {
-  const { id, name, primary_repository, linked_repos_count } = workspace;
-  const fullName = primary_repository.full_name;
-  const linkedLabel =
-    linked_repos_count === 0
-      ? "No linked repos"
-      : linked_repos_count === 1
-        ? "1 linked repo"
-        : `${linked_repos_count} linked repos`;
+  const { id, name, repository } = workspace;
+  const fullName = repository.full_name;
   return (
     <article
       data-testid="workspace-card"
@@ -44,8 +45,6 @@ export const WorkspaceCard = component$<WorkspaceCardProps>(({ workspace }) => {
           class="truncate text-sm text-slate-600"
         >
           <span class="font-mono">{fullName}</span>
-          <span class="mx-2 text-slate-300">·</span>
-          <span data-testid="workspace-card-linked-count">{linkedLabel}</span>
         </p>
       </div>
       <a

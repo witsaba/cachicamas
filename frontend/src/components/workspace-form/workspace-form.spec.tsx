@@ -11,10 +11,10 @@
 import { createDOM } from "@builder.io/qwik/testing";
 import { $ } from "@builder.io/qwik";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import type { PrimaryRepository } from "~/lib/api";
+import type { Repository } from "~/lib/api";
 import { WorkspaceForm, type WorkspaceFormAction } from "./workspace-form";
 
-const FAKE_REPOS: PrimaryRepository[] = [
+const FAKE_REPOS: Repository[] = [
   {
     github_id: 1,
     full_name: "octocat/hello-world",
@@ -29,7 +29,7 @@ const FAKE_REPOS: PrimaryRepository[] = [
   },
 ];
 
-function stubFetcher(repos: PrimaryRepository[]) {
+function stubFetcher(repos: Repository[]) {
   return $(
     async (_opts: { page: number; perPage: number; bustCache?: boolean }) => ({
       repositories: repos,
@@ -109,7 +109,7 @@ describe("WorkspaceForm", () => {
     ).toBeTruthy();
   });
 
-test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns field='form'", async () => {
+  test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns field='form'", async () => {
     const errorAction = $(async (_data: FormData) => ({
       ok: false as const,
       field: "form" as const,
@@ -132,7 +132,7 @@ test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns fi
     ).toBeTruthy();
   });
 
-// 2026-07-07 regression for bug 1 (page stays static after
+  // 2026-07-07 regression for bug 1 (page stays static after
   // successful workspace create). The wiring contract that
   // reproduces the bug is in two pieces:
   //   (a) onSuccess$ must be part of the public surface
@@ -154,7 +154,8 @@ test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns fi
     // The submit handler MUST check result.ok before calling
     // onSuccess$ AND must pass result.id (the new workspace id).
     // Allow either whitespace variants around the if condition.
-    const successPath = /if\s*\(\s*result\.ok\s*\)\s*\{[\s\S]*?onSuccess\$\(\s*result\.id\s*\)/;
+    const successPath =
+      /if\s*\(\s*result\.ok\s*\)\s*\{[\s\S]*?onSuccess\$\(\s*result\.id\s*\)/;
     expect(source).toMatch(successPath);
   });
 });

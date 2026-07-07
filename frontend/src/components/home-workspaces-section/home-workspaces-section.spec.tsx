@@ -54,13 +54,12 @@ describe("HomeWorkspacesSection", () => {
           {
             id: 1,
             name: "ws-one",
-            primary_repository: {
+repository: {
               github_id: 1,
               full_name: "octocat/hello",
               owner: "octocat",
               name: "hello",
             },
-            linked_repos_count: 0,
             created_at: "2026-07-06T00:00:00Z",
           },
         ]}
@@ -105,13 +104,12 @@ describe("HomeWorkspacesSection", () => {
           {
             id: 1,
             name: "ws",
-            primary_repository: {
+repository: {
               github_id: 1,
               full_name: "o/r",
               owner: "o",
               name: "r",
             },
-            linked_repos_count: 0,
             created_at: "2026-07-06T00:00:00Z",
           },
         ]}

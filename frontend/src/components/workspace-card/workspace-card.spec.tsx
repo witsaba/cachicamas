@@ -2,6 +2,14 @@
  * workspace-card.spec.tsx — TDD coverage for WorkspaceCard.
  *
  * Reference: T-WS-2i-008..010.
+ *
+ * 2026-07-08-workspaces-simplify changelog:
+ *   - Dropped the 3 tests that exercised the linked_repos_count
+ *     badge (No linked repos / N linked repos / singular/plural
+ *     agreement). The card no longer renders that data — the
+ *     workspace IS its repo in the 1:1 model.
+ *   - Replaced those tests with one that pins the post-simplify
+ *     card shape: name + repo + Open link, no linked count.
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
@@ -12,65 +20,40 @@ function makeWorkspace(over: Partial<WorkspaceSummary> = {}): WorkspaceSummary {
   return {
     id: 42,
     name: "alpha",
-    primary_repository: {
+    repository: {
       github_id: 100,
       full_name: "octocat/hello-world",
       owner: "octocat",
       name: "hello-world",
     },
-    linked_repos_count: 2,
     created_at: "2026-07-01T00:00:00Z",
     ...over,
   };
 }
 
 describe("WorkspaceCard", () => {
-  it("RED-T-WS-2i-008: renders name, primary repository, linked count, and Open link", async () => {
+  it("RED-T-WS-2i-008 (updated 2026-07-08): renders name, repository, and Open link", async () => {
     const { screen, render } = await createDOM();
     await render(<WorkspaceCard workspace={makeWorkspace()} />);
 
     const name = screen.querySelector('[data-testid="workspace-card-name"]');
     const repo = screen.querySelector('[data-testid="workspace-card-repo"]');
-    const linked = screen.querySelector(
-      '[data-testid="workspace-card-linked-count"]',
-    );
     const open = screen.querySelector('[data-testid="workspace-card-open"]');
     expect(name?.textContent).toBe("alpha");
     expect(repo?.textContent).toContain("octocat/hello-world");
-    expect(linked?.textContent).toBe("2 linked repos");
     expect(open?.getAttribute("href")).toBe("/workspaces/42");
   });
 
-  it("TRIANGULATE-T-WS-2i-010(a): linked_repos_count=0 → 'No linked repos'", async () => {
+  it("2026-07-08: NO linked_repos_count element rendered (1:1 model)", async () => {
     const { screen, render } = await createDOM();
-    await render(
-      <WorkspaceCard workspace={makeWorkspace({ linked_repos_count: 0 })} />,
-    );
+    await render(<WorkspaceCard workspace={makeWorkspace()} />);
+    // Regression: pre-simplify, the card rendered a linked-count badge
+    // (data-testid="workspace-card-linked-count"). Post-simplify it
+    // MUST NOT exist on the card. (qwik/testing's querySelector
+    // returns `undefined` rather than `null` when the selector misses.)
     const linked = screen.querySelector(
       '[data-testid="workspace-card-linked-count"]',
     );
-    expect(linked?.textContent).toBe("No linked repos");
-  });
-
-  it("TRIANGULATE-T-WS-2i-010(b): linked_repos_count=5 → '5 linked repos'", async () => {
-    const { screen, render } = await createDOM();
-    await render(
-      <WorkspaceCard workspace={makeWorkspace({ linked_repos_count: 5 })} />,
-    );
-    const linked = screen.querySelector(
-      '[data-testid="workspace-card-linked-count"]',
-    );
-    expect(linked?.textContent).toBe("5 linked repos");
-  });
-
-  it("TRIANGULATE-T-WS-2i-010(c): linked_repos_count=1 → '1 linked repo' (singular)", async () => {
-    const { screen, render } = await createDOM();
-    await render(
-      <WorkspaceCard workspace={makeWorkspace({ linked_repos_count: 1 })} />,
-    );
-    const linked = screen.querySelector(
-      '[data-testid="workspace-card-linked-count"]',
-    );
-    expect(linked?.textContent).toBe("1 linked repo");
+    expect(linked).toBeFalsy();
   });
 });

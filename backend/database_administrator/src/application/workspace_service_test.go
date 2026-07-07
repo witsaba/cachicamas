@@ -1,13 +1,21 @@
-// Package application_test — workspace_service_test.go covers the 8
-// use cases of WorkspaceService plus its OTel + slog + GitHubAccessor
-// integration. Same patterns as organization_service_test.go:
-// hand-rolled fakeRepo + fakeGitHubAccessor + in-memory OTel span
-// recorder + recording slog handler.
+// Package application_test — workspace_service_test.go covers the 5
+// use cases of WorkspaceService (Create / List / Get / Update /
+// Delete) plus its OTel + slog + GitHubAccessor integration. Same
+// patterns as organization_service_test.go: hand-rolled fakeRepo +
+// fakeGitHubAccessor + in-memory OTel span recorder + recording slog
+// handler.
 //
-// Strict TDD discipline (per openspec/AGENTS.md): this file was written
-// per the 20-task list in sdd/2026-07-06-workspaces/tasks §PR1b-ii.b.
-// Each task pair (RED + GREEN) is captured in the apply-progress
-// artifact at sdd/2026-07-06-workspaces/apply-progress-pr1b-ii-b.
+// Strict TDD discipline (per openspec/AGENTS.md): this file was
+// originally written per the 20-task list in
+// sdd/2026-07-06-workspaces/tasks §PR1b-ii.b. Each task pair
+// (RED + GREEN) was captured in the apply-progress artifact at
+// sdd/2026-07-06-workspaces/apply-progress-pr1b-ii-b.
+//
+// 2026-07-08-workspaces-simplify: dropped the 9 test cases for
+// AddRepository / RemoveRepository / ListRepositories (the
+// workspace_repository table no longer exists) plus the 3 fake
+// methods that backed them. Renamed PrimaryRepo -> Repository
+// in validCreateInput.
 package application_test
 
 import (
@@ -66,23 +74,6 @@ type wsFakeRepo struct {
 	deleteErr   error
 	deleteCalls int
 	deleteID    int64
-
-	// AddLinkedRepo
-	addLinkedErr   error
-	addLinkedCalls int
-	addLinkedArg   *domain.LinkedRepository
-
-	// RemoveLinkedRepo
-	removeLinkedErr   error
-	removeLinkedCalls int
-	removeLinkedWSID  int64
-	removeLinkedRID   int64
-
-	// SelectLinkedRepos
-	selectLinkedResult []domain.LinkedRepository
-	selectLinkedErr    error
-	selectLinkedCalls  int
-	selectLinkedWSID   int64
 }
 
 func (f *wsFakeRepo) Insert(_ context.Context, w *domain.Workspace) (*domain.Workspace, error) {
@@ -147,37 +138,6 @@ func (f *wsFakeRepo) SoftDelete(_ context.Context, id int64) error {
 	f.deleteCalls++
 	f.deleteID = id
 	return f.deleteErr
-}
-
-func (f *wsFakeRepo) AddLinkedRepo(_ context.Context, r *domain.LinkedRepository) (*domain.LinkedRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.addLinkedCalls++
-	f.addLinkedArg = r
-	if f.addLinkedErr != nil {
-		return nil, f.addLinkedErr
-	}
-	out := *r
-	out.ID = 200
-	out.AddedAt = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
-	return &out, nil
-}
-
-func (f *wsFakeRepo) RemoveLinkedRepo(_ context.Context, wsID, rID int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.removeLinkedCalls++
-	f.removeLinkedWSID = wsID
-	f.removeLinkedRID = rID
-	return f.removeLinkedErr
-}
-
-func (f *wsFakeRepo) SelectLinkedRepos(_ context.Context, wsID int64) ([]domain.LinkedRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.selectLinkedCalls++
-	f.selectLinkedWSID = wsID
-	return f.selectLinkedResult, f.selectLinkedErr
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +223,7 @@ func validCreateInput() domain.CreateWorkspaceInput {
 		OrganizationID: 1,
 		OwnerUserID:    int64Ptr(99),
 		Name:           "frontend-app",
-		PrimaryRepo: domain.PrimaryRepository{
+		Repository: domain.Repository{
 			GitHubID: 12345,
 			FullName: "octocat/frontend-app",
 			Owner:    "octocat",
@@ -344,9 +304,9 @@ func TestWorkspaceService_Create_RepoNotAccessible_ReturnsValidationError(t *tes
 	if !errors.As(err, &verr) {
 		t.Fatalf("Create returned %T, want *ValidationError", err)
 	}
-	if verr.Fields["primary_repository"] != domain.MsgRepoNotAccessible {
-		t.Errorf("Fields[primary_repository] = %q, want %q",
-			verr.Fields["primary_repository"], domain.MsgRepoNotAccessible)
+	if verr.Fields["repository"] != domain.MsgRepoNotAccessible {
+		t.Errorf("Fields[repository] = %q, want %q",
+			verr.Fields["repository"], domain.MsgRepoNotAccessible)
 	}
 	if repo.insertCalls != 0 {
 		t.Errorf("repo.Insert calls = %d, want 0 (validation must short-circuit)", repo.insertCalls)
@@ -372,8 +332,8 @@ func TestWorkspaceService_Create_GitHubAccessorError_ReturnsWrapped(t *testing.T
 	if !errors.Is(err, boom) {
 		t.Errorf("err = %v, want it to wrap the github accessor error", err)
 	}
-	if !strings.Contains(err.Error(), "verify primary repo") {
-		t.Errorf("err = %q, want it to include 'verify primary repo' prefix", err.Error())
+	if !strings.Contains(err.Error(), "verify repo") {
+		t.Errorf("err = %q, want it to include 'verify repo' prefix", err.Error())
 	}
 	if repo.insertCalls != 0 {
 		t.Errorf("repo.Insert calls = %d, want 0", repo.insertCalls)
@@ -658,190 +618,5 @@ func TestWorkspaceService_Delete_NotFound(t *testing.T) {
 	var nerr *domain.NotFoundError
 	if !errors.As(err, &nerr) {
 		t.Errorf("err = %T, want *NotFoundError", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T-WS-1BiiB-013/014/015: AddRepository
-// ---------------------------------------------------------------------------
-
-func TestWorkspaceService_AddRepository_HappyPath(t *testing.T) {
-	repo := &wsFakeRepo{}
-	gh := &fakeGitHubAccessor{} // default: everything accessible
-	tr, sr := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
-	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
-	defer cancel()
-
-	out, err := svc.AddRepository(ctx, 7, domain.AddRepositoryInput{
-		GitHubID: 555,
-		FullName: "octocat/lib",
-		Owner:    "octocat",
-		Name:     "lib",
-	})
-	if err != nil {
-		t.Fatalf("AddRepository: %v", err)
-	}
-	if out.ID != 200 {
-		t.Errorf("AddRepository returned ID = %d, want 200", out.ID)
-	}
-	if repo.addLinkedCalls != 1 {
-		t.Errorf("repo.AddLinkedRepo calls = %d, want 1", repo.addLinkedCalls)
-	}
-
-	spans := sr.Ended()
-	if len(spans) != 1 || spans[0].Name() != "workspace.add_repo" {
-		t.Errorf("expected one workspace.add_repo span, got %+v", spans)
-	}
-	attrs := wsAttrMap(spans[0])
-	if attrs["http.method"] != "POST" {
-		t.Errorf("http.method = %q, want POST", attrs["http.method"])
-	}
-	if attrs["http.route"] != "/workspaces/:id/repositories" {
-		t.Errorf("http.route = %q, want /workspaces/:id/repositories", attrs["http.route"])
-	}
-	if attrs["workspace.id"] != "7" {
-		t.Errorf("workspace.id = %q, want 7", attrs["workspace.id"])
-	}
-}
-
-func TestWorkspaceService_AddRepository_DuplicateReturnsConflict(t *testing.T) {
-	repo := &wsFakeRepo{addLinkedErr: &domain.ConflictError{Cause: fmt.Errorf("pgx 23505")}}
-	gh := &fakeGitHubAccessor{}
-	tr, _ := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
-	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
-	defer cancel()
-
-	_, err := svc.AddRepository(ctx, 7, domain.AddRepositoryInput{
-		GitHubID: 555, FullName: "octocat/lib", Owner: "octocat", Name: "lib",
-	})
-	var cerr *domain.ConflictError
-	if !errors.As(err, &cerr) {
-		t.Fatalf("err = %T, want *ConflictError", err)
-	}
-}
-
-func TestWorkspaceService_AddRepository_NotAccessible_ReturnsValidation(t *testing.T) {
-	repo := &wsFakeRepo{}
-	gh := &fakeGitHubAccessor{accessible: map[int64]bool{555: false}}
-	tr, _ := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
-	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
-	defer cancel()
-
-	_, err := svc.AddRepository(ctx, 7, domain.AddRepositoryInput{
-		GitHubID: 555, FullName: "octocat/lib", Owner: "octocat", Name: "lib",
-	})
-	var verr *domain.ValidationError
-	if !errors.As(err, &verr) {
-		t.Fatalf("err = %T, want *ValidationError", err)
-	}
-	if verr.Fields["primary_repository"] != domain.MsgRepoNotAccessible {
-		t.Errorf("Fields[primary_repository] = %q, want %q", verr.Fields["primary_repository"], domain.MsgRepoNotAccessible)
-	}
-	if repo.addLinkedCalls != 0 {
-		t.Errorf("repo.AddLinkedRepo calls = %d, want 0", repo.addLinkedCalls)
-	}
-}
-
-func TestWorkspaceService_AddRepository_NoToken_ReturnsGitHubNotConnected(t *testing.T) {
-	repo := &wsFakeRepo{}
-	gh := &fakeGitHubAccessor{}
-	tr, _ := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err := svc.AddRepository(ctx, 7, domain.AddRepositoryInput{
-		GitHubID: 555, FullName: "octocat/lib", Owner: "octocat", Name: "lib",
-	})
-	var gerr *domain.GitHubNotConnectedError
-	if !errors.As(err, &gerr) {
-		t.Fatalf("err = %T, want *GitHubNotConnectedError", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T-WS-1BiiB-016/017: RemoveRepository
-// ---------------------------------------------------------------------------
-
-func TestWorkspaceService_RemoveRepository_Success(t *testing.T) {
-	repo := &wsFakeRepo{}
-	tr, _ := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := svc.RemoveRepository(ctx, 7, 555); err != nil {
-		t.Fatalf("RemoveRepository: %v", err)
-	}
-	if repo.removeLinkedWSID != 7 || repo.removeLinkedRID != 555 {
-		t.Errorf("repo.RemoveLinkedRepo args = (%d, %d), want (7, 555)", repo.removeLinkedWSID, repo.removeLinkedRID)
-	}
-}
-
-func TestWorkspaceService_RemoveRepository_NotFound(t *testing.T) {
-	repo := &wsFakeRepo{removeLinkedErr: &domain.NotFoundError{Resource: "workspace_repository"}}
-	tr, _ := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := svc.RemoveRepository(ctx, 7, 999)
-	var nerr *domain.NotFoundError
-	if !errors.As(err, &nerr) {
-		t.Fatalf("err = %T, want *NotFoundError", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T-WS-1BiiB-018/019: ListRepositories
-// ---------------------------------------------------------------------------
-
-func TestWorkspaceService_ListRepositories_HappyPath(t *testing.T) {
-	repo := &wsFakeRepo{
-		selectLinkedResult: []domain.LinkedRepository{
-			{ID: 1, WorkspaceID: 7, GitHubID: 555, FullName: "octocat/lib"},
-			{ID: 2, WorkspaceID: 7, GitHubID: 666, FullName: "octocat/util"},
-		},
-	}
-	tr, sr := wsNewTestTracer()
-	logger, _ := wsNewRecordingLogger()
-
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	out, err := svc.ListRepositories(ctx, 7)
-	if err != nil {
-		t.Fatalf("ListRepositories: %v", err)
-	}
-	if len(out) != 2 {
-		t.Errorf("len(out) = %d, want 2", len(out))
-	}
-	if repo.selectLinkedWSID != 7 {
-		t.Errorf("repo.SelectLinkedRepos(wsID) = %d, want 7", repo.selectLinkedWSID)
-	}
-
-	spans := sr.Ended()
-	if len(spans) != 1 || spans[0].Name() != "workspace.list_repos" {
-		t.Errorf("expected one workspace.list_repos span, got %+v", spans)
-	}
-	attrs := wsAttrMap(spans[0])
-	if attrs["workspace_repository.count"] != "2" {
-		t.Errorf("workspace_repository.count = %q, want 2", attrs["workspace_repository.count"])
 	}
 }

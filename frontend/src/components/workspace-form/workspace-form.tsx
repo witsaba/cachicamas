@@ -4,7 +4,7 @@
  * Mirrors the OwnboardingForm structure (zod-style client validation +
  * submit-action discriminated union result), but with two fields:
  *   - `name` (3..60 chars)
- *   - `primary_repository` (selected via the GitHubRepoPicker component)
+ *   - `repository` (selected via the GitHubRepoPicker component)
  *
  * The submit action is injected by the route (so the route controls the
  * navigation side-effect). The repo picker fetcher is also injected (so
@@ -15,7 +15,7 @@ import {
   GitHubRepoPicker,
   type GitHubRepoFetcher,
 } from "~/components/github-repo-picker/github-repo-picker";
-import type { PrimaryRepository } from "~/lib/api";
+import type { Repository } from "~/lib/api";
 
 /**
  * Submit-action discriminated-union result. Mirrors the OwnboardingForm
@@ -25,7 +25,7 @@ export type WorkspaceFormActionResult =
   | { ok: true; id: number }
   | {
       ok: false;
-      field: "name" | "primary_repository" | "form";
+      field: "name" | "repository" | "form";
       message: string;
     };
 
@@ -48,7 +48,7 @@ export const WorkspaceForm = component$<WorkspaceFormProps>(
     const name = useSignal("");
     const nameError = useSignal<string | null>(null);
     const topError = useSignal<string | null>(null);
-    const selectedRepo = useSignal<PrimaryRepository | null>(null);
+    const selectedRepo = useSignal<Repository | null>(null);
     const repoError = useSignal<string | null>(null);
     const submitting = useSignal(false);
     const pickerKey = useSignal(0);
@@ -59,7 +59,7 @@ export const WorkspaceForm = component$<WorkspaceFormProps>(
       topError.value = null;
     });
 
-    const onRepoChange$ = $((repo: PrimaryRepository | null) => {
+    const onRepoChange$ = $((repo: Repository | null) => {
       selectedRepo.value = repo;
       repoError.value = null;
       topError.value = null;
@@ -84,17 +84,17 @@ export const WorkspaceForm = component$<WorkspaceFormProps>(
         return;
       }
       if (!selectedRepo.value) {
-        repoError.value = "Pick a primary repository.";
+        repoError.value = "Pick a the GitHub repository.";
         return;
       }
       submitting.value = true;
       topError.value = null;
       const fd = new FormData();
       fd.append("name", trimmedName);
-      fd.append("primary_repository_id", String(selectedRepo.value.github_id));
-      fd.append("primary_repository_full_name", selectedRepo.value.full_name);
-      fd.append("primary_repository_owner", selectedRepo.value.owner);
-      fd.append("primary_repository_name", selectedRepo.value.name);
+      fd.append("repository_id", String(selectedRepo.value.github_id));
+      fd.append("repository_full_name", selectedRepo.value.full_name);
+      fd.append("repository_owner", selectedRepo.value.owner);
+      fd.append("repository_name", selectedRepo.value.name);
       const result = await action(fd);
       submitting.value = false;
       if (result.ok) {
@@ -103,7 +103,7 @@ export const WorkspaceForm = component$<WorkspaceFormProps>(
       }
       if (result.field === "name") {
         nameError.value = result.message;
-      } else if (result.field === "primary_repository") {
+      } else if (result.field === "repository") {
         repoError.value = result.message;
       } else {
         topError.value = result.message;

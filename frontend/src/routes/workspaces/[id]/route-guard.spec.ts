@@ -88,11 +88,12 @@ describe("workspaces/:id — route guard structural wiring (R-PR-003)", () => {
     // be a code smell indicating someone is mixing the two. We allow
     // it in the file only if both are imported AND useTask$ uses the
     // SSR one (the next test pins the call site).
-    const importBlock = SOURCE.match(
-      new RegExp(
-        "import\\\\s*\\\\{[\\\\s\\\\S]*?\\\\}\\\\s*from\\\\s*['\"]~/lib/api['\"]",
-      ),
-    )?.[0] ?? "";
+    const importBlock =
+      SOURCE.match(
+        new RegExp(
+          "import\\\\s*\\\\{[\\\\s\\\\S]*?\\\\}\\\\s*from\\\\s*['\"]~/lib/api['\"]",
+        ),
+      )?.[0] ?? "";
     const importsGetWorkspace = new RegExp(
       "\\bgetWorkspace\\b\\s*(?:,|\\})",
     ).test(importBlock);

@@ -46,13 +46,12 @@ describe("/workspaces list page (PR2-i)", () => {
             {
               id: 1,
               name: "alpha",
-              primary_repository: {
+repository: {
                 github_id: 100,
                 full_name: "octocat/hello-world",
                 owner: "octocat",
                 name: "hello-world",
               },
-              linked_repos_count: 2,
               created_at: "2026-07-01T00:00:00Z",
             },
           ],

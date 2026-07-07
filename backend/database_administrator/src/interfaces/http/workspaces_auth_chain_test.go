@@ -101,15 +101,6 @@ func (r *fakeWorkspaceRepo) UpdateName(_ context.Context, id int64, name string)
 func (r *fakeWorkspaceRepo) SoftDelete(_ context.Context, id int64) error {
 	return errors.New("fakeWorkspaceRepo.SoftDelete: not implemented in auth-chain test")
 }
-func (r *fakeWorkspaceRepo) AddLinkedRepo(_ context.Context, repo *domain.LinkedRepository) (*domain.LinkedRepository, error) {
-	return nil, errors.New("fakeWorkspaceRepo.AddLinkedRepo: not implemented in auth-chain test")
-}
-func (r *fakeWorkspaceRepo) RemoveLinkedRepo(_ context.Context, workspaceID, repoID int64) error {
-	return errors.New("fakeWorkspaceRepo.RemoveLinkedRepo: not implemented in auth-chain test")
-}
-func (r *fakeWorkspaceRepo) SelectLinkedRepos(_ context.Context, workspaceID int64) ([]domain.LinkedRepository, error) {
-	return nil, errors.New("fakeWorkspaceRepo.SelectLinkedRepos: not implemented in auth-chain test")
-}
 
 // fakeGitHubAccessorForChain is a no-op GitHubAccessor for the
 // auth-chain test: any call returns "not accessible" so the handler

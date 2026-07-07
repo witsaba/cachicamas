@@ -1,6 +1,6 @@
 // Package domain contains the core business types of the database
 // administrator service. This file covers the workspace aggregate
-// (Workspace, PrimaryRepository, LinkedRepository, WorkspaceRepository
+// (Workspace, Repository, WorkspaceRepository
 // port) and its validation + error contracts.
 //
 // Strict TDD discipline (per openspec/AGENTS.md and sdd-init/cachicamas):
@@ -16,6 +16,13 @@
 // in src/infrastructure/postgres/workspace_repo_test.go (PR1b-ii.a) and
 // in src/migration/runner_test.go (the schema invariants covered by
 // TestRunner_Up_WorkspacesPR1bI_*).
+//
+// 2026-07-08-workspaces-simplify changelog:
+//   - PrimaryRepo renamed to Repository (struct field on
+//     CreateWorkspaceInput)
+//   - PrimaryRepository renamed to Repository (type)
+//   - validation rule for the repo field renamed from
+//     primary_repository to repository
 package domain
 
 import (
@@ -24,7 +31,7 @@ import (
 )
 
 // TestValidateCreateWorkspace_RejectsInvalidInputs covers spec R-WS-001
-// S-WS-003 (name required + length rules) + the locked primary-repo
+// S-WS-003 (name required + length rules) + the locked repository
 // requirement: every input below MUST return *ValidationError with the
 // locked fields map key. The shape is intentionally small (one test,
 // many sub-cases) so the RED → GREEN transition is a single function
@@ -37,38 +44,38 @@ func TestValidateCreateWorkspace_RejectsInvalidInputs(t *testing.T) {
 	}{
 		{
 			name:       "empty name",
-			in:         CreateWorkspaceInput{Name: "", PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
+			in:         CreateWorkspaceInput{Name: "", Repository: Repository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
 			wantFields: []string{"name"},
 		},
 		{
 			name:       "name too short (2 chars)",
-			in:         CreateWorkspaceInput{Name: "ab", PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
+			in:         CreateWorkspaceInput{Name: "ab", Repository: Repository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
 			wantFields: []string{"name"},
 		},
 		{
 			name:       "name too long (61 chars)",
-			in:         CreateWorkspaceInput{Name: strings.Repeat("a", 61), PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
+			in:         CreateWorkspaceInput{Name: strings.Repeat("a", 61), Repository: Repository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: "n"}},
 			wantFields: []string{"name"},
 		},
 		{
-			name:       "missing primary repo (GitHubID == 0)",
-			in:         CreateWorkspaceInput{Name: "valid-name", PrimaryRepo: PrimaryRepository{GitHubID: 0, FullName: "o/n", Owner: "o", Name: "n"}},
-			wantFields: []string{"primary_repository"},
+			name:       "missing repo (GitHubID == 0)",
+			in:         CreateWorkspaceInput{Name: "valid-name", Repository: Repository{GitHubID: 0, FullName: "o/n", Owner: "o", Name: "n"}},
+			wantFields: []string{"repository"},
 		},
 		{
-			name:       "primary repo with empty FullName",
-			in:         CreateWorkspaceInput{Name: "valid-name", PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "", Owner: "o", Name: "n"}},
-			wantFields: []string{"primary_repository"},
+			name:       "repo with empty FullName",
+			in:         CreateWorkspaceInput{Name: "valid-name", Repository: Repository{GitHubID: 1, FullName: "", Owner: "o", Name: "n"}},
+			wantFields: []string{"repository"},
 		},
 		{
-			name:       "primary repo with empty Owner",
-			in:         CreateWorkspaceInput{Name: "valid-name", PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "o/n", Owner: "", Name: "n"}},
-			wantFields: []string{"primary_repository"},
+			name:       "repo with empty Owner",
+			in:         CreateWorkspaceInput{Name: "valid-name", Repository: Repository{GitHubID: 1, FullName: "o/n", Owner: "", Name: "n"}},
+			wantFields: []string{"repository"},
 		},
 		{
-			name:       "primary repo with empty Name",
-			in:         CreateWorkspaceInput{Name: "valid-name", PrimaryRepo: PrimaryRepository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: ""}},
-			wantFields: []string{"primary_repository"},
+			name:       "repo with empty Name",
+			in:         CreateWorkspaceInput{Name: "valid-name", Repository: Repository{GitHubID: 1, FullName: "o/n", Owner: "o", Name: ""}},
+			wantFields: []string{"repository"},
 		},
 	}
 	for _, tc := range cases {
@@ -104,7 +111,7 @@ func TestValidateCreateWorkspace_AcceptsValidInput(t *testing.T) {
 			name: "minimum viable (3-char name, all repo fields set)",
 			in: CreateWorkspaceInput{
 				Name: "abc",
-				PrimaryRepo: PrimaryRepository{
+				Repository: Repository{
 					GitHubID: 12345,
 					FullName: "octocat/hello-world",
 					Owner:    "octocat",
@@ -116,7 +123,7 @@ func TestValidateCreateWorkspace_AcceptsValidInput(t *testing.T) {
 			name: "maximum name length (60 chars)",
 			in: CreateWorkspaceInput{
 				Name: strings.Repeat("a", 60),
-				PrimaryRepo: PrimaryRepository{
+				Repository: Repository{
 					GitHubID: 1,
 					FullName: "o/n",
 					Owner:    "o",
@@ -128,7 +135,7 @@ func TestValidateCreateWorkspace_AcceptsValidInput(t *testing.T) {
 			name: "single-char-per-segment repo with hyphenated name",
 			in: CreateWorkspaceInput{
 				Name: "my-team-2026",
-				PrimaryRepo: PrimaryRepository{
+				Repository: Repository{
 					GitHubID: 999999,
 					FullName: "my-org/my-team-2026",
 					Owner:    "my-org",

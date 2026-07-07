@@ -1,21 +1,33 @@
-// Package httpiface — workspace_handler_test.go covers the 8
-// workspace HTTP endpoints. Uses the same in-memory fakeRepo +
-// fakeGitHubAccessor + noop OTel tracer pattern as
-// organization_handler_test.go.
+// Package httpiface — workspace_handler_test.go covers the 5
+// workspace HTTP endpoints (post-2026-07-08-workspaces-simplify).
+// Uses the same in-memory fakeRepo + fakeGitHubAccessor + noop
+// OTel tracer pattern as organization_handler_test.go.
+//
+// 2026-07-08-workspaces-simplify changelog:
+//   - Dropped 4 test functions that exercised the linked-repo
+//     endpoints (AddRepo, RemoveRepo, ListRepos + their
+//     not-accessible / no-leakage variants).
+//   - Dropped the linked-repo bookkeeping on fakeRepo
+//     (linkedRepos map, addRepoErr, addRepoResult, the 3 fake
+//     methods).
+//   - Renamed primary_repository -> repository in the test body
+//     shapes + assertions.
+//   - Updated TestWorkspaceHandler_Get_WireShapeFlat to assert
+//     the new shape (top-level "repository" + no
+//     "linked_repositories").
+//   - Updated TestWorkspaceHandler_Update_DropsPrimaryRepository
+//     to TestWorkspaceHandler_Update_DropsRepository.
 package httpiface_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,22 +51,18 @@ type fakeRepo struct {
 	insertResult *domain.Workspace
 	insertErr    error
 
-	byID          map[int64]*domain.Workspace
-	listByOrg     map[int64][]domain.Workspace
-	linkedRepos   map[int64][]domain.LinkedRepository
-	deletedIDs    map[int64]bool // soft-deleted
-	updateErr     error
-	softDeleteErr error
-	addRepoErr    error
-	addRepoResult *domain.LinkedRepository
+	byID        map[int64]*domain.Workspace
+	listByOrg   map[int64][]domain.Workspace
+	deletedIDs  map[int64]bool // soft-deleted
+	updateErr   error
+	deleteErr   error
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		byID:        map[int64]*domain.Workspace{},
-		listByOrg:   map[int64][]domain.Workspace{},
-		linkedRepos: map[int64][]domain.LinkedRepository{},
-		deletedIDs:  map[int64]bool{},
+		byID:       map[int64]*domain.Workspace{},
+		listByOrg:  map[int64][]domain.Workspace{},
+		deletedIDs: map[int64]bool{},
 	}
 }
 
@@ -93,7 +101,6 @@ func (f *fakeRepo) SelectAllByOrg(_ context.Context, orgID int64, limit int) ([]
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	all := f.listByOrg[orgID]
-	// Filter out soft-deleted.
 	out := make([]domain.Workspace, 0, len(all))
 	for _, w := range all {
 		if !f.deletedIDs[w.ID] {
@@ -127,8 +134,8 @@ func (f *fakeRepo) UpdateName(_ context.Context, id int64, name string) (*domain
 func (f *fakeRepo) SoftDelete(_ context.Context, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.softDeleteErr != nil {
-		return f.softDeleteErr
+	if f.deleteErr != nil {
+		return f.deleteErr
 	}
 	if f.deletedIDs[id] {
 		return &domain.NotFoundError{Resource: "workspace"}
@@ -137,65 +144,7 @@ func (f *fakeRepo) SoftDelete(_ context.Context, id int64) error {
 		return &domain.NotFoundError{Resource: "workspace"}
 	}
 	f.deletedIDs[id] = true
-	delete(f.linkedRepos, id) // cascade (matches the real repo's behavior)
 	return nil
-}
-
-func (f *fakeRepo) AddLinkedRepo(_ context.Context, r *domain.LinkedRepository) (*domain.LinkedRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.addRepoErr != nil {
-		return nil, f.addRepoErr
-	}
-	if f.addRepoResult != nil {
-		return f.addRepoResult, nil
-	}
-	if f.deletedIDs[r.WorkspaceID] {
-		return nil, &domain.NotFoundError{Resource: "workspace"}
-	}
-	// Duplicate check.
-	for _, existing := range f.linkedRepos[r.WorkspaceID] {
-		if existing.GitHubID == r.GitHubID {
-			return nil, &domain.ConflictError{Cause: errors.New("duplicate github_id")}
-		}
-	}
-	out := *r
-	out.ID = int64(len(f.linkedRepos) + 1)
-	out.AddedAt = time.Now().UTC()
-	f.linkedRepos[r.WorkspaceID] = append(f.linkedRepos[r.WorkspaceID], out)
-	return &out, nil
-}
-
-func (f *fakeRepo) RemoveLinkedRepo(_ context.Context, workspaceID, repoID int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.deletedIDs[workspaceID] {
-		return &domain.NotFoundError{Resource: "workspace"}
-	}
-	repos := f.linkedRepos[workspaceID]
-	for i, r := range repos {
-		if r.ID == repoID {
-			f.linkedRepos[workspaceID] = append(repos[:i], repos[i+1:]...)
-			return nil
-		}
-	}
-	return &domain.NotFoundError{Resource: "linked_repository"}
-}
-
-func (f *fakeRepo) SelectLinkedRepos(_ context.Context, workspaceID int64) ([]domain.LinkedRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.deletedIDs[workspaceID] {
-		return nil, &domain.NotFoundError{Resource: "workspace"}
-	}
-	repos := f.linkedRepos[workspaceID]
-	out := make([]domain.LinkedRepository, 0, len(repos))
-	for _, r := range repos {
-		if !f.deletedIDs[workspaceID] {
-			out = append(out, r)
-		}
-	}
-	return out, nil
 }
 
 // fakeGitHubAccessor — in-memory map of accessible repo IDs.
@@ -218,13 +167,7 @@ func (a *fakeGitHubAccessor) IsRepoAccessible(_ context.Context, id int64) (bool
 // Test helpers
 // ---------------------------------------------------------------------------
 
-func newTestEcho() *echo.Echo {
-	e := echo.New()
-	return e
-}
-
 func newTestHandler(repo *fakeRepo, ghAcc *fakeGitHubAccessor, t *testing.T) (httpiface.WorkspaceHandler, *application.WorkspaceService, *echo.Echo) {
-	// unused t
 	_ = t
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	svc := application.NewWorkspaceService(repo, ghAcc, logger, noopTracer())
@@ -247,21 +190,15 @@ func newTestHandler(repo *fakeRepo, ghAcc *fakeGitHubAccessor, t *testing.T) (ht
 			return next(c)
 		}
 	}
-	// Pass `nil` for the GitHub handler to keep the existing
-	// handler-only tests focused; the production-registering assertion
-	// lives in workspaces_auth_chain_test.go and would mount a real
-	// GitHub handler there.
 	httpiface.RegisterAuthenticatedWorkspaceRoutes(
 		e, svc, nil, []echo.MiddlewareFunc{identityInjector}, logger,
 	)
-	// We can't return the unexported handler; the caller uses `e` to dispatch.
 	return httpiface.WorkspaceHandler{}, svc, e
 }
 
 // noopTracer returns the noop tracer from the application package's
-// default. We can't import noop directly without a cycle; use slog
-// default as a stub. The application.NewWorkspaceService with a nil
-// tracer falls back to noop inside the package, so we just pass nil.
+// default. The application.NewWorkspaceService with a nil tracer
+// falls back to noop inside the package, so we just pass nil.
 func noopTracer() trace.Tracer { return nil }
 
 // Set the single-tenant resolver to 1 (test default).
@@ -269,10 +206,7 @@ func init() {
 	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })
 }
 
-// dispatch issues a request through the registered handler. The
-// identity is injected via the X-Test-Identity-ID request header.
-// newTestHandler installs a middleware on the test Echo that reads
-// this header and populates c.Set(IdentityContextKey).
+// dispatch issues a request through the registered handler.
 func dispatch(t *testing.T, e *echo.Echo, method, path string, body any, identity *domain.Identity) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Reader
@@ -289,9 +223,6 @@ func dispatch(t *testing.T, e *echo.Echo, method, path string, body any, identit
 	if body != nil {
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	}
-	// Inject empty token into the request context so handlers that
-	// require a token (Create, AddRepo) get 401 reconnect rather
-	// than a nil-map panic.
 	req = req.WithContext(tokenctx.WithGitHubToken(req.Context(), ""))
 	if identity != nil {
 		req.Header.Set("X-Test-Identity-ID", strconv.FormatInt(identity.ID, 10))
@@ -302,13 +233,11 @@ func dispatch(t *testing.T, e *echo.Echo, method, path string, body any, identit
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests (post-2026-07-08-workspaces-simplify: 5 endpoints covered).
 // ---------------------------------------------------------------------------
 
 // 1. POST /workspaces — empty token pre-flight returns 401 reconnect
-// (R-WS-017). The "happy path" with a valid token is covered by
-// the application-level workspace_service_test.go Create tests
-// (which inject the token via context.Context directly).
+// (R-WS-017).
 func TestWorkspaceHandler_Create_NoToken_Returns401(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{accessible: map[int64]bool{42: true}}
@@ -317,7 +246,7 @@ func TestWorkspaceHandler_Create_NoToken_Returns401(t *testing.T) {
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
 	body := map[string]any{
 		"name": "my-workspace",
-		"primary_repository": map[string]any{
+		"repository": map[string]any{
 			"github_id": 42,
 			"full_name": "octocat/hello",
 			"owner":     "octocat",
@@ -328,16 +257,14 @@ func TestWorkspaceHandler_Create_NoToken_Returns401(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 (github_not_connected), got %d: %s", rec.Code, rec.Body.String())
 	}
-	// Verify the locked envelope shape.
-	if !strings.Contains(rec.Body.String(), "github_not_connected") {
+	if !regexp.MustCompile(`github_not_connected`).MatchString(rec.Body.String()) {
 		t.Errorf("expected envelope code=github_not_connected, got: %s", rec.Body.String())
 	}
 }
 
-// TestWorkspaceHandler_Create_ValidationError — body with empty fields
-// triggers the validator. The empty-token pre-flight runs AFTER
-// validation, so validation fires first; we expect 400 with
-// fields.name + fields.primary_repository.
+// TestWorkspaceHandler_Create_ValidationError — empty body triggers
+// the validator; validation fires BEFORE the empty-token
+// pre-flight.
 func TestWorkspaceHandler_Create_ValidationError(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{accessible: map[int64]bool{42: true}}
@@ -345,8 +272,8 @@ func TestWorkspaceHandler_Create_ValidationError(t *testing.T) {
 
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
 	body := map[string]any{
-		"name":               "",
-		"primary_repository": map[string]any{},
+		"name":       "",
+		"repository": map[string]any{},
 	}
 	rec := dispatch(t, e, http.MethodPost, "/workspaces", body, identity)
 	if rec.Code != http.StatusBadRequest {
@@ -354,15 +281,15 @@ func TestWorkspaceHandler_Create_ValidationError(t *testing.T) {
 	}
 }
 
-// TestWorkspaceHandler_NoTokenResponse_NoLeakage — Token-leak
-// regression: no token-shaped string appears in any response body.
+// TestWorkspaceHandler_NoTokenResponse_NoLeakage — token-leak regression:
+// no token-shaped string appears in any response body.
 func TestWorkspaceHandler_NoTokenResponse_NoLeakage(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{accessible: map[int64]bool{}}
 	_, _, e := newTestHandler(repo, gh, t)
 
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-	body := map[string]any{"name": "ws", "primary_repository": map[string]any{"github_id": 42}}
+	body := map[string]any{"name": "ws", "repository": map[string]any{"github_id": 42}}
 	rec := dispatch(t, e, http.MethodPost, "/workspaces", body, identity)
 
 	if tokenLeaked(t, rec.Body.Bytes()) {
@@ -375,7 +302,6 @@ func TestWorkspaceHandler_Delete_Returns204(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{}
 	_, _, e := newTestHandler(repo, gh, t)
-	// Seed one workspace.
 	w := seedWorkspace(t, repo, 1)
 
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
@@ -393,9 +319,7 @@ func TestWorkspaceHandler_Delete_AlreadyDeleted_Returns404(t *testing.T) {
 	w := seedWorkspace(t, repo, 1)
 
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-	// First delete: 204.
 	dispatch(t, e, http.MethodDelete, "/workspaces/"+strconv.FormatInt(w.ID, 10), nil, identity)
-	// Second delete: 404.
 	rec := dispatch(t, e, http.MethodDelete, "/workspaces/"+strconv.FormatInt(w.ID, 10), nil, identity)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
@@ -414,9 +338,13 @@ func TestWorkspaceHandler_Get_NotFound_Returns404(t *testing.T) {
 	}
 }
 
-// TestWorkspaceHandler_Update_DropsPrimaryRepository — locked design
-// decision: PATCH silently ignores primary_repository.
-func TestWorkspaceHandler_Update_DropsPrimaryRepository(t *testing.T) {
+// TestWorkspaceHandler_Update_DropsRepository — locked design decision:
+// PATCH silently ignores the repository field (the repo is the
+// workspace's identity and cannot change post-create).
+//
+// 2026-07-08-workspaces-simplify: renamed from
+// DropsPrimaryRepository; the wire field is now "repository".
+func TestWorkspaceHandler_Update_DropsRepository(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{}
 	_, _, e := newTestHandler(repo, gh, t)
@@ -425,7 +353,7 @@ func TestWorkspaceHandler_Update_DropsPrimaryRepository(t *testing.T) {
 	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
 	body := map[string]any{
 		"name": "new-name",
-		"primary_repository": map[string]any{
+		"repository": map[string]any{
 			"github_id": 999,
 			"full_name": "attacker/repo",
 		},
@@ -434,25 +362,13 @@ func TestWorkspaceHandler_Update_DropsPrimaryRepository(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	// Verify the primary repo did NOT change.
 	got, _ := repo.SelectByID(context.Background(), w.ID)
-	if got.PrimaryRepoGitHubID != w.PrimaryRepoGitHubID {
-		t.Errorf("primary repo changed: was %d, got %d", w.PrimaryRepoGitHubID, got.PrimaryRepoGitHubID)
+	if got.RepoGitHubID != w.RepoGitHubID {
+		t.Errorf("repo changed: was %d, got %d", w.RepoGitHubID, got.RepoGitHubID)
 	}
 	if got.Name != "new-name" {
 		t.Errorf("expected name 'new-name', got %q", got.Name)
 	}
-}
-
-// TestWorkspaceHandler_AddRepo_NotAccessible_Returns422.
-func TestWorkspaceHandler_AddRepo_NotAccessible_Returns422(t *testing.T) {
-	// Skipped: the AddRepo path goes through requireGitHubToken() +
-	// IsRepoAccessible. With an empty token (which our dispatch sets)
-	// it short-circuits to 401, not 422. To test the 422 path we'd
-	// need to inject a non-empty token AND mark the repo as
-	// inaccessible; that's covered in the application layer's
-	// WorkspaceService.AddRepository test, which is more focused.
-	t.Skip("see workspace_service_test.go AddRepository test for the not-accessible path")
 }
 
 // TestWorkspaceHandler_List_ReturnsWorkspaces.
@@ -495,19 +411,22 @@ func TestWorkspaceHandler_Get_NoLeakage(t *testing.T) {
 	}
 }
 
-// TestWorkspaceHandler_Get_WireShapeFlat — 2026-07-07 regression for
-// the SSR 500 ("Cannot read properties of undefined (reading
-// 'full_name')") on /workspaces/:id. The frontend's WorkspaceDetail
-// interface reads the workspace fields flat at the top level (id,
-// name, primary_repository, etc.) with linked_repositories as a
-// sibling key. The Get handler MUST return that exact shape, NOT a
-// wrapper like {workspace: {...}, linked_repositories: [...]}.
+// TestWorkspaceHandler_Get_WireShapeFlat — 2026-07-07 / 2026-07-08
+// regression for the SSR 500. The frontend's WorkspaceDetail
+// interface reads the workspace fields flat at the top level:
 //
-// Pre-fix, Get returned the wrapper shape (the response struct was
-// {Workspace workspaceResponse `json:"workspace"`; LinkedRepositories ...})
-// while Create/Update returned the flat shape. The frontend decoder
-// treated every top-level field as undefined → primaryRepo.full_name
-// crashed the SSR render with TypeError.
+//   - id
+//   - name
+//   - repository   (the workspace's only repo, post-simplify)
+//   - created_at
+//   - updated_at
+//
+// NOT a wrapper like {workspace: {...}, linked_repositories: [...]}.
+// Pre-fix (PR1c-ii era) Get returned the wrapper shape while
+// Create/Update returned flat — the frontend decoder treated every
+// top-level field as undefined → primaryRepo.full_name crashed SSR
+// with TypeError. 2026-07-08-workspaces-simplify removes the
+// linked_repositories field entirely.
 func TestWorkspaceHandler_Get_WireShapeFlat(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{}
@@ -523,16 +442,19 @@ func TestWorkspaceHandler_Get_WireShapeFlat(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	// Workspace fields MUST be at the top level.
-	for _, key := range []string{"id", "name", "primary_repository", "created_at", "updated_at"} {
+	for _, key := range []string{"id", "name", "repository", "created_at", "updated_at"} {
 		if _, ok := body[key]; !ok {
 			t.Errorf("GET /workspaces/:id response missing top-level key %q (body=%s)", key, rec.Body.String())
 		}
 	}
-	// linked_repositories MUST be at the top level too.
-	if _, ok := body["linked_repositories"]; !ok {
-		t.Errorf("GET /workspaces/:id response missing top-level key linked_repositories (body=%s)", rec.Body.String())
+	// legacy keys MUST NOT be present (post-simplify we no longer ship
+	// them at all).
+	for _, legacy := range []string{"primary_repository", "linked_repositories"} {
+		if _, ok := body[legacy]; ok {
+			t.Errorf("GET /workspaces/:id response should not carry legacy key %q (body=%s)", legacy, rec.Body.String())
+		}
 	}
-	// The legacy wrapper MUST NOT be present.
+	// The wrapper MUST NOT be present.
 	if _, ok := body["workspace"]; ok {
 		t.Errorf("GET /workspaces/:id response still has the legacy wrapper key %q (body=%s)", "workspace", rec.Body.String())
 	}
@@ -552,108 +474,12 @@ func TestWorkspaceHandler_Patch_NoLeakage(t *testing.T) {
 	}
 }
 
-// TestWorkspaceHandler_AddRepo_NoLeakage — even when the repo is
-// accessible, the response body must not include any token field.
-func TestWorkspaceHandler_AddRepo_NoLeakage(t *testing.T) {
-	repo := newFakeRepo()
-	gh := &fakeGitHubAccessor{accessible: map[int64]bool{42: true}}
-	_, _, e := newTestHandler(repo, gh, t)
-	w := seedWorkspace(t, repo, 1)
-	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-
-	body := map[string]any{
-		"github_id": 42,
-		"full_name": "octocat/hello",
-		"owner":     "octocat",
-		"name":      "hello",
-	}
-	rec := dispatch(t, e, http.MethodPost,
-		"/workspaces/"+strconv.FormatInt(w.ID, 10)+"/repositories",
-		body, identity)
-	// We don't care about the status code (may be 401 if pre-flight
-	// rejects the empty token); we only care that the body does NOT
-	// contain a token-shaped string.
-	if tokenLeaked(t, rec.Body.Bytes()) {
-		t.Errorf("token-shaped string leaked in addRepo response: %s", rec.Body.String())
-	}
-}
-
-// TestWorkspaceHandler_RemoveRepo_NoContent.
-func TestWorkspaceHandler_RemoveRepo_NoContent(t *testing.T) {
-	repo := newFakeRepo()
-	gh := &fakeGitHubAccessor{}
-	_, _, e := newTestHandler(repo, gh, t)
-	w := seedWorkspace(t, repo, 1)
-	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-
-	// Seed a linked repo via the fake's add path.
-	linked, err := repo.AddLinkedRepo(context.Background(), &domain.LinkedRepository{
-		WorkspaceID: w.ID,
-		GitHubID:    99,
-		FullName:    "octocat/linked",
-		Owner:       "octocat",
-		Name:        "linked",
-	})
-	if err != nil {
-		t.Fatalf("seed linked repo: %v", err)
-	}
-
-	rec := dispatch(t, e, http.MethodDelete,
-		"/workspaces/"+strconv.FormatInt(w.ID, 10)+"/repositories/"+strconv.FormatInt(linked.ID, 10),
-		nil, identity)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestWorkspaceHandler_ListRepos.
-func TestWorkspaceHandler_ListRepos(t *testing.T) {
-	repo := newFakeRepo()
-	gh := &fakeGitHubAccessor{}
-	_, _, e := newTestHandler(repo, gh, t)
-	w := seedWorkspace(t, repo, 1)
-	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-	rec := dispatch(t, e, http.MethodGet,
-		"/workspaces/"+strconv.FormatInt(w.ID, 10)+"/repositories",
-		nil, identity)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestWorkspaceHandler_ListRepos_NoLeakage.
-func TestWorkspaceHandler_ListRepos_NoLeakage(t *testing.T) {
-	repo := newFakeRepo()
-	gh := &fakeGitHubAccessor{}
-	_, _, e := newTestHandler(repo, gh, t)
-	w := seedWorkspace(t, repo, 1)
-	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
-	rec := dispatch(t, e, http.MethodGet,
-		"/workspaces/"+strconv.FormatInt(w.ID, 10)+"/repositories",
-		nil, identity)
-	if tokenLeaked(t, rec.Body.Bytes()) {
-		t.Errorf("token-shaped string leaked in listRepos response: %s", rec.Body.String())
-	}
-}
-
-// TestWorkspaceHandler_NoIdentity_ReturnsValidationError — the
-// handler-level defense in depth. With no identity in the Echo
-// context (e.g. a unit test that bypasses the production auth chain
-// or an internal misconfiguration), the handler returns 400 +
-// validation envelope with field "auth: Authentication required.".
-//
-// In production the auth chain (IdentityFromCookie →
-// LoadGitHubTokenMiddleware → handler, mounted by
-// RegisterAuthenticatedWorkspaceRoutes) runs BEFORE the handler and
-// short-circuits anonymous requests with 401 + code=unauthorized.
-// Therefore this 400 path is unreachable from real traffic, but
-// keeping it here catches any future regression that reintroduces a
-// public entry-point for the workspace endpoints.
-//
-// End-to-end assertion that the auth chain 401s anonymous requests
-// lives in TestWorkspaces_AuthChain_NoCookie_Returns401FromMiddleware
-// (workspaces_auth_chain_test.go) and uses the production middleware
-// shape.
+// TestWorkspaceHandler_NoIdentity_ReturnsValidationError — defense in
+// depth: with no identity in the Echo context, the handler returns
+// 400 + validation envelope. In production the auth chain runs
+// BEFORE the handler and 401s anonymous requests; this 400 path is
+// unreachable from real traffic. End-to-end auth-chain coverage
+// lives in workspaces_auth_chain_test.go.
 func TestWorkspaceHandler_NoIdentity_ReturnsValidationError(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{}
@@ -661,6 +487,44 @@ func TestWorkspaceHandler_NoIdentity_ReturnsValidationError(t *testing.T) {
 	rec := dispatch(t, e, http.MethodGet, "/workspaces", nil, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 (no identity, defense in depth), got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWorkspaceHandler_Get_WireShapeFlat_Summary — companion to
+// TestWorkspaceHandler_Get_WireShapeFlat: also assert the LIST
+// endpoint returns `workspaces[]` items WITHOUT the legacy keys
+// (primary_repository, linked_repos_count). This is the wire shape
+// the frontend WorkspaceSummary type reads.
+func TestWorkspaceHandler_List_WireShape1to1(t *testing.T) {
+	repo := newFakeRepo()
+	gh := &fakeGitHubAccessor{}
+	_, _, e := newTestHandler(repo, gh, t)
+	_ = seedWorkspace(t, repo, 1)
+	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
+	rec := dispatch(t, e, http.MethodGet, "/workspaces", nil, identity)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Workspaces []map[string]json.RawMessage `json:"workspaces"`
+		Truncated  bool                        `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Workspaces) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(body.Workspaces))
+	}
+	item := body.Workspaces[0]
+	for _, key := range []string{"id", "name", "repository", "created_at"} {
+		if _, ok := item[key]; !ok {
+			t.Errorf("list item missing %q (item=%v)", key, item)
+		}
+	}
+	for _, legacy := range []string{"primary_repository", "linked_repos_count"} {
+		if _, ok := item[legacy]; ok {
+			t.Errorf("list item should not carry legacy key %q (item=%v)", legacy, item)
+		}
 	}
 }
 
@@ -672,13 +536,13 @@ func seedWorkspace(t *testing.T, repo *fakeRepo, orgID int64) *domain.Workspace 
 	t.Helper()
 	uid := int64(1)
 	w, err := repo.Insert(context.Background(), &domain.Workspace{
-		OrganizationID:      orgID,
-		OwnerUserID:         &uid,
-		Name:                "seeded",
-		PrimaryRepoGitHubID: 7,
-		PrimaryRepoFullName: "octocat/seeded",
-		PrimaryRepoOwner:    "octocat",
-		PrimaryRepoName:     "seeded",
+		OrganizationID: orgID,
+		OwnerUserID:    &uid,
+		Name:           "seeded",
+		RepoGitHubID:   7,
+		RepoFullName:   "octocat/seeded",
+		RepoOwner:      "octocat",
+		RepoName:       "seeded",
 	})
 	if err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -686,37 +550,10 @@ func seedWorkspace(t *testing.T, repo *fakeRepo, orgID int64) *domain.Workspace 
 	return w
 }
 
-// tokenRegex matches `gho_<36+ alnum>` (GitHub OAuth token format) and
-// `gho_<varies>` more loosely. The T-WS-1Cii-024 introspection test.
+// tokenRegex matches `gho_<16+ alnum>` (GitHub OAuth token format).
 var tokenRegex = regexp.MustCompile(`gho_[a-zA-Z0-9]{16,}`)
 
 func tokenLeaked(t *testing.T, body []byte) bool {
 	t.Helper()
 	return tokenRegex.Match(body)
 }
-
-func decodeWorkspaceResp(t *testing.T, body []byte) struct {
-	Name string `json:"name"`
-} {
-	t.Helper()
-	var out struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatalf("decode: %v (body=%s)", err, body)
-	}
-	return out
-}
-
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return b
-}
-
-// silence unused imports when this file is extended.
-var _ = fmt.Sprintf
-var _ = strings.Contains
