@@ -35,12 +35,17 @@ describe("Workspace detail page module", () => {
   });
 
   test("TRIANGULATE-T-WS-2ii-013: getWorkspace 404 → 'not found' message", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "not_found", message: "Workspace not found." }),
-        { status: 404 },
-      ),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "not_found",
+            message: "Workspace not found.",
+          }),
+          { status: 404 },
+        ),
+      );
     const res = await fetch("http://localhost:8080/workspaces/999");
     expect(res.status).toBe(404);
     const body = (await res.json()) as { message: string };
