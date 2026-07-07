@@ -16,10 +16,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-    
+
 const here = fileURLToPath(import.meta.url);
 const routePath = here.replace(/\/route-guard\.spec\.ts$/, "/index.tsx");
-    
+
 describe("[routes/home] protected-route wiring", () => {
   it("imports requireSession and SignInRequiredCard (R-HP-008 / S-HP-071)", () => {
     const source = readFileSync(routePath, "utf8");
@@ -28,7 +28,7 @@ describe("[routes/home] protected-route wiring", () => {
       /from\s+["']~\/components\/sign-in-required-card\/sign-in-required-card["']/,
     );
   });
-    
+
   it("reads useSession, dispatches the anon branch with /home pathname (R-HP-003 / S-HP-020)", () => {
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain("useSession()");
@@ -38,7 +38,7 @@ describe("[routes/home] protected-route wiring", () => {
     expect(source).toContain('description="Sign in to view your home."');
     expect(source).toContain("redirectTo={guard.pathname}");
   });
-    
+
   it("renders the personalised greeting heading on the auth branch (R-HP-001 / S-HP-001)", () => {
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain('data-testid="home-heading"');
@@ -46,20 +46,18 @@ describe("[routes/home] protected-route wiring", () => {
     // The fallback heading for empty/null name claims.
     expect(source).toContain("Welcome");
   });
-    
-it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
+
+  it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)", () => {
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain('data-testid="home-paragraph"');
   });
-    
+
   // R-OW-007 / S-OW-063 — ownboarding helper wired in.
   it("imports requireOwnboarding (R-OW-007 / S-OW-063)", () => {
     const source = readFileSync(routePath, "utf8");
-    expect(source).toMatch(
-/from\s+["']~\/lib\/require-ownboarding["']/,
-    );
+    expect(source).toMatch(/from\s+["']~\/lib\/require-ownboarding["']/);
   });
-    
+
   // R-OW-007 / S-OW-064 amended (S-WS-AUTH-CHAIN-SSR-001):
   //   The ownboarding guard moved out of a routeLoader$ and into the
   //   onRequest middleware so the SSR cookie context can be captured
@@ -70,8 +68,8 @@ it("renders the placeholder paragraph on the auth branch (R-HP-002 / S-HP-010)",
     const source = readFileSync(routePath, "utf8");
     expect(source).toContain("onRequest");
     expect(source).toContain("requireOwnboarding(event)");
-    // Captures the inbound cookie before the guards run so SSR
+    // Captures the inbound cookie BEFORE the guards run so SSR
     // fetches in useTask$ can re-attach it.
-    expect(source).toContain("withSsrCookieContext(event");
+    expect(source).toContain("setSsrCookieHeader(event.request.headers.get(\"cookie\") ?? \"\")");
   });
 });

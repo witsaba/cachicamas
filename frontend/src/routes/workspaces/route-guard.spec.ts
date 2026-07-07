@@ -19,11 +19,11 @@ describe("/workspaces route-guard wiring (PR2-i)", () => {
   //   The reason is that the same middleware captures the inbound
   //   Cookie header into AsyncLocalStorage so SSR-time fetches in
   //   useTask$ can re-attach it (see ~/lib/with-ssr-cookie.ts).
-  it("T-WS-2i-014 amended: index.tsx wires requireAuthRedirect + requireOwnboarding in onRequest", () => {
+it("T-WS-2i-014 amended: index.tsx wires requireAuthRedirect + requireOwnboarding in onRequest", () => {
     const src = readFileSync(`${HERE}index.tsx`, "utf8");
     expect(src).toContain("requireAuthRedirect");
     expect(src).toContain("requireOwnboarding");
     expect(src).toContain("onRequest");
-    expect(src).toContain("withSsrCookieContext");
+    expect(src).toContain("setSsrCookieHeader(event.request.headers.get(\"cookie\") ?? \"\")");
   });
 });

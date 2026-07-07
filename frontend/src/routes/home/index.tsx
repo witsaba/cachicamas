@@ -13,15 +13,16 @@
  *
  * SSR cookie forwarding (S-WS-AUTH-CHAIN-SSR-001):
  *   `onRequest` runs first and captures the inbound Cookie header into
- *   AsyncLocalStorage. `listWorkspacesSSR` (called from useTask$)
- *   reads from that store and re-attaches the cookie to the outgoing
- *   SSR fetch to the backend. Without this forwarding the backend's
+ *   the module-level ssrCookie header (sync, no Promise). The auth +
+ *   ownboarding guards run AFTER that capture and throw synchronously
+ *   to short-circuit anonymous requests. `listWorkspacesSSR` (called
+ *   from useTask$) reads the captured header and re-attaches the cookie
+ *   to the outgoing SSR fetch. Without this forwarding the backend's
  *   IdentityFromCookie middleware (commit fbe62c0) would 401 the
- *   request and the page would render an error block.
+ *   request.
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
-import { type DocumentHead } from "@builder.io/qwik-city";
-import type { RequestHandler } from "@builder.io/qwik-city";
+import { type DocumentHead, type RequestHandler } from "@builder.io/qwik-city";
 import { HomeWorkspacesSection } from "~/components/home-workspaces-section/home-workspaces-section";
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import {
@@ -32,16 +33,18 @@ import {
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
 import { requireSession } from "~/lib/require-session";
-import { withSsrCookieContext } from "~/lib/with-ssr-cookie";
+import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
-// Capture the inbound cookie first (for SSR-time api fetches), then
-// run the auth + ownboarding guards.
 export const onRequest: RequestHandler = (event) => {
-  return withSsrCookieContext(event, () => {
-    requireAuthRedirect(event);
-    requireOwnboarding(event);
-  });
+  // Capture the inbound cookie SYNCHRONOUSLY before the guards can
+  // throw. Wrapping these in an async lambda would turn the
+  // `event.redirect(...)` throws into rejected Promises, which Qwik
+  // City handles differently from sync throws and crashes the
+  // server with "Response already sent".
+  setSsrCookieHeader(event.request.headers.get("cookie") ?? "");
+  requireAuthRedirect(event);
+  requireOwnboarding(event);
 };
 
 // Module-level QRLs so the Qwik optimizer can transform them (inline
@@ -66,10 +69,9 @@ export default component$(() => {
   const name = guard.session?.user?.name ?? "";
   const heading = name.length > 0 ? `Welcome, ${name}` : "Welcome";
 
-  // Workspaces section state. Initial values come from the SSR-time
-  // fetch (listWorkspacesSSR reads the cookie from AsyncLocalStorage
-  // during SSR; from the browser it falls through to the `/api` proxy
-  // and gets the cookie auto-attached).
+  // Workspaces section state. Initial values come from useTask$ which
+  // calls listWorkspacesSSR — that helper reads the cookie from the
+  // module-level ssrCookie header (set in onRequest above).
   const loading = useSignal(true);
   const error = useSignal<string | null>(null);
   const workspaces = useSignal<WorkspaceSummary[]>([]);
@@ -91,9 +93,11 @@ export default component$(() => {
   useTask$(async () => {
     loading.value = true;
     error.value = null;
-    // listWorkspacesSSR reads the cookie from AsyncLocalStorage in SSR
-    // (the withSsrCookieContext middleware captured it from the inbound
-    // request). Browser-side calls bypass this helper.
+    // listWorkspacesSSR reads the cookie from the module-level
+    // header (set during this request's onRequest). Browser-side
+    // calls bypass this helper — useTask$ only runs on the SSR /
+    // hydration side, and at hydration time the cookie has already
+    // been used by the server path.
     const result = await listWorkspacesSSR();
     if (result.ok) {
       workspaces.value = result.value.workspaces;

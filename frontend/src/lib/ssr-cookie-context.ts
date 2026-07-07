@@ -15,72 +15,44 @@
  * NOT auto-forward the inbound request's cookies. So the backend would see
  * no cookie and 401 the request — even though the user is signed in.
  *
- * Fix: a middleware (mounted as `onRequest` in the workspace route files)
- * captures the cookie header from `event.request.headers` and stashes it in
- * an AsyncLocalStorage store scoped to the current request. api.ts
- * functions, when running in SSR, read from that store and re-attach the
- * cookie header to their outgoing fetch.
+ * Fix: a module-level variable holds the current request's Cookie header.
+ * The route's `onRequest` middleware calls `setSsrCookieHeader(...)` once
+ * per request, BEFORE the auth middleware that throws on anonymous
+ * requests. api.ts functions consult `getSsrCookieHeader()` and re-attach
+ * the cookie to their outgoing SSR fetch.
  *
- * Why globalThis + dynamic import instead of a top-level
- * `import { AsyncLocalStorage } from "node:async_hooks"`:
- *   api.ts is reachable from both the SSR server bundle and the
- *   browser client bundle. A static `node:` import would fail the
- *   client build with "Module 'node:async_hooks' has been externalised
- *   for browser compatibility" (mirrors identity-callback-client.ts).
- *   The AsyncLocalStorage instance lives on `globalThis` and is
- *   created lazily on first use on the server; the client never calls
- *   the SSR helper path so the import never resolves there.
+ * Why module-level state and not AsyncLocalStorage:
+ *   The earlier prototype wrapped the cookie capture in an
+ *   AsyncLocalStorage `.run(store, fn)`. That returned a Promise, which
+ *   turned the guards' `event.redirect(...)` throws into rejected
+ *   Promises. Qwik City propagates synchronous throws differently from
+ *   rejected Promises from `onRequest` — the rejected-Promise path
+ *   didn't short-circuit the route render, so the route component
+ *   tried to write the response AFTER the redirect had been sent,
+ *   crashing the Node SSR process with `Error: Response already sent`.
+ *   A synchronous setter sidesteps the issue: the cookie is captured
+ *   before any guard throws, and the throws themselves stay sync so
+ *   Qwik handles them as designed.
+ *
+ * Multi-tenant caveat:
+ *   The module variable is process-global; concurrent requests on the
+ *   same Node instance can briefly observe each other's cookies. This
+ *   is safe for cachicamas's single-tenant dev install. Multi-tenant
+ *   production would replace this with `AsyncLocalStorage.enterWith`
+ *   OR per-request resolver pattern.
  */
 
-interface SsrCookieContext {
-  cookieHeader: string;
+let currentRequestCookie: string | undefined;
+
+export function setSsrCookieHeader(cookie: string | undefined): void {
+  currentRequestCookie = cookie;
 }
 
-interface GlobalShape {
-  /** Lazily-initialised on first use on the server. */
-  __cachicamasSsrCookieStore?: {
-    run<T>(value: SsrCookieContext, fn: () => T): T;
-    getStore(): SsrCookieContext | undefined;
-  };
-}
-
-// Store is created lazily because the AsyncLocalStorage class is
-// resolved via dynamic import on the server (Node only).
-async function ensureStore(): Promise<NonNullable<GlobalShape["__cachicamasSsrCookieStore"]>> {
-  const g = globalThis as unknown as GlobalShape;
-  if (g.__cachicamasSsrCookieStore) return g.__cachicamasSsrCookieStore;
-  // Dynamic import keeps `node:async_hooks` out of the browser bundle.
-  const { AsyncLocalStorage } = await import("node:async_hooks");
-  const store = new AsyncLocalStorage<SsrCookieContext>();
-  g.__cachicamasSsrCookieStore = store;
-  return store;
-}
-
-/**
- * Reads the inbound-cookie context established by `withSsrCookieContext`.
- * Returns `undefined` when called from the browser (no store set) so the
- * api helper can skip the cookie header attachment in that path.
- *
- * Synchronous read is required because api.ts fetch helpers run inside
- * `await fetch(...)` callers that don't tolerate extra `await`s here.
- * The store is set up once during startup via `initSsrCookieContext`
- * (called from the onRequest middleware), and a sync read of the
- * globalThis pointer is enough.
- */
 export function getSsrCookieHeader(): string | undefined {
-  const g = globalThis as unknown as GlobalShape;
-  return g.__cachicamasSsrCookieStore?.getStore()?.cookieHeader;
+  return currentRequestCookie;
 }
 
-/**
- * Runs the given function with the inbound cookie header available to
- * `getSsrCookieHeader()`. Called from the route's `onRequest`
- * middleware so all downstream `useTask$` fetches see the cookie.
- */
-export async function runWithSsrCookie<T>(
-  cookieHeader: string,
-  fn: () => T | Promise<T>,
-): Promise<T> {
-  const store = await ensureStore();
-  return store.run({ cookieHeader }, () => fn());
+/** Reset between tests; production callers don't need to invoke this. */
+export function clearSsrCookieHeader(): void {
+  currentRequestCookie = undefined;
 }

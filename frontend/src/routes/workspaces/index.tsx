@@ -17,11 +17,11 @@
  *
  * SSR cookie forwarding (S-WS-AUTH-CHAIN-SSR-001):
  *   `onRequest` runs first and captures the inbound Cookie header into
- *   AsyncLocalStorage. `listWorkspacesSSR` (called from useTask$)
- *   reads from that store and re-attaches the cookie to the outgoing
- *   SSR fetch to the backend. Without this forwarding the backend's
- *   IdentityFromCookie middleware (commit fbe62c0) would 401 the
- *   request and the page would render an error block.
+ *   the module-level ssrCookie header (sync, no Promise). The auth +
+ *   ownboarding guards run AFTER that capture and throw synchronously
+ *   to short-circuit anonymous requests. `listWorkspacesSSR` (called
+ *   from useTask$) reads the captured header and re-attaches the
+ *   cookie to the outgoing SSR fetch.
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
 import { type DocumentHead, type RequestHandler } from "@builder.io/qwik-city";
@@ -32,17 +32,15 @@ import {
 } from "~/lib/api";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
-import { withSsrCookieContext } from "~/lib/with-ssr-cookie";
+import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { WorkspaceCard } from "~/components/workspace-card/workspace-card";
 
-// Capture inbound cookie first (for SSR-time api fetches), then run
-// the auth + ownboarding guards. Plain RequestHandler — no routeLoader
-// needed because cookies flow through AsyncLocalStorage.
 export const onRequest: RequestHandler = (event) => {
-  return withSsrCookieContext(event, () => {
-    requireAuthRedirect(event);
-    requireOwnboarding(event);
-  });
+  // Capture the inbound cookie SYNCHRONOUSLY before the guards throw
+  // (see comment in routes/home/index.tsx for the rationale).
+  setSsrCookieHeader(event.request.headers.get("cookie") ?? "");
+  requireAuthRedirect(event);
+  requireOwnboarding(event);
 };
 
 export default component$(() => {
@@ -65,9 +63,6 @@ export default component$(() => {
   useTask$(async () => {
     loading.value = true;
     error.value = null;
-    // listWorkspacesSSR reads the cookie from AsyncLocalStorage in SSR.
-    // Browser-side calls fall through to the regular listWorkspaces
-    // (relative /api, browser auto-attaches cookie).
     const result = await listWorkspacesSSR();
     if (result.ok) {
       workspaces.value = result.value.workspaces;
