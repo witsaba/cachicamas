@@ -164,6 +164,27 @@ type linkedRepoResponse struct {
 	AddedAt  string `json:"added_at"`
 }
 
+// workspaceDetailResponse is the wire shape returned by Get
+// (GET /workspaces/:id). The frontend's WorkspaceDetail interface
+// reads the workspace fields at the top level (id, name,
+// primary_repository, created_at, updated_at) and reads
+// linked_repositories as a sibling key. Embedding workspaceResponse
+// promotes its fields to the top level so the JSON shape is flat.
+//
+// 2026-07-07 regression: this used to be a hand-rolled anonymous
+// struct with `Workspace workspaceResponse` and a `json:"workspace"`
+// tag, producing `{workspace: {...}, linked_repositories: [...]}`.
+// That broke the frontend's `WorkspaceDetail` interface (which
+// reads fields flat) and crashed SSR with
+// `TypeError: Cannot read properties of undefined (reading
+// 'full_name')` on `primaryRepo.full_name`. Embedding + dropping
+// the json:"workspace" tag fixes the wire shape without changing
+// any of the field tags on workspaceResponse itself.
+type workspaceDetailResponse struct {
+	workspaceResponse
+	LinkedRepositories []linkedRepoResponse `json:"linked_repositories"`
+}
+
 // workspacesListResponse wraps a slice for the locked envelope shape.
 type workspacesListResponse struct {
 	Workspaces []workspaceSummaryResponse `json:"workspaces"`
@@ -313,11 +334,8 @@ func (h *WorkspaceHandler) Get(c *echo.Context) error {
 		return writeWorkspaceError(c, err)
 	}
 
-	resp := struct {
-		Workspace          workspaceResponse    `json:"workspace"`
-		LinkedRepositories []linkedRepoResponse `json:"linked_repositories"`
-	}{
-		Workspace:          toWorkspaceResponse(w),
+resp := workspaceDetailResponse{
+		workspaceResponse: toWorkspaceResponse(w),
 		LinkedRepositories: toLinkedRepoResponses(repos),
 	}
 	return c.JSON(http.StatusOK, resp)

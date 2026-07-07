@@ -495,6 +495,49 @@ func TestWorkspaceHandler_Get_NoLeakage(t *testing.T) {
 	}
 }
 
+// TestWorkspaceHandler_Get_WireShapeFlat — 2026-07-07 regression for
+// the SSR 500 ("Cannot read properties of undefined (reading
+// 'full_name')") on /workspaces/:id. The frontend's WorkspaceDetail
+// interface reads the workspace fields flat at the top level (id,
+// name, primary_repository, etc.) with linked_repositories as a
+// sibling key. The Get handler MUST return that exact shape, NOT a
+// wrapper like {workspace: {...}, linked_repositories: [...]}.
+//
+// Pre-fix, Get returned the wrapper shape (the response struct was
+// {Workspace workspaceResponse `json:"workspace"`; LinkedRepositories ...})
+// while Create/Update returned the flat shape. The frontend decoder
+// treated every top-level field as undefined → primaryRepo.full_name
+// crashed the SSR render with TypeError.
+func TestWorkspaceHandler_Get_WireShapeFlat(t *testing.T) {
+	repo := newFakeRepo()
+	gh := &fakeGitHubAccessor{}
+	_, _, e := newTestHandler(repo, gh, t)
+	w := seedWorkspace(t, repo, 1)
+	identity := &domain.Identity{ID: 1, Provider: "github", ProviderAccountID: "u1"}
+	rec := dispatch(t, e, http.MethodGet, "/workspaces/"+strconv.FormatInt(w.ID, 10), nil, identity)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Workspace fields MUST be at the top level.
+	for _, key := range []string{"id", "name", "primary_repository", "created_at", "updated_at"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("GET /workspaces/:id response missing top-level key %q (body=%s)", key, rec.Body.String())
+		}
+	}
+	// linked_repositories MUST be at the top level too.
+	if _, ok := body["linked_repositories"]; !ok {
+		t.Errorf("GET /workspaces/:id response missing top-level key linked_repositories (body=%s)", rec.Body.String())
+	}
+	// The legacy wrapper MUST NOT be present.
+	if _, ok := body["workspace"]; ok {
+		t.Errorf("GET /workspaces/:id response still has the legacy wrapper key %q (body=%s)", "workspace", rec.Body.String())
+	}
+}
+
 // TestWorkspaceHandler_Patch_NoLeakage.
 func TestWorkspaceHandler_Patch_NoLeakage(t *testing.T) {
 	repo := newFakeRepo()
