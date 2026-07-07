@@ -35,12 +35,12 @@ import { requireOwnboarding } from "~/lib/require-ownboarding";
 import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { WorkspaceCard } from "~/components/workspace-card/workspace-card";
 
-export const onRequest: RequestHandler = (event) => {
-  // Capture the inbound cookie SYNCHRONOUSLY before the guards throw
-  // (see comment in routes/home/index.tsx for the rationale).
+export const onRequest: RequestHandler = async (event) => {
+  // See routes/home/index.tsx for the rationale on async + cookie
+  // capture + guards.
   setSsrCookieHeader(event.request.headers.get("cookie") ?? "");
   requireAuthRedirect(event);
-  requireOwnboarding(event);
+  await requireOwnboarding(event);
 };
 
 export default component$(() => {

@@ -36,15 +36,18 @@ import { requireSession } from "~/lib/require-session";
 import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
-export const onRequest: RequestHandler = (event) => {
-  // Capture the inbound cookie SYNCHRONOUSLY before the guards can
-  // throw. Wrapping these in an async lambda would turn the
-  // `event.redirect(...)` throws into rejected Promises, which Qwik
-  // City handles differently from sync throws and crashes the
-  // server with "Response already sent".
+export const onRequest: RequestHandler = async (event) => {
+  // Capture the inbound cookie BEFORE the guards run so SSR-time
+  // api fetches in useTask$ can re-attach it.
   setSsrCookieHeader(event.request.headers.get("cookie") ?? "");
+  // requireAuthRedirect throws synchronously when anonymous — Qwik
+  // catches the sync throw and short-circuits with the redirect.
   requireAuthRedirect(event);
-  requireOwnboarding(event);
+  // requireOwnboarding is ASYNC (it awaits a setup-state fetch to the
+  // backend). Awaiting it makes its `event.redirect(...)` rejection
+  // propagate through onRequest's returned Promise, which Qwik
+  // treats as a redirect rather than a fatal server error.
+  await requireOwnboarding(event);
 };
 
 // Module-level QRLs so the Qwik optimizer can transform them (inline
