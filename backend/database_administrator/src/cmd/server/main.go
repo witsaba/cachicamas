@@ -250,11 +250,27 @@ func main() {
 
 	// Workspaces (2026-07-06): auth middleware chain MUST be
 	// IdentityFromCookie → loadGitHubTokenForIdentity → ... route
-	// registrations. Register the token loader on Echo's USE chain
-	// BEFORE the workspace + github route registrations so every
-	// authenticated request carries the access_token in its context.
+	// registrations. The chain is built once and passed to
+	// RegisterAuthenticatedWorkspaceRoutes; the function mounts the
+	// 8 workspace endpoints + /github/repos inside an Echo sub-group
+	// that runs the chain before the handlers. This is the
+	// COMPILER-enforced wire contract — the old `e.Use(tokenMW)` +
+	// `RegisterWorkspaceRoutes(e,...)` shape silently omitted
+	// IdentityFromCookie and let anonymous requests reach the
+	// handlers (symptom: 400 "auth: Authentication required." on
+	// /home, observed 2026-07-07).
 	tokenFetcher := postgres.NewTokenFetcher(db)
-	e.Use(httpiface.LoadGitHubTokenMiddleware(tokenFetcher, logger))
+	identityMW := httpiface.IdentityFromCookie(httpiface.IdentityMiddlewareConfig{
+		AuthSecret:     authSecret,
+		CookieName:     cookieName,
+		IdentityRepo:   identityRepo,
+		Logger:         logger,
+		TracerProvider: otelglobal.GetTracerProvider(),
+	})
+	authChain := []echo.MiddlewareFunc{
+		identityMW,
+		httpiface.LoadGitHubTokenMiddleware(tokenFetcher, logger),
+	}
 
 	// Workspaces HTTP routes: 8 endpoints + the github proxy.
 	// Wire the pgx-backed WorkspaceRepo → WorkspaceService →
@@ -269,7 +285,6 @@ func main() {
 		logger,
 		otelglobal.Tracer(serviceName),
 	)
-	httpiface.RegisterWorkspaceRoutes(e, workspaceService, logger)
 
 	// GitHub repos proxy (R-WS-009): 5-min in-memory cache keyed by
 	// user_id. Cache TTL configurable via GITHUB_REPOS_CACHE_TTL env
@@ -289,7 +304,13 @@ func main() {
 		},
 		logger,
 	)
-	httpiface.RegisterGitHubRoutes(e, githubHandler)
+
+	// Compile-time guarantee that every workspace + GitHub-proxy
+	// route runs the full auth chain (see the regression test in
+	// src/interfaces/http/workspaces_auth_chain_test.go).
+	httpiface.RegisterAuthenticatedWorkspaceRoutes(
+		e, workspaceService, githubHandler, authChain, logger,
+	)
 
 	// Single-tenant resolver hook (used by the workspace handlers).
 	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })

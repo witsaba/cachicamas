@@ -45,19 +45,79 @@ func NewWorkspaceHandler(service *application.WorkspaceService, logger *slog.Log
 	return &WorkspaceHandler{service: service, logger: logger}
 }
 
-// RegisterWorkspaceRoutes wires the 8 workspace routes on the given
-// Echo instance.
-func RegisterWorkspaceRoutes(e *echo.Echo, svc *application.WorkspaceService, logger *slog.Logger) {
+// RegisterAuthenticatedWorkspaceRoutes wires the 8 workspace endpoints
+// and the GitHub repos proxy behind the auth middleware chain.
+//
+// Why a single function: the previous split (a global
+// `e.Use(LoadGitHubTokenMiddleware(...))` plus direct
+// `RegisterWorkspaceRoutes` / `RegisterGitHubRoutes` registrations on the
+// Echo root) made it easy to mount workspace routes WITHOUT the cookie
+// verifier middleware. Symptom: a request to `/workspaces` without a
+// session cookie returned 400 + validation envelope with field "auth:
+// Authentication required." instead of 401 + code=unauthorized. The
+// post-PR1c-ii wiring documentation in main.go described the intended
+// chain (`IdentityFromCookie` → `LoadGitHubTokenMiddleware` → … routes)
+// but the only enforcement was a comment.
+//
+// This function makes the chain a compile-time guarantee. Every caller
+// must supply the `authChain` middleware slice (in order); the routes
+// are then mounted inside an Echo sub-group that runs the chain first.
+// Any code that wants to skip the chain has no public surface to do so.
+//
+// In production, main.go passes:
+//   [{IdentityFromCookie(cfg)}, {LoadGitHubTokenMiddleware(fetcher, logger)}]
+// In tests, callers pass the `IdentityContextKey`-seeding middleware
+// directly (see workspace_handler_test.go).
+func RegisterAuthenticatedWorkspaceRoutes(
+	e *echo.Echo,
+	svc *application.WorkspaceService,
+	githubHandler *GitHubHandler,
+	authChain []echo.MiddlewareFunc,
+	logger *slog.Logger,
+) {
+	if e == nil {
+		panic("RegisterAuthenticatedWorkspaceRoutes: e must not be nil")
+	}
+	if svc == nil {
+		panic("RegisterAuthenticatedWorkspaceRoutes: svc must not be nil")
+	}
+	if len(authChain) == 0 {
+		panic("RegisterAuthenticatedWorkspaceRoutes: authChain must be non-empty (every workspace + GitHub route requires authentication)")
+	}
+
+	// Echo v5: e.Group("", mw...) creates a sub-group with the given
+	// middleware running before every route registered on the group.
+	// If the group is empty (no middleware), a panic fires here.
 	h := NewWorkspaceHandler(svc, logger)
-	e.POST("/workspaces", h.Create)
-	e.GET("/workspaces", h.List)
-	e.GET("/workspaces/:id", h.Get)
-	e.PATCH("/workspaces/:id", h.Update)
-	e.DELETE("/workspaces/:id", h.Delete)
-	e.POST("/workspaces/:id/repositories", h.AddRepo)
-	e.DELETE("/workspaces/:id/repositories/:repoId", h.RemoveRepo)
-	e.GET("/workspaces/:id/repositories", h.ListRepos)
+	g := e.Group("", authChain...)
+	g.POST("/workspaces", h.Create)
+	g.GET("/workspaces", h.List)
+	g.GET("/workspaces/:id", h.Get)
+	g.PATCH("/workspaces/:id", h.Update)
+	g.DELETE("/workspaces/:id", h.Delete)
+	g.POST("/workspaces/:id/repositories", h.AddRepo)
+	g.DELETE("/workspaces/:id/repositories/:repoId", h.RemoveRepo)
+	g.GET("/workspaces/:id/repositories", h.ListRepos)
+
+	// The GitHub repos proxy is part of the same auth chain. Tests
+	// focused on workspace handler logic pass a nil githubHandler
+	// and only exercise the workspace routes.
+	if githubHandler != nil {
+		g.GET("/github/repos", githubHandler.ListRepos)
+	}
 }
+
+// RegisterWorkspaceRoutes is REMOVED in this slice. Use
+// RegisterAuthenticatedWorkspaceRoutes instead. The old public surface
+// allowed callers to mount the 8 workspace endpoints WITHOUT the auth
+// middleware chain, which led to the wiring bug fixed here. Keep this
+// comment as the load-bearing documentation of WHY the old shape is gone.
+//
+// Legacy callers (workspace_handler_test.go) must now route through
+// RegisterAuthenticatedWorkspaceRoutes with a test-only authChain that
+// seeds c.Set(IdentityContextKey, *Identity) via the X-Test-Identity-ID
+// header. See workspaces_auth_chain_test.go for the production-shape
+// test.
 
 // ---------------------------------------------------------------------------
 // Wire types

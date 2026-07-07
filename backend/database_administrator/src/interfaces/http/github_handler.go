@@ -73,6 +73,13 @@ func NewGitHubHandler(
 
 // RegisterGitHubRoutes wires the GitHub-adjacent routes on the given
 // Echo instance. Currently a single endpoint: GET /github/repos.
+//
+// Deprecated: this surface is unsafe. Use
+// RegisterAuthenticatedWorkspaceRoutes in workspace_handler.go, which
+// mounts /github/repos AND the 8 workspace endpoints behind the auth
+// chain as a single compile-time guarantee. Wiring /github/repos
+// here without the auth middleware reintroduces the bug fixed in
+// commit on feat/2026-07-06-workspaces.
 func RegisterGitHubRoutes(e *echo.Echo, h *GitHubHandler) {
 	e.GET("/github/repos", h.ListRepos)
 }

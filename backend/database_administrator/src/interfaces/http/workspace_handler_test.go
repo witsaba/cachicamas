@@ -229,11 +229,12 @@ func newTestHandler(repo *fakeRepo, ghAcc *fakeGitHubAccessor, t *testing.T) (ht
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	svc := application.NewWorkspaceService(repo, ghAcc, logger, noopTracer())
 	e := echo.New()
-	// Identity-injection middleware: reads X-Test-Identity-ID header
-	// and seeds c.Set(IdentityContextKey) so handlers see the
-	// resolved identity without going through the JWE verifier
-	// (which is out of scope for this handler test).
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+	// Test identity-injection middleware: reads X-Test-Identity-ID
+	// header and seeds c.Set(IdentityContextKey). This stands in for
+	// the production IdentityFromCookie chain that
+	// RegisterAuthenticatedWorkspaceRoutes requires. Production
+	// wiring is exercised end-to-end in workspaces_auth_chain_test.go.
+	identityInjector := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if idHeader := c.Request().Header.Get("X-Test-Identity-ID"); idHeader != "" {
 				uid, _ := strconv.ParseInt(idHeader, 10, 64)
@@ -245,8 +246,14 @@ func newTestHandler(repo *fakeRepo, ghAcc *fakeGitHubAccessor, t *testing.T) (ht
 			}
 			return next(c)
 		}
-	})
-	httpiface.RegisterWorkspaceRoutes(e, svc, logger)
+	}
+	// Pass `nil` for the GitHub handler to keep the existing
+	// handler-only tests focused; the production-registering assertion
+	// lives in workspaces_auth_chain_test.go and would mount a real
+	// GitHub handler there.
+	httpiface.RegisterAuthenticatedWorkspaceRoutes(
+		e, svc, nil, []echo.MiddlewareFunc{identityInjector}, logger,
+	)
 	// We can't return the unexported handler; the caller uses `e` to dispatch.
 	return httpiface.WorkspaceHandler{}, svc, e
 }
@@ -586,18 +593,31 @@ func TestWorkspaceHandler_ListRepos_NoLeakage(t *testing.T) {
 	}
 }
 
-// TestWorkspaceHandler_NoIdentity_ReturnsValidationError — without an
-// identity in the Echo context, handlers return 400 with `fields.auth`.
-// (Spec says 401 for unauth; this implementation returns 400 with a
-// validation envelope because the handler can't distinguish "no auth
-// middleware" from "auth middleware didn't run" without coupling.)
+// TestWorkspaceHandler_NoIdentity_ReturnsValidationError — the
+// handler-level defense in depth. With no identity in the Echo
+// context (e.g. a unit test that bypasses the production auth chain
+// or an internal misconfiguration), the handler returns 400 +
+// validation envelope with field "auth: Authentication required.".
+//
+// In production the auth chain (IdentityFromCookie →
+// LoadGitHubTokenMiddleware → handler, mounted by
+// RegisterAuthenticatedWorkspaceRoutes) runs BEFORE the handler and
+// short-circuits anonymous requests with 401 + code=unauthorized.
+// Therefore this 400 path is unreachable from real traffic, but
+// keeping it here catches any future regression that reintroduces a
+// public entry-point for the workspace endpoints.
+//
+// End-to-end assertion that the auth chain 401s anonymous requests
+// lives in TestWorkspaces_AuthChain_NoCookie_Returns401FromMiddleware
+// (workspaces_auth_chain_test.go) and uses the production middleware
+// shape.
 func TestWorkspaceHandler_NoIdentity_ReturnsValidationError(t *testing.T) {
 	repo := newFakeRepo()
 	gh := &fakeGitHubAccessor{}
 	_, _, e := newTestHandler(repo, gh, t)
 	rec := dispatch(t, e, http.MethodGet, "/workspaces", nil, nil)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 (no identity), got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 400 (no identity, defense in depth), got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
