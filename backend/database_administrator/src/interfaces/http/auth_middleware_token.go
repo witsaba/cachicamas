@@ -54,6 +54,27 @@ type TokenFetcher interface {
 	AccessTokenForIdentity(ctx context.Context, provider, accountID string) (string, error)
 }
 
+// TokenNotFoundError is a typed sentinel returned by a TokenFetcher
+// when no access_token is available for the given (provider, account_id):
+// either no row matches, or the row exists but access_token is NULL
+// (signed in before PR1a). The auth middleware checks errors.As and
+// logs a structured warning instead of escalating to 5xx.
+type TokenNotFoundError struct {
+	Reason string
+}
+
+// Error implements the error interface.
+func (e *TokenNotFoundError) Error() string {
+	if e.Reason != "" {
+		return "token not found: " + e.Reason
+	}
+	return "token not found"
+}
+
+// Sentinel returns true so callers (tests, future switches) can use
+// this typed value as a canonical marker.
+func (e *TokenNotFoundError) Sentinel() bool { return true }
+
 // loadGitHubTokenForIdentity returns an Echo middleware that loads the
 // authenticated user's GitHub OAuth access_token from identity.account
 // and injects it into the request context. The middleware MUST be
@@ -143,3 +164,13 @@ func loadGitHubTokenForIdentity(fetcher TokenFetcher, logger *slog.Logger) echo.
 
 // Ensure context imports aren't accidentally dropped.
 var _ = context.Background
+
+// LoadGitHubTokenMiddleware is the production alias for
+// loadGitHubTokenForIdentity (which is lowercase because it's only
+// used internally by the middleware file + tests). main.go calls this
+// from cmd/server/main.go to register the middleware on Echo's USE
+// chain AFTER IdentityFromCookie and BEFORE any handler that needs
+// the token (workspace + github routes).
+func LoadGitHubTokenMiddleware(fetcher TokenFetcher, logger *slog.Logger) echo.MiddlewareFunc {
+    return loadGitHubTokenForIdentity(fetcher, logger)
+}
