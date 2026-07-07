@@ -74,6 +74,23 @@ func NewClientWithBase(baseURL string) *Client {
 // Returns `(repos, hasNext, err)`. `hasNext` is true when the response
 // contained exactly perPage repos, hinting that page+1 may have more.
 // (GitHub does not return a total count for this endpoint.)
+//
+// Query parameters pinned by the workspace picker UX (T-WS-1Ci-009):
+//   - affiliation=owner,collaborator,organization_member — the
+//     user-facing default in the GitHub web UI's repo picker.
+//     Without this param, GET /user/repos returns only repos where
+//     the user is the OWNER (their personal repos + forks they made),
+//     which silently excludes every organisation repo the user is a
+//     member of and every fork of a private repo they collaborate on.
+//     The partner in the OAuth flow must explicitly approve the app
+//     on each organisation; if they did, those repos will appear.
+//   - type=all — explicit, so we never silently rely on the server
+//     default changing. Includes both public and private repos the
+//     token can see (the `repo` OAuth scope already covers both).
+//   - sort=updated&direction=desc — most recently changed first,
+//     which matches the workspace picker's UX intent (the user
+//     usually picks a project they are actively working on). Default
+//     sort=full_name would put "a-recent" after "zebra".
 func (c *Client) ListUserRepos(ctx context.Context, token string, page, perPage int) ([]Repo, bool, error) {
 	if token == "" {
 		return nil, false, &UnauthorizedError{Cause: fmt.Errorf("empty access token")}
@@ -92,6 +109,10 @@ func (c *Client) ListUserRepos(ctx context.Context, token string, page, perPage 
 	q := u.Query()
 	q.Set("page", strconv.Itoa(page))
 	q.Set("per_page", strconv.Itoa(perPage))
+	q.Set("affiliation", "owner,collaborator,organization_member")
+	q.Set("type", "all")
+	q.Set("sort", "updated")
+	q.Set("direction", "desc")
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
