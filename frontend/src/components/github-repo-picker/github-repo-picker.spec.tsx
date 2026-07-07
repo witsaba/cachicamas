@@ -19,28 +19,16 @@ import { GitHubRepoPicker } from "./github-repo-picker";
 // =========================================================================
 
 const FAKE_REPOS: PrimaryRepository[] = [
-  {
-    github_id: 1,
-    full_name: "octocat/hello-world",
-    owner: "octocat",
-    name: "hello-world",
-  },
-  {
-    github_id: 2,
-    full_name: "octocat/widgets",
-    owner: "octocat",
-    name: "widgets",
-  },
+  { github_id: 1, full_name: "octocat/hello-world", owner: "octocat", name: "hello-world" },
+  { github_id: 2, full_name: "octocat/widgets", owner: "octocat", name: "widgets" },
   { github_id: 3, full_name: "rails/rails", owner: "rails", name: "rails" },
 ];
 
 function stubFetcher(repos: PrimaryRepository[], hasNext = false) {
-  return $(
-    async (_opts: { page: number; perPage: number; bustCache?: boolean }) => ({
-      repositories: repos,
-      has_next: hasNext,
-    }),
-  );
+  return $(async (_opts: { page: number; perPage: number; bustCache?: boolean }) => ({
+    repositories: repos,
+    has_next: hasNext,
+  }));
 }
 
 const noopChange = $(async (_: PrimaryRepository | null) => {
@@ -74,15 +62,11 @@ describe("GitHubRepoPicker", () => {
       />,
     );
 
-    const options = screen.querySelectorAll(
-      '[data-testid="github-repo-picker-option"]',
-    );
+    const options = screen.querySelectorAll('[data-testid="github-repo-picker-option"]');
     expect(options.length).toBe(3);
     expect(options[0]?.textContent).toContain("octocat/hello-world");
     expect(options[2]?.textContent).toContain("rails/rails");
-    const count = screen.querySelector(
-      '[data-testid="github-repo-picker-count"]',
-    );
+    const count = screen.querySelector('[data-testid="github-repo-picker-count"]');
     expect(count?.textContent).toContain("3 repositories");
   });
 
@@ -124,13 +108,9 @@ describe("GitHubRepoPicker", () => {
       />,
     );
 
-    const selected = screen.querySelector(
-      '[data-testid="github-repo-picker-selected"]',
-    );
+    const selected = screen.querySelector('[data-testid="github-repo-picker-selected"]');
     expect(selected?.textContent).toContain("octocat/widgets");
-    const clearBtn = screen.querySelector(
-      '[data-testid="github-repo-picker-clear"]',
-    );
+    const clearBtn = screen.querySelector('[data-testid="github-repo-picker-clear"]');
     expect(clearBtn).toBeTruthy();
   });
 
