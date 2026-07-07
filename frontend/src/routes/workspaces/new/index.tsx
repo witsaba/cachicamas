@@ -111,21 +111,26 @@ const submitAction: WorkspaceFormAction = $(
  * component doesn't need to import the api module directly.
  */
 const repoFetcher = $(
-  async (opts: { page: number; perPage: number; bustCache?: boolean }) => {
-    const result = await listGitHubRepos({
-      page: opts.page,
-      perPage: opts.perPage,
-      bustCache: opts.bustCache,
-    });
-    if (result.ok) {
-      return {
-        repositories: result.value.repositories,
-        has_next: result.value.hasNext,
-      };
-    }
-    return { repositories: [], has_next: false };
-  },
-);
+      async (opts: { page: number; perPage: number; bustCache?: boolean }) => {
+        const result = await listGitHubRepos({
+          page: opts.page,
+          perPage: opts.perPage,
+          bustCache: opts.bustCache,
+        });
+        if (result.ok) {
+          return {
+            repositories: result.value.repositories.map((r) => ({
+              github_id: r.id,
+              full_name: r.full_name,
+              owner: r.owner_login,
+              name: r.name,
+            })),
+            has_next: result.value.hasNext,
+          };
+        }
+        return { repositories: [], has_next: false };
+      },
+    );
 
 export default component$(() => {
   const nav = useNavigate();

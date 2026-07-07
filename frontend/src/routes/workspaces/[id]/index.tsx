@@ -81,11 +81,24 @@ export default component$(() => {
         return { repositories: [], has_next: false };
       }
       if (!res.ok) return { repositories: [], has_next: false };
-      const body = (await res.json()) as {
-        repositories: PrimaryRepository[];
-        has_next: boolean;
-      };
-      return body;
+const body = (await res.json()) as {
+            repositories: Array<{
+              id: number;
+              full_name: string;
+              owner_login: string;
+              name: string;
+            }>;
+            has_next: boolean;
+          };
+          return {
+            repositories: body.repositories.map((r) => ({
+              github_id: r.id,
+              full_name: r.full_name,
+              owner: r.owner_login,
+              name: r.name,
+            })),
+            has_next: body.has_next,
+          };
     },
   );
 
