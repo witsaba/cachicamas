@@ -54,6 +54,18 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
   });
 
+  it("TRIANGULATE-T-WS-2i-017: anon user has no Workspaces link in DOM", async () => {
+    const { render, screen } = await createDOM();
+    const session: SessionShape = { user: null };
+    await render(<AvatarDropdown session={session} signOut={fakeSignOut()} />);
+    // The whole dropdown is null for anon (defensive). The Workspaces
+    // nav is auth-only via the dropdown menu (the /workspaces route
+    // itself enforces requireAuthRedirect).
+    expect(
+      screen.querySelector('[data-testid="avatar-menu-workspaces"]'),
+    ).toBeFalsy();
+  });
+
   it("renders the trigger button with aria-label and avatar image (S-AS-020)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
@@ -144,7 +156,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(cls).toMatch(/active:scale-95/);
   });
 
-it("panel lists Profile and Sign out entries (S-AS-040, 2026-07-06 ownboarding)", async () => {
+  it("panel lists Profile, Workspaces, and Sign out entries (T-WS-2i-015 + 2026-07-06 ownboarding)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -169,10 +181,17 @@ it("panel lists Profile and Sign out entries (S-AS-040, 2026-07-06 ownboarding)"
 
     // 2026-07-06 ownboarding (R-OW-010 / S-OW-094): the
     // "Manage organizations" entry was removed because the
-    // /organizations surface was deleted. The panel now
-    // contains only Profile + Sign out.
+    // /organizations surface was deleted. 2026-07-06 workspaces
+    // (T-WS-2i-015): a "Workspaces" entry was added per R-WS-016.
     const orgs = screen.querySelector('[data-testid="avatar-menu-orgs"]');
     expect(orgs).toBeFalsy();
+    const workspaces = screen.querySelector(
+      '[data-testid="avatar-menu-workspaces"]',
+    );
+    expect(workspaces).toBeTruthy();
+    expect((workspaces as HTMLAnchorElement).getAttribute("href")).toBe(
+      "/workspaces",
+    );
 
     const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',
