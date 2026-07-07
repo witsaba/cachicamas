@@ -209,39 +209,72 @@ const auth = QwikAuth$((ev) => {
 // `globalAction$`/`routeLoader$` and have no onRequest side effect.
 export const { useSession, useSignIn, useSignOut } = auth;
 
-// Custom onRequest — see the long comment block above the `QwikAuth$`
-// call for the full rationale. Summary:
-//   1. If the request is `GET /auth/signin` or `GET /auth/signout` with
-//      no provider segment, skip @auth/core entirely so Qwik City
-//      renders our native page instead of the dark default HTML.
-//   2. Otherwise, delegate to the library's onRequest, which still
-//      handles every Auth.js protocol path (OAuth callbacks, the
-//      internal POSTs from useSignIn/useSignOut, /auth/error, /auth/csrf,
-//      /auth/session).
-export const onRequest = async (
-  req: Parameters<typeof auth.onRequest>[0],
-): Promise<void> => {
-  if (!isServer) return;
-  // 2026-07-06 bugfix: Qwik City auto-redirects `/auth/signin` to
-  // `/auth/signin/` (trailing-slash canonicalisation) BEFORE middleware
-  // runs, so the path the interceptor sees almost always has the
-  // trailing slash. Comparing `path === "/auth/signin"` therefore misses
-  // both shapes and falls through to @auth/core, which redirects back
-  // to `/auth/signin?callbackUrl=...` — an infinite loop in the
-  // browser. Normalise by stripping trailing slashes before comparing.
-  // `req.url.pathname` excludes the query string, so the callbackUrl
-  // param is not affected by the strip.
-  const normalizedPath = req.url.pathname.replace(/\/+$/, "") || "/";
-  const isGet = req.request.method === "GET";
-  const isNativePageRender =
-    isGet &&
-    (normalizedPath === "/auth/signin" || normalizedPath === "/auth/signout");
-  if (isNativePageRender) {
-    // No-op: Qwik City's router will match `routes/auth/signin/index.tsx`
-    // or `routes/auth/signout/index.tsx` and render our native page.
-    // Trade-off documented above: useSession() returns null on these
-    // pages until we wire session loading manually.
-    return;
-  }
-  await auth.onRequest(req);
-};
+    // Custom onRequest — see the long comment block above the `QwikAuth$`
+    // call for the full rationale. Summary:
+    //   1. If the request is `GET /auth/signin` or `GET /auth/signout` with
+    //      no provider segment, skip @auth/core entirely so Qwik City
+    //      renders our native page instead of the dark default HTML.
+    //   2. If the request targets `/auth/signin` or `/auth/signout` (with
+    //      or without trailing slash) AND carries Qwik's `?qaction=<id>`
+    //      query param, skip @auth/core too. Qwik City's Form action
+    //      submit handler fetches `<currentPath>/q-data.json?qaction=<id>`
+    //      (NOT the bare `<form action="?qaction=<id>">` URL — see
+    //      `getClientDataPath` in `@builder.io/qwik-city`). Intercepting
+    //      those requests inside auth.onRequest runs `Auth()` against
+    //      `/auth/signin/q-data.json`, which `@auth/core` parses as
+    //      action=signin + providerId="q-data.json" → "Provider not
+    //      found" → caught by Auth()'s error handler and renders as
+    //      `/auth/error?error=Configuration`. Skipping lets the Qwik
+    //      action runner that runs AFTER this middleware execute
+    //      useSignIn/useSignOut, which internally calls Auth() with the
+    //      proper `/auth/signin/github` (or `/auth/signout`) URL.
+    //   3. Otherwise, delegate to the library's onRequest, which still
+    //      handles every Auth.js protocol path (OAuth callbacks, the
+    //      internal POSTs from useSignIn/useSignOut, /auth/error,
+    //      /auth/csrf, /auth/session, /auth/signin/{provider}).
+    export const onRequest = async (
+      req: Parameters<typeof auth.onRequest>[0],
+    ): Promise<void> => {
+      if (!isServer) return;
+      // 2026-07-06 bugfix: Qwik City auto-redirects `/auth/signin` to
+      // `/auth/signin/` (trailing-slash canonicalisation) BEFORE middleware
+      // runs, so the path the interceptor sees almost always has the
+      // trailing slash. Comparing `path === "/auth/signin"` therefore misses
+      // both shapes and falls through to @auth/core, which redirects back
+      // to `/auth/signin?callbackUrl=...` — an infinite loop in the
+      // browser. Normalise by stripping trailing slashes before comparing.
+      // `req.url.pathname` excludes the query string, so the callbackUrl
+      // param is not affected by the strip.
+      const normalizedPath = req.url.pathname.replace(/\/+$/, "") || "/";
+      const isGet = req.request.method === "GET";
+      const isNativePageRender =
+        isGet &&
+        (normalizedPath === "/auth/signin" || normalizedPath === "/auth/signout");
+      // 2026-07-07 bugfix (Configuration error on sign-in from auth pages):
+      // Qwik Action POSTs to `<base>/q-data.json?qaction=<id>`. Without
+      // this guard, auth.onRequest calls Auth() against e.g.
+      // `/auth/signin/q-data.json` and @auth/core throws
+      // "Provider with id q-data.json not found", which the framework
+      // re-surfaces as a 302 to /auth/error?error=Configuration.
+      const isQwikActionOnAuthShellPage =
+        req.url.searchParams.has("qaction") &&
+        (normalizedPath === "/auth/signin" ||
+          normalizedPath === "/auth/signout");
+      if (isNativePageRender) {
+        // No-op: Qwik City's router will match `routes/auth/signin/index.tsx`
+        // or `routes/auth/signout/index.tsx` and render our native page.
+        // Trade-off documented above: useSession() returns null on these
+        // pages until we wire session loading manually.
+        return;
+      }
+      if (isQwikActionOnAuthShellPage) {
+        // No-op: let the Qwik action runner middleware (Ft in the chain)
+        // run useSignIn/useSignOut. Those handlers internally call Auth()
+        // with the correct URL (useSignIn → /auth/signin/github,
+        // useSignOut → /auth/signout). The action runner also populates
+        // sharedMap.session downstream via its own getSessionData call,
+        // so we do NOT need to populate it here.
+        return;
+      }
+      await auth.onRequest(req);
+    };
