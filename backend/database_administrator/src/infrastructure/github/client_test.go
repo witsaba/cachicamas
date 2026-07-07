@@ -245,108 +245,128 @@ func TestClient_IsRepoAccessible_NotInFirstPage(t *testing.T) {
 }
 
 func TestClient_IsRepoAccessible_ZeroIDRejected(t *testing.T) {
-    	// TRIANGULATE: zero / negative id rejected before hitting GitHub.
-    	srv, calls, _ := newMockGH(t, http.StatusOK, sampleReposJSON)
-    	c := gh.NewClientWithBase(srv.URL)
-    	_, err := c.IsRepoAccessible(context.Background(), "t", 0)
-    	if err == nil {
-    		t.Fatal("expected error for githubID=0")
-    	}
-    	if calls.Load() != 0 {
-    		t.Errorf("githubID=0 should not hit the network, got %d calls", calls.Load())
-    	}
-    }
+	// TRIANGULATE: zero / negative id rejected before hitting GitHub.
+	srv, calls, _ := newMockGH(t, http.StatusOK, sampleReposJSON)
+	c := gh.NewClientWithBase(srv.URL)
+	_, err := c.IsRepoAccessible(context.Background(), "t", 0)
+	if err == nil {
+		t.Fatal("expected error for githubID=0")
+	}
+	if calls.Load() != 0 {
+		t.Errorf("githubID=0 should not hit the network, got %d calls", calls.Load())
+	}
+}
 
-    // 2026-07-07 bugfix (org repos not appearing in workspace repo picker):
-    // the workspace UI's GitHub repo picker only showed the user's
-    // personal repos + forks they made. Repos where they are a
-    // collaborator or repos in organisations they are a member of
-    // were absent. Root cause: GET /user/repos without `affiliation`
-    // defaults to `affiliation=owner` per GitHub's REST API — the
-    // docstring default of "owner,collaborator,organization_member"
-    // is misleading; the effective behaviour in our callsite is
-    // owner-only. Fix: explicitly set the affiliation param to
-    // include all three relationships so the workspace picker shows
-    // every repo the access token can see.
-    //
-    // These tests pin the request shape so a future regression that
-    // drops the affiliation param is caught immediately.
-    func TestClient_ListUserRepos_RequestsAffiliation(t *testing.T) {
-    	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
-    	c := gh.NewClientWithBase(srv.URL)
-    	if _, _, err := c.ListUserRepos(context.Background(), "t", 1, 30); err != nil {
-    		t.Fatalf("unexpected error: %v", err)
-    	}
-    	if len(*queries) != 1 {
-    		t.Fatalf("expected 1 request, got %d", len(*queries))
-    	}
-    	// Parse the query so URL-decoding is correct (commas in the
-    	// affiliation value become %2C on the wire).
-    	parsed, err := url.ParseQuery((*queries)[0])
-    	if err != nil {
-    		t.Fatalf("parse query: %v", err)
-    	}
-    	aff := parsed.Get("affiliation")
-    	for _, want := range []string{"owner", "collaborator", "organization_member"} {
-    		if !strings.Contains(aff, want) {
-    			t.Errorf("affiliation param missing %q; got %q", want, aff)
-    		}
-    	}
-    	// All three must appear under the SAME `affiliation` key
-    	// (comma-separated), NOT three separate keys. Counting keys
-    	// via the parsed map guards against a regression where a
-    	// developer appends to the query string manually.
-    	if got := len(parsed["affiliation"]); got != 1 {
-    		t.Errorf("expected exactly 1 affiliation key, got %d in %v", got, parsed["affiliation"])
-    	}
-    }
+// 2026-07-07 bugfix (org repos not appearing in workspace repo picker):
+// the workspace UI's GitHub repo picker only showed the user's
+// personal repos + forks they made. Repos where they are a
+// collaborator or repos in organisations they are a member of
+// were absent. Root cause: GET /user/repos without `affiliation`
+// defaults to `affiliation=owner` per GitHub's REST API — the
+// docstring default of "owner,collaborator,organization_member"
+// is misleading; the effective behaviour in our callsite is
+// owner-only. Fix: explicitly set the affiliation param to
+// include all three relationships so the workspace picker shows
+// every repo the access token can see.
+//
+// These tests pin the request shape so a future regression that
+// drops the affiliation param is caught immediately.
+func TestClient_ListUserRepos_RequestsAffiliation(t *testing.T) {
+	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
+	c := gh.NewClientWithBase(srv.URL)
+	if _, _, err := c.ListUserRepos(context.Background(), "t", 1, 30); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*queries) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*queries))
+	}
+	// Parse the query so URL-decoding is correct (commas in the
+	// affiliation value become %2C on the wire).
+	parsed, err := url.ParseQuery((*queries)[0])
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	aff := parsed.Get("affiliation")
+	for _, want := range []string{"owner", "collaborator", "organization_member"} {
+		if !strings.Contains(aff, want) {
+			t.Errorf("affiliation param missing %q; got %q", want, aff)
+		}
+	}
+	// All three must appear under the SAME `affiliation` key
+	// (comma-separated), NOT three separate keys. Counting keys
+	// via the parsed map guards against a regression where a
+	// developer appends to the query string manually.
+	if got := len(parsed["affiliation"]); got != 1 {
+		t.Errorf("expected exactly 1 affiliation key, got %d in %v", got, parsed["affiliation"])
+	}
+}
 
-        func TestClient_ListUserRepos_RequestsSortAndType(t *testing.T) {
-        	// The workspace picker is most useful when repos appear
-        	// most-recently-updated first. The default `sort=full_name`
-        	// puts `a-recent` after `zebra` — bad UX for picking a project.
-        	// We pin sort=updated&direction=desc and type=all so private
-        	// repos the user has access to also appear.
-        	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
-        	c := gh.NewClientWithBase(srv.URL)
-        	_, _, err := c.ListUserRepos(context.Background(), "t", 1, 30)
-        	if err != nil {
-        		t.Fatalf("unexpected error: %v", err)
-        	}
-        	q := (*queries)[0]
-        	if !strings.Contains(q, "sort=updated") {
-        		t.Errorf("query missing sort=updated: %q", q)
-        	}
-        	if !strings.Contains(q, "direction=desc") {
-        		t.Errorf("query missing direction=desc: %q", q)
-        	}
-        	if !strings.Contains(q, "type=all") {
-        		t.Errorf("query missing type=all: %q", q)
-        	}
-        }
+func TestClient_ListUserRepos_RequestsSortAndType(t *testing.T) {
+	// The workspace picker is most useful when repos appear
+	// most-recently-updated first. The default `sort=full_name`
+	// puts `a-recent` after `zebra` — bad UX for picking a project.
+	// We pin sort=updated&direction=desc.
+	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
+	c := gh.NewClientWithBase(srv.URL)
+	_, _, err := c.ListUserRepos(context.Background(), "t", 1, 30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	q := (*queries)[0]
+	if !strings.Contains(q, "sort=updated") {
+		t.Errorf("query missing sort=updated: %q", q)
+	}
+	if !strings.Contains(q, "direction=desc") {
+		t.Errorf("query missing direction=desc: %q", q)
+	}
+}
 
-        func TestClient_ListUserRepos_PaginationPreservesAffiliation(t *testing.T) {
-        	// TRIANGULATE: the affiliation / sort / type params must
-        	// survive pagination. The frontend scrolls to load more pages,
-        	// so a regression that drops affiliation on page=2 would hide
-        	// org repos on every page after the first.
-        	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
-        	c := gh.NewClientWithBase(srv.URL)
-        	_, _, err := c.ListUserRepos(context.Background(), "t", 3, 100)
-        	if err != nil {
-        		t.Fatal(err)
-        	}
-        	if len(*queries) != 1 {
-        		t.Fatalf("expected 1 request, got %d", len(*queries))
-        	}
-        	q := (*queries)[0]
-        	if !strings.Contains(q, "page=3") {
-        		t.Errorf("query missing page=3: %q", q)
-        	}
-        	if !strings.Contains(q, "per_page=100") {
-        		t.Errorf("query missing per_page=100: %q", q)
-        	}
-        	if !strings.Contains(q, "affiliation=owner%2Ccollaborator%2Corganization_member") {
-        		t.Errorf("query missing full affiliation param: %q", q)
-        	}
-        }
+// 2026-07-07 regression for the 422-loop on /user/repos. GitHub's
+// REST API explicitly forbids combining `affiliation` (or
+// `visibility`) with `type` — the docs link in the 422 response
+// says \"If you specify visibility or affiliation, you cannot
+// specify type.\" Sending `type=all` together with `affiliation`
+// makes the picker return ZERO repos (the backend surfaces the
+// 422 as a generic transport error and the frontend renders an
+// empty list). The affiliation triple already covers every repo
+// type the token can see, so `type` is omitted on purpose.
+func TestClient_ListUserRepos_NoTypeParamWithAffiliation(t *testing.T) {
+	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
+	c := gh.NewClientWithBase(srv.URL)
+	if _, _, err := c.ListUserRepos(context.Background(), "t", 1, 30); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parsed, err := url.ParseQuery((*queries)[0])
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if _, hasType := parsed["type"]; hasType {
+		t.Errorf("query must NOT carry `type` when `affiliation` is set; got %q", parsed.Get("type"))
+	}
+}
+
+func TestClient_ListUserRepos_PaginationPreservesAffiliation(t *testing.T) {
+	// TRIANGULATE: the affiliation / sort / type params must
+	// survive pagination. The frontend scrolls to load more pages,
+	// so a regression that drops affiliation on page=2 would hide
+	// org repos on every page after the first.
+	srv, queries := newMockGHCapturingQuery(t, http.StatusOK, sampleReposJSON)
+	c := gh.NewClientWithBase(srv.URL)
+	_, _, err := c.ListUserRepos(context.Background(), "t", 3, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*queries) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(*queries))
+	}
+	q := (*queries)[0]
+	if !strings.Contains(q, "page=3") {
+		t.Errorf("query missing page=3: %q", q)
+	}
+	if !strings.Contains(q, "per_page=100") {
+		t.Errorf("query missing per_page=100: %q", q)
+	}
+	if !strings.Contains(q, "affiliation=owner%2Ccollaborator%2Corganization_member") {
+		t.Errorf("query missing full affiliation param: %q", q)
+	}
+}

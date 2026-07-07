@@ -84,9 +84,12 @@ func NewClientWithBase(baseURL string) *Client {
 //     member of and every fork of a private repo they collaborate on.
 //     The partner in the OAuth flow must explicitly approve the app
 //     on each organisation; if they did, those repos will appear.
-//   - type=all — explicit, so we never silently rely on the server
-//     default changing. Includes both public and private repos the
-//     token can see (the `repo` OAuth scope already covers both).
+//     NOTE: per GitHub REST API, when `affiliation` is set, `type`
+//     MUST NOT be set — the API returns 422 Unprocessable Entity
+//     (\"If you specify visibility or affiliation, you cannot specify
+//     type.\"). The `affiliation` triple already covers every repo
+//     type the token can see, so omitting `type` is both correct
+//     and required.
 //   - sort=updated&direction=desc — most recently changed first,
 //     which matches the workspace picker's UX intent (the user
 //     usually picks a project they are actively working on). Default
@@ -110,7 +113,6 @@ func (c *Client) ListUserRepos(ctx context.Context, token string, page, perPage 
 	q.Set("page", strconv.Itoa(page))
 	q.Set("per_page", strconv.Itoa(perPage))
 	q.Set("affiliation", "owner,collaborator,organization_member")
-	q.Set("type", "all")
 	q.Set("sort", "updated")
 	q.Set("direction", "desc")
 	u.RawQuery = q.Encode()
