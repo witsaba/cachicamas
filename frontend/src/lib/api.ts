@@ -189,8 +189,7 @@ import { getSsrCookieHeader } from "./ssr-cookie-context";
 
 function ssrBaseUrl(): string {
   const v = process.env.SERVER_API_BASE_URL;
-  const base =
-    v && v.trim().length > 0 ? v : DEFAULT_BASE_URL;
+  const base = v && v.trim().length > 0 ? v : DEFAULT_BASE_URL;
   return base.replace(/\/+$/, "");
 }
 
@@ -211,20 +210,50 @@ function withSsrCookieHeader(init?: RequestInit): RequestInit {
   };
 }
 
-async function ssrFetch(
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
+async function ssrFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${ssrBaseUrl()}${path}`, withSsrCookieHeader(init));
 }
 
-/** SSR-time GET /workspaces with the inbound request's cookies (when in SSR). */
+/**
+ * Detect Node SSR (vs browser hydration).
+ */
+function isServerRuntime(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    typeof (process as { versions?: unknown }).versions !== "undefined"
+  );
+}
+
+/**
+ * Fetch wrapper used by the SSR helpers. Picks the right transport
+ * based on runtime:
+ *
+ *   - Node SSR: hits the backend directly and forwards the inbound
+ *     Cookie header so the IdentityFromCookie middleware can
+ *     authenticate. SERVER_API_BASE_URL points at
+ *     database_administrator:8080.
+ *
+ *   - Browser hydration: useTask$ also runs during client hydration.
+ *     Direct fetch to http://localhost:8080 is CROSS-ORIGIN and the
+ *     browser blocks it with "Load failed". We hit the relative
+ *     `/api` path — same origin, the Qwik Node server proxies to
+ *     the backend with cookies auto-attached by the browser.
+ */
+async function serverAwareFetch(path: string, init?: RequestInit): Promise<Response> {
+  if (isServerRuntime()) {
+    return ssrFetch(path, init);
+  }
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  return fetch(`${base}/api${path}`, init);
+}
+
+/** List workspaces. SSR path goes direct; browser path goes via /api. */
 export async function listWorkspacesSSR(): Promise<
   ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
 > {
   let res: Response;
   try {
-    res = await ssrFetch("/workspaces");
+    res = await serverAwareFetch("/workspaces");
   } catch (err) {
     return { ok: false, kind: "offline", message: offlineMessage(err) };
   }
@@ -240,13 +269,13 @@ export async function listWorkspacesSSR(): Promise<
   });
 }
 
-/** SSR-time GET /workspaces/:id with the inbound request's cookies (when in SSR). */
+/** Get one workspace. Same dual-runtime path as listWorkspacesSSR. */
 export async function getWorkspaceSSR(
   id: number,
 ): Promise<ApiResult<WorkspaceDetail>> {
   let res: Response;
   try {
-    res = await ssrFetch(`/workspaces/${id}`);
+    res = await serverAwareFetch(`/workspaces/${id}`);
   } catch (err) {
     return { ok: false, kind: "offline", message: offlineMessage(err) };
   }
