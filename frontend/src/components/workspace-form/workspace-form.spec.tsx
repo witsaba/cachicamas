@@ -11,7 +11,7 @@
 import { createDOM } from "@builder.io/qwik/testing";
 import { $ } from "@builder.io/qwik";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import type { PrimaryRepository, WorkspaceDetail } from "~/lib/api";
+import type { PrimaryRepository } from "~/lib/api";
 import { WorkspaceForm, type WorkspaceFormAction } from "./workspace-form";
 
 const FAKE_REPOS: PrimaryRepository[] = [
@@ -41,20 +41,6 @@ function stubFetcher(repos: PrimaryRepository[]) {
 function stubAction(result: Awaited<ReturnType<WorkspaceFormAction>>) {
   return $(async (_data: FormData) => result) as unknown as WorkspaceFormAction;
 }
-
-const FAKE_UNUSED: WorkspaceDetail = {
-  id: 99,
-  name: "ws-one",
-  primary_repository: {
-    github_id: 1,
-    full_name: "octocat/hello-world",
-    owner: "octocat",
-    name: "hello-world",
-  },
-  linked_repositories: [],
-  created_at: "2026-07-06T00:00:00Z",
-  updated_at: "2026-07-06T00:00:00Z",
-};
 
 const noopNav = $(async (_: number) => {
   /* noop */
@@ -123,7 +109,7 @@ describe("WorkspaceForm", () => {
     ).toBeTruthy();
   });
 
-  test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns field='form'", async () => {
+test("TRIANGULATE-T-WS-2iii-009c: top-level error renders when action returns field='form'", async () => {
     const errorAction = $(async (_data: FormData) => ({
       ok: false as const,
       field: "form" as const,
@@ -144,5 +130,31 @@ describe("WorkspaceForm", () => {
     expect(
       screen.querySelector('[data-testid="workspace-form-submit"]'),
     ).toBeTruthy();
+  });
+
+// 2026-07-07 regression for bug 1 (page stays static after
+  // successful workspace create). The wiring contract that
+  // reproduces the bug is in two pieces:
+  //   (a) onSuccess$ must be part of the public surface
+  //       (compile-time guarantee on WorkspaceFormProps).
+  //   (b) The submit handler in workspace-form.tsx must call
+  //       onSuccess$(result.id) when result.ok === true.
+  //
+  // Asserting (b) at runtime is fragile in qwik/testing DOM
+  // because Qwik QRLs do not capture vi.fn() (see
+  // "Qrl($) scope is not a function" error). Instead we pin
+  // the wiring contract with a SOURCE regex test — any future
+  // refactor that breaks the call site fails immediately. The
+  // actual click-to-navigate integration is covered by the
+  // Playwright e2e in PR3 (e2e/workspace-create.spec.ts).
+  test("RED-T-WS-BUG-001: workspace-form.tsx wires onSuccess$(result.id) on the success path", () => {
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const source = readFileSync(join(__dirname, "workspace-form.tsx"), "utf8");
+    // The submit handler MUST check result.ok before calling
+    // onSuccess$ AND must pass result.id (the new workspace id).
+    // Allow either whitespace variants around the if condition.
+    const successPath = /if\s*\(\s*result\.ok\s*\)\s*\{[\s\S]*?onSuccess\$\(\s*result\.id\s*\)/;
+    expect(source).toMatch(successPath);
   });
 });

@@ -26,6 +26,7 @@ import {
   useLocation,
   useNavigate,
   type DocumentHead,
+  type RequestHandler,
 } from "@builder.io/qwik-city";
 import {
   addRepoToWorkspace,
@@ -37,19 +38,35 @@ import {
 } from "~/lib/api";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
+import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { GitHubRepoPicker } from "~/components/github-repo-picker/github-repo-picker";
 import type { PrimaryRepository } from "~/lib/api";
 
-export { requireAuthRedirect as onRequest };
-
-// The /workspaces/[id] page also needs SSR cookie forwarding (see
-// S-WS-AUTH-CHAIN-SSR-001). onRequest re-exported above is what wires
-// requireAuthRedirect; we cannot easily insert withSsrCookieContext
-// BEFORE it without rewriting the route's onRequest shape. The detail
-// page's existing useTask$ (using the regular getWorkspace) is left
-// intact here; the SSR-time fetch through useTask$ may 401 and the
-// Retry button (browser-side) recovers it. For full SSR coverage,
-// the helper is wired up below for callers that want it.
+// SSR cookie forwarding (S-WS-AUTH-CHAIN-SSR-001). The pattern is the
+// same as routes/home/index.tsx and routes/workspaces/index.tsx:
+//   1. Capture the inbound Cookie header into the module-level
+//      ssrCookieContext (sync, no Promise). This MUST run BEFORE the
+//      auth/ownboarding guards because those guards can short-circuit
+//      via throw for anonymous users; if the throw fires first, the
+//      subsequent ssrFetch calls during the same render cycle never
+//      see a captured cookie.
+//   2. requireAuthRedirect — throws for anonymous → /auth/signin?cb=...
+//   3. requireOwnboarding — throws for no-org → /ownboarding
+//
+// Why this matters: getWorkspace(id) runs from useTask$ during SSR.
+// It calls serverAwareFetch() which dispatches to ssrFetch() on the
+// Node runtime. ssrFetch() attaches currentRequestCookie to the
+// outgoing request to the backend. If we never called
+// setSsrCookieHeader on this route, currentRequestCookie is empty,
+// the backend's IdentityFromCookie middleware rejects with 401
+// "authentication required", and the page renders the error alert
+// instead of the workspace detail. Pre-fix behaviour reproduced
+// 2026-07-07 (UAT, see commit message).
+export const onRequest: RequestHandler = async (event) => {
+  setSsrCookieHeader(event.request.headers.get("cookie") ?? "");
+  requireAuthRedirect(event);
+  await requireOwnboarding(event);
+};
 
 export const useSetupLoader = routeLoader$(async (event) => {
   await requireOwnboarding(event);
@@ -115,7 +132,7 @@ export default component$(() => {
     /* banner state is rendered inline via the picker component */
   });
 
-const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
+  const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
     if (!repo) return;
     const result = await addRepoToWorkspace(id, {
       github_id: repo.github_id,
@@ -308,9 +325,7 @@ const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
                 data-linked-id={r.id}
                 class="flex items-center justify-between gap-3 px-4 py-3"
               >
-                <span class="truncate font-mono text-sm">
-                  {r.full_name}
-                </span>
+                <span class="truncate font-mono text-sm">{r.full_name}</span>
                 <button
                   type="button"
                   data-testid="workspace-detail-disconnect"
@@ -340,9 +355,7 @@ const onSelectRepoForAdd = $(async (repo: PrimaryRepository | null) => {
             </h2>
             <p class="mt-3 text-sm text-slate-700">
               This will remove{" "}
-              <span class="font-mono">
-                {pendingDisconnect.value.full_name}
-              </span>{" "}
+              <span class="font-mono">{pendingDisconnect.value.full_name}</span>{" "}
               from this workspace.
             </p>
             <div class="mt-6 flex justify-end gap-2">
