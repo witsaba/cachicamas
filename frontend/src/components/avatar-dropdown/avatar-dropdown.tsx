@@ -128,6 +128,15 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   Profile
                 </a>
               </li>
+              <li>
+                <a
+                  href="/workspaces"
+                  data-testid="avatar-menu-workspaces"
+                  class="block rounded px-2 py-1.5 text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                >
+                  Workspaces
+                </a>
+              </li>
             </ul>
             <hr class="my-3 border-slate-200" />
             <Form action={signOut} data-testid="avatar-menu-signout-form">

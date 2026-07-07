@@ -346,3 +346,110 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
   }
   return body as OrganizationReadModel;
 }
+
+// ---------------------------------------------------------------------------
+// Workspaces (2026-07-06 PR2-i)
+// ---------------------------------------------------------------------------
+
+/**
+ * PrimaryRepository is the locked wire shape for the primary repo stored
+ * on every workspace. Mirrors `backend/.../src/domain/workspace.go`.
+ */
+export interface PrimaryRepository {
+  github_id: number;
+  full_name: string;
+  owner: string;
+  name: string;
+}
+
+export interface LinkedRepository {
+  id: number;
+  github_id: number;
+  github_full_name: string;
+  github_owner: string;
+  github_name: string;
+  added_at: string;
+}
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  primary_repository: PrimaryRepository;
+  linked_repos_count: number;
+  created_at: string;
+}
+
+export interface WorkspaceDetail {
+  id: number;
+  name: string;
+  primary_repository: PrimaryRepository;
+  linked_repositories: LinkedRepository[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /workspaces (R-WS-002). */
+export async function listWorkspaces(): Promise<
+  ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
+> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      workspaces: WorkspaceSummary[];
+      truncated?: boolean;
+    };
+    return {
+      workspaces: body.workspaces ?? [],
+      truncated: body.truncated ?? false,
+    };
+  });
+}
+
+/** GET /workspaces/:id (R-WS-003). */
+export async function getWorkspace(
+  id: number,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as WorkspaceDetail,
+  );
+}
+
+/** GET /workspaces/:id/repositories (R-WS-008). */
+export async function listLinkedRepos(
+  workspaceID: number,
+): Promise<ApiResult<{ repositories: LinkedRepository[] }>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${workspaceID}/repositories`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as { repositories: LinkedRepository[] };
+    return { repositories: body.repositories ?? [] };
+  });
+}
