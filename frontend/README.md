@@ -69,10 +69,13 @@ pnpm build # or `pnpm build`
 The frontend ships the very first UI surface: a four-route
 aphantasia-friendly Organizations flow.
 
-| Route          | Purpose                                                                                                                            |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/`            | Brand mark + tagline + a single "Get started" CTA to `/ownboarding`.                                                               |
-| `/ownboarding` | First-run setup form. Collects `full_name` + `identification` to create the unique organization. On success, redirects to `/home`. |
+| Route             | Purpose                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`               | Brand mark + tagline + a single "Get started" CTA to `/ownboarding`.                                                                                     |
+| `/ownboarding`    | First-run setup form. Collects `full_name` + `identification` to create the unique organization. On success, redirects to `/home`.                       |
+| `/workspaces`     | Workspaces list. Authed + ownboarded. Empty CTA when zero workspaces; list of cards when 1+. Each card shows name, primary repo, and linked-repo count.  |
+| `/workspaces/new` | Workspace creation form. Authed + ownboarded. Single field `name` + GitHub repo picker for primary repo.                                                 |
+| `/workspaces/:id` | Workspace detail. Authed + ownboarded. Shows workspace name + primary repo + linked repos. "Add repository" / "Disconnect" / "Delete workspace" buttons. |
 
 ### Aphantasia-friendly layout
 
@@ -93,6 +96,29 @@ When the user types in the `full_name` field, the `identification` (slug) field 
 5. Truncate to 60 chars; if truncation lands on `-`, strip the trailing `-`.
 
 Once the user manually edits the slug field, auto-derivation stops until the field is cleared.
+
+## Workspaces (2026-07-06)
+
+After organization ownboarding, the user can create **workspaces**: logical
+containers that map 1:1 to a primary GitHub repository and optionally
+connect N additional repos. Each workspace lives behind the
+`requireAuthRedirect` + `requireOwnboarding` gate chain (same pattern as
+the ownboarding flow).
+
+| Route             | Purpose                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/workspaces`     | Workspaces list. Authed + ownboarded. Empty CTA when zero workspaces; list of cards when 1+. Each card shows name, primary repo, and linked-repo count.  |
+| `/workspaces/new` | Workspace creation form. Authed + ownboarded. Single field `name` + GitHub repo picker for primary repo.                                                 |
+| `/workspaces/:id` | Workspace detail. Authed + ownboarded. Shows workspace name + primary repo + linked repos. "Add repository" / "Disconnect" / "Delete workspace" buttons. |
+
+The Workspaces link is in the avatar dropdown (auth-aware per existing
+ADR-0010/0011 patterns).
+
+### Workspace env vars
+
+| Variable                                | Default | Purpose                                                                                              |
+| --------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `PUBLIC_GITHUB_REPO_PICKER_DEBOUNCE_MS` | `300`   | Debounce on the GitHub repo picker's search input (used in `/workspaces/new` and `/workspaces/:id`). |
 
 ### Out-of-scope follow-up
 
@@ -126,6 +152,12 @@ browser against the full local stack:
 ```shell
 pnpm test:e2e
 ```
+
+### Workspace env vars
+
+| Variable                                | Default | Purpose                                                                                              |
+| --------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `PUBLIC_GITHUB_REPO_PICKER_DEBOUNCE_MS` | `300`   | Debounce on the GitHub repo picker's search input (used in `/workspaces/new` and `/workspaces/:id`). |
 
 Pre-requisites:
 
