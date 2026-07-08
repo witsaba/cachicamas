@@ -434,7 +434,7 @@ func truncateNewTables(t *testing.T, db *sql.DB) func() {
 		// is included in the truncate so a future FK violation is also
 		// cleared when a test rewinds.
 		_, _ = db.ExecContext(ctx,
-			"TRUNCATE TABLE workspace_repository, workspace, identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
+			"TRUNCATE TABLE sync_job, workspace_repository, workspace, identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
 	}
 }
 
@@ -457,6 +457,9 @@ func wipeNewTables(t *testing.T, db *sql.DB) {
 		// identity.* tables must drop BEFORE organization so the FK
 		// on organization.owner_user_id can resolve. organization
 		// is dropped last to satisfy any FK from project.
+		// sync_job FKs to workspace; drop sync_job first so CASCADE
+		// on the parent FK is unblocked.
+		"DROP TABLE IF EXISTS sync_job CASCADE",
 		"DROP TABLE IF EXISTS workspace_repository CASCADE",
 		"DROP TABLE IF EXISTS workspace CASCADE",
 		"DROP TABLE IF EXISTS identity.account CASCADE",
@@ -489,11 +492,12 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// 6 migrations: hello_world, orgs_and_projects,
+	// 10 migrations: hello_world, orgs_and_projects,
 	// requirements_and_milestones, tasks_and_specs, github_login,
-	// workspaces_and_account_tokens.
-	if len(applied) != 7 {
-		t.Fatalf("Up applied %d migrations, want 7 (got %+v)", len(applied), applied)
+	// workspaces_and_account_tokens, workspaces, drop_workspace_repository,
+	// rename_workspace_primary_repo_columns, sync_job.
+	if len(applied) != 10 {
+		t.Fatalf("Up applied %d migrations, want 10 (got %+v)", len(applied), applied)
 	}
 	wantVersions := []int64{
 		20260621120000,
@@ -503,6 +507,9 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 		20260703120000, // cachicamas-github-login (identity.user + identity.account + organization.owner_user_id)
 		20260706120000, // 2026-07-06-workspaces PR1a (identity.account OAuth token columns)
 		20260706120002, // 2026-07-06-workspaces PR1b-i (workspace + workspace_repository)
+		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
+		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
+		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 	}
 	for i, want := range wantVersions {
 		if applied[i].ID != want {
@@ -514,6 +521,7 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	wantTables := []string{
 		"organization", "project", "requirement", "requirement_spike",
 		"milestone", "task", "spec", "spec_phase",
+		"workspace", "sync_job",
 	}
 	for _, name := range wantTables {
 		var exists bool
@@ -969,6 +977,9 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260703120000, // cachicamas-github-login
 		20260706120000, // 2026-07-06-workspaces PR1a
 		20260706120002, // 2026-07-06-workspaces PR1b-i
+		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
+		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
+		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 	}
 	if len(applied) != len(wantVersions) {
 		t.Errorf("Up applied %d migrations, want %d (got %+v)", len(applied), len(wantVersions), applied)
@@ -1007,6 +1018,9 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260703120000, // cachicamas-github-login
 		20260706120000, // 2026-07-06-workspaces PR1a
 		20260706120002, // 2026-07-06-workspaces PR1b-i
+		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
+		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
+		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
@@ -2076,6 +2090,245 @@ func TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex(t *testing.T) {
 	}
 	if liveCount != 1 {
 		t.Errorf("live 'alpha' workspaces in this org = %d, want 1 (the new row; soft-deleted one excluded)", liveCount)
+	}
+}
+
+// TestRunner_Up_SyncJob_TableAndColumns covers spec R-WS-019 (Workspace
+// sync) for the 2026-07-08-workspace-sync-clone change. The migration
+// `20260708120200_sync_job.sql` MUST produce:
+//
+//   - public.sync_job table with BIGSERIAL id and the locked columns:
+//     id (BIGSERIAL PK), workspace_id (BIGINT NOT NULL FK), status
+//     (TEXT NOT NULL CHECK), triggered_by (TEXT NOT NULL CHECK),
+//     started_at, finished_at, commit_sha_after, error_message,
+//     error_code, attempts (INT NOT NULL DEFAULT 0), created_at.
+//   - public.workspace table with the 4 new columns:
+//     last_synced_at (TIMESTAMPTZ NULL), last_synced_commit_sha (TEXT NULL),
+//     default_branch (TEXT NULL), last_sync_job_id (BIGINT NULL).
+//   - FK workspace.last_sync_job_id -> sync_job(id) ON DELETE SET NULL.
+func TestRunner_Up_SyncJob_TableAndColumns(t *testing.T) {
+	db := integrationRunnerDB(t)
+	resetSchemaMigrations(t, db)
+	wipeNewTables(t, db)
+	t.Cleanup(truncateNewTables(t, db))
+
+	r := newTestRunner(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := r.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	// sync_job exists.
+	var syncJobExists bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'sync_job'
+         )`).Scan(&syncJobExists); err != nil {
+		t.Fatalf("check public.sync_job: %v", err)
+	}
+	if !syncJobExists {
+		t.Fatalf("public.sync_job missing after Up()")
+	}
+
+	// sync_job has every locked column with the right type and nullability.
+	wantColumns := map[string]string{
+		"id":               "bigint",
+		"workspace_id":     "bigint",
+		"status":           "text",
+		"triggered_by":     "text",
+		"started_at":       "timestamp with time zone",
+		"finished_at":      "timestamp with time zone",
+		"commit_sha_after": "text",
+		"error_message":    "text",
+		"error_code":       "text",
+		"attempts":         "integer",
+		"created_at":       "timestamp with time zone",
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT column_name, data_type, is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'sync_job'`)
+	if err != nil {
+		t.Fatalf("query sync_job columns: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	got := map[string][2]string{}
+	for rows.Next() {
+		var name, dtype, nullable string
+		if err := rows.Scan(&name, &dtype, &nullable); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		got[name] = [2]string{dtype, nullable}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	for col, wantType := range wantColumns {
+		entry, ok := got[col]
+		if !ok {
+			t.Errorf("sync_job.%s missing", col)
+			continue
+		}
+		if entry[0] != wantType {
+			t.Errorf("sync_job.%s type = %s, want %s", col, entry[0], wantType)
+		}
+	}
+	// Locked NOT NULL columns.
+	for _, col := range []string{"id", "workspace_id", "status", "triggered_by", "attempts", "created_at"} {
+		if entry, ok := got[col]; !ok {
+			t.Errorf("sync_job.%s missing", col)
+		} else if entry[1] != "NO" {
+			t.Errorf("sync_job.%s nullable = %s, want NO", col, entry[1])
+		}
+	}
+	// Locked nullable columns.
+	for _, col := range []string{"started_at", "finished_at", "commit_sha_after", "error_message", "error_code"} {
+		if entry, ok := got[col]; !ok {
+			t.Errorf("sync_job.%s missing", col)
+		} else if entry[1] != "YES" {
+			t.Errorf("sync_job.%s nullable = %s, want YES", col, entry[1])
+		}
+	}
+
+	// workspace has the 4 new columns.
+	wantWorkspaceCols := map[string]string{
+		"last_synced_at":         "timestamp with time zone",
+		"last_synced_commit_sha": "text",
+		"default_branch":         "text",
+		"last_sync_job_id":       "bigint",
+	}
+	wRows, err := db.QueryContext(ctx,
+		`SELECT column_name, data_type, is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'workspace'
+            AND column_name IN ('last_synced_at', 'last_synced_commit_sha', 'default_branch', 'last_sync_job_id')`)
+	if err != nil {
+		t.Fatalf("query workspace new columns: %v", err)
+	}
+	defer func() { _ = wRows.Close() }()
+	gotW := map[string][2]string{}
+	for wRows.Next() {
+		var name, dtype, nullable string
+		if err := wRows.Scan(&name, &dtype, &nullable); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		gotW[name] = [2]string{dtype, nullable}
+	}
+	if err := wRows.Err(); err != nil {
+		t.Fatalf("wRows err: %v", err)
+	}
+	for col, wantType := range wantWorkspaceCols {
+		entry, ok := gotW[col]
+		if !ok {
+			t.Errorf("workspace.%s missing", col)
+			continue
+		}
+		if entry[0] != wantType {
+			t.Errorf("workspace.%s type = %s, want %s", col, entry[0], wantType)
+		}
+		if entry[1] != "YES" {
+			t.Errorf("workspace.%s nullable = %s, want YES (all 4 new columns must be nullable)", col, entry[1])
+		}
+	}
+
+	// FK workspace.last_sync_job_id -> sync_job(id) ON DELETE SET NULL.
+	var fkAction string
+	if err := db.QueryRowContext(ctx,
+		`SELECT confdeltype
+           FROM pg_constraint
+          WHERE conname = 'workspace_last_sync_job_id_fkey'
+            AND conrelid = 'public.workspace'::regclass`).Scan(&fkAction); err != nil {
+		t.Fatalf("query workspace_last_sync_job_id_fkey: %v", err)
+	}
+	// 'a' = NO ACTION, 'r' = RESTRICT, 'c' = CASCADE, 'n' = SET NULL, 'd' = SET DEFAULT
+	if fkAction != "n" {
+		t.Errorf("workspace_last_sync_job_id_fkey ON DELETE = %q, want SET NULL (n)", fkAction)
+	}
+}
+
+// TestRunner_Up_SyncJob_PartialUniqueIndex covers spec R-WS-019 S-WS-193:
+// the partial unique index `sync_job_single_flight_uidx` on
+// (workspace_id) WHERE status IN ('pending','running') MUST reject a
+// second in-flight job for the same workspace_id, AND MUST allow a
+// second job once the first one is in a terminal state (done|failed).
+// Also asserts the CHECK constraints on status and triggered_by.
+func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
+	db := integrationRunnerDB(t)
+	resetSchemaMigrations(t, db)
+	wipeNewTables(t, db)
+	t.Cleanup(truncateNewTables(t, db))
+
+	r := newTestRunner(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := r.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	// Seed org + workspace.
+	var orgID, wsID int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO organization (full_name, identification) VALUES ('Acme', 'sync-uniq') RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatalf("seed organization: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO workspace (organization_id, name, repo_github_id, repo_full_name, repo_owner, repo_name)
+         VALUES ($1, 'w1', 100, 'o/r', 'o', 'r') RETURNING id`, orgID).Scan(&wsID); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	// First pending job succeeds.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'pending', 'manual')`, wsID); err != nil {
+		t.Fatalf("first pending insert: %v", err)
+	}
+
+	// Second pending job for the same workspace_id must violate the
+	// partial unique index. The CHECK constraint also restricts the
+	// status vocabulary, so we know the partial index is what fires.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'pending', 'manual')`, wsID); err == nil {
+		t.Errorf("expected sync_job_single_flight_uidx violation on second pending job, got nil error")
+	} else if !msgContainsAny(err.Error(), "sync_job_single_flight_uidx", "duplicate key", "23505") {
+		t.Errorf("expected error mentioning sync_job_single_flight_uidx, got: %v", err)
+	}
+
+	// A second 'running' job is also rejected (the partial WHERE covers
+	// both 'pending' and 'running').
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'running', 'manual')`, wsID); err == nil {
+		t.Errorf("expected partial-index violation on second 'running' job, got nil error")
+	}
+
+	// A terminal-state job ('done' or 'failed') MUST be allowed for
+	// the same workspace_id (the partial index excludes terminal rows).
+	// Promote the first job to 'done', then insert a fresh 'pending'
+	// job for the same workspace — must succeed.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE sync_job SET status = 'done', finished_at = now() WHERE workspace_id = $1 AND status = 'pending'`, wsID); err != nil {
+		t.Fatalf("promote first job to done: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'pending', 'manual')`, wsID); err != nil {
+		t.Errorf("expected second 'pending' job after first is 'done' to be allowed, got: %v", err)
+	}
+
+	// CHECK constraint on status: an unknown status must be rejected.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'NOT_A_STATUS', 'manual')`, wsID); err == nil {
+		t.Errorf("expected CHECK violation on unknown status, got nil error")
+	} else if !msgContainsAny(err.Error(), "sync_job_status_check", "check constraint", "23514") {
+		t.Errorf("expected error mentioning sync_job_status_check, got: %v", err)
+	}
+
+	// CHECK constraint on triggered_by: an unknown value must be rejected.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sync_job (workspace_id, status, triggered_by) VALUES ($1, 'pending', 'NOT_A_TRIGGER')`, wsID); err == nil {
+		t.Errorf("expected CHECK violation on unknown triggered_by, got nil error")
+	} else if !msgContainsAny(err.Error(), "sync_job_triggered_by_check", "check constraint", "23514") {
+		t.Errorf("expected error mentioning sync_job_triggered_by_check, got: %v", err)
 	}
 }
 
