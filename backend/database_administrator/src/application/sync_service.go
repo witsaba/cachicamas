@@ -188,11 +188,25 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	defer func() { _ = tx.Rollback() }()
 
 	// 1. Lookup the current job to learn its workspace_id (and
-	//    enforce idempotency: only update if status='running').
-	//    The simple path is: UPDATE with WHERE filter. The
-	//    RETURNING clause gives us the new row + the original
-	//    workspace_id; a 0-row result means the callback is a
-	//    late duplicate (idempotent no-op).
+	//    enforce idempotency: only update if the row is in a
+	//    pre-terminal state).
+	//
+	//    UAT fix (2026-07-08): the prior WHERE filter was
+	//    `AND status = 'running'`, but the syncer never transitions
+	//    a row to 'running' before the callback arrives — the row
+	//    is in 'pending' the entire time the clone runs. The
+	//    UPDATE matched 0 rows and the handler returned 204 without
+	//    updating the row, so the sync_job stayed in 'pending'
+	//    forever.
+	//
+	//    The fix: accept the row in EITHER 'pending' or 'running'
+	//    state. The single-flight invariant is guaranteed by the
+	//    partial unique index `sync_job_single_flight_uidx` on
+	//    (workspace_id) WHERE status IN ('pending','running'), not
+	//    by the callback's WHERE filter. The callback can
+	//    legitimately land on a 'pending' row (normal path) or a
+	//    'running' row (future state where the syncer posts a
+	//    'started' callback before the worktree probe).
 	//
 	//    The defaultBranch arg is NOT bound here (PG would reject
 	//    the query with SQLSTATE 42P18 "indeterminate datatype"
@@ -207,7 +221,7 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 		       finished_at      = now(),
 		       attempts         = attempts + 1
 		 WHERE id = $1
-		   AND status = 'running'
+		   AND status IN ('pending', 'running')
 	`, jobID, status, commitSHA, errorCode, errorMessage)
 	if err != nil {
 		return nil, fmt.Errorf("sync.ProcessSyncCallback: update sync_job: %w", err)
@@ -242,7 +256,18 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	}
 
 	// 3. On 'done', denormalize onto the workspace row.
-	if status == domain.SyncJobStatusDone && s.workspaceRepo != nil {
+	//
+	//    UAT fix (2026-07-08): the prior code had
+	//    `&& s.workspaceRepo != nil` as a guard, but the
+	//    production path uses raw SQL on the tx (not the repo
+	//    port), so the guard was redundant in production AND
+	//    blocked the denormalization in tests that pass nil
+	//    for the workspaceRepo. The denormalization is now
+	//    unconditional on status='done'. The workspaceRepo
+	//    is unused in the production path (kept on the
+	//    service struct for the unit-test path that exercises
+	//    s.repo directly when s.db is nil).
+	if status == domain.SyncJobStatusDone {
 		markRes, err := tx.ExecContext(ctx, `
 			UPDATE workspace
 			   SET last_synced_at         = now(),
