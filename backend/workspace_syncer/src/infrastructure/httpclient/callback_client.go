@@ -74,7 +74,13 @@ func (c *CallbackClient) Post(ctx context.Context, req CallbackRequest) error {
 		return fmt.Errorf("callback: marshal body: %w", err)
 	}
 
-	url := c.baseURL + "/internal/sync-callback"
+	// PR-2c fix: the URL must include the /api/v1 prefix to match
+	// the database_administrator's route convention. Without this
+	// prefix, db_admin returns 404 (and the sync_job row stays in
+	// 'pending' because the callback never lands). The error was
+	// masked by the prior "context canceled" bug — once that was
+	// fixed, the URL mismatch surfaced.
+	url := c.baseURL + "/api/v1/internal/sync-callback"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("callback: build request: %w", err)

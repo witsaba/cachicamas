@@ -36,8 +36,8 @@ func TestCallbackClient_Post_Success(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", capturedMethod)
 	}
-	if capturedPath != "/internal/sync-callback" {
-		t.Errorf("path = %q, want /internal/sync-callback", capturedPath)
+	if capturedPath != "/api/v1/internal/sync-callback" {
+		t.Errorf("path = %q, want /api/v1/internal/sync-callback", capturedPath)
 	}
 	if capturedAuth != "Bearer test-token" {
 		t.Errorf("auth = %q, want Bearer test-token", capturedAuth)
