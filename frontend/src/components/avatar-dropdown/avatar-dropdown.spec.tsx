@@ -147,13 +147,26 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       'button[data-testid="avatar-dropdown"]',
     ) as HTMLButtonElement | null;
     expect(trigger).toBeTruthy();
-    const cls = trigger?.className ?? "";
+const cls = trigger?.className ?? "";
     // cursor + transition + hover ring + active press-in
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
     expect(cls).toMatch(/hover:ring-slate-400/);
     expect(cls).toMatch(/hover:shadow-md/);
     expect(cls).toMatch(/active:scale-95/);
+    // Regression guards — these tokens CONFLICT with the primary
+    // variant's defaults (rounded-md, bg-slate-900,
+    // active:translate-y-px). Tailwind 4 emits utilities in
+    // alphabetical order in the generated CSS, so the override
+    // would silently lose without the `!important` prefix in the
+    // consumer className. The visual regression would be: square
+    // avatar instead of circular, dark slate background bleeding
+    // around the image, and the button sliding down 1px instead of
+    // pressing in. These assertions pin the override carries the
+    // `!important` prefix that wins at the CSS layer:
+    expect(cls).toMatch(/!rounded-full/);
+    expect(cls).toMatch(/!bg-transparent/);
+    expect(cls).toMatch(/!active:scale-95/);
   });
 
   it("panel lists Profile, Workspaces, and Sign out entries (T-WS-2i-015 + 2026-07-06 ownboarding)", async () => {

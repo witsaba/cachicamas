@@ -107,7 +107,12 @@ export default component$(() => {
             type="submit"
             variant="primary"
             testId="auth-signout-submit"
-            class="border border-zinc-700 bg-zinc-900 text-zinc-100 shadow-sm hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus-visible:ring-zinc-500"
+            // See the sign-in-button.tsx for the rationale: the
+            // `not-disabled:hover:*` and `focus-visible:*` tokens
+            // from the primary variant have higher specificity than
+            // bare `hover:*` overrides, so the consumer must use
+            // `!important` to win.
+            class="!hover:border-zinc-600 !hover:bg-zinc-800 !focus-visible:ring-zinc-500 border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:shadow-md"
           >
             Sign out
           </Button>

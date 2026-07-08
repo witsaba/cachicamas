@@ -58,6 +58,17 @@ ruleTester.run("no-inline-button-class", rule, {
       code: IMPORT_LINE + '<Button variant="primary">Save</Button>',
       filename: "/app/src/components/clean.tsx",
     },
+    // Documented `!important` overrides (e.g. the avatar trigger's
+    // `!rounded-full` to override the variant's `rounded-md`) are
+    // intentionally excluded by the rule — the `!` prefix signals an
+    // intentional override of a system token. Without stripping `!`,
+    // this case would false-positive.
+    {
+      code:
+        IMPORT_LINE +
+        '<button class="!rounded-full h-10 w-10 overflow-hidden">x</button>',
+      filename: "/app/src/components/avatar.tsx",
+    },
     // Allowlisted file (SignInButton zinc override) passes.
     {
       code:

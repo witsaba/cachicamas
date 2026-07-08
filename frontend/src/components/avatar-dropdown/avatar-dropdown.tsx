@@ -93,7 +93,15 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}
           onClick$={() => setOpen$(!open.value)}
-          class="h-10 w-10 overflow-hidden rounded-full ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:scale-95"
+          // Tailwind 4 emits utilities in alphabetical order in the
+          // generated CSS. The consumer override classes that
+          // CONFLICT with the variant's tokens (`rounded-full` vs
+          // `rounded-md`, `bg-transparent` vs `bg-slate-900`,
+          // `active:scale-95` vs `active:translate-y-px`) need the
+          // `!` important prefix so the override wins regardless of
+          // emission order. See the README section "Consumer
+          // personalizations" for why this is needed.
+          class="!active:scale-95 h-10 w-10 overflow-hidden !rounded-full !bg-transparent ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400"
         >
           {safeImage ? (
             <img

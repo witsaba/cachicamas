@@ -182,7 +182,7 @@ describe("components/sign-in-button", () => {
     const { screen, render } = await createDOM();
     await render(<SignInButton signIn={action} />);
 
-    const button = screen.querySelector('button[type="submit"]');
+const button = screen.querySelector('button[type="submit"]');
     expect(button).toBeTruthy();
     const cls = (button as HTMLElement).className;
     // explicit cursor for cross-OS consistency (some browsers/OSes
@@ -197,5 +197,19 @@ describe("components/sign-in-button", () => {
     expect(cls).toMatch(/transition-/);
     // active-state press-down for click feedback
     expect(cls).toMatch(/active:translate-y-px/);
+    // Regression guards — the SignInButton uses a zinc override on
+    // top of variant="primary". Tailwind 4 + the
+    // `not-disabled:hover:*` pseudo-class means the variant has
+    // higher specificity than bare `hover:*` overrides, so the
+    // consumer MUST use `!important` on the conflicting tokens.
+    // Without `!` the override silently loses and the button
+    // renders with slate-700 hover + slate focus ring instead of
+    // zinc-800 + zinc-500. These assertions pin the override
+    // carries the `!important` prefix:
+    expect(cls).toMatch(/!bg-zinc-900/);
+    expect(cls).toMatch(/!text-zinc-100/);
+    expect(cls).toMatch(/!hover:bg-zinc-800/);
+    expect(cls).toMatch(/!hover:border-zinc-600/);
+    expect(cls).toMatch(/!focus-visible:ring-zinc-500/);
   });
 });

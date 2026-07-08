@@ -45,13 +45,19 @@ function importsPrimitives(text) {
 }
 
 function checkClassString(context, node, cls) {
-  const hasBgSlate900 = /\bbg-slate-900\b/.test(cls);
-  const hasBgRed700 = /\bbg-red-700\b/.test(cls);
-  const hasBgRed800 = /\bbg-red-800\b/.test(cls);
-  const hasTextWhite = /\btext-white\b/.test(cls);
-  const hasBorderSlate300 = /\bborder-slate-300\b/.test(cls);
-  const hasBgWhite = /\bbg-white\b/.test(cls);
-  const hasTextSlate900 = /\btext-slate-900\b/.test(cls);
+  // We strip the `!important` prefix from each token before matching so
+  // the rule doesn't false-positive on documented overrides that use
+  // `!` (e.g. `!bg-zinc-900`, `!hover:bg-zinc-800`). The override is
+  // legitimate; the literal token still appears in the class string but
+  // with the `!` prefix that signals an intentional override.
+  const stripped = cls.replace(/!/g, "");
+  const hasBgSlate900 = /\bbg-slate-900\b/.test(stripped);
+  const hasBgRed700 = /\bbg-red-700\b/.test(stripped);
+  const hasBgRed800 = /\bbg-red-800\b/.test(stripped);
+  const hasTextWhite = /\btext-white\b/.test(stripped);
+  const hasBorderSlate300 = /\bborder-slate-300\b/.test(stripped);
+  const hasBgWhite = /\bbg-white\b/.test(stripped);
+  const hasTextSlate900 = /\btext-slate-900\b/.test(stripped);
 
   if (hasBgSlate900 && hasTextWhite) {
     context.report({ node, messageId: "primaryDrift" });

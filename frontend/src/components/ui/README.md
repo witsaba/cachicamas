@@ -61,6 +61,42 @@ Every `<Button>` and `<MenuItem>` accepts an optional `class` prop. The system t
 
 The design system does not encode these as named variants because each is a one-off consumer concern. Promoting them to variants would inflate the API for marginal gain.
 
+### The `!important` escape hatch
+
+Tailwind 4 emits utilities in alphabetical order in the generated CSS. The class attribute order does **not** affect specificity — only the CSS emission order does. When a consumer override class **conflicts** with a variant token (same property name, different value), the order of the two class strings in the HTML attribute does not decide which wins; the order in the generated CSS does.
+
+For most conflicts (e.g. `bg-zinc-900` vs `bg-slate-900`), the alphabetical emission order happens to favor the override because `bg-zinc-900` > `bg-slate-900`. But for **two specific cases**, the override silently loses without help:
+
+1. **`rounded-md` (variant) vs `rounded-full` (override)**: `'f' < 'm'` alphabetically → `rounded-md` emitted later → `rounded-md` wins → square corner instead of circle. **Affected**: the avatar trigger (`<Button variant="primary" class="h-10 w-10 …">`).
+2. **`not-disabled:hover:bg-slate-700` (variant) vs `hover:bg-zinc-800` (override)**: the variant compiles to `:not(:disabled):hover`, which has CSS specificity `(0, 3, 0)` (class + :not(:disabled) pseudo + :hover pseudo). The bare override compiles to `:hover` only, specificity `(0, 2, 0)`. **Higher specificity always wins** regardless of emission order. **Affected**: any override on a primary/secondary/destructive button that wants to change the hover color (the SignInButton zinc CTA, the destructive-outline delete button, the SignOut confirm).
+
+The escape hatch is the `!important` prefix — Tailwind 4's standard pattern for "this utility MUST win over the cascade":
+
+```tsx
+// Avatar trigger — `!rounded-full` wins over `rounded-md` from BUTTON_BASE.
+<Button variant="primary" class="!rounded-full !bg-transparent h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 !active:scale-95">
+  <img src={avatar} alt="" />
+</Button>
+
+// Brand-anchored zinc CTA — every conflicting token needs `!`.
+<Button variant="primary" class="!bg-zinc-900 !text-zinc-100 border border-zinc-700 shadow-sm !hover:border-zinc-600 !hover:bg-zinc-800 hover:shadow-md !focus-visible:ring-zinc-500">
+  Sign in
+</Button>
+
+// Outline destructive — solid red overridden with transparent + red border.
+<Button variant="destructive" class="!bg-transparent !text-red-700 border border-red-300 !hover:bg-red-50 !focus-visible:ring-red-500">
+  Delete workspace
+</Button>
+```
+
+When **not** to use `!important`:
+
+- Pure additions (a new utility not present in the variant): `class="px-3 py-1"` — no conflict, no need.
+- Same property, same value: `class="text-sm"` (already in the variant's size) — no-op, harmless.
+- Different property entirely: `class="shadow-sm"` — no conflict.
+
+The lint rule `no-inline-button-class` strips `!` before matching, so documented `!important` overrides don't trigger drift warnings. The presence of `!` is itself the signal that the consumer knows they are overriding a system token.
+
 ## `loading` state
 
 `<Button loading={true}>` becomes disabled and gets `aria-busy="true"`. The consumer is expected to pass alternate content via children (e.g. `<Button loading>Saving…</Button>`).

@@ -98,7 +98,19 @@ export const SignInButton = component$<SignInButtonProps>(
           type="submit"
           variant="primary"
           testId="sign-in-button"
-          class="border border-zinc-700 bg-zinc-900 text-zinc-100 shadow-sm hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus-visible:ring-zinc-500"
+          // Tailwind 4 + `not-disabled:hover:*` specificity trap:
+          //   - The primary variant has `not-disabled:hover:bg-slate-700`,
+          //     which compiles to `:not(:disabled):hover` — specificity
+          //     (0,3,0) because `:not()` inherits the specificity of its
+          //     argument plus the `:hover` pseudo-class.
+          //   - A bare `hover:bg-zinc-800` override compiles to `:hover`
+          //     only — specificity (0,2,0).
+          //   - The variant WINS regardless of emission order, so the
+          //     consumer must use `!important` to override.
+          // Without `!` the SignInButton would render `hover:bg-slate-700`
+          // (the variant's default), not the intended zinc-800. The
+          // difference is subtle (both very dark) but the override loses.
+          class="!hover:border-zinc-600 !hover:bg-zinc-800 !focus-visible:ring-zinc-500 border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:shadow-md"
         >
           {/*
 GitHub Octocat brand mark — a recognizable visual anchor
