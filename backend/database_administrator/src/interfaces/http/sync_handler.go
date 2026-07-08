@@ -45,29 +45,47 @@ type SyncEnqueuer interface {
 	GetLatestSyncJob(ctx context.Context, workspaceID int64) (*domain.SyncJob, error)
 }
 
+// WorkspaceRowLoader is the narrow contract PR-3c uses to load
+// the workspace row in the handler. The workspace row carries
+// the repo identity (RepoOwner, RepoName) the syncer needs.
+// Production: *postgres.WorkspaceRepo. Tests: a fake.
+type WorkspaceRowLoader interface {
+	SelectByID(ctx context.Context, id int64) (*domain.Workspace, error)
+}
+
 // SyncHandler exposes the 2 sync endpoints. The handler depends
-// on SyncEnqueuer (an interface) so tests can pass a fake without
-// standing up the full hexagonal graph.
+// on SyncEnqueuer + WorkspaceRowLoader (interfaces) so tests can
+// pass fakes without standing up the full hexagonal graph.
 type SyncHandler struct {
-	syncSvc SyncEnqueuer
-	syncer  application.SyncDispatcher // may be nil (test path)
-	logger  *slog.Logger
+	syncSvc      SyncEnqueuer
+	workspaces   WorkspaceRowLoader
+	tokenFetcher TokenFetcher
+	syncer       application.SyncDispatcher // may be nil (test path)
+	logger       *slog.Logger
 }
 
 // NewSyncHandler wires a SyncHandler to its service. dispatcher
 // may be nil (the test path); the handler tolerates the nil case
 // by skipping the syncer call and leaving the job in 'pending'.
-func NewSyncHandler(syncSvc SyncEnqueuer, dispatcher application.SyncDispatcher, logger *slog.Logger) *SyncHandler {
+func NewSyncHandler(syncSvc SyncEnqueuer, workspaces WorkspaceRowLoader, tokenFetcher TokenFetcher, dispatcher application.SyncDispatcher, logger *slog.Logger) *SyncHandler {
 	if syncSvc == nil {
 		panic("NewSyncHandler: syncSvc must not be nil")
+	}
+	if workspaces == nil {
+		panic("NewSyncHandler: workspaces must not be nil")
+	}
+	if tokenFetcher == nil {
+		panic("NewSyncHandler: tokenFetcher must not be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &SyncHandler{
-		syncSvc: syncSvc,
-		syncer:  dispatcher,
-		logger:  logger,
+		syncSvc:      syncSvc,
+		workspaces:   workspaces,
+		tokenFetcher: tokenFetcher,
+		syncer:       dispatcher,
+		logger:       logger,
 	}
 }
 
@@ -136,6 +154,7 @@ func (h *SyncHandler) Post(c *echo.Context) error {
 			Fields: map[string]string{"auth": "Authentication required."},
 		})
 	}
+	identity, _ := identityFromContext(c)
 
 	jobID, isFresh, existing, err := h.syncSvc.EnqueueSync(c.Request().Context(), workspaceID, domain.SyncJobTriggerManual)
 	if err != nil {
@@ -146,15 +165,13 @@ func (h *SyncHandler) Post(c *echo.Context) error {
 	// logged but does NOT change the response. The job is in
 	// 'pending' state in the DB; the user can retry from the UI.
 	if isFresh && h.syncer != nil {
-		// The dispatcher requires owner/repo/default_branch/oauth_token
-		// to assemble the syncer request. For PR-3b the workspace
-		// service would supply these via a context-loaded
-		// workspace value; the handler does NOT have access to the
-		// workspace row here. We dispatch with empty owner/repo;
-		// the syncer will reject with 400 + validation. This is
-		// a known limitation of PR-3b that PR-3c (or follow-up)
-		// will close by loading the workspace row in the handler.
-		_ = h.dispatchToSyncer(c, workspaceID, jobID, existing)
+		// PR-3c: load the workspace row + the user's OAuth token
+		// before dispatching. The syncer's ValidateCloneRequest
+		// requires owner/repo/default_branch/oauth_token — sending
+		// empty strings (the PR-3b behavior) results in a 400
+		// and the job stays in 'pending' forever. The handler now
+		// loads the real values so the syncer can actually run.
+		_ = h.dispatchToSyncer(c, identity, workspaceID, jobID, existing)
 	}
 
 	if isFresh {
@@ -169,28 +186,80 @@ func (h *SyncHandler) Post(c *echo.Context) error {
 }
 
 // dispatchToSyncer invokes the syncer via the configured
-// dispatcher. The owner/repo/default_branch/oauth_token are
-// not yet loaded in the handler (PR-3b scope); for now the
-// handler invokes the dispatcher with empty strings, which
-// the syncer rejects with 400 + validation. The job remains
-// 'pending' in the DB and the UI can retry.
+// dispatcher. Loads the workspace row (for owner/repo) + the
+// user's OAuth token (from the auth chain's identity) and
+// passes them to the syncer. PR-3b was a placeholder that sent
+// empty strings; PR-3c is the wired version.
 //
-// PR-3c (follow-up) will close this gap by loading the workspace
-// row + the user's OAuth token in the handler before calling
-// the dispatcher.
-func (h *SyncHandler) dispatchToSyncer(c *echo.Context, workspaceID, jobID int64, job *domain.SyncJob) error {
+// defaultBranch resolution: the workspace row's DefaultBranch is
+// denormalized from the syncer's callback on the first done.
+// On the FIRST sync the column is NULL (the syncer hasn't reported
+// back yet), so we hardcode "main" — GitHub's default for every
+// new repo since Oct 2020. A future slice may call the GitHub
+// REST GET /repos/{owner}/{repo} to fetch the actual default,
+// but that adds a network call to every dispatch; the workspace
+// row denormalization is the source of truth on subsequent syncs.
+func (h *SyncHandler) dispatchToSyncer(c *echo.Context, identity *domain.Identity, workspaceID, jobID int64, job *domain.SyncJob) error {
 	if h.syncer == nil {
 		return nil
 	}
-	h.logger.DebugContext(c.Request().Context(),
+	ctx := c.Request().Context()
+
+	// 1. Load the workspace row.
+	ws, err := h.workspaces.SelectByID(ctx, workspaceID)
+	if err != nil {
+		h.logger.WarnContext(ctx,
+			"sync handler: workspace lookup failed; job remains pending",
+			slog.Int64("workspace_id", workspaceID),
+			slog.Int64("job_id", jobID),
+			slog.String("error", err.Error()),
+		)
+		return err
+	}
+	if ws == nil {
+		h.logger.WarnContext(ctx,
+			"sync handler: workspace not found; job remains pending",
+			slog.Int64("workspace_id", workspaceID),
+			slog.Int64("job_id", jobID),
+		)
+		return errors.New("workspace not found")
+	}
+
+	// 2. Load the user's OAuth token. The identity's
+	// ProviderAccountID is the GitHub user id; Provider is "github".
+	token, err := h.tokenFetcher.AccessTokenForIdentity(ctx, identity.Provider, identity.ProviderAccountID)
+	if err != nil || token == "" {
+		h.logger.WarnContext(ctx,
+			"sync handler: OAuth token not found (user must reconnect); job remains pending",
+			slog.Int64("workspace_id", workspaceID),
+			slog.Int64("job_id", jobID),
+			slog.String("error", errString(err)),
+		)
+		return errors.New("OAuth token not found")
+	}
+
+	// 3. Resolve default_branch. Use the denormalized value if
+	// available; fall back to "main" on the first sync.
+	defaultBranch := ""
+	if ws.DefaultBranch != nil {
+		defaultBranch = *ws.DefaultBranch
+	}
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+
+	h.logger.DebugContext(ctx,
 		"sync handler: dispatching to syncer",
 		slog.Int64("workspace_id", workspaceID),
 		slog.Int64("job_id", jobID),
+		slog.String("owner", ws.RepoOwner),
+		slog.String("repo", ws.RepoName),
+		slog.String("default_branch", defaultBranch),
 	)
-	// Best-effort dispatch. The dispatcher tolerates nil inputs
-	// and surfaces a typed error; the handler logs and returns.
-	if err := h.syncer.StartSync(c.Request().Context(), jobID, workspaceID, "", "", "", ""); err != nil {
-		h.logger.WarnContext(c.Request().Context(),
+
+	// 4. Dispatch.
+	if err := h.syncer.StartSync(ctx, jobID, workspaceID, ws.RepoOwner, ws.RepoName, defaultBranch, token); err != nil {
+		h.logger.WarnContext(ctx,
 			"sync handler: dispatcher.StartSync returned error; job remains pending",
 			slog.Int64("workspace_id", workspaceID),
 			slog.Int64("job_id", jobID),
@@ -200,6 +269,15 @@ func (h *SyncHandler) dispatchToSyncer(c *echo.Context, workspaceID, jobID int64
 		return err
 	}
 	return nil
+}
+
+// errString returns err.Error() or "" if err is nil. Tiny helper
+// to keep the warn logs single-line.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Get handles GET /workspaces/:id/sync. Returns the most recent

@@ -336,7 +336,12 @@ func main() {
 	syncerClient := workspacesyncer.NewClient(syncerBaseURL, syncerToken)
 	syncerDispatcher := httpiface.NewWSClientAdapter(syncerClient)
 
-	syncHandler := httpiface.NewSyncHandler(syncSvc, syncerDispatcher, logger)
+	// PR-3c: pass workspaceRepo (WorkspaceRowLoader) + tokenFetcher
+	// (TokenFetcher) to the SyncHandler so it can populate the
+	// syncer dispatch with the real owner/repo/default_branch/
+	// oauth_token. Both are already wired in main.go (the
+	// workspaceRepo from PR-1; the tokenFetcher from PR1c-ii).
+	syncHandler := httpiface.NewSyncHandler(syncSvc, workspaceRepo, tokenFetcher, syncerDispatcher, logger)
 
 	// Mount the sync endpoints inside the auth-protected workspace
 	// group. We need to attach the routes to the same Echo sub-group

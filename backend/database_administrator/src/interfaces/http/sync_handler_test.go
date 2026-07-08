@@ -68,13 +68,44 @@ func seedIdentityMW() echo.MiddlewareFunc {
 	}
 }
 
-// newSyncTestHandler wires SyncHandler with a fake enqueuer. The
-// returned *fakeSyncEnqueuer lets the test inspect calls.
+// fakeWorkspaceRowLoader is a minimal in-memory WorkspaceRowLoader.
+type fakeWorkspaceRowLoader struct {
+	workspace *domain.Workspace
+}
+
+func (f *fakeWorkspaceRowLoader) SelectByID(_ context.Context, _ int64) (*domain.Workspace, error) {
+	return f.workspace, nil
+}
+
+// fakeTokenFetcher is a minimal in-memory TokenFetcher.
+type fakeTokenFetcher struct {
+	token string
+	err   error
+}
+
+func (f *fakeTokenFetcher) AccessTokenForIdentity(_ context.Context, _ string, _ string) (string, error) {
+	return f.token, f.err
+}
+
+// newSyncTestHandler wires SyncHandler with fakes. PR-3c added
+// workspaces + tokenFetcher to the handler signature; tests pass
+// a workspace that returns the given owner/repo + a token fetcher
+// that returns the given oauth_token.
 func newSyncTestHandler(t *testing.T, enq *fakeSyncEnqueuer, disp *fakeDispatcher) (*httpiface.SyncHandler, *fakeSyncEnqueuer, *fakeDispatcher) {
 	t.Helper()
-	h := httpiface.NewSyncHandler(enq, disp, nil)
+	ws := &domain.Workspace{
+		ID:           7,
+		RepoOwner:    "octocat",
+		RepoName:     "hello",
+		DefaultBranch: stringPtr("main"),
+	}
+	wsLoader := &fakeWorkspaceRowLoader{workspace: ws}
+	tf := &fakeTokenFetcher{token: "gho_test_token"}
+	h := httpiface.NewSyncHandler(enq, wsLoader, tf, disp, nil)
 	return h, enq, disp
 }
+
+func stringPtr(s string) *string { return &s }
 
 func TestSyncHandler_Post_FreshEnqueue_202(t *testing.T) {
 	createdAt := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
