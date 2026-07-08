@@ -27,7 +27,7 @@ export default defineConfig(({ command, mode }): UserConfig => {
       tsconfigPaths({ root: "." }),
       tailwindcss(),
     ],
-    // Vitest picks up `**/*.spec.{ts,tsx}` by default; the e2e
+// Vitest picks up `**/*.spec.{ts,tsx}` by default; the e2e
     // tests live under `frontend/e2e/` and use Playwright's
     // `test()` API, which collides with Vitest's globals.  Keep
     // them out of `pnpm test:ci`.
@@ -37,6 +37,10 @@ export default defineConfig(({ command, mode }): UserConfig => {
         "node_modules/**",
         "dist/**",
         ".rollup.cache/**",
+        // ESLint rule tests live under `eslint-rules/` and use
+        // Node's built-in test runner (`node --test`), not vitest.
+        // Excluded here so vitest does not try to parse them.
+        "eslint-rules/**",
       ],
     },
 // This tells Vite which dependencies to pre-build in dev mode.
