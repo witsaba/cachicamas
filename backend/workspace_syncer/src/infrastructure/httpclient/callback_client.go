@@ -59,6 +59,14 @@ type CallbackRequest struct {
 	WorkspaceID    int64  `json:"workspace_id"`
 	Status         string `json:"status"` // "done" | "failed"
 	CommitSHAAfter string `json:"commit_sha,omitempty"`
+	// DefaultBranch is the upstream's default branch (e.g.
+	// "main", "master") that the clone actually used. The
+	// database_administrator denormalizes this onto
+	// workspace.default_branch on `done`. UAT fix
+	// (2026-07-08): the prior code did not include this field
+	// in the callback, leaving workspace.default_branch NULL
+	// even after a successful sync.
+	DefaultBranch string `json:"default_branch,omitempty"`
 	ErrorCode      string `json:"error_code,omitempty"`
 	ErrorMessage   string `json:"error_message,omitempty"`
 	StartedAt      string `json:"started_at,omitempty"`

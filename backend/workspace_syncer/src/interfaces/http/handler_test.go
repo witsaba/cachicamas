@@ -34,6 +34,10 @@ func (f *fakeRunnerForHandler) Clone(ctx context.Context, workspaceID int64, own
 func (f *fakeRunnerForHandler) WorktreeProbe(ctx context.Context, path string) (string, error) {
 	return f.probeSHA, f.probeErr
 }
+func (f *fakeRunnerForHandler) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
+	return "main", nil
+}
+
 func (f *fakeRunnerForHandler) ResolveHead(ctx context.Context, path string) (string, error) {
 	return f.probeSHA, nil
 }

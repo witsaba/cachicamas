@@ -185,17 +185,36 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 		return
 	}
 
+	// Step 4b: resolve the default branch. Used to denormalize
+	// onto workspace.default_branch via the callback. The
+	// resolve is best-effort: a failure (older git on bare mirror,
+	// non-standard layout) is logged but does NOT fail the clone
+	// — the callback is still posted with an empty
+	// DefaultBranch, and the workspace row stays NULL until
+	// the next successful sync.
+	defaultBranch := ""
+	if dbBranch, dbErr := s.runner.ResolveDefaultBranch(ctx, path); dbErr != nil {
+		s.logger.WarnContext(ctx, "clone: ResolveDefaultBranch failed (non-fatal; callback will omit the field)",
+			slog.Int64("job_id", req.JobID),
+			slog.String("error", dbErr.Error()),
+		)
+	} else {
+		defaultBranch = dbBranch
+	}
+
 	// Step 5: post the success callback.
 	s.logger.InfoContext(ctx, "clone: success",
 		slog.Int64("job_id", req.JobID),
 		slog.Int64("workspace_id", req.WorkspaceID),
 		slog.String("sha", sha),
+		slog.String("default_branch", defaultBranch),
 	)
 	s.postCallback(ctx, req, startedAt, httpclient.CallbackRequest{
 		JobID:          req.JobID,
 		WorkspaceID:    req.WorkspaceID,
 		Status:         "done",
 		CommitSHAAfter: sha,
+		DefaultBranch:  defaultBranch,
 	})
 }
 

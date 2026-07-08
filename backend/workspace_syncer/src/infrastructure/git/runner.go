@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -42,6 +43,23 @@ type Runner interface {
 	// bare mirror at <path>. Used by the application layer to
 	// report `commit_sha_after` on the sync_job.
 	ResolveHead(ctx context.Context, path string) (sha string, err error)
+
+	// ResolveDefaultBranch returns the upstream's default branch
+	// name (e.g. "main", "master") from the bare mirror at
+	// <path>. Implemented via
+	//   git symbolic-ref --short refs/remotes/origin/HEAD
+	// which resolves to e.g. "origin/main"; we strip the
+	// "origin/" prefix to return "main". The value is what the
+	// clone actually points at, NOT the current HEAD (which
+	// could be on a feature branch in a worktree setup).
+	//
+	// Used by the application layer to fill in the
+	// callback's `default_branch` field; the workspace row's
+	// `default_branch` is denormalized from the callback on
+	// `done`. UAT fix (2026-07-08): the prior code passed an
+	// empty default_branch through the dispatch+callback
+	// pipeline, leaving workspace.default_branch NULL.
+	ResolveDefaultBranch(ctx context.Context, path string) (branch string, err error)
 }
 
 // Compile-time check: the production implementation MUST satisfy
@@ -193,6 +211,44 @@ func (r *realRunner) ResolveHead(ctx context.Context, path string) (string, erro
 		return "", &cloneFailedError{Cause: fmt.Errorf("unexpected SHA length %d", len(sha)), Stderr: stderr.String()}
 	}
 	return string(sha), nil
+}
+
+// ResolveDefaultBranch returns the upstream's default branch name
+// (stripped of the "refs/heads/" prefix). UAT fix (2026-07-08): the
+// prior code never resolved the default branch, so the callback
+// body omitted `default_branch` and the workspace's
+// `default_branch` column stayed NULL even after a successful sync.
+//
+// Implementation: `git symbolic-ref HEAD` on a bare mirror
+// returns the symbolic ref HEAD points at, e.g.
+// "refs/heads/main". This is set by `git clone --bare` to match
+// the upstream's default branch at clone time. We strip the
+// `refs/heads/` prefix to return just the branch name.
+//
+// Why HEAD (not refs/remotes/origin/HEAD): the latter is a
+// git-clone-with-checkout convention and does NOT exist on a
+// bare mirror (verified empirically against a real clone of
+// `witsaba/cachicamas`). HEAD on a bare mirror is set by
+// `git clone --bare` to the upstream's default branch and IS
+// the correct source for the default branch name.
+//
+// Errors:
+//   - bare mirror not at <path>: the git command exits non-zero
+//     (no HEAD reference). We return the wrapped error and the
+//     caller logs + posts a callback with default_branch="" (the
+//     workspace row stays NULL — recoverable on the next sync).
+func (r *realRunner) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.gitPath, "-C", path, "symbolic-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git symbolic-ref HEAD: %w", err)
+	}
+	branch := strings.TrimSpace(string(out))
+	branch = strings.TrimPrefix(branch, "refs/heads/")
+	if branch == "" {
+		return "", fmt.Errorf("git symbolic-ref returned empty branch for %q", path)
+	}
+	return branch, nil
 }
 
 // ---------------------------------------------------------------------------

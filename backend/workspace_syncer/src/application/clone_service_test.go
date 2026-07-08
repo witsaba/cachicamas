@@ -19,6 +19,8 @@ type fakeRunner struct {
 	cloneErr  error
 	probeSHA  string
 	probeErr  error
+	defaultBranch string
+	defaultBranchErr error
 }
 
 func (f *fakeRunner) Clone(ctx context.Context, workspaceID int64, owner, repo, oauthToken string) (string, error) {
@@ -35,6 +37,15 @@ func (f *fakeRunner) WorktreeProbe(ctx context.Context, path string) (string, er
 
 func (f *fakeRunner) ResolveHead(ctx context.Context, path string) (string, error) {
 	return f.probeSHA, nil
+}
+
+func (f *fakeRunner) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.defaultBranchErr != nil {
+		return "", f.defaultBranchErr
+	}
+	return f.defaultBranch, nil
 }
 
 // fakeCallback is a controllable CallbackClientPort for tests.
@@ -73,7 +84,11 @@ func validRequest() domain.CloneRequest {
 }
 
 func TestCloneService_CloneAndValidate_Success(t *testing.T) {
-	runner := &fakeRunner{clonePath: "/data/workspaces/7/octocat/hello-world.git/", probeSHA: "abc1234567890abcdef1234567890abcdef12345"}
+	runner := &fakeRunner{
+		clonePath: "/data/workspaces/7/octocat/hello-world.git/",
+		probeSHA:  "abc1234567890abcdef1234567890abcdef12345",
+		defaultBranch: "main",
+	}
 	callback := &fakeCallback{}
 	github := &fakeGitHub{accessible: true}
 	svc := NewCloneService(runner, callback, github, nil)
@@ -92,6 +107,64 @@ func TestCloneService_CloneAndValidate_Success(t *testing.T) {
 	}
 	if c.ErrorCode != "" {
 		t.Errorf("callback error_code = %q, want empty", c.ErrorCode)
+	}
+}
+
+// TestCloneService_CloneAndValidate_SuccessCallbackIncludesDefaultBranch
+// is the regression test for the UAT bug discovered on 2026-07-08:
+// the callback body omitted `default_branch`, leaving the
+// workspace's `default_branch` column NULL after a successful sync.
+// The fix threads the resolved branch through to the callback
+// via CallbackRequest.DefaultBranch (which the db_admin
+// denormalizes onto workspace.default_branch on `done`).
+func TestCloneService_CloneAndValidate_SuccessCallbackIncludesDefaultBranch(t *testing.T) {
+	runner := &fakeRunner{
+		clonePath:      "/data/workspaces/7/octocat/hello-world.git/",
+		probeSHA:       "abc1234567890abcdef1234567890abcdef12345",
+		defaultBranch:  "main",
+	}
+	callback := &fakeCallback{}
+	github := &fakeGitHub{accessible: true}
+	svc := NewCloneService(runner, callback, github, nil)
+
+	svc.CloneAndValidate(context.Background(), validRequest())
+
+	if len(callback.calls) != 1 {
+		t.Fatalf("callback calls = %d, want 1", len(callback.calls))
+	}
+	c := callback.calls[0]
+	if c.DefaultBranch != "main" {
+		t.Errorf("callback DefaultBranch = %q, want %q (REGRESSION: the UAT bug left workspace.default_branch NULL because the callback body omitted this field)", c.DefaultBranch, "main")
+	}
+}
+
+// TestCloneService_CloneAndValidate_DefaultBranchResolveError pins
+// the failure path: when ResolveDefaultBranch fails, the
+// callback body has DefaultBranch="" (the workspace row stays
+// NULL — recoverable on the next sync). The use case logs
+// the resolve error but does NOT fail the whole clone; the
+// callback is still posted with the commit SHA.
+func TestCloneService_CloneAndValidate_DefaultBranchResolveError(t *testing.T) {
+	runner := &fakeRunner{
+		clonePath:        "/data/workspaces/7/octocat/hello-world.git/",
+		probeSHA:         "abc1234567890abcdef1234567890abcdef12345",
+		defaultBranchErr: errors.New("git symbolic-ref HEAD: exit status 128"),
+	}
+	callback := &fakeCallback{}
+	github := &fakeGitHub{accessible: true}
+	svc := NewCloneService(runner, callback, github, nil)
+
+	svc.CloneAndValidate(context.Background(), validRequest())
+
+	if len(callback.calls) != 1 {
+		t.Fatalf("callback calls = %d, want 1", len(callback.calls))
+	}
+	c := callback.calls[0]
+	if c.Status != "done" {
+		t.Errorf("status = %q, want done (the clone succeeded; the default_branch resolve error is non-fatal)", c.Status)
+	}
+	if c.DefaultBranch != "" {
+		t.Errorf("DefaultBranch = %q, want empty (the resolve failed; the callback carries an empty default_branch)", c.DefaultBranch)
 	}
 }
 

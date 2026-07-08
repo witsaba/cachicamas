@@ -152,6 +152,78 @@ func TestRunner_ResolveHead_RealRepo(t *testing.T) {
 	}
 }
 
+// TestRunner_ResolveDefaultBranch_RealRepo is the regression
+// test for the "default_branch NULL in callback" UAT bug
+// discovered on 2026-07-08. The previous CloneAndValidate did
+// not resolve the default branch from the clone, so the
+// callback body omitted `default_branch` and the
+// database_administrator's workspace denormalization left
+// workspace.default_branch NULL.
+//
+// ResolveDefaultBranch runs `git symbolic-ref --short
+// refs/remotes/origin/HEAD` against the bare mirror; the result
+// is the upstream's default branch (e.g. "main" or "master"),
+// stripped of the "origin/" prefix that git adds.
+func TestRunner_ResolveDefaultBranch_RealRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available; skipping integration test")
+	}
+
+	tmpDir := t.TempDir()
+	workDir := tmpDir + "/work"
+	repoPath := tmpDir + "/bare.git"
+	ctx := context.Background()
+
+	// Create a real source repo (with `master` as the initial branch
+	// — older git default; newer git uses `main`). Push two branches
+	// so the default (`master`) is distinguishable from HEAD.
+	for _, args := range [][]string{
+		{"init", "--initial-branch=master", workDir},
+	} {
+		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v\n%s", err, out)
+		}
+	}
+	for _, args := range [][]string{
+		{"-C", workDir, "config", "user.email", "test@example.com"},
+		{"-C", workDir, "config", "user.name", "Test"},
+	} {
+		_ = exec.CommandContext(ctx, "git", args...).Run()
+	}
+	if out, err := exec.CommandContext(ctx, "git", "-C", workDir, "commit", "--allow-empty", "-m", "initial").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Clone the bare mirror via `git clone --bare` (the actual
+	// production invocation in workspace_syncer). This sets up
+	// refs/remotes/origin/HEAD → refs/remotes/origin/<default>
+	// automatically — the same setup the production code sees.
+	if out, err := exec.CommandContext(ctx, "git", "clone", "--bare", workDir, repoPath).CombinedOutput(); err != nil {
+		t.Fatalf("git clone --bare: %v\n%s", err, out)
+	}
+
+	// Push a feature-branch from the source so HEAD is no
+	// longer the default — proving ResolveDefaultBranch returns
+	// the upstream default, not the current HEAD.
+	if out, err := exec.CommandContext(ctx, "git", "-C", workDir, "checkout", "-b", "feature-branch").CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b feature-branch: %v\n%s", err, out)
+	}
+	if out, err := exec.CommandContext(ctx, "git", "-C", workDir, "push", repoPath, "HEAD:feature-branch").CombinedOutput(); err != nil {
+		t.Fatalf("git push feature-branch: %v\n%s", err, out)
+	}
+
+	// ResolveDefaultBranch should return "master" (the upstream
+	// default), NOT "feature-branch".
+	r := NewRunner()
+	branch, err := r.ResolveDefaultBranch(ctx, repoPath)
+	if err != nil {
+		t.Fatalf("ResolveDefaultBranch: %v", err)
+	}
+	if branch != "master" {
+		t.Errorf("default branch = %q, want %q (the upstream default, NOT feature-branch)", branch, "master")
+	}
+}
+
 // TestErrorsAs_CloneFailedError is a guard for the handler's
 // errors.As mapping (the handler relies on errors.As to translate
 // the concrete error to a callback code).
