@@ -22,6 +22,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/cachicamas/backend/workspace_syncer/src/application"
+	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/git"
+	httphandler "github.com/cachicamas/backend/workspace_syncer/src/interfaces/http"
+	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/httpclient"
 	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/token"
 	"github.com/cachicamas/backend/workspace_syncer/src/otel"
 )
@@ -70,10 +74,8 @@ func main() {
 		slog.String("otel.tracer", "noop (PR-2c upgrades to OTLP)"),
 	)
 
-	// Build the Echo instance. The middleware is applied to the
-	// entire instance — every internal route is guarded.
-	e := newEcho(tokenStr)
-	_ = e
+	// Build the Echo instance with the wired CloneHandler.
+	e := newEcho(tokenStr, logger)
 
 	// Run the server with graceful shutdown on SIGINT/SIGTERM.
 	// The ctx is the parent for both the server run and the
@@ -92,10 +94,11 @@ func main() {
 }
 
 // newEcho constructs the Echo instance with the bearer-token
-// middleware and the placeholder routes. Exported as a function
-// (not inlined in main) so the test in main_test.go can construct
-// the same instance without spinning up a real HTTP server.
-func newEcho(serviceToken string) *echo.Echo {
+// middleware, the liveness probe, and the CloneHandler route.
+// Exported as a function (not inlined in main) so the test in
+// main_test.go can construct the same instance without spinning
+// up a real HTTP server.
+func newEcho(serviceToken string, logger *slog.Logger) *echo.Echo {
 	e := echo.New()
 
 	// Bearer-token middleware is applied to ALL routes via the skipper:
@@ -116,14 +119,21 @@ func newEcho(serviceToken string) *echo.Echo {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Placeholder route. PR-2b replaces this with the full
-	// CloneAndValidate handler (see design.md §2 sequence diagrams).
-	e.POST("/internal/clone-and-validate", func(c *echo.Context) error {
-		return c.JSON(http.StatusNotImplemented, map[string]string{
-			"error":   "not_implemented",
-			"message": "Clone-and-validate handler lands in PR-2b.",
-		})
-	})
+	// Wire the clone + callback pipeline. The real production
+	// wiring reads DATABASEEADMINISTRATORBASE_URL from the
+	// compose env; for now we read it from DATABASE_ADMINISTRATOR_URL.
+	dbAdminURL := os.Getenv("DATABASE_ADMINISTRATOR_URL")
+	if dbAdminURL == "" {
+		dbAdminURL = "http://database_administrator:8080"
+	}
+	runner := git.NewRunner()
+	callback := httpclient.NewCallbackClient(dbAdminURL, serviceToken)
+	// PR-2b uses nil for the GitHub accessor (the real GitHub
+	// client lands in PR-2c). The use case skips permission
+	// validation when the accessor is nil.
+	svc := application.NewCloneService(runner, callback, nil, logger)
+	cloneHandler := httphandler.NewCloneHandler(svc, logger)
+	cloneHandler.Register(e)
 
 	return e
 }

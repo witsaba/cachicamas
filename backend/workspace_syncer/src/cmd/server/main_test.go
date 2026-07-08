@@ -17,35 +17,41 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-
-	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/token"
 )
 
-// TestNewEchoInstance_PlaceholderReturnsNotImplemented asserts that
-// the POST /internal/clone-and-validate route is registered in PR-2a
-// (so the docker-compose healthcheck can hit it and the database_administrator
-// can call it) but returns 501 Not Implemented until PR-2b lands.
-func TestNewEchoInstance_PlaceholderReturnsNotImplemented(t *testing.T) {
+// TestNewEchoInstance_CloneEndpointReturns202 asserts that
+// POST /internal/clone-and-validate now returns 202 with the
+// job_id and running status (replaced the PR-2a 501 placeholder
+// with the real handler in PR-2b).
+func TestNewEchoInstance_CloneEndpointReturns202(t *testing.T) {
 	e := newTestEcho("test-token")
 
-	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader([]byte("{}")))
+	body := []byte(`{
+		"job_id": 42,
+		"workspace_id": 7,
+		"owner": "octocat",
+		"repo": "hello-world",
+		"default_branch": "main",
+		"oauth_token": "gho_xxx"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+	var respBody map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &respBody); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["error"] != "not_implemented" {
-		t.Errorf("body.error = %q, want %q", body["error"], "not_implemented")
+	if respBody["job_id"].(float64) != 42 {
+		t.Errorf("job_id = %v, want 42", respBody["job_id"])
 	}
-	if body["message"] == "" {
-		t.Errorf("body.message is empty")
+	if respBody["status"] != "running" {
+		t.Errorf("status = %q, want running", respBody["status"])
 	}
 }
 
@@ -74,7 +80,8 @@ func TestNewEchoInstance_HealthzAlwaysOK(t *testing.T) {
 func TestNewEchoInstance_RejectsBadToken(t *testing.T) {
 	e := newTestEcho("test-token")
 
-	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader([]byte("{}")))
+	body := []byte(`{"job_id":1,"workspace_id":1,"owner":"o","repo":"r","default_branch":"main","oauth_token":"t"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rec := httptest.NewRecorder()
@@ -154,22 +161,7 @@ func TestEchoContextType(t *testing.T) {
 // construct, minus the os.Exit / signal handling. The skipper
 // mirrors the production wiring so /healthz bypasses the token.
 func newTestEcho(tok string) *echo.Echo {
-	e := echo.New()
-	e.Use(token.ServiceTokenMiddleware(tok, token.ServiceTokenMiddlewareConfig{
-		Skipper: func(c *echo.Context) bool {
-			return c.Request().URL.Path == "/healthz"
-		},
-	}))
-	e.GET("/healthz", func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-	})
-	e.POST("/internal/clone-and-validate", func(c *echo.Context) error {
-		return c.JSON(http.StatusNotImplemented, map[string]string{
-			"error":   "not_implemented",
-			"message": "Clone-and-validate handler lands in PR-2b.",
-		})
-	})
-	return e
+	return newEcho(tok, slogDiscard())
 }
 
 // slogDiscard returns a *slog.Logger that drops every record. The
