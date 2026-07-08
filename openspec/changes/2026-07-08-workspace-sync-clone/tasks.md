@@ -82,17 +82,11 @@ Write the migration file `backend/database_administrator/src/migration/sql/20260
 
 **Estimated LoC:** 80 (migration file) + 50 (test extension).
 
-### T-WSY-1-002 — Write the optional cleanup migration
+### T-WSY-1-002 — [SKIPPED] Optional cleanup migration
 
-Write the optional housekeeping migration `backend/database_administrator/src/migration/sql/20260708120100_workspace_sync_cleanup_metadata.sql`. The migration is a no-op stub: it documents the decision to NOT backfill `default_branch` for pre-existing workspaces and leaves them NULL (the next sync populates the value). The migration file exists for traceability but its `Up` is a no-op SELECT that returns 1.
+Skipped per user decision (2026-07-08). Rationale: green-field assumption (no existing clients, no data at risk of loss). The `workspace.default_branch` column is NULLable; the first sync after this change populates it for any pre-existing row. The optional backfill migration is not needed and not landed.
 
-**Strict TDD evidence:** N/A (the migration is a no-op; no test code).
-
-**Estimated LoC:** 20.
-
-**Optional:** The tasks phase marks this as optional. The apply phase may skip it if the team prefers to keep the change surface small.
-
-### T-WSY-1-003 — Grant CRUD on `sync_job` to the `queen` role
+### T-WSY-1-002 — Grant CRUD on `sync_job` to the `queen` role
 
 Modify `infra/postgres/init/01-init.sql` to add `GRANT SELECT, INSERT, UPDATE, DELETE ON sync_job TO queen;`. (The migration test exercises this grant; the change is required for the API service to access the table in production.)
 
@@ -100,7 +94,7 @@ Modify `infra/postgres/init/01-init.sql` to add `GRANT SELECT, INSERT, UPDATE, D
 
 **Estimated LoC:** 5 (1 line + comment).
 
-### PR-1 review focus
+### PR-1 review focus (refined: 2 tasks instead of 3)
 
 - Schema correctness: the `sync_job` columns are exactly the ones in `design.md` §3.
 - The partial unique index clause `WHERE status IN ('pending','running')` is correct.
