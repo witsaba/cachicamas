@@ -389,8 +389,13 @@ services:
     restart: unless-stopped
     environment:
       SERVICE_NAME: workspace_syncer
-      SERVICE_PORT: ${SERVICE_PORT:-8080}
       SERVICE_ENV: ${SERVICE_ENV:-development}
+      # 2026-07-08-workspace-sync-clone: the syncer code reads
+      # WORKSPACE_SYNCER_PORT (not SERVICE_PORT) for its bind port.
+      # The database_administrator dispatches to port 8080 (see
+      # WORKSPACE_SYNCER_URL in its env block), so we MUST align
+      # them here. Override in .env if needed.
+      WORKSPACE_SYNCER_PORT: ${WORKSPACE_SYNCER_PORT:-8080}
       # 2026-07-08-workspace-sync-clone: bearer token verified by the
       # syncer middleware (subtle.ConstantTimeCompare). MUST match
       # the database_administrator INTERNAL_SERVICE_TOKEN value
