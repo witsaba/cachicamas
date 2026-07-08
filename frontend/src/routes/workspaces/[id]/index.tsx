@@ -23,6 +23,7 @@
  *   - confirm dialog for delete
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import {
   Link,
   routeLoader$,
@@ -174,16 +175,17 @@ export default component$(() => {
         </header>
 
         <div class="mb-8 flex items-center justify-end">
-          <button
+          <Button
             type="button"
-            data-testid="workspace-detail-delete"
-            class="rounded border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+            variant="destructive"
+            testId="workspace-detail-delete"
+            class="border border-red-300 bg-transparent text-red-700 hover:bg-red-50 focus-visible:ring-red-500"
             onClick$={() => {
               showDeleteConfirm.value = true;
             }}
           >
             Delete workspace
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -203,24 +205,24 @@ export default component$(() => {
               longer access it from this page.
             </p>
             <div class="mt-6 flex justify-end gap-2">
-              <button
+              <Button
                 type="button"
-                data-testid="workspace-detail-delete-cancel"
-                class="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                variant="secondary"
+                testId="workspace-detail-delete-cancel"
                 onClick$={() => {
                   showDeleteConfirm.value = false;
                 }}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                data-testid="workspace-detail-delete-confirm-button"
-                class="rounded bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800"
+                variant="destructive"
+                testId="workspace-detail-delete-confirm-button"
                 onClick$={onConfirmDelete}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </div>

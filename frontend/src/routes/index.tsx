@@ -1,5 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
+import { Button } from "~/components/ui/button/button";
 import { useSession } from "~/routes/plugin@auth";
 
 /**
@@ -90,20 +91,24 @@ export default component$(() => {
           built for clarity, designed for the AI era.
         </p>
         <div class="mt-8 flex flex-wrap items-center gap-3">
-          <a
+          <Button
+            as="a"
             href="/ownboarding"
-            data-cta="get-started"
-            class="inline-block rounded bg-slate-900 px-5 py-2.5 font-semibold text-white underline"
+            size="lg"
+            variant="primary"
+            testId="get-started"
           >
             Get started
-          </a>
-          <a
+          </Button>
+          <Button
+            as="a"
             href="#interface"
-            data-cta="see-interface"
-            class="inline-block rounded border border-slate-300 px-5 py-2.5 font-semibold text-slate-900 underline"
+            size="lg"
+            variant="secondary"
+            testId="see-interface"
           >
             See the interface
-          </a>
+          </Button>
         </div>
       </section>
 

@@ -11,6 +11,7 @@
  * the form is testable in isolation).
  */
 import { $, component$, useSignal, type QRL } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import {
   GitHubRepoPicker,
   type GitHubRepoFetcher,
@@ -176,25 +177,26 @@ export const WorkspaceForm = component$<WorkspaceFormProps>(
             </p>
           ) : null}
           {selectedRepo.value ? (
-            <button
+            <Button
               type="button"
-              data-testid="workspace-form-clear-repo"
+              variant="link"
+              testId="workspace-form-clear-repo"
               onClick$={onClearRepo$}
-              class="mt-2 text-sm text-slate-600 underline"
+              class="mt-2"
             >
               Clear selection
-            </button>
+            </Button>
           ) : null}
         </div>
 
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={submitting.value}
-          data-testid="workspace-form-submit"
-          class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          testId="workspace-form-submit"
         >
           {submitting.value ? "Creating..." : "Create workspace"}
-        </button>
+        </Button>
       </form>
     );
   },

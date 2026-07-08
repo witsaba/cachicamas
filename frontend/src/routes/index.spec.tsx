@@ -65,7 +65,7 @@ test("[routes/index]: primary CTA points to /ownboarding with 'Get started' labe
   // The first-run flow is landing → /ownboarding (which redirects
   // to /home on success). The /organizations surface was removed
   // in the 2026-07-06 ownboarding change.
-  const cta = screen.querySelector('a[data-cta="get-started"]');
+  const cta = screen.querySelector('a[data-testid="get-started"]');
   expect(cta).not.toBeNull();
   expect((cta as HTMLAnchorElement).getAttribute("href")).toBe(
     "/ownboarding",
@@ -79,7 +79,7 @@ test("[routes/index]: secondary CTA anchors to the interface section", async () 
   const { screen, render } = await createDOM();
   await render(<Index />);
 
-  const cta = screen.querySelector('a[data-cta="see-interface"]');
+  const cta = screen.querySelector('a[data-testid="see-interface"]');
   expect(cta).not.toBeNull();
   expect((cta as HTMLAnchorElement).getAttribute("href")).toBe("#interface");
 });
@@ -164,8 +164,8 @@ test("[routes/index]: UAT-1 — landing body has NO SignInButton (header is the 
     'form[data-testid="sign-in-button"]',
   );
   expect(signInForm).toBeFalsy();
-  // The "Get started" primary CTA is still present — it points
+// The "Get started" primary CTA is still present — it points
   // at /organizations/new, not the sign-in flow.
-  const cta = screen.querySelector('a[data-cta="get-started"]');
+  const cta = screen.querySelector('a[data-testid="get-started"]');
   expect(cta).toBeTruthy();
 });

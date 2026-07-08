@@ -4,10 +4,11 @@
  *
  * Reference: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
  *
- * Three intents:
+ * Four intents:
  *   - `primary` (default) — create / update actions; `bg-slate-900`.
  *   - `secondary` — general-purpose outline; `bg-white` + `border-slate-300`.
  *   - `destructive` — delete / remove actions; `bg-red-700`.
+ *   - `link` — bare-underline text button; no surface.
  *
  * Two sizes:
  *   - `md` (default) — `text-sm px-4 py-2`. Used by forms, headers, retry buttons.
@@ -24,10 +25,19 @@
  * disabled, gets `aria-busy="true"`, and the consumer is expected to
  * pass alternate content via children (UX-4 — no spinner icon).
  *
+ * `class` overrides: the system tokens always apply first; consumer
+ * classes are APPENDED. Use this for shape overrides (circular,
+ * full-width, dark-surface hover) that the variants don't anticipate.
+ *
  * The className table is sourced from `./classes` so the unit tests can
  * pin the affordances without instantiating a Qwik component.
  */
-import { Slot, component$, type QwikIntrinsicElements } from "@builder.io/qwik";
+import {
+  Slot,
+  component$,
+  type QwikIntrinsicElements,
+  type Signal,
+} from "@builder.io/qwik";
 import {
   buttonClassName,
   type ButtonSize,
@@ -51,6 +61,12 @@ export type ButtonAsButtonProps = CommonButtonAttrs & {
   disabled?: boolean;
   /** `loading` is sugar for `disabled={true}` + `aria-busy="true"`. */
   loading?: boolean;
+  /**
+   * Element reference (Qwik convention). Typed loosely because Qwik's
+   * intrinsic `ref` is parameterized by element kind and the discriminated
+   * union cannot narrow it.
+   */
+  ref?: Signal<Element | undefined>;
   /** Ignored when `as="button"`. */
   href?: never;
 };
@@ -59,6 +75,24 @@ export type ButtonAsButtonProps = CommonButtonAttrs & {
 export type ButtonAsAnchorProps = CommonButtonAttrs & {
   as: "a";
   href: string;
+  /** Standard anchor attributes — typed explicitly because Qwik 1.20's
+   * `AnchorHTMLAttributes` interface is empty (the special attrs live
+   * in a `SpecialAttrs` map that the public types don't expose). */
+  target?: "_self" | "_blank" | "_parent" | "_top" | (string & {}) | undefined;
+  rel?: string | undefined;
+  download?: string | undefined;
+  referrerPolicy?:
+    | "no-referrer"
+    | "no-referrer-when-downgrade"
+    | "origin"
+    | "origin-when-cross-origin"
+    | "same-origin"
+    | "strict-origin"
+    | "strict-origin-when-cross-origin"
+    | "unsafe-url"
+    | undefined;
+  /** Element reference. Loose typing — see ButtonAsButtonProps. */
+  ref?: Signal<Element | undefined>;
   /** Ignored when `as="a"` — links cannot be disabled in HTML. */
   disabled?: never;
   /** Ignored when `as="a"`. */
@@ -73,6 +107,13 @@ export type ButtonProps = (ButtonAsButtonProps | ButtonAsAnchorProps) & {
   size?: ButtonSize;
   /** Optional data-testid override; rendered as `data-testid`. */
   testId?: string;
+  /**
+   * Optional className tokens appended to the system className.
+   * Use for shape overrides (circular, full-width, dark-surface hover)
+   * that the variants don't anticipate. Does NOT replace the system
+   * tokens — both apply.
+   */
+  class?: string;
 };
 
 /**
@@ -86,23 +127,24 @@ export type ButtonProps = (ButtonAsButtonProps | ButtonAsAnchorProps) & {
  *   designs of this component.
  */
 export const Button = component$<ButtonProps>((props) => {
-  const variant = props.variant ?? "primary";
-  const size = props.size ?? "md";
-  const className = buttonClassName(variant, size);
+  const variant: ButtonVariant = props.variant ?? "primary";
+  const size: ButtonSize = props.size ?? "md";
+  const className = buttonClassName(variant, size, props.class);
 
   if (props.as === "a") {
     // Anchor case: `href` is required, no disabled, no type.
-    // The `rest` cast is safe because TypeScript discriminated the
-    // union on `as`; the consumer cannot have passed button-only props
-    // (disabled, type, loading). Qwik's intrinsic element types share
-    // most attributes but narrow event handlers and refs by element
-    // kind, so the union of button+anchor intrinsic types is not
-    // assignable to either alone. The runtime guard above is the
-    // safety net; the cast here bridges the gap.
-    const { as: _as, variant: _v, size: _s, testId, ...rest } = props;
+    const {
+      as: _as,
+      variant: _v,
+      size: _s,
+      testId,
+      class: _c,
+      ...rest
+    } = props;
     void _as;
     void _v;
     void _s;
+    void _c;
     const anchorProps = rest as unknown as QwikIntrinsicElements["a"];
     return (
       <a
@@ -122,18 +164,22 @@ export const Button = component$<ButtonProps>((props) => {
     variant: _v,
     size: _s,
     testId,
+    class: _c,
     type,
     disabled,
     loading,
+    ref,
     ...rest
   } = props;
   void _as;
   void _v;
   void _s;
+  void _c;
   const isDisabled = Boolean(loading) || Boolean(disabled);
   return (
     <button
       {...rest}
+      ref={ref as unknown as Signal<HTMLButtonElement | undefined>}
       type={type ?? "button"}
       class={className}
       disabled={isDisabled}

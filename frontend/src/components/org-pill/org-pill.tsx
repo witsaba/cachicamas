@@ -36,6 +36,7 @@
 import { component$, useSignal, useTask$ } from "@builder.io/qwik";
 import { useLocation } from "@builder.io/qwik-city";
 import { useClickOutside } from "~/components/avatar-dropdown/use-click-outside";
+import { Button } from "~/components/ui/button/button";
 import { getCurrentOrganization, type OrganizationReadModel } from "~/lib/api";
 
 export interface OrgPillProps {
@@ -104,7 +105,7 @@ export const OrgPill = component$<OrgPillProps>(
     // so the pill picks up the freshly-created org without a manual
     // refresh. (R-FIX-004, 2026-07-06 follow-up to R-FIX-002.)
     const loc = useLocation();
-    // eslint-disable-next-line qwik/no-use-visible-task
+
     useTask$(async ({ track }) => {
       // track the override so a future change to the prop re-runs
       // the task. Track the URL so SPA navigation re-runs the task.
@@ -193,15 +194,16 @@ const OrgPillInteractive = component$<{
 
   return (
     <div class="relative inline-block">
-      <button
+      <Button
         ref={triggerRef}
         type="button"
-        data-testid="org-pill"
+        variant="secondary"
+        testId="org-pill"
         aria-label={`${organization.full_name} menu`}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         onClick$={() => setOpen$(!open.value)}
-        class="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:translate-y-px"
+        class="px-3 py-1.5"
       >
         <span
           aria-hidden="true"
@@ -214,7 +216,7 @@ const OrgPillInteractive = component$<{
         <span aria-hidden="true" class="text-slate-400">
           ▾
         </span>
-      </button>
+      </Button>
 
       {isOpen ? (
         <div

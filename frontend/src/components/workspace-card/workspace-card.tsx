@@ -18,6 +18,7 @@
  * an "Open" link to /workspaces/:id. No decorative iconography.
  */
 import { component$ } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import type { WorkspaceSummary } from "~/lib/api";
 
 export interface WorkspaceCardProps {
@@ -47,13 +48,15 @@ export const WorkspaceCard = component$<WorkspaceCardProps>(({ workspace }) => {
           <span class="font-mono">{fullName}</span>
         </p>
       </div>
-      <a
+      <Button
+        as="a"
         href={`/workspaces/${id}`}
-        data-testid="workspace-card-open"
-        class="inline-flex shrink-0 items-center rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
+        variant="primary"
+        testId="workspace-card-open"
+        class="shrink-0"
       >
         Open
-      </a>
+      </Button>
     </article>
   );
 });

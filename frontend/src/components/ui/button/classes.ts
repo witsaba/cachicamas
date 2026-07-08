@@ -12,14 +12,15 @@
  *   - Anti-drift: a contributor who removes `cursor-pointer` from a
  *     variant breaks `classes.spec.ts` immediately.
  *
- * Variant tokens are tuned for the project:
+ * Variants:
  *   - `primary` (create / update): bg-slate-900, the project monochrome.
- *   - `secondary` (general-purpose): bg-white + border-slate-300, the
- *     outline pair that the org-pill trigger and cancel actions use.
- *   - `destructive` (delete / remove): bg-red-700, the user's preferred
- *     destructive color (per the original change request).
+ *   - `secondary` (general-purpose outline): bg-white + border-slate-300.
+ *   - `destructive` (delete / remove): bg-red-700.
+ *   - `link` (bare-underline text button): no surface, just an underlined
+ *     text link styled as a button. Used by `workspace-form-clear-repo`,
+ *     `github-repo-picker-refresh`, etc.
  *
- * All variants share the base affordances:
+ * All filled variants share the base affordances:
  *   - `cursor-pointer` for cross-OS consistency (some OSes don't apply
  *     cursor:pointer to <button> natively; the user reported this as a
  *     pain point).
@@ -35,8 +36,15 @@
  * buttons still respond visually to mouse-over. The `not-` variant
  * prefix is built into Tailwind 4 and renders as `:not(:disabled):hover:*`.
  *
- * The fifth `link` variant is added in PR-3 (per `design.md` §6
- * "Open question resolved") — not part of PR-1.
+ * The `link` variant is text-only and does not use the BUTTON_BASE chrome
+ * (no flex, no padding, no rounded-md). It duplicates the cursor / focus
+ * / active / disabled affordances inside VARIANT_LINK so the variant
+ * stands alone — a text link styled like a button.
+ *
+ * Consumers can APPEND custom classes via the `<Button class="...">`
+ * prop for shape overrides (e.g. circular, full-width, dark-surface
+ * hover). The system tokens always apply first; consumer tokens layer on
+ * top.
  */
 
 export const BUTTON_BASE = [
@@ -106,30 +114,74 @@ export const VARIANT_DESTRUCTIVE = [
   "disabled:opacity-50",
 ].join(" ");
 
-/** All three PR-1 variants. The `link` variant is added in PR-3. */
-export type ButtonVariant = "primary" | "secondary" | "destructive";
+/**
+ * Link intent — bare-underline text button (no surface).
+ *
+ * Uses `transition-colors` (lighter transition than the filled variants)
+ * because the hover state is a text color change, not a surface swap.
+ */
+export const VARIANT_LINK = [
+  "text-slate-700",
+  "underline",
+  "transition-colors",
+  "duration-150",
+  "cursor-pointer",
+  "disabled:cursor-not-allowed",
+  "hover:text-slate-900",
+  "focus:outline-none",
+  "focus-visible:ring-2",
+  "focus-visible:ring-indigo-500",
+  "active:translate-y-px",
+  "disabled:opacity-50",
+].join(" ");
 
-/** PR-1 sizes. */
+/** All four variants. */
+export type ButtonVariant = "primary" | "secondary" | "destructive" | "link";
+
+/** Sizes. */
 export type ButtonSize = "md" | "lg";
+
+/** Variant constants in array form for iteration in tests. */
+export const ALL_VARIANTS: readonly ButtonVariant[] = [
+  "primary",
+  "secondary",
+  "destructive",
+  "link",
+] as const;
+export const ALL_SIZES: readonly ButtonSize[] = ["md", "lg"] as const;
 
 /**
  * Compose the final className for a `<Button>` variant × size cell.
  * Pure function — unit-tested in isolation (no DOM).
+ *
+ * `consumerClass` is APPENDED to the system tokens — it does NOT
+ * replace them. Use it for shape overrides (circular, full-width,
+ * dark-surface hover) that the variants don't anticipate.
  */
 export function buttonClassName(
   variant: ButtonVariant,
   size: ButtonSize,
+  consumerClass?: string,
 ): string {
-  const sizeClass = size === "lg" ? BUTTON_SIZE_LG : BUTTON_SIZE_MD;
-  const variantClass = (() => {
-    switch (variant) {
-      case "primary":
-        return VARIANT_PRIMARY;
-      case "secondary":
-        return VARIANT_SECONDARY;
-      case "destructive":
-        return VARIANT_DESTRUCTIVE;
-    }
-  })();
-  return [BUTTON_BASE, sizeClass, variantClass].join(" ");
+  // The link variant is text-only and does not use BUTTON_BASE or size.
+  if (variant === "link") {
+    return consumerClass
+      ? [VARIANT_LINK, consumerClass].join(" ")
+      : VARIANT_LINK;
+  }
+
+  const tokens = [BUTTON_BASE, size === "lg" ? BUTTON_SIZE_LG : BUTTON_SIZE_MD];
+  switch (variant) {
+    case "primary":
+      tokens.push(VARIANT_PRIMARY);
+      break;
+    case "secondary":
+      tokens.push(VARIANT_SECONDARY);
+      break;
+    case "destructive":
+      tokens.push(VARIANT_DESTRUCTIVE);
+      break;
+  }
+  if (consumerClass) tokens.push(consumerClass);
+  return tokens.join(" ");
 }

@@ -9,7 +9,7 @@
  *
  * Pure-function className coverage lives in `classes.spec.ts`; this
  * file focuses on the Qwik component layer (props, polymorphism,
- * default type, aria-busy, Slot children).
+ * default type, aria-busy, Slot children, class override).
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
@@ -45,6 +45,17 @@ describe("components/ui/button", () => {
       expect(btn?.className).toContain("bg-red-700");
       expect(btn?.className).toContain("text-white");
       expect(btn?.className).not.toContain("active:translate-y-px");
+    });
+
+    it("link renders text-slate-700 + underline + NO surface", async () => {
+      const { screen, render } = await createDOM();
+      await render(<Button variant="link">Clear selection</Button>);
+      const btn = screen.querySelector("button");
+      expect(btn?.className).toContain("text-slate-700");
+      expect(btn?.className).toContain("underline");
+      // No surface — must not look like a button.
+      expect(btn?.className).not.toMatch(/\bbg-/);
+      expect(btn?.className).not.toContain("rounded");
     });
 
     it("sizes: md uses text-sm + px-4 py-2", async () => {
@@ -112,6 +123,18 @@ describe("components/ui/button", () => {
       expect(cls).toContain("not-disabled:hover:bg-red-800");
       expect(cls).not.toContain("active:translate-y-px");
     });
+
+    it("link has transition-colors + active:translate-y-px + no surface swap", async () => {
+      const { screen, render } = await createDOM();
+      await render(<Button variant="link">Clear</Button>);
+      const cls = screen.querySelector("button")?.className ?? "";
+      expect(cls).toContain("transition-colors");
+      expect(cls).toContain("duration-150");
+      expect(cls).toContain("active:translate-y-px");
+      expect(cls).toContain("hover:text-slate-900");
+      // No surface — must NOT have not-disabled:hover:bg-*
+      expect(cls).not.toMatch(/not-disabled:hover:bg-/);
+    });
   });
 
   describe("R-UB-004 — focus ring", () => {
@@ -136,6 +159,40 @@ describe("components/ui/button", () => {
       await render(<Button variant="destructive">Delete</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
       expect(cls).toContain("focus-visible:ring-red-500");
+    });
+  });
+
+  describe("class override (consumer personalization)", () => {
+    it("consumer class is appended to the system tokens", async () => {
+      const { screen, render } = await createDOM();
+      await render(<Button class="h-10 w-10 rounded-full">Circular</Button>);
+      const cls = screen.querySelector("button")?.className ?? "";
+      expect(cls).toContain("bg-slate-900");
+      expect(cls).toContain("h-10 w-10");
+      expect(cls).toContain("rounded-full");
+    });
+
+    it("consumer class on link variant is appended after VARIANT_LINK", async () => {
+      const { screen, render } = await createDOM();
+      await render(
+        <Button variant="link" class="text-sm">
+          Clear
+        </Button>,
+      );
+      const cls = screen.querySelector("button")?.className ?? "";
+      expect(cls).toContain("text-slate-700");
+      expect(cls).toContain("text-sm");
+    });
+
+    it("consumer class on link variant does NOT add a surface", async () => {
+      const { screen, render } = await createDOM();
+      await render(
+        <Button variant="link" class="text-sm">
+          Clear
+        </Button>,
+      );
+      const cls = screen.querySelector("button")?.className ?? "";
+      expect(cls).not.toMatch(/\bbg-/);
     });
   });
 
@@ -185,9 +242,19 @@ describe("components/ui/button", () => {
       expect(a?.getAttribute("href")).toBe("/workspaces/new");
       expect(a?.className).toContain("bg-slate-900");
       expect(a?.className).toContain("cursor-pointer");
-      // The anchor must NOT carry a `disabled` attribute (links cannot
-      // be disabled in HTML; consumers handle that via route guards).
       expect(a?.hasAttribute("disabled")).toBe(false);
+    });
+
+    it("as='a' passes through class override for shape tokens", async () => {
+      const { screen, render } = await createDOM();
+      await render(
+        <Button as="a" href="/profile" variant="secondary" class="px-5 py-2.5">
+          View profile
+        </Button>,
+      );
+      const a = screen.querySelector("a");
+      expect(a?.className).toContain("bg-white");
+      expect(a?.className).toContain("px-5 py-2.5");
     });
   });
 
@@ -225,17 +292,15 @@ describe("components/ui/button", () => {
           <span data-testid="child-span">Hello</span>
         </Button>,
       );
-      expect(screen.querySelector('[data-testid="child-span"]')?.textContent).toBe(
-        "Hello",
-      );
+      expect(
+        screen.querySelector('[data-testid="child-span"]')?.textContent,
+      ).toBe("Hello");
     });
 
     it("testId prop is rendered as data-testid", async () => {
       const { screen, render } = await createDOM();
       await render(<Button testId="my-button">x</Button>);
-      expect(
-        screen.querySelector('[data-testid="my-button"]'),
-      ).toBeTruthy();
+      expect(screen.querySelector('[data-testid="my-button"]')).toBeTruthy();
     });
   });
 });

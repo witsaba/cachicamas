@@ -12,13 +12,14 @@ Buttons and menu items only. Anything not listed below is out of scope:
 - Dark mode — the project is locked to a white surface; no dark tokens yet.
 - Loading animations beyond the simple `loading` flag on `<Button>`.
 
-## The three button intents
+## The four button intents
 
-| Intent              | When to use                                                                                   | Visual                                                                               |
-| ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `primary` (default) | Create, update, save — actions that **mutate the database**.                                  | `bg-slate-900` filled button with white text, indigo focus ring, slate-700 on hover. |
-| `secondary`         | General-purpose actions (Cancel, secondary navigation, "open" links).                         | White button with a slate border, slate-50 on hover.                                 |
-| `destructive`       | Delete, remove, sign-out-of-account. **Not** for sign-out confirmations (those stay neutral). | `bg-red-700` filled button with white text, red focus ring, red-800 on hover.        |
+| Intent              | When to use                                                           | Visual                                                                               |
+| ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `primary` (default) | Create, update, save — actions that **mutate the database**.          | `bg-slate-900` filled button with white text, indigo focus ring, slate-700 on hover. |
+| `secondary`         | General-purpose actions (Cancel, secondary navigation, "open" links). | White button with a slate border, slate-50 on hover.                                 |
+| `destructive`       | Delete, remove, sign-out-of-account.                                  | `bg-red-700` filled button with white text, red focus ring, red-800 on hover.        |
+| `link`              | Bare-underline text button (clear selection, refresh, etc.).          | No surface; text color change on hover.                                              |
 
 The color rules are the project's monochrome rule. The `primary` intent is **always** `bg-slate-900`. Do not introduce tinted variants (no `bg-indigo-600`, `bg-emerald-600`, etc.) without an ADR — every existing primary CTA is slate-900 and any drift is a bug.
 
@@ -29,7 +30,7 @@ The color rules are the project's monochrome rule. The `primary` intent is **alw
 | `md` (default) | `px-4 py-2 text-sm`   | Form submits, header CTAs, retry buttons, panel actions. |
 | `lg`           | `px-5 py-3 text-base` | Hero CTAs, empty-state CTAs.                             |
 
-There is no `sm` size in this slice. None of the current call sites use `text-xs`, so adding a third size would be speculative.
+There is no `sm` size in this slice.
 
 ## Affordances (guaranteed by the primitive)
 
@@ -40,11 +41,25 @@ Every `<Button>` carries these tokens regardless of variant:
 - `transition-[background-color,box-shadow,transform,border-color] duration-150` — the same hover transition everywhere.
 - `focus:outline-none focus-visible:ring-2` — focus visibility is non-negotiable for keyboard users.
 - `active:translate-y-px` — uniform press feedback (except `destructive` — see below).
-- `not-disabled:hover:*` — disabled buttons do **not** respond visually to mouse-over. This fixes the existing project bug where disabled buttons looked interactive.
+- `not-disabled:hover:*` — disabled buttons do **not** respond visually to mouse-over.
 
 The one carve-out:
 
-- `destructive` does **not** carry `active:translate-y-px`. A heavy destructive button should not "press" — the visual weight signals permanence, and a press feels like the page is shaking.
+- `destructive` does **not** carry `active:translate-y-px`. A heavy destructive button should not "press" — the visual weight signals permanence.
+
+The `link` variant uses `transition-colors` (a lighter transition than the filled variants) because the hover state is a text color change, not a surface swap.
+
+## Consumer personalizations (the `class` prop)
+
+Every `<Button>` and `<MenuItem>` accepts an optional `class` prop. The system tokens always apply first; consumer tokens are **appended**. Use this for personalizations the variants don't anticipate:
+
+- **Shape**: `class="h-10 w-10 rounded-full"` for circular triggers (avatar dropdown).
+- **Color override**: `class="border border-zinc-700 bg-zinc-900 ..."` for the brand-anchored zinc dark CTA (SignInButton, SignOut confirmation).
+- **Dark-surface hover**: `class="hover:bg-slate-700"` for chips on a slate-900 background (the picker "Clear" button).
+- **Padding override**: `class="px-3 py-1"` for tighter button sizes inside dense layouts.
+- **Outline destructive**: `class="border border-red-300 bg-transparent text-red-700 hover:bg-red-50"` for the destructive-outline variant (one call site today; the solid variant is the default).
+
+The design system does not encode these as named variants because each is a one-off consumer concern. Promoting them to variants would inflate the API for marginal gain.
 
 ## `loading` state
 
@@ -54,7 +69,7 @@ There is **no** built-in spinner. The project follows UX-4 (aphantasia-friendly,
 
 ## `as="a"` (link polymorphism)
 
-`<Button as="a" href="/foo">` renders an `<a>` element with the same className as the equivalent button. The `disabled` and `loading` props are type-narrowed away in this case — links cannot be disabled in HTML; consumers handle that via route guards.
+`<Button as="a" href="/foo">` renders an `<a>` element with the same className as the equivalent button. Standard anchor attrs (`target`, `rel`, `download`, `referrerPolicy`) are typed explicitly. The `disabled` and `loading` props are type-narrowed away in this case — links cannot be disabled in HTML.
 
 ## `<MenuItem>` (separate primitive)
 
@@ -68,21 +83,63 @@ For affordances that sit inside dropdown panels (avatar dropdown, org-pill panel
 | Alignment | center                                      | left                            |
 | Use for   | CTAs                                        | in-page actions inside panels   |
 
-A separate primitive prevents the temptation to abuse a hypothetical `size="sm"` Button inside panels — which would produce the wrong padding and the wrong hover color.
+`<MenuItem>` also supports `as="a"` for menu items that navigate to another route (e.g. avatar menu: Profile / Workspaces).
 
-## Carve-outs (NOT consuming the design system)
+## Migration coverage
 
-These elements have a unique shape that does not match the three intents above. They stay as their own components with their own class strings:
+Every interactive button-like element in `@cachicamas/frontend` consumes the design system:
 
-| Element                                                                                    | Why it is a carve-out                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components/sign-in-button/sign-in-button.tsx`                                             | Brand-anchored CTA (zinc-900 + GitHub Octocat SVG). UX-4 amendment 2026-07-04 lets the brand mark carry the provider identification. The dark zinc surface is intentional. **Not** a destructive intent (signing in is not destroying). |
-| `components/avatar-dropdown/avatar-dropdown.tsx` (avatar trigger)                          | Circular (`h-10 w-10 rounded-full`) with `active:scale-95` press feedback, unique among buttons. The `UAT-7` test pins this exact affordance.                                                                                           |
-| `components/org-pill/org-pill.tsx` empty-state pill (`cursor-default`)                     | Visually-disabled passive display; not an interactive button.                                                                                                                                                                           |
-| `components/org-pill/org-pill.tsx` settings-disabled row (`role="menuitem" aria-disabled`) | Future-deferred affordance; rendered as a `<span>` to stay non-interactive.                                                                                                                                                             |
-| `components/example/example.tsx`                                                           | Qwik starter demo, not user-visible.                                                                                                                                                                                                    |
+| File                                                             | Element                              | Primitive                                                                   |
+| ---------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| `routes/index.tsx`                                               | "Get started" CTA                    | `<Button variant="primary" size="lg" as="a">`                               |
+| `routes/index.tsx`                                               | "See the interface" CTA              | `<Button variant="secondary" size="lg" as="a">`                             |
+| `routes/workspaces/index.tsx`                                    | Create workspace CTAs (×2)           | `<Button variant="primary" as="a">`                                         |
+| `routes/workspaces/index.tsx`                                    | Retry                                | `<Button variant="primary">`                                                |
+| `routes/workspaces/[id]/index.tsx`                               | Delete workspace (outline)           | `<Button variant="destructive" class="…outline override…">`                 |
+| `routes/workspaces/[id]/index.tsx`                               | Delete confirm (solid)               | `<Button variant="destructive">`                                            |
+| `routes/workspaces/[id]/index.tsx`                               | Cancel                               | `<Button variant="secondary">`                                              |
+| `routes/home/index.tsx`                                          | (uses HomeWorkspacesSection)         | —                                                                           |
+| `components/home-workspaces-section/home-workspaces-section.tsx` | Create workspace CTAs (×2)           | `<Button variant="primary" as="a">`                                         |
+| `components/home-workspaces-section/home-workspaces-section.tsx` | Retry                                | `<Button variant="primary">`                                                |
+| `components/workspace-card/workspace-card.tsx`                   | Open link                            | `<Button variant="primary" as="a">`                                         |
+| `components/profile-view/profile-view.tsx`                       | github.com/{login}                   | `<Button variant="secondary" size="lg" as="a">`                             |
+| `components/organization-form/organization-form.tsx`             | Submit (create organization)         | `<Button variant="primary" type="submit">`                                  |
+| `components/organization-form/organization-form.tsx`             | Add optional details                 | `<Button variant="secondary">`                                              |
+| `components/ownboarding-form/ownboarding-form.tsx`               | Submit (create organization)         | `<Button variant="primary" type="submit">`                                  |
+| `components/workspace-form/workspace-form.tsx`                   | Submit (create workspace)            | `<Button variant="primary" type="submit">`                                  |
+| `components/workspace-form/workspace-form.tsx`                   | Clear selection                      | `<Button variant="link">`                                                   |
+| `components/github-repo-picker/github-repo-picker.tsx`           | Clear (chip on dark surface)         | `<MenuItem class="hover:bg-slate-700">`                                     |
+| `components/github-repo-picker/github-repo-picker.tsx`           | Refresh repos                        | `<Button variant="link">`                                                   |
+| `components/github-repo-picker/github-repo-picker.tsx`           | Picker option row                    | `<MenuItem>`                                                                |
+| `components/github-repo-picker/github-repo-picker.tsx`           | Load more                            | `<Button variant="secondary">`                                              |
+| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Avatar trigger (circular)            | `<Button variant="primary" class="h-10 w-10 rounded-full active:scale-95">` |
+| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Profile link (menu row)              | `<MenuItem as="a">`                                                         |
+| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Workspaces link (menu row)           | `<MenuItem as="a">`                                                         |
+| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Sign out (menu row submit)           | `<MenuItem type="submit">`                                                  |
+| `components/org-pill/org-pill.tsx`                               | Interactive trigger                  | `<Button variant="secondary">`                                              |
+| `components/sign-in-button/sign-in-button.tsx`                   | Sign in (zinc dark + GitHub Octocat) | `<Button variant="primary" class="…zinc override…">`                        |
+| `routes/auth/signout/index.tsx`                                  | Sign out confirm (zinc dark)         | `<Button variant="primary" class="…zinc override…">`                        |
+| `routes/auth/signout/index.tsx`                                  | Cancel                               | `<Button variant="secondary" as="a">`                                       |
 
-PR-5 introduces an ESLint rule (`no-inline-button-class`) that flags inline class strings in any file that imports the primitives. The carve-outs above have explicit allowlist entries.
+## Legitimate carve-outs (NOT consuming the primitives)
+
+These are NOT buttons or button-like affordances. They are passive visual elements that happen to look button-shaped:
+
+| Element                                                                                                                      | Why it is a carve-out                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components/org-pill/org-pill.tsx` loading `<div>`                                                                           | Status display while fetching the current org. Not interactive.                                                                                       |
+| `components/org-pill/org-pill.tsx` empty-state `<div>` ("No organization yet")                                               | Status display when the user has no org yet. Not interactive.                                                                                         |
+| `components/org-pill/org-pill.tsx` settings-disabled `<span role="menuitem" aria-disabled>`                                  | Placeholder for a future settings link. `aria-disabled` semantics require a non-button element.                                                       |
+| `components/example/example.tsx`                                                                                             | Qwik starter demo, not user-visible.                                                                                                                  |
+| Inline chips / monograms with `bg-slate-900 text-white` (e.g. the "Selected" pill in `github-repo-picker`, the org monogram) | Not button-shaped — they sit inside other elements and have no click affordance. The lint rule skips them by checking only `<button>` and `<a>` tags. |
+
+The `sign-in-button/sign-in-button.tsx` file is in the lint rule's allowlist because the zinc-anchored dark CTA is a documented brand override (the SignInButton's GitHub Octocat SVG is the UX-4 visual anchor; the dark zinc surface is intentional). The `<Button>` wrapper still consumes the design system — the override is what makes it a brand CTA rather than the default primary.
+
+## Anti-drift guardrail (ESLint rule)
+
+`frontend/eslint-rules/no-inline-button-class.mjs` is a custom ESLint rule that runs as part of `pnpm lint`. It flags inline className strings on `<button>` or `<a>` JSX elements that contain the design-system variant markers (primary/secondary/destructive), in any file that imports from `~/components/ui/button` or `~/components/ui/menu-item`. The rule is set to `"warn"` so a regression surfaces in CI without breaking the build.
+
+Files in the allowlist (`sign-in-button.tsx`) are not checked — their override is documented above. Dynamic class strings (``class={`...${variant}...`}``) are out of scope for v1; the rule uses string `includes()` on the literal source.
 
 ## Quick reference
 
@@ -101,18 +158,36 @@ import { Button, MenuItem } from "~/components/ui";
 // Destructive solid — "Delete workspace" in a confirmation dialog
 <Button variant="destructive" onClick$={onConfirmDelete}>Delete</Button>
 
+// Destructive outline — "Delete workspace" trigger
+<Button variant="destructive" onClick$={onShowConfirm}
+  class="border border-red-300 bg-transparent text-red-700 hover:bg-red-50">
+  Delete workspace
+</Button>
+
+// Bare-underline text button — "Clear selection", "Refresh repos"
+<Button variant="link" onClick$={onClear$}>Clear selection</Button>
+
+// Circular avatar trigger (custom shape)
+<Button variant="primary" onClick$={toggleMenu}
+  class="h-10 w-10 overflow-hidden rounded-full active:scale-95">
+  <img src={avatar} alt="" />
+</Button>
+
+// Brand-anchored zinc dark CTA (SignInButton, SignOut confirm)
+<Button variant="primary" type="submit"
+  class="border border-zinc-700 bg-zinc-900 text-zinc-100 shadow-sm hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus-visible:ring-zinc-500">
+  Sign out
+</Button>
+
 // Menu row inside a dropdown panel
 <MenuItem onClick$={openProfile}>Profile</MenuItem>
+
+// Menu row as a link
+<MenuItem as="a" href="/workspaces">Workspaces</MenuItem>
 
 // Menu row disabled (visually disabled but still selectable for SR announcements)
 <MenuItem disabled={true}>Settings (coming soon)</MenuItem>
 ```
-
-## Anti-drift guardrails
-
-1. The pure-function unit tests in `button/classes.spec.ts` and `menu-item/classes.spec.ts` pin every token. Removing `cursor-pointer` or any other affordance breaks the tests immediately.
-2. PR-5 adds an ESLint rule that flags inline class strings matching the variant markers in any file that imports the primitives. See the `eslint-rules/no-inline-button-class.mjs` file (added in PR-5).
-3. The `link` variant is **not** in this slice. PR-3 introduces it; do not backport it into PR-1 review unless the design is updated.
 
 ## Reference
 
@@ -120,3 +195,4 @@ import { Button, MenuItem } from "~/components/ui";
 - Spec: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
 - Design: `openspec/changes/cachicamas-button-design-system/design.md`
 - Tasks: `openspec/changes/cachicamas-button-design-system/tasks.md`
+- Explore: `openspec/changes/cachicamas-button-design-system/explore.md`

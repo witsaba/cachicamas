@@ -1,6 +1,6 @@
 /**
  * MenuItem primitive — the row affordance inside dropdown panels
- * (avatar menu, org-pill panel, future pickers).
+ * (avatar menu, org-pill panel, pickers).
  *
  * Reference: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
  *   R-UB-006 — MenuItem primitive renders panel-row affordances.
@@ -15,36 +15,88 @@
  * clean ("this is a CTA, not a menu row") and prevents the temptation
  * to abuse a hypothetical `size="sm"` Button inside panels.
  *
- * The component always renders a `<button>` (never an `<a>`) because
- * menu items are in-page actions (sign out, switch view, etc.). Links
- * to other routes are not rendered as menu items.
+ * Polymorphism via `as`:
+ *   - `as="button"` (default) — native `<button>`. Default `type="button"`.
+ *   - `as="a"` — renders `<a href={href}>` for menu items that navigate
+ *     to another route (e.g. avatar menu: Profile / Workspaces).
+ *
+ * `class` overrides are appended to the system tokens, identical to
+ * the Button contract.
  */
 import { Slot, component$, type QwikIntrinsicElements } from "@builder.io/qwik";
 import { MENU_ITEM_BASE } from "./classes";
 
-export type MenuItemProps = {
-  /** When true, the button is non-interactive and styled as disabled. */
-  disabled?: boolean;
-  /** Default "button"; can be overridden to "submit" or "reset". */
-  type?: "button" | "submit" | "reset";
-  /** Optional data-testid override. */
-  testId?: string;
-} & Omit<
+/** Common attrs shared by the two polymorphism cases. */
+type CommonMenuItemAttrs = Omit<
   QwikIntrinsicElements["button"],
   "class" | "type" | "disabled" | "ref"
 >;
 
+export type MenuItemAsButtonProps = CommonMenuItemAttrs & {
+  as?: "button";
+  type?: "button" | "submit" | "reset";
+  /** When true, the button is non-interactive and styled as disabled. */
+  disabled?: boolean;
+  /** Ignored when `as="button"`. */
+  href?: never;
+};
+
+export type MenuItemAsAnchorProps = CommonMenuItemAttrs & {
+  as: "a";
+  href: string;
+  /** Standard anchor attrs (Qwik 1.20's AnchorHTMLAttributes is empty). */
+  target?: "_self" | "_blank" | "_parent" | "_top" | (string & {}) | undefined;
+  rel?: string | undefined;
+  /** Links cannot be disabled in HTML. */
+  disabled?: never;
+  /** Ignored when `as="a"`. */
+  type?: never;
+};
+
+export type MenuItemProps = (MenuItemAsButtonProps | MenuItemAsAnchorProps) & {
+  /** Optional data-testid override. */
+  testId?: string;
+  /**
+   * Optional className tokens appended to the system className.
+   * Use for color overrides on dark surfaces (e.g. `hover:bg-slate-700`
+   * on a slate-900 picker chip).
+   */
+  class?: string;
+};
+
 export const MenuItem = component$<MenuItemProps>((props) => {
-  const { testId, type, ...rest } = props;
-  // The `disabled` field is owned by the primitive (typed via the prop
-  // union above). We forward it as the native attribute.
-  const disabled = props.disabled === true;
+  const className = props.class
+    ? [MENU_ITEM_BASE, props.class].join(" ")
+    : MENU_ITEM_BASE;
+
+  if (props.as === "a") {
+    const { as: _as, testId, class: _c, ...rest } = props;
+    void _as;
+    void _c;
+    const anchorProps = rest as unknown as QwikIntrinsicElements["a"];
+    return (
+      <a
+        {...anchorProps}
+        href={props.href}
+        class={className}
+        data-testid={testId}
+      >
+        <Slot />
+      </a>
+    );
+  }
+
+  // Button case
+  const { as: _as, testId, class: _c, type, disabled, ...rest } = props;
+  void _as;
+  void _c;
+  const isDisabled = disabled === true;
   return (
     <button
       {...rest}
       type={type ?? "button"}
-      class={MENU_ITEM_BASE}
-      disabled={disabled}
+      class={className}
+      disabled={isDisabled}
       data-testid={testId}
     >
       <Slot />

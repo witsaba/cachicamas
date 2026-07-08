@@ -39,6 +39,7 @@
  */
 import { component$ } from "@builder.io/qwik";
 import { Form, type DocumentHead } from "@builder.io/qwik-city";
+import { Button } from "~/components/ui/button/button";
 import { useSignOut } from "~/routes/plugin@auth";
 
 // Where to send the user after a successful sign-out. Matches the
@@ -102,23 +103,26 @@ export default component$(() => {
             name="redirectTo"
             value={POST_SIGNOUT_REDIRECT_TO}
           />
-          <button
+          <Button
             type="submit"
-            class="inline-flex cursor-pointer items-center justify-center rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-100 shadow-sm transition-[background-color,box-shadow,transform,border-color] duration-150 hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 active:translate-y-px"
-            data-testid="auth-signout-submit"
+            variant="primary"
+            testId="auth-signout-submit"
+            class="border border-zinc-700 bg-zinc-900 text-zinc-100 shadow-sm hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus-visible:ring-zinc-500"
           >
             Sign out
-          </button>
+          </Button>
           {/* Cancel — bails to the landing without touching the session.
               A regular link (not a button) so the affordance reads as
               "secondary, reversible". */}
-          <a
+          <Button
+            as="a"
             href="/"
-            class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 underline transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-            data-testid="auth-signout-cancel"
+            variant="secondary"
+            testId="auth-signout-cancel"
+            class="focus-visible:ring-slate-400"
           >
             Cancel
-          </a>
+          </Button>
         </Form>
 
         <p

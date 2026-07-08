@@ -5,7 +5,8 @@
  *   R-UB-006 — MenuItem primitive renders panel-row affordances.
  *
  * Class token coverage is in `classes.spec.ts`; this file focuses on
- * the Qwik component layer (props, Slot, default type, disabled).
+ * the Qwik component layer (props, Slot, default type, disabled,
+ * polymorphism, class override).
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
@@ -62,17 +63,13 @@ describe("components/ui/menu-item", () => {
   it("default type is 'button' (R-UB-010)", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem>Profile</MenuItem>);
-    expect(screen.querySelector("button")?.getAttribute("type")).toBe(
-      "button",
-    );
+    expect(screen.querySelector("button")?.getAttribute("type")).toBe("button");
   });
 
   it("type='submit' override is honored", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem type="submit">Sign out</MenuItem>);
-    expect(screen.querySelector("button")?.getAttribute("type")).toBe(
-      "submit",
-    );
+    expect(screen.querySelector("button")?.getAttribute("type")).toBe("submit");
   });
 
   it("disabled=true renders the disabled attribute + disabled tokens", async () => {
@@ -91,14 +88,43 @@ describe("components/ui/menu-item", () => {
         <span data-testid="child-span">Hello</span>
       </MenuItem>,
     );
-    expect(screen.querySelector('[data-testid="child-span"]')?.textContent).toBe(
-      "Hello",
-    );
+    expect(
+      screen.querySelector('[data-testid="child-span"]')?.textContent,
+    ).toBe("Hello");
   });
 
   it("testId prop is rendered as data-testid", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem testId="my-row">x</MenuItem>);
     expect(screen.querySelector('[data-testid="my-row"]')).toBeTruthy();
+  });
+
+  describe("class override (consumer personalization)", () => {
+    it("consumer class is appended to MENU_ITEM_BASE", async () => {
+      const { screen, render } = await createDOM();
+      await render(<MenuItem class="hover:bg-slate-700">Clear</MenuItem>);
+      const cls = screen.querySelector("button")?.className ?? "";
+      // Base tokens preserved
+      expect(cls).toContain("block w-full text-left");
+      expect(cls).toContain("hover:bg-slate-100");
+      // Override appended
+      expect(cls).toContain("hover:bg-slate-700");
+    });
+  });
+
+  describe("polymorphism", () => {
+    it("as='a' renders an <a> with the panel-row className + href", async () => {
+      const { screen, render } = await createDOM();
+      await render(
+        <MenuItem as="a" href="/profile">
+          Profile
+        </MenuItem>,
+      );
+      const a = screen.querySelector("a");
+      expect(a).toBeTruthy();
+      expect(a?.getAttribute("href")).toBe("/profile");
+      expect(a?.className).toContain("block w-full text-left");
+      expect(a?.className).toContain("hover:bg-slate-100");
+    });
   });
 });
