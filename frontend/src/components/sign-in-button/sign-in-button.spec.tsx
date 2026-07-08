@@ -182,22 +182,22 @@ describe("components/sign-in-button", () => {
     const { screen, render } = await createDOM();
     await render(<SignInButton signIn={action} />);
 
-const button = screen.querySelector('button[type="submit"]');
+    const button = screen.querySelector('button[type="submit"]');
     expect(button).toBeTruthy();
     const cls = (button as HTMLElement).className;
     // explicit cursor for cross-OS consistency (some browsers/OSes
     // do NOT apply cursor: pointer to <button> automatically)
     expect(cls).toMatch(/cursor-pointer/);
-    // hover bg still there
-    expect(cls).toMatch(/hover:bg-zinc-800/);
-    // new: hover shadow + hover border emphasis
+    // hover bg still there (Tailwind 4 `!important` syntax: `!` AFTER the variant)
+    expect(cls).toMatch(/hover:!bg-zinc-800/);
+// new: hover shadow + hover border emphasis (Tailwind 4 `!important` syntax)
     expect(cls).toMatch(/hover:shadow-md/);
-    expect(cls).toMatch(/hover:border-zinc-600/);
+    expect(cls).toMatch(/hover:!border-zinc-600/);
     // transition (without it the hover state is an instant flip)
     expect(cls).toMatch(/transition-/);
     // active-state press-down for click feedback
     expect(cls).toMatch(/active:translate-y-px/);
-    // Regression guards — the SignInButton uses a zinc override on
+// Regression guards — the SignInButton uses a zinc override on
     // top of variant="primary". Tailwind 4 + the
     // `not-disabled:hover:*` pseudo-class means the variant has
     // higher specificity than bare `hover:*` overrides, so the
@@ -205,11 +205,15 @@ const button = screen.querySelector('button[type="submit"]');
     // Without `!` the override silently loses and the button
     // renders with slate-700 hover + slate focus ring instead of
     // zinc-800 + zinc-500. These assertions pin the override
-    // carries the `!important` prefix:
+    // carries the `!important` prefix.
+    //
+    // Tailwind 4 syntax gotcha: `!` goes AFTER the variant
+    // (`hover:!bg-zinc-800`), not before (`!hover:bg-zinc-800`).
+    // Tailwind silently drops the `!` when it's at the start.
     expect(cls).toMatch(/!bg-zinc-900/);
     expect(cls).toMatch(/!text-zinc-100/);
-    expect(cls).toMatch(/!hover:bg-zinc-800/);
-    expect(cls).toMatch(/!hover:border-zinc-600/);
-    expect(cls).toMatch(/!focus-visible:ring-zinc-500/);
+    expect(cls).toMatch(/hover:!bg-zinc-800/);
+    expect(cls).toMatch(/hover:!border-zinc-600/);
+    expect(cls).toMatch(/focus-visible:!ring-zinc-500/);
   });
 });

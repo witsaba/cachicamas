@@ -100,16 +100,20 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
           // For the avatar trigger there are FOUR conflicts to neutralize:
           //   - `rounded-full` vs `rounded-md` (variant default)
           //   - `bg-transparent` vs `bg-slate-900` (variant default)
-          //   - `active:scale-95` vs `active:translate-y-px` (variant default)
-          //   - `p-0` vs `px-4 py-2` from BUTTON_SIZE_MD — Tailwind uses
+          //   - `active:!scale-95` vs `active:translate-y-px` (variant default)
+          //   - `!p-0` vs `px-4 py-2` from BUTTON_SIZE_MD — Tailwind uses
           //     box-sizing: border-box, so the size padding shrinks the
           //     content area to 8×24 inside the 40×40 h-10 w-10 box,
           //     which renders the image as a vertical strip. The avatar
           //     is shape-driven (h-10 w-10), not size-driven, so the
           //     padding is wrong for this consumer.
-          // See the README section "Consumer personalizations" for
-          // the full rationale.
-          class="!active:scale-95 h-10 w-10 overflow-hidden !rounded-full !bg-transparent !p-0 ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400"
+          // Important Tailwind 4 syntax gotcha: the `!` prefix for
+          // variant utilities MUST come AFTER the variant (e.g.
+          // `hover:!bg-red-50`), NOT before (`!hover:bg-red-50`).
+          // Tailwind silently ignores `!variant:` — the override
+          // loses. See the README section "Consumer personalizations"
+          // for the full rationale.
+          class="h-10 w-10 overflow-hidden !rounded-full !bg-transparent !p-0 ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:!scale-95"
         >
           {safeImage ? (
             <img

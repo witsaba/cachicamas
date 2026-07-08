@@ -110,7 +110,12 @@ export const SignInButton = component$<SignInButtonProps>(
           // Without `!` the SignInButton would render `hover:bg-slate-700`
           // (the variant's default), not the intended zinc-800. The
           // difference is subtle (both very dark) but the override loses.
-          class="!hover:border-zinc-600 !hover:bg-zinc-800 !focus-visible:ring-zinc-500 border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:shadow-md"
+          //
+          // Tailwind 4 syntax gotcha: the `!` prefix for VARIANT
+          // utilities goes AFTER the variant (`hover:!bg-zinc-800`),
+          // not before (`!hover:bg-zinc-800`). Tailwind silently
+          // ignores `!variant:` syntax — the `!` is dropped.
+          class="border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:!border-zinc-600 hover:!bg-zinc-800 hover:shadow-md focus-visible:!ring-zinc-500"
         >
           {/*
 GitHub Octocat brand mark — a recognizable visual anchor

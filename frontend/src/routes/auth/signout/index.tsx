@@ -111,8 +111,9 @@ export default component$(() => {
             // `not-disabled:hover:*` and `focus-visible:*` tokens
             // from the primary variant have higher specificity than
             // bare `hover:*` overrides, so the consumer must use
-            // `!important` to win.
-            class="!hover:border-zinc-600 !hover:bg-zinc-800 !focus-visible:ring-zinc-500 border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:shadow-md"
+            // `!important` to win. Tailwind 4 syntax: `!` goes
+            // AFTER the variant (`hover:!bg-zinc-800`), not before.
+            class="border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:!border-zinc-600 hover:!bg-zinc-800 hover:shadow-md focus-visible:!ring-zinc-500"
           >
             Sign out
           </Button>

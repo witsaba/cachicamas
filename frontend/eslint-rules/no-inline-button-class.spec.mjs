@@ -69,6 +69,15 @@ ruleTester.run("no-inline-button-class", rule, {
         '<button class="!rounded-full h-10 w-10 overflow-hidden">x</button>',
       filename: "/app/src/components/avatar.tsx",
     },
+    // Tailwind 4 syntax puts `!` AFTER the variant (`hover:!bg-red-50`),
+    // not before (`!hover:bg-red-50` — silently ignored by Tailwind).
+    // Both forms should be tolerated by the rule.
+    {
+      code:
+        IMPORT_LINE +
+        '<button class="hover:!bg-red-50 border border-red-300">x</button>',
+      filename: "/app/src/components/destructive-outline.tsx",
+    },
     // Allowlisted file (SignInButton zinc override) passes.
     {
       code:

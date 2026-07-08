@@ -77,7 +77,10 @@ The escape hatch is the `!important` prefix — Tailwind 4's standard pattern fo
 // Avatar trigger — `!rounded-full` wins over `rounded-md` from BUTTON_BASE.
 // `!p-0` neutralizes the size's `px-4 py-2` so the content area
 // fills the full 40×40 box (otherwise the image renders as an 8×24 strip).
-<Button variant="primary" class="!rounded-full !bg-transparent !p-0 h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 !active:scale-95">
+// `active:!scale-95` wins over `active:translate-y-px` from the variant.
+// Tailwind 4 syntax: `!` goes AFTER the variant (`active:!scale-95`),
+// not before (`!active:scale-95` — silently ignored by Tailwind).
+<Button variant="primary" class="!rounded-full !bg-transparent !p-0 h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:!scale-95">
   <img src={avatar} alt="" />
 </Button>
 

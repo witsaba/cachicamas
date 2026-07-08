@@ -181,14 +181,12 @@ export default component$(() => {
             testId="workspace-detail-delete"
             // Outline variant — overrides the solid red destructive
             // fill with a transparent bg + red border. The
-            // conflicting utilities (`bg-transparent`, `text-red-700`,
-            // `hover:bg-red-50`, `focus-visible:ring-red-500`) all
-            // carry the `!important` prefix so the override wins
-            // against Tailwind's alphabetical emission order AND the
-            // variant's higher-specificity `not-disabled:hover:*`
-            // pseudo-class. See sign-in-button.tsx for the full
-            // rationale.
-            class="!hover:bg-red-50 !focus-visible:ring-red-500 border border-red-300 !bg-transparent !text-red-700"
+            // conflicting utilities all carry the `!important`
+            // prefix so the override wins. Tailwind 4 syntax:
+            // `!` goes AFTER the variant (`hover:!bg-red-50`),
+            // not before (`!hover:bg-red-50`). See
+            // sign-in-button.tsx for the full rationale.
+            class="border border-red-300 !bg-transparent !text-red-700 hover:!bg-red-50 focus-visible:!ring-red-500"
             onClick$={() => {
               showDeleteConfirm.value = true;
             }}

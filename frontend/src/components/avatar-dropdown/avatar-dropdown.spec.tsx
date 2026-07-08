@@ -151,9 +151,10 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     // cursor + transition + hover ring + active press-in
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
-    expect(cls).toMatch(/hover:ring-slate-400/);
-    expect(cls).toMatch(/hover:shadow-md/);
-    expect(cls).toMatch(/active:scale-95/);
+expect(cls).toMatch(/hover:ring-slate-400/);
+        expect(cls).toMatch(/hover:shadow-md/);
+        // `active:!scale-95` (Tailwind 4 syntax: `!` AFTER the variant)
+        expect(cls).toMatch(/active:!scale-95/);
 // Regression guards — these tokens CONFLICT with the primary
     // variant's defaults (rounded-md, bg-slate-900,
     // active:translate-y-px) and with the size's px-4 py-2
@@ -171,10 +172,14 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     //     content area to 8×24 inside the 40×40 h-10 w-10 box;
     //     box-sizing is border-box by default)
     // These assertions pin the override carries the `!important`
-    // prefix that wins at the CSS layer:
+    // prefix that wins at the CSS layer.
+    //
+    // Tailwind 4 syntax gotcha: `!` goes AFTER the variant
+    // (`active:!scale-95`), not before (`!active:scale-95`).
+    // Tailwind silently drops the `!` when it's at the start.
     expect(cls).toMatch(/!rounded-full/);
     expect(cls).toMatch(/!bg-transparent/);
-    expect(cls).toMatch(/!active:scale-95/);
+    expect(cls).toMatch(/active:!scale-95/);
     expect(cls).toMatch(/!p-0/);
   });
 
