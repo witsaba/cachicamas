@@ -41,11 +41,24 @@ const antiReplayToleranceMs = 5 * 60 * 1000
 // CallbackRequest is the body posted to
 // database_administrator's POST /api/v1/internal/sync-callback
 // endpoint. See design.md §5 — Cross-service contract.
+//
+// PR-2c wire-contract fix: the commit SHA wire field is named
+// "commit_sha" (NOT "commit_sha_after" as the prior version had).
+// The database_administrator's syncCallbackBody.CommitSHA is
+// tagged `json:"commit_sha"`; if the syncer sends a different
+// key, the field is unmarshaled as nil and the db_admin rejects
+// with "commit_sha is required on status=done" (422). The
+// resulting job stays in 'pending' forever.
+//
+// The prior name "commit_sha_after" was a guess at what the
+// cross-service schema "should" be; the actual locked schema
+// (per spec R-WS-019 §S-WS-194 and the database_administrator's
+// syncCallbackBody struct) is "commit_sha".
 type CallbackRequest struct {
 	JobID          int64  `json:"job_id"`
 	WorkspaceID    int64  `json:"workspace_id"`
 	Status         string `json:"status"` // "done" | "failed"
-	CommitSHAAfter string `json:"commit_sha_after,omitempty"`
+	CommitSHAAfter string `json:"commit_sha,omitempty"`
 	ErrorCode      string `json:"error_code,omitempty"`
 	ErrorMessage   string `json:"error_message,omitempty"`
 	StartedAt      string `json:"started_at,omitempty"`
