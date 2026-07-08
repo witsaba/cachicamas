@@ -74,6 +74,13 @@ type wsFakeRepo struct {
 	deleteErr   error
 	deleteCalls int
 	deleteID    int64
+
+	// MarkSynced (PR-3b)
+	markSyncedErr    error
+	markSyncedCalls  int
+	markSyncedID     int64
+	markSyncedCommit string
+	markSyncedBranch string
 }
 
 func (f *wsFakeRepo) Insert(_ context.Context, w *domain.Workspace) (*domain.Workspace, error) {
@@ -138,6 +145,16 @@ func (f *wsFakeRepo) SoftDelete(_ context.Context, id int64) error {
 	f.deleteCalls++
 	f.deleteID = id
 	return f.deleteErr
+}
+
+func (f *wsFakeRepo) MarkSynced(_ context.Context, id int64, commitSHA, defaultBranch string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markSyncedCalls++
+	f.markSyncedID = id
+	f.markSyncedCommit = commitSHA
+	f.markSyncedBranch = defaultBranch
+	return f.markSyncedErr
 }
 
 // ---------------------------------------------------------------------------

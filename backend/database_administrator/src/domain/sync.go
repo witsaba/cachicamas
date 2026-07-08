@@ -39,17 +39,17 @@ const (
 // table. Nullable columns are represented as pointer types so the
 // caller can distinguish "not set" from "set to the zero value".
 type SyncJob struct {
-	ID              int64
-	WorkspaceID     int64
-	Status          string
-	TriggeredBy     string
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	CommitSHAAfter  *string
-	ErrorMessage    *string
-	ErrorCode       *string
-	Attempts        int
-	CreatedAt       time.Time
+	ID             int64
+	WorkspaceID    int64
+	Status         string
+	TriggeredBy    string
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	CommitSHAAfter *string
+	ErrorMessage   *string
+	ErrorCode      *string
+	Attempts       int
+	CreatedAt      time.Time
 }
 
 // SyncJobRepository is the hexagonal port that the application

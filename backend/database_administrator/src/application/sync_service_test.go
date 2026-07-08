@@ -14,10 +14,10 @@ import (
 // returns the most recently inserted job (matching the real
 // "ORDER BY id DESC LIMIT 1" semantics).
 type fakeSyncJobRepo struct {
-	jobs        []*domain.SyncJob
-	insertErr   error
-	nextID      int64
-	getErr      error
+	jobs      []*domain.SyncJob
+	insertErr error
+	nextID    int64
+	getErr    error
 }
 
 func (f *fakeSyncJobRepo) Insert(ctx context.Context, job *domain.SyncJob) (*domain.SyncJob, error) {
@@ -49,7 +49,7 @@ func (f *fakeSyncJobRepo) Update(ctx context.Context, job *domain.SyncJob) error
 
 func TestSyncService_EnqueueSync_FreshInsert(t *testing.T) {
 	repo := &fakeSyncJobRepo{}
-	svc := NewSyncService(repo, nil)
+	svc := NewSyncService(repo, nil, nil, nil)
 
 	id, isFresh, existing, err := svc.EnqueueSync(context.Background(), 7, domain.SyncJobTriggerManual)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestSyncService_EnqueueSync_SingleFlightHit(t *testing.T) {
 	// On the SECOND Insert, simulate a unique-violation.
 	repo.insertErr = nil
 	// Pre-seed: first call inserted a job.
-	svc := NewSyncService(repo, nil)
+	svc := NewSyncService(repo, nil, nil, nil)
 	_, _, _, _ = svc.EnqueueSync(context.Background(), 7, domain.SyncJobTriggerManual)
 	// Switch the fake to return ConflictError on the second Insert.
 	repo.insertErr = &domain.ConflictError{Cause: errors.New("duplicate key")}
@@ -103,7 +103,7 @@ func TestSyncService_EnqueueSync_OtherError(t *testing.T) {
 	repo := &fakeSyncJobRepo{
 		insertErr: errors.New("network down"),
 	}
-	svc := NewSyncService(repo, nil)
+	svc := NewSyncService(repo, nil, nil, nil)
 	_, _, _, err := svc.EnqueueSync(context.Background(), 7, domain.SyncJobTriggerManual)
 	if err == nil {
 		t.Errorf("EnqueueSync on non-conflict error: got nil error, want propagated")
@@ -112,7 +112,7 @@ func TestSyncService_EnqueueSync_OtherError(t *testing.T) {
 
 func TestSyncService_GetLatestSyncJob_NoJobs(t *testing.T) {
 	repo := &fakeSyncJobRepo{}
-	svc := NewSyncService(repo, nil)
+	svc := NewSyncService(repo, nil, nil, nil)
 	job, err := svc.GetLatestSyncJob(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("GetLatestSyncJob: %v", err)
@@ -124,7 +124,7 @@ func TestSyncService_GetLatestSyncJob_NoJobs(t *testing.T) {
 
 func TestSyncService_GetLatestSyncJob_HasJob(t *testing.T) {
 	repo := &fakeSyncJobRepo{}
-	svc := NewSyncService(repo, nil)
+	svc := NewSyncService(repo, nil, nil, nil)
 	_, _, _, _ = svc.EnqueueSync(context.Background(), 7, domain.SyncJobTriggerManual)
 	job, err := svc.GetLatestSyncJob(context.Background(), 7)
 	if err != nil {

@@ -68,6 +68,16 @@ type Workspace struct {
 	CreatedAt      time.Time  `db:"created_at"     json:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at"     json:"updated_at"`
 	DeletedAt      *time.Time `db:"deleted_at"    json:"deleted_at"`
+
+	// 2026-07-08-workspace-sync-clone (PR-1 migration
+	// 20260708120200_sync_job.sql). All four fields are NULL until the
+	// first sync attempt resolves. They are denormalized from the latest
+	// sync_job row on the callback; the sync_job table remains the
+	// single source of truth.
+	LastSyncedAt        *time.Time `db:"last_synced_at"        json:"last_synced_at"`
+	LastSyncedCommitSHA *string    `db:"last_synced_commit_sha" json:"last_synced_commit_sha"`
+	DefaultBranch       *string    `db:"default_branch"         json:"default_branch"`
+	LastSyncJobID       *int64     `db:"last_sync_job_id"       json:"last_sync_job_id"`
 }
 
 // Repository captures the four GitHub fields that identify the
@@ -157,6 +167,13 @@ type WorkspaceRepository interface {
 	SelectAllByOrg(ctx context.Context, orgID int64, limit int) ([]Workspace, error)
 	UpdateName(ctx context.Context, id int64, name string) (*Workspace, error)
 	SoftDelete(ctx context.Context, id int64) error
+
+	// 2026-07-08-workspace-sync-clone (PR-3b): denormalize the
+	// outcome of a successful sync onto the workspace row so the UI
+	// can render the card without a second query. The sync_job row
+	// is updated independently (see SyncService.ProcessSyncCallback).
+	// The two writes happen in the same Tx.
+	MarkSynced(ctx context.Context, id int64, commitSHA, defaultBranch string) error
 }
 
 // ---------------------------------------------------------------------------
@@ -266,3 +283,73 @@ func (e *GitHubNotConnectedError) Error() string {
 // Code returns CodeGitHubNotConnected (locked vocabulary, distinct
 // from CodeServer so the handler can route to a 401).
 func (e *GitHubNotConnectedError) Code() string { return CodeGitHubNotConnected }
+
+// WorkspaceNotFoundError is the locked not-found error returned
+// by the workspace handlers and the sync handler (when a
+// /workspaces/:id/sync GET is called for a workspace that does
+// not exist). Distinct from the generic NotFoundError so callers
+// can branch on Code() == CodeWorkspaceNotFound.
+type WorkspaceNotFoundError struct{}
+
+func (e *WorkspaceNotFoundError) Error() string { return MsgWorkspaceNotFound }
+func (e *WorkspaceNotFoundError) Code() string  { return CodeNotFound }
+
+// ---------------------------------------------------------------------------
+// 2026-07-08-workspace-sync-clone: locked error codes for the sync flow.
+// The Code() returned by each error is the stable contract the frontend
+// branch on (work-unit-commits: never change a code once it ships).
+// ---------------------------------------------------------------------------
+
+const (
+	// CodeSyncAlreadyRunning is the locked vocabulary for a second
+	// concurrent POST /workspaces/:id/sync against a workspace that
+	// already has a pending or running sync_job (R-WS-019 S-WS-193).
+	// The HTTP status is 409.
+	CodeSyncAlreadyRunning = "sync_already_running"
+
+	// CodeSyncInsufficientPermissions is the locked vocabulary for a
+	// callback or workspace_check that determines the user's OAuth
+	// token has permissions.push === false. The HTTP status is 422.
+	// The frontend renders the "Reconnect GitHub" banner.
+	CodeSyncInsufficientPermissions = "sync_insufficient_permissions"
+
+	// CodeSyncTokenExpired is the locked vocabulary for a callback or
+	// workspace_check that determines the OAuth token is expired.
+	// The HTTP status is 401.
+	CodeSyncTokenExpired = "sync_token_expired"
+)
+
+// ErrSyncAlreadyRunning is the typed error returned by
+// SyncService.EnqueueSync on a single-flight hit AND by
+// /workspaces/:id/sync when a second concurrent request arrives.
+// The Code() is CodeSyncAlreadyRunning.
+type ErrSyncAlreadyRunning struct {
+	JobID int64
+}
+
+func (e *ErrSyncAlreadyRunning) Error() string {
+	return "sync already running for this workspace"
+}
+func (e *ErrSyncAlreadyRunning) Code() string { return CodeSyncAlreadyRunning }
+
+// ErrInsufficientPermissions is the typed error returned by the
+// permission-validation use case when the OAuth token has
+// permissions.push === false. The Code() is
+// CodeSyncInsufficientPermissions.
+type ErrInsufficientPermissions struct {
+	GitHubID int64
+}
+
+func (e *ErrInsufficientPermissions) Error() string {
+	return "github token has insufficient permissions (push) for this repository"
+}
+func (e *ErrInsufficientPermissions) Code() string { return CodeSyncInsufficientPermissions }
+
+// ErrTokenExpired is the typed error returned when the OAuth
+// token is past its expires_at. The Code() is CodeSyncTokenExpired.
+type ErrTokenExpired struct{}
+
+func (e *ErrTokenExpired) Error() string {
+	return "github access token is expired; reconnect required"
+}
+func (e *ErrTokenExpired) Code() string { return CodeSyncTokenExpired }

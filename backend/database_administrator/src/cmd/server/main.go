@@ -29,6 +29,7 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
+	workspacesyncer "github.com/cachicamas/backend/database_administrator/src/infrastructure/workspacesyncer"
 	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
 	migrationpg "github.com/cachicamas/backend/database_administrator/src/migration/postgres"
@@ -282,9 +283,10 @@ func main() {
 
 	// 2026-07-08-workspace-sync-clone PR-3a: wire the sync_job repo
 	// and the SyncService. WorkspaceService.Create auto-enqueues
-	// the first sync job via the SyncService.
+	// the first sync job via the SyncService. PR-3b added the
+	// workspaceRepo + db params (the callback path needs Tx access).
 	syncJobRepo := postgres.NewSyncJobRepo(db)
-	syncSvc := application.NewSyncService(syncJobRepo, logger)
+	syncSvc := application.NewSyncService(syncJobRepo, workspaceRepo, db, logger)
 
 	workspaceService := application.NewWorkspaceService(
 		workspaceRepo,
@@ -320,6 +322,48 @@ func main() {
 		e, workspaceService, githubHandler, authChain, logger,
 	)
 
+	// 2026-07-08-workspace-sync-clone PR-3b: wire the workspace_syncer
+	// HTTP client + the sync endpoints. The client is constructed
+	// with the shared INTERNAL_SERVICE_TOKEN; the URL defaults to
+	// http://workspace_syncer:8080 (the docker-compose service
+	// name; overridable for dev).
+	syncerBaseURL := envString("WORKSPACE_SYNCER_URL", "http://workspace_syncer:8080")
+	syncerToken := envString("INTERNAL_SERVICE_TOKEN", "")
+	if syncerToken == "" {
+		slog.Error("INTERNAL_SERVICE_TOKEN must be set; exiting (workspace_syncer auth)")
+		os.Exit(1)
+	}
+	syncerClient := workspacesyncer.NewClient(syncerBaseURL, syncerToken)
+	syncerDispatcher := httpiface.NewWSClientAdapter(syncerClient)
+
+	syncHandler := httpiface.NewSyncHandler(syncSvc, syncerDispatcher, logger)
+
+	// Mount the sync endpoints inside the auth-protected workspace
+	// group. We need to attach the routes to the same Echo sub-group
+	// that already runs the authChain; RegisterAuthenticatedWorkspaceRoutes
+	// does not return it, so we re-create the group with the same
+	// middleware and register the sync routes on the group.
+	syncGroup := e.Group("", authChain...)
+	httpiface.RegisterSyncRoutes(syncGroup, syncHandler)
+
+	// Internal sync callback receiver (PR-3b). Mounted on the public
+	// group; HMAC + anti-replay window. Secret is independent of
+	// IDENTITY_CALLBACK_SECRET (defense in depth: a leak of one does
+	// not compromise the other).
+	syncCallbackSecret := envString("SYNC_CALLBACK_SECRET", "")
+	if syncCallbackSecret == "" {
+		slog.Error("SYNC_CALLBACK_SECRET must be set; exiting")
+		os.Exit(1)
+	}
+	if len(syncCallbackSecret) < 32 {
+		slog.Error("SYNC_CALLBACK_SECRET must be at least 32 raw bytes; exiting",
+			"length", len(syncCallbackSecret),
+			"hint", "generate with `openssl rand -base64 32`",
+		)
+		os.Exit(1)
+	}
+	httpiface.RegisterInternalSyncCallbackRoute(e, syncSvc, syncCallbackSecret, logger)
+
 	// 2026-07-08-workspace-sync-clone PR-3a: hold a reference to
 	// the syncSvc so PR-3b can mount the sync endpoints.
 	_ = syncSvc
@@ -346,6 +390,11 @@ func main() {
 		os.Exit(1)
 	}
 	httpiface.RegisterIdentityCallbackRoute(e, identityService, callbackSecret, logger)
+
+	// 2026-07-08-workspace-sync-clone PR-3b: mount the syncer's
+	// internal sync-callback receiver on the same public group as
+	// the identity callback. Both endpoints share the HMAC + timestamp
+	// anti-replay pattern but use independent secrets.
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port

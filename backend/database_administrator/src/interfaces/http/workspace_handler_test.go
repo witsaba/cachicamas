@@ -147,6 +147,12 @@ func (f *fakeRepo) SoftDelete(_ context.Context, id int64) error {
 	return nil
 }
 
+func (f *fakeRepo) MarkSynced(_ context.Context, _ int64, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return nil
+}
+
 // fakeGitHubAccessor — in-memory map of accessible repo IDs.
 type fakeGitHubAccessor struct {
 	mu         sync.Mutex
@@ -170,7 +176,7 @@ func (a *fakeGitHubAccessor) IsRepoAccessible(_ context.Context, id int64) (bool
 func newTestHandler(repo *fakeRepo, ghAcc *fakeGitHubAccessor, t *testing.T) (httpiface.WorkspaceHandler, *application.WorkspaceService, *echo.Echo) {
 	_ = t
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	svc := application.NewWorkspaceService(repo, ghAcc, logger, noopTracer())
+	svc := application.NewWorkspaceService(repo, nil, ghAcc, logger, noopTracer())
 	e := echo.New()
 	// Test identity-injection middleware: reads X-Test-Identity-ID
 	// header and seeds c.Set(IdentityContextKey). This stands in for
