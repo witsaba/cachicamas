@@ -65,16 +65,19 @@ The design system does not encode these as named variants because each is a one-
 
 Tailwind 4 emits utilities in alphabetical order in the generated CSS. The class attribute order does **not** affect specificity — only the CSS emission order does. When a consumer override class **conflicts** with a variant token (same property name, different value), the order of the two class strings in the HTML attribute does not decide which wins; the order in the generated CSS does.
 
-For most conflicts (e.g. `bg-zinc-900` vs `bg-slate-900`), the alphabetical emission order happens to favor the override because `bg-zinc-900` > `bg-slate-900`. But for **two specific cases**, the override silently loses without help:
+For most conflicts (e.g. `bg-zinc-900` vs `bg-slate-900`), the alphabetical emission order happens to favor the override because `bg-zinc-900` > `bg-slate-900`. But for **three specific cases**, the override silently loses without help:
 
 1. **`rounded-md` (variant) vs `rounded-full` (override)**: `'f' < 'm'` alphabetically → `rounded-md` emitted later → `rounded-md` wins → square corner instead of circle. **Affected**: the avatar trigger (`<Button variant="primary" class="h-10 w-10 …">`).
 2. **`not-disabled:hover:bg-slate-700` (variant) vs `hover:bg-zinc-800` (override)**: the variant compiles to `:not(:disabled):hover`, which has CSS specificity `(0, 3, 0)` (class + :not(:disabled) pseudo + :hover pseudo). The bare override compiles to `:hover` only, specificity `(0, 2, 0)`. **Higher specificity always wins** regardless of emission order. **Affected**: any override on a primary/secondary/destructive button that wants to change the hover color (the SignInButton zinc CTA, the destructive-outline delete button, the SignOut confirm).
+3. **`px-4 py-2` (from `BUTTON_SIZE_MD`) vs a shape-driven override like `h-10 w-10`**: Tailwind's default `box-sizing` is `border-box`, so `h-10 w-10 px-4 py-2` is a 40×40 box with the content area shrunk to `40 − 32 = 8` wide and `40 − 16 = 24` tall. A child with `h-full w-full` becomes an 8×24 vertical strip inside the 40×40 circular clip. **Affected**: the avatar trigger (a shape-driven element, not a size-driven one). Fix: `!p-0` neutralizes the size padding.
 
 The escape hatch is the `!important` prefix — Tailwind 4's standard pattern for "this utility MUST win over the cascade":
 
 ```tsx
 // Avatar trigger — `!rounded-full` wins over `rounded-md` from BUTTON_BASE.
-<Button variant="primary" class="!rounded-full !bg-transparent h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 !active:scale-95">
+// `!p-0` neutralizes the size's `px-4 py-2` so the content area
+// fills the full 40×40 box (otherwise the image renders as an 8×24 strip).
+<Button variant="primary" class="!rounded-full !bg-transparent !p-0 h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 !active:scale-95">
   <img src={avatar} alt="" />
 </Button>
 
