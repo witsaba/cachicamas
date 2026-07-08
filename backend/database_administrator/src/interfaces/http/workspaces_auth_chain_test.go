@@ -152,7 +152,7 @@ func newWiringEcho(t *testing.T) (*echo.Echo, *fakeWorkspaceRepo, *fakeTokenFetc
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	repo := newFakeWorkspaceRepo()
 	ghAcc := fakeGitHubAccessorForChain{}
-	svc := application.NewWorkspaceService(repo, ghAcc, logger, nil)
+	svc := application.NewWorkspaceService(repo, nil, ghAcc, logger, nil)
 	tFetcher := &fakeTokenFetcher{fixed: "test-oauth-token-fixture"}
 
 	e := echo.New()

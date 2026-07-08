@@ -81,19 +81,20 @@ type GitHubAccessor interface {
 // concrete adapter.
 //
 // 2026-07-08-workspaces-simplify: no longer manages linked repos.
+// 2026-07-08-workspace-sync-clone PR-3a: Create now auto-enqueues
+// the first sync job via the SyncService (if wired).
 type WorkspaceService struct {
 	repo         domain.WorkspaceRepository
+	syncService  *SyncService // may be nil for pre-PR-3a wiring
 	githubClient GitHubAccessor
 	logger       *slog.Logger
 	tracer       trace.Tracer
 }
 
-// NewWorkspaceService constructs a WorkspaceService. The repo is the
-// hexagonal port; production code wires it to a pgx-backed adapter,
-// tests wire it to an in-memory fake. githubClient is the GitHub
-// accessor (PR1c-i wires the real REST-backed impl). tracer is the
-// OTel Tracer used to open the locked span names.
-func NewWorkspaceService(repo domain.WorkspaceRepository, githubClient GitHubAccessor, logger *slog.Logger, tracer trace.Tracer) *WorkspaceService {
+// NewWorkspaceService constructs a WorkspaceService. The
+// syncService may be nil (the service still functions; the
+// first-sync auto-enqueue is best-effort skipped when nil).
+func NewWorkspaceService(repo domain.WorkspaceRepository, syncService *SyncService, githubClient GitHubAccessor, logger *slog.Logger, tracer trace.Tracer) *WorkspaceService {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -110,6 +111,7 @@ func NewWorkspaceService(repo domain.WorkspaceRepository, githubClient GitHubAcc
 	}
 	return &WorkspaceService{
 		repo:         repo,
+		syncService:  syncService,
 		githubClient: githubClient,
 		logger:       logger,
 		tracer:       tracer,

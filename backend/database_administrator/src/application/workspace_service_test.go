@@ -246,7 +246,7 @@ func TestWorkspaceService_Create_HappyPath(t *testing.T) {
 	tr, sr := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, gh, logger, tr)
 	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
 	defer cancel()
 
@@ -292,7 +292,7 @@ func TestWorkspaceService_Create_RepoNotAccessible_ReturnsValidationError(t *tes
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, gh, logger, tr)
 	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
 	defer cancel()
 
@@ -321,7 +321,7 @@ func TestWorkspaceService_Create_GitHubAccessorError_ReturnsWrapped(t *testing.T
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, gh, logger, tr)
 	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
 	defer cancel()
 
@@ -348,7 +348,7 @@ func TestWorkspaceService_Create_NoToken_ReturnsGitHubNotConnected(t *testing.T)
 	tr, sr := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, gh, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -382,7 +382,7 @@ func TestWorkspaceService_Create_InvalidInput_NoSpanNoRepoCall(t *testing.T) {
 	tr, sr := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, gh, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, gh, logger, tr)
 	ctx, cancel := context.WithTimeout(withToken(context.Background(), "test-token"), 5*time.Second)
 	defer cancel()
 
@@ -417,7 +417,7 @@ func TestWorkspaceService_List_HappyPath(t *testing.T) {
 	tr, sr := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -461,7 +461,7 @@ func TestWorkspaceService_Get_Found(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -479,7 +479,7 @@ func TestWorkspaceService_Get_NotFound(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -511,7 +511,7 @@ func TestWorkspaceService_Update_RenameOnly(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -539,7 +539,7 @@ func TestWorkspaceService_Update_NilName_NoOp(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -563,7 +563,7 @@ func TestWorkspaceService_Update_DuplicateName_ReturnsConflict(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -587,7 +587,7 @@ func TestWorkspaceService_Delete_Success(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -607,7 +607,7 @@ func TestWorkspaceService_Delete_NotFound(t *testing.T) {
 	tr, _ := wsNewTestTracer()
 	logger, _ := wsNewRecordingLogger()
 
-	svc := application.NewWorkspaceService(repo, nil, logger, tr)
+	svc := application.NewWorkspaceService(repo, nil, nil, logger, tr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

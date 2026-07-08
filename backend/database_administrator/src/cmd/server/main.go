@@ -279,8 +279,16 @@ func main() {
 	// adapter so WorkspaceService (which doesn't import http) can call it.
 	workspaceRepo := postgres.NewWorkspaceRepo(db)
 	githubClient := githubinfra.NewClient()
+
+	// 2026-07-08-workspace-sync-clone PR-3a: wire the sync_job repo
+	// and the SyncService. WorkspaceService.Create auto-enqueues
+	// the first sync job via the SyncService.
+	syncJobRepo := postgres.NewSyncJobRepo(db)
+	syncSvc := application.NewSyncService(syncJobRepo, logger)
+
 	workspaceService := application.NewWorkspaceService(
 		workspaceRepo,
+		syncSvc,
 		httpiface.NewWorkspaceGitHubAccessor(githubClient),
 		logger,
 		otelglobal.Tracer(serviceName),
@@ -311,6 +319,10 @@ func main() {
 	httpiface.RegisterAuthenticatedWorkspaceRoutes(
 		e, workspaceService, githubHandler, authChain, logger,
 	)
+
+	// 2026-07-08-workspace-sync-clone PR-3a: hold a reference to
+	// the syncSvc so PR-3b can mount the sync endpoints.
+	_ = syncSvc
 
 	// Single-tenant resolver hook (used by the workspace handlers).
 	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })
