@@ -59,6 +59,16 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Read the HMAC secret for the sync-callback. This is a
+	// separate secret from the bearer token (defense in depth +
+	// independent rotation). MUST match the value in the
+	// database_administrator's SYNC_CALLBACK_SECRET env.
+	callbackSecret := os.Getenv("SYNC_CALLBACK_SECRET")
+	if callbackSecret == "" {
+		fmt.Fprintln(os.Stderr, "FATAL: SYNC_CALLBACK_SECRET is required and must be non-empty")
+		os.Exit(2)
+	}
+
 	port := os.Getenv("WORKSPACE_SYNCER_PORT")
 	if port == "" {
 		port = defaultPort
@@ -77,7 +87,7 @@ func main() {
 	)
 
 	// Build the Echo instance with the wired CloneHandler.
-	e := newEcho(tokenStr, logger)
+	e := newEcho(tokenStr, callbackSecret, logger)
 
 	// Run the server with graceful shutdown on SIGINT/SIGTERM.
 	// The ctx is the parent for both the server run and the
@@ -136,7 +146,7 @@ func runStartupSweep(ctx context.Context, logger *slog.Logger) {
 // Exported as a function (not inlined in main) so the test in
 // main_test.go can construct the same instance without spinning
 // up a real HTTP server.
-func newEcho(serviceToken string, logger *slog.Logger) *echo.Echo {
+func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Echo {
 	e := echo.New()
 
 	// Bearer-token middleware is applied to ALL routes via the skipper:
@@ -165,7 +175,7 @@ func newEcho(serviceToken string, logger *slog.Logger) *echo.Echo {
 		dbAdminURL = "http://database_administrator:8080"
 	}
 	runner := git.NewRunner()
-	callback := httpclient.NewCallbackClient(dbAdminURL, serviceToken)
+	callback := httpclient.NewCallbackClient(dbAdminURL, callbackSecret)
 	// PR-2b uses nil for the GitHub accessor (the real GitHub
 	// client lands in PR-2c). The use case skips permission
 	// validation when the accessor is nil.

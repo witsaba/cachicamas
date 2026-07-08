@@ -161,7 +161,7 @@ func TestEchoContextType(t *testing.T) {
 // construct, minus the os.Exit / signal handling. The skipper
 // mirrors the production wiring so /healthz bypasses the token.
 func newTestEcho(tok string) *echo.Echo {
-	return newEcho(tok, slogDiscard())
+	return newEcho(tok, "test-callback-secret", slogDiscard())
 }
 
 // slogDiscard returns a *slog.Logger that drops every record. The
