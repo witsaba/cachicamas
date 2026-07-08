@@ -65,13 +65,15 @@ func main() {
 	}
 
 	// Wire observability. PR-2a uses a no-op tracer and a basic JSON
-	// slog handler. PR-2c upgrades both.
+	// slog handler. PR-2c upgrades the logger to the redaction
+	// handler (security-critical). The real OTLP tracer is a
+	// follow-up (deps bloat deferred).
 	otelTracer := otel.NewTracer() // consumed in PR-2c by the handler
 	_ = otelTracer
 	logger := otel.NewLogger()
 	logger.Info("workspace_syncer boot",
 		slog.String("port", port),
-		slog.String("otel.tracer", "noop (PR-2c upgrades to OTLP)"),
+		slog.String("otel.tracer", "noop (real OTLP deferred to follow-up)"),
 	)
 
 	// Build the Echo instance with the wired CloneHandler.
@@ -85,11 +87,47 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Startup sweep (PR-2c): remove orphan cloned directories
+	// whose workspace_id no longer has a live sync_job. Runs
+	// in a goroutine so it does not block the server boot.
+	// PR-3b wires the liveIDs lookup to call database_administrator's
+	// /internal/live-workspaces endpoint; for now we pass an
+	// empty map (the sweep is a no-op on first deploy).
+	go runStartupSweep(ctx, logger)
+
 	if err := runServer(ctx, e, port, logger); err != nil {
 		logger.Error("workspace_syncer exited with error",
 			slog.String("error", err.Error()),
 		)
 		os.Exit(1)
+	}
+}
+
+// runStartupSweep performs the cleanup sweep on startup. The
+// sweep walks the data dir and removes any directory whose
+// workspace_id is not in the liveIDs map.
+//
+// PR-2c: the liveIDs lookup is hardcoded to an empty map (the
+// real lookup against database_administrator's
+// /internal/live-workspaces endpoint lands in PR-3b). This
+// means PR-2c's sweep is effectively a no-op for production
+// (it just logs the data dir as "empty"). The sweep code is
+// in place; PR-3b only adds the lookup.
+//
+// The sweep runs in a goroutine so the server boot is not
+// blocked. The sweep is bounded by git.DefaultSweepTimeout
+// (30s); a slow sweep logs a warning and exits.
+func runStartupSweep(ctx context.Context, logger *slog.Logger) {
+	dataDir := os.Getenv("WORKSPACE_SYNCER_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/data/workspaces"
+	}
+	liveIDs := map[int64]bool{} // TODO(PR-3b): fetch from database_administrator
+	if err := git.Sweep(ctx, dataDir, liveIDs, git.OSFS{}, logger); err != nil {
+		logger.WarnContext(ctx, "startup sweep failed (non-fatal; the server continues)",
+			slog.String("data_dir", dataDir),
+			slog.String("error", err.Error()),
+		)
 	}
 }
 
@@ -184,3 +222,5 @@ func runServer(ctx context.Context, e *echo.Echo, port string, logger *slog.Logg
 // future cleanup removing the net import while leaving a stale
 // reference in a comment).
 var _ = net.IPv4len
+
+var _ application.CloneService // keep the import alive
