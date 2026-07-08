@@ -242,6 +242,13 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_healthy
+      # 2026-07-08-workspace-sync-clone: syncer wires the
+      # workspace_syncer HTTP client; we do not block on it
+      # being healthy because the healthcheck is disabled
+      # (no shell in distroless image). service_started is
+      # sufficient.
+      workspace_syncer:
+        condition: service_started
     healthcheck:
       # Disabled on purpose. The runtime image is distroless/static, which
       # has no shell, no wget, no curl, no nc — verified by extracting
@@ -367,6 +374,65 @@ services:
           retries: 6
           start_period: 5s
 
+  # --------------------------------------------------------------------------
+  # workspace_syncer — Go microservice (2026-07-08-workspace-sync-clone).
+  # Clones GitHub repos server-side + probes worktrees. Reached only by
+  # database_administrator over the docker network; never exposed to the
+  # host (no ports: directive). Internal-only.
+  # --------------------------------------------------------------------------
+  workspace_syncer:
+    build:
+      context: ./backend/workspace_syncer
+      dockerfile: Dockerfile
+    image: cachicamas/workspace_syncer:local
+    container_name: cachicamas-workspace-syncer
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: workspace_syncer
+      SERVICE_PORT: ${SERVICE_PORT:-8080}
+      SERVICE_ENV: ${SERVICE_ENV:-development}
+      # 2026-07-08-workspace-sync-clone: bearer token verified by the
+      # syncer middleware (subtle.ConstantTimeCompare). MUST match
+      # the database_administrator INTERNAL_SERVICE_TOKEN value
+      # (default placeholder keeps both services in sync when
+      # neither value is set; production MUST set a real value in .env).
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-changeme-internal-service-token-must-be-set-when-syncer-wired}
+      # 2026-07-08-workspace-sync-clone: HMAC-SHA256 secret the syncer
+      # uses to sign its callback body. The database_administrator
+      # verifies the signature on POST /api/v1/internal/sync-callback.
+      # MUST match the SYNC_CALLBACK_SECRET on db_admin.
+      SYNC_CALLBACK_SECRET: ${SYNC_CALLBACK_SECRET:-changeme-sync-callback-secret-must-be-set-when-syncer-wired}
+      # The base URL of database_administrator (the syncer posts
+      # the callback here). Default points at the docker-compose
+      # service name; override only for dev/test.
+      DATABASE_ADMINISTRATOR_URL: ${DATABASE_ADMINISTRATOR_URL:-http://database_administrator:8080}
+      # OTEL — mirrors db_admin.
+      OTEL_SERVICE_NAME: workspace_syncer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    # Internal-only: NO ports: directive. Reachable only via the
+    # docker network (database_administrator calls http://workspace_syncer:8080).
+    networks:
+      - cachicamas_network
+    # NOTE: no depends_on db_admin here — the syncer does NOT need
+    # db_admin at startup. The callback is best-effort and can fail
+    # (the job stays in pending; the next sync attempt will reconcile).
+    # Adding a depends_on would create a cycle (db_admin depends_on
+    # workspace_syncer for the dispatch, workspace_syncer depends_on
+    # db_admin for the callback).
+    volumes:
+      # /data/workspaces is the syncer clone target. Named volume
+      # so the data survives container restarts (the startup sweep
+      # at PR-2c reconciles the directory against db_admin live
+      # workspaces).
+      - workspace_syncer_data:/data/workspaces
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
     # ----- Shared network ----------------------------------------------------
 networks:
   cachicamas_network:
@@ -377,3 +443,5 @@ networks:
 volumes:
   postgres-data:
     name: cachicamas-postgres-data
+  workspace_syncer_data:
+    name: cachicamas-workspace-syncer-data

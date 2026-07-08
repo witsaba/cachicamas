@@ -144,7 +144,7 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	// the repository's idempotent Update directly. No workspace
 	// denormalization in this mode.
 	if s.db == nil {
-		job, err := s.repo.GetLatestForWorkspace(ctx, /*fallback*/ -1)
+		job, err := s.repo.GetLatestForWorkspace(ctx /*fallback*/, -1)
 		_ = job
 		_ = err
 		// Lookup the job by ID rather than latest-for-workspace.
@@ -193,17 +193,22 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	//    RETURNING clause gives us the new row + the original
 	//    workspace_id; a 0-row result means the callback is a
 	//    late duplicate (idempotent no-op).
+	//
+	//    The defaultBranch arg is NOT bound here (PG would reject
+	//    the query with SQLSTATE 42P18 "indeterminate datatype"
+	//    for an unreferenced $N parameter). defaultBranch is only
+	//    used in the workspace UPDATE below.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE sync_job
 		   SET status = $2,
 		       commit_sha_after = CASE WHEN $2 = 'done' THEN $3 ELSE commit_sha_after END,
-		       error_message    = CASE WHEN $2 = 'failed' THEN $6 ELSE error_message END,
-		       error_code       = CASE WHEN $2 = 'failed' THEN $5 ELSE error_code END,
+		       error_message    = CASE WHEN $2 = 'failed' THEN $5 ELSE error_message END,
+		       error_code       = CASE WHEN $2 = 'failed' THEN $4 ELSE error_code END,
 		       finished_at      = now(),
 		       attempts         = attempts + 1
 		 WHERE id = $1
 		   AND status = 'running'
-	`, jobID, status, commitSHA, defaultBranch, errorCode, errorMessage)
+	`, jobID, status, commitSHA, errorCode, errorMessage)
 	if err != nil {
 		return nil, fmt.Errorf("sync.ProcessSyncCallback: update sync_job: %w", err)
 	}
@@ -275,9 +280,8 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	}
 
 	// 4. Re-fetch the updated job so the caller sees the new state.
-	//    We use the repository's idempotent lookup path so this
-	//    works in both production and test wiring.
-	updated, err := s.lookupJobByIDTx(ctx, tx, jobID)
+	//    Use s.db (NOT the tx, which is already closed post-commit).
+	updated, err := s.lookupJobByID(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}

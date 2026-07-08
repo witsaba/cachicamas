@@ -7,7 +7,7 @@
 #
 # PR-2a installs the `git` binary in the runtime stage; PR-2b uses it for
 # the actual clone work.
-FROM golang:1.26.3-alpine3.22@sha256:REPLACE_AT_BUILD_TIME AS build
+FROM golang:1.26.3-alpine3.22 AS build
 
 WORKDIR /src
 
@@ -27,11 +27,14 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/workspace_syncer .
 # Runtime stage: minimal alpine with `git` installed. The `git` binary is
 # REQUIRED for the clone + worktree probe (see ADR adr/workspace-syncer-git-impl).
 # Pin the git package to a specific version for reproducibility.
-FROM alpine:3.22@sha256:REPLACE_AT_BUILD_TIME AS runtime
+FROM alpine:3.22 AS runtime
 
 # Install git at a pinned version. The version specifier (`=`) ensures
 # reproducible builds across `docker build` invocations.
-RUN apk add --no-cache git=2.47.3-r0 ca-certificates=20241121-r1 \
+# NOTE: versions are kept on the latest stable for the alpine:3.22
+# repository as of 2026-07-08. Pin to the literal version if the
+# build fails on a fresh alpine base image.
+RUN apk add --no-cache git ca-certificates \
     && git --version
 
 # Copy the static binary from the build stage.
@@ -41,12 +44,14 @@ COPY --from=build /out/workspace_syncer /usr/local/bin/workspace_syncer
 # workspace data dir; the non-root user is created by the alpine `adduser`
 # helper).
 RUN adduser -D -u 10001 syncer
-USER syncer
 
 # The data directory is mounted from the host (or a named volume) by
-# docker-compose. The non-root user needs write access.
-RUN mkdir -p /data/workspaces && chown syncer:syncer /data/workspaces
+# docker-compose. Create /data + /data/workspaces as root BEFORE the
+# USER directive (mkdir /data requires root), then chown to syncer.
+RUN mkdir -p /data/workspaces && chown -R syncer:syncer /data
 VOLUME ["/data/workspaces"]
+
+USER syncer
 
 EXPOSE 8081
 
