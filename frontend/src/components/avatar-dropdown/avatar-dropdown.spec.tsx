@@ -151,11 +151,11 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     // cursor + transition + hover ring + active press-in
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
-expect(cls).toMatch(/hover:ring-slate-400/);
-        expect(cls).toMatch(/hover:shadow-md/);
-        // `active:!scale-95` (Tailwind 4 syntax: `!` AFTER the variant)
-        expect(cls).toMatch(/active:!scale-95/);
-// Regression guards — these tokens CONFLICT with the primary
+    expect(cls).toMatch(/hover:ring-slate-400/);
+    expect(cls).toMatch(/hover:shadow-md/);
+    // `active:!scale-95` (Tailwind 4 syntax: `!` AFTER the variant)
+    expect(cls).toMatch(/active:!scale-95/);
+    // Regression guards — these tokens CONFLICT with the primary
     // variant's defaults (rounded-md, bg-slate-900,
     // active:translate-y-px) and with the size's px-4 py-2
     // padding. Tailwind 4 emits utilities in alphabetical order

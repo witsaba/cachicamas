@@ -190,14 +190,14 @@ describe("components/sign-in-button", () => {
     expect(cls).toMatch(/cursor-pointer/);
     // hover bg still there (Tailwind 4 `!important` syntax: `!` AFTER the variant)
     expect(cls).toMatch(/hover:!bg-zinc-800/);
-// new: hover shadow + hover border emphasis (Tailwind 4 `!important` syntax)
+    // new: hover shadow + hover border emphasis (Tailwind 4 `!important` syntax)
     expect(cls).toMatch(/hover:shadow-md/);
     expect(cls).toMatch(/hover:!border-zinc-600/);
     // transition (without it the hover state is an instant flip)
     expect(cls).toMatch(/transition-/);
     // active-state press-down for click feedback
     expect(cls).toMatch(/active:translate-y-px/);
-// Regression guards — the SignInButton uses a zinc override on
+    // Regression guards — the SignInButton uses a zinc override on
     // top of variant="primary". Tailwind 4 + the
     // `not-disabled:hover:*` pseudo-class means the variant has
     // higher specificity than bare `hover:*` overrides, so the
