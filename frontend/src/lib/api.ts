@@ -508,6 +508,34 @@ export interface WorkspaceDetail {
   repository: Repository;
   created_at: string;
   updated_at: string;
+  // 2026-07-08-workspace-sync-clone PR-4: denormalized sync state
+  // surfaced by the database_administrator's GET /workspaces/:id.
+  // All four fields are NULL until the first sync attempt resolves.
+  // The frontend uses last_synced_at + last_synced_commit_sha to
+  // render the initial card state; subsequent updates flow through
+  // the polling hook (getWorkspaceSyncStatus).
+  last_synced_at: string | null;
+  last_synced_commit_sha: string | null;
+  default_branch: string | null;
+  last_sync_job_id: number | null;
+}
+
+// 2026-07-08-workspace-sync-clone PR-4: SyncJob is the wire shape
+// for the /workspaces/:id/sync endpoint. The status vocabulary is
+// locked: pending | running | done | failed. The frontend's
+// WorkspaceSyncCard consumes this through useSyncStatus.
+export interface SyncJob {
+  job_id: number;
+  workspace_id: number;
+  status: "pending" | "running" | "done" | "failed";
+  triggered_by: "auto_on_create" | "manual";
+  started_at: string | null;
+  finished_at: string | null;
+  commit_sha_after: string | null;
+  error_message: string | null;
+  error_code: string | null;
+  attempts: number;
+  created_at: string;
 }
 
 /** GET /workspaces (R-WS-002). */
@@ -571,6 +599,62 @@ export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
     };
   }
   return envelopeToResult(res, async () => null);
+}
+
+// 2026-07-08-workspace-sync-clone PR-4: sync endpoints. The
+// WorkspaceSyncCard consumes these through the useSyncStatus
+// polling hook (components/workspace-sync-card/use-sync-status.ts).
+
+/**
+ * POST /workspaces/:id/sync (R-WS-019 S-WS-190).
+ *
+ * 202 on a fresh enqueue (the job_id is in the response body);
+ * 200 on a single-flight hit (the existing in-flight job_id is
+ * returned so the caller can resume polling). Errors: 422 on
+ * validation failure, 500 on service error.
+ */
+export async function startWorkspaceSync(
+  id: number,
+): Promise<ApiResult<SyncJob>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}/sync`, {
+      method: "POST",
+    });
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as SyncJob,
+  );
+}
+
+/**
+ * GET /workspaces/:id/sync (R-WS-019 S-WS-196).
+ *
+ * 200 with the latest SyncJob on a hit; 404 with
+ * error="workspace_not_synced_yet" on a miss (no job has ever
+ * been enqueued for this workspace). The polling hook
+ * distinguishes these two cases and uses the 404 to terminate
+ * the polling loop.
+ */
+export async function getWorkspaceSyncStatus(
+  id: number,
+): Promise<ApiResult<SyncJob | null>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}/sync`);
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  if (res.status === 404) {
+    return { ok: true, value: null };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as SyncJob,
+  );
 }
 
 /**

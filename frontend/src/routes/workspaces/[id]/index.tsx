@@ -24,6 +24,7 @@
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
 import { Button } from "~/components/ui/button/button";
+import { WorkspaceSyncCard } from "~/components/workspace-sync-card/workspace-sync-card";
 import {
   Link,
   routeLoader$,
@@ -35,7 +36,9 @@ import {
 import {
   deleteWorkspace,
   getWorkspaceSSR,
+  getWorkspaceSyncStatus,
   type WorkspaceDetail,
+  type SyncJob,
 } from "~/lib/api";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
@@ -81,6 +84,11 @@ export default component$(() => {
   const notFound = useSignal(false);
   const error = useSignal<string | null>(null);
   const showDeleteConfirm = useSignal(false);
+  // 2026-07-08-workspace-sync-clone PR-4: the latest sync_job
+  // (or null) for this workspace. Fetched on the server during
+  // SSR (so the first paint of the card is populated) and
+  // refreshed by the WorkspaceSyncCard's polling hook.
+  const initialSyncJob = useSignal<SyncJob | null>(null);
 
   const onConfirmDelete = $(async () => {
     const result = await deleteWorkspace(id);
@@ -92,7 +100,7 @@ export default component$(() => {
     }
   });
 
-  useTask$(async ({ track }) => {
+  useTask$(async ({ track }: { track: (fn: () => unknown) => unknown }) => {
     track(() => id);
     loading.value = true;
     notFound.value = false;
@@ -100,6 +108,12 @@ export default component$(() => {
     const result = await getWorkspaceSSR(id);
     if (result.ok) {
       workspace.value = result.value;
+      // 2026-07-08-workspace-sync-clone PR-4: also fetch the
+      // latest sync_job for the card's initial render.
+      const syncResult = await getWorkspaceSyncStatus(id);
+      if (syncResult.ok) {
+        initialSyncJob.value = syncResult.value;
+      }
     } else if (
       !result.ok &&
       result.message.toLowerCase().includes("not found")
@@ -194,6 +208,15 @@ export default component$(() => {
             Delete workspace
           </Button>
         </div>
+
+        {/* 2026-07-08-workspace-sync-clone PR-4: sync card.
+            Server-rendered with the latest known job_id so
+            the first paint isn't empty. The card's polling
+            hook refreshes the state on the client. */}
+        <WorkspaceSyncCard
+          workspaceId={ws.id}
+          initialJob={initialSyncJob.value}
+        />
       </section>
 
       {showDeleteConfirm.value ? (
