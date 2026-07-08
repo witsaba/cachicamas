@@ -5,6 +5,7 @@ import {
   useStore,
   type QRL,
 } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import {
   organizationInputSchema,
   type OrganizationInput,
@@ -428,16 +429,18 @@ export const OrganizationForm = component$<{
 
       {!showReviewGroup.value && (
         <div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="md"
             data-action="show-details"
             onClick$={$(() => {
               state.showDetails = true;
             })}
-            class="cursor-pointer rounded border border-slate-300 px-3 py-1 text-slate-700 underline"
+            class="px-3 py-1"
           >
             Add optional details
-          </button>
+          </Button>
         </div>
       )}
 
@@ -647,13 +650,9 @@ export const OrganizationForm = component$<{
       )}
 
       <div>
-        <button
-          type="submit"
-          disabled={state.submitting}
-          class="cursor-pointer rounded bg-slate-900 px-4 py-2 font-semibold text-white underline not-disabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" disabled={state.submitting}>
           {state.submitting ? "Creating organization…" : "Create organization"}
-        </button>
+        </Button>
       </div>
     </form>
   );

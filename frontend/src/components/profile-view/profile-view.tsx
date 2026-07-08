@@ -70,6 +70,7 @@
  *   updated in the same PR.
  */
 import { component$ } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 
 /**
  * Mirror of the minimal Auth.js Session shape we depend on. Defined
@@ -157,16 +158,18 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
             Auth.js GitHub provider populates it from the OAuth
             userinfo payload). */}
         {userGithubLogin ? (
-          <a
+          <Button
+            as="a"
             href={`https://github.com/${encodeURIComponent(userGithubLogin)}`}
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 underline transition-[background-color,box-shadow,transform,border-color] duration-150 hover:border-slate-400 hover:bg-slate-50 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:translate-y-px"
-            data-testid="profile-github-login"
+            size="lg"
+            variant="secondary"
+            testId="profile-github-login"
           >
             github.com/{userGithubLogin}
             <span aria-hidden="true">↗</span>
-          </a>
+          </Button>
         ) : null}
       </div>
     </main>

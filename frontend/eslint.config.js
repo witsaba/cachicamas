@@ -44,6 +44,7 @@ const ignores = [
   "**/yarn.lock",
   "**/server",
   "eslint.config.js",
+  "eslint-rules/**",
 ];
 
 export default tseslint.config(
@@ -66,8 +67,19 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/components/**/*.{ts,tsx}", "src/routes/**/*.{ts,tsx}"],
+    plugins: {
+      cachicamas: {
+        rules: {
+          "no-inline-button-class": (
+            await import("./eslint-rules/no-inline-button-class.mjs")
+          ).default,
+        },
+      },
+    },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+      "cachicamas/no-inline-button-class": "warn",
     },
   },
 );

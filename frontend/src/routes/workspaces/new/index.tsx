@@ -111,26 +111,26 @@ const submitAction: WorkspaceFormAction = $(
  * component doesn't need to import the api module directly.
  */
 const repoFetcher = $(
-      async (opts: { page: number; perPage: number; bustCache?: boolean }) => {
-        const result = await listGitHubRepos({
-          page: opts.page,
-          perPage: opts.perPage,
-          bustCache: opts.bustCache,
-        });
-        if (result.ok) {
-          return {
-            repositories: result.value.repositories.map((r) => ({
-              github_id: r.id,
-              full_name: r.full_name,
-              owner: r.owner_login,
-              name: r.name,
-            })),
-            has_next: result.value.hasNext,
-          };
-        }
-        return { repositories: [], has_next: false };
-      },
-    );
+  async (opts: { page: number; perPage: number; bustCache?: boolean }) => {
+    const result = await listGitHubRepos({
+      page: opts.page,
+      perPage: opts.perPage,
+      bustCache: opts.bustCache,
+    });
+    if (result.ok) {
+      return {
+        repositories: result.value.repositories.map((r) => ({
+          github_id: r.id,
+          full_name: r.full_name,
+          owner: r.owner_login,
+          name: r.name,
+        })),
+        has_next: result.value.hasNext,
+      };
+    }
+    return { repositories: [], has_next: false };
+  },
+);
 
 export default component$(() => {
   const nav = useNavigate();
@@ -143,7 +143,7 @@ export default component$(() => {
   return (
     <main class="mx-auto max-w-3xl px-4 py-16">
       <h1 class="text-3xl font-bold text-slate-900">Create a workspace</h1>
-<p class="mt-3 text-slate-700">
+      <p class="mt-3 text-slate-700">
         Pick a name and the GitHub repository for this workspace.
       </p>
       <div class="mt-8">

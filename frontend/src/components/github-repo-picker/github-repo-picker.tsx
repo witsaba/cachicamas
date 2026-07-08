@@ -27,6 +27,8 @@
  * The "Reconnect" state uses plain text + a link.
  */
 import { $, component$, useSignal, useTask$, type QRL } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
+import { MenuItem } from "~/components/ui/menu-item/menu-item";
 import type { Repository } from "~/lib/api";
 
 /**
@@ -142,14 +144,14 @@ export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
             >
               {value.full_name}
             </span>
-            <button
+            <MenuItem
               type="button"
-              data-testid="github-repo-picker-clear"
+              testId="github-repo-picker-clear"
               class="rounded px-2 py-0.5 text-xs font-medium hover:bg-slate-700"
               onClick$={onClear$}
             >
               Clear
-            </button>
+            </MenuItem>
           </div>
         ) : null}
 
@@ -173,14 +175,15 @@ export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
           <span data-testid="github-repo-picker-count" class="text-slate-500">
             {loading.value ? "Loading…" : `${repos.value.length} repositories`}
           </span>
-          <button
+          <Button
             type="button"
-            data-testid="github-repo-picker-refresh"
-            class="rounded text-xs font-medium text-slate-700 underline hover:text-slate-900"
+            variant="link"
+            testId="github-repo-picker-refresh"
+            class="text-xs font-medium"
             onClick$={onRefresh$}
           >
             Refresh repos
-          </button>
+          </Button>
         </div>
 
         {/* List */}
@@ -203,11 +206,11 @@ export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
             })
             .map((repo) => (
               <li key={repo.github_id}>
-                <button
+                <MenuItem
                   type="button"
-                  data-testid="github-repo-picker-option"
+                  testId="github-repo-picker-option"
                   data-github-id={repo.github_id}
-                  class="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-slate-50"
+                  class="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm"
                   onClick$={() => onSelectRepo$(repo)}
                 >
                   <span class="truncate font-mono">{repo.full_name}</span>
@@ -219,21 +222,22 @@ export const GitHubRepoPicker = component$<GitHubRepoPickerProps>(
                       Selected
                     </span>
                   ) : null}
-                </button>
+                </MenuItem>
               </li>
             ))}
         </ul>
 
         {/* Load-more sentinel */}
         {hasNext.value ? (
-          <button
+          <Button
             type="button"
-            data-testid="github-repo-picker-load-more"
-            class="w-full rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            variant="secondary"
+            testId="github-repo-picker-load-more"
+            class="w-full"
             onClick$={onLoadMore$}
           >
             {loadingMore.value ? "Loading more…" : "Load more"}
-          </button>
+          </Button>
         ) : null}
 
         {/* Reconnect GitHub banner */}

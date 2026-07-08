@@ -1,4 +1,5 @@
 import { $, component$, useSignal, useStore, type QRL } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import { createOrganization } from "~/lib/api";
 
 /**
@@ -227,14 +228,14 @@ export const OwnboardingForm = component$<{
         ) : null}
       </div>
 
-      <button
+      <Button
         type="submit"
+        variant="primary"
         disabled={state.submitting}
-        data-testid="ownboarding-submit"
-        class="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        testId="ownboarding-submit"
       >
         {state.submitting ? "Setting up..." : "Create organization"}
-      </button>
+      </Button>
     </form>
   );
 });

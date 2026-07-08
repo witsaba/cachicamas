@@ -14,6 +14,7 @@
  * Aphantasic-friendly: text-first, no imagery, monochrome (bg-slate-900).
  */
 import { component$, type QRL } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import { WorkspaceCard } from "~/components/workspace-card/workspace-card";
 import type { WorkspaceSummary } from "~/lib/api";
 
@@ -46,14 +47,15 @@ export const HomeWorkspacesSection = component$<HomeWorkspacesSectionProps>(
           class="mt-8 space-y-3"
         >
           <p class="text-red-700">{error}</p>
-          <button
+          <Button
             type="button"
-            data-testid="home-workspaces-retry"
+            variant="primary"
+            testId="home-workspaces-retry"
             onClick$={onRetry}
-            class="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white"
+            class="px-3 py-1"
           >
             Retry
-          </button>
+          </Button>
         </section>
       );
     }
@@ -69,13 +71,14 @@ export const HomeWorkspacesSection = component$<HomeWorkspacesSectionProps>(
           <p class="text-slate-700">
             Create your first one to connect a GitHub repository.
           </p>
-          <a
+          <Button
+            as="a"
             href="/workspaces/new"
-            data-testid="home-workspaces-create-cta"
-            class="inline-block rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            variant="primary"
+            testId="home-workspaces-create-cta"
           >
             Create workspace
-          </a>
+          </Button>
         </section>
       );
     }
@@ -85,13 +88,15 @@ export const HomeWorkspacesSection = component$<HomeWorkspacesSectionProps>(
       <section data-testid="home-workspaces-list" class="mt-8 space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-xl font-semibold text-slate-900">Your workspaces</h2>
-          <a
+          <Button
+            as="a"
             href="/workspaces/new"
-            data-testid="home-workspaces-create-cta"
-            class="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white"
+            variant="primary"
+            testId="home-workspaces-create-cta"
+            class="px-3 py-1"
           >
             Create workspace
-          </a>
+          </Button>
         </div>
         {truncated ? (
           <p class="text-sm text-slate-600">

@@ -23,6 +23,7 @@
  *   - confirm dialog for delete
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
+import { Button } from "~/components/ui/button/button";
 import {
   Link,
   routeLoader$,
@@ -168,26 +169,30 @@ export default component$(() => {
           >
             {ws.name}
           </h1>
-          <p
-            data-testid="workspace-detail-repo"
-            class="text-sm text-slate-600"
-          >
-            Repository:{" "}
-            <span class="font-mono">{repo.full_name}</span>
+          <p data-testid="workspace-detail-repo" class="text-sm text-slate-600">
+            Repository: <span class="font-mono">{repo.full_name}</span>
           </p>
         </header>
 
         <div class="mb-8 flex items-center justify-end">
-          <button
+          <Button
             type="button"
-            data-testid="workspace-detail-delete"
-            class="rounded border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+            variant="destructive"
+            testId="workspace-detail-delete"
+            // Outline variant — overrides the solid red destructive
+            // fill with a transparent bg + red border. The
+            // conflicting utilities all carry the `!important`
+            // prefix so the override wins. Tailwind 4 syntax:
+            // `!` goes AFTER the variant (`hover:!bg-red-50`),
+            // not before (`!hover:bg-red-50`). See
+            // sign-in-button.tsx for the full rationale.
+            class="border border-red-300 !bg-transparent !text-red-700 hover:!bg-red-50 focus-visible:!ring-red-500"
             onClick$={() => {
               showDeleteConfirm.value = true;
             }}
           >
             Delete workspace
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -207,24 +212,24 @@ export default component$(() => {
               longer access it from this page.
             </p>
             <div class="mt-6 flex justify-end gap-2">
-              <button
+              <Button
                 type="button"
-                data-testid="workspace-detail-delete-cancel"
-                class="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                variant="secondary"
+                testId="workspace-detail-delete-cancel"
                 onClick$={() => {
                   showDeleteConfirm.value = false;
                 }}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                data-testid="workspace-detail-delete-confirm-button"
-                class="rounded bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800"
+                variant="destructive"
+                testId="workspace-detail-delete-confirm-button"
                 onClick$={onConfirmDelete}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </div>

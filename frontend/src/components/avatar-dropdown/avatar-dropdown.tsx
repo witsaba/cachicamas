@@ -36,6 +36,8 @@
 import { component$ } from "@builder.io/qwik";
 import { Form } from "@builder.io/qwik-city";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
+import { Button } from "~/components/ui/button/button";
+import { MenuItem } from "~/components/ui/menu-item/menu-item";
 import { safeAvatarSrc } from "~/lib/safe-avatar-src";
 import { useClickOutside } from "./use-click-outside";
 
@@ -82,15 +84,36 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
 
     return (
       <div class="relative inline-block">
-        <button
+        <Button
           ref={triggerRef}
           type="button"
-          class="h-10 w-10 cursor-pointer overflow-hidden rounded-full ring-1 ring-slate-200 transition-[box-shadow,transform] duration-150 hover:shadow-md hover:ring-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:scale-95"
+          variant="primary"
+          testId="avatar-dropdown"
           aria-haspopup="menu"
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}
-          data-testid="avatar-dropdown"
           onClick$={() => setOpen$(!open.value)}
+          // Tailwind 4 emits utilities in alphabetical order in the
+          // generated CSS. The consumer override classes that
+          // CONFLICT with the variant's tokens need the `!` important
+          // prefix so the override wins regardless of emission order.
+          // For the avatar trigger there are FOUR conflicts to neutralize:
+          //   - `rounded-full` vs `rounded-md` (variant default)
+          //   - `bg-transparent` vs `bg-slate-900` (variant default)
+          //   - `active:!scale-95` vs `active:translate-y-px` (variant default)
+          //   - `!p-0` vs `px-4 py-2` from BUTTON_SIZE_MD — Tailwind uses
+          //     box-sizing: border-box, so the size padding shrinks the
+          //     content area to 8×24 inside the 40×40 h-10 w-10 box,
+          //     which renders the image as a vertical strip. The avatar
+          //     is shape-driven (h-10 w-10), not size-driven, so the
+          //     padding is wrong for this consumer.
+          // Important Tailwind 4 syntax gotcha: the `!` prefix for
+          // variant utilities MUST come AFTER the variant (e.g.
+          // `hover:!bg-red-50`), NOT before (`!hover:bg-red-50`).
+          // Tailwind silently ignores `!variant:` — the override
+          // loses. See the README section "Consumer personalizations"
+          // for the full rationale.
+          class="h-10 w-10 overflow-hidden !rounded-full !bg-transparent !p-0 ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:!scale-95"
         >
           {safeImage ? (
             <img
@@ -102,7 +125,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
               data-testid="avatar-image"
             />
           ) : null}
-        </button>
+        </Button>
 
         {isOpen ? (
           <div
@@ -120,22 +143,18 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
             <hr class="my-3 border-slate-200" />
             <ul class="space-y-1">
               <li>
-                <a
-                  href="/profile"
-                  data-testid="avatar-menu-profile"
-                  class="block rounded px-2 py-1.5 text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
+                <MenuItem as="a" href="/profile" testId="avatar-menu-profile">
                   Profile
-                </a>
+                </MenuItem>
               </li>
               <li>
-                <a
+                <MenuItem
+                  as="a"
                   href="/workspaces"
-                  data-testid="avatar-menu-workspaces"
-                  class="block rounded px-2 py-1.5 text-sm hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  testId="avatar-menu-workspaces"
                 >
                   Workspaces
-                </a>
+                </MenuItem>
               </li>
             </ul>
             <hr class="my-3 border-slate-200" />
@@ -146,10 +165,10 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                     public landing. See proposal decision #5.
                   */}
               <input type="hidden" name="redirectTo" value="/auth/signin" />
-              <button
+              <MenuItem
                 type="submit"
-                data-testid="avatar-menu-signout"
-                class="inline-flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-slate-700 transition-[background-color,box-shadow,transform,border-color] duration-150 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:translate-y-px"
+                testId="avatar-menu-signout"
+                class="inline-flex w-full items-center gap-2 text-left text-sm text-slate-700"
               >
                 {/*
                     Functional visual anchor for "log out" (UX-4
@@ -178,7 +197,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
                 <span>Sign out</span>
-              </button>
+              </MenuItem>
             </Form>
           </div>
         ) : null}

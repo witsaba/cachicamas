@@ -25,6 +25,7 @@
  */
 import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
 import { type DocumentHead, type RequestHandler } from "@builder.io/qwik-city";
+import { Button } from "~/components/ui/button/button";
 import {
   listWorkspaces,
   listWorkspacesSSR,
@@ -89,14 +90,15 @@ export default component$(() => {
           class="rounded border border-red-300 bg-red-50 px-4 py-3 text-red-800"
         >
           <p>{error.value}</p>
-          <button
+          <Button
             type="button"
-            data-testid="workspaces-retry"
-            class="mt-3 inline-flex rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+            variant="primary"
+            testId="workspaces-retry"
+            class="mt-3"
             onClick$={load}
           >
             Retry
-          </button>
+          </Button>
         </div>
       </main>
     );
@@ -110,13 +112,16 @@ export default component$(() => {
           <p class="mt-3 text-slate-700">
             Create your first one to connect a GitHub repository.
           </p>
-          <a
+          <Button
+            as="a"
             href="/workspaces/new"
-            data-testid="create-workspace-cta"
-            class="mt-6 inline-flex rounded bg-slate-900 px-5 py-3 text-base font-medium text-white hover:bg-slate-700"
+            size="lg"
+            variant="primary"
+            testId="create-workspace-cta"
+            class="mt-6"
           >
             Create workspace
-          </a>
+          </Button>
         </section>
       </main>
     );
@@ -127,13 +132,14 @@ export default component$(() => {
       <section data-testid="workspaces-list">
         <header class="mb-6 flex items-center justify-between">
           <h1 class="text-3xl font-bold text-slate-900">Workspaces</h1>
-          <a
+          <Button
+            as="a"
             href="/workspaces/new"
-            data-testid="create-workspace-cta"
-            class="inline-flex rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            variant="primary"
+            testId="create-workspace-cta"
           >
             Create workspace
-          </a>
+          </Button>
         </header>
         <ul class="space-y-3">
           {workspaces.value.map((w) => (
