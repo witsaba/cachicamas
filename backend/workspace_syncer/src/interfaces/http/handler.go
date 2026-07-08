@@ -5,16 +5,32 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/cachicamas/backend/workspace_syncer/src/application"
 	"github.com/cachicamas/backend/workspace_syncer/src/domain"
 )
+
+// asyncJobTimeout is the hard cap on the goroutine that runs the
+// clone + worktree probe + callback. The use case's individual
+// steps have their own timeouts (clone 90s, probe 30s, callback
+// 30s — ~3 min worst case); 5 min gives generous headroom for
+// slow repos while preventing a stuck goroutine from leaking.
+//
+// PR-2b fix: this used to be c.Request().Context(), which is
+// canceled when Echo returns the 202 response to the client.
+// The clone then aborted immediately with "context canceled"
+// and the sync_job row stayed in 'pending' forever. The fix is
+// to derive a fresh context from context.Background() so the
+// goroutine is decoupled from the request lifecycle.
+const asyncJobTimeout = 5 * time.Minute
 
 // cloneRequestBody is the JSON body the handler decodes. It mirrors
 // domain.CloneRequest field-for-field so the handler stays a thin
@@ -106,11 +122,17 @@ func (h *CloneHandler) Clone(c *echo.Context) error {
 	// 202 immediately. The use case posts the outcome via the
 	// callback; the client polls the database_administrator's
 	// GET /workspaces/:id/sync endpoint.
+	//
+	// PR-2b fix: the goroutine MUST use a fresh context derived
+	// from context.Background() (with a 5-min timeout), NOT
+	// c.Request().Context(). The request context is canceled
+	// when Echo returns the 202 response to the client; the
+	// clone then aborts immediately with "context canceled"
+	// and the sync_job row stays in 'pending' forever.
 	go func() {
-		// The goroutine's context is a new background context
-		// (the request context is canceled when the response
-		// is sent). The use case's clone has its own timeout.
-		h.svc.CloneAndValidate(c.Request().Context(), req)
+		ctx, cancel := context.WithTimeout(context.Background(), asyncJobTimeout)
+		defer cancel()
+		h.svc.CloneAndValidate(ctx, req)
 	}()
 
 	return c.JSON(http.StatusAccepted, map[string]any{
