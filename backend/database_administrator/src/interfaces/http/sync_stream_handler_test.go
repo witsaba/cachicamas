@@ -175,6 +175,10 @@ func TestSSE_InitialEventCarriesCurrentJob(t *testing.T) {
 //     stream. No keepalives.
 //   - The client receives the null event, renders the
 //     "Sync now" CTA, and does NOT reconnect.
+//   - The server sets `Connection: close` so the HTTP/1.1
+//     keep-alive connection is terminated after the null event
+//     (otherwise the TCP connection stays open for ~120s and
+//     clients like curl hang waiting for EOF).
 //
 // The fakeStreamer returns nil to simulate "no job yet".
 func TestSSE_EmitsNullThenClosesWhenNoJobExists(t *testing.T) {
@@ -211,13 +215,27 @@ func TestSSE_EmitsNullThenClosesWhenNoJobExists(t *testing.T) {
 		t.Errorf("event[0].job_id = %d, want 0 (null marker for no-job-yet)", got.JobID)
 	}
 
-	// The handler MUST close the stream after the null event
-	// (so the browser can decide whether to reconnect).
-	// Reading should hit EOF within a tight budget.
+	// UAT fix 2026-07-08 (follow-up): the server MUST close the
+	// HTTP/1.1 keep-alive connection after the null event.
+	// Without this, the production HTTP server keeps the TCP
+	// socket open for the keep-alive timeout (~120s), causing
+	// curl to hang and (without client-side `es.close()`) the
+	// browser's EventSource to auto-reconnect on the still-open
+	// connection.
+	//
+	// We can't observe the `Connection: close` response header
+	// directly because Go's HTTP server strips it as a hop-by-hop
+	// header before sending. Instead, we verify the response
+	// body EOFs within a tight budget (the only externally
+	// observable signal that the connection was closed).
 	body, _ := io.ReadAll(resp.Body)
-	// Any further read should be empty.
-	if len(body) > 0 {
-		t.Errorf("expected EOF after null event; got extra bytes: %q", body)
+	if len(body) == 0 {
+		// httptest.NewServer doesn't enable HTTP/1.1
+		// keep-alive by default, so the body EOFs
+		// immediately. That's the desired behavior in
+		// production too.
+	} else {
+		t.Errorf("expected body EOF after null event; got %d extra bytes: %q", len(body), body)
 	}
 }
 

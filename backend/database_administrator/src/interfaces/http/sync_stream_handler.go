@@ -129,9 +129,7 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	w := c.Response()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering (nginx)
-	w.WriteHeader(http.StatusOK)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -150,36 +148,46 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	ctx := c.Request().Context()
 
 	// Initial poll: if no sync_job exists for this workspace
-	// yet, emit ONE null event and close. The frontend's
-	// EventSource will receive the null, render the
-	// "Sync now" CTA, and NOT reconnect (the stream is
-	// already closed).
+	// yet, emit ONE null event and close the TCP connection.
+	// The frontend's EventSource will receive the null, render
+	// the "Sync now" CTA, and NOT reconnect (the client-side
+	// `es.close()` in subscribeWorkspaceSyncStream stops the
+	// browser's default auto-reconnect on EOF).
 	//
-	// UAT fix 2026-07-08 (clean-rebuild bug): the previous
-	// behavior sent ": empty" keepalive comments every 15s
-	// forever when no job existed. That wasted a connection
-	// and confused the user (the stream looked broken
-	// because nothing happened).
+	// UAT fix 2026-07-08 (clean-rebuild bug, follow-up): the
+	// previous behavior set `Connection: keep-alive` and then
+	// returned from the handler, which left the HTTP/1.1
+	// keep-alive connection open for ~120s after the null
+	// event. curl hung for the full timeout. The fix is to set
+	// `Connection: close` so the production HTTP server closes
+	// the TCP connection immediately after the response.
 	initial, err := h.streamer.GetLatestSyncJob(ctx, workspaceID)
 	if err != nil {
 		// Transient error on the very first poll: send a
 		// null event so the client doesn't hang waiting for
-		// the first event, then close. The client can retry
-		// the stream if the user clicks "Retry sync".
-		h.logger.WarnContext(ctx, "sync stream: initial poll failed; emitting null and closing",
+		// the first event, then close the TCP connection.
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusOK)
+		writeSSEEvent(w, flusher, toSyncResponse(nil))
+		h.logger.WarnContext(ctx, "sync stream: initial poll failed; emitted null and closed",
 			slog.Int64("workspace_id", workspaceID),
 			slog.String("error", err.Error()),
 		)
-		writeSSEEvent(w, flusher, toSyncResponse(nil))
 		return nil
 	}
 	if initial == nil {
-		// No job yet. Emit null and close.
+		// No job yet. Emit null and close the TCP connection.
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusOK)
 		writeSSEEvent(w, flusher, toSyncResponse(nil))
 		return nil
 	}
 
-	// Job exists. Send the initial state then watch for changes.
+	// Job exists. Keep the connection open (keep-alive) so
+	// the polling loop can push live state updates.
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
 	ticker := time.NewTicker(ssePollInterval)
 	defer ticker.Stop()
 	keepalive := time.NewTicker(sseKeepaliveEvery)
