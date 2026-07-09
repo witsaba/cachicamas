@@ -9,15 +9,13 @@
  * Strict TDD posture: tests cover the locked wire shapes only. Server
  * implementation lives in backend/database_administrator.
  */
-import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
-import {
+import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";import {
   listWorkspaces,
   getWorkspace,
   deleteWorkspace,
   createWorkspace,
   listGitHubRepos,
 } from "~/lib/api";
-
 describe("api.ts — workspaces client (PR2-i)", () => {
   const originalFetch = globalThis.fetch;
 
@@ -431,5 +429,58 @@ const body = {
       expect(result.kind).toBe("server");
       expect(result.message).toContain("rate limit");
     });
+  });
+});
+
+// -------------------------------------------------------------------
+// getWorkspaceSyncStatus — R-WS-019 S-WS-196 (sync card polling)
+//
+// UAT bug discovered 2026-07-08: the prior implementation used
+// plain `fetch` (not `serverAwareFetch`), so the SSR path sent
+// an unauthenticated request to db_admin and got 401. The route's
+// `useTask$` silently ignored the 401 (`if (syncResult.ok) ...`),
+// leaving `initialSyncJob.value = null` and the card stuck on
+// "Pending...". The fix: route through `serverAwareFetch` so the
+// SSR path forwards the user's session cookie.
+// -------------------------------------------------------------------
+describe("getWorkspaceSyncStatus", () => {
+  it("RED-R-WS-019-2026-07-08-001: SSR fetch forwards the session cookie", async () => {
+    // Run in the Node SSR runtime (process.versions is defined).
+    // We assert that the dispatched fetch carries the captured
+    // cookie header (IdentityFromCookie on the db_admin side
+    // needs it to authenticate the request).
+    const capturedHeaders: Record<string, string> = {};
+    globalThis.fetch = vi.fn().mockImplementation(async (url, init) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      Object.assign(capturedHeaders, headers);
+      return new Response(
+        JSON.stringify({
+          job_id: 42,
+          workspace_id: 7,
+          status: "done",
+          commit_sha: "ec8fbc8a",
+          default_branch: "main",
+        }),
+        { status: 200 },
+      );
+    });
+
+    // Inject a captured session cookie (the route's onRequest
+    // writes the inbound Cookie into the module-level
+    // ssrCookieContext before the page renders).
+    const { setSsrCookieHeader } = await import("~/lib/ssr-cookie-context");
+    setSsrCookieHeader("authjs.session-token=PAYLOAD; Path=/; HttpOnly");
+
+    const { getWorkspaceSyncStatus } = await import("~/lib/api");
+    const result = await getWorkspaceSyncStatus(7);
+
+    expect(result.ok).toBe(true);
+    const cookie = capturedHeaders["cookie"] ?? capturedHeaders["Cookie"];
+    if (!cookie || !cookie.includes("authjs.session-token=PAYLOAD")) {
+      throw new Error(
+        `SSR fetch did NOT forward the session cookie. ` +
+        `Headers sent: ${JSON.stringify(capturedHeaders)}`,
+      );
+    }
   });
 });

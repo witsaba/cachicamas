@@ -642,9 +642,16 @@ export async function startWorkspaceSync(
 export async function getWorkspaceSyncStatus(
   id: number,
 ): Promise<ApiResult<SyncJob | null>> {
+  // serverAwareFetch routes through ssrFetch in Node (which
+  // forwards the user's session cookie via withSsrCookieHeader)
+  // and through the browser fetch in the client. The prior
+  // implementation used plain `fetch` here, which sent
+  // unauthenticated requests during SSR; the route silently
+  // ignored the 401 and the card stayed on "Pending…".
+  // R-WS-019 S-WS-196.
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/workspaces/${id}/sync`);
+    res = await serverAwareFetch(`/workspaces/${id}/sync`);
   } catch (err) {
     return { ok: false, kind: "offline", message: offlineMessage(err) };
   }
