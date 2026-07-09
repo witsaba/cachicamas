@@ -903,17 +903,22 @@ export function subscribeWorkspaceSyncStream(
     return () => {};
   }
   const url = `${apiBaseUrl()}/workspaces/${workspaceId}/sync/stream`;
-const es = new EventSource(url, { withCredentials: true });
+  const es = new EventSource(url, { withCredentials: true });
   es.onmessage = (ev: MessageEvent<string>) => {
     try {
       const job = JSON.parse(ev.data) as SyncJob;
-      // UAT fix 2026-07-08: the backend uses job_id=0 as the
-      // null marker (when no sync_job exists yet). Convert
-      // that to null so the hook's `job.value === null`
-      // branch renders the "Sync now" CTA.
+      // UAT fix 2026-07-08 (4th pass): the backend uses
+      // job_id=0 as the null marker (when no sync_job exists
+      // yet). When we receive the null marker, the server
+      // is about to close the stream (no more events). We
+      // MUST close the EventSource client-side too, because
+      // the browser's EventSource auto-reconnects on EOF.
+      // Without this close, the browser opens a new SSE
+      // every ~3s forever (endless loop in the UAT).
       if (job.job_id === 0) {
-    onUpdate(null);
-    return;
+        onUpdate(null);
+        es.close();
+        return;
       }
       onUpdate(job);
     } catch {

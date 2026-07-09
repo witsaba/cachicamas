@@ -94,9 +94,9 @@ func (f *fakeTokenFetcher) AccessTokenForIdentity(_ context.Context, _ string, _
 func newSyncTestHandler(t *testing.T, enq *fakeSyncEnqueuer, disp *fakeDispatcher) (*httpiface.SyncHandler, *fakeSyncEnqueuer, *fakeDispatcher) {
 	t.Helper()
 	ws := &domain.Workspace{
-		ID:           7,
-		RepoOwner:    "octocat",
-		RepoName:     "hello",
+		ID:            7,
+		RepoOwner:     "octocat",
+		RepoName:      "hello",
 		DefaultBranch: stringPtr("main"),
 	}
 	wsLoader := &fakeWorkspaceRowLoader{workspace: ws}

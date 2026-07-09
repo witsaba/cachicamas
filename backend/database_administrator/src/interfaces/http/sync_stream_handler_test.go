@@ -156,10 +156,10 @@ func TestSSE_InitialEventCarriesCurrentJob(t *testing.T) {
 	if err := json.Unmarshal([]byte(events[0]), &got); err != nil {
 		t.Fatalf("unmarshal event[0] %q: %v", events[0], err)
 	}
-if got.JobID != 42 || got.Status != "pending" {
-    		t.Errorf("event[0] = %+v, want job_id=42 status=pending", got)
-    	}
-    }
+	if got.JobID != 42 || got.Status != "pending" {
+		t.Errorf("event[0] = %+v, want job_id=42 status=pending", got)
+	}
+}
 
 // TestSSE_EmitsNullThenClosesWhenNoJobExists is the
 // regression test for the 2nd UAT bug (2026-07-08 clean
