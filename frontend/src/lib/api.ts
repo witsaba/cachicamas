@@ -630,11 +630,16 @@ export async function startWorkspaceSync(
 /**
  * GET /workspaces/:id/sync (R-WS-019 S-WS-196).
  *
- * 200 with the latest SyncJob on a hit; 404 with
- * error="workspace_not_synced_yet" on a miss (no job has ever
- * been enqueued for this workspace). The polling hook
- * distinguishes these two cases and uses the 404 to terminate
- * the polling loop.
+ * Wire shape (locked, 2026-07-08):
+ *   - 200 with a populated syncJob on a hit
+ *   - 200 with a ZERO-VALUE syncJob (job_id=0, status="") on a
+ *     miss. The backend used to return 404 with
+ *     error=workspace_not_synced_yet but the 404 made the
+ *     frontend think the workspace was missing. 200 with a
+ *     null marker is the semantically correct shape.
+ *
+ * The hook distinguishes these two cases: a zero-value job
+ * (job_id=0) is treated as null.
  */
 export async function getWorkspaceSyncStatus(
   id: number,
@@ -652,10 +657,16 @@ export async function getWorkspaceSyncStatus(
   } catch (err) {
     return { ok: false, kind: "offline", message: offlineMessage(err) };
   }
-  if (res.status === 404) {
+  if (!res.ok) {
+    return envelopeToResult(res, async () => (await res.json()) as SyncJob);
+  }
+  const body = (await res.json()) as SyncJob;
+  // Zero-value response = no sync_job yet. Convert to null
+  // so the hook can render the "Sync now" CTA.
+  if (body.job_id === 0) {
     return { ok: true, value: null };
   }
-  return envelopeToResult(res, async () => (await res.json()) as SyncJob);
+  return { ok: true, value: body };
 }
 
 /**
@@ -892,10 +903,18 @@ export function subscribeWorkspaceSyncStream(
     return () => {};
   }
   const url = `${apiBaseUrl()}/workspaces/${workspaceId}/sync/stream`;
-  const es = new EventSource(url, { withCredentials: true });
+const es = new EventSource(url, { withCredentials: true });
   es.onmessage = (ev: MessageEvent<string>) => {
     try {
       const job = JSON.parse(ev.data) as SyncJob;
+      // UAT fix 2026-07-08: the backend uses job_id=0 as the
+      // null marker (when no sync_job exists yet). Convert
+      // that to null so the hook's `job.value === null`
+      // branch renders the "Sync now" CTA.
+      if (job.job_id === 0) {
+    onUpdate(null);
+    return;
+      }
       onUpdate(job);
     } catch {
       // Malformed JSON — surface as null (the "no job" state)

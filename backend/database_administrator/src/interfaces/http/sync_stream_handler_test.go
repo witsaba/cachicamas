@@ -156,8 +156,68 @@ func TestSSE_InitialEventCarriesCurrentJob(t *testing.T) {
 	if err := json.Unmarshal([]byte(events[0]), &got); err != nil {
 		t.Fatalf("unmarshal event[0] %q: %v", events[0], err)
 	}
-	if got.JobID != 42 || got.Status != "pending" {
-		t.Errorf("event[0] = %+v, want job_id=42 status=pending", got)
+if got.JobID != 42 || got.Status != "pending" {
+    		t.Errorf("event[0] = %+v, want job_id=42 status=pending", got)
+    	}
+    }
+
+// TestSSE_EmitsNullThenClosesWhenNoJobExists is the
+// regression test for the 2nd UAT bug (2026-07-08 clean
+// rebuild): the SSE stream used to send ": empty" keepalive
+// comments forever when no sync_job existed for the workspace.
+// That wasted a connection AND confused the user (the stream
+// looked broken because nothing happened).
+//
+// Correct behavior:
+//   - The handler queries GetLatestSyncJob once.
+//   - If the result is nil (no job ever enqueued), emit ONE
+//     event with job_id=0 (or a null marker), then close the
+//     stream. No keepalives.
+//   - The client receives the null event, renders the
+//     "Sync now" CTA, and does NOT reconnect.
+//
+// The fakeStreamer returns nil to simulate "no job yet".
+func TestSSE_EmitsNullThenClosesWhenNoJobExists(t *testing.T) {
+	streamer := &fakeStreamer{
+		next: nil, // no sync_job exists for this workspace
+	}
+	srv := newSSEServer(streamer)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/workspaces/99/sync/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Read events with a tight timeout. We expect exactly
+	// ONE event (the null marker) and then the server should
+	// close the connection (EOF on the body).
+	events := readSSE(t, resp.Body, 1, 2*time.Second)
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want exactly 1 (null marker); no keepalives allowed when no job exists", len(events))
+	}
+
+	var got syncResponse
+	if err := json.Unmarshal([]byte(events[0]), &got); err != nil {
+		t.Fatalf("unmarshal event[0] %q: %v", events[0], err)
+	}
+	if got.JobID != 0 {
+		t.Errorf("event[0].job_id = %d, want 0 (null marker for no-job-yet)", got.JobID)
+	}
+
+	// The handler MUST close the stream after the null event
+	// (so the browser can decide whether to reconnect).
+	// Reading should hit EOF within a tight budget.
+	body, _ := io.ReadAll(resp.Body)
+	// Any further read should be empty.
+	if len(body) > 0 {
+		t.Errorf("expected EOF after null event; got extra bytes: %q", body)
 	}
 }
 

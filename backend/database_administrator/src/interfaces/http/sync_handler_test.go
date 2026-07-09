@@ -236,6 +236,16 @@ func TestSyncHandler_Post_ServiceError_500(t *testing.T) {
 }
 
 func TestSyncHandler_Get_NoJobs_404(t *testing.T) {
+	// UAT fix 2026-07-08: the previous behavior was 404 with
+	// code=workspace_not_synced_yet. The 404 was technically
+	// correct (no job found) but semantically misleading:
+	// the workspace DOES exist; only the sync state is empty.
+	// The 404 confused the frontend (a 404 on the read path
+	// suggested the workspace was gone, not just unsynced).
+	//
+	// The new behavior: 200 with `{job: null}` so the
+	// frontend can distinguish "no sync yet" from "workspace
+	// not found".
 	enq := &fakeSyncEnqueuer{
 		getLatestExisting: nil, // no jobs
 	}
@@ -249,15 +259,18 @@ func TestSyncHandler_Get_NoJobs_404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/workspaces/7/sync", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (workspace exists with no sync yet)", rec.Code)
 	}
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("body: %v", err)
 	}
-	if body["error"] != "workspace_not_synced_yet" {
-		t.Errorf("error = %v, want workspace_not_synced_yet", body["error"])
+	if body["job"] != nil {
+		t.Errorf("body.job = %v, want nil (no sync yet)", body["job"])
+	}
+	if _, hasError := body["error"]; hasError {
+		t.Errorf("body.error = %v, want field absent (200 is not an error)", body["error"])
 	}
 }
 

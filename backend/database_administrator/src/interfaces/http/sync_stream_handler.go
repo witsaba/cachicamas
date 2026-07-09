@@ -148,6 +148,38 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+
+	// Initial poll: if no sync_job exists for this workspace
+	// yet, emit ONE null event and close. The frontend's
+	// EventSource will receive the null, render the
+	// "Sync now" CTA, and NOT reconnect (the stream is
+	// already closed).
+	//
+	// UAT fix 2026-07-08 (clean-rebuild bug): the previous
+	// behavior sent ": empty" keepalive comments every 15s
+	// forever when no job existed. That wasted a connection
+	// and confused the user (the stream looked broken
+	// because nothing happened).
+	initial, err := h.streamer.GetLatestSyncJob(ctx, workspaceID)
+	if err != nil {
+		// Transient error on the very first poll: send a
+		// null event so the client doesn't hang waiting for
+		// the first event, then close. The client can retry
+		// the stream if the user clicks "Retry sync".
+		h.logger.WarnContext(ctx, "sync stream: initial poll failed; emitting null and closing",
+			slog.Int64("workspace_id", workspaceID),
+			slog.String("error", err.Error()),
+		)
+		writeSSEEvent(w, flusher, toSyncResponse(nil))
+		return nil
+	}
+	if initial == nil {
+		// No job yet. Emit null and close.
+		writeSSEEvent(w, flusher, toSyncResponse(nil))
+		return nil
+	}
+
+	// Job exists. Send the initial state then watch for changes.
 	ticker := time.NewTicker(ssePollInterval)
 	defer ticker.Stop()
 	keepalive := time.NewTicker(sseKeepaliveEvery)
@@ -206,6 +238,22 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	}
 }
 
+// writeSSEEvent marshals a syncResponse and writes it as a
+// single SSE data frame ("data: <json>\n\n"). The trailing
+// \n\n is the SSE event boundary (the empty line terminates
+// the event per the spec).
+func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, body syncResponse) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		// Marshal of a known struct should not fail; if it
+		// does, log and skip (the next iteration will
+		// retry).
+		return
+	}
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+	flusher.Flush()
+}
+
 // pollAndSend fetches the latest sync_job, serializes it to the
 // SSE wire format, and writes it to the response writer if the
 // serialized form differs from the previous one (delta-only). On
@@ -224,14 +272,15 @@ func (h *SyncStreamHandler) pollAndSend(
 		return fmt.Errorf("poll: %w", err)
 	}
 	if job == nil {
-		// No job yet. Send an empty event (so the client
-		// knows the stream is alive and we're polling) but
-		// don't replace lastJSON (so we keep sending the same
-		// keepalive-only state on subsequent polls).
-		if _, err := fmt.Fprintf(w, ": empty\n\n"); err != nil {
-			return fmt.Errorf("write empty event: %w", err)
-		}
-		flusher.Flush()
+		// This branch is reachable only AFTER we've already
+		// sent a non-null initial event (because the Stream
+		// function returns early on the very first nil).
+		// It means the job was deleted between polls (which
+		// doesn't happen in the current implementation, but
+		// we handle it defensively). Emit a null event and
+		// keep watching in case a new job arrives.
+		writeSSEEvent(w, flusher, toSyncResponse(nil))
+		*lastJSON = "" // reset so the next non-null event emits
 		return nil
 	}
 

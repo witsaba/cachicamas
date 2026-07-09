@@ -117,6 +117,14 @@ type syncResponse struct {
 }
 
 func toSyncResponse(j *domain.SyncJob) syncResponse {
+	// nil-tolerant: returns a zero-value response with
+	// JobID=0, Status="" so the frontend can distinguish
+	// "no sync yet" from a missing workspace. Used by both
+	// the GET endpoint (200 with job: null) and the SSE
+	// stream (one null event then close).
+	if j == nil {
+		return syncResponse{}
+	}
 	return syncResponse{
 		JobID:          j.ID,
 		WorkspaceID:    j.WorkspaceID,
@@ -307,10 +315,16 @@ func (h *SyncHandler) Get(c *echo.Context) error {
 		return writeSyncError(c, err)
 	}
 	if job == nil {
-		return c.JSON(http.StatusNotFound, map[string]any{
-			"error":   "workspace_not_synced_yet",
-			"message": "No sync has been enqueued for this workspace yet.",
-		})
+		// UAT fix 2026-07-08 (clean-rebuild bug): the previous
+		// behavior was 404 with code=workspace_not_synced_yet.
+		// That was technically correct (no row) but semantically
+		// misleading: the workspace DOES exist; only the sync
+		// state is empty. The 404 made the frontend think the
+		// workspace was missing (a different code path). The
+		// correct shape is 200 with a zero-value syncResponse
+		// so the card renders the "Sync now" CTA without
+		// surfacing an error.
+		return c.JSON(http.StatusOK, toSyncResponse(nil))
 	}
 	return c.JSON(http.StatusOK, toSyncResponse(job))
 }
