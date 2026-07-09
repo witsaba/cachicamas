@@ -903,7 +903,7 @@ export function subscribeWorkspaceSyncStream(
     return () => {};
   }
   const url = `${apiBaseUrl()}/workspaces/${workspaceId}/sync/stream`;
-  const es = new EventSource(url, { withCredentials: true });
+const es = new EventSource(url, { withCredentials: true });
   es.onmessage = (ev: MessageEvent<string>) => {
     try {
       const job = JSON.parse(ev.data) as SyncJob;
@@ -917,6 +917,18 @@ export function subscribeWorkspaceSyncStream(
       // every ~3s forever (endless loop in the UAT).
       if (job.job_id === 0) {
         onUpdate(null);
+        es.close();
+        return;
+      }
+      // UAT fix 2026-07-08 (6th pass): when the job reaches
+      // a terminal status (done/failed), the backend closes
+      // the stream after sending the event. We MUST close
+      // the EventSource client-side too, for the same
+      // reason as the null marker — the browser would
+      // otherwise auto-reconnect on EOF and re-open the
+      // SSE every ~3s forever.
+      if (job.status === "done" || job.status === "failed") {
+        onUpdate(job);
         es.close();
         return;
       }

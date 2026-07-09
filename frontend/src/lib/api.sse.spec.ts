@@ -134,7 +134,34 @@ describe("subscribeWorkspaceSyncStream auto-close on null marker", () => {
     unsubscribe();
   });
 
-  it("does NOT close on a real event (job_id > 0)", async () => {
+it("does NOT close on a real event (job_id > 0, non-terminal)", async () => {
+    const updates: Array<unknown> = [];
+    const unsubscribe = subscribeWorkspaceSyncStream(
+      7,
+      (job) => updates.push(job),
+      () => {},
+    );
+    lastCreated!.onmessage!({
+      data: JSON.stringify({
+        job_id: 42,
+        workspace_id: 7,
+        status: "running",
+        triggered_by: "manual",
+        started_at: null,
+        finished_at: null,
+        commit_sha_after: null,
+        error_message: null,
+        error_code: null,
+        attempts: 1,
+        created_at: "2026-07-08T00:00:00Z",
+      }),
+    } as MessageEvent<string>);
+    expect(lastCreated!.closed).toBe(false);
+    expect(updates).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("closes the EventSource on terminal status (done) so browser does NOT auto-reconnect", async () => {
     const updates: Array<unknown> = [];
     const unsubscribe = subscribeWorkspaceSyncStream(
       7,
@@ -156,8 +183,34 @@ describe("subscribeWorkspaceSyncStream auto-close on null marker", () => {
         created_at: "2026-07-08T00:00:00Z",
       }),
     } as MessageEvent<string>);
-    expect(lastCreated!.closed).toBe(false);
+    expect(lastCreated!.closed).toBe(true);
     expect(updates).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("closes the EventSource on terminal status (failed) so browser does NOT auto-reconnect", async () => {
+    const updates: Array<unknown> = [];
+    const unsubscribe = subscribeWorkspaceSyncStream(
+      7,
+      (job) => updates.push(job),
+      () => {},
+    );
+    lastCreated!.onmessage!({
+      data: JSON.stringify({
+        job_id: 42,
+        workspace_id: 7,
+        status: "failed",
+        triggered_by: "manual",
+        started_at: null,
+        finished_at: null,
+        commit_sha_after: null,
+        error_message: "clone failed",
+        error_code: "clone_error",
+        attempts: 1,
+        created_at: "2026-07-08T00:00:00Z",
+      }),
+    } as MessageEvent<string>);
+    expect(lastCreated!.closed).toBe(true);
     unsubscribe();
   });
 });

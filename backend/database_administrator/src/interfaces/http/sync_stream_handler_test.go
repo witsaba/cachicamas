@@ -270,6 +270,56 @@ func TestSSE_OnlyEmitsOnChange(t *testing.T) {
 	}
 }
 
+// TestSSE_ClosesAfterTerminalState is the regression test for
+// the 6th UAT bug (2026-07-08): when a sync_job reaches a
+// terminal state (done/failed), the SSE stream stays open
+// forever (waiting for more changes) even though no more
+// changes are expected. The user observed the SSE keepalive
+// for 21+ seconds with no visible data.
+//
+// Correct behavior:
+//   - Send the state-change event for the terminal job.
+//   - Close the TCP connection (Connection: close).
+//   - The browser's EventSource will fire `error` after
+//     seeing EOF. The frontend hook then calls es.close()
+//     to prevent auto-reconnect.
+func TestSSE_ClosesAfterTerminalState(t *testing.T) {
+	streamer := &fakeStreamer{
+		next: &domain.SyncJob{
+			ID:       1,
+			Status:   domain.SyncJobStatusDone,
+			Attempts: 1,
+		},
+	}
+	srv := newSSEServer(streamer)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/workspaces/7/sync/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Should emit the initial snapshot of the done job.
+	events := readSSE(t, resp.Body, 1, 2*time.Second)
+	if len(events) < 1 {
+		t.Fatalf("got %d events, want >= 1 (initial done snapshot)", len(events))
+	}
+
+	// After the initial snapshot, the SSE MUST close the
+	// connection (no more events expected). The body should
+	// EOF within a tight budget.
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) > 0 {
+		t.Errorf("expected EOF after terminal snapshot; got %d extra bytes: %q", len(body), body)
+	}
+}
+
 func TestSSE_EmitsOnStateChange(t *testing.T) {
 	streamer := &fakeStreamer{
 		next: &domain.SyncJob{ID: 1, Status: "pending"},

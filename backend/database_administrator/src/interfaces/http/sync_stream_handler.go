@@ -183,9 +183,14 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 		return nil
 	}
 
-	// Job exists. Keep the connection open (keep-alive) so
-	// the polling loop can push live state updates.
-	w.Header().Set("Connection", "keep-alive")
+	// Job exists. Decide on Connection based on the job status:
+//   - Terminal (done/failed): close after sending the initial state.
+//   - Active (pending/running): keep-alive for live updates.
+	if isTerminalStatus(initial.Status) {
+		w.Header().Set("Connection", "close")
+	} else {
+		w.Header().Set("Connection", "keep-alive")
+	}
 	w.WriteHeader(http.StatusOK)
 
 	ticker := time.NewTicker(ssePollInterval)
@@ -199,6 +204,14 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	// Send the initial state immediately so the client doesn't
 	// see a blank card for the first poll interval.
 	if err := h.pollAndSend(ctx, workspaceID, &lastJSON, flusher, w); err != nil {
+		if errors.Is(err, errTerminal) {
+			// Initial state was already terminal — close cleanly.
+			h.logger.DebugContext(ctx, "sync stream: initial state is terminal; closing",
+				slog.Int64("workspace_id", workspaceID),
+				slog.String("status", initial.Status),
+			)
+			return nil
+		}
 		h.logger.WarnContext(ctx, "sync stream: initial poll failed",
 			slog.Int64("workspace_id", workspaceID),
 			slog.String("error", err.Error()),
@@ -207,6 +220,14 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 		// keepalive so the client doesn't time out.
 		_, _ = fmt.Fprintf(w, ": keepalive\n\n")
 		flusher.Flush()
+	} else if isTerminalStatus(initial.Status) {
+		// Initial state was terminal; pollAndSend emitted the
+		// snapshot and signaled to close. Exit the handler.
+		h.logger.DebugContext(ctx, "sync stream: initial state is terminal (post-emit); closing",
+			slog.Int64("workspace_id", workspaceID),
+			slog.String("status", initial.Status),
+		)
+		return nil
 	}
 
 	for {
@@ -225,7 +246,17 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 			}
 			flusher.Flush()
 		case <-ticker.C:
-			if err := h.pollAndSend(ctx, workspaceID, &lastJSON, flusher, w); err != nil {
+			err := h.pollAndSend(ctx, workspaceID, &lastJSON, flusher, w)
+			if errors.Is(err, errTerminal) {
+				// State transitioned to a terminal status.
+				// Close the stream so the client knows
+				// there's nothing more to watch.
+				h.logger.DebugContext(ctx, "sync stream: state transitioned to terminal; closing",
+					slog.Int64("workspace_id", workspaceID),
+				)
+				return nil
+			}
+			if err != nil {
 				h.logger.WarnContext(ctx,
 					"sync stream: poll failed (backoff and retry)",
 					slog.Int64("workspace_id", workspaceID),
@@ -268,6 +299,13 @@ func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, body syncRespons
 // change, flushes immediately. Returns nil on a successful no-op
 // or successful send; returns a non-nil error if the DB poll failed
 // (the caller applies backoff).
+//
+// On a successful send AND the new state is terminal (done or
+// failed), returns errTerminal so the caller can close the
+// stream. There are no more state changes expected for this
+// job, and keeping the connection open just wastes resources.
+// The browser's EventSource will see EOF and the frontend hook
+// calls es.close() to prevent auto-reconnect.
 func (h *SyncStreamHandler) pollAndSend(
 	ctx context.Context,
 	workspaceID int64,
@@ -317,8 +355,34 @@ func (h *SyncStreamHandler) pollAndSend(
 		return fmt.Errorf("write event: %w", err)
 	}
 	flusher.Flush()
+
+	// If the new state is terminal (done or failed), the loop
+	// should exit. The SSE has done its job — no more state
+	// changes are expected for this sync_job. Keeping the
+	// connection open would just leak resources and confuse the
+	// user (they see a hung stream with no data).
+	//
+	// UAT fix 2026-07-08 (6th pass): the previous behavior kept
+	// the loop alive indefinitely once the job reached a
+	// terminal state, sending ":empty" keepalives forever.
+	// The fix returns errTerminal here so the loop breaks.
+	if isTerminalStatus(job.Status) {
+		return errTerminal
+	}
 	return nil
 }
+
+// isTerminalStatus reports whether a sync_job status is terminal
+// (no further state changes expected). Used by the SSE handler
+// to decide whether to close the stream after a state emission.
+func isTerminalStatus(status string) bool {
+	return status == domain.SyncJobStatusDone || status == domain.SyncJobStatusFailed
+}
+
+// errTerminal signals the SSE loop to exit because the last
+// emitted event was a terminal status. The handler returns nil
+// to Echo (clean exit) after receiving this.
+var errTerminal = fmt.Errorf("sync_job reached terminal status; closing stream")
 
 // errSSEWriter is a test-only helper. It exists to ensure the
 // errors package is imported even when no test uses errors.As in
