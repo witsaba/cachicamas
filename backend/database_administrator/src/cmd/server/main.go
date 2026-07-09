@@ -369,6 +369,14 @@ func main() {
 	}
 	httpiface.RegisterInternalSyncCallbackRoute(e, syncSvc, syncCallbackSecret, logger)
 
+	// SSE stream for live sync_job updates (UAT fix 2026-07-08:
+	// replaces the fragile polling that failed to propagate signal
+	// updates through QRL closures). Mounted on the same
+	// auth-protected group as the other sync routes so the
+	// IdentityFromCookie middleware applies.
+	streamHandler := httpiface.NewSyncStreamHandler(syncSvc, logger)
+	httpiface.RegisterSyncStreamRoute(e, streamHandler)
+
 	// 2026-07-08-workspace-sync-clone PR-3a: hold a reference to
 	// the syncSvc so PR-3b can mount the sync endpoints.
 	_ = syncSvc

@@ -22,16 +22,18 @@ import { describe, expect, it } from "vitest";
 // workspace-sync-card.spec.tsx. Here we test the polling logic in
 // isolation by re-implementing the same state machine the hook uses.
 
-async function tick(
-  opts: {
-    stopFlag: { stop: boolean };
-    job: { value: SyncJob | null };
-    pollOnce: () => Promise<SyncJob | null>;
-  },
-): Promise<void> {
+async function tick(opts: {
+  stopFlag: { stop: boolean };
+  job: { value: SyncJob | null };
+  pollOnce: () => Promise<SyncJob | null>;
+}): Promise<void> {
   if (opts.stopFlag.stop) return;
   if (!opts.job.value) return;
-  if (opts.job.value.status !== "pending" && opts.job.value.status !== "running") return;
+  if (
+    opts.job.value.status !== "pending" &&
+    opts.job.value.status !== "running"
+  )
+    return;
   const result = await opts.pollOnce();
   opts.job.value = result;
   if (result === null) {

@@ -14,12 +14,12 @@ import (
 // a runner that returns path=42, sha=ok for all calls; the test
 // can override individual fields.
 type fakeRunner struct {
-	mu        sync.Mutex
-	clonePath string
-	cloneErr  error
-	probeSHA  string
-	probeErr  error
-	defaultBranch string
+	mu               sync.Mutex
+	clonePath        string
+	cloneErr         error
+	probeSHA         string
+	probeErr         error
+	defaultBranch    string
 	defaultBranchErr error
 }
 
@@ -85,8 +85,8 @@ func validRequest() domain.CloneRequest {
 
 func TestCloneService_CloneAndValidate_Success(t *testing.T) {
 	runner := &fakeRunner{
-		clonePath: "/data/workspaces/7/octocat/hello-world.git/",
-		probeSHA:  "abc1234567890abcdef1234567890abcdef12345",
+		clonePath:     "/data/workspaces/7/octocat/hello-world.git/",
+		probeSHA:      "abc1234567890abcdef1234567890abcdef12345",
 		defaultBranch: "main",
 	}
 	callback := &fakeCallback{}
@@ -119,9 +119,9 @@ func TestCloneService_CloneAndValidate_Success(t *testing.T) {
 // denormalizes onto workspace.default_branch on `done`).
 func TestCloneService_CloneAndValidate_SuccessCallbackIncludesDefaultBranch(t *testing.T) {
 	runner := &fakeRunner{
-		clonePath:      "/data/workspaces/7/octocat/hello-world.git/",
-		probeSHA:       "abc1234567890abcdef1234567890abcdef12345",
-		defaultBranch:  "main",
+		clonePath:     "/data/workspaces/7/octocat/hello-world.git/",
+		probeSHA:      "abc1234567890abcdef1234567890abcdef12345",
+		defaultBranch: "main",
 	}
 	callback := &fakeCallback{}
 	github := &fakeGitHub{accessible: true}

@@ -67,10 +67,10 @@ type CallbackRequest struct {
 	// in the callback, leaving workspace.default_branch NULL
 	// even after a successful sync.
 	DefaultBranch string `json:"default_branch,omitempty"`
-	ErrorCode      string `json:"error_code,omitempty"`
-	ErrorMessage   string `json:"error_message,omitempty"`
-	StartedAt      string `json:"started_at,omitempty"`
-	FinishedAt     string `json:"finished_at,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
+	FinishedAt    string `json:"finished_at,omitempty"`
 }
 
 // CallbackClient posts CallbackRequest bodies to database_administrator.

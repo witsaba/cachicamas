@@ -9,7 +9,8 @@
  * Strict TDD posture: tests cover the locked wire shapes only. Server
  * implementation lives in backend/database_administrator.
  */
-import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";import {
+import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
+import {
   listWorkspaces,
   getWorkspace,
   deleteWorkspace,
@@ -62,7 +63,7 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       if (!result.ok) return;
       expect(result.value.workspaces).toHaveLength(1);
       expect(result.value.workspaces[0]!.name).toBe("alpha");
-expect(result.value.workspaces[0]!.repository.full_name).toBe(
+      expect(result.value.workspaces[0]!.repository.full_name).toBe(
         "octocat/hello-world",
       );
       expect(result.value.truncated).toBe(false);
@@ -123,7 +124,7 @@ expect(result.value.workspaces[0]!.repository.full_name).toBe(
               owner: "octocat",
               name: "widgets",
             },
-created_at: "2026-07-01T00:00:00Z",
+            created_at: "2026-07-01T00:00:00Z",
             updated_at: "2026-07-02T00:00:00Z",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -209,7 +210,7 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
 
   describe("createWorkspace", () => {
     it("RED-T-WS-2iii-001: 201 + body → ok with the new workspace detail", async () => {
-const body = {
+      const body = {
         id: 99,
         name: "ws-one",
         repository: {
@@ -479,7 +480,7 @@ describe("getWorkspaceSyncStatus", () => {
     if (!cookie || !cookie.includes("authjs.session-token=PAYLOAD")) {
       throw new Error(
         `SSR fetch did NOT forward the session cookie. ` +
-        `Headers sent: ${JSON.stringify(capturedHeaders)}`,
+          `Headers sent: ${JSON.stringify(capturedHeaders)}`,
       );
     }
   });

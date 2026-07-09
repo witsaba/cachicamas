@@ -70,8 +70,8 @@ var _ Runner = (*realRunner)(nil)
 // realRunner is the production Runner. It shells out to the
 // system `git` binary via os/exec.
 type realRunner struct {
-	gitPath           string
-	cloneTimeout      time.Duration
+	gitPath      string
+	cloneTimeout time.Duration
 }
 
 // NewRunner constructs a realRunner. The gitPath defaults to
@@ -129,8 +129,8 @@ func (r *realRunner) Clone(ctx context.Context, workspaceID int64, owner, repo, 
 		"--depth=1",       // shallow clone (full history is not needed)
 		"--single-branch", // only the default branch
 		"--no-checkout",   // bare repo; no working tree to check out
-		url,              // URL (validated owner/repo in path)
-		path,             // destination (validated workspaceID + owner/repo)
+		url,               // URL (validated owner/repo in path)
+		path,              // destination (validated workspaceID + owner/repo)
 	)
 
 	var stderr bytes.Buffer
@@ -163,11 +163,11 @@ func (r *realRunner) WorktreeProbe(ctx context.Context, path string) (string, er
 
 	probePath := fmt.Sprintf("/tmp/probe-%d", time.Now().UnixNano())
 	cmd := exec.CommandContext(probeCtx, r.gitPath,
-		"-C", path,                // run from the bare mirror
-		"worktree", "add",         // create a worktree
-		"--detach",                // detached HEAD (no branch checkout)
-		probePath,                 // destination
-		"HEAD",                    // from the HEAD commit
+		"-C", path, // run from the bare mirror
+		"worktree", "add", // create a worktree
+		"--detach", // detached HEAD (no branch checkout)
+		probePath,  // destination
+		"HEAD",     // from the HEAD commit
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -157,10 +157,10 @@ func readSyncJob(t *testing.T, db *sql.DB, id int64) syncJobRow {
 }
 
 type workspaceRow struct {
-	LastSyncedAt       sql.NullTime
+	LastSyncedAt        sql.NullTime
 	LastSyncedCommitSHA sql.NullString
-	DefaultBranch      sql.NullString
-	LastSyncJobID      sql.NullInt64
+	DefaultBranch       sql.NullString
+	LastSyncJobID       sql.NullInt64
 }
 
 func readWorkspace(t *testing.T, db *sql.DB, id int64) workspaceRow {
