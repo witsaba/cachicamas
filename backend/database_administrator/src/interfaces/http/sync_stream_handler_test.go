@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
 
@@ -24,11 +26,11 @@ import (
 // returns the value of `next` (atomic via mu); the test can
 // re-set `next` mid-stream to simulate a job transition.
 type fakeStreamer struct {
-	mu     sync.Mutex
-	next   *domain.SyncJob
-	calls  int
-	err    error
-	delay  time.Duration
+	mu    sync.Mutex
+	next  *domain.SyncJob
+	calls int
+	err   error
+	delay time.Duration
 }
 
 func (f *fakeStreamer) GetLatestSyncJob(ctx context.Context, workspaceID int64) (*domain.SyncJob, error) {
@@ -106,11 +108,20 @@ func splitFirstLine(s string) (string, string, bool) {
 // IdentityFromCookie middleware (so the auth check passes).
 func newSSEServer(streamer SyncJobStreamer) *httptest.Server {
 	logger := discardLogger()
-	e := newSSEEcho()
+	e, g := newSSERootAndGroup()
 	h := NewSyncStreamHandler(streamer, logger)
-	RegisterSyncStreamRoute(e, h)
+	RegisterSyncStreamRoute(g, h)
+	// *echo.Echo is the http.Handler; *echo.Group is not. The
+	// root Echo is the http server. The group's routes are
+	// registered on the root.
 	return httptest.NewServer(e)
 }
+
+// newSSERootAndGroup returns (root, group) so the test can
+// register routes on the auth-protected group while serving
+// the root as the http.Handler. Implemented in
+// sse_test_helper.go to share the same Echo + auth-stub
+// middleware as the other test fixtures.
 
 func TestSSE_InitialEventCarriesCurrentJob(t *testing.T) {
 	streamer := &fakeStreamer{
@@ -207,7 +218,7 @@ func TestSSE_EmitsOnStateChange(t *testing.T) {
 	streamer.set(&domain.SyncJob{
 		ID:             1,
 		Status:         "done",
-		CommitSHAAfter:  stringPtr("ec8fbc8a"),
+		CommitSHAAfter: stringPtr("ec8fbc8a"),
 	})
 	events2 := readSSE(t, resp.Body, 1, 2*time.Second)
 	if len(events2) < 1 {
@@ -253,6 +264,48 @@ func TestSSE_PollErrorsDoNotKillStream(t *testing.T) {
 	}
 }
 
+// TestSSE_RejectsUnauthenticatedRequests is the regression
+// test for the UAT bug discovered 2026-07-08: the SSE endpoint
+// was mounted on the root Echo (no authChain), so the
+// IdentityFromCookie middleware never ran. A request with a
+// valid session cookie (but going through /api/sync/stream
+// without the auth chain) returned 400 "Authentication
+// required" even though the cookie was valid.
+//
+// The fix: mount the SSE route on the same auth-protected
+// group as the other sync routes (e.g. syncGroup in main.go).
+// This test pins the handler-side contract: WITHOUT auth, the
+// handler must reject with 400. With auth, the happy-path
+// tests above pass.
+func TestSSE_RejectsUnauthenticatedRequests(t *testing.T) {
+	streamer := &fakeStreamer{
+		next: &domain.SyncJob{ID: 1, Status: "pending"},
+	}
+	logger := discardLogger()
+	e := echo.New()
+	// Intentionally do NOT add the auth stub. The handler
+	// must reject.
+	h := NewSyncStreamHandler(streamer, logger)
+	e.GET("/workspaces/:id/sync/stream", h.Stream)
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/workspaces/7/sync/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (the auth check must fire when no identity is in context)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Authentication required") {
+		t.Errorf("body = %q, want it to contain 'Authentication required'", string(body))
+	}
+}
+
 func stringPtr(s string) *string { return &s }
 
 // newSSEEcho is a minimal Echo router used by the SSE tests.
@@ -263,3 +316,5 @@ func stringPtr(s string) *string { return &s }
 // package) so the test can call it without reaching into
 // production-only helpers.
 var _ = newSSEEcho // keep the helper referenced
+
+var _ = echo.New

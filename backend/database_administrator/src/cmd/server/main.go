@@ -351,6 +351,19 @@ func main() {
 	syncGroup := e.Group("", authChain...)
 	httpiface.RegisterSyncRoutes(syncGroup, syncHandler)
 
+	// SSE stream for live sync_job updates (UAT fix 2026-07-08:
+	// replaces the fragile polling that failed to propagate signal
+	// updates through QRL closures). Mounted on the same
+	// auth-protected group as the other sync routes so the
+	// IdentityFromCookie middleware applies. The prior wiring
+	// mounted the SSE on the root Echo (no authChain), so a
+	// request with a valid session cookie returned 400
+	// "Authentication required" — see
+	// sync_stream_handler_test.go:TestSSE_RejectsUnauthenticatedRequests
+	// for the regression guard.
+	streamHandler := httpiface.NewSyncStreamHandler(syncSvc, logger)
+	httpiface.RegisterSyncStreamRoute(syncGroup, streamHandler)
+
 	// Internal sync callback receiver (PR-3b). Mounted on the public
 	// group; HMAC + anti-replay window. Secret is independent of
 	// IDENTITY_CALLBACK_SECRET (defense in depth: a leak of one does
@@ -368,19 +381,9 @@ func main() {
 		os.Exit(1)
 	}
 	httpiface.RegisterInternalSyncCallbackRoute(e, syncSvc, syncCallbackSecret, logger)
-
-	// SSE stream for live sync_job updates (UAT fix 2026-07-08:
-	// replaces the fragile polling that failed to propagate signal
-	// updates through QRL closures). Mounted on the same
-	// auth-protected group as the other sync routes so the
-	// IdentityFromCookie middleware applies.
-	streamHandler := httpiface.NewSyncStreamHandler(syncSvc, logger)
-	httpiface.RegisterSyncStreamRoute(e, streamHandler)
-
 	// 2026-07-08-workspace-sync-clone PR-3a: hold a reference to
 	// the syncSvc so PR-3b can mount the sync endpoints.
 	_ = syncSvc
-
 	// Single-tenant resolver hook (used by the workspace handlers).
 	httpiface.SetSingleTenantOrgIDResolver(func() int64 { return 1 })
 

@@ -33,3 +33,20 @@ func newSSEEcho() *echo.Echo {
 	})
 	return e
 }
+
+// newSSEEchoGroup is deprecated; use newSSERootAndGroup to get
+// a single Echo + its sub-group. Kept for backwards compat
+// with any older test that calls it directly.
+func newSSEEchoGroup() *echo.Group {
+	e := newSSEEcho()
+	return e.Group("")
+}
+
+// newSSERootAndGroup returns (root, group) so the test can
+// register routes on the auth-protected group while serving
+// the root as the http.Handler. Single-instance keeps the
+// middleware stack consistent across the root and the group.
+func newSSERootAndGroup() (*echo.Echo, *echo.Group) {
+	e := newSSEEcho()
+	return e, e.Group("")
+}

@@ -1,9 +1,9 @@
 // Package httpiface — sync_stream_handler.go implements the
 // Server-Sent Events (SSE) endpoint for live sync_job updates.
 //
-//   GET /workspaces/:id/sync/stream
-//   Accept: text/event-stream
-//   Response: text/event-stream
+//	GET /workspaces/:id/sync/stream
+//	Accept: text/event-stream
+//	Response: text/event-stream
 //
 // The endpoint pushes a JSON event every time the workspace's
 // latest sync_job row changes (created, status transition, or
@@ -23,10 +23,10 @@
 //
 // Wire shape (SSE protocol):
 //
-//   data: {"job_id":1,"workspace_id":1,"status":"done",
-//          "commit_sha":"ec8fbc8","default_branch":"main", ...}\n\n
-//   : keepalive\n\n     (sent every 15s to keep the connection open
-//                          through intermediaries)
+//	data: {"job_id":1,"workspace_id":1,"status":"done",
+//	       "commit_sha":"ec8fbc8","default_branch":"main", ...}\n\n
+//	: keepalive\n\n     (sent every 15s to keep the connection open
+//	                       through intermediaries)
 //
 // The client (frontend) sees a sequence of MessageEvents, each
 // with `event.data` being the JSON of a syncResponse. The first
@@ -53,7 +53,7 @@ const (
 	ssePollInterval     = 750 * time.Millisecond // how often the server polls the DB
 	sseKeepaliveEvery   = 15 * time.Second       // how often a ": keepalive\n\n" is sent
 	sseInitialBackoff   = 100 * time.Millisecond // small initial backoff for the first poll
-	sseMaxBackoffGrowth = 5 * time.Second       // cap on the per-error backoff (defensive)
+	sseMaxBackoffGrowth = 5 * time.Second        // cap on the per-error backoff (defensive)
 )
 
 // SyncStreamHandler is the SSE handler for live sync_job updates.
@@ -61,7 +61,7 @@ const (
 // read the latest sync_job; the test wiring passes a fake.
 type SyncStreamHandler struct {
 	streamer SyncJobStreamer
-	logger  *slog.Logger
+	logger   *slog.Logger
 }
 
 // SyncJobStreamer is the narrow contract this handler uses to
@@ -84,20 +84,30 @@ func NewSyncStreamHandler(streamer SyncJobStreamer, logger *slog.Logger) *SyncSt
 // Echo sub-group. The caller is responsible for applying the
 // auth chain via the group middleware; the handler does not
 // double-apply.
-func RegisterSyncStreamRoute(e *echo.Echo, h *SyncStreamHandler) {
-	e.GET("/workspaces/:id/sync/stream", h.Stream)
+//
+// We accept *echo.Group (not *echo.Echo) because the SSE
+// endpoint MUST be mounted on the auth-protected group (per
+// the UAT fix 2026-07-08). Mounting on the root Echo would
+// skip the IdentityFromCookie middleware and the handler
+// would return 400 "Authentication required" even with a
+// valid session cookie. See
+// sync_stream_handler_test.go:TestSSE_RejectsUnauthenticatedRequests
+// for the regression guard on the handler side; the wiring
+// is in main.go.
+func RegisterSyncStreamRoute(g *echo.Group, h *SyncStreamHandler) {
+	g.GET("/workspaces/:id/sync/stream", h.Stream)
 }
 
 // Stream is the GET /workspaces/:id/sync/stream handler.
 //
 // Lifecycle:
-//   1. Write SSE headers (Content-Type, Cache-Control, etc.)
-//   2. Flusher-enable the response writer
-//   3. Loop: poll GetLatestSyncJob on a ticker; on state change,
-//      write "data: {json}\n\n" and flush. On ctx.Done() (client
-//      disconnect, server shutdown, or 30s timeout), break the loop.
-//   4. Return without writing a Content-Length header (SSE is
-//      chunked transfer).
+//  1. Write SSE headers (Content-Type, Cache-Control, etc.)
+//  2. Flusher-enable the response writer
+//  3. Loop: poll GetLatestSyncJob on a ticker; on state change,
+//     write "data: {json}\n\n" and flush. On ctx.Done() (client
+//     disconnect, server shutdown, or 30s timeout), break the loop.
+//  4. Return without writing a Content-Length header (SSE is
+//     chunked transfer).
 //
 // Error handling: the handler is best-effort. A poll error
 // (e.g. transient DB blip) is logged and the loop continues
