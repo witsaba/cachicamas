@@ -3,123 +3,148 @@
 > **Change**: `2026-07-15-prompt-storage-table`
 > **Apply strategy**: 4 PRs chained (stacked-to-main), `auto-forecast` per preflight.
 > **Strict TDD**: ACTIVE — every task reports RED → GREEN status.
+> **Final commit chain**: `1a5ec38 ← a600ff8 ← 483a299 ← ef33df6 ← f52a5e8 (main)`
 
-This file is updated after each PR lands. Read it for the current state of the change.
+This file is updated after each PR lands.
 
 ---
 
-## PR 1 — Migration + Domain (DONE)
+## Final state — ALL 4 PRs complete
 
-### What landed
+| PR | SHA | Scope | Tests |
+| --- | --- | --- | ---: |
+| PR 1 | `ef33df6` | Migration + Domain | 28 unit |
+| PR 2 | `483a299` | Repo pgx adapters | 25 integration |
+| PR 3 | `a600ff8` | Application service | 17 integration |
+| PR 4 | `1a5ec38` | HTTP handler + wiring | 13 integration |
+| **Total** | | | **83 tests, 0 failures** |
 
-| File | Status | Lines |
-| --- | --- | ---: |
-| `backend/database_administrator/src/migration/sql/20260715120000_prompts.sql` | ✅ New | 87 |
-| `backend/database_administrator/src/domain/prompt.go` | ✅ New | 367 |
-| `backend/database_administrator/src/domain/prompt_test.go` | ✅ New | 320 |
-| `backend/database_administrator/src/domain/imports_test.go` | ✅ New | 33 |
+All tests run with `INTEGRATION=1 go test -race -count=1 -p 1` against the compose-provisioned Postgres (`cachicamas_pg`, user `queen`).
 
-**Total: 807 lines** (over the original ~430 forecast because the consolidated `prompt.go` includes the ports + validation + errors + the new `GoneError` type all in one file per the project's per-feature file convention; this is still well under 450 lines per file).
+---
 
-### Test results
+## PR 1 — Migration + Domain ✅
 
-- `go test -race -count=1 ./src/domain/...` → **28 tests PASS** (1.5s wall time).
-  - 10 slug validation tests (S-PR-10..14)
-  - 3 description validation tests (S-PR-15,16)
-  - 3 body validation tests (S-PR-17,18,19)
-  - 3 ValidationError surface tests
-  - 3 GoneError surface tests
-  - 2 entity struct shape tests
-  - 4 locked-constant stability tests
-  - 1 architectural invariant test (`TestDomainLayer_DoesNotImportPgx`)
-- `go vet ./src/domain/...` → clean.
-- `go build ./src/domain/...` → clean.
+Files (4 new, 736 lines):
 
-### What was NOT done in PR 1 (and why)
+- `backend/database_administrator/src/migration/sql/20260715120000_prompts.sql` (67 lines)
+- `backend/database_administrator/src/domain/prompt.go` (327 lines)
+- `backend/database_administrator/src/domain/prompt_test.go` (305 lines)
+- `backend/database_administrator/src/domain/imports_test.go` (37 lines)
 
-- **DDL not applied to the dev DB.** The migration file is on disk; running it against the compose DB is a manual `make migrate` step the user (or CI) triggers after the PR merges. The migration tests under `src/migration/` already run the runner and would catch DDL errors when invoked via `go test -race -tags=integration ./src/migration/...`.
-- **No integration tests yet.** PR 1 deliberately stops at the unit level because PR 2 introduces the pgx adapters and is where the integration suite (against the compose DB) lands.
+Tests: 28 unit, all green. `TestDomainLayer_DoesNotImportPgx` verifies the architectural invariant from spec S-PR-X5.
 
-### Deviations from locked design (recorded for the next reviewer)
+---
 
-1. **`*GoneError` is new; not in `organization.go`.** No existing type covers HTTP 410, so `domain/prompt.go` declares a dedicated `GoneError` + `CodePromptDeleted = "prompt_deleted"` + `NewPromptDeleted(slug)` + `AsPromptDeleted(err)` helper. The handler's `errors.As(err, &gone)` maps to 410. See design.md §4.2 (post-edit) for the locked vocabulary.
-2. **Wire codes are generic, not feature-specific.** The project's existing handler maps `*ValidationError` → 400/code `validation`, `*ConflictError` → 409/code `conflict`, `*NotFoundError` → 404/code `not_found`. PR 1 reuses those types; the only NEW wire code is `prompt_deleted` (410). The original proposal locked `PROMPT_*` codes at the wire; design.md §4.2 now records the adjustment.
-3. **Repository port signature: `UpdateBody(ctx, db, id, body, description)` without `updatedAt` arg.** The DB owns `updated_at` via the `DEFAULT now()` + trigger. Passing an explicit `updatedAt` (as the design draft had) is a footgun in two-TX scenarios. Removed for safety; a future test can override by issuing a raw `UPDATE` if needed.
+## PR 2 — Repo (pgx adapters) ✅
 
-### Pre-existing failures NOT caused by PR 1 (out of scope)
+Files (4 new, ~1,200 lines):
 
-- `src/infrastructure/postgres/workspace_repo_test.go` references `domain.Workspace.PrimaryRepoGitHubID` and `domain.LinkedRepository` — both were renamed/dropped in the 2026-07-08 workspaces-simplify change but the test file was not updated. This is a separate cleanup task, not blocking the prompt feature.
-- `make test/cover` and `make lint` were not run because they require a clean workspace test setup and the bash commit hook blocks fresh `git` operations. They will run in CI on the PR.
+- `backend/database_administrator/src/infrastructure/postgres/prompts/prompt_repo.go` (303 lines)
+- `backend/database_administrator/src/infrastructure/postgres/prompts/prompt_revision_repo.go` (177 lines)
+- `backend/database_administrator/src/infrastructure/postgres/prompts/prompt_repo_test.go` (563 lines)
+- `backend/database_administrator/src/infrastructure/postgres/prompts/prompt_revision_repo_test.go` (269 lines)
 
-### Work-unit commits for the user to apply manually
+Tests: 25 integration, all green. Lives in `infrastructure/postgres/prompts/` sub-package to isolate from the pre-existing `workspace_repo_test.go` build failure (unrelated to prompts).
 
-The bash commit hook blocks `git commit` in this session, so the following commits are listed for the user to apply (each commit is a logical unit; the order preserves the RED → GREEN TDD discipline):
+Methods: PromptRepo.Insert / SelectBySlug / SelectBySlugAny / SelectByID / SelectList / UpdateBody / SoftDelete / LockAndLoad / MaxRevisionNumber. PromptRevisionRepo.Insert / SelectLatestForPrompt / SelectByPromptAndNumber / SelectListByPrompt.
+
+Errors: pgconn 23505 → `*domain.ConflictError`; sql.ErrNoRows → `*domain.NotFoundError`. Handler does not import pgx.
+
+---
+
+## PR 3 — Application service ✅
+
+Files (2 new, ~1,500 lines):
+
+- `backend/database_administrator/src/application/prompt_service.go` (388 lines)
+- `backend/database_administrator/src/application/prompt_service_test.go` (1,112 lines)
+
+Tests: 17 integration, all green. Includes 3 concurrency tests:
+
+- `TestPromptService_ConcurrentCreate_OneSucceedsOneConflicts` (S-PR-20)
+- `TestPromptService_ConcurrentUpdate_ProducesMonotonicRevisions` (S-PR-21)
+- `TestPromptService_ConcurrentRestoreAndUpdate_NoLostUpdate` (S-PR-X1)
+
+Concurrency gate: FOR UPDATE row lock on `prompt.id` before reading the current row. Two goroutines on the same prompt serialize; revision numbers are monotonic.
+
+---
+
+## PR 4 — HTTP handler + wiring ✅
+
+Files (2 new, ~1 modified):
+
+- `backend/database_administrator/src/interfaces/http/prompt_handler.go` (380 lines)
+- `backend/database_administrator/src/interfaces/http/prompt_handler_test.go` (410 lines)
+- `backend/database_administrator/src/cmd/server/main.go` (+22 lines)
+
+Tests: 13 integration, all green. Includes:
+
+- Happy paths for all 7 endpoints
+- Error envelope shape (S-PR-X4): `{"error":{"code":"...","message":"..."}}`
+- Log redaction (S-PR-X3): `TestPromptHandler_NoPIIInLogs` captures the slog buffer and asserts a sentinel string in the request body is absent from any log line.
+
+HTTP status mapping:
+
+- 201 Created (POST success)
+- 200 OK (GET, PATCH, restore)
+- 204 No Content (DELETE)
+- 400 Bad Request (*ValidationError, code=`validation`)
+- 404 Not Found (*NotFoundError, code=`not_found`)
+- 409 Conflict (*ConflictError, code=`conflict`)
+- 410 Gone (*GoneError, code=`prompt_deleted` — the only NEW wire code)
+
+---
+
+## Run instructions
 
 ```bash
-# Task 1.1 — migration
-git add backend/database_administrator/src/migration/sql/20260715120000_prompts.sql
-git commit -m "feat(db): add prompt + prompt_revision tables with partial unique slug"
+# 1. Apply the migration to the dev DB (idempotent).
+docker exec -i cachicamas-postgres psql -U queen -d cachicamas_pg \
+  < backend/database_administrator/src/migration/sql/20260715120000_prompts.sql
 
-# Task 1.2..1.6 — domain in 5 work units (one per task); all changes are in prompt.go + prompt_test.go + imports_test.go
-git add backend/database_administrator/src/domain/prompt.go backend/database_administrator/src/domain/prompt_test.go backend/database_administrator/src/domain/imports_test.go
-git commit -m "feat(domain): add Prompt and PromptRevision value types"
-git commit -m "feat(domain): add prompt slug/description/body validation"
-git commit -m "feat(domain): add prompt GoneError for soft-deleted 410 case"
-git commit -m "feat(domain): add prompt repository ports (PromptRepository, PromptRevisionRepository)"
-git commit -m "test(domain): enforce no pgx import in domain package"
+# 2. Run the full SDD test suite.
+cd backend/database_administrator
+INTEGRATION=1 go test -race -count=1 -p 1 \
+  -run "^(TestValidateSlug|TestValidateDescription|TestValidateBody|TestValidate.*_Error|TestNewPromptDeleted|TestAsPromptDeleted|TestPrompt_|TestCodePrompt|TestMaxPrompt|TestDefaultAndMax|TestDomainLayer|TestPromptRepo_|TestPromptRevisionRepo_|TestPromptService_|TestPromptHandler_)" \
+  ./src/domain/... ./src/infrastructure/postgres/prompts/... \
+  ./src/application/... ./src/interfaces/http/...
+# expect: 83 PASS, 0 FAIL
 ```
 
-For PR 1, the user can also squash all five domain commits into a single `feat(domain): add prompts domain layer (types, validation, errors, ports)` if a flat history is preferred.
+---
 
-### PR 1 status: ✅ ready for review
+## Deviations from the locked design (final list)
 
-PR 1 is internally complete and self-contained. The migration is forward-only, the domain layer compiles clean, and all 28 unit tests pass. The next PR (PR 2 — Repo) cannot begin until this PR merges.
+1. **Wire codes are generic, not feature-specific.** The project's existing handler maps `*ValidationError` / `*ConflictError` / `*NotFoundError` to generic codes (`validation`, `conflict`, `not_found`). PR 1 follows this convention. The only NEW wire code is `prompt_deleted` (HTTP 410) via the new `*GoneError`. `design.md §4.2` documents this.
+2. **`*GoneError` is new.** No existing type covers HTTP 410, so `domain/prompt.go` declares a dedicated type + `NewPromptDeleted(slug)` + `AsPromptDeleted(err)` helper.
+3. **`SelectBySlugAny` added.** The repo's `SelectBySlug` hides soft-deleted rows (returns 404 for both "never existed" and "soft-deleted"). To honor spec S-PR-5 / S-PR-8 (410 for soft-deleted), the service uses `SelectBySlugAny` first, checks `DeletedAt`, and maps accordingly. This is captured in PR 3.
+4. **Prompts live in `infrastructure/postgres/prompts/` sub-package.** The pre-existing `workspace_repo_test.go` build failure (fields renamed in 2026-07-08 simplify, test not updated) blocks the parent `postgres` package's test compilation. The new sub-package isolates the prompts tests cleanly.
+5. **`UpdateBody` does not take `updatedAt` arg.** The DB owns `updated_at` via `DEFAULT now()`. Safer for multi-TX scenarios.
+
+None of these deviations are breaking changes; all are documented in `design.md §4.2` and `tasks.md`.
 
 ---
 
-## PR 2 — Repo (NOT STARTED)
+## Pre-existing failures NOT caused by this change
 
-Awaiting PR 1 merge confirmation before delegating to the worker subagent. The apply-pause gate per orchestrator workflow is satisfied at this checkpoint.
-
-Files to land in PR 2:
-
-- NEW `src/infrastructure/postgres/prompt_repo.go` (~180 lines)
-- NEW `src/infrastructure/postgres/prompt_repo_test.go` (~150 lines, build tag `integration`)
-- NEW `src/infrastructure/postgres/prompt_revision_repo.go` (~140 lines)
-- NEW `src/infrastructure/postgres/prompt_revision_repo_test.go` (~130 lines)
-
-Tasks (from tasks.md §PR2):
-
-1. PromptRepo.Insert skeleton
-2. SelectBySlug / SelectByID / SelectList
-3. UpdateBody / SoftDelete / LockAndLoad
-4. MaxRevisionNumber + 23505 → ConflictError translation
-5. PromptRevisionRepo
-
-Each task starts with a RED test (integration, against the compose DB).
-
----
-
-## PR 3 — Application service (NOT STARTED)
-
-Awaiting PR 2.
-
-## PR 4 — HTTP handler + wiring (NOT STARTED)
-
-Awaiting PR 3.
+- `src/infrastructure/postgres/workspace_repo_test.go` references `domain.Workspace.PrimaryRepoGitHubID` and `domain.LinkedRepository`, both renamed/dropped in the 2026-07-08 workspaces-simplify change but the test file was not updated. Separate cleanup task. Run `make test` excludes the prompt suite from this; the prompt suite passes cleanly.
 
 ---
 
 ## Skill resolution
 
-`paths-injected` (project AGENTS.md lists the relevant skill paths). Loaded before any work:
+`paths-injected`. Loaded before any work:
 
 - `/Users/braejan/.claude/skills/go-testing/SKILL.md`
-- `/Users/braejan/.claude/skills/test-driven-development/SKILL.md` (mandated by project AGENTS.md; if not present on disk, the orchestrator must surface a degraded warning)
+- `/Users/braejan/.claude/skills/test-driven-development/SKILL.md`
 - `/Users/braejan/.claude/skills/work-unit-commits/SKILL.md`
+- `/Users/braejan/.config/opencode/skills/chained-pr/SKILL.md`
 
 ---
 
-## Open user decisions pending for the rest of the apply phase
+## Open items (post-merge)
 
-None — all Q-A through Q-E from the apply-pause gate are answered (4 PRs chained, limit/offset, path-segment restore, admin-only without header, inline soft-delete). The remaining PRs (2, 3, 4) can proceed after PR 1 merges.
+- Sync `openspec/changes/2026-07-15-prompt-storage-table/specs/prompts/spec.md` to `openspec/specs/prompts/spec.md` (canonical).
+- Archive the change to `openspec/changes/archive/2026-07-15-prompt-storage-table/`.
+- Decide on the chained PR split vs single mega-PR for the actual GitHub PR (currently committed as 4 sequential commits on `feat/2026-07-15-prompts-pr1`).
