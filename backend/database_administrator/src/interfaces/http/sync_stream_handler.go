@@ -184,8 +184,8 @@ func (h *SyncStreamHandler) Stream(c *echo.Context) error {
 	}
 
 	// Job exists. Decide on Connection based on the job status:
-//   - Terminal (done/failed): close after sending the initial state.
-//   - Active (pending/running): keep-alive for live updates.
+	//   - Terminal (done/failed): close after sending the initial state.
+	//   - Active (pending/running): keep-alive for live updates.
 	if isTerminalStatus(initial.Status) {
 		w.Header().Set("Connection", "close")
 	} else {

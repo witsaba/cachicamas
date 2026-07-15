@@ -134,7 +134,7 @@ describe("subscribeWorkspaceSyncStream auto-close on null marker", () => {
     unsubscribe();
   });
 
-it("does NOT close on a real event (job_id > 0, non-terminal)", async () => {
+  it("does NOT close on a real event (job_id > 0, non-terminal)", async () => {
     const updates: Array<unknown> = [];
     const unsubscribe = subscribeWorkspaceSyncStream(
       7,
@@ -211,6 +211,97 @@ it("does NOT close on a real event (job_id > 0, non-terminal)", async () => {
       }),
     } as MessageEvent<string>);
     expect(lastCreated!.closed).toBe(true);
+    unsubscribe();
+  });
+
+  // UAT fix 2026-07-08 (7th pass): when we close the
+  // EventSource intentionally (after null marker or terminal
+  // status), the browser may still fire onerror AFTER our
+  // close() call because the server closed the TCP socket.
+  // We must suppress the onerror handler so the caller
+  // doesn't trigger a spurious refresh() REST GET.
+  it("does NOT call onError after an intentional close (null marker)", async () => {
+    const updates: Array<unknown> = [];
+    let errorCalled = 0;
+    const unsubscribe = subscribeWorkspaceSyncStream(
+      7,
+      (job) => updates.push(job),
+      () => {
+        errorCalled++;
+      },
+    );
+    // Server sends null marker; we close intentionally.
+    lastCreated!.onmessage!({
+      data: JSON.stringify({
+        job_id: 0,
+        workspace_id: 7,
+        status: "",
+        triggered_by: "",
+        started_at: null,
+        finished_at: null,
+        commit_sha_after: null,
+        error_message: null,
+        error_code: null,
+        attempts: 0,
+        created_at: "0001-01-01T00:00:00Z",
+      }),
+    } as MessageEvent<string>);
+    // Browser fires onerror because the server closed the
+    // TCP socket (even though we already called close()).
+    lastCreated!.onerror!(new Event("error"));
+    // The hook MUST NOT have called the error handler —
+    // we already have the data we needed and a refresh()
+    // would be a wasted REST GET.
+    expect(errorCalled).toBe(0);
+    unsubscribe();
+  });
+
+  it("does NOT call onError after an intentional close (terminal status)", async () => {
+    const updates: Array<unknown> = [];
+    let errorCalled = 0;
+    const unsubscribe = subscribeWorkspaceSyncStream(
+      7,
+      (job) => updates.push(job),
+      () => {
+        errorCalled++;
+      },
+    );
+    lastCreated!.onmessage!({
+      data: JSON.stringify({
+        job_id: 42,
+        workspace_id: 7,
+        status: "done",
+        triggered_by: "manual",
+        started_at: null,
+        finished_at: null,
+        commit_sha_after: null,
+        error_message: null,
+        error_code: null,
+        attempts: 1,
+        created_at: "2026-07-08T00:00:00Z",
+      }),
+    } as MessageEvent<string>);
+    // Simulate the browser firing onerror after our close.
+    lastCreated!.onerror!(new Event("error"));
+    expect(errorCalled).toBe(0);
+    unsubscribe();
+  });
+
+  it("DOES call onError on a real network failure (not an intentional close)", async () => {
+    const updates: Array<unknown> = [];
+    let errorCalled = 0;
+    const unsubscribe = subscribeWorkspaceSyncStream(
+      7,
+      (job) => updates.push(job),
+      () => {
+        errorCalled++;
+      },
+    );
+    // No message received — just a network error.
+    lastCreated!.onerror!(new Event("error"));
+    // The hook MUST call the error handler so the caller can
+    // trigger a recovery (one-shot refresh).
+    expect(errorCalled).toBe(1);
     unsubscribe();
   });
 });

@@ -903,7 +903,22 @@ export function subscribeWorkspaceSyncStream(
     return () => {};
   }
   const url = `${apiBaseUrl()}/workspaces/${workspaceId}/sync/stream`;
-const es = new EventSource(url, { withCredentials: true });
+  const es = new EventSource(url, { withCredentials: true });
+
+  // Track whether we closed the EventSource intentionally (after
+  // the null marker or terminal status). When the server closes
+  // the TCP socket after sending the event, the browser fires
+  // onerror BEFORE we process es.close() in some browsers. We
+  // must NOT treat that onerror as a "real error" and trigger
+  // refresh() — we already have the data we needed.
+  //
+  // UAT fix 2026-07-08 (7th pass): the user reported "the stream
+  // keeps alive" — in fact the SSE was closing correctly in 6.5ms,
+  // but the trailing onerror was triggering a refresh() REST GET,
+  // which appeared as an extra request in DevTools. With this
+  // fix, the intentional close suppresses the spurious error.
+  let intentionalClose = false;
+
   es.onmessage = (ev: MessageEvent<string>) => {
     try {
       const job = JSON.parse(ev.data) as SyncJob;
@@ -917,6 +932,7 @@ const es = new EventSource(url, { withCredentials: true });
       // every ~3s forever (endless loop in the UAT).
       if (job.job_id === 0) {
         onUpdate(null);
+        intentionalClose = true;
         es.close();
         return;
       }
@@ -929,6 +945,7 @@ const es = new EventSource(url, { withCredentials: true });
       // SSE every ~3s forever.
       if (job.status === "done" || job.status === "failed") {
         onUpdate(job);
+        intentionalClose = true;
         es.close();
         return;
       }
@@ -940,9 +957,20 @@ const es = new EventSource(url, { withCredentials: true });
     }
   };
   es.onerror = (ev: Event) => {
+    // UAT fix 2026-07-08 (7th pass): when we close the
+    // EventSource intentionally (after null marker or terminal
+    // status), the browser still fires onerror because the
+    // server closed the TCP socket. We must NOT call the
+    // caller's error handler in that case — the caller would
+    // trigger a spurious refresh() REST GET that has no
+    // purpose.
+    if (intentionalClose) {
+      return;
+    }
     if (onError) onError(ev);
   };
   return () => {
+    intentionalClose = true;
     es.close();
   };
 }
