@@ -29,6 +29,7 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
+	promptspg "github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres/prompts"
 	workspacesyncer "github.com/cachicamas/backend/database_administrator/src/infrastructure/workspacesyncer"
 	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
@@ -411,6 +412,16 @@ func main() {
 	// internal sync-callback receiver on the same public group as
 	// the identity callback. Both endpoints share the HMAC + timestamp
 	// anti-replay pattern but use independent secrets.
+
+	// 2026-07-15-prompt-storage-table PR 4 of 4: wire the prompts
+	// HTTP surface. Admin-only, no extra header (Q-D locked). The
+	// routes mount on the public Echo group; in production they
+	// should sit behind the compose internal network only.
+	promptRepo := promptspg.NewPromptRepo(db)
+	promptRevRepo := promptspg.NewPromptRevisionRepo(db)
+	promptService := application.NewPromptService(promptRepo, promptRevRepo, db, logger)
+	promptHandler := httpiface.NewPromptHandler(promptService, logger)
+	promptHandler.RegisterPromptRoutes(e)
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
