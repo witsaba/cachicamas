@@ -124,6 +124,27 @@ func (r *PromptRepo) SelectBySlug(ctx context.Context, db domain.SqlExecutor, sl
 	return p, nil
 }
 
+// SelectBySlugAny returns the row with the given slug regardless
+// of its deleted_at state. Used by the service to distinguish
+// "slug never existed" (returns *NotFoundError) from "slug exists
+// but is soft-deleted" (returns the row with DeletedAt != nil; the
+// service then maps to *GoneError → 410 per spec S-PR-8 / S-PR-5).
+func (r *PromptRepo) SelectBySlugAny(ctx context.Context, db domain.SqlExecutor, slug string) (*domain.Prompt, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT `+promptColumnList+` FROM `+promptTableName+`
+             WHERE slug = $1`,
+		slug,
+	)
+	p, err := scanPrompt(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: promptTableName}
+		}
+		return nil, fmt.Errorf("postgres.PromptRepo.SelectBySlugAny: %w", err)
+	}
+	return p, nil
+}
+
 // SelectByID returns the LIVE row with the given id, or
 // *domain.NotFoundError when no live row matches. The caller is
 // typically the service layer after LockAndLoad.

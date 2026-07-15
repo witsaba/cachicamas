@@ -287,6 +287,9 @@ type SqlExecutor = sqlExecutor
 //     the DB clock (DEFAULT now()) and return the populated p.
 //   - SelectBySlug(ctx, db, slug) returns *NotFoundError with Code
 //     CodeNotFound when no active row matches.
+//   - SelectBySlugAny(ctx, db, slug) returns the row regardless of
+//     deleted_at (or *NotFoundError when no row matches); the caller
+//     inspects DeletedAt to distinguish 404 from 410.
 //   - SelectByID(ctx, db, id) returns *NotFoundError with Code
 //     CodeNotFound when no row matches.
 //   - SelectList(ctx, db, limit, offset) returns active rows only
@@ -303,6 +306,7 @@ type SqlExecutor = sqlExecutor
 type PromptRepository interface {
 	Insert(ctx context.Context, db sqlExecutor, p *Prompt) error
 	SelectBySlug(ctx context.Context, db sqlExecutor, slug string) (*Prompt, error)
+	SelectBySlugAny(ctx context.Context, db sqlExecutor, slug string) (*Prompt, error)
 	SelectByID(ctx context.Context, db sqlExecutor, id int64) (*Prompt, error)
 	SelectList(ctx context.Context, db sqlExecutor, limit, offset int) ([]*Prompt, error)
 	UpdateBody(ctx context.Context, db sqlExecutor, id int64, body, description string) error
