@@ -67,3 +67,30 @@ func AsRateLimited(err error) (*RateLimitedError, bool) {
 	}
 	return nil, false
 }
+
+// NotFoundError signals that GitHub returned 404 for the requested
+// resource (repo deleted, renamed, or private to a different org).
+// Added in 2026-07-08-workspace-sync-clone PR-3b so the
+// permission-validation use case can branch on a distinct typed
+// error (rather than re-parsing the message).
+type NotFoundError struct {
+	Cause error
+}
+
+func (e *NotFoundError) Error() string {
+	if e.Cause != nil {
+		return "github not found: " + e.Cause.Error()
+	}
+	return "github not found"
+}
+
+func (e *NotFoundError) Unwrap() error { return e.Cause }
+
+// AsNotFound reports whether err is a *NotFoundError.
+func AsNotFound(err error) (*NotFoundError, bool) {
+	var n *NotFoundError
+	if errors.As(err, &n) {
+		return n, true
+	}
+	return nil, false
+}

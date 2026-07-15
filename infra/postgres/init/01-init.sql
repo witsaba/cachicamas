@@ -181,6 +181,28 @@ COMMENT ON TABLE public.schema_migrations IS
     'Append-only log of applied migrations (goose v3 schema: id, version_id, is_applied, tstamp)';
 
 -- ---------------------------------------------------------------------------
+-- sync_job table CRUD grant (2026-07-08-workspace-sync-clone PR-1)
+--
+-- The `sync_job` table is created by the goose migration
+-- `20260708120200_sync_job.sql` (owned by queen). The database_administrator
+-- service connects as queen and needs CRUD on this table to read the
+-- latest sync_job for the card and to insert / update jobs as the
+-- user creates a workspace or clicks Sync. The GRANT is conditional on
+-- the table existing (the migration may not have run yet on a fresh
+-- cluster) — DO $$ so the init script remains idempotent.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_name = 'sync_job'
+    ) THEN
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.sync_job TO queen';
+    END IF;
+END
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Recipe for creating a future application role (e.g. cachicamas_app).
 -- Run this as queen once you want least-privilege runtime users:
 --

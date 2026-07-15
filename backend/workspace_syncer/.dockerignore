@@ -1,0 +1,16 @@
+# Mirrors backend/database_administrator/.dockerignore.
+
+# Local bin/ — Makefile targets install golangci-lint, goimports, etc. into ./bin.
+bin/
+# Coverage reports produced by `make test/cover`.
+coverage.out
+coverage.html
+# Go test cache.
+*.test
+# Editor / OS junk.
+.idea/
+.vscode/
+.DS_Store
+# Local .env files (compose injects the real values).
+.env
+.env.local

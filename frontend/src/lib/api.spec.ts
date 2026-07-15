@@ -17,7 +17,6 @@ import {
   createWorkspace,
   listGitHubRepos,
 } from "~/lib/api";
-
 describe("api.ts — workspaces client (PR2-i)", () => {
   const originalFetch = globalThis.fetch;
 
@@ -64,7 +63,7 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       if (!result.ok) return;
       expect(result.value.workspaces).toHaveLength(1);
       expect(result.value.workspaces[0]!.name).toBe("alpha");
-expect(result.value.workspaces[0]!.repository.full_name).toBe(
+      expect(result.value.workspaces[0]!.repository.full_name).toBe(
         "octocat/hello-world",
       );
       expect(result.value.truncated).toBe(false);
@@ -125,7 +124,7 @@ expect(result.value.workspaces[0]!.repository.full_name).toBe(
               owner: "octocat",
               name: "widgets",
             },
-created_at: "2026-07-01T00:00:00Z",
+            created_at: "2026-07-01T00:00:00Z",
             updated_at: "2026-07-02T00:00:00Z",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -211,7 +210,7 @@ describe("api.ts — workspaces client (PR2-iii)", () => {
 
   describe("createWorkspace", () => {
     it("RED-T-WS-2iii-001: 201 + body → ok with the new workspace detail", async () => {
-const body = {
+      const body = {
         id: 99,
         name: "ws-one",
         repository: {
@@ -431,5 +430,58 @@ const body = {
       expect(result.kind).toBe("server");
       expect(result.message).toContain("rate limit");
     });
+  });
+});
+
+// -------------------------------------------------------------------
+// getWorkspaceSyncStatus — R-WS-019 S-WS-196 (sync card polling)
+//
+// UAT bug discovered 2026-07-08: the prior implementation used
+// plain `fetch` (not `serverAwareFetch`), so the SSR path sent
+// an unauthenticated request to db_admin and got 401. The route's
+// `useTask$` silently ignored the 401 (`if (syncResult.ok) ...`),
+// leaving `initialSyncJob.value = null` and the card stuck on
+// "Pending...". The fix: route through `serverAwareFetch` so the
+// SSR path forwards the user's session cookie.
+// -------------------------------------------------------------------
+describe("getWorkspaceSyncStatus", () => {
+  it("RED-R-WS-019-2026-07-08-001: SSR fetch forwards the session cookie", async () => {
+    // Run in the Node SSR runtime (process.versions is defined).
+    // We assert that the dispatched fetch carries the captured
+    // cookie header (IdentityFromCookie on the db_admin side
+    // needs it to authenticate the request).
+    const capturedHeaders: Record<string, string> = {};
+    globalThis.fetch = vi.fn().mockImplementation(async (url, init) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      Object.assign(capturedHeaders, headers);
+      return new Response(
+        JSON.stringify({
+          job_id: 42,
+          workspace_id: 7,
+          status: "done",
+          commit_sha: "ec8fbc8a",
+          default_branch: "main",
+        }),
+        { status: 200 },
+      );
+    });
+
+    // Inject a captured session cookie (the route's onRequest
+    // writes the inbound Cookie into the module-level
+    // ssrCookieContext before the page renders).
+    const { setSsrCookieHeader } = await import("~/lib/ssr-cookie-context");
+    setSsrCookieHeader("authjs.session-token=PAYLOAD; Path=/; HttpOnly");
+
+    const { getWorkspaceSyncStatus } = await import("~/lib/api");
+    const result = await getWorkspaceSyncStatus(7);
+
+    expect(result.ok).toBe(true);
+    const cookie = capturedHeaders["cookie"] ?? capturedHeaders["Cookie"];
+    if (!cookie || !cookie.includes("authjs.session-token=PAYLOAD")) {
+      throw new Error(
+        `SSR fetch did NOT forward the session cookie. ` +
+          `Headers sent: ${JSON.stringify(capturedHeaders)}`,
+      );
+    }
   });
 });

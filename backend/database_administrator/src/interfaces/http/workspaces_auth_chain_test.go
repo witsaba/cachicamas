@@ -102,6 +102,10 @@ func (r *fakeWorkspaceRepo) SoftDelete(_ context.Context, id int64) error {
 	return errors.New("fakeWorkspaceRepo.SoftDelete: not implemented in auth-chain test")
 }
 
+func (r *fakeWorkspaceRepo) MarkSynced(_ context.Context, id int64, commitSHA, defaultBranch string) error {
+	return errors.New("fakeWorkspaceRepo.MarkSynced: not implemented in auth-chain test")
+}
+
 // fakeGitHubAccessorForChain is a no-op GitHubAccessor for the
 // auth-chain test: any call returns "not accessible" so the handler
 // fails downstream rather than the test pretending business
@@ -152,7 +156,7 @@ func newWiringEcho(t *testing.T) (*echo.Echo, *fakeWorkspaceRepo, *fakeTokenFetc
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	repo := newFakeWorkspaceRepo()
 	ghAcc := fakeGitHubAccessorForChain{}
-	svc := application.NewWorkspaceService(repo, ghAcc, logger, nil)
+	svc := application.NewWorkspaceService(repo, nil, ghAcc, logger, nil)
 	tFetcher := &fakeTokenFetcher{fixed: "test-oauth-token-fixture"}
 
 	e := echo.New()

@@ -230,3 +230,166 @@ func parseRepos(body []byte) ([]Repo, error) {
 	}
 	return out, nil
 }
+
+// RepoMetadata is the locked projection of GET /repos/{owner}/{repo}
+// used by 2026-07-08-workspace-sync-clone PR-3b. It carries the four
+// fields the workspace_sync card needs to render the post-sync state
+// and the two permission flags the permission-validation use case
+// checks (Permissions.Pull + Permissions.Push) before enqueueing a
+// sync_job.
+//
+// Wire shape: the GetRepository method maps GitHub's response into
+// this struct, never leaks the raw response, and never logs the
+// access token. The field tags here are NOT for JSON serialization
+// (the struct is internal); they are for documentation purposes and
+// future pgx adapter reuse.
+type RepoMetadata struct {
+	GitHubID        int64
+	FullName        string
+	OwnerLogin      string
+	Name            string
+	DefaultBranch   string
+	PrimaryLanguage  *string
+	Visibility      string // "public" | "private" | "internal"
+	PushedAt        time.Time
+	SizeKB          int
+	Permissions     RepoPermissions
+}
+
+type RepoPermissions struct {
+	Pull  bool
+	Push  bool
+	Admin bool
+}
+
+// GetRepository fetches one repo by (owner, name) and returns a
+// locked RepoMetadata projection. The single error space returns:
+//   - *UnauthorizedError on 401
+//   - *RateLimitedError on 403
+//   - *NotFoundError on 404 (distinct from the generic ParseError so
+//     the sync permission-validation use case can return 422 with
+//     code=validation when the repo was deleted between workspace
+//     create and the first sync)
+//   - *ParseError on 2xx with malformed JSON
+//   - wrapped error on transport failures
+//
+// The endpoint is GET /repos/{owner}/{repo} (NOT /repositories/{id}).
+// owner/name is the wire shape the workspace already has; using
+// /repos/{owner}/{name} avoids a second round-trip to /repositories/:id.
+func (c *Client) GetRepository(ctx context.Context, token, owner, name string) (*RepoMetadata, error) {
+	if token == "" {
+		return nil, &UnauthorizedError{Cause: fmt.Errorf("empty access token")}
+	}
+	if owner == "" || name == "" {
+		return nil, fmt.Errorf("github.GetRepository: owner and name must be non-empty")
+	}
+	u, err := url.Parse(c.BaseURL + "/repos/" + owner + "/" + name)
+	if err != nil {
+		return nil, fmt.Errorf("github.GetRepository: parse url: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("github.GetRepository: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github.GetRepository: do request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// fall through to parse
+	case http.StatusUnauthorized:
+		return nil, &UnauthorizedError{Cause: fmt.Errorf("http %d", resp.StatusCode)}
+	case http.StatusForbidden:
+		return nil, &RateLimitedError{Cause: fmt.Errorf("http %d", resp.StatusCode)}
+	case http.StatusNotFound:
+		return nil, &NotFoundError{Cause: fmt.Errorf("http %d", resp.StatusCode)}
+	default:
+		return nil, fmt.Errorf("github.GetRepository: unexpected status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("github.GetRepository: read body: %w", err)
+	}
+	meta, err := parseRepoMetadata(body)
+	if err != nil {
+		return nil, &ParseError{Cause: err}
+	}
+	return meta, nil
+}
+
+// parseRepoMetadata decodes the JSON body of GET /repos/{owner}/{name}
+// into a RepoMetadata. Mirrors the parseRepos discipline: every
+// field is explicit so a future GitHub schema change fails loudly.
+func parseRepoMetadata(body []byte) (*RepoMetadata, error) {
+	if len(body) == 0 {
+		return nil, fmt.Errorf("parseRepoMetadata: empty body")
+	}
+	var raw struct {
+		ID          int64   `json:"id"`
+		FullName    string  `json:"full_name"`
+		Name        string  `json:"name"`
+		Private     bool    `json:"private"`
+		Visibility  string  `json:"visibility"`
+		Size        int     `json:"size"`
+		DefaultBr   string  `json:"default_branch"`
+		PushedAt    string  `json:"pushed_at"`
+		Language    *string `json:"language"`
+		Owner       *struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Permissions *struct {
+			Pull  bool `json:"pull"`
+			Push  bool `json:"push"`
+			Admin bool `json:"admin"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("parse json object: %w", err)
+	}
+	ownerLogin := ""
+	if raw.Owner != nil {
+		ownerLogin = raw.Owner.Login
+	}
+	pushedAt, _ := time.Parse(time.RFC3339, raw.PushedAt)
+	perms := RepoPermissions{}
+	if raw.Permissions != nil {
+		perms.Pull = raw.Permissions.Pull
+		perms.Push = raw.Permissions.Push
+		perms.Admin = raw.Permissions.Admin
+	}
+	return &RepoMetadata{
+		GitHubID:       raw.ID,
+		FullName:       raw.FullName,
+		OwnerLogin:     ownerLogin,
+		Name:           raw.Name,
+		DefaultBranch:  raw.DefaultBr,
+		PrimaryLanguage: raw.Language,
+		// GitHub's "private" boolean + "visibility" string are
+		// redundant in current API versions; we prefer the
+		// explicit string so "internal" is preserved (Enterprise
+		// repos). When the API does not include "visibility"
+		// (older mirrors), fall back to the boolean.
+		Visibility:  visibilityOrFallback(raw.Visibility, raw.Private),
+		PushedAt:    pushedAt,
+		SizeKB:      raw.Size,
+		Permissions: perms,
+	}, nil
+}
+
+func visibilityOrFallback(visibility string, private bool) string {
+	if visibility != "" {
+		return visibility
+	}
+	if private {
+		return "private"
+	}
+	return "public"
+}

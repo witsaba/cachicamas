@@ -70,7 +70,7 @@ var _ domain.WorkspaceRepository = (*WorkspaceRepo)(nil)
 
 const (
 	workspaceTableName        = "workspace"
-	workspaceColumnList       = "id, organization_id, owner_user_id, name, repo_github_id, repo_full_name, repo_owner, repo_name, created_at, updated_at, deleted_at"
+	workspaceColumnList       = "id, organization_id, owner_user_id, name, repo_github_id, repo_full_name, repo_owner, repo_name, created_at, updated_at, deleted_at, last_synced_at, last_synced_commit_sha, default_branch, last_sync_job_id"
 	workspaceInsertColumnList = "organization_id, owner_user_id, name, repo_github_id, repo_full_name, repo_owner, repo_name"
 	workspaceInsertValuesCount = 7
 	workspaceLiveUniqueIndex  = "workspace_org_name_live_key"
@@ -244,9 +244,13 @@ func (r *WorkspaceRepo) SoftDelete(ctx context.Context, id int64) error {
 // the SELECT order.
 func scanWorkspace(row rowScanner) (*domain.Workspace, error) {
 	var (
-		w           domain.Workspace
-		ownerUserID sql.NullInt64
-		deletedAt   sql.NullTime
+		w                    domain.Workspace
+		ownerUserID          sql.NullInt64
+		deletedAt            sql.NullTime
+		lastSyncedAt         sql.NullTime
+		lastSyncedCommitSHA  sql.NullString
+		defaultBranch        sql.NullString
+		lastSyncJobID        sql.NullInt64
 	)
 	if err := row.Scan(
 		&w.ID,
@@ -260,6 +264,10 @@ func scanWorkspace(row rowScanner) (*domain.Workspace, error) {
 		&w.CreatedAt,
 		&w.UpdatedAt,
 		&deletedAt,
+		&lastSyncedAt,
+		&lastSyncedCommitSHA,
+		&defaultBranch,
+		&lastSyncJobID,
 	); err != nil {
 		return nil, err
 	}
@@ -271,7 +279,51 @@ func scanWorkspace(row rowScanner) (*domain.Workspace, error) {
 		t := deletedAt.Time
 		w.DeletedAt = &t
 	}
+	if lastSyncedAt.Valid {
+		t := lastSyncedAt.Time
+		w.LastSyncedAt = &t
+	}
+	if lastSyncedCommitSHA.Valid {
+		s := lastSyncedCommitSHA.String
+		w.LastSyncedCommitSHA = &s
+	}
+	if defaultBranch.Valid {
+		s := defaultBranch.String
+		w.DefaultBranch = &s
+	}
+	if lastSyncJobID.Valid {
+		v := lastSyncJobID.Int64
+		w.LastSyncJobID = &v
+	}
 	return &w, nil
+}
+
+// MarkSynced denormalizes the outcome of a successful sync onto the
+// workspace row. Called from SyncService.ProcessSyncCallback inside
+// the same Tx as the sync_job update so the two writes commit
+// together. Returns *domain.NotFoundError if no live row matches the
+// given id.
+func (r *WorkspaceRepo) MarkSynced(ctx context.Context, id int64, commitSHA, defaultBranch string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE `+workspaceTableName+`
+                 SET last_synced_at         = now(),
+                     last_synced_commit_sha = $1,
+                     default_branch         = $2,
+                     updated_at             = now()
+                 WHERE id = $3 AND deleted_at IS NULL`,
+		commitSHA, defaultBranch, id,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres.WorkspaceRepo.MarkSynced: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres.WorkspaceRepo.MarkSynced: rows-affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return &domain.NotFoundError{Resource: workspaceTableName}
+	}
+	return nil
 }
 
 // nullableInt64 returns the value of a *int64 as an

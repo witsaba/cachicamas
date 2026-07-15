@@ -219,6 +219,19 @@ services:
       # block below). Different from AUTH_SECRET (purpose + rotation
       # cadence differ). Generate with `openssl rand -base64 32`.
       IDENTITY_CALLBACK_SECRET: ${IDENTITY_CALLBACK_SECRET:?IDENTITY_CALLBACK_SECRET must be set in .env (openssl rand -base64 32)}
+      # 2026-07-08-workspace-sync-clone PR-3b: bearer token for
+      # the workspace_syncer client. MUST match the value in the
+      # workspace_syncer INTERNAL_SERVICE_TOKEN env. Defaults to a
+      # placeholder so the database_administrator boots without the
+      # syncer service (the sync endpoints are wired, the dispatcher
+      # silently no-ops without a real token).
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-changeme-internal-service-token-must-be-set-when-syncer-wired}
+      # 2026-07-08-workspace-sync-clone PR-3b: HMAC-SHA256 secret
+      # for the workspace_syncer internal sync-callback
+      # (POST /api/v1/internal/sync-callback). MUST match the value
+      # in the workspace_syncer SYNC_CALLBACK_SECRET env. Same
+      # placeholder pattern as INTERNAL_SERVICE_TOKEN.
+      SYNC_CALLBACK_SECRET: ${SYNC_CALLBACK_SECRET:-changeme-sync-callback-secret-must-be-set-when-syncer-wired}
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
     ports:
       - "${SERVICE_PORT:-8080}:8080"
@@ -229,6 +242,13 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_healthy
+      # 2026-07-08-workspace-sync-clone: syncer wires the
+      # workspace_syncer HTTP client; we do not block on it
+      # being healthy because the healthcheck is disabled
+      # (no shell in distroless image). service_started is
+      # sufficient.
+      workspace_syncer:
+        condition: service_started
     healthcheck:
       # Disabled on purpose. The runtime image is distroless/static, which
       # has no shell, no wget, no curl, no nc — verified by extracting
@@ -354,6 +374,70 @@ services:
           retries: 6
           start_period: 5s
 
+  # --------------------------------------------------------------------------
+  # workspace_syncer — Go microservice (2026-07-08-workspace-sync-clone).
+  # Clones GitHub repos server-side + probes worktrees. Reached only by
+  # database_administrator over the docker network; never exposed to the
+  # host (no ports: directive). Internal-only.
+  # --------------------------------------------------------------------------
+  workspace_syncer:
+    build:
+      context: ./backend/workspace_syncer
+      dockerfile: Dockerfile
+    image: cachicamas/workspace_syncer:local
+    container_name: cachicamas-workspace-syncer
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: workspace_syncer
+      SERVICE_ENV: ${SERVICE_ENV:-development}
+      # 2026-07-08-workspace-sync-clone: the syncer code reads
+      # WORKSPACE_SYNCER_PORT (not SERVICE_PORT) for its bind port.
+      # The database_administrator dispatches to port 8080 (see
+      # WORKSPACE_SYNCER_URL in its env block), so we MUST align
+      # them here. Override in .env if needed.
+      WORKSPACE_SYNCER_PORT: ${WORKSPACE_SYNCER_PORT:-8080}
+      # 2026-07-08-workspace-sync-clone: bearer token verified by the
+      # syncer middleware (subtle.ConstantTimeCompare). MUST match
+      # the database_administrator INTERNAL_SERVICE_TOKEN value
+      # (default placeholder keeps both services in sync when
+      # neither value is set; production MUST set a real value in .env).
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-changeme-internal-service-token-must-be-set-when-syncer-wired}
+      # 2026-07-08-workspace-sync-clone: HMAC-SHA256 secret the syncer
+      # uses to sign its callback body. The database_administrator
+      # verifies the signature on POST /api/v1/internal/sync-callback.
+      # MUST match the SYNC_CALLBACK_SECRET on db_admin.
+      SYNC_CALLBACK_SECRET: ${SYNC_CALLBACK_SECRET:-changeme-sync-callback-secret-must-be-set-when-syncer-wired}
+      # The base URL of database_administrator (the syncer posts
+      # the callback here). Default points at the docker-compose
+      # service name; override only for dev/test.
+      DATABASE_ADMINISTRATOR_URL: ${DATABASE_ADMINISTRATOR_URL:-http://database_administrator:8080}
+      # OTEL — mirrors db_admin.
+      OTEL_SERVICE_NAME: workspace_syncer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    # Internal-only: NO ports: directive. Reachable only via the
+    # docker network (database_administrator calls http://workspace_syncer:8080).
+    networks:
+      - cachicamas_network
+    # NOTE: no depends_on db_admin here — the syncer does NOT need
+    # db_admin at startup. The callback is best-effort and can fail
+    # (the job stays in pending; the next sync attempt will reconcile).
+    # Adding a depends_on would create a cycle (db_admin depends_on
+    # workspace_syncer for the dispatch, workspace_syncer depends_on
+    # db_admin for the callback).
+    volumes:
+      # /data/workspaces is the syncer clone target. Named volume
+      # so the data survives container restarts (the startup sweep
+      # at PR-2c reconciles the directory against db_admin live
+      # workspaces).
+      - workspace_syncer_data:/data/workspaces
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
     # ----- Shared network ----------------------------------------------------
 networks:
   cachicamas_network:
@@ -364,3 +448,5 @@ networks:
 volumes:
   postgres-data:
     name: cachicamas-postgres-data
+  workspace_syncer_data:
+    name: cachicamas-workspace-syncer-data

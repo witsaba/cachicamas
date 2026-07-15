@@ -508,6 +508,34 @@ export interface WorkspaceDetail {
   repository: Repository;
   created_at: string;
   updated_at: string;
+  // 2026-07-08-workspace-sync-clone PR-4: denormalized sync state
+  // surfaced by the database_administrator's GET /workspaces/:id.
+  // All four fields are NULL until the first sync attempt resolves.
+  // The frontend uses last_synced_at + last_synced_commit_sha to
+  // render the initial card state; subsequent updates flow through
+  // the polling hook (getWorkspaceSyncStatus).
+  last_synced_at: string | null;
+  last_synced_commit_sha: string | null;
+  default_branch: string | null;
+  last_sync_job_id: number | null;
+}
+
+// 2026-07-08-workspace-sync-clone PR-4: SyncJob is the wire shape
+// for the /workspaces/:id/sync endpoint. The status vocabulary is
+// locked: pending | running | done | failed. The frontend's
+// WorkspaceSyncCard consumes this through useSyncStatus.
+export interface SyncJob {
+  job_id: number;
+  workspace_id: number;
+  status: "pending" | "running" | "done" | "failed";
+  triggered_by: "auto_on_create" | "manual";
+  started_at: string | null;
+  finished_at: string | null;
+  commit_sha_after: string | null;
+  error_message: string | null;
+  error_code: string | null;
+  attempts: number;
+  created_at: string;
 }
 
 /** GET /workspaces (R-WS-002). */
@@ -571,6 +599,74 @@ export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
     };
   }
   return envelopeToResult(res, async () => null);
+}
+
+// 2026-07-08-workspace-sync-clone PR-4: sync endpoints. The
+// WorkspaceSyncCard consumes these through the useSyncStatus
+// polling hook (components/workspace-sync-card/use-sync-status.ts).
+
+/**
+ * POST /workspaces/:id/sync (R-WS-019 S-WS-190).
+ *
+ * 202 on a fresh enqueue (the job_id is in the response body);
+ * 200 on a single-flight hit (the existing in-flight job_id is
+ * returned so the caller can resume polling). Errors: 422 on
+ * validation failure, 500 on service error.
+ */
+export async function startWorkspaceSync(
+  id: number,
+): Promise<ApiResult<SyncJob>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}/sync`, {
+      method: "POST",
+    });
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  return envelopeToResult(res, async () => (await res.json()) as SyncJob);
+}
+
+/**
+ * GET /workspaces/:id/sync (R-WS-019 S-WS-196).
+ *
+ * Wire shape (locked, 2026-07-08):
+ *   - 200 with a populated syncJob on a hit
+ *   - 200 with a ZERO-VALUE syncJob (job_id=0, status="") on a
+ *     miss. The backend used to return 404 with
+ *     error=workspace_not_synced_yet but the 404 made the
+ *     frontend think the workspace was missing. 200 with a
+ *     null marker is the semantically correct shape.
+ *
+ * The hook distinguishes these two cases: a zero-value job
+ * (job_id=0) is treated as null.
+ */
+export async function getWorkspaceSyncStatus(
+  id: number,
+): Promise<ApiResult<SyncJob | null>> {
+  // serverAwareFetch routes through ssrFetch in Node (which
+  // forwards the user's session cookie via withSsrCookieHeader)
+  // and through the browser fetch in the client. The prior
+  // implementation used plain `fetch` here, which sent
+  // unauthenticated requests during SSR; the route silently
+  // ignored the 401 and the card stayed on "Pending…".
+  // R-WS-019 S-WS-196.
+  let res: Response;
+  try {
+    res = await serverAwareFetch(`/workspaces/${id}/sync`);
+  } catch (err) {
+    return { ok: false, kind: "offline", message: offlineMessage(err) };
+  }
+  if (!res.ok) {
+    return envelopeToResult(res, async () => (await res.json()) as SyncJob);
+  }
+  const body = (await res.json()) as SyncJob;
+  // Zero-value response = no sync_job yet. Convert to null
+  // so the hook can render the "Sync now" CTA.
+  if (body.job_id === 0) {
+    return { ok: true, value: null };
+  }
+  return { ok: true, value: body };
 }
 
 /**
@@ -715,4 +811,166 @@ export async function listGitHubRepos(
       hasNext: body.has_next ?? false,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// SSE wire-format primitives (2026-07-08 SSE migration).
+//
+// The polling-based sync_status endpoint was fragile: a click that
+// returned 202 + job_id=1 sometimes never updated the card UI
+// because the polling tick fired from inside a QRL closure whose
+// signal subscription didn't propagate. SSE replaces polling with
+// push: the server streams a single JSON event per state change;
+// the frontend subscribes once and updates job.value on every event.
+// ---------------------------------------------------------------------------
+
+// SSEWireEvent is one frame parsed out of the SSE stream.
+// `data: null` is used for keepalive comment frames ("\n: keepalive\n\n")
+// and for malformed data frames (JSON parse failed).
+export interface SSEWireEvent {
+  data: SyncJob | null;
+}
+
+// parseSSEResponse parses a chunk of SSE wire data into events.
+// The parser is incremental: it returns complete events only and
+// holds a partial trailing frame inside the chunk (caller can
+// call again with the next chunk — for this project we always
+// pass full chunks, so the function is total).
+//
+// SSE wire format (https://html.spec.whatwg.org/multipage/server-sent-events.html):
+//   - One event = one or more "field: value\n" lines, followed
+//     by a blank line ("\n\n")
+//   - Field names are: "data", "event", "id", "retry"
+//   - Lines starting with ":" are comments (kept on the wire
+//     so the client can advance its event counter; we surface
+//     them as { data: null } so the caller's stream stays
+//     responsive to subsequent events)
+//
+// Tests: see api.sse.spec.ts.
+export function parseSSEResponse(chunk: string): SSEWireEvent[] {
+  const out: SSEWireEvent[] = [];
+  const frames = chunk.split("\n\n");
+  for (const frame of frames) {
+    if (frame.length === 0) continue;
+    let data: SyncJob | null = null;
+    let sawData = false;
+    let sawComment = false;
+    for (const line of frame.split("\n")) {
+      if (line.startsWith(":")) {
+        sawComment = true;
+        continue;
+      }
+      if (line.startsWith("data: ")) {
+        const raw = line.slice("data: ".length);
+        try {
+          data = JSON.parse(raw) as SyncJob;
+        } catch {
+          data = null;
+        }
+        sawData = true;
+      }
+    }
+    if (sawData) {
+      out.push({ data });
+    } else if (sawComment) {
+      out.push({ data: null });
+    }
+  }
+  return out;
+}
+
+// subscribeWorkspaceSyncStream opens an SSE connection to the
+// database_administrator's /workspaces/:id/sync/stream endpoint
+// and invokes onUpdate for every event. Returns an unsubscribe
+// function that closes the connection.
+//
+// The function is browser-only: it uses the native EventSource
+// global. SSR code paths must NOT call this (the route should
+// use getWorkspaceSyncStatus as the SSR snapshot).
+//
+// Why we don't use a polyfill in tests: the test mocks
+// globalThis.EventSource to capture the subscribe call and feed
+// canned events. This is simpler than wiring a real EventSource
+// polyfill (eventsource-parser) and tests the same contract.
+export function subscribeWorkspaceSyncStream(
+  workspaceId: number,
+  onUpdate: (job: SyncJob | null) => void,
+  onError?: (error: Event) => void,
+): () => void {
+  if (typeof EventSource === "undefined") {
+    // SSR or unsupported environment. The caller is expected to
+    // fall back to getWorkspaceSyncStatus.
+    return () => {};
+  }
+  const url = `${apiBaseUrl()}/workspaces/${workspaceId}/sync/stream`;
+  const es = new EventSource(url, { withCredentials: true });
+
+  // Track whether we closed the EventSource intentionally (after
+  // the null marker or terminal status). When the server closes
+  // the TCP socket after sending the event, the browser fires
+  // onerror BEFORE we process es.close() in some browsers. We
+  // must NOT treat that onerror as a "real error" and trigger
+  // refresh() — we already have the data we needed.
+  //
+  // UAT fix 2026-07-08 (7th pass): the user reported "the stream
+  // keeps alive" — in fact the SSE was closing correctly in 6.5ms,
+  // but the trailing onerror was triggering a refresh() REST GET,
+  // which appeared as an extra request in DevTools. With this
+  // fix, the intentional close suppresses the spurious error.
+  let intentionalClose = false;
+
+  es.onmessage = (ev: MessageEvent<string>) => {
+    try {
+      const job = JSON.parse(ev.data) as SyncJob;
+      // UAT fix 2026-07-08 (4th pass): the backend uses
+      // job_id=0 as the null marker (when no sync_job exists
+      // yet). When we receive the null marker, the server
+      // is about to close the stream (no more events). We
+      // MUST close the EventSource client-side too, because
+      // the browser's EventSource auto-reconnects on EOF.
+      // Without this close, the browser opens a new SSE
+      // every ~3s forever (endless loop in the UAT).
+      if (job.job_id === 0) {
+        onUpdate(null);
+        intentionalClose = true;
+        es.close();
+        return;
+      }
+      // UAT fix 2026-07-08 (6th pass): when the job reaches
+      // a terminal status (done/failed), the backend closes
+      // the stream after sending the event. We MUST close
+      // the EventSource client-side too, for the same
+      // reason as the null marker — the browser would
+      // otherwise auto-reconnect on EOF and re-open the
+      // SSE every ~3s forever.
+      if (job.status === "done" || job.status === "failed") {
+        onUpdate(job);
+        intentionalClose = true;
+        es.close();
+        return;
+      }
+      onUpdate(job);
+    } catch {
+      // Malformed JSON — surface as null (the "no job" state)
+      // so the caller can recover.
+      onUpdate(null);
+    }
+  };
+  es.onerror = (ev: Event) => {
+    // UAT fix 2026-07-08 (7th pass): when we close the
+    // EventSource intentionally (after null marker or terminal
+    // status), the browser still fires onerror because the
+    // server closed the TCP socket. We must NOT call the
+    // caller's error handler in that case — the caller would
+    // trigger a spurious refresh() REST GET that has no
+    // purpose.
+    if (intentionalClose) {
+      return;
+    }
+    if (onError) onError(ev);
+  };
+  return () => {
+    intentionalClose = true;
+    es.close();
+  };
 }
