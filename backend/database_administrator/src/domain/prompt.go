@@ -273,6 +273,12 @@ type sqlExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+// SqlExecutor is the exported alias of sqlExecutor for use by
+// infrastructure adapters. The lowercase name stays for internal
+// callers; this alias lets postgres/ import the interface name
+// without leaking its private members.
+type SqlExecutor = sqlExecutor
+
 // PromptRepository is the port for reading and persisting Prompt
 // rows. The application layer depends only on this interface.
 //
