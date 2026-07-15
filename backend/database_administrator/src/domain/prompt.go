@@ -109,6 +109,11 @@ const (
 	// MsgPromptBodyTooLarge is the user-facing message for body
 	// length failure.
 	MsgPromptBodyTooLarge = "Prompt body must be 1-524288 characters."
+
+	// MsgPromptValidationFailed is the top-level fallback message
+	// when a ValidationError has no per-field map; the handler
+	// surfaces the per-field message in `fields` instead.
+	MsgPromptValidationFailed = "One or more fields failed validation."
 )
 
 // ---------------------------------------------------------------------------
