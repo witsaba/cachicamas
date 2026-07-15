@@ -51,10 +51,10 @@ func ensureWorkspaceMigrations(t *testing.T, db *sql.DB) {
 		    organization_id           BIGINT       NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
 		    owner_user_id             BIGINT       REFERENCES identity.user(id) ON DELETE SET NULL,
 		    name                      TEXT         NOT NULL,
-		    primary_repo_github_id    BIGINT       NOT NULL,
-		    primary_repo_full_name    TEXT         NOT NULL,
-		    primary_repo_owner        TEXT         NOT NULL,
-		    primary_repo_name         TEXT         NOT NULL,
+		    repo_github_id    BIGINT       NOT NULL,
+		    repo_full_name    TEXT         NOT NULL,
+		    repo_owner        TEXT         NOT NULL,
+		    repo_name         TEXT         NOT NULL,
 		    created_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
 		    updated_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
 		    deleted_at                TIMESTAMPTZ
@@ -75,38 +75,22 @@ func ensureWorkspaceMigrations(t *testing.T, db *sql.DB) {
 	`); err != nil {
 		t.Fatalf("ensure workspace_org_deleted_at_idx index: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS workspace_repository (
-		    id                BIGSERIAL    PRIMARY KEY,
-		    workspace_id      BIGINT       NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-		    github_id         BIGINT       NOT NULL,
-		    github_full_name  TEXT         NOT NULL,
-		    github_owner      TEXT         NOT NULL,
-		    github_name       TEXT         NOT NULL,
-		    added_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		    CONSTRAINT workspace_repository_workspace_github_key UNIQUE (workspace_id, github_id)
-		)
-	`); err != nil {
-		t.Fatalf("ensure workspace_repository table: %v", err)
-	}
 }
 
-// truncateWorkspaces wipes the workspace + workspace_repository
+// truncateWorkspaces wipes the workspace
 // tables for test isolation. CASCADE so linked repos are torn down
 // with the parent workspace row.
 func truncateWorkspaces(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := db.ExecContext(ctx, "TRUNCATE workspace_repository, workspace RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := db.ExecContext(ctx, "TRUNCATE workspace RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate workspace tables: %v", err)
 	}
 }
 
 // int64Ptr returns the address of an int64 literal. Used for
 // OwnerUserID fixtures (nullable).
-func int64Ptr(v int64) *int64 { return &v }
-
 // makeOrg inserts a minimal organization row and returns its id. The
 // organization table is the parent FK for workspace; tests need a
 // real org id to satisfy the FK. The org's full_name +
@@ -137,33 +121,13 @@ func makeWorkspaceInput(orgID int64, name string) *domain.Workspace {
 	return &domain.Workspace{
 		OrganizationID:      orgID,
 		Name:                name,
-		PrimaryRepoGitHubID: 123456,
-		PrimaryRepoFullName: "octocat/" + name,
-		PrimaryRepoOwner:    "octocat",
-		PrimaryRepoName:     name,
+		RepoGitHubID: 123456,
+		RepoFullName: "octocat/" + name,
+		RepoOwner:    "octocat",
+		RepoName:     name,
 	}
 }
 
-// makeLinkedRepoInput builds a minimal valid LinkedRepository for the
-// given workspace id. Tests can mutate fields before calling
-// AddLinkedRepo. The GitHubID is keyed off the (workspaceID, name)
-// pair so different tests on the same workspace + different names
-// stay unique, AND the same (workspaceID, name) in different tests
-// intentionally collides (so the duplicate test is well-defined).
-func makeLinkedRepoInput(workspaceID int64, name string) *domain.LinkedRepository {
-	var h uint64 = 1469598103934665603 // FNV-1a offset basis
-	for _, c := range fmt.Sprintf("%d:%s", workspaceID, name) {
-		h ^= uint64(c)
-		h *= 1099511628211 // FNV-1a prime
-	}
-	return &domain.LinkedRepository{
-		WorkspaceID: workspaceID,
-		GitHubID:    int64(h & 0x7FFFFFFFFFFFFFFF), // strip sign bit
-		FullName:    "linked/" + name,
-		Owner:       "linked",
-		Name:        name,
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Insert
@@ -206,17 +170,17 @@ func TestWorkspaceRepo_Insert_AssignsIDAndTimestamps(t *testing.T) {
 	if got.OrganizationID != orgID {
 		t.Errorf("OrganizationID = %d, want %d", got.OrganizationID, orgID)
 	}
-	if got.PrimaryRepoGitHubID != in.PrimaryRepoGitHubID {
-		t.Errorf("PrimaryRepoGitHubID = %d, want %d", got.PrimaryRepoGitHubID, in.PrimaryRepoGitHubID)
+	if got.RepoGitHubID != in.RepoGitHubID {
+		t.Errorf("RepoGitHubID = %d, want %d", got.RepoGitHubID, in.RepoGitHubID)
 	}
-	if got.PrimaryRepoFullName != in.PrimaryRepoFullName {
-		t.Errorf("PrimaryRepoFullName = %q, want %q", got.PrimaryRepoFullName, in.PrimaryRepoFullName)
+	if got.RepoFullName != in.RepoFullName {
+		t.Errorf("RepoFullName = %q, want %q", got.RepoFullName, in.RepoFullName)
 	}
-	if got.PrimaryRepoOwner != in.PrimaryRepoOwner {
-		t.Errorf("PrimaryRepoOwner = %q, want %q", got.PrimaryRepoOwner, in.PrimaryRepoOwner)
+	if got.RepoOwner != in.RepoOwner {
+		t.Errorf("RepoOwner = %q, want %q", got.RepoOwner, in.RepoOwner)
 	}
-	if got.PrimaryRepoName != in.PrimaryRepoName {
-		t.Errorf("PrimaryRepoName = %q, want %q", got.PrimaryRepoName, in.PrimaryRepoName)
+	if got.RepoName != in.RepoName {
+		t.Errorf("RepoName = %q, want %q", got.RepoName, in.RepoName)
 	}
 	if got.DeletedAt != nil {
 		t.Errorf("DeletedAt = %v, want nil (freshly inserted row is live)", got.DeletedAt)
@@ -288,7 +252,7 @@ func TestWorkspaceRepo_Insert_DuplicateNameInSameOrg_ReturnsConflictError(t *tes
 	}
 
 	second := makeWorkspaceInput(orgID, "shared-name")
-	second.PrimaryRepoGitHubID = 999999 // differ on primary repo so the only collision is name
+	second.RepoGitHubID = 999999 // differ on primary repo so the only collision is name
 	_, err := repo.Insert(ctx, second)
 	if err == nil {
 		t.Fatalf("Insert second: expected error, got nil")
@@ -337,8 +301,8 @@ func TestWorkspaceRepo_SelectByID_ReturnsInserted(t *testing.T) {
 	if got.OrganizationID != orgID {
 		t.Errorf("OrganizationID = %d, want %d", got.OrganizationID, orgID)
 	}
-	if got.PrimaryRepoFullName != in.PrimaryRepoFullName {
-		t.Errorf("PrimaryRepoFullName = %q, want %q", got.PrimaryRepoFullName, in.PrimaryRepoFullName)
+	if got.RepoFullName != in.RepoFullName {
+		t.Errorf("RepoFullName = %q, want %q", got.RepoFullName, in.RepoFullName)
 	}
 }
 
@@ -677,12 +641,11 @@ func TestWorkspaceRepo_UpdateName_SoftDeletedReturnsNotFound(t *testing.T) {
 // SoftDelete
 // ---------------------------------------------------------------------------
 
-// TestWorkspaceRepo_SoftDelete_SetsDeletedAtAndCascadesLinkedRepos
+// TestWorkspaceRepo_SoftDelete_SetsDeletedAt
 // covers T-WS-1BiiA-013 (RED) + T-WS-1BiiA-014 (GREEN): SoftDelete
 // must set deleted_at = now() on the workspace row AND hard-delete
 // every linked workspace_repository row. The cascade protects
-// against orphan linked repos after a workspace is removed.
-func TestWorkspaceRepo_SoftDelete_SetsDeletedAtAndCascadesLinkedRepos(t *testing.T) {
+func TestWorkspaceRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	db := integrationDB(t)
 	ensureMigrations(t, db)
 	ensureWorkspaceMigrations(t, db)
@@ -699,19 +662,6 @@ func TestWorkspaceRepo_SoftDelete_SetsDeletedAtAndCascadesLinkedRepos(t *testing
 		t.Fatalf("Insert: %v", err)
 	}
 
-	// Add 2 linked repos.
-	for _, n := range []string{"linked-x", "linked-y"} {
-		if _, err := repo.AddLinkedRepo(ctx, makeLinkedRepoInput(inserted.ID, n)); err != nil {
-			t.Fatalf("AddLinkedRepo %q: %v", n, err)
-		}
-	}
-	// Sanity: 2 linked repos present.
-	if rs, err := repo.SelectLinkedRepos(ctx, inserted.ID); err != nil {
-		t.Fatalf("SelectLinkedRepos pre-delete: %v", err)
-	} else if len(rs) != 2 {
-		t.Fatalf("pre-delete SelectLinkedRepos len = %d, want 2", len(rs))
-	}
-
 	// SoftDelete.
 	if err := repo.SoftDelete(ctx, inserted.ID); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
@@ -725,13 +675,6 @@ func TestWorkspaceRepo_SoftDelete_SetsDeletedAtAndCascadesLinkedRepos(t *testing
 	}
 	if !deletedAt.Valid {
 		t.Errorf("deleted_at column = NULL, want non-NULL (SoftDelete should have set it)")
-	}
-
-	// Linked repos are gone.
-	if rs, err := repo.SelectLinkedRepos(ctx, inserted.ID); err != nil {
-		t.Fatalf("SelectLinkedRepos post-delete: %v", err)
-	} else if len(rs) != 0 {
-		t.Errorf("post-delete SelectLinkedRepos len = %d, want 0 (cascade)", len(rs))
 	}
 
 	// Workspace row is invisible to SelectByID.
@@ -779,282 +722,20 @@ func TestWorkspaceRepo_SoftDelete_AlreadyDeletedReturnsNotFound(t *testing.T) {
 // AddLinkedRepo
 // ---------------------------------------------------------------------------
 
-// TestWorkspaceRepo_AddLinkedRepo_AssignsIDAndAddedAt covers
-// T-WS-1BiiA-016 (RED) + T-WS-1BiiA-017 (GREEN): a freshly added
-// linked repo must come back with a non-zero ID + non-zero AddedAt
-// populated from the DB clock.
-func TestWorkspaceRepo_AddLinkedRepo_AssignsIDAndAddedAt(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
 
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
-	orgID := makeOrg(t, db, "addlinkedrepo-basic")
-	in := makeWorkspaceInput(orgID, "add-link-host")
-	inserted, err := repo.Insert(ctx, in)
-	if err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-
-	repoIn := makeLinkedRepoInput(inserted.ID, "link-1")
-	got, err := repo.AddLinkedRepo(ctx, repoIn)
-	if err != nil {
-		t.Fatalf("AddLinkedRepo: %v", err)
-	}
-	if got.ID <= 0 {
-		t.Errorf("AddLinkedRepo returned ID = %d, want > 0", got.ID)
-	}
-	if got.WorkspaceID != inserted.ID {
-		t.Errorf("WorkspaceID = %d, want %d", got.WorkspaceID, inserted.ID)
-	}
-	if got.AddedAt.IsZero() {
-		t.Errorf("AddedAt zero, want non-zero (DB default now())")
-	}
-	if got.GitHubID != repoIn.GitHubID {
-		t.Errorf("GitHubID = %d, want %d", got.GitHubID, repoIn.GitHubID)
-	}
-	if got.FullName != repoIn.FullName {
-		t.Errorf("FullName = %q, want %q", got.FullName, repoIn.FullName)
-	}
-
-	// Round-trip via SelectLinkedRepos.
-	got2, err := repo.SelectLinkedRepos(ctx, inserted.ID)
-	if err != nil {
-		t.Fatalf("SelectLinkedRepos: %v", err)
-	}
-	if len(got2) != 1 {
-		t.Fatalf("len(SelectLinkedRepos) = %d, want 1", len(got2))
-	}
-	if got2[0].ID != got.ID {
-		t.Errorf("SelectLinkedRepos ID = %d, want %d", got2[0].ID, got.ID)
-	}
-}
-
-// TestWorkspaceRepo_AddLinkedRepo_DuplicateInWorkspaceReturnsConflict
-// covers the unique-violation path: a second AddLinkedRepo with the
-// same (workspace_id, github_id) must return *domain.ConflictError.
-func TestWorkspaceRepo_AddLinkedRepo_DuplicateInWorkspaceReturnsConflict(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
-
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	orgID := makeOrg(t, db, "addlinkedrepo-dup")
-	in := makeWorkspaceInput(orgID, "dup-link-host")
-	inserted, err := repo.Insert(ctx, in)
-	if err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-
-	first := makeLinkedRepoInput(inserted.ID, "first-link")
-	if _, err := repo.AddLinkedRepo(ctx, first); err != nil {
-		t.Fatalf("AddLinkedRepo (first): %v", err)
-	}
-	second := makeLinkedRepoInput(inserted.ID, "first-link")
-	second.FullName = "linked/different-name" // same github_id, differ on name to prove conflict is keyed on github_id
-	_, err = repo.AddLinkedRepo(ctx, second)
-	if err == nil {
-		t.Fatalf("AddLinkedRepo (second): expected error, got nil")
-	}
-	var conflictErr *domain.ConflictError
-	if !errors.As(err, &conflictErr) {
-		t.Fatalf("AddLinkedRepo (second): got %T (%v), want *domain.ConflictError", err, err)
-	}
-}
-
-// TestWorkspaceRepo_AddLinkedRepo_NonExistentWorkspaceReturnsInternalError
-// covers T-WS-1BiiA-018 (TRIANGULATE): a workspace_id that does
-// not exist triggers a FK violation → translated to
-// *domain.InternalError wrapping the cause. The handler maps to
-// HTTP 500.
-func TestWorkspaceRepo_AddLinkedRepo_NonExistentWorkspaceReturnsInternalError(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
-
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	orphan := makeLinkedRepoInput(99999999, "orphan")
-	_, err := repo.AddLinkedRepo(ctx, orphan)
-	if err == nil {
-		t.Fatalf("AddLinkedRepo(workspace_id=99999999): expected error, got nil")
-	}
-	var ierr *domain.InternalError
-	if !errors.As(err, &ierr) {
-		t.Fatalf("AddLinkedRepo(workspace_id=99999999): got %T (%v), want *domain.InternalError", err, err)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // RemoveLinkedRepo
 // ---------------------------------------------------------------------------
 
-// TestWorkspaceRepo_RemoveLinkedRepo_DeletesRow covers T-WS-1BiiA-019
-// (RED) + T-WS-1BiiA-020 (GREEN): a successful RemoveLinkedRepo
-// must hard-delete the row. The workspace must be untouched.
-func TestWorkspaceRepo_RemoveLinkedRepo_DeletesRow(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
 
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	orgID := makeOrg(t, db, "removelinkedrepo-basic")
-	in := makeWorkspaceInput(orgID, "remove-link-host")
-	inserted, err := repo.Insert(ctx, in)
-	if err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-	added, err := repo.AddLinkedRepo(ctx, makeLinkedRepoInput(inserted.ID, "to-remove"))
-	if err != nil {
-		t.Fatalf("AddLinkedRepo: %v", err)
-	}
-
-	if err := repo.RemoveLinkedRepo(ctx, inserted.ID, added.ID); err != nil {
-		t.Fatalf("RemoveLinkedRepo: %v", err)
-	}
-
-	// Verify gone via SelectLinkedRepos.
-	rs, err := repo.SelectLinkedRepos(ctx, inserted.ID)
-	if err != nil {
-		t.Fatalf("SelectLinkedRepos: %v", err)
-	}
-	if len(rs) != 0 {
-		t.Errorf("SelectLinkedRepos len = %d, want 0", len(rs))
-	}
-	// Workspace is still there and live.
-	got, err := repo.SelectByID(ctx, inserted.ID)
-	if err != nil {
-		t.Fatalf("SelectByID post-remove: %v", err)
-	}
-	if got.Name != in.Name {
-		t.Errorf("workspace Name changed: got %q, want %q", got.Name, in.Name)
-	}
-	if got.DeletedAt != nil {
-		t.Errorf("workspace DeletedAt = %v, want nil (RemoveLinkedRepo must NOT cascade-delete the workspace)", got.DeletedAt)
-	}
-}
-
-// TestWorkspaceRepo_RemoveLinkedRepo_NotFound covers the not-found
-// case: removing a non-existent (workspaceID, repoID) pair must
-// return *domain.NotFoundError.
-func TestWorkspaceRepo_RemoveLinkedRepo_NotFound(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
-
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := repo.RemoveLinkedRepo(ctx, 99999999, 99999999)
-	if err == nil {
-		t.Fatalf("RemoveLinkedRepo(not-found): expected error, got nil")
-	}
-	var nerr *domain.NotFoundError
-	if !errors.As(err, &nerr) {
-		t.Fatalf("RemoveLinkedRepo(not-found): got %T (%v), want *domain.NotFoundError", err, err)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // SelectLinkedRepos
 // ---------------------------------------------------------------------------
 
-// TestWorkspaceRepo_SelectLinkedRepos_OrdersAddedAtAsc covers
-// T-WS-1BiiA-021 (RED) + T-WS-1BiiA-022 (GREEN): rows must be
-// returned in (added_at ASC, id ASC) order — chronological. Tests
-// deterministic name ordering via deterministic sleep gaps.
-func TestWorkspaceRepo_SelectLinkedRepos_OrdersAddedAtAsc(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
 
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	orgID := makeOrg(t, db, "selectlinked-order")
-	in := makeWorkspaceInput(orgID, "order-host")
-	inserted, err := repo.Insert(ctx, in)
-	if err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-
-	names := []string{"first-link", "second-link", "third-link"}
-	for _, n := range names {
-		if _, err := repo.AddLinkedRepo(ctx, makeLinkedRepoInput(inserted.ID, n)); err != nil {
-			t.Fatalf("AddLinkedRepo %q: %v", n, err)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-
-	got, err := repo.SelectLinkedRepos(ctx, inserted.ID)
-	if err != nil {
-		t.Fatalf("SelectLinkedRepos: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
-	}
-	if got[0].Name != "first-link" {
-		t.Errorf("got[0].Name = %q, want %q", got[0].Name, "first-link")
-	}
-	if got[1].Name != "second-link" {
-		t.Errorf("got[1].Name = %q, want %q", got[1].Name, "second-link")
-	}
-	if got[2].Name != "third-link" {
-		t.Errorf("got[2].Name = %q, want %q", got[2].Name, "third-link")
-	}
-}
-
-// TestWorkspaceRepo_SelectLinkedRepos_EmptyReturnsEmptySlice covers
-// T-WS-1BiiA-023 (TRIANGULATE): zero linked repos must return an
-// empty slice (NOT nil) so callers can `for _, r := range got`
-// without nil checks.
-func TestWorkspaceRepo_SelectLinkedRepos_EmptyReturnsEmptySlice(t *testing.T) {
-	db := integrationDB(t)
-	ensureMigrations(t, db)
-	ensureWorkspaceMigrations(t, db)
-	truncateWorkspaces(t, db)
-
-	repo := postgres.NewWorkspaceRepo(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	orgID := makeOrg(t, db, "selectlinked-empty")
-	in := makeWorkspaceInput(orgID, "empty-host")
-	inserted, err := repo.Insert(ctx, in)
-	if err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-
-	got, err := repo.SelectLinkedRepos(ctx, inserted.ID)
-	if err != nil {
-		t.Fatalf("SelectLinkedRepos: %v", err)
-	}
-	if got == nil {
-		t.Fatalf("SelectLinkedRepos: got nil slice, want empty slice")
-	}
-	if len(got) != 0 {
-		t.Errorf("len = %d, want 0", len(got))
-	}
-}
 
 // _ ensures INTEGRATION=1 is required; if someone runs without it
 // every test above is skipped, which would silently pass and hide a

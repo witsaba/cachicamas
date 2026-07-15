@@ -143,7 +143,7 @@ func httpDo(t *testing.T, e *echo.Echo, method, path string, body []byte) *httpt
 
 func TestPromptHandler_Create_HappyPath_201(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	body := []byte(`{"slug":"welcome-email","description":"Welcome email body","body":"# Welcome"}`)
 	rec := httpDo(t, e, "POST", "/prompts", body)
 	if rec.Code != http.StatusCreated {
@@ -160,7 +160,7 @@ func TestPromptHandler_Create_HappyPath_201(t *testing.T) {
 
 func TestPromptHandler_Create_DuplicateSlug_409(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	body := []byte(`{"slug":"dup","description":"d","body":"b"}`)
 	_ = httpDo(t, e, "POST", "/prompts", body)
 	rec := httpDo(t, e, "POST", "/prompts", body)
@@ -171,7 +171,7 @@ func TestPromptHandler_Create_DuplicateSlug_409(t *testing.T) {
 
 func TestPromptHandler_Create_InvalidSlug_400(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	body := []byte(`{"slug":"BAD","description":"d","body":"b"}`)
 	rec := httpDo(t, e, "POST", "/prompts", body)
 	if rec.Code != http.StatusBadRequest {
@@ -185,7 +185,7 @@ func TestPromptHandler_Create_InvalidSlug_400(t *testing.T) {
 
 func TestPromptHandler_GetBySlug_200(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"get","description":"d","body":"b"}`))
 	rec := httpDo(t, e, "GET", "/prompts/get", nil)
 	if rec.Code != http.StatusOK {
@@ -195,7 +195,7 @@ func TestPromptHandler_GetBySlug_200(t *testing.T) {
 
 func TestPromptHandler_GetBySlug_404(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rec := httpDo(t, e, "GET", "/prompts/missing", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -204,7 +204,7 @@ func TestPromptHandler_GetBySlug_404(t *testing.T) {
 
 func TestPromptHandler_List_ExcludesDeleted(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"a","description":"d","body":"b"}`))
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"b","description":"d","body":"b"}`))
 	_ = httpDo(t, e, "DELETE", "/prompts/b", nil)
@@ -228,7 +228,7 @@ func TestPromptHandler_List_ExcludesDeleted(t *testing.T) {
 
 func TestPromptHandler_Update_HappyPath_200(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"upd","description":"d1","body":"b1"}`))
 	body := []byte(`{"body":"new body"}`)
 	rec := httpDo(t, e, "PATCH", "/prompts/upd", body)
@@ -239,7 +239,7 @@ func TestPromptHandler_Update_HappyPath_200(t *testing.T) {
 
 func TestPromptHandler_Update_Deleted_410(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"del","description":"d","body":"b"}`))
 	_ = httpDo(t, e, "DELETE", "/prompts/del", nil)
 	rec := httpDo(t, e, "PATCH", "/prompts/del", []byte(`{"body":"x"}`))
@@ -250,7 +250,7 @@ func TestPromptHandler_Update_Deleted_410(t *testing.T) {
 
 func TestPromptHandler_Delete_204(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"d","description":"d","body":"b"}`))
 	rec := httpDo(t, e, "DELETE", "/prompts/d", nil)
 	if rec.Code != http.StatusNoContent {
@@ -264,7 +264,7 @@ func TestPromptHandler_Delete_204(t *testing.T) {
 
 func TestPromptHandler_ListRevisions_NewestFirst(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"rev","description":"d","body":"b1"}`))
 	_ = httpDo(t, e, "PATCH", "/prompts/rev", []byte(`{"body":"b2"}`))
 	_ = httpDo(t, e, "PATCH", "/prompts/rev", []byte(`{"body":"b3"}`))
@@ -284,7 +284,7 @@ func TestPromptHandler_ListRevisions_NewestFirst(t *testing.T) {
 
 func TestPromptHandler_Restore_HappyPath_200(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = httpDo(t, e, "POST", "/prompts", []byte(`{"slug":"restore","description":"d","body":"v1"}`))
 	_ = httpDo(t, e, "PATCH", "/prompts/restore", []byte(`{"body":"v2"}`))
 	rec := httpDo(t, e, "POST", "/prompts/restore/revisions/1/restore", nil)
@@ -304,7 +304,7 @@ func TestPromptHandler_Restore_HappyPath_200(t *testing.T) {
 
 func TestPromptHandler_ErrorEnvelopeShape(t *testing.T) {
 	e, _, db := setupHandler(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rec := httpDo(t, e, "GET", "/prompts/missing", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -356,7 +356,7 @@ func TestPromptHandler_NoPIIInLogs(t *testing.T) {
 	e := echo.New()
 	h.RegisterPromptRoutes(e)
 
-	defer dbConn.Close()
+	defer func() { _ = dbConn.Close() }()
 	sentinel := "SECRET_SENTINEL_TOKEN_DO_NOT_LOG"
 	body := []byte(`{"slug":"log-test","description":"d","body":"` + sentinel + `"}`)
 	rec := httpDo(t, e, "POST", "/prompts", body)

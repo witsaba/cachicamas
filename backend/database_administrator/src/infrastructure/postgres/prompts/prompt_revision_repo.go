@@ -1,4 +1,4 @@
-// Package postgres contains the Postgres adapter for the prompt
+// Package prompts contains the Postgres adapter for the prompt
 // revisions hexagonal slice (PR2 of 2026-07-15-prompt-storage-table).
 // This is the sibling file to prompt_repo.go; both translate pgx
 // errors into domain errors per the project's existing convention.
@@ -58,7 +58,7 @@ const (
 // The service is supposed to prevent this with FOR UPDATE; if it
 // still happens, the surface returns *domain.ConflictError so the
 // handler can map to 409.
-func (r *PromptRevisionRepo) Insert(ctx context.Context, db domain.SqlExecutor, rev *domain.PromptRevision) error {
+func (r *PromptRevisionRepo) Insert(ctx context.Context, db domain.SQLExecutor, rev *domain.PromptRevision) error {
 	row := db.QueryRowContext(ctx,
 		`INSERT INTO `+promptRevisionTableName+` (prompt_id, revision_number, description, body, change_note, created_by)
              VALUES ($1, $2, $3, $4, $5, $6)
@@ -81,7 +81,7 @@ func (r *PromptRevisionRepo) Insert(ctx context.Context, db domain.SqlExecutor, 
 // prompt, or *domain.NotFoundError when none exist. The DB invariant
 // says every prompt has at least revision 1, so a "no rows" result
 // indicates a DB-level invariant violation.
-func (r *PromptRevisionRepo) SelectLatestForPrompt(ctx context.Context, db domain.SqlExecutor, promptID int64) (*domain.PromptRevision, error) {
+func (r *PromptRevisionRepo) SelectLatestForPrompt(ctx context.Context, db domain.SQLExecutor, promptID int64) (*domain.PromptRevision, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptRevisionColumnList+` FROM `+promptRevisionTableName+`
              WHERE prompt_id = $1
@@ -101,7 +101,7 @@ func (r *PromptRevisionRepo) SelectLatestForPrompt(ctx context.Context, db domai
 
 // SelectByPromptAndNumber returns the specific revision, or
 // *domain.NotFoundError when no such revision exists.
-func (r *PromptRevisionRepo) SelectByPromptAndNumber(ctx context.Context, db domain.SqlExecutor, promptID int64, n int) (*domain.PromptRevision, error) {
+func (r *PromptRevisionRepo) SelectByPromptAndNumber(ctx context.Context, db domain.SQLExecutor, promptID int64, n int) (*domain.PromptRevision, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptRevisionColumnList+` FROM `+promptRevisionTableName+`
              WHERE prompt_id = $1 AND revision_number = $2`,
@@ -120,7 +120,7 @@ func (r *PromptRevisionRepo) SelectByPromptAndNumber(ctx context.Context, db dom
 // SelectListByPrompt returns every revision for the prompt, ordered
 // by revision_number DESC (newest first). Returns an empty slice
 // (NOT nil) when zero rows exist.
-func (r *PromptRevisionRepo) SelectListByPrompt(ctx context.Context, db domain.SqlExecutor, promptID int64) ([]*domain.PromptRevision, error) {
+func (r *PromptRevisionRepo) SelectListByPrompt(ctx context.Context, db domain.SQLExecutor, promptID int64) ([]*domain.PromptRevision, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT `+promptRevisionColumnList+` FROM `+promptRevisionTableName+`
              WHERE prompt_id = $1

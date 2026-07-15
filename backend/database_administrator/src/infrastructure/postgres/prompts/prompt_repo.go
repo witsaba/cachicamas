@@ -1,4 +1,4 @@
-// Package postgres contains the Postgres adapters for the prompts
+// Package prompts contains the Postgres adapters for the prompts
 // hexagonal slice (PR2 of 2026-07-15-prompt-storage-table). This
 // file is the ONLY file in the repo that imports jackc/pgx (and
 // pgconn) for prompt data access, mirroring the existing
@@ -84,7 +84,7 @@ const (
 // `prompt_slug_active_uidx` (slug WHERE deleted_at IS NULL) is
 // translated to *domain.ConflictError so the handler does not need to
 // import pgx.
-func (r *PromptRepo) Insert(ctx context.Context, db domain.SqlExecutor, p *domain.Prompt) error {
+func (r *PromptRepo) Insert(ctx context.Context, db domain.SQLExecutor, p *domain.Prompt) error {
 	row := db.QueryRowContext(ctx,
 		`INSERT INTO `+promptTableName+` (`+promptInsertColumnList+`)
              VALUES ($1, $2, $3)
@@ -108,7 +108,7 @@ func (r *PromptRepo) Insert(ctx context.Context, db domain.SqlExecutor, p *domai
 // partial UNIQUE index + the explicit `WHERE deleted_at IS NULL`
 // clause together ensure soft-deleted rows are invisible (spec S-PR-6,
 // S-PR-9, S-PR-24).
-func (r *PromptRepo) SelectBySlug(ctx context.Context, db domain.SqlExecutor, slug string) (*domain.Prompt, error) {
+func (r *PromptRepo) SelectBySlug(ctx context.Context, db domain.SQLExecutor, slug string) (*domain.Prompt, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptColumnList+` FROM `+promptTableName+`
              WHERE slug = $1 AND deleted_at IS NULL`,
@@ -129,7 +129,7 @@ func (r *PromptRepo) SelectBySlug(ctx context.Context, db domain.SqlExecutor, sl
 // "slug never existed" (returns *NotFoundError) from "slug exists
 // but is soft-deleted" (returns the row with DeletedAt != nil; the
 // service then maps to *GoneError → 410 per spec S-PR-8 / S-PR-5).
-func (r *PromptRepo) SelectBySlugAny(ctx context.Context, db domain.SqlExecutor, slug string) (*domain.Prompt, error) {
+func (r *PromptRepo) SelectBySlugAny(ctx context.Context, db domain.SQLExecutor, slug string) (*domain.Prompt, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptColumnList+` FROM `+promptTableName+`
              WHERE slug = $1`,
@@ -148,7 +148,7 @@ func (r *PromptRepo) SelectBySlugAny(ctx context.Context, db domain.SqlExecutor,
 // SelectByID returns the LIVE row with the given id, or
 // *domain.NotFoundError when no live row matches. The caller is
 // typically the service layer after LockAndLoad.
-func (r *PromptRepo) SelectByID(ctx context.Context, db domain.SqlExecutor, id int64) (*domain.Prompt, error) {
+func (r *PromptRepo) SelectByID(ctx context.Context, db domain.SQLExecutor, id int64) (*domain.Prompt, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptColumnList+` FROM `+promptTableName+`
              WHERE id = $1 AND deleted_at IS NULL`,
@@ -168,7 +168,7 @@ func (r *PromptRepo) SelectByID(ctx context.Context, db domain.SqlExecutor, id i
 // id DESC) for stable pagination. The limit is clamped by the service
 // to MaxListLimit before reaching the repo. Returns an empty slice
 // (NOT nil) when zero rows exist.
-func (r *PromptRepo) SelectList(ctx context.Context, db domain.SqlExecutor, limit, offset int) ([]*domain.Prompt, error) {
+func (r *PromptRepo) SelectList(ctx context.Context, db domain.SQLExecutor, limit, offset int) ([]*domain.Prompt, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT `+promptColumnList+` FROM `+promptTableName+`
              WHERE deleted_at IS NULL
@@ -199,7 +199,7 @@ func (r *PromptRepo) SelectList(ctx context.Context, db domain.SqlExecutor, limi
 // prompt. Used by the service layer after acquiring the FOR UPDATE
 // row lock so the version assignment is monotonic (spec INV-4,
 // S-PR-21). The DB clock owns updated_at.
-func (r *PromptRepo) UpdateBody(ctx context.Context, db domain.SqlExecutor, id int64, body, description string) error {
+func (r *PromptRepo) UpdateBody(ctx context.Context, db domain.SQLExecutor, id int64, body, description string) error {
 	res, err := db.ExecContext(ctx,
 		`UPDATE `+promptTableName+`
              SET body = $1, description = $2, updated_at = now()
@@ -229,7 +229,7 @@ func (r *PromptRepo) UpdateBody(ctx context.Context, db domain.SqlExecutor, id i
 // call finds zero rows matching `deleted_at IS NULL`, returns nil).
 // The partial unique index frees the slug for reuse after delete
 // (spec S-PR-7, EC2).
-func (r *PromptRepo) SoftDelete(ctx context.Context, db domain.SqlExecutor, id int64) error {
+func (r *PromptRepo) SoftDelete(ctx context.Context, db domain.SQLExecutor, id int64) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE `+promptTableName+`
              SET deleted_at = now()
@@ -254,7 +254,7 @@ func (r *PromptRepo) SoftDelete(ctx context.Context, db domain.SqlExecutor, id i
 // soft-deleted must produce PROMPT_DELETED (410), not PROMPT_NOT_FOUND
 // (404). Hiding it in the repo would force the service to issue a
 // second SELECT after a 404, which is racy.
-func (r *PromptRepo) LockAndLoad(ctx context.Context, db domain.SqlExecutor, id int64) (*domain.Prompt, error) {
+func (r *PromptRepo) LockAndLoad(ctx context.Context, db domain.SQLExecutor, id int64) (*domain.Prompt, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT `+promptColumnList+` FROM `+promptTableName+`
              WHERE id = $1
@@ -276,7 +276,7 @@ func (r *PromptRepo) LockAndLoad(ctx context.Context, db domain.SqlExecutor, id 
 // the next revision number (spec INV-4). Returns 0 for a prompt with
 // no revisions yet (the DB invariant says every prompt has at least
 // revision 1, so this only happens before the first Insert).
-func (r *PromptRepo) MaxRevisionNumber(ctx context.Context, db domain.SqlExecutor, promptID int64) (int, error) {
+func (r *PromptRepo) MaxRevisionNumber(ctx context.Context, db domain.SQLExecutor, promptID int64) (int, error) {
 	var n sql.NullInt64
 	if err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(revision_number), 0) FROM prompt_revision WHERE prompt_id = $1`,

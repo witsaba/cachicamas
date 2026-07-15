@@ -434,7 +434,7 @@ func truncateNewTables(t *testing.T, db *sql.DB) func() {
 		// is included in the truncate so a future FK violation is also
 		// cleared when a test rewinds.
 		_, _ = db.ExecContext(ctx,
-			"TRUNCATE TABLE sync_job, workspace_repository, workspace, identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
+			"TRUNCATE TABLE sync_job, workspace, identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
 	}
 }
 
@@ -460,7 +460,6 @@ func wipeNewTables(t *testing.T, db *sql.DB) {
 		// sync_job FKs to workspace; drop sync_job first so CASCADE
 		// on the parent FK is unblocked.
 		"DROP TABLE IF EXISTS sync_job CASCADE",
-		"DROP TABLE IF EXISTS workspace_repository CASCADE",
 		"DROP TABLE IF EXISTS workspace CASCADE",
 		"DROP TABLE IF EXISTS identity.account CASCADE",
 		"DROP TABLE IF EXISTS identity.user CASCADE",
@@ -492,11 +491,11 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// 10 migrations: hello_world, orgs_and_projects,
+	// 11 migrations: hello_world, orgs_and_projects,
 	// requirements_and_milestones, tasks_and_specs, github_login,
 	// workspaces_and_account_tokens, workspaces, drop_workspace_repository,
-	// rename_workspace_primary_repo_columns, sync_job.
-	if len(applied) != 10 {
+	// rename_workspace_primary_repo_columns, sync_job, prompts.
+	if len(applied) != 11 {
 		t.Fatalf("Up applied %d migrations, want 10 (got %+v)", len(applied), applied)
 	}
 	wantVersions := []int64{
@@ -510,6 +509,7 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
+		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 	}
 	for i, want := range wantVersions {
 		if applied[i].ID != want {
@@ -980,6 +980,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
+		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 	}
 	if len(applied) != len(wantVersions) {
 		t.Errorf("Up applied %d migrations, want %d (got %+v)", len(applied), len(wantVersions), applied)
@@ -1021,6 +1022,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260708120000, // 2026-07-08-workspaces-simplify (drop workspace_repository)
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
+		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
@@ -1424,8 +1426,8 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 7 {
-		t.Fatalf("expected 7 migrations applied (hello + 3 witsaba + cachicamas-github-login + workspaces PR1a + workspaces PR1b-i), got %d", len(applied))
+	if len(applied) != 11 {
+		t.Fatalf("expected 11 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts), got %d", len(applied))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1735,271 +1737,6 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	}
 }
 
-// TestRunner_Up_WorkspacesPR1bI_WorkspaceTables covers the 2026-07-06-workspaces
-// PR1b-i migration (20260706120002): after Up() applies it, the schema MUST
-// contain a `public.workspace` table with the locked columns + FKs and a
-// `public.workspace_repository` table with the locked columns + FKs + the
-// partial unique index `workspace_org_name_live_key` on
-// (organization_id, name) WHERE deleted_at IS NULL.
-//
-// Pre-PR1b-i this test MUST fail (the migration file does not exist yet,
-// so `goose.SetBaseFS(MigrationsFS)` does not produce a 20260706120002 entry
-// and runner.Up applies only the prior 6 versions). The test is the RED
-// step for T-WS-1Bi-001; once `20260706120002_workspaces.sql` is written,
-// this test must turn green.
-func TestRunner_Up_WorkspacesPR1bI_WorkspaceTables(t *testing.T) {
-	db := integrationRunnerDB(t)
-	resetSchemaMigrations(t, db)
-	wipeNewTables(t, db)
-	t.Cleanup(truncateNewTables(t, db))
-
-	r := newTestRunner(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := r.Up(ctx); err != nil {
-		t.Fatalf("Up: %v", err)
-	}
-
-	// Pull column metadata for `public.workspace`.
-	wsRows, err := db.QueryContext(ctx,
-		`SELECT column_name, data_type, is_nullable, character_maximum_length
-           FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = 'workspace'
-          ORDER BY ordinal_position`)
-	if err != nil {
-		t.Fatalf("query workspace columns: %v", err)
-	}
-	defer func() { _ = wsRows.Close() }()
-	type colInfo struct {
-		name     string
-		dataType string
-		nullable string
-		maxLen   *int
-	}
-	var wsCols []colInfo
-	for wsRows.Next() {
-		var c colInfo
-		if err := wsRows.Scan(&c.name, &c.dataType, &c.nullable, &c.maxLen); err != nil {
-			t.Fatalf("scan workspace col: %v", err)
-		}
-		wsCols = append(wsCols, c)
-	}
-	if err := wsRows.Err(); err != nil {
-		t.Fatalf("workspace rows err: %v", err)
-	}
-
-	// Required columns with their locked types. PK columns also carry
-	// `is_nullable = NO` implicitly; we assert that below.
-	wantWS := map[string]string{
-		"id":                     "bigint",
-		"organization_id":        "bigint",
-		"owner_user_id":          "bigint",
-		"name":                   "text",
-		"primary_repo_github_id": "bigint",
-		"primary_repo_full_name": "text",
-		"primary_repo_owner":     "text",
-		"primary_repo_name":      "text",
-		"created_at":             "timestamp with time zone",
-		"updated_at":             "timestamp with time zone",
-		"deleted_at":             "timestamp with time zone",
-	}
-	gotWS := map[string]string{}
-	for _, c := range wsCols {
-		gotWS[c.name] = c.dataType
-	}
-	for name, wantType := range wantWS {
-		gotType, ok := gotWS[name]
-		if !ok {
-			t.Errorf("workspace.%s missing after Up() (PR1b-i migration not applied)", name)
-			continue
-		}
-		if gotType != wantType {
-			t.Errorf("workspace.%s data_type = %q, want %q", name, gotType, wantType)
-		}
-	}
-
-	// Nullable contract: `id` MUST be NOT NULL, `organization_id` MUST
-	// be NOT NULL, `name` MUST be NOT NULL, `owner_user_id` MUST be
-	// NULLABLE (so the FK can be SET NULL on identity.user delete),
-	// `deleted_at` MUST be NULLABLE.
-	wantNullable := map[string]string{
-		"id":              "NO",
-		"organization_id": "NO",
-		"name":            "NO",
-		"owner_user_id":   "YES",
-		"deleted_at":      "YES",
-	}
-	for _, c := range wsCols {
-		want, ok := wantNullable[c.name]
-		if !ok {
-			continue
-		}
-		if c.nullable != want {
-			t.Errorf("workspace.%s nullable = %q, want %q", c.name, c.nullable, want)
-		}
-	}
-
-	// Pull column metadata for `public.workspace_repository`.
-	wrRows, err := db.QueryContext(ctx,
-		`SELECT column_name, data_type, is_nullable
-           FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = 'workspace_repository'
-          ORDER BY ordinal_position`)
-	if err != nil {
-		t.Fatalf("query workspace_repository columns: %v", err)
-	}
-	defer func() { _ = wrRows.Close() }()
-	var wrCols []colInfo
-	for wrRows.Next() {
-		var c colInfo
-		if err := wrRows.Scan(&c.name, &c.dataType, &c.nullable); err != nil {
-			t.Fatalf("scan workspace_repository col: %v", err)
-		}
-		wrCols = append(wrCols, c)
-	}
-	if err := wrRows.Err(); err != nil {
-		t.Fatalf("workspace_repository rows err: %v", err)
-	}
-	wantWR := map[string]string{
-		"id":               "bigint",
-		"workspace_id":     "bigint",
-		"github_id":        "bigint",
-		"github_full_name": "text",
-		"github_owner":     "text",
-		"github_name":      "text",
-		"added_at":         "timestamp with time zone",
-	}
-	gotWR := map[string]string{}
-	for _, c := range wrCols {
-		gotWR[c.name] = c.dataType
-	}
-	for name, wantType := range wantWR {
-		gotType, ok := gotWR[name]
-		if !ok {
-			t.Errorf("workspace_repository.%s missing after Up()", name)
-			continue
-		}
-		if gotType != wantType {
-			t.Errorf("workspace_repository.%s data_type = %q, want %q", name, gotType, wantType)
-		}
-	}
-
-	// The partial unique index `workspace_org_name_live_key` on
-	// (organization_id, name) WHERE deleted_at IS NULL MUST exist.
-	var indexExists bool
-	if err := db.QueryRowContext(ctx,
-		`SELECT EXISTS (
-           SELECT 1 FROM pg_indexes
-            WHERE schemaname = 'public'
-              AND tablename = 'workspace'
-              AND indexname = 'workspace_org_name_live_key'
-              AND indexdef LIKE '%WHERE%'
-              AND indexdef LIKE '%deleted_at IS NULL%'
-         )`).Scan(&indexExists); err != nil {
-		t.Fatalf("query workspace_org_name_live_key: %v", err)
-	}
-	if !indexExists {
-		t.Errorf("partial unique index workspace_org_name_live_key(organization_id, name) WHERE deleted_at IS NULL missing on workspace")
-	}
-
-	// The unique constraint `workspace_repository_workspace_github_key`
-	// on (workspace_id, github_id) MUST exist.
-	var constraintExists bool
-	if err := db.QueryRowContext(ctx,
-		`SELECT EXISTS (
-           SELECT 1 FROM information_schema.table_constraints
-            WHERE table_schema = 'public'
-              AND table_name = 'workspace_repository'
-              AND constraint_name = 'workspace_repository_workspace_github_key'
-              AND constraint_type = 'UNIQUE'
-         )`).Scan(&constraintExists); err != nil {
-		t.Fatalf("query workspace_repository_workspace_github_key: %v", err)
-	}
-	if !constraintExists {
-		t.Errorf("UNIQUE constraint workspace_repository_workspace_github_key(workspace_id, github_id) missing on workspace_repository")
-	}
-}
-
-// TestRunner_Up_WorkspacesPR1bI_MigrationReversible (TRIANGULATE for
-// T-WS-1Bi-003) covers spec NFR-WS-005: the migration's Down section
-// drops both tables cleanly so a forward-fix rollback path exists.
-// This is the test for the `Down` clause of `20260706120002_workspaces.sql`.
-func TestRunner_Up_WorkspacesPR1bI_MigrationReversible(t *testing.T) {
-	db := integrationRunnerDB(t)
-	resetSchemaMigrations(t, db)
-	wipeNewTables(t, db)
-	t.Cleanup(truncateNewTables(t, db))
-
-	r := newTestRunner(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := r.Up(ctx); err != nil {
-		t.Fatalf("Up: %v", err)
-	}
-
-	// Both tables must exist after Up.
-	for _, name := range []string{"workspace", "workspace_repository"} {
-		var exists bool
-		if err := db.QueryRowContext(ctx,
-			`SELECT EXISTS (
-               SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = $1
-             )`, name).Scan(&exists); err != nil {
-			t.Fatalf("check %s after Up: %v", name, err)
-		}
-		if !exists {
-			t.Fatalf("public.%s missing after Up — reverse-cycle test cannot proceed", name)
-		}
-	}
-
-	// Drop the two workspace tables in dependency-reversed order
-	// (children first). This mirrors the expected Down clause.
-	if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS workspace_repository"); err != nil {
-		t.Fatalf("drop workspace_repository: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS workspace"); err != nil {
-		t.Fatalf("drop workspace: %v", err)
-	}
-
-	// Both tables must be gone.
-	for _, name := range []string{"workspace", "workspace_repository"} {
-		var exists bool
-		if err := db.QueryRowContext(ctx,
-			`SELECT EXISTS (
-               SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = $1
-             )`, name).Scan(&exists); err != nil {
-			t.Fatalf("check %s after drop: %v", name, err)
-		}
-		if exists {
-			t.Errorf("public.%s still exists after drop — Down clause failed to reverse", name)
-		}
-	}
-
-	// Up must be re-runnable: re-apply creates the tables again. We
-	// wipe the bookkeeping AND wipe the pre-existing tables so the
-	// re-Up applies all 7 migrations from scratch instead of failing
-	// on the prior "organization already exists" / "identity.account
-	// already exists" errors.
-	resetSchemaMigrations(t, db)
-	wipeNewTables(t, db)
-	if _, err := r.Up(ctx); err != nil {
-		t.Fatalf("Up after reverse: %v", err)
-	}
-	for _, name := range []string{"workspace", "workspace_repository"} {
-		var exists bool
-		if err := db.QueryRowContext(ctx,
-			`SELECT EXISTS (
-               SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = $1
-             )`, name).Scan(&exists); err != nil {
-			t.Fatalf("check %s after re-Up: %v", name, err)
-		}
-		if !exists {
-			t.Errorf("public.%s missing after re-Up — reverse-cycle test failed", name)
-		}
-	}
-}
 
 // TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex (TRIANGULATE for
 // T-WS-1Bi-003) covers spec R-WS-005 / S-WS-043: the partial unique index
@@ -2039,7 +1776,7 @@ func TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex(t *testing.T) {
 	var ws1 int64
 	if err := db.QueryRowContext(setupCtx,
 		`INSERT INTO workspace (organization_id, owner_user_id, name,
-            primary_repo_github_id, primary_repo_full_name, primary_repo_owner, primary_repo_name)
+            repo_github_id, repo_full_name, repo_owner, repo_name)
          VALUES ($1, $2, 'alpha', 100, 'owner/alpha', 'owner', 'alpha')
          RETURNING id`, orgID, userID).Scan(&ws1); err != nil {
 		t.Fatalf("seed first workspace: %v", err)
@@ -2049,7 +1786,7 @@ func TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex(t *testing.T) {
 	// MUST fail with the partial unique index violation.
 	_, err := db.ExecContext(setupCtx,
 		`INSERT INTO workspace (organization_id, owner_user_id, name,
-            primary_repo_github_id, primary_repo_full_name, primary_repo_owner, primary_repo_name)
+            repo_github_id, repo_full_name, repo_owner, repo_name)
          VALUES ($1, $2, 'alpha', 200, 'other/alpha', 'other', 'alpha')
          `, orgID, userID)
 	if err == nil {
@@ -2069,7 +1806,7 @@ func TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex(t *testing.T) {
 	var ws2 int64
 	if err := db.QueryRowContext(setupCtx,
 		`INSERT INTO workspace (organization_id, owner_user_id, name,
-            primary_repo_github_id, primary_repo_full_name, primary_repo_owner, primary_repo_name)
+            repo_github_id, repo_full_name, repo_owner, repo_name)
          VALUES ($1, $2, 'alpha', 300, 'third/alpha', 'third', 'alpha')
          RETURNING id`, orgID, userID).Scan(&ws2); err != nil {
 		t.Fatalf("workspace after soft-delete of name collision must succeed, got: %v", err)

@@ -241,6 +241,9 @@ func (e *GoneError) Error() string {
 	return fmt.Sprintf("prompt slug=%q: %s", e.Slug, MsgPromptDeleted)
 }
 
+// Code returns the locked wire code for HTTP 410 mapping
+// ("prompt_deleted"). The handler maps this via the AppError
+// interface to a 410 Gone response.
 func (e *GoneError) Code() string { return CodePromptDeleted }
 
 func (e *GoneError) Unwrap() error { return e.Cause }
@@ -278,11 +281,11 @@ type sqlExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// SqlExecutor is the exported alias of sqlExecutor for use by
+// SQLExecutor is the exported alias of sqlExecutor for use by
 // infrastructure adapters. The lowercase name stays for internal
 // callers; this alias lets postgres/ import the interface name
 // without leaking its private members.
-type SqlExecutor = sqlExecutor
+type SQLExecutor = sqlExecutor
 
 // PromptRepository is the port for reading and persisting Prompt
 // rows. The application layer depends only on this interface.

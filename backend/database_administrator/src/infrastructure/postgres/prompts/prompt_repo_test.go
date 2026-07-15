@@ -150,7 +150,7 @@ func skipIfNoIntegration(t *testing.T) {
 func TestPromptRepo_Insert_HappyPath(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -173,7 +173,7 @@ func TestPromptRepo_Insert_HappyPath(t *testing.T) {
 func TestPromptRepo_Insert_DuplicateSlug_ReturnsConflictError(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -199,7 +199,7 @@ func TestPromptRepo_Insert_DuplicateSlug_ReturnsConflictError(t *testing.T) {
 func TestPromptRepo_SelectBySlug_HappyPath(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -221,7 +221,7 @@ func TestPromptRepo_SelectBySlug_HappyPath(t *testing.T) {
 func TestPromptRepo_SelectBySlug_NotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -239,7 +239,7 @@ func TestPromptRepo_SelectBySlug_NotFound(t *testing.T) {
 func TestPromptRepo_SelectBySlug_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -262,7 +262,7 @@ func TestPromptRepo_SelectBySlug_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 func TestPromptRepo_SelectList_OrderByUpdatedAtDesc(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -291,7 +291,7 @@ func TestPromptRepo_SelectList_OrderByUpdatedAtDesc(t *testing.T) {
 func TestPromptRepo_SelectList_ExcludesDeleted(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -316,7 +316,7 @@ func TestPromptRepo_SelectList_ExcludesDeleted(t *testing.T) {
 func TestPromptRepo_SelectList_EmptyReturnsEmptySlice(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -340,7 +340,7 @@ func TestPromptRepo_SelectList_EmptyReturnsEmptySlice(t *testing.T) {
 func TestPromptRepo_UpdateBody_UpdatesRow(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -371,7 +371,7 @@ func TestPromptRepo_UpdateBody_UpdatesRow(t *testing.T) {
 func TestPromptRepo_UpdateBody_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -395,7 +395,7 @@ func TestPromptRepo_UpdateBody_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 func TestPromptRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -420,7 +420,7 @@ func TestPromptRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 func TestPromptRepo_SoftDelete_IsIdempotent(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -442,7 +442,7 @@ func TestPromptRepo_SoftDelete_IsIdempotent(t *testing.T) {
 func TestPromptRepo_LockAndLoad_AcquiresRowLock(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -457,7 +457,7 @@ func TestPromptRepo_LockAndLoad_AcquiresRowLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	loaded, err := repo.LockAndLoad(ctx, tx, seeded.ID)
 	if err != nil {
@@ -473,7 +473,7 @@ func TestPromptRepo_LockAndLoad_AcquiresRowLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx2: %v", err)
 	}
-	defer tx2.Rollback()
+	defer func() { _ = tx2.Rollback() }()
 	if _, err := tx2.ExecContext(ctx, "SET LOCAL statement_timeout = '500ms'"); err != nil {
 		t.Fatalf("SET LOCAL statement_timeout: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestPromptRepo_LockAndLoad_AcquiresRowLock(t *testing.T) {
 func TestPromptRepo_LockAndLoad_NotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -499,7 +499,7 @@ func TestPromptRepo_LockAndLoad_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	_, err = repo.LockAndLoad(context.Background(), tx, 99999)
 	var nerr *domain.NotFoundError
 	if !errors.As(err, &nerr) {
@@ -514,7 +514,7 @@ func TestPromptRepo_LockAndLoad_NotFound(t *testing.T) {
 func TestPromptRepo_MaxRevisionNumber_ReturnsZeroOnEmpty(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -532,7 +532,7 @@ func TestPromptRepo_MaxRevisionNumber_ReturnsZeroOnEmpty(t *testing.T) {
 func TestPromptRepo_MaxRevisionNumber_ReturnsLatestOnExisting(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 

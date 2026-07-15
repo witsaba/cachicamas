@@ -20,7 +20,7 @@ import (
 func TestPromptRevisionRepo_Insert_HappyPath(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -47,7 +47,7 @@ func TestPromptRevisionRepo_Insert_HappyPath(t *testing.T) {
 func TestPromptRevisionRepo_Insert_DuplicateRevisionNumber_ReturnsConflictError(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -83,7 +83,7 @@ func TestPromptRevisionRepo_Insert_DuplicateRevisionNumber_ReturnsConflictError(
 func TestPromptRevisionRepo_SelectLatestForPrompt_ReturnsLatest(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -115,7 +115,7 @@ func TestPromptRevisionRepo_SelectLatestForPrompt_ReturnsLatest(t *testing.T) {
 func TestPromptRevisionRepo_SelectLatestForPrompt_NoRevisions_ReturnsNotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -135,7 +135,7 @@ func TestPromptRevisionRepo_SelectLatestForPrompt_NoRevisions_ReturnsNotFound(t 
 func TestPromptRevisionRepo_SelectByPromptAndNumber_HappyPath(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -164,7 +164,7 @@ func TestPromptRevisionRepo_SelectByPromptAndNumber_HappyPath(t *testing.T) {
 func TestPromptRevisionRepo_SelectByPromptAndNumber_NotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -184,7 +184,7 @@ func TestPromptRevisionRepo_SelectByPromptAndNumber_NotFound(t *testing.T) {
 func TestPromptRevisionRepo_SelectListByPrompt_OrderDesc(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -216,7 +216,7 @@ func TestPromptRevisionRepo_SelectListByPrompt_OrderDesc(t *testing.T) {
 func TestPromptRevisionRepo_SelectListByPrompt_EmptyReturnsEmptySlice(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 
@@ -241,7 +241,7 @@ func TestPromptRevisionRepo_SelectListByPrompt_EmptyReturnsEmptySlice(t *testing
 func TestPromptRevisionRepo_CascadeDeleteRemovesRevisions(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensurePromptMigrations(t, db)
 	cleanPromptTables(t, db)
 

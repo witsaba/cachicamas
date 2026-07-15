@@ -24,7 +24,6 @@
 package httpiface
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,9 +95,6 @@ type promptRevisionResponse struct {
 // Create handles POST /prompts.
 func (h *PromptHandler) Create(c *echo.Context) error {
 	var req createPromptRequest
-	if err := c.Request().ParseForm(); err != nil && false {
-		// ignore: ParseForm is a hint; we always try JSON below
-	}
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return writePromptError(c, h.logger, http.StatusBadRequest, domain.CodeValidation, "request body must be JSON with slug, description, body")
 	}
@@ -361,13 +357,6 @@ func parseIntDefault(s string, fallback int) int {
 		return fallback
 	}
 	return n
-}
-
-// makeContext is a small adapter so callers can build a context.Context
-// from an echo.Context without importing the package twice. Used in
-// places where the test harness builds requests by hand.
-func makeContext(c *echo.Context) context.Context {
-	return c.Request().Context()
 }
 
 // ensure imports are used (errors, fmt) — keep them explicit so the
