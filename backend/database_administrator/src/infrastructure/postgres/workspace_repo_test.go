@@ -119,15 +119,14 @@ func makeOrg(t *testing.T, db *sql.DB, nameSuffix string) int64 {
 // the given org id. Tests can mutate fields before calling Insert.
 func makeWorkspaceInput(orgID int64, name string) *domain.Workspace {
 	return &domain.Workspace{
-		OrganizationID:      orgID,
-		Name:                name,
-		RepoGitHubID: 123456,
-		RepoFullName: "octocat/" + name,
-		RepoOwner:    "octocat",
-		RepoName:     name,
+		OrganizationID: orgID,
+		Name:           name,
+		RepoGitHubID:   123456,
+		RepoFullName:   "octocat/" + name,
+		RepoOwner:      "octocat",
+		RepoName:       name,
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // Insert
@@ -722,20 +721,13 @@ func TestWorkspaceRepo_SoftDelete_AlreadyDeletedReturnsNotFound(t *testing.T) {
 // AddLinkedRepo
 // ---------------------------------------------------------------------------
 
-
-
-
 // ---------------------------------------------------------------------------
 // RemoveLinkedRepo
 // ---------------------------------------------------------------------------
 
-
-
 // ---------------------------------------------------------------------------
 // SelectLinkedRepos
 // ---------------------------------------------------------------------------
-
-
 
 // _ ensures INTEGRATION=1 is required; if someone runs without it
 // every test above is skipped, which would silently pass and hide a

@@ -1737,7 +1737,6 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	}
 }
 
-
 // TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex (TRIANGULATE for
 // T-WS-1Bi-003) covers spec R-WS-005 / S-WS-043: the partial unique index
 // `workspace_org_name_live_key` on (organization_id, name) WHERE
