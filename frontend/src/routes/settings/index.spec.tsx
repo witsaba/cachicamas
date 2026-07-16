@@ -147,7 +147,15 @@ describe("routes/settings/index — canonical guard chain + grid render", () => 
   });
 
   it("exports DocumentHead with title 'Settings — Cachicamas'", () => {
-    expect(head.title).toBe("Settings — Cachicamas");
+    // Qwik 1.20's DocumentHead is a union: object OR
+    // (props) => object. The route exports the OBJECT form (the
+    // common case — see `routes/settings/prompts/index.tsx` for
+    // the same shape). Narrow with a runtime guard before reading
+    // .title so tsc accepts the access without an unsafe cast.
+    expect(typeof head).toBe("object");
+    expect((head as { title: string }).title).toBe(
+      "Settings — Cachicamas",
+    );
   });
 
   it("REQ-11 / SCN-11.1 — renders NO <h1> element (headerless page)", async () => {
