@@ -100,6 +100,14 @@ vi.mock("~/lib/require-auth-redirect", () => ({
 // string is interchangeable with Qwik City's private one.
 import Index, { usePromptsLoader } from "./index";
 
+// `__id` is a Qwik City internal stamped onto every `routeLoader$`
+// at build time. It is not part of the public type, but it IS the
+// key Qwik City uses to look up the loader's value in
+// `RouteStateContext`. Cast to the internal shape so tsc accepts
+// the access without an `as any` escape hatch.
+type LoaderWithId = { __id: string };
+const loaderId = (usePromptsLoader as unknown as LoaderWithId).__id;
+
 const QC_S = createContextId<Record<string, unknown>>("qc-s");
 const QC_C = createContextId("qc-c");
 const QC_IC = createContextId("qc-ic");
@@ -117,10 +125,10 @@ const TestWrapper = component$(() => {
   // gives us exactly the shape QwikCityProvider would inject after
   // a real loader resolution.
   const loaderState = useStore<Record<string, unknown>>(
-    { [usePromptsLoader.__id]: useSignal() },
+    { [loaderId]: useSignal() },
     { deep: false },
   );
-  (loaderState[usePromptsLoader.__id] as { value: unknown }).value = {
+  (loaderState[loaderId] as { value: unknown }).value = {
     ok: true as const,
     prompts: [],
   };
