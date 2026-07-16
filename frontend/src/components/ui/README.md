@@ -127,6 +127,24 @@ For affordances that sit inside dropdown panels (avatar dropdown, org-pill panel
 
 `<MenuItem>` also supports `as="a"` for menu items that navigate to another route (e.g. avatar menu: Profile / Workspaces).
 
+## `<SettingCard>` (separate primitive — settings surface tile)
+
+For affordances that are settings surface entries — tiles in the `/settings` Launchpad-style grid, where each tile is the entry point to one settings surface (Prompts, Profile, Billing, ...). The macOS Launchpad metaphor: a centered icon-in-rounded-square with a label below, hover lift, and the same focus-visible chrome the other DS primitives use.
+
+| SettingCard                                  | `<Button>`                          | `<MenuItem>`                  |
+| -------------------------------------------- | ----------------------------------- | ----------------------------- |
+| `flex-col` (vertical tile)                   | `inline-flex` (button shape)        | `block w-full` (panel row)    |
+| `p-3` + `rounded-lg` (tile)                  | `px-4 py-2` + `rounded-md`          | `px-2 py-1.5`                 |
+| `bg-slate-100` icon well + label below       | `bg-slate-900` / `bg-white` surface | `bg-slate-100` row tint       |
+| Hover: `bg-slate-50` + group-hover text flip | surface swap                        | `bg-slate-100` row tint       |
+| Use for: settings surface tiles (Launchpad)  | CTAs                                | in-page actions inside panels |
+
+`<SettingCard>` is polymorphic via `as="a" | "button"` (default `as="a"`, matching the Launchpad's navigation semantics). The icon is passed via the `icon: JSXNode` prop and rendered inside a 64×64 slate-100 rounded-xl icon well; the label is a sibling span.
+
+The icon container's `text-slate-700 group-hover:text-slate-900` tokens drive the icon's stroke — the consumer-provided SVG MUST use `stroke="currentColor"` (or `fill="currentColor"` for filled icons). The currentColor contract is the monochrome rule: do not hard-code colors in consumer-provided icons.
+
+Currently one consumer (`/settings` index route → Prompts tile). Designed to grow without layout change — Profile, Billing, Notifications, etc. slot in as additional `<SettingCard>` children.
+
 ## Migration coverage
 
 Every interactive button-like element in `@cachicamas/frontend` consumes the design system:
