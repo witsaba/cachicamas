@@ -1,11 +1,13 @@
 /**
  * Behavioural spec for `routes/settings/index.tsx`.
  *
- * Reference: `sdd/settings-app-grid/{spec,design}.md` (engram).
+ * Reference: `sdd/settings-app-grid/{spec,design}.md` (engram #1922).
  *   - REQ-10 (`/settings` index route uses canonical guard chain)
  *   - SCN-10.1 / SCN-10.2 (auth gate + grid render)
- *   - REQ-11 (headerless — no `<h1>`)
- *   - SCN-11.1
+ *   - REQ-11 (page identity section — revised 2026-07-16, was headerless)
+ *   - SCN-11.1 (revised 2026-07-16: page identity section present)
+ *   - REQ-17 (layout centering — new 2026-07-16)
+ *   - SCN-17.1 (centering classes on <main> + grid)
  *
  * RED step: until `./index` exists, the import fails and the suite
  * is reported as failing by vitest. That failure IS the RED state.
@@ -158,9 +160,42 @@ describe("routes/settings/index — canonical guard chain + grid render", () => 
     );
   });
 
-  it("REQ-11 / SCN-11.1 — renders NO <h1> element (headerless page)", async () => {
+  it("REQ-11 (rev 2026-07-16) / SCN-11.1 — renders exactly ONE <h1> with text 'Settings'", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    expect(screen.querySelectorAll("h1").length).toBe(0);
+    const h1s = screen.querySelectorAll("h1");
+    expect(h1s.length).toBe(1);
+    expect(h1s[0]?.textContent?.trim()).toBe("Settings");
+  });
+
+  it("REQ-11 (rev 2026-07-16) — renders a <p data-testid='settings-subtitle'> with a non-empty descriptive subtitle", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const subtitle = screen.querySelector('[data-testid="settings-subtitle"]');
+    expect(subtitle).toBeTruthy();
+    expect((subtitle?.textContent ?? "").trim().length).toBeGreaterThan(0);
+  });
+
+  it("REQ-17 (new 2026-07-16) / SCN-17.1 — <main> centers content vertically + horizontally", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const main = screen.querySelector("main") as HTMLElement | null;
+    expect(main).toBeTruthy();
+    const cls = main?.className ?? "";
+    expect(cls).toContain("flex");
+    expect(cls).toContain("flex-col");
+    expect(cls).toContain("items-center");
+    expect(cls).toContain("justify-center");
+    expect(cls).toMatch(/min-h-/);
+  });
+
+  it("REQ-17 (new 2026-07-16) / SCN-17.1 — grid carries justify-items-center", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const grid = screen.querySelector(
+      '[data-testid="settings-grid"]',
+    ) as HTMLElement | null;
+    expect(grid).toBeTruthy();
+    expect(grid?.className).toContain("justify-items-center");
   });
 });
