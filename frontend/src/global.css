@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* -----------------------------------------------------------------------------
  * Monospace stack — the "agentic" / framework feel.
