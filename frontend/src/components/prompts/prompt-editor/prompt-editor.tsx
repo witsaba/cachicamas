@@ -82,7 +82,14 @@ export const PromptEditor = component$<PromptEditorProps>(
     const showDeleteConfirm = useSignal(false);
     const showRestoreConfirm = useSignal<number | null>(null);
 
-    // Reset local state when prompt changes
+    // Reset local state when prompt changes.
+    //
+    // Tracked dep is `prompt?.slug` so the task fires on BOTH
+    // transitions: prompt-X → prompt-Y (load a different existing
+    // prompt) AND prompt-X → null (handleNewPrompt switches to
+    // create mode with no prompt). The null branch is what was
+    // missing before — without it, switching to create mode kept
+    // the previous prompt's values in the form fields.
     useTask$(({ track }) => {
       track(() => prompt?.slug);
       if (prompt) {
@@ -90,6 +97,13 @@ export const PromptEditor = component$<PromptEditorProps>(
         description.value = prompt.description ?? "";
         body.value = prompt.body;
         previewBody.value = prompt.body;
+      } else {
+        // prompt is null — create mode. Clear all four signals
+        // so the form starts empty.
+        slug.value = "";
+        description.value = "";
+        body.value = "";
+        previewBody.value = "";
       }
     });
 
