@@ -64,11 +64,11 @@ var _ domain.PromptRepository = (*PromptRepo)(nil)
 // ---------------------------------------------------------------------------
 
 const (
-	promptTableName        = "prompt"
-	promptColumnList       = "id, description, slug, body, deleted_at, created_at, updated_at"
-	promptInsertColumnList = "description, slug, body"
+	promptTableName         = "prompt"
+	promptColumnList        = "id, description, slug, body, deleted_at, created_at, updated_at"
+	promptInsertColumnList  = "description, slug, body"
 	promptInsertValuesCount = 3
-	promptLiveUniqueIndex  = "prompt_slug_active_uidx"
+	promptLiveUniqueIndex   = "prompt_slug_active_uidx"
 )
 
 // ---------------------------------------------------------------------------

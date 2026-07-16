@@ -156,6 +156,15 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   Workspaces
                 </MenuItem>
               </li>
+              <li>
+                <MenuItem
+                  as="a"
+                  href="/settings/prompts"
+                  testId="avatar-menu-settings"
+                >
+                  Settings
+                </MenuItem>
+              </li>
             </ul>
             <hr class="my-3 border-slate-200" />
             <Form action={signOut} data-testid="avatar-menu-signout-form">
