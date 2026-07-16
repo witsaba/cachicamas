@@ -157,11 +157,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                 </MenuItem>
               </li>
               <li>
-                <MenuItem
-                  as="a"
-                  href="/settings/prompts"
-                  testId="avatar-menu-settings"
-                >
+                <MenuItem as="a" href="/settings" testId="avatar-menu-settings">
                   Settings
                 </MenuItem>
               </li>
