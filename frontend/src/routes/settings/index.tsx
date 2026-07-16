@@ -28,10 +28,13 @@
  * The original C1 (headerless) decision was falsified by UAT on
  * 2026-07-16 — the URL alone does not orient the user.
  *
- * Centering (REQ-17, NEW 2026-07-16): `<main>` is `flex flex-col
- * items-center justify-center min-h-[60vh]` so the content block
- * floats in the middle of the viewport; the grid carries
- * `justify-items-center` so a single tile centers in its cell.
+ * Positioning (REQ-17, REVISED 2026-07-16 rev 2, was: centering):
+ * `<main>` is `w-full max-w-3xl px-4 py-8` so the content block
+ * sits near the top of the viewport, just below the root-layout
+ * navbar. Vertical centering was dropped because it pushed content
+ * ~150px below the navbar (UAT immediately after rev 1 ship). The
+ * grid STILL carries `justify-items-center` so a single tile centers
+ * in its cell.
  */
 import { component$ } from "@builder.io/qwik";
 import { type DocumentHead, type RequestHandler } from "@builder.io/qwik-city";
@@ -56,7 +59,7 @@ export const onRequest: RequestHandler = async (event) => {
 // ---------------------------------------------------------------------------
 
 export default component$(() => (
-  <main class="mx-auto flex min-h-[60vh] w-full max-w-3xl flex-col items-center justify-center px-4 py-12">
+  <main class="mx-auto w-full max-w-3xl px-4 py-8">
     {/*
       REQ-11 (revised 2026-07-16, was: headerless). UAT showed the
       page reads as a "desert" without visual identity — the URL is
@@ -75,9 +78,10 @@ export default component$(() => (
       </p>
     </header>
     {/*
-      REQ-17 (new 2026-07-16). min-h-[60vh] avoids overflow below the
-      root-layout navbar; justify-items-center on the grid centers a
-      single tile in its cell rather than hugging the left edge.
+      REQ-17 (revised 2026-07-16 rev 2). <main> drops vertical
+      centering so content sits near the top of the viewport;
+      justify-items-center on the grid still centers a single tile
+      in its cell rather than hugging the left edge.
     */}
     <div
       class="grid w-full grid-cols-2 justify-items-center gap-6 sm:grid-cols-3 md:grid-cols-4"
