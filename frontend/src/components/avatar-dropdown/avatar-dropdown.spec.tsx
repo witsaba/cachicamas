@@ -220,17 +220,19 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       "/workspaces",
     );
 
-    // 2026-07-16 prompts (R-FP-NAV-001): a "Settings" entry links
-    // to the Prompt Studio at /settings/prompts. It is the only
-    // settings surface today; the entry is auth-gated by virtue
-    // of living inside the avatar dropdown (anon visitors never
-    // see this menu).
+    // 2026-07-16 settings-app-grid (R-SAG-NAV-001): the "Settings"
+    // menu item now links to /settings, the Launchpad-style app
+    // launcher grid. The grid currently lists one tile (Prompts);
+    // future tiles (Profile, Billing) will render without layout
+    // change. The entry remains auth-gated by virtue of living
+    // inside the avatar dropdown (anon visitors never see this
+    // menu).
     const settings = screen.querySelector(
       '[data-testid="avatar-menu-settings"]',
     );
     expect(settings).toBeTruthy();
     expect((settings as HTMLAnchorElement).getAttribute("href")).toBe(
-      "/settings/prompts",
+      "/settings",
     );
     expect((settings as HTMLElement).textContent ?? "").toContain("Settings");
 
