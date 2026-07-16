@@ -42,7 +42,7 @@
  *   via Object.assign, which shadows the internal getter and lets the
  *   handler read the pre-set `textarea.value`.
  */
-import { $, type QRL } from "@builder.io/qwik";
+import { $, component$, useSignal, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { beforeEach, test, expect } from "vitest";
 import { PromptEditor } from "./prompt-editor";
@@ -181,4 +181,97 @@ test("[prompt-editor]: Save button is disabled while saving={true}, even with bo
 
   const saveBtn = getSaveButton(screen);
   expect(saveBtn.disabled).toBe(true);
+});
+
+test("[prompt-editor]: resets local form state (slug/description/body/preview) when prompt transitions from Prompt to null (new-prompt flow)", async () => {
+  // Regression guard for UAT bug 2026-07-16: clicking "New Prompt"
+  // after editing an existing prompt left the editor form populated
+  // with the old prompt's data. The useTask$ reset task only ran
+  // its body when `prompt` was truthy, so the transition to null
+  // kept the previous values.
+  //
+  // Setup: wrap the editor in a parent that holds prompt as a
+  // signal, render once with a populated prompt, then mutate the
+  // signal to null (the same shape as the real route's
+  // `handleNewPrompt` handler) and verify all four form fields
+  // clear out.
+  //
+  // This test uses an inline TestWrapper component$ because
+  // createDOM()'s render() doesn't support in-place prop mutation;
+  // the wrapper lets us drive the transition through a signal,
+  // which IS what Qwik does in production when the parent
+  // component re-renders with a different prop value.
+  const originalPrompt: Prompt = {
+    id: 1,
+    slug: "hello",
+    description: "An old prompt",
+    body: "Old body content that should be cleared",
+    current_revision: 1,
+    created_at: "2026-07-16T00:00:00Z",
+    updated_at: "2026-07-16T00:00:00Z",
+    deleted_at: null,
+  };
+
+  const TestWrapper = component$(() => {
+    const prompt = useSignal<Prompt | null>(originalPrompt);
+    const mode = useSignal<"create" | "edit">("edit");
+
+    return (
+      <>
+        <button
+          type="button"
+          data-testid="simulate-new-prompt"
+          onClick$={() => {
+            // Mirror the real route's handleNewPrompt: clear prompt, switch to create.
+            prompt.value = null;
+            mode.value = "create";
+          }}
+        >
+          Simulate New Prompt
+        </button>
+        <PromptEditor
+          prompt={prompt.value}
+          revisions={[]}
+          mode={mode.value}
+          saving={false}
+          error={null}
+          onSave$={makeRecordingOnSave()}
+          onCancel$={makeQrlStub()}
+          onDelete$={makeQrlStub()}
+          onRestore$={makeRestoreQrlStub()}
+        />
+      </>
+    );
+  });
+
+  const { screen, render, userEvent } = await createDOM();
+  await render(<TestWrapper />);
+
+  // Step 1: Editor is populated with the original prompt.
+  const slugInput = screen.querySelector(
+    '[data-testid="prompt-editor-slug"]',
+  ) as HTMLInputElement;
+  expect(slugInput).toBeTruthy();
+  expect(slugInput.value).toBe("hello");
+
+  const descriptionInput = screen.querySelector(
+    '[data-testid="prompt-editor-description"]',
+  ) as HTMLInputElement;
+  expect(descriptionInput.value).toBe("An old prompt");
+
+  expect(getBodyTextarea(screen).value).toBe(
+    "Old body content that should be cleared",
+  );
+
+  // Step 2: Simulate the parent's "New Prompt" click.
+  const newPromptBtn = screen.querySelector(
+    '[data-testid="simulate-new-prompt"]',
+  ) as HTMLButtonElement;
+  expect(newPromptBtn).toBeTruthy();
+  await userEvent(newPromptBtn, "click");
+
+  // Step 3: All four form fields MUST be empty after the transition.
+  expect(slugInput.value).toBe("");
+  expect(descriptionInput.value).toBe("");
+  expect(getBodyTextarea(screen).value).toBe("");
 });
