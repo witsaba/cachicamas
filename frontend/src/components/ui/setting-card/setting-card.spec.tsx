@@ -56,7 +56,9 @@ describe("components/ui/setting-card", () => {
       const btn = screen.querySelector("button");
       expect(btn).toBeTruthy();
       // No anchor in the DOM (polymorphism switch worked).
-      expect(screen.querySelector("a")).toBeNull();
+      // querySelector returns undefined (not null) when no match —
+      // use toBeFalsy() to match the Qwik testing-env contract.
+      expect(screen.querySelector("a")).toBeFalsy();
     });
 
     it("as='button' defaults type to 'button' (anti-implicit-submit)", async () => {
