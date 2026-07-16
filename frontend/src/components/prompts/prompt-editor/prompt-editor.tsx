@@ -14,7 +14,16 @@
  *   - Activity feed
  */
 
-import { component$, useSignal, useTask$, $, type QRL } from "@builder.io/qwik";
+import {
+  component$,
+  useSignal,
+  useTask$,
+  useComputed$,
+  $,
+  noSerialize,
+  type NoSerialize,
+  type QRL,
+} from "@builder.io/qwik";
 import type { Prompt, PromptRevision } from "~/lib/prompts-api";
 import { MarkdownTextarea } from "~/components/prompts/markdown-textarea/markdown-textarea";
 import { MarkdownPreview } from "~/components/prompts/markdown-preview/markdown-preview";
@@ -58,8 +67,16 @@ export const PromptEditor = component$<PromptEditorProps>(
     const body = useSignal(prompt?.body ?? "");
     const previewBody = useSignal(prompt?.body ?? "");
 
-    // Debounce timer for preview update
-    const debounceTimer = useSignal<ReturnType<typeof setTimeout> | null>(null);
+    // Debounce timer for preview update.
+    // The timer handle is wrapped in noSerialize() because
+    // `setTimeout` returns either a number (browsers) or a Timeout
+    // object (Node) — neither is serializable in Qwik's resumable
+    // model. noSerialize opts the value out of the serialization
+    // check; it is discarded on server-side render and re-created
+    // when the component resumes on the client.
+    const debounceTimer = useSignal<
+      NoSerialize<ReturnType<typeof setTimeout>> | undefined
+    >(undefined);
 
     // Dialog state
     const showDeleteConfirm = useSignal(false);
@@ -80,23 +97,32 @@ export const PromptEditor = component$<PromptEditorProps>(
     const handleBodyChange = $((newBody: string) => {
       body.value = newBody;
 
-      if (debounceTimer.value) {
+      if (debounceTimer.value !== undefined) {
         clearTimeout(debounceTimer.value);
       }
-      debounceTimer.value = setTimeout(() => {
-        previewBody.value = newBody;
-      }, DEBOUNCE_MS);
+      debounceTimer.value = noSerialize(
+        setTimeout(() => {
+          previewBody.value = newBody;
+        }, DEBOUNCE_MS),
+      );
     });
 
-    const hasChanges =
+    // Derived values use useComputed$ for perf. Plain consts derived from
+    // signals ARE reactive in Qwik (component$ re-runs on signal change),
+    // but they cause the whole template to re-render. useComputed$ enables
+    // surgical updates — only the JSX nodes that read .value get updated
+    // (Qwik best practices: "Moving signal reads to useTask$ or
+    // useComputed$").
+    const hasChanges = useComputed$(() =>
       mode === "create"
         ? body.value.trim().length > 0
-        : body.value !== (prompt?.body ?? "");
+        : body.value !== (prompt?.body ?? ""),
+    );
 
-    const canSave = body.value.trim().length > 0 && !saving;
+    const canSave = useComputed$(() => body.value.trim().length > 0 && !saving);
 
     const handleSave = $(() => {
-      if (!canSave) return;
+      if (!canSave.value) return;
       onSave$({
         slug: mode === "create" ? slug.value : undefined,
         description: mode === "create" ? description.value : undefined,
@@ -222,7 +248,7 @@ export const PromptEditor = component$<PromptEditorProps>(
             )}
           </div>
           <div class="flex items-center gap-2">
-            {!hasChanges && (
+            {!hasChanges.value && (
               <span class="text-xs text-slate-400">No changes to save</span>
             )}
             <Button
@@ -236,7 +262,7 @@ export const PromptEditor = component$<PromptEditorProps>(
             <Button
               type="button"
               variant="primary"
-              disabled={!canSave}
+              disabled={!canSave.value}
               loading={saving}
               onClick$={handleSave}
               testId="prompt-editor-save"
