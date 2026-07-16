@@ -6,8 +6,8 @@
  *   - SCN-10.1 / SCN-10.2 (auth gate + grid render)
  *   - REQ-11 (page identity section — revised 2026-07-16, was headerless)
  *   - SCN-11.1 (revised 2026-07-16: page identity section present)
- *   - REQ-17 (layout centering — new 2026-07-16)
- *   - SCN-17.1 (centering classes on <main> + grid)
+ *   - REQ-17 (layout positioning near top — REVISED 2026-07-16 rev 2, was: layout centering)
+ *   - SCN-17.1 (revised rev 2: <main> drops vertical centering, keeps w-full/max-w-3xl/py-; grid keeps justify-items-center)
  *
  * RED step: until `./index` exists, the import fails and the suite
  * is reported as failing by vitest. That failure IS the RED state.
@@ -176,17 +176,21 @@ describe("routes/settings/index — canonical guard chain + grid render", () => 
     expect((subtitle?.textContent ?? "").trim().length).toBeGreaterThan(0);
   });
 
-  it("REQ-17 (new 2026-07-16) / SCN-17.1 — <main> centers content vertically + horizontally", async () => {
+  it("REQ-17 (rev 2026-07-16 rev 2) / SCN-17.1 — <main> positions content near top of viewport (no vertical centering)", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
     const main = screen.querySelector("main") as HTMLElement | null;
     expect(main).toBeTruthy();
     const cls = main?.className ?? "";
-    expect(cls).toContain("flex");
-    expect(cls).toContain("flex-col");
-    expect(cls).toContain("items-center");
-    expect(cls).toContain("justify-center");
-    expect(cls).toMatch(/min-h-/);
+    // Horizontal block centering via mx-auto + max-w-3xl + small top padding.
+    expect(cls).toContain("w-full");
+    expect(cls).toContain("max-w-3xl");
+    expect(cls).toMatch(/\bpy-\S+/);
+    // Vertical centering is REMOVED — these tokens must NOT be present.
+    expect(cls).not.toMatch(/min-h-/);
+    expect(cls).not.toContain("justify-center");
+    expect(cls).not.toContain("flex");
+    expect(cls).not.toContain("flex-col");
   });
 
   it("REQ-17 (new 2026-07-16) / SCN-17.1 — grid carries justify-items-center", async () => {
