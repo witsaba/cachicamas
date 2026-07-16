@@ -115,6 +115,11 @@ function isServerSide(): boolean {
  * Fetch wrapper that works in both Node SSR and browser contexts.
  * - Browser: uses standard fetch with relative URL
  * - Node SSR: uses absolute URL via SERVER_API_BASE_URL
+ *
+ * Default Content-Type is application/json because every prompts
+ * endpoint that accepts a body (POST /prompts, PATCH /prompts/:slug)
+ * decodes the body with json.NewDecoder on the backend. Older
+ * workspaces endpoints accept both forms; the prompts backend does not.
  */
 async function safeFetch(
   input: RequestInfo,
@@ -133,7 +138,7 @@ async function safeFetch(
   const resp = await fetch(fullUrl, {
     ...init,
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
@@ -204,13 +209,20 @@ async function parseResponse<T>(resp: Response): Promise<ApiResult<T>> {
 }
 
 /**
- * Encode form data as application/x-www-form-urlencoded.
+ * Encode form data as a JSON string.
+ *
+ * Why JSON and not application/x-www-form-urlencoded: the canonical
+ * backend handler (PromptHandler.Create / PromptHandler.Update) uses
+ * `json.NewDecoder(c.Request().Body).Decode(&req)`, which ONLY
+ * accepts application/json. The earlier form-encoded implementation
+ * matched the older workspaces API convention (lib/api.ts) but
+ * silently broke every save against the prompts backend — the
+ * backend returned 400 "request body must be JSON" and the editor
+ * error banner flashed briefly under the "No changes to save"
+ * affordance, easy to miss.
  */
-function formEncode(data: Record<string, string | undefined>): string {
-  return Object.entries(data)
-    .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v!)}`)
-    .join("&");
+function jsonEncode(data: Record<string, unknown>): string {
+  return JSON.stringify(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +274,7 @@ export async function createPrompt(
   input: CreatePromptInput,
 ): Promise<ApiResult<Prompt>> {
   try {
-    const body = formEncode({
+    const body = jsonEncode({
       slug: input.slug,
       description: input.description ?? "",
       body: input.body,
@@ -290,11 +302,11 @@ export async function updatePrompt(
   body: string,
 ): Promise<ApiResult<Prompt>> {
   try {
-    const encodedBody = formEncode({ body });
+    const encodedBody = jsonEncode({ body });
     const resp = await safeFetch(
       `${apiBaseUrl()}/prompts/${encodeURIComponent(slug)}`,
       {
-        method: "PUT",
+        method: "PATCH",
         body: encodedBody,
       },
     );

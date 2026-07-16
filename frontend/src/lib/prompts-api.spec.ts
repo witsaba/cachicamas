@@ -91,7 +91,7 @@ describe("prompts-api wire shapes", () => {
   // createPrompt
   // -------------------------------------------------------------------------
 
-  it("createPrompt calls POST /prompts with form data", async () => {
+  it("createPrompt calls POST /prompts with JSON body", async () => {
     vi.mocked(fetch).mockResolvedValue(mockResponse(PROMPT, { status: 201 }));
     const { createPrompt } = await import("./prompts-api");
     const result = await createPrompt({
@@ -103,10 +103,16 @@ describe("prompts-api wire shapes", () => {
     const call = vi.mocked(fetch).mock.calls[0];
     expect(call[0]).toContain("/prompts");
     expect(call[1]?.method).toBe("POST");
-    expect(call[1]?.body).toContain("slug=test-prompt");
-    expect(call[1]?.body).toContain("body=");
+    // JSON body — backend uses json.NewDecoder
+    const parsed = JSON.parse(call[1]?.body as string) as Record<
+      string,
+      string
+    >;
+    expect(parsed.slug).toBe("test-prompt");
+    expect(parsed.description).toBe("A test");
+    expect(parsed.body).toBe("# Hello");
     expect((call[1]?.headers as Record<string, string>)?.["Content-Type"]).toBe(
-      "application/x-www-form-urlencoded",
+      "application/json",
     );
   });
 
@@ -130,15 +136,20 @@ describe("prompts-api wire shapes", () => {
   // updatePrompt
   // -------------------------------------------------------------------------
 
-  it("updatePrompt calls PUT /prompts/:slug", async () => {
+  it("updatePrompt calls PATCH /prompts/:slug with JSON body", async () => {
     vi.mocked(fetch).mockResolvedValue(mockResponse(PROMPT, { status: 200 }));
     const { updatePrompt } = await import("./prompts-api");
     const result = await updatePrompt("test-prompt", "# Updated body");
     expect(result.ok).toBe(true);
     const call = vi.mocked(fetch).mock.calls[0];
     expect(call[0]).toContain("/prompts/test-prompt");
-    expect(call[1]?.method).toBe("PUT");
-    expect(call[1]?.body).toContain("body=");
+    expect(call[1]?.method).toBe("PATCH");
+    // JSON body — backend uses json.NewDecoder
+    const parsed = JSON.parse(call[1]?.body as string) as Record<
+      string,
+      string
+    >;
+    expect(parsed.body).toBe("# Updated body");
   });
 
   it("updatePrompt returns validation error on 400", async () => {
