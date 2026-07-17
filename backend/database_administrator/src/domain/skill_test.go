@@ -12,6 +12,7 @@
 package domain_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -27,14 +28,66 @@ func TestSkillRepository_PortInterface(t *testing.T) {
 	t.Parallel()
 	// Compile-time check: a fake must satisfy the interface. If the
 	// interface surface drifts, this file fails to build.
-	type fakeRepo struct{}
-	var _ domain.SkillRepository = (*fakeRepo)(nil)
+	fake := &fakeSkillRepo{}
+	var _ domain.SkillRepository = fake
+	if fake == nil {
+		t.Fatalf("unexpected nil fake")
+	}
 }
 
 func TestSkillRevisionRepository_PortInterface(t *testing.T) {
 	t.Parallel()
-	type fakeRevRepo struct{}
-	var _ domain.SkillRevisionRepository = (*fakeRevRepo)(nil)
+	fake := &fakeSkillRevisionRepo{}
+	var _ domain.SkillRevisionRepository = fake
+	if fake == nil {
+		t.Fatalf("unexpected nil fake")
+	}
+}
+
+// fakeSkillRepo satisfies domain.SkillRepository at compile time
+// (used only for the port interface test). No real methods; add
+// stubs here if a future test calls them.
+type fakeSkillRepo struct{}
+
+func (*fakeSkillRepo) Insert(context.Context, domain.SQLExecutor, *domain.Skill) error { return nil }
+func (*fakeSkillRepo) SelectBySlug(context.Context, domain.SQLExecutor, string) (*domain.Skill, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) SelectBySlugAny(context.Context, domain.SQLExecutor, string) (*domain.Skill, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) SelectByID(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) List(context.Context, domain.SQLExecutor, int) ([]*domain.Skill, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) ListWithCurrentRevision(context.Context, domain.SQLExecutor, int) ([]*domain.SkillListItem, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) UpdateBody(context.Context, domain.SQLExecutor, int64, string, string) error {
+	return nil
+}
+func (*fakeSkillRepo) SoftDelete(context.Context, domain.SQLExecutor, int64) error { return nil }
+func (*fakeSkillRepo) LockAndLoad(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
+	return nil, nil
+}
+func (*fakeSkillRepo) MaxRevisionNumber(context.Context, domain.SQLExecutor, int64) (int, error) {
+	return 0, nil
+}
+
+// fakeSkillRevisionRepo satisfies domain.SkillRevisionRepository at
+// compile time (used only for the port interface test).
+type fakeSkillRevisionRepo struct{}
+
+func (*fakeSkillRevisionRepo) Insert(context.Context, domain.SQLExecutor, *domain.SkillRevision) error {
+	return nil
+}
+func (*fakeSkillRevisionRepo) SelectBySkillAndNumber(context.Context, domain.SQLExecutor, int64, int) (*domain.SkillRevision, error) {
+	return nil, nil
+}
+func (*fakeSkillRevisionRepo) ListBySkillID(context.Context, domain.SQLExecutor, int64) ([]*domain.SkillRevision, error) {
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ package domain
 
 import (
 	"bytes"
+	"context"
 	"regexp"
 	"strings"
 	"time"
@@ -398,4 +399,114 @@ func LockStepCheck(slug, reqDescription string, fm Frontmatter) error {
 		return nil
 	}
 	return &ValidationError{Fields: fields}
+}
+
+// ---------------------------------------------------------------------------
+// Skill list / detail DTOs (used by the application + HTTP layers).
+//
+// SkillDetail is what the handler returns from
+// GET /skills/:name + POST /skills + PATCH /skills/:name + restore.
+// It carries `current_revision` so the frontend never has to derive
+// it (anti-drift gate from obs #1959 #2 — the prompts gotcha where
+// `v{undefined}` rendered because the field was undefined at
+// runtime).
+//
+// SkillListItem is the trimmed shape returned from GET /skills.
+// SkillRevisionItem is one entry in GET /skills/:name/revisions.
+// ---------------------------------------------------------------------------
+
+// SkillDetail is the response shape for a single skill (current state
+// + current revision number, joined at the DB level).
+type SkillDetail struct {
+	Skill
+	CurrentRevision int `db:"current_revision" json:"current_revision"`
+}
+
+// SkillListItem is the trimmed shape for GET /skills (list view).
+type SkillListItem struct {
+	Name            string    `db:"name"             json:"name"`
+	Description     string    `db:"description"      json:"description"`
+	CurrentRevision int       `db:"current_revision" json:"current_revision"`
+	UpdatedAt       time.Time `db:"updated_at"       json:"updated_at"`
+}
+
+// SkillRevisionItem is one entry in the GET /skills/:name/revisions
+// list. The body is intentionally omitted (it can be large); callers
+// that need a specific revision use the application service.
+type SkillRevisionItem struct {
+	RevisionNumber int       `db:"revision_number" json:"revision_number"`
+	Description    string    `db:"description"     json:"description"`
+	ChangeNote     *string   `db:"change_note"     json:"change_note"`
+	CreatedAt      time.Time `db:"created_at"      json:"created_at"`
+}
+
+// ---------------------------------------------------------------------------
+// Repository ports (hexagonal boundary). Implementations live under
+// src/infrastructure/postgres/skills/ (PR1b). Interfaces are small so
+// fakes are trivial in tests.
+// ---------------------------------------------------------------------------
+
+// sqlExecutor is satisfied by *sql.DB and *sql.Tx, so the service
+// can pass either to the repo depending on whether the operation
+// runs in a transaction. Defining it in the domain package keeps pgx
+// out of the domain (spec SCN-6.2 — see also imports_test.go).
+//
+// SkillRepository uses this same SQLExecutor type as the prompts
+// port (declared in prompt.go); defining it again here would
+// duplicate the interface so we reuse the same name on the same
+// underlying contract.
+
+// SkillRepository is the port for reading and persisting Skill rows.
+// The application layer depends only on this interface.
+//
+// Contract (implemented in PR1b):
+//
+//   - Insert(ctx, db, s) MUST set s.ID, s.CreatedAt, s.UpdatedAt from
+//     the DB clock and return the populated entity.
+//   - SelectBySlug(ctx, db, name) returns *NotFoundError with Code
+//     CodeNotFound when no active row matches.
+//   - SelectBySlugAny returns the row regardless of deleted_at;
+//     callers inspect the DeletedAt pointer themselves.
+//   - SelectByID returns *NotFoundError with Code CodeNotFound when
+//     no row matches.
+//   - List(ctx, db, limit) returns active rows ordered by updated_at
+//     DESC; limit is clamped at the application layer (default 50,
+//     hard cap 200).
+//   - ListWithCurrentRevision(ctx, db, limit) returns SkillListItem
+//     rows joined with MAX(revision_number).
+//   - UpdateBody(ctx, db, id, description, body) updates fields and
+//     updated_at from the DB clock.
+//   - SoftDelete(ctx, db, id) sets deleted_at = now(); idempotent.
+//   - LockAndLoad issues SELECT … FOR UPDATE; caller MUST be inside
+//     a transaction.
+//   - MaxRevisionNumber(ctx, db, skillID) returns
+//     COALESCE(MAX(revision_number), 0) under the FOR UPDATE lock.
+type SkillRepository interface {
+	Insert(ctx context.Context, db sqlExecutor, s *Skill) error
+	SelectBySlug(ctx context.Context, db sqlExecutor, name string) (*Skill, error)
+	SelectBySlugAny(ctx context.Context, db sqlExecutor, name string) (*Skill, error)
+	SelectByID(ctx context.Context, db sqlExecutor, id int64) (*Skill, error)
+	List(ctx context.Context, db sqlExecutor, limit int) ([]*Skill, error)
+	ListWithCurrentRevision(ctx context.Context, db sqlExecutor, limit int) ([]*SkillListItem, error)
+	UpdateBody(ctx context.Context, db sqlExecutor, id int64, description, body string) error
+	SoftDelete(ctx context.Context, db sqlExecutor, id int64) error
+	LockAndLoad(ctx context.Context, db sqlExecutor, id int64) (*Skill, error)
+	MaxRevisionNumber(ctx context.Context, db sqlExecutor, skillID int64) (int, error)
+}
+
+// SkillRevisionRepository is the port for reading and persisting
+// SkillRevision rows.
+//
+// Contract (implemented in PR1b):
+//
+//   - Insert(ctx, db, r) MUST set r.ID, r.CreatedAt from the DB clock.
+//   - SelectBySkillAndNumber(ctx, db, skillID, n) returns the
+//     specific revision; *NotFoundError with Code CodeNotFound when
+//     missing.
+//   - ListBySkillID(ctx, db, skillID) returns rows ordered by
+//     revision_number DESC.
+type SkillRevisionRepository interface {
+	Insert(ctx context.Context, db sqlExecutor, r *SkillRevision) error
+	SelectBySkillAndNumber(ctx context.Context, db sqlExecutor, skillID int64, n int) (*SkillRevision, error)
+	ListBySkillID(ctx context.Context, db sqlExecutor, skillID int64) ([]*SkillRevision, error)
 }
