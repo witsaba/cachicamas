@@ -354,3 +354,140 @@ test("[skill-editor]: clicking Save when canSave is FALSE does NOT invoke onSave
 
   expect(capturedCalls.length).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Task 6.9 — reset signals when currentSkill changes (incl. null transition)
+// ---------------------------------------------------------------------------
+
+test("[skill-editor]: loads description + body from skill prop on first render (edit mode)", async () => {
+  // Sanity: signals MUST reflect the bound skill on mount. This is
+  // the same path useTask$ uses to seed the form fields.
+  const { screen } = await renderEditor({
+    mode: "edit",
+    skill: makeSkill({
+      description: "Loaded description",
+      body: "Loaded body content",
+    }),
+  });
+
+  expect(getDescriptionInput(screen).value).toBe("Loaded description");
+  expect(getBodyTextarea(screen).value).toBe("Loaded body content");
+});
+
+test("[skill-editor]: resets description + body when currentSkill transitions to a different skill (edit mode)", async () => {
+  // Regression: switching from skill A to skill B must repopulate
+  // the form. Without useTask$, the form keeps A's values when B
+  // is selected. This mirrors the prompts UAT bug (obs #1977 PR2a
+  // describes a similar reset-on-null fix).
+  const TestWrapper = component$(() => {
+    const skill = useSignal<Skill | null>(makeSkill({
+      id: 1,
+      name: "skill-a",
+      description: "Description A",
+      body: "Body A",
+    }));
+
+    return (
+      <>
+        <button
+          type="button"
+          data-testid="simulate-skill-b"
+          onClick$={() => {
+            skill.value = makeSkill({
+              id: 2,
+              name: "skill-b",
+              description: "Description B",
+              body: "Body B",
+            });
+          }}
+        >
+          Simulate Skill B
+        </button>
+        <SkillEditor
+          skill={skill.value}
+          revisions={[]}
+          mode={"edit"}
+          saving={false}
+          error={null}
+          onSave$={makeRecordingOnSave()}
+          onCancel$={makeQrlStub()}
+          onDelete$={makeQrlStub()}
+          onRestore$={makeRestoreQrlStub()}
+        />
+      </>
+    );
+  });
+
+  const { screen, render, userEvent } = await createDOM();
+  await render(<TestWrapper />);
+
+  // Step 1: skill A is loaded.
+  expect(getDescriptionInput(screen).value).toBe("Description A");
+  expect(getBodyTextarea(screen).value).toBe("Body A");
+
+  // Step 2: switch to skill B.
+  const switchBtn = screen.querySelector(
+    '[data-testid="simulate-skill-b"]',
+  ) as HTMLButtonElement;
+  expect(switchBtn).toBeTruthy();
+  await userEvent(switchBtn, "click");
+
+  // Step 3: form fields MUST now reflect skill B.
+  expect(getDescriptionInput(screen).value).toBe("Description B");
+  expect(getBodyTextarea(screen).value).toBe("Body B");
+});
+
+test("[skill-editor]: clears description + body when currentSkill transitions to null (new-skill flow)", async () => {
+  // Regression: clicking "New Skill" after editing an existing skill
+  // must clear the form. Without useTask$'s null branch, the previous
+  // skill's values linger. Mirrors the prompt-editor reset-on-null
+  // bug from PR #50 (prompt-editor fix).
+  const TestWrapper = component$(() => {
+    const skill = useSignal<Skill | null>(makeSkill({
+      description: "An old description",
+      body: "An old body",
+    }));
+
+    return (
+      <>
+        <button
+          type="button"
+          data-testid="simulate-new-skill"
+          onClick$={() => {
+            skill.value = null;
+          }}
+        >
+          Simulate New Skill
+        </button>
+        <SkillEditor
+          skill={skill.value}
+          revisions={[]}
+          mode={"create"}
+          saving={false}
+          error={null}
+          onSave$={makeRecordingOnSave()}
+          onCancel$={makeQrlStub()}
+          onDelete$={makeQrlStub()}
+          onRestore$={makeRestoreQrlStub()}
+        />
+      </>
+    );
+  });
+
+  const { screen, render, userEvent } = await createDOM();
+  await render(<TestWrapper />);
+
+  // Step 1: skill with content loaded.
+  expect(getDescriptionInput(screen).value).toBe("An old description");
+  expect(getBodyTextarea(screen).value).toBe("An old body");
+
+  // Step 2: transition to null (new-skill).
+  const newBtn = screen.querySelector(
+    '[data-testid="simulate-new-skill"]',
+  ) as HTMLButtonElement;
+  await userEvent(newBtn, "click");
+
+  // Step 3: form fields MUST be empty.
+  expect(getDescriptionInput(screen).value).toBe("");
+  expect(getBodyTextarea(screen).value).toBe("");
+});
