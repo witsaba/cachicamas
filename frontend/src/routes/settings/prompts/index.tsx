@@ -10,12 +10,18 @@
  *   error     → error alert with retry
  *   empty     → EmptyState (no prompts)
  *   loaded    → PromptSidebar + PromptEditor
+ *
+ * Navigation:
+ *   - The `← Back` affordance uses `window.history.back()` with a
+ *     `/settings` fallback for deep-link entries. NOT a hardcoded
+ *     `<Link href="...">` — semantic actions survive navigation
+ *     flow changes (deep links, bookmarks, cross-navigation).
  */
 
 import { $, component$, useSignal } from "@builder.io/qwik";
 import {
-  Link,
   routeLoader$,
+  useNavigate,
   type DocumentHead,
   type RequestHandler,
 } from "@builder.io/qwik-city";
@@ -83,6 +89,19 @@ export default component$(() => {
   const currentRevisions = useSignal<PromptRevision[]>([]);
   const editorSaving = useSignal(false);
   const editorError = useSignal<string | null>(null);
+
+  // Real-history back: navigate to wherever the user came from.
+  // Falls back to /settings (the URL hierarchy parent) for
+  // deep-link / new-tab entries that have no history.
+  const nav = useNavigate();
+  const handleBack = $(() => {
+    if (typeof window === "undefined") return; // SSR guard
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      nav("/settings");
+    }
+  });
 
   // Load prompt detail + revisions
   const loadPromptDetail = $(async (slug: string) => {
@@ -269,13 +288,14 @@ export default component$(() => {
       {/* Page header */}
       <div class="mb-6 flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <Link
-            href="/home"
+          <button
+            type="button"
+            onClick$={handleBack}
             class="text-sm text-slate-500 hover:text-slate-700"
             data-testid="prompt-studio-back"
           >
             &larr; Back
-          </Link>
+          </button>
           <h1 class="text-2xl font-bold text-slate-900">Prompts</h1>
         </div>
         {hasPrompts && mode.value !== "create" && (

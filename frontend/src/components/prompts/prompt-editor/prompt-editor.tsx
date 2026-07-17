@@ -82,7 +82,14 @@ export const PromptEditor = component$<PromptEditorProps>(
     const showDeleteConfirm = useSignal(false);
     const showRestoreConfirm = useSignal<number | null>(null);
 
-    // Reset local state when prompt changes
+    // Reset local state when prompt changes.
+    //
+    // Tracked dep is `prompt?.slug` so the task fires on BOTH
+    // transitions: prompt-X → prompt-Y (load a different existing
+    // prompt) AND prompt-X → null (handleNewPrompt switches to
+    // create mode with no prompt). The null branch is what was
+    // missing before — without it, switching to create mode kept
+    // the previous prompt's values in the form fields.
     useTask$(({ track }) => {
       track(() => prompt?.slug);
       if (prompt) {
@@ -90,6 +97,13 @@ export const PromptEditor = component$<PromptEditorProps>(
         description.value = prompt.description ?? "";
         body.value = prompt.body;
         previewBody.value = prompt.body;
+      } else {
+        // prompt is null — create mode. Clear all four signals
+        // so the form starts empty.
+        slug.value = "";
+        description.value = "";
+        body.value = "";
+        previewBody.value = "";
       }
     });
 
@@ -119,7 +133,17 @@ export const PromptEditor = component$<PromptEditorProps>(
         : body.value !== (prompt?.body ?? ""),
     );
 
-    const canSave = useComputed$(() => body.value.trim().length > 0 && !saving);
+    // Save is enabled only when (a) the body has content,
+    // (b) we're not currently saving, AND (c) there ARE changes
+    // to save. The third clause is the one that matters for edit
+    // mode: without it, picking up a prompt with non-empty body
+    // would leave the button enabled for a no-op update. The
+    // existing "No changes to save" text already gated on
+    // !hasChanges — this brings the button in line with it.
+    const canSave = useComputed$(
+      () =>
+        body.value.trim().length > 0 && !saving && hasChanges.value,
+    );
 
     const handleSave = $(() => {
       if (!canSave.value) return;
