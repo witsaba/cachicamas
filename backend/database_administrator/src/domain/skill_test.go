@@ -19,6 +19,78 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// ParseFrontmatter (spec S-SK-031..035 — ANTI-DRIFT GATE).
+//
+// Each frontmatter test below corresponds to a real failure mode the
+// parser MUST surface as a *ValidationError. Frontmatter shape is the
+// critical gateway: a misread here means the rest of the contract is
+// unenforceable (lock-step, reserved-word, etc).
+// ---------------------------------------------------------------------------
+
+func TestParseFrontmatter_RejectsMissingFence(t *testing.T) {
+	t.Parallel()
+	// No leading "---"; body starts with markdown.
+	body := "name: pdf-cleanup\ndescription: d\n---\n\n# Markdown only\n"
+	if _, err := domain.ParseFrontmatter(body); err == nil {
+		t.Fatalf("expected error for missing leading fence, got nil")
+	}
+}
+
+func TestParseFrontmatter_RejectsMalformedYAML(t *testing.T) {
+	t.Parallel()
+	// Valid fence markers but unparseable YAML inside.
+	body := "---\nname: pdf-cleanup\n  description: [unterminated\n---\n"
+	if _, err := domain.ParseFrontmatter(body); err == nil {
+		t.Fatalf("expected error for malformed YAML, got nil")
+	}
+}
+
+func TestParseFrontmatter_RejectsMissingName(t *testing.T) {
+	t.Parallel()
+	body := "---\ndescription: a description\n---\n"
+	if _, err := domain.ParseFrontmatter(body); err == nil {
+		t.Fatalf("expected error for missing name key, got nil")
+	}
+}
+
+func TestParseFrontmatter_RejectsMissingDescription(t *testing.T) {
+	t.Parallel()
+	body := "---\nname: pdf-cleanup\n---\n"
+	if _, err := domain.ParseFrontmatter(body); err == nil {
+		t.Fatalf("expected error for missing description key, got nil")
+	}
+}
+
+func TestParseFrontmatter_AcceptsValidFrontmatter(t *testing.T) {
+	t.Parallel()
+	body := "---\nname: pdf-cleanup\ndescription: A description.\n---\n\n# Heading\n\nMarkdown body.\n"
+	fm, err := domain.ParseFrontmatter(body)
+	if err != nil {
+		t.Fatalf("expected nil for valid frontmatter, got %v", err)
+	}
+	if fm.Name != "pdf-cleanup" {
+		t.Errorf("expected fm.Name = %q, got %q", "pdf-cleanup", fm.Name)
+	}
+	if fm.Description != "A description." {
+		t.Errorf("expected fm.Description = %q, got %q", "A description.", fm.Description)
+	}
+}
+
+func TestParseFrontmatter_AcceptsFrontmatterOnlyBody(t *testing.T) {
+	t.Parallel()
+	// No markdown after the closing fence — the spec allows this for
+	// "metadata-only" skills.
+	body := "---\nname: pdf-cleanup\ndescription: d\n---\n"
+	fm, err := domain.ParseFrontmatter(body)
+	if err != nil {
+		t.Fatalf("expected nil for frontmatter-only body, got %v", err)
+	}
+	if fm.Name != "pdf-cleanup" {
+		t.Errorf("expected fm.Name = %q, got %q", "pdf-cleanup", fm.Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ValidateSkillBody (spec S-SK-030, S-SK-031, S-SK-003).
 // ---------------------------------------------------------------------------
 
