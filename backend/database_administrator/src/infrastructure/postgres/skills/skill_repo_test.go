@@ -227,8 +227,9 @@ func TestSkillRepo_SelectBySlug_ExcludesDeleted(t *testing.T) {
 
 	seeded := seedSkill(t, db, "live-skill", "active", "body")
 	deleted := seedSkill(t, db, "dead-skill", "active", "body")
-	if err := repo.SoftDelete(ctx, db, deleted.ID); err != nil {
-		t.Fatalf("SoftDelete: %v", err)
+	// Soft-delete via raw SQL — SoftDelete is implemented in task 2.8.
+	if _, err := db.ExecContext(ctx, "UPDATE skill SET deleted_at = now() WHERE id = $1", deleted.ID); err != nil {
+		t.Fatalf("raw soft-delete: %v", err)
 	}
 
 	// Live row is returned.
@@ -265,8 +266,9 @@ func TestSkillRepo_SelectBySlugAny_IncludesDeleted(t *testing.T) {
 
 	live := seedSkill(t, db, "alive", "active", "body")
 	deleted := seedSkill(t, db, "doomed", "active", "body")
-	if err := repo.SoftDelete(ctx, db, deleted.ID); err != nil {
-		t.Fatalf("SoftDelete: %v", err)
+	// Soft-delete via raw SQL — SoftDelete is implemented in task 2.8.
+	if _, err := db.ExecContext(ctx, "UPDATE skill SET deleted_at = now() WHERE id = $1", deleted.ID); err != nil {
+		t.Fatalf("raw soft-delete: %v", err)
 	}
 
 	// Live row.

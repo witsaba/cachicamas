@@ -113,11 +113,46 @@ func (r *SkillRepo) Insert(ctx context.Context, db domain.SQLExecutor, s *domain
 // later tasks; the signatures stay stable.
 // ---------------------------------------------------------------------------
 
-func (r *SkillRepo) SelectBySlug(context.Context, domain.SQLExecutor, string) (*domain.Skill, error) {
-	return nil, nil
+// SelectBySlug returns the LIVE (deleted_at IS NULL) row with the
+// given name, or *domain.NotFoundError when no live row matches. The
+// partial UNIQUE index + the explicit `WHERE deleted_at IS NULL`
+// clause together ensure soft-deleted rows are invisible (spec
+// R-SK-002 / SCN-2.1).
+func (r *SkillRepo) SelectBySlug(ctx context.Context, db domain.SQLExecutor, name string) (*domain.Skill, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT `+skillColumnList+` FROM `+skillTableName+`
+             WHERE name = $1 AND deleted_at IS NULL`,
+		name,
+	)
+	s, err := scanSkill(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: skillTableName}
+		}
+		return nil, fmt.Errorf("postgres.SkillRepo.SelectBySlug: %w", err)
+	}
+	return s, nil
 }
-func (r *SkillRepo) SelectBySlugAny(context.Context, domain.SQLExecutor, string) (*domain.Skill, error) {
-	return nil, nil
+
+// SelectBySlugAny returns the row with the given name regardless of
+// its deleted_at state. Used by the service to distinguish
+// "name never existed" (returns *NotFoundError) from "name exists
+// but is soft-deleted" (returns the row with DeletedAt != nil; the
+// service then maps to *SkillGoneError → 410 per spec R-SK-005).
+func (r *SkillRepo) SelectBySlugAny(ctx context.Context, db domain.SQLExecutor, name string) (*domain.Skill, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT `+skillColumnList+` FROM `+skillTableName+`
+             WHERE name = $1`,
+		name,
+	)
+	s, err := scanSkill(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: skillTableName}
+		}
+		return nil, fmt.Errorf("postgres.SkillRepo.SelectBySlugAny: %w", err)
+	}
+	return s, nil
 }
 func (r *SkillRepo) SelectByID(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
 	return nil, nil
