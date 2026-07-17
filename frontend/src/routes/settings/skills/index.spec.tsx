@@ -91,6 +91,14 @@ vi.mock("~/lib/skills-api", () => ({
   createSkill: vi.fn(
     async (input: { name: string; description: string; body: string }) => {
       createCalls.push(input);
+      if (Object.keys(validationFields).length > 0) {
+        return {
+          ok: false as const,
+          kind: "validation" as const,
+          message: "Validation failed",
+          fields: { ...validationFields },
+        };
+      }
       return {
         ok: true as const,
         value: {
@@ -543,5 +551,54 @@ describe("routes/settings/skills — 410 → not_found mapping (7.11)", () => {
     );
     expect(errorEl).toBeTruthy();
     expect(errorEl?.textContent ?? "").toContain("deleted");
+  });
+});
+
+// =========================================================================
+// 7.12 — Validation errors surface inline
+// =========================================================================
+
+describe("routes/settings/skills — validation errors (7.12)", () => {
+  it("TestSettingsSkillsRoute_ValidationErrorsSurfaceInline — when createSkill returns 400 with fields.* keys, the error appears in the editor error area", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
+    validationFields = {
+      name: "Name is taken.",
+      description: "Description is too long.",
+    };
+    const { screen, render, userEvent } = await createDOM();
+    await render(<TestWrapper />);
+
+    // Trigger create flow.
+    const newBtn = screen.querySelector(
+      '[data-testid="skill-studio-new"]',
+    ) as HTMLElement | null;
+    await userEvent(newBtn!, "click");
+
+    const desc = screen.querySelector(
+      '[data-testid="skill-editor-description"]',
+    ) as HTMLInputElement | null;
+    const body = screen.querySelector(
+      '[data-testid="skill-editor-body"]',
+    ) as HTMLTextAreaElement | null;
+    desc!.value = "x".repeat(2000);
+    await userEvent(desc!, "input", { target: desc! });
+    body!.value = "---\nname: conflict-skill\ndescription: too long\n---\n";
+    await userEvent(body!, "input", { target: body! });
+
+    const saveBtn = screen.querySelector(
+      '[data-testid="skill-editor-save"]',
+    ) as HTMLButtonElement | null;
+    expect(saveBtn!.disabled).toBe(false);
+    await userEvent(saveBtn!, "click");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The error banner shows the validation message OR a per-field
+    // banner is rendered. Lock the contract: at minimum the editor
+    // error banner is present with a non-empty message.
+    const errorEl = screen.querySelector(
+      '[data-testid="skill-editor-error"]',
+    );
+    expect(errorEl).toBeTruthy();
+    expect((errorEl?.textContent ?? "").length).toBeGreaterThan(0);
   });
 });
