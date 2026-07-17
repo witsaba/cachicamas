@@ -19,6 +19,55 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Error vocabulary (spec §7, design §3.6).
+//
+// Wire codes are the locked vocabulary the handler maps to HTTP
+// statuses (400 / 404 / 409 / 410 / 500). Skill-specific values are
+// `skill_deleted` (added here for the 410 case — organization.go has
+// no 410 type); the rest come from organization.go.
+// ---------------------------------------------------------------------------
+
+func TestSkillValidationError_Fields(t *testing.T) {
+	t.Parallel()
+	err := &domain.ValidationError{
+		Fields: map[string]string{"name": domain.MsgSkillNameLength},
+	}
+	if err.Code() != domain.CodeValidation {
+		t.Errorf("expected Code() = %q, got %q", domain.CodeValidation, err.Code())
+	}
+	if err.Fields["name"] == "" {
+		t.Errorf("expected Fields[name] to be non-empty, got %+v", err.Fields)
+	}
+}
+
+func TestSkillNotFoundError_ResourceSkill(t *testing.T) {
+	t.Parallel()
+	err := &domain.NotFoundError{Resource: domain.ResourceSkill}
+	if err.Code() != domain.CodeNotFound {
+		t.Errorf("expected Code() = %q, got %q", domain.CodeNotFound, err.Code())
+	}
+	if err.Resource != domain.ResourceSkill {
+		t.Errorf("expected Resource = %q, got %q", domain.ResourceSkill, err.Resource)
+	}
+}
+
+func TestSkillConflictError_CodeIsConflict(t *testing.T) {
+	t.Parallel()
+	err := &domain.ConflictError{}
+	if err.Code() != domain.CodeConflict {
+		t.Errorf("expected Code() = %q, got %q", domain.CodeConflict, err.Code())
+	}
+}
+
+func TestSkillGoneError_CodeIsSkillDeleted(t *testing.T) {
+	t.Parallel()
+	err := domain.NewSkillDeleted("pdf-cleanup")
+	if err.Code() != domain.CodeSkillDeleted {
+		t.Errorf("expected Code() = %q, got %q", domain.CodeSkillDeleted, err.Code())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Entity structs (spec INV-1, INV-2; mirrors `prompt.go` shape).
 // ---------------------------------------------------------------------------
 
