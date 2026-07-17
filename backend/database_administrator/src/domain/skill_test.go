@@ -72,6 +72,9 @@ func (*fakeSkillRepo) SelectBySlugAny(context.Context, domain.SQLExecutor, strin
 func (*fakeSkillRepo) SelectByID(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
 	return nil, nil
 }
+func (*fakeSkillRepo) SelectByIDWithCurrentRevision(context.Context, domain.SQLExecutor, int64) (*domain.SkillDetail, error) {
+	return nil, nil
+}
 func (*fakeSkillRepo) List(context.Context, domain.SQLExecutor, int) ([]*domain.Skill, error) {
 	return nil, nil
 }
