@@ -160,6 +160,71 @@ func TestSkillService_Create_WritesRevisionOne(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.2 — Create rejects invalid + reserved names.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Create_RejectsInvalidName(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	cases := []struct {
+		name string
+		bad  string
+	}{
+		{"uppercase", "BadName"},
+		{"leading-hyphen", "-leading"},
+		{"trailing-hyphen", "trailing-"},
+		{"consecutive-hyphens", "foo--bar"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+				Name:        tc.bad,
+				Description: "desc",
+				Body:        validSkillBody(tc.bad, "desc"),
+			})
+			var verr *domain.ValidationError
+			if !errors.As(err, &verr) {
+				t.Fatalf("expected *ValidationError for name=%q, got %T (%v)", tc.bad, err, err)
+			}
+		})
+	}
+}
+
+func TestSkillService_Create_RejectsReservedName(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	cases := []string{
+		"anthropic-toolkit",
+		"claude-helper",
+		"my-anthropic-skill",
+		"claudeCode",
+	}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+				Name:        name,
+				Description: "desc",
+				Body:        validSkillBody(name, "desc"),
+			})
+			var verr *domain.ValidationError
+			if !errors.As(err, &verr) {
+				t.Fatalf("expected *ValidationError for reserved name=%q, got %T (%v)", name, err, err)
+			}
+		})
+	}
+}
+
 // _ = sync / atomic are used by later concurrency tests; referencing
 // them here avoids unused-import errors as the file grows.
 var (
