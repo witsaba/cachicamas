@@ -90,25 +90,29 @@ export default component$(() => {
 // Reactive: useTask$ syncs the local `skills` signal whenever the
 // loader value changes. The hook's `.value` is a wrapper; the
 // actual loader data is at `.value.value` (Qwik City loader contract).
+// The cast through `unknown` is required because Qwik's types do not
+// surface the wrapper — only the loaders return value is typed.
   const skills = useSignal<Skill[]>(() => {
-    const v = skillsLoader.value.value as { ok?: boolean; skills?: Skill[] };
+    const v = (skillsLoader.value as unknown as { value: unknown })
+      .value as { ok?: boolean; skills?: Skill[] };
     return v?.ok && Array.isArray(v.skills) ? v.skills : [];
   });
   useTask$(({ track }) => {
     const wrapper = track(() => skillsLoader.value);
-    const v = (wrapper as { value: unknown }).value as {
+    const v = (wrapper as unknown as { value: unknown }).value as {
       ok?: boolean;
       skills?: Skill[];
     };
     skills.value = v?.ok && Array.isArray(v.skills) ? v.skills : [];
   });
   const loaderError = useSignal<string | null>(() => {
-    const v = skillsLoader.value.value as { ok?: boolean; message?: string };
+    const v = (skillsLoader.value as unknown as { value: unknown })
+      .value as { ok?: boolean; message?: string };
     return v?.ok ? null : (v?.message ?? null);
   });
   useTask$(({ track }) => {
     const wrapper = track(() => skillsLoader.value);
-    const v = (wrapper as { value: unknown }).value as {
+    const v = (wrapper as unknown as { value: unknown }).value as {
       ok?: boolean;
       message?: string;
     };
@@ -216,8 +220,10 @@ export default component$(() => {
         } else {
           // Update current skill in memory
           currentSkill.value = result.value;
-          const revResult = await listRevisions(selectedName.value);
-          currentRevisions.value = revResult.ok ? revResult.value : [];
+          if (selectedName.value) {
+            const revResult = await listRevisions(selectedName.value);
+            currentRevisions.value = revResult.ok ? revResult.value : [];
+          }
         }
       } else {
         editorError.value = result.message;
