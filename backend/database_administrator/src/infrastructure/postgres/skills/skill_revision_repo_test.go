@@ -1,9 +1,7 @@
-// Package skills_test — integration tests for the SkillRevisionRepo.
-// Companion file to skill_repo_test.go. Mirrors prompts/
-// prompt_revision_repo_test.go shape: separate file, separate test
-// functions, same helpers (openTestDB, ensureSkillMigrations,
-// cleanSkillTables, makeSkillInput, seedSkill) defined in
-// skill_repo_test.go.
+// Package skills_test — integration tests for SkillRevisionRepo.
+// Companion to skill_repo_test.go. Same helpers (openTestDB,
+// ensureSkillMigrations, cleanSkillTables, makeSkillInput, seedSkill)
+// live in skill_repo_test.go.
 package skills_test
 
 import (
@@ -17,14 +15,20 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres/skills"
 )
 
-// ---------------------------------------------------------------------------
-// SkillRevisionRepo.Insert
-// ---------------------------------------------------------------------------
+// seedSkillRevisionAt inserts a skill_revision row via raw SQL.
+// Used by SkillRevisionRepo tests without depending on the repo's Insert.
+func seedSkillRevisionAt(t *testing.T, db *sql.DB, skillID int64, n int, description, body string) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO skill_revision (skill_id, revision_number, description, body)
+         VALUES ($1, $2, $3, $4)`, skillID, n, description, body)
+	return err
+}
 
-// TestSkillRevisionRepo_Insert_PersistsRow covers spec R-SK-001 +
-// design §3.2: Insert sets id, created_at from the DB clock (the
-// append-only invariant). The skill_id/revision_number pair must be
-// (already-existing after the parent skill is seeded by seedSkill).
+// TestSkillRevisionRepo_Insert_PersistsRow covers spec R-SK-001:
+// Insert sets id, created_at from the DB clock (append-only invariant).
 func TestSkillRevisionRepo_Insert_PersistsRow(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -34,29 +38,20 @@ func TestSkillRevisionRepo_Insert_PersistsRow(t *testing.T) {
 
 	repo := skills.NewSkillRevisionRepo(db)
 	skill := seedSkill(t, db, "rev-insert", "d", "b")
-
 	rev := &domain.SkillRevision{
-		SkillID:        skill.ID,
-		RevisionNumber: 1,
-		Description:    "d",
-		Body:           "b",
+		SkillID: skill.ID, RevisionNumber: 1, Description: "d", Body: "b",
 	}
 	if err := repo.Insert(context.Background(), db, rev); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if rev.ID == 0 {
-		t.Errorf("ID not set: %+v", rev)
-	}
-	if rev.CreatedAt.IsZero() {
-		t.Errorf("CreatedAt not set: %+v", rev)
+	if rev.ID == 0 || rev.CreatedAt.IsZero() {
+		t.Errorf("Insert did not populate row: %+v", rev)
 	}
 }
 
 // TestSkillRevisionRepo_Insert_RejectsDuplicateRevisionNumber covers
-// spec S-SK-041 + ADR-SK-004: a duplicate (skill_id, revision_number)
-// collides on the UNIQUE constraint and surfaces as
-// *domain.ConflictError so the handler can map to 409. This is the
-// smoking gun for a lost-update race that bypassed FOR UPDATE.
+// spec S-SK-041 + ADR-SK-004: duplicate (skill_id, revision_number)
+// collides on UNIQUE and surfaces as *domain.ConflictError (409).
 func TestSkillRevisionRepo_Insert_RejectsDuplicateRevisionNumber(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -69,16 +64,12 @@ func TestSkillRevisionRepo_Insert_RejectsDuplicateRevisionNumber(t *testing.T) {
 	ctx := context.Background()
 
 	if err := repo.Insert(ctx, db, &domain.SkillRevision{
-		SkillID:        skill.ID,
-		RevisionNumber: 1,
-		Description:    "d", Body: "b",
+		SkillID: skill.ID, RevisionNumber: 1, Description: "d", Body: "b",
 	}); err != nil {
 		t.Fatalf("first Insert: %v", err)
 	}
 	err := repo.Insert(ctx, db, &domain.SkillRevision{
-		SkillID:        skill.ID,
-		RevisionNumber: 1,
-		Description:    "d", Body: "b",
+		SkillID: skill.ID, RevisionNumber: 1, Description: "d", Body: "b",
 	})
 	if err == nil {
 		t.Fatalf("expected conflict error on duplicate revision_number")
@@ -90,9 +81,8 @@ func TestSkillRevisionRepo_Insert_RejectsDuplicateRevisionNumber(t *testing.T) {
 }
 
 // TestSkillRevisionRepo_SelectBySkillAndNumber_ReturnsBodyAndDescription
-// covers spec R-SK-001 + S-SK-013: the service restores a historical
-// revision, so it must be able to fetch the exact (skill_id, n) row
-// and read body+description for the new revision.
+// covers spec R-SK-001 + S-SK-013: service restores a historical
+// revision, must fetch exact (skill_id, n) row and read body+description.
 func TestSkillRevisionRepo_SelectBySkillAndNumber_ReturnsBodyAndDescription(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -113,21 +103,15 @@ func TestSkillRevisionRepo_SelectBySkillAndNumber_ReturnsBodyAndDescription(t *t
 	if err != nil {
 		t.Fatalf("SelectBySkillAndNumber: %v", err)
 	}
-	if got.RevisionNumber != 3 {
-		t.Errorf("revision_number = %d, want 3", got.RevisionNumber)
-	}
-	if got.Body != "body 3" {
-		t.Errorf("body = %q, want %q", got.Body, "body 3")
-	}
-	if got.Description != "desc" {
-		t.Errorf("description = %q, want %q", got.Description, "desc")
+	if got.RevisionNumber != 3 || got.Body != "body 3" || got.Description != "desc" {
+		t.Errorf("got = {n:%d, body:%q, desc:%q}, want {n:3, body:body 3, desc:desc}",
+			got.RevisionNumber, got.Body, got.Description)
 	}
 }
 
 // TestSkillRevisionRepo_SelectBySkillAndNumber_MissingReturnsNotFound
-// covers spec S-SK-013 negative path: a non-existent revision number
-// for an existing skill returns *domain.NotFoundError so the handler
-// can map to 404.
+// covers spec S-SK-013 negative path: non-existent revision number
+// returns *domain.NotFoundError (404).
 func TestSkillRevisionRepo_SelectBySkillAndNumber_MissingReturnsNotFound(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -147,22 +131,8 @@ func TestSkillRevisionRepo_SelectBySkillAndNumber_MissingReturnsNotFound(t *test
 	}
 }
 
-// seedSkillRevisionAt inserts a skill_revision row directly via SQL
-// at the given revision_number. Used by SkillRevisionRepo tests
-// without depending on the repo's own Insert.
-func seedSkillRevisionAt(t *testing.T, db *sql.DB, skillID int64, n int, description, body string) error {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO skill_revision (skill_id, revision_number, description, body)
-         VALUES ($1, $2, $3, $4)`, skillID, n, description, body)
-	return err
-}
-
 // TestSkillRevisionRepo_ListBySkillID_NewestFirst covers spec SCN-5.5:
-// revisions are listed in descending revision_number order
-// (newest first). Used by GET /skills/:name/revisions.
+// revisions are listed in descending revision_number order (newest first).
 func TestSkillRevisionRepo_ListBySkillID_NewestFirst(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -172,14 +142,13 @@ func TestSkillRevisionRepo_ListBySkillID_NewestFirst(t *testing.T) {
 
 	repo := skills.NewSkillRevisionRepo(db)
 	skill := seedSkill(t, db, "rev-list", "d", "b")
-	ctx := context.Background()
 	for n := 1; n <= 5; n++ {
 		if err := seedSkillRevisionAt(t, db, skill.ID, n, "d", "body"); err != nil {
 			t.Fatalf("seed rev %d: %v", n, err)
 		}
 	}
 
-	got, err := repo.ListBySkillID(ctx, db, skill.ID)
+	got, err := repo.ListBySkillID(context.Background(), db, skill.ID)
 	if err != nil {
 		t.Fatalf("ListBySkillID: %v", err)
 	}

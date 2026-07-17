@@ -1,18 +1,8 @@
-// Package skills_test contains the integration test suite for the
-// skill + skill_revision repository adapters (PR1b of
-// cachicamas-skills-foundational). Tests are gated on INTEGRATION=1
-// because they need a live Postgres (the compose-provisioned instance
-// used by the migration runner). Mirrors the prompts adapter pattern
-// at prompts/prompt_repo_test.go (no test fixtures; each test seeds
-// its own state).
-//
-// Strict TDD discipline (per sdd-apply/strict-tdd.md): every test
-// here was written BEFORE the corresponding SkillRepo /
-// SkillRevisionRepo method existed. The first commit in the PR
-// (the RED commit) references types and methods that do not exist
-// yet, so `go build ./...` fails — that build failure IS the RED
-// step. The next commit (GREEN) adds the production code that
-// resolves the build failure and makes the test pass.
+// Package skills_test — integration tests for the skill + skill_revision
+// repository adapters (PR1b of cachicamas-skills-foundational). Gated
+// on INTEGRATION=1 (compose Postgres). Mirrors prompts/prompt_repo_test.go.
+// Strict TDD: every test was written before its production code; the
+// RED step is a build failure.
 package skills_test
 
 import (
@@ -30,13 +20,8 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres/skills"
 )
 
-// ---------------------------------------------------------------------------
-// Connection helper.
-// ---------------------------------------------------------------------------
-
 // openTestDB connects to the compose Postgres instance using the
-// environment variables the project standardizes on. Mirrors
-// prompts/prompt_repo_test.go:openTestDB.
+// project-standard env vars. Mirrors prompts/prompt_repo_test.go.
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	host := getenvOr("POSTGRES_HOST", "localhost")
@@ -64,34 +49,29 @@ func getenvOr(key, fallback string) string {
 }
 
 // ensureSkillMigrations applies the PR1a skill migration idempotently.
-// The compose DB already has the migration in schema_migrations; this
-// helper only ensures the skill + skill_revision tables exist. CREATE
-// TABLE IF NOT EXISTS makes the helper safe to call repeatedly.
+// CREATE TABLE IF NOT EXISTS makes it safe to call repeatedly.
 func ensureSkillMigrations(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS skill (
-		    id          BIGSERIAL    PRIMARY KEY,
-		    name        TEXT         NOT NULL
-		                 CHECK (name ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(name) BETWEEN 1 AND 64),
-		    description TEXT         NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
-		    body        TEXT         NOT NULL CHECK (length(body) BETWEEN 1 AND 524288),
-		    deleted_at  TIMESTAMPTZ  NULL,
-		    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
-		)`,
+		    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL
+		         CHECK (name ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(name) BETWEEN 1 AND 64),
+		    description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
+		    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 524288),
+		    deleted_at TIMESTAMPTZ NULL,
+		    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		    updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
 		`CREATE TABLE IF NOT EXISTS skill_revision (
-		    id              BIGSERIAL    PRIMARY KEY,
-		    skill_id        BIGINT       NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
-		    revision_number INT          NOT NULL CHECK (revision_number > 0),
-		    description     TEXT         NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
-		    body            TEXT         NOT NULL CHECK (length(body) BETWEEN 1 AND 524288),
-		    change_note     TEXT         NULL,
-		    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		    CONSTRAINT skill_revision_unique UNIQUE (skill_id, revision_number)
-		)`,
+		    id BIGSERIAL PRIMARY KEY,
+		    skill_id BIGINT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+		    revision_number INT NOT NULL CHECK (revision_number > 0),
+		    description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
+		    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 524288),
+		    change_note TEXT NULL,
+		    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		    CONSTRAINT skill_revision_unique UNIQUE (skill_id, revision_number))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS skill_slug_active_uidx ON skill(name) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS skill_updated_at_idx ON skill(updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS skill_revision_skill_id_idx ON skill_revision(skill_id, revision_number DESC)`,
@@ -103,7 +83,6 @@ func ensureSkillMigrations(t *testing.T, db *sql.DB) {
 	}
 }
 
-// cleanSkillTables wipes skill + skill_revision in FK-safe order.
 func cleanSkillTables(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -116,17 +95,10 @@ func cleanSkillTables(t *testing.T, db *sql.DB) {
 	}
 }
 
-// makeSkillInput returns a valid *domain.Skill for use in tests.
 func makeSkillInput(name, description, body string) *domain.Skill {
-	return &domain.Skill{
-		Name:        name,
-		Description: description,
-		Body:        body,
-	}
+	return &domain.Skill{Name: name, Description: description, Body: body}
 }
 
-// seedSkill inserts one skill row directly (bypassing repo.Insert)
-// for tests that need a pre-existing row.
 func seedSkill(t *testing.T, db *sql.DB, name, description, body string) *domain.Skill {
 	t.Helper()
 	s := makeSkillInput(name, description, body)
@@ -136,7 +108,6 @@ func seedSkill(t *testing.T, db *sql.DB, name, description, body string) *domain
 	return s
 }
 
-// skipIfNoIntegration skips the test if INTEGRATION != "1".
 func skipIfNoIntegration(t *testing.T) {
 	t.Helper()
 	if os.Getenv("INTEGRATION") != "1" {
@@ -144,163 +115,9 @@ func skipIfNoIntegration(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// SkillRepo.Insert
-// ---------------------------------------------------------------------------
-
-// TestSkillRepo_Insert_PersistsRowAndReturnsID covers spec S-SK-001 +
-// design §3.6: SkillRepo.Insert persists a new skill row and returns
-// a populated *Skill with non-zero ID, non-zero CreatedAt, non-zero
-// UpdatedAt, and nil DeletedAt (per the DB DEFAULT). This is the
-// minimal "happy path" RED/GREEN cycle for task 2.1.
-func TestSkillRepo_Insert_PersistsRowAndReturnsID(t *testing.T) {
-	skipIfNoIntegration(t)
-	db := openTestDB(t)
-	defer func() { _ = db.Close() }()
-	ensureSkillMigrations(t, db)
-	cleanSkillTables(t, db)
-
-	repo := skills.NewSkillRepo(db)
-	s := makeSkillInput("pdf-cleanup", "Cleans PDFs", "---\nname: pdf-cleanup\ndescription: Cleans PDFs\n---\n# Body")
-	if err := repo.Insert(context.Background(), db, s); err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-	if s.ID == 0 {
-		t.Fatalf("Insert did not set ID: %+v", s)
-	}
-	if s.CreatedAt.IsZero() {
-		t.Fatalf("Insert did not set CreatedAt: %+v", s)
-	}
-	if s.UpdatedAt.IsZero() {
-		t.Fatalf("Insert did not set UpdatedAt: %+v", s)
-	}
-	if s.DeletedAt != nil {
-		t.Fatalf("Insert set DeletedAt (should be nil): %+v", s)
-	}
-}
-
-// TestSkillRepo_Insert_TranslatesUniqueViolation covers spec S-SK-037
-// + ADR-SK-003: a second INSERT against the partial UNIQUE index
-// `skill_slug_active_uidx` must surface as *domain.ConflictError
-// (with Code() == "conflict") so the handler can map to HTTP 409
-// without importing pgx. This locks the pgconn 23505 → ConflictError
-// translation at the infra boundary.
-func TestSkillRepo_Insert_TranslatesUniqueViolation(t *testing.T) {
-	skipIfNoIntegration(t)
-	db := openTestDB(t)
-	defer func() { _ = db.Close() }()
-	ensureSkillMigrations(t, db)
-	cleanSkillTables(t, db)
-
-	repo := skills.NewSkillRepo(db)
-	ctx := context.Background()
-	if err := repo.Insert(ctx, db, makeSkillInput("dup-name", "first", "body one")); err != nil {
-		t.Fatalf("first Insert: %v", err)
-	}
-	err := repo.Insert(ctx, db, makeSkillInput("dup-name", "second", "body two"))
-	if err == nil {
-		t.Fatalf("expected conflict error on duplicate name, got nil")
-	}
-	var cerr *domain.ConflictError
-	if !errors.As(err, &cerr) {
-		t.Fatalf("expected *domain.ConflictError, got %T (%v)", err, err)
-	}
-	if cerr.Code() != domain.CodeConflict {
-		t.Errorf("ConflictError.Code() = %q, want %q", cerr.Code(), domain.CodeConflict)
-	}
-}
-
-// TestSkillRepo_SelectBySlug_ExcludesDeleted covers spec S-SK-038 +
-// ADR-SK-003: a soft-deleted skill MUST NOT be returned by
-// SelectBySlug (active-only). SelectBySlugAny exists to bridge the
-// "still exists but soft-deleted" → *GoneError (410) flow in the
-// service layer; SelectBySlug returns *NotFoundError on the same row.
-func TestSkillRepo_SelectBySlug_ExcludesDeleted(t *testing.T) {
-	skipIfNoIntegration(t)
-	db := openTestDB(t)
-	defer func() { _ = db.Close() }()
-	ensureSkillMigrations(t, db)
-	cleanSkillTables(t, db)
-
-	repo := skills.NewSkillRepo(db)
-	ctx := context.Background()
-
-	seeded := seedSkill(t, db, "live-skill", "active", "body")
-	deleted := seedSkill(t, db, "dead-skill", "active", "body")
-	// Soft-delete via raw SQL — SoftDelete is implemented in task 2.8.
-	if _, err := db.ExecContext(ctx, "UPDATE skill SET deleted_at = now() WHERE id = $1", deleted.ID); err != nil {
-		t.Fatalf("raw soft-delete: %v", err)
-	}
-
-	// Live row is returned.
-	got, err := repo.SelectBySlug(ctx, db, "live-skill")
-	if err != nil {
-		t.Fatalf("SelectBySlug(live-skill): %v", err)
-	}
-	if got.ID != seeded.ID {
-		t.Errorf("live ID = %d, want %d", got.ID, seeded.ID)
-	}
-
-	// Soft-deleted row is hidden.
-	_, err = repo.SelectBySlug(ctx, db, "dead-skill")
-	var nerr *domain.NotFoundError
-	if !errors.As(err, &nerr) {
-		t.Fatalf("SelectBySlug(deleted): expected *domain.NotFoundError, got %T (%v)", err, err)
-	}
-}
-
-// TestSkillRepo_SelectBySlugAny_IncludesDeleted covers spec S-SK-005 +
-// design §3.2 (PATCH flow): the service needs to distinguish
-// "slug never existed" (→ 404) from "slug exists but is soft-deleted"
-// (→ 410 skill_deleted). SelectBySlugAny returns the row regardless
-// of deleted_at state and the service inspects DeletedAt.
-func TestSkillRepo_SelectBySlugAny_IncludesDeleted(t *testing.T) {
-	skipIfNoIntegration(t)
-	db := openTestDB(t)
-	defer func() { _ = db.Close() }()
-	ensureSkillMigrations(t, db)
-	cleanSkillTables(t, db)
-
-	repo := skills.NewSkillRepo(db)
-	ctx := context.Background()
-
-	live := seedSkill(t, db, "alive", "active", "body")
-	deleted := seedSkill(t, db, "doomed", "active", "body")
-	// Soft-delete via raw SQL — SoftDelete is implemented in task 2.8.
-	if _, err := db.ExecContext(ctx, "UPDATE skill SET deleted_at = now() WHERE id = $1", deleted.ID); err != nil {
-		t.Fatalf("raw soft-delete: %v", err)
-	}
-
-	// Live row.
-	got, err := repo.SelectBySlugAny(ctx, db, "alive")
-	if err != nil {
-		t.Fatalf("SelectBySlugAny(alive): %v", err)
-	}
-	if got.ID != live.ID {
-		t.Errorf("alive ID = %d, want %d", got.ID, live.ID)
-	}
-	if got.DeletedAt != nil {
-		t.Errorf("alive.DeletedAt = %v, want nil", got.DeletedAt)
-	}
-
-	// Soft-deleted row is returned with DeletedAt set; the service
-	// uses this to emit 410 instead of 404.
-	got, err = repo.SelectBySlugAny(ctx, db, "doomed")
-	if err != nil {
-		t.Fatalf("SelectBySlugAny(doomed): %v", err)
-	}
-	if got.ID != deleted.ID {
-		t.Errorf("doomed ID = %d, want %d", got.ID, deleted.ID)
-	}
-	if got.DeletedAt == nil {
-		t.Errorf("doomed.DeletedAt must be non-nil for soft-deleted row")
-	}
-}
-
-// seedSkillRevisions inserts n revisions (1..n) directly via raw SQL
-// for the given skill. Used by tests that need a revision history
-// without depending on SkillRevisionRepo.Insert (which lands in
-// task 2.9). Mirrors the seedPrompt helper pattern.
+// seedSkillRevisions inserts n revisions (1..n) via raw SQL — used by
+// tests that need a revision history without depending on
+// SkillRevisionRepo.Insert (which lands in task 2.9).
 func seedSkillRevisions(t *testing.T, db *sql.DB, skillID int64, n int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -314,12 +131,147 @@ func seedSkillRevisions(t *testing.T, db *sql.DB, skillID int64, n int) {
 	}
 }
 
+// rawSoftDelete sets deleted_at = now() via raw SQL. Used by tests
+// that need a soft-deleted row without depending on SkillRepo.SoftDelete.
+func rawSoftDelete(t *testing.T, db *sql.DB, id int64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, "UPDATE skill SET deleted_at = now() WHERE id = $1", id); err != nil {
+		t.Fatalf("raw soft-delete: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SkillRepo.Insert (tasks 2.1, 2.2)
+// ---------------------------------------------------------------------------
+
+// TestSkillRepo_Insert_PersistsRowAndReturnsID covers spec S-SK-001:
+// Insert persists a new skill row and returns a populated *Skill with
+// non-zero ID, non-zero timestamps, nil DeletedAt (DB DEFAULT).
+func TestSkillRepo_Insert_PersistsRowAndReturnsID(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	s := makeSkillInput("pdf-cleanup", "Cleans PDFs", "---\nname: pdf-cleanup\ndescription: Cleans PDFs\n---\n# Body")
+	if err := repo.Insert(context.Background(), db, s); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if s.ID == 0 || s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() || s.DeletedAt != nil {
+		t.Fatalf("Insert did not populate row: %+v", s)
+	}
+}
+
+// TestSkillRepo_Insert_TranslatesUniqueViolation covers spec S-SK-037 +
+// ADR-SK-003: a second INSERT against the partial UNIQUE index
+// `skill_slug_active_uidx` must surface as *domain.ConflictError
+// (Code() == "conflict") so the handler can map to 409.
+func TestSkillRepo_Insert_TranslatesUniqueViolation(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+	if err := repo.Insert(ctx, db, makeSkillInput("dup-name", "first", "b1")); err != nil {
+		t.Fatalf("first Insert: %v", err)
+	}
+	err := repo.Insert(ctx, db, makeSkillInput("dup-name", "second", "b2"))
+	if err == nil {
+		t.Fatalf("expected conflict error on duplicate name, got nil")
+	}
+	var cerr *domain.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *domain.ConflictError, got %T (%v)", err, err)
+	}
+	if cerr.Code() != domain.CodeConflict {
+		t.Errorf("ConflictError.Code() = %q, want %q", cerr.Code(), domain.CodeConflict)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SkillRepo.SelectBySlug / SelectBySlugAny (task 2.3)
+// ---------------------------------------------------------------------------
+
+// TestSkillRepo_SelectBySlug_ExcludesDeleted covers spec S-SK-038 +
+// ADR-SK-003: soft-deleted skills MUST NOT be returned by
+// SelectBySlug (active-only); SelectBySlugAny exists for the 410 path.
+func TestSkillRepo_SelectBySlug_ExcludesDeleted(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	live := seedSkill(t, db, "live-skill", "d", "b")
+	dead := seedSkill(t, db, "dead-skill", "d", "b")
+	rawSoftDelete(t, db, dead.ID)
+
+	got, err := repo.SelectBySlug(ctx, db, "live-skill")
+	if err != nil {
+		t.Fatalf("SelectBySlug(live): %v", err)
+	}
+	if got.ID != live.ID {
+		t.Errorf("live ID = %d, want %d", got.ID, live.ID)
+	}
+	_, err = repo.SelectBySlug(ctx, db, "dead-skill")
+	var nerr *domain.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Fatalf("SelectBySlug(deleted): expected *domain.NotFoundError, got %T (%v)", err, err)
+	}
+}
+
+// TestSkillRepo_SelectBySlugAny_IncludesDeleted covers spec R-SK-005 +
+// design §3.2 (PATCH flow): SelectBySlugAny returns the row regardless
+// of deleted_at; service inspects DeletedAt to choose 404 vs 410.
+func TestSkillRepo_SelectBySlugAny_IncludesDeleted(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	live := seedSkill(t, db, "alive", "d", "b")
+	dead := seedSkill(t, db, "doomed", "d", "b")
+	rawSoftDelete(t, db, dead.ID)
+
+	got, err := repo.SelectBySlugAny(ctx, db, "alive")
+	if err != nil {
+		t.Fatalf("SelectBySlugAny(alive): %v", err)
+	}
+	if got.ID != live.ID || got.DeletedAt != nil {
+		t.Errorf("alive: ID=%d (want %d), DeletedAt=%v (want nil)", got.ID, live.ID, got.DeletedAt)
+	}
+	got, err = repo.SelectBySlugAny(ctx, db, "doomed")
+	if err != nil {
+		t.Fatalf("SelectBySlugAny(doomed): %v", err)
+	}
+	if got.ID != dead.ID || got.DeletedAt == nil {
+		t.Errorf("doomed: ID=%d (want %d), DeletedAt must be non-nil", got.ID, dead.ID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SkillRepo.SelectByIDWithCurrentRevision + ListWithCurrentRevision
+// (task 2.4 — ANTI-DRIFT GATE ADR-SK-008)
+// ---------------------------------------------------------------------------
+
 // TestSkillRepo_SelectByIDWithCurrentRevision_EmitsCurrentRevision
-// covers spec S-SK-042 + ADR-SK-008 (ANITI-DRIFT GATE from
-// obs #1959 #2 — backend emits current_revision via SQL JOIN, kills
-// the "v{undefined}" bug). A skill with revisions 1..5 must return
-// CurrentRevision=5 from SelectByIDWithCurrentRevision; a skill with
-// NO revisions returns CurrentRevision=0 (or whatever COALESCE yields).
+// covers spec S-SK-042 + ADR-SK-008: backend emits current_revision via
+// SQL JOIN, kills the "v{undefined}" prompt bug. Skills with no
+// revisions yield CurrentRevision=0 (COALESCE).
 func TestSkillRepo_SelectByIDWithCurrentRevision_EmitsCurrentRevision(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -334,34 +286,25 @@ func TestSkillRepo_SelectByIDWithCurrentRevision_EmitsCurrentRevision(t *testing
 	seedSkillRevisions(t, db, withRevs.ID, 5)
 	noRevs := seedSkill(t, db, "no-revs", "d", "b")
 
-	// Skill with revisions: CurrentRevision = 5.
 	got, err := repo.SelectByIDWithCurrentRevision(ctx, db, withRevs.ID)
 	if err != nil {
 		t.Fatalf("SelectByIDWithCurrentRevision(with-revs): %v", err)
 	}
-	if got.ID != withRevs.ID {
-		t.Errorf("ID = %d, want %d", got.ID, withRevs.ID)
+	if got.ID != withRevs.ID || got.CurrentRevision != 5 {
+		t.Errorf("with-revs: ID=%d (want %d), CurrentRevision=%d (want 5)", got.ID, withRevs.ID, got.CurrentRevision)
 	}
-	if got.CurrentRevision != 5 {
-		t.Errorf("CurrentRevision = %d, want 5", got.CurrentRevision)
-	}
-
-	// Skill without revisions: CurrentRevision = 0 (COALESCE on MAX).
 	got, err = repo.SelectByIDWithCurrentRevision(ctx, db, noRevs.ID)
 	if err != nil {
 		t.Fatalf("SelectByIDWithCurrentRevision(no-revs): %v", err)
 	}
 	if got.CurrentRevision != 0 {
-		t.Errorf("CurrentRevision = %d, want 0 (no revisions yet)", got.CurrentRevision)
+		t.Errorf("no-revs.CurrentRevision = %d, want 0", got.CurrentRevision)
 	}
 }
 
 // TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows
-// covers spec S-SK-043 + ADR-SK-008: the list endpoint must emit
-// current_revision for EVERY row, not just rows that happen to have
-// revisions. The fixture has 3 skills: skillA (5 revs), skillB (1
-// rev), skillC (no revs). The list query must return 3 items, each
-// with the right CurrentRevision.
+// covers spec S-SK-043 + ADR-SK-008: list endpoint emits
+// current_revision for EVERY row, not just ones with revisions.
 func TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -385,34 +328,22 @@ func TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows(t *test
 	if len(items) != 3 {
 		t.Fatalf("len = %d, want 3", len(items))
 	}
-	// Build a map by name for stable assertions regardless of order.
 	byName := map[string]int{}
 	for _, it := range items {
 		byName[it.Name] = it.CurrentRevision
 	}
-	if byName["skill-a"] != 5 {
-		t.Errorf("skill-a.CurrentRevision = %d, want 5", byName["skill-a"])
-	}
-	if byName["skill-b"] != 1 {
-		t.Errorf("skill-b.CurrentRevision = %d, want 1", byName["skill-b"])
-	}
-	if byName["skill-c"] != 0 {
-		t.Errorf("skill-c.CurrentRevision = %d, want 0 (no revisions)", byName["skill-c"])
+	if byName["skill-a"] != 5 || byName["skill-b"] != 1 || byName["skill-c"] != 0 {
+		t.Errorf("byName = %+v, want {skill-a:5, skill-b:1, skill-c:0}", byName)
 	}
 }
 
-// TestSkillRepo_N1Query_OneStatementForList covers design §7 R8
-// (anti-drift): ListWithCurrentRevision MUST issue exactly ONE SQL
-// statement for any list size. The test uses pgx's pgx_stat_statements
-// proxy via a counter wrapper: every QueryContext call increments a
-// counter, and the assertion is that one List() call = one statement.
-//
-// To avoid introducing a heavy tracing dependency, we use a
-// sentinel-driver trick: open a *sql.DB with a custom query observer
-// via the `database/sql` driver's instrumentation. The simplest
-// portable approach: capture the call count by wrapping the executor
-// passed to the repo. We wrap the db's QueryContext via a thin
-// proxy struct that the repo accepts as domain.SQLExecutor.
+// ---------------------------------------------------------------------------
+// N+1 guard (task 2.5)
+// ---------------------------------------------------------------------------
+
+// TestSkillRepo_N1Query_OneStatementForList covers design §7 R8: list
+// MUST be exactly ONE SQL statement for any list size. countingExecutor
+// wraps the SQLExecutor and counts QueryContext/QueryRowContext calls.
 func TestSkillRepo_N1Query_OneStatementForList(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -421,17 +352,12 @@ func TestSkillRepo_N1Query_OneStatementForList(t *testing.T) {
 	cleanSkillTables(t, db)
 
 	repo := skills.NewSkillRepo(db)
-
-	// Seed 5 skills, each with a few revisions.
 	for i := 0; i < 5; i++ {
-		name := "n1-skill-" + string(rune('a'+i))
-		s := seedSkill(t, db, name, "d", "b")
-		seedSkillRevisions(t, db, s.ID, i+1) // 1..5 revs
+		s := seedSkill(t, db, "n1-skill-"+string(rune('a'+i)), "d", "b")
+		seedSkillRevisions(t, db, s.ID, i+1)
 	}
 
-	// Wrap the DB in a counter proxy.
-	counter := &countingExecutor{inner: db, queryCount: 0}
-
+	counter := &countingExecutor{inner: db}
 	_, err := repo.ListWithCurrentRevision(context.Background(), counter, 50)
 	if err != nil {
 		t.Fatalf("ListWithCurrentRevision: %v", err)
@@ -441,12 +367,6 @@ func TestSkillRepo_N1Query_OneStatementForList(t *testing.T) {
 	}
 }
 
-// countingExecutor wraps a domain.SQLExecutor and counts every
-// QueryContext and QueryRowContext call. Domain.SQLExecutor is the
-// repo's input; we implement it on *sql.DB by re-exposing the same
-// surface. We delegate ExecContext (which the repo also uses for
-// inserts) but don't count it for the N+1 assertion — N+1 manifests
-// as per-row reads, not writes.
 type countingExecutor struct {
 	inner      domain.SQLExecutor
 	queryCount int
@@ -464,10 +384,13 @@ func (c *countingExecutor) QueryRowContext(ctx context.Context, q string, args .
 	return c.inner.QueryRowContext(ctx, q, args...)
 }
 
+// ---------------------------------------------------------------------------
+// SkillRepo.MaxRevisionNumber (task 2.6)
+// ---------------------------------------------------------------------------
+
 // TestSkillRepo_MaxRevisionNumber_EmptyTableReturnsZero covers spec
-// INV-4 + design §3.2: a skill with no revisions returns 0 from
-// MaxRevisionNumber (so the service can assign revision_number=1 to
-// the very first write under FOR UPDATE).
+// INV-4: a skill with no revisions returns 0 (so the service can
+// assign revision_number=1 to the very first write under FOR UPDATE).
 func TestSkillRepo_MaxRevisionNumber_EmptyTableReturnsZero(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -487,8 +410,7 @@ func TestSkillRepo_MaxRevisionNumber_EmptyTableReturnsZero(t *testing.T) {
 }
 
 // TestSkillRepo_MaxRevisionNumber_ReturnsMax covers the happy path:
-// a skill with revisions 1..4 must report MaxRevisionNumber=4 (used
-// by the service to assign revision_number=5 on the next write).
+// a skill with revisions 1..4 must report MaxRevisionNumber=4.
 func TestSkillRepo_MaxRevisionNumber_ReturnsMax(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -508,12 +430,14 @@ func TestSkillRepo_MaxRevisionNumber_ReturnsMax(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// SkillRepo.LockAndLoad + UpdateBody (task 2.7)
+// ---------------------------------------------------------------------------
+
 // TestSkillRepo_LockAndLoad_HoldsRowLock covers spec S-SK-039 +
-// design §3.5: a SELECT … FOR UPDATE on the skill row must hold a
-// row lock that blocks a concurrent UPDATE on the same row (with a
-// tight statement_timeout). The lock is the concurrency gate for
-// Update, Restore, and SoftDelete — without it, two concurrent
-// writers could compute the same next revision number.
+// design §3.5: SELECT … FOR UPDATE holds a row lock that blocks a
+// concurrent UPDATE (with statement_timeout=500ms). The lock is the
+// concurrency gate for Update, Restore, and SoftDelete.
 func TestSkillRepo_LockAndLoad_HoldsRowLock(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -525,7 +449,6 @@ func TestSkillRepo_LockAndLoad_HoldsRowLock(t *testing.T) {
 	seeded := seedSkill(t, db, "lock-and-load", "d", "b")
 	ctx := context.Background()
 
-	// Open a transaction, take the FOR UPDATE lock.
 	tx1, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx1: %v", err)
@@ -533,15 +456,10 @@ func TestSkillRepo_LockAndLoad_HoldsRowLock(t *testing.T) {
 	defer func() { _ = tx1.Rollback() }()
 
 	loaded, err := repo.LockAndLoad(ctx, tx1, seeded.ID)
-	if err != nil {
-		t.Fatalf("LockAndLoad: %v", err)
-	}
-	if loaded.ID != seeded.ID {
-		t.Errorf("ID = %d, want %d", loaded.ID, seeded.ID)
+	if err != nil || loaded.ID != seeded.ID {
+		t.Fatalf("LockAndLoad: err=%v, id=%d", err, loaded.ID)
 	}
 
-	// Second TX with statement_timeout=500ms — must fail to update
-	// the locked row.
 	tx2, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx2: %v", err)
@@ -561,9 +479,8 @@ func TestSkillRepo_LockAndLoad_HoldsRowLock(t *testing.T) {
 }
 
 // TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp covers
-// spec R-SK-001 / S-SK-010 + design §3.5: UpdateBody writes the new
-// description + body and bumps updated_at from the DB clock (so the
-// re-read in the handler reflects the post-write timestamp).
+// spec R-SK-001 + design §3.5: UpdateBody writes new description +
+// body and bumps updated_at from the DB clock.
 func TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -584,21 +501,20 @@ func TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectByID: %v", err)
 	}
-	if got.Body != "new body" {
-		t.Errorf("Body = %q, want %q", got.Body, "new body")
-	}
-	if got.Description != "new desc" {
-		t.Errorf("Description = %q, want %q", got.Description, "new desc")
+	if got.Body != "new body" || got.Description != "new desc" {
+		t.Errorf("Body=%q (want new body), Description=%q (want new desc)", got.Body, got.Description)
 	}
 	if !got.UpdatedAt.After(originalUpdatedAt) {
 		t.Errorf("UpdatedAt = %v, want > %v", got.UpdatedAt, originalUpdatedAt)
 	}
 }
 
-// TestSkillRepo_SoftDelete_SetsDeletedAt covers spec SCN-2.1 + R-SK-002:
-// SoftDelete writes deleted_at = now() to the row. We verify via a raw
-// query because the repo's SelectByID still returns the row but the
-// service contract is that soft-deleted is "no longer active".
+// ---------------------------------------------------------------------------
+// SkillRepo.SoftDelete (task 2.8)
+// ---------------------------------------------------------------------------
+
+// TestSkillRepo_SoftDelete_SetsDeletedAt covers spec SCN-2.1:
+// SoftDelete writes deleted_at = now() to the row.
 func TestSkillRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -612,7 +528,6 @@ func TestSkillRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	if err := repo.SoftDelete(ctx, db, seeded.ID); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
-
 	var deletedAt *time.Time
 	if err := db.QueryRowContext(ctx, "SELECT deleted_at FROM skill WHERE id = $1", seeded.ID).Scan(&deletedAt); err != nil {
 		t.Fatalf("raw query: %v", err)
@@ -623,10 +538,7 @@ func TestSkillRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 }
 
 // TestSkillRepo_SoftDelete_Idempotent covers spec SCN-2.3: calling
-// SoftDelete twice on the same row succeeds both times (the second
-// call finds zero rows matching `deleted_at IS NULL` and returns
-// nil). This is the handler-level "DELETE returns 204 even on
-// missing" promise.
+// SoftDelete twice on the same row succeeds both times.
 func TestSkillRepo_SoftDelete_Idempotent(t *testing.T) {
 	skipIfNoIntegration(t)
 	db := openTestDB(t)
@@ -644,7 +556,3 @@ func TestSkillRepo_SoftDelete_Idempotent(t *testing.T) {
 		t.Fatalf("second SoftDelete (idempotent): %v", err)
 	}
 }
-
-// _ = strings.Contains is used so an unused-import regression fails
-// the build deterministically if a future refactor drops it.
-var _ = strings.Contains
