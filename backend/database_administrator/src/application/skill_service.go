@@ -249,6 +249,100 @@ func (s *SkillService) Update(ctx context.Context, name string, in domain.Update
 }
 
 // ---------------------------------------------------------------------------
+// Restore (POST /skills/:name/revisions/:n/restore)
+// ---------------------------------------------------------------------------
+
+// Restore implements POST /skills/:name/revisions/:n/restore. Reads
+// historical revision n, inserts it as the NEW latest revision (so
+// history is preserved per spec SCN-1.3), and updates the skill to
+// match. The change_note is set to "restored from revision N". On a
+// soft-deleted skill, returns *domain.SkillGoneError (410).
+func (s *SkillService) Restore(ctx context.Context, name string, n int) (*domain.Skill, *domain.SkillRevision, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Restore: BeginTx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existing, err := s.skillRepo.SelectBySlugAny(ctx, tx, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if existing.DeletedAt != nil {
+		return nil, nil, domain.NewSkillDeleted(name)
+	}
+	locked, err := s.skillRepo.LockAndLoad(ctx, tx, existing.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if locked.DeletedAt != nil {
+		return nil, nil, domain.NewSkillDeleted(name)
+	}
+	historical, err := s.revRepo.SelectBySkillAndNumber(ctx, tx, existing.ID, n)
+	if err != nil {
+		return nil, nil, err
+	}
+	maxRev, err := s.skillRepo.MaxRevisionNumber(ctx, tx, existing.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Restore: MaxRevisionNumber: %w", err)
+	}
+	newRev := maxRev + 1
+	note := fmt.Sprintf("restored from revision %d", n)
+
+	rev := &domain.SkillRevision{
+		SkillID:        existing.ID,
+		RevisionNumber: newRev,
+		Description:    historical.Description,
+		Body:           historical.Body,
+		ChangeNote:     &note,
+	}
+	if err := s.revRepo.Insert(ctx, tx, rev); err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Restore: revision Insert: %w", err)
+	}
+	if err := s.skillRepo.UpdateBody(ctx, tx, existing.ID, historical.Body, historical.Description); err != nil {
+		return nil, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Restore: Commit: %w", err)
+	}
+
+	updated, err := s.skillRepo.SelectByID(ctx, s.db, existing.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Restore: re-read: %w", err)
+	}
+	return updated, rev, nil
+}
+
+// ---------------------------------------------------------------------------
+// SoftDelete (DELETE /skills/:name)
+// ---------------------------------------------------------------------------
+
+// SoftDelete sets deleted_at = now() on the skill. Idempotent:
+// calling it twice returns nil on both calls (spec SCN-2.3).
+func (s *SkillService) SoftDelete(ctx context.Context, name string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("SkillService.SoftDelete: BeginTx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existing, err := s.skillRepo.SelectBySlug(ctx, tx, name)
+	if err != nil {
+		// NotFound = idempotent success (already deleted or never existed).
+		var nerr *domain.NotFoundError
+		if errors.As(err, &nerr) {
+			return tx.Commit()
+		}
+		return err
+	}
+	if err := s.skillRepo.SoftDelete(ctx, tx, existing.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ---------------------------------------------------------------------------
 // Reads (no transaction needed) — listed here for completeness; the
 // remaining use cases land in subsequent TDD tasks (3.5..3.12).
 // ---------------------------------------------------------------------------

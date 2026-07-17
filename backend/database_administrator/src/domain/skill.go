@@ -27,6 +27,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -176,6 +177,16 @@ func (e *SkillGoneError) Unwrap() error { return e.Cause }
 
 func NewSkillDeleted(name string) *SkillGoneError {
 	return &SkillGoneError{Name: name}
+}
+
+// AsSkillDeleted is a convenience that wraps errors.As for the
+// skill-specific GoneError, mirroring the pattern used by prompts.
+func AsSkillDeleted(err error) (*SkillGoneError, bool) {
+	var gone *SkillGoneError
+	if errors.As(err, &gone) {
+		return gone, true
+	}
+	return nil, false
 }
 
 const (
