@@ -126,6 +126,129 @@ func (s *SkillService) Create(ctx context.Context, in domain.CreateSkillInput) (
 }
 
 // ---------------------------------------------------------------------------
+// Update (PATCH /skills/:name)
+// ---------------------------------------------------------------------------
+
+// Update applies a partial mutation to an existing skill and appends
+// a new revision row reflecting the post-mutation state. At least
+// one of in.Description or in.Body MUST be non-nil. Concurrency gate:
+// the service acquires a SELECT … FOR UPDATE row lock via the repo
+// before reading current state, computes max+1 under the lock, and
+// re-reads the skill for the response so updated_at reflects the DB
+// clock. On a soft-deleted skill, returns *domain.SkillGoneError
+// (410 — spec SCN-3.x).
+func (s *SkillService) Update(ctx context.Context, name string, in domain.UpdateSkillInput) (*domain.Skill, *domain.SkillRevision, error) {
+	if in.Description == nil && in.Body == nil {
+		return nil, nil, &domain.ValidationError{
+			Fields: map[string]string{"body": "at least one of description or body must be provided"},
+		}
+	}
+	if in.Description != nil {
+		if err := domain.ValidateSkillDescription(*in.Description); err != nil {
+			return nil, nil, err
+		}
+	}
+	if in.Body != nil {
+		if err := domain.ValidateSkillBody(*in.Body); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Update: BeginTx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Step 1: Locate by name (any state) so we can distinguish 404 vs 410.
+	existing, err := s.skillRepo.SelectBySlugAny(ctx, tx, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if existing.DeletedAt != nil {
+		return nil, nil, domain.NewSkillDeleted(name)
+	}
+	// Step 2: Lock and load (concurrency gate — serializes concurrent
+	// writers on the same row).
+	locked, err := s.skillRepo.LockAndLoad(ctx, tx, existing.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if locked.DeletedAt != nil {
+		return nil, nil, domain.NewSkillDeleted(name)
+	}
+
+	// Step 2.5: If the body changed, parse its frontmatter and check
+	// lock-step against the POST-mutation state. When the caller did
+	// not provide a new description, infer it from the body's
+	// frontmatter (the body is the source of truth for both fields).
+	if in.Body != nil {
+		fm, err := domain.ParseFrontmatter(*in.Body)
+		if err != nil {
+			return nil, nil, err
+		}
+		descForLockStep := fm.Description
+		if in.Description != nil {
+			descForLockStep = *in.Description
+		}
+		if err := domain.LockStepCheck(name, descForLockStep, fm); err != nil {
+			return nil, nil, err
+		}
+		// When the caller omitted Description, lift it from the
+		// frontmatter so the skill row + revision both reflect the
+		// post-mutation state.
+		if in.Description == nil {
+			inferred := fm.Description
+			in.Description = &inferred
+		}
+	}
+
+	// Step 3: Compute next revision under the lock.
+	maxRev, err := s.skillRepo.MaxRevisionNumber(ctx, tx, existing.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Update: MaxRevisionNumber: %w", err)
+	}
+	newRev := maxRev + 1
+
+	// Step 4: Decide the new field values.
+	newDescription := locked.Description
+	if in.Description != nil {
+		newDescription = *in.Description
+	}
+	newBody := locked.Body
+	if in.Body != nil {
+		newBody = *in.Body
+	}
+
+	// Step 5: Snapshot revision.
+	rev := &domain.SkillRevision{
+		SkillID:        existing.ID,
+		RevisionNumber: newRev,
+		Description:    newDescription,
+		Body:           newBody,
+	}
+	if err := s.revRepo.Insert(ctx, tx, rev); err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Update: revision Insert: %w", err)
+	}
+
+	// Step 6: Update the skill row.
+	if err := s.skillRepo.UpdateBody(ctx, tx, existing.ID, newBody, newDescription); err != nil {
+		return nil, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Update: Commit: %w", err)
+	}
+
+	// Re-read so the response reflects the DB clock + committed state.
+	updated, err := s.skillRepo.SelectByID(ctx, s.db, existing.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SkillService.Update: re-read: %w", err)
+	}
+	return updated, rev, nil
+}
+
+// ---------------------------------------------------------------------------
 // Reads (no transaction needed) — listed here for completeness; the
 // remaining use cases land in subsequent TDD tasks (3.5..3.12).
 // ---------------------------------------------------------------------------
