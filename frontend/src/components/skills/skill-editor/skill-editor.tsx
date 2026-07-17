@@ -32,6 +32,7 @@ import {
 } from "@builder.io/qwik";
 import type { Skill, SkillRevision } from "~/lib/skills-api";
 import { Button } from "~/components/ui/button/button";
+import { skillEditorClasses } from "./classes";
 
 export interface SkillEditorProps {
   skill: Skill | null; // null in create mode
@@ -57,6 +58,9 @@ export const SkillEditor = component$<SkillEditorProps>(
     onDelete$,
     onRestore$: _onRestore$,
   }) => {
+    // Class table for the form controls. Pure function — see ./classes.
+    const classes = skillEditorClasses();
+
     // Local editing state — reset by useTask$ below when skill changes.
     const description = useSignal(skill?.description ?? "");
     const body = useSignal(skill?.body ?? "");
@@ -119,7 +123,7 @@ export const SkillEditor = component$<SkillEditorProps>(
                 hasChanges.value = true;
               }}
               placeholder="Short description..."
-              class="flex-1 rounded border border-slate-200 px-2 py-1 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 focus:outline-none"
+              class={classes.descriptionInput}
               data-testid="skill-editor-description"
             />
           </div>
@@ -134,7 +138,7 @@ export const SkillEditor = component$<SkillEditorProps>(
               hasChanges.value = true;
             }}
             placeholder="Write your SKILL.md (YAML frontmatter + markdown body)..."
-            class="flex-1 resize-none rounded border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 focus:outline-none"
+            class={classes.bodyTextarea}
             data-testid="skill-editor-body"
           />
         </div>
@@ -151,7 +155,7 @@ export const SkillEditor = component$<SkillEditorProps>(
         )}
 
         {/* Footer: actions */}
-        <div class="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+        <div class={classes.footerRow}>
           <div>
             {skill && (
               <Button
@@ -167,7 +171,7 @@ export const SkillEditor = component$<SkillEditorProps>(
           </div>
           <div class="flex items-center gap-2">
             {!hasChanges.value && skill && (
-              <span class="text-xs text-slate-400">No changes to save</span>
+              <span class={classes.noChangesHint}>No changes to save</span>
             )}
             <Button
               type="button"
