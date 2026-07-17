@@ -329,9 +329,9 @@ describe("routes/settings/skills — create flow (7.8)", () => {
 
     // 3. Type into description and body fields.
     desc!.value = "A new skill";
-    await userEvent(desc!, "input");
+    await userEvent(desc!, "input", { target: desc! });
     body!.value = "---\nname: new-skill\ndescription: A new skill\n---\n# Body";
-    await userEvent(body!, "input");
+    await userEvent(body!, "input", { target: body! });
 
     // 4. Click Save.
     const saveBtn = screen.querySelector(
@@ -341,8 +341,8 @@ describe("routes/settings/skills — create flow (7.8)", () => {
     expect(saveBtn!.disabled).toBe(false);
     await userEvent(saveBtn!, "click");
 
-    // 5. Wait a tick for the async save to complete.
-    await new Promise((r) => setTimeout(r, 50));
+    // 5. Wait for the async save to complete.
+    await new Promise((r) => setTimeout(r, 200));
 
     // 6. createSkill was called once with name + description + body.
     expect(createCalls.length).toBe(1);

@@ -40,6 +40,11 @@ import {
   listSkills,
   getSkill,
   listRevisions,
+  createSkill,
+  updateSkill,
+  deleteSkill,
+  restoreRevision,
+  type ApiResult,
   type Skill,
   type SkillRevision,
 } from "~/lib/skills-api";
@@ -146,6 +151,75 @@ export default component$(() => {
     currentRevisions.value = [];
     editorError.value = null;
   });
+
+  // Save (create or update) — task 7.8/7.9
+  //
+  // Name source (create mode):
+  //   The SkillEditor does NOT expose a separate "name" field — per
+  //   agentskills.io spec the name lives in the body's YAML
+  //   frontmatter (ADR-SK-005). We parse it from the frontmatter on
+  //   save; if missing or malformed, surface a friendly error.
+  const handleSave = $(
+    async (input: { description: string; body: string }) => {
+      editorSaving.value = true;
+      editorError.value = null;
+
+      let result: ApiResult<Skill>;
+
+      if (mode.value === "create") {
+        // Parse `name:` from the frontmatter (best-effort; the
+        // backend will lock-step validate the full body anyway).
+        const fmNameMatch = /^---\n[\s\S]*?name:\s*([^\n]+)\n/.exec(
+          input.body,
+        );
+        const fmName = fmNameMatch ? fmNameMatch[1].trim() : "";
+        if (!fmName) {
+          editorError.value =
+            "Body must start with YAML frontmatter including a `name:` field.";
+          editorSaving.value = false;
+          return;
+        }
+        result = await createSkill({
+          name: fmName,
+          description: input.description,
+          body: input.body,
+        });
+      } else if (selectedName.value) {
+        // Anti-drift gate: edit-mode PATCH sends BOTH description AND body.
+        result = await updateSkill(selectedName.value, {
+          description: input.description,
+          body: input.body,
+        });
+      } else {
+        editorSaving.value = false;
+        return;
+      }
+
+      if (result.ok) {
+        // Refresh the skills list
+        const listResult = await listSkills();
+        if (listResult.ok) skills.value = listResult.value;
+
+        if (mode.value === "create") {
+          // Switch to edit mode for the new skill
+          selectedName.value = result.value.name;
+          currentSkill.value = result.value;
+          mode.value = "edit";
+          const revResult = await listRevisions(result.value.name);
+          currentRevisions.value = revResult.ok ? revResult.value : [];
+        } else {
+          // Update current skill in memory
+          currentSkill.value = result.value;
+          const revResult = await listRevisions(selectedName.value);
+          currentRevisions.value = revResult.ok ? revResult.value : [];
+        }
+      } else {
+        editorError.value = result.message;
+      }
+
+      editorSaving.value = false;
+    },
+  );
 
   // Load skill detail + revisions (populated branch — task 7.7)
   const loadSkillDetail = $(async (name: string) => {
@@ -279,7 +353,7 @@ export default component$(() => {
                   mode={mode.value === "create" ? "create" : "edit"}
                   saving={editorSaving.value}
                   error={editorError.value}
-                  onSave$={$(async () => {})}
+                  onSave$={handleSave}
                   onCancel$={handleCancel}
                   onDelete$={$(async () => {})}
                   onRestore$={$(async () => {})}
@@ -299,7 +373,7 @@ export default component$(() => {
                   mode="create"
                   saving={editorSaving.value}
                   error={editorError.value}
-                  onSave$={$(async () => {})}
+                  onSave$={handleSave}
                   onCancel$={handleCancel}
                   onDelete$={$(async () => {})}
                   onRestore$={$(async () => {})}
