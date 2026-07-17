@@ -275,3 +275,67 @@ test("[prompt-editor]: resets local form state (slug/description/body/preview) w
   expect(descriptionInput.value).toBe("");
   expect(getBodyTextarea(screen).value).toBe("");
 });
+
+test("[prompt-editor]: Save button is DISABLED in edit mode right after picking up a prompt (no changes yet)", async () => {
+  // Regression guard for UAT bug 2026-07-16: after loading an
+  // existing prompt, the Save button must be disabled until the
+  // user actually changes something. The previous canSave did
+  // NOT consult hasChanges, so the button was enabled with a
+  // no-op update on the line — clicking it would create an empty
+  // revision through the API.
+  //
+  // Note the pre-existing "Save button is disabled while saving"
+  // test covers the saving-state branch but NOT this one — the
+  // two constraints are independent.
+  const loadedPrompt: Prompt = {
+    id: 1,
+    slug: "existing",
+    description: "An existing prompt",
+    body: "Existing content",
+    current_revision: 3,
+    created_at: "2026-07-16T00:00:00Z",
+    updated_at: "2026-07-16T00:00:00Z",
+    deleted_at: null,
+  };
+
+  const { screen } = await renderEditor({
+    mode: "edit",
+    prompt: loadedPrompt,
+    saving: false,
+  });
+
+  const saveBtn = getSaveButton(screen);
+  // No changes yet → button must be disabled.
+  expect(saveBtn.disabled).toBe(true);
+});
+
+test("[prompt-editor]: Save button becomes ENABLED in edit mode after the user changes the body", async () => {
+  // Counterpart to the previous test: once the user actually
+  // edits the body, hasChanges flips to true and the button must
+  // become enabled (matching the existing create-mode behavior).
+  const loadedPrompt: Prompt = {
+    id: 1,
+    slug: "existing",
+    description: "An existing prompt",
+    body: "Existing content",
+    current_revision: 3,
+    created_at: "2026-07-16T00:00:00Z",
+    updated_at: "2026-07-16T00:00:00Z",
+    deleted_at: null,
+  };
+
+  const { screen, userEvent } = await renderEditor({
+    mode: "edit",
+    prompt: loadedPrompt,
+    saving: false,
+  });
+
+  const saveBtn = getSaveButton(screen);
+  expect(saveBtn.disabled).toBe(true); // sanity: starts disabled
+
+  const textarea = getBodyTextarea(screen);
+  textarea.value = "Updated content"; // any value different from the loaded body
+  await userEvent(textarea, "input", { target: textarea });
+
+  expect(saveBtn.disabled).toBe(false);
+});
