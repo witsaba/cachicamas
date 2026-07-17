@@ -157,14 +157,99 @@ func (r *SkillRepo) SelectBySlugAny(ctx context.Context, db domain.SQLExecutor, 
 func (r *SkillRepo) SelectByID(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
 	return nil, nil
 }
-func (r *SkillRepo) SelectByIDWithCurrentRevision(context.Context, domain.SQLExecutor, int64) (*domain.SkillDetail, error) {
-	return nil, nil
+// currentRevisionSubquery is the locked SQL fragment for the JOIN
+// against skill_revision. Defined as a constant so the SQL structure
+// is identical between SelectByIDWithCurrentRevision and
+// ListWithCurrentRevision (the design's anti-drift gate from
+// ADR-SK-008 + obs #1959 #2 — kills the "v{undefined}" prompt bug).
+const currentRevisionSubquery = `(SELECT skill_id, MAX(revision_number) AS current_revision FROM skill_revision GROUP BY skill_id)`
+
+// SelectByIDWithCurrentRevision returns the Skill + its current
+// revision number via a single LEFT JOIN (no N+1, no per-row query).
+// A skill with no revisions yields CurrentRevision=0 (COALESCE).
+// *domain.NotFoundError when the id doesn't match any row (live or
+// soft-deleted).
+func (r *SkillRepo) SelectByIDWithCurrentRevision(ctx context.Context, db domain.SQLExecutor, id int64) (*domain.SkillDetail, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT s.id, s.name, s.description, s.body, s.deleted_at, s.created_at, s.updated_at,
+                COALESCE(r.current_revision, 0) AS current_revision
+             FROM `+skillTableName+` s
+             LEFT JOIN `+currentRevisionSubquery+` r ON r.skill_id = s.id
+             WHERE s.id = $1`,
+		id,
+	)
+	out, err := scanSkillDetail(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: skillTableName}
+		}
+		return nil, fmt.Errorf("postgres.SkillRepo.SelectByIDWithCurrentRevision: %w", err)
+	}
+	return out, nil
 }
-func (r *SkillRepo) List(context.Context, domain.SQLExecutor, int) ([]*domain.Skill, error) {
-	return nil, nil
+
+// List returns active (deleted_at IS NULL) skills ordered by
+// (updated_at DESC, id DESC) for stable pagination. The limit is
+// clamped by the service to MaxListLimit before reaching the repo.
+// Returns an empty slice (NOT nil) when zero rows exist.
+func (r *SkillRepo) List(ctx context.Context, db domain.SQLExecutor, limit int) ([]*domain.Skill, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT `+skillColumnList+` FROM `+skillTableName+`
+             WHERE deleted_at IS NULL
+             ORDER BY updated_at DESC, id DESC
+             LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres.SkillRepo.List: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []*domain.Skill{}
+	for rows.Next() {
+		s, err := scanSkill(rows)
+		if err != nil {
+			return nil, fmt.Errorf("postgres.SkillRepo.List: scan: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres.SkillRepo.List: rows: %w", err)
+	}
+	return out, nil
 }
-func (r *SkillRepo) ListWithCurrentRevision(context.Context, domain.SQLExecutor, int) ([]*domain.SkillListItem, error) {
-	return nil, nil
+
+// ListWithCurrentRevision returns active (deleted_at IS NULL) skills
+// joined with their current revision number. ONE SQL statement for
+// the entire list (anti-drift gate ADR-SK-008). Skills with no
+// revisions emit current_revision=0 (COALESCE).
+func (r *SkillRepo) ListWithCurrentRevision(ctx context.Context, db domain.SQLExecutor, limit int) ([]*domain.SkillListItem, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT s.name, s.description, COALESCE(r.current_revision, 0) AS current_revision, s.updated_at
+             FROM `+skillTableName+` s
+             LEFT JOIN `+currentRevisionSubquery+` r ON r.skill_id = s.id
+             WHERE s.deleted_at IS NULL
+             ORDER BY s.updated_at DESC, s.id DESC
+             LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres.SkillRepo.ListWithCurrentRevision: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []*domain.SkillListItem{}
+	for rows.Next() {
+		var it domain.SkillListItem
+		if err := rows.Scan(&it.Name, &it.Description, &it.CurrentRevision, &it.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("postgres.SkillRepo.ListWithCurrentRevision: scan: %w", err)
+		}
+		out = append(out, &it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres.SkillRepo.ListWithCurrentRevision: rows: %w", err)
+	}
+	return out, nil
 }
 func (r *SkillRepo) UpdateBody(context.Context, domain.SQLExecutor, int64, string, string) error {
 	return nil
@@ -211,4 +296,30 @@ func scanSkill(s skillRowScanner) (*domain.Skill, error) {
 		sk.DeletedAt = &t
 	}
 	return &sk, nil
+}
+
+// scanSkillDetail reads one row from a SELECT … LEFT JOIN with
+// current_revision. The row shape is the same as scanSkill plus an
+// extra COALESCE column at the end. We scan into a SkillDetail
+// (which embeds Skill) and populate CurrentRevision separately.
+func scanSkillDetail(s skillRowScanner) (*domain.SkillDetail, error) {
+	var d domain.SkillDetail
+	var deletedAt sql.NullTime
+	if err := s.Scan(
+		&d.ID,
+		&d.Name,
+		&d.Description,
+		&d.Body,
+		&deletedAt,
+		&d.CreatedAt,
+		&d.UpdatedAt,
+		&d.CurrentRevision,
+	); err != nil {
+		return nil, err
+	}
+	if deletedAt.Valid {
+		t := deletedAt.Time
+		d.DeletedAt = &t
+	}
+	return &d, nil
 }
