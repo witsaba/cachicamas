@@ -34,4 +34,7 @@
 //     by AI-05 and AI-08 respectively. See message.go.
 //
 // Subsequent milestones (AI-05..AI-38) introduce content parts,
+// tool declarations, tool calls, the model request shape, finish reasons,
+// usage, the event envelope, the stream shape, and concrete provider
+// adapters — each in its own change.
 package ai
