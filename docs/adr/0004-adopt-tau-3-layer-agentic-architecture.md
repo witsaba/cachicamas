@@ -1,6 +1,6 @@
 # ADR 0004: Adopt 3-Layer Agentic Architecture
 
-> Status: **Proposed** (2026-07-17)
+> Status: **Accepted** (2026-07-17, change `cachicamas-agentic-architecture-adr`)
 > Author: cachicamas SDD pipeline (parent orchestrator)
 > Source narrative: [spike](./references/0004-spike-3-layer-architecture.md)
 > Origin: architecture demonstrated by Alejandro AO in his *How to Build a Coding Agent | 3-Layer Architecture* talk; cachicamas adopts the architecture, not the name. See [References](#references).
