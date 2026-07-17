@@ -17,7 +17,7 @@
  * envelopes (the prompts gotcha fixture regression).
  */
 
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Helpers (for wire-shape tests; task 5.2+)
@@ -285,5 +285,179 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     if (result.ok) {
       expect(result.value).toEqual({ hello: "world" });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tasks 5.4-5.9 — Wire-shape tests for the 7 endpoint wrappers
+// ---------------------------------------------------------------------------
+
+// Sample fixtures (mirror backend wire shapes).
+const SAMPLE_SKILL: import("./skills-api").Skill = {
+  id: 1,
+  name: "pdf-cleanup",
+  description: "Clean up PDFs.",
+  body: "---\nname: pdf-cleanup\ndescription: Clean up PDFs.\n---\n# Body",
+  current_revision: 2,
+  created_at: "2026-07-17T08:00:00Z",
+  updated_at: "2026-07-17T09:00:00Z",
+  deleted_at: null,
+};
+
+const SAMPLE_REVISION: import("./skills-api").SkillRevision = {
+  id: 10,
+  skill_id: 1,
+  revision_number: 2,
+  description: "Clean up PDFs.",
+  body: "---\nname: pdf-cleanup\ndescription: Clean up PDFs.\n---\n# Body",
+  change_note: null,
+  created_at: "2026-07-17T09:00:00Z",
+};
+
+describe("skills-api wire shapes (anti-drift obs #1959 items 3,4,5,6)", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(mockResponse([], { status: 200 }))),
+    );
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 5.4 — listSkills calls GET /skills (NO query string)
+  // -------------------------------------------------------------------------
+
+  it("Task 5.4 — listSkills calls GET /skills with NO query string", async () => {
+    const { listSkills } = await import("./skills-api");
+    await listSkills();
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    // URL MUST be exactly /skills — NO ?deleted=false (obs #1959 item 5).
+    expect(url).toMatch(/\/skills$/);
+    expect(url).not.toContain("?");
+    expect(url).not.toContain("deleted=");
+    expect(call[1]?.method).toBeUndefined(); // GET defaults
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 5.5 — getSkill + deleteSkill URL/method
+  // -------------------------------------------------------------------------
+
+  it("Task 5.5 — getSkill calls GET /skills/:name with encoded name", async () => {
+    const { getSkill } = await import("./skills-api");
+    await getSkill("pdf-cleanup");
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills\/pdf-cleanup$/);
+    expect(call[1]?.method).toBeUndefined();
+  });
+
+  it("Task 5.5 — getSkill encodes slugs with special characters", async () => {
+    const { getSkill } = await import("./skills-api");
+    await getSkill("a/b c");
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    // encodeURIComponent encodes /, space, etc.
+    expect(url).toContain(encodeURIComponent("a/b c"));
+  });
+
+  it("Task 5.5 — deleteSkill calls DELETE /skills/:name and returns ok on 204", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(undefined, { status: 204 }),
+    );
+    const { deleteSkill } = await import("./skills-api");
+    const result = await deleteSkill("pdf-cleanup");
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills\/pdf-cleanup$/);
+    expect(call[1]?.method).toBe("DELETE");
+    expect(result.ok).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 5.6 — createSkill calls POST /skills with JSON
+  // -------------------------------------------------------------------------
+
+  it("Task 5.6 — createSkill calls POST /skills with JSON {name, description, body}", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(SAMPLE_SKILL, { status: 201 }));
+    const { createSkill } = await import("./skills-api");
+    const result = await createSkill({
+      name: "pdf-cleanup",
+      description: "Clean up PDFs.",
+      body: "---\nname: pdf-cleanup\ndescription: Clean up PDFs.\n---\n# Body",
+    });
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills$/);
+    expect(call[1]?.method).toBe("POST");
+    const parsed = JSON.parse(call[1]?.body as string) as Record<string, string>;
+    expect(parsed.name).toBe("pdf-cleanup");
+    expect(parsed.description).toBe("Clean up PDFs.");
+    expect(parsed.body).toContain("name: pdf-cleanup");
+    const headers = call[1]?.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(result.ok).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 5.7 — updateSkill calls PATCH /skills/:name with BOTH description AND body
+  // -------------------------------------------------------------------------
+
+  it("Task 5.7 — updateSkill calls PATCH /skills/:name with BOTH description AND body", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(SAMPLE_SKILL, { status: 200 }));
+    const { updateSkill } = await import("./skills-api");
+    const result = await updateSkill("pdf-cleanup", {
+      description: "Updated description",
+      body: "---\nname: pdf-cleanup\ndescription: Updated description\n---\n# Body",
+    });
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills\/pdf-cleanup$/);
+    expect(call[1]?.method).toBe("PATCH");
+    // Anti-drift obs #1959 item 4: BOTH fields MUST be sent.
+    const parsed = JSON.parse(call[1]?.body as string) as Record<string, string>;
+    expect(parsed.description).toBe("Updated description");
+    expect(parsed.body).toContain("Updated description");
+    expect(result.ok).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 5.9 — listRevisions + restoreRevision
+  // -------------------------------------------------------------------------
+
+  it("Task 5.9 — listRevisions calls GET /skills/:name/revisions", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse([SAMPLE_REVISION], { status: 200 }),
+    );
+    const { listRevisions } = await import("./skills-api");
+    await listRevisions("pdf-cleanup");
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills\/pdf-cleanup\/revisions$/);
+    expect(call[1]?.method).toBeUndefined();
+  });
+
+  it("Task 5.9 — restoreRevision calls POST /skills/:name/revisions/:n/restore", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(SAMPLE_SKILL, { status: 200 }));
+    const { restoreRevision } = await import("./skills-api");
+    const result = await restoreRevision("pdf-cleanup", 2);
+    const call = vi.mocked(fetch).mock.calls[0];
+    const url = call[0] as string;
+    expect(url).toMatch(/\/skills\/pdf-cleanup\/revisions\/2\/restore$/);
+    expect(call[1]?.method).toBe("POST");
+    expect(result.ok).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Anti-drift — NO ?deleted=false dead query param on listSkills
+  // -------------------------------------------------------------------------
+
+  it("anti-drift — listSkills does NOT send ?deleted=false (obs #1959 item 5)", async () => {
+    const { listSkills } = await import("./skills-api");
+    await listSkills();
+    const url = vi.mocked(fetch).mock.calls[0][0] as string;
+    expect(url).not.toMatch(/deleted=/);
   });
 });
