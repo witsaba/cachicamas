@@ -508,6 +508,93 @@ func TestSkillRepo_MaxRevisionNumber_ReturnsMax(t *testing.T) {
 	}
 }
 
+// TestSkillRepo_LockAndLoad_HoldsRowLock covers spec S-SK-039 +
+// design §3.5: a SELECT … FOR UPDATE on the skill row must hold a
+// row lock that blocks a concurrent UPDATE on the same row (with a
+// tight statement_timeout). The lock is the concurrency gate for
+// Update, Restore, and SoftDelete — without it, two concurrent
+// writers could compute the same next revision number.
+func TestSkillRepo_LockAndLoad_HoldsRowLock(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	seeded := seedSkill(t, db, "lock-and-load", "d", "b")
+	ctx := context.Background()
+
+	// Open a transaction, take the FOR UPDATE lock.
+	tx1, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx1: %v", err)
+	}
+	defer func() { _ = tx1.Rollback() }()
+
+	loaded, err := repo.LockAndLoad(ctx, tx1, seeded.ID)
+	if err != nil {
+		t.Fatalf("LockAndLoad: %v", err)
+	}
+	if loaded.ID != seeded.ID {
+		t.Errorf("ID = %d, want %d", loaded.ID, seeded.ID)
+	}
+
+	// Second TX with statement_timeout=500ms — must fail to update
+	// the locked row.
+	tx2, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx2: %v", err)
+	}
+	defer func() { _ = tx2.Rollback() }()
+	if _, err := tx2.ExecContext(ctx, "SET LOCAL statement_timeout = '500ms'"); err != nil {
+		t.Fatalf("SET LOCAL statement_timeout: %v", err)
+	}
+	_, err = tx2.ExecContext(ctx, "UPDATE skill SET body = 'blocked' WHERE id = $1", seeded.ID)
+	if err == nil {
+		t.Errorf("expected second TX to block on FOR UPDATE; got nil error")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "cancel") &&
+		!strings.Contains(strings.ToLower(err.Error()), "timeout") &&
+		!strings.Contains(strings.ToLower(err.Error()), "lock") {
+		t.Logf("second TX error: %v (acceptable if lock-related)", err)
+	}
+}
+
+// TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp covers
+// spec R-SK-001 / S-SK-010 + design §3.5: UpdateBody writes the new
+// description + body and bumps updated_at from the DB clock (so the
+// re-read in the handler reflects the post-write timestamp).
+func TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+	seeded := seedSkill(t, db, "update-body", "original desc", "original body")
+	originalUpdatedAt := seeded.UpdatedAt
+
+	time.Sleep(10 * time.Millisecond)
+	if err := repo.UpdateBody(ctx, db, seeded.ID, "new body", "new desc"); err != nil {
+		t.Fatalf("UpdateBody: %v", err)
+	}
+	got, err := repo.SelectByID(ctx, db, seeded.ID)
+	if err != nil {
+		t.Fatalf("SelectByID: %v", err)
+	}
+	if got.Body != "new body" {
+		t.Errorf("Body = %q, want %q", got.Body, "new body")
+	}
+	if got.Description != "new desc" {
+		t.Errorf("Description = %q, want %q", got.Description, "new desc")
+	}
+	if !got.UpdatedAt.After(originalUpdatedAt) {
+		t.Errorf("UpdatedAt = %v, want > %v", got.UpdatedAt, originalUpdatedAt)
+	}
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
