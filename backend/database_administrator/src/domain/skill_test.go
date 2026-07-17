@@ -19,6 +19,40 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// ValidateSkillDescription (spec S-SK-028, S-SK-029, S-SK-003).
+// ---------------------------------------------------------------------------
+
+func TestValidateSkillDescription_Accepts1024Chars(t *testing.T) {
+	t.Parallel()
+	d := strings.Repeat("a", 1024)
+	if err := domain.ValidateSkillDescription(d); err != nil {
+		t.Fatalf("expected nil for 1024-char description, got %v", err)
+	}
+}
+
+func TestValidateSkillDescription_Rejects1025Chars(t *testing.T) {
+	t.Parallel()
+	d := strings.Repeat("a", 1025)
+	if err := domain.ValidateSkillDescription(d); err == nil {
+		t.Fatalf("expected error for 1025-char description, got nil")
+	}
+}
+
+func TestValidateSkillDescription_Accepts1Char(t *testing.T) {
+	t.Parallel()
+	if err := domain.ValidateSkillDescription("x"); err != nil {
+		t.Fatalf("expected nil for 1-char description, got %v", err)
+	}
+}
+
+func TestValidateSkillDescription_RejectsEmpty(t *testing.T) {
+	t.Parallel()
+	if err := domain.ValidateSkillDescription(""); err == nil {
+		t.Fatalf("expected error for empty description, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ValidateSkillName — reserved-word rejection (spec S-SK-026).
 // ---------------------------------------------------------------------------
 
