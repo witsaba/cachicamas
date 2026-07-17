@@ -42,20 +42,20 @@ import (
 // Setup helpers
 // ---------------------------------------------------------------------------
 
-// setupHandler wires the real SkillService + SkillHandler against the
+// setupSkillHandler wires the real SkillService + SkillHandler against the
 // live Postgres integration DB. The handler is mounted on a fresh
 // Echo router so test cases cannot collide on global state. Returns
 // (echo, handler, sql.DB).
-func setupHandler(t *testing.T) (*echo.Echo, *httpiface.SkillHandler, *sql.DB) {
+func setupSkillHandler(t *testing.T) (*echo.Echo, *httpiface.SkillHandler, *sql.DB) {
 	t.Helper()
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
 	}
-	host := osOr("POSTGRES_HOST", "localhost")
-	port := osOr("POSTGRES_PORT", "5432")
-	user := osOr("QUEEN_USER", "queen")
-	pass := osOr("QUEEN_PASSWORD", "changeme-queen")
-	dbname := osOr("POSTGRES_DB", "cachicamas_pg")
+	host := skillOsOr("POSTGRES_HOST", "localhost")
+	port := skillOsOr("POSTGRES_PORT", "5432")
+	user := skillOsOr("QUEEN_USER", "queen")
+	pass := skillOsOr("QUEEN_PASSWORD", "changeme-queen")
+	dbname := skillOsOr("POSTGRES_DB", "cachicamas_pg")
 	dsn := "host=" + host + " port=" + port + " user=" + user + " password=" + pass + " dbname=" + dbname + " sslmode=disable"
 	dbConn, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -82,7 +82,7 @@ func setupHandler(t *testing.T) (*echo.Echo, *httpiface.SkillHandler, *sql.DB) {
 	return e, h, dbConn
 }
 
-func osOr(k, f string) string {
+func skillOsOr(k, f string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
 	}
@@ -168,7 +168,7 @@ func validSkillBody(name, description string) string {
 // gate (ADR-SK-008). The response MUST include current_revision=1 (proves
 // the backend emits the field; kills the v{undefined} prompt bug).
 func TestSkillHandler_Create_Returns201AndCurrentRevisionOne(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "pdf-cleanup"
@@ -211,12 +211,17 @@ type envEnvelope struct {
 	} `json:"error"`
 }
 
+// skillListResponseShape decodes the spec §8 wire shape {skills:[...]}.
+type skillListResponseShape struct {
+	Skills []map[string]any `json:"skills"`
+}
+
 // TestSkillHandler_Create_ValidationErrorEnvelopeShape is the anti-drift
 // gate for the NESTED error envelope (spec R-SK-006 / S-SK-X4). An invalid
 // name MUST produce 400 with code="validation" AND a populated fields.name
 // map (kills the prompts flat-fixture parsing bug).
 func TestSkillHandler_Create_ValidationErrorEnvelopeShape(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	body := []byte(`{"name":"BAD","description":"d","body":"x"}`)
@@ -242,7 +247,7 @@ func TestSkillHandler_Create_ValidationErrorEnvelopeShape(t *testing.T) {
 // TestSkillHandler_Create_DuplicateName_Returns409WithConflictCode asserts
 // that a duplicate active name is translated to HTTP 409 with code "conflict".
 func TestSkillHandler_Create_DuplicateName_Returns409WithConflictCode(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "dup"
@@ -270,7 +275,7 @@ func TestSkillHandler_Create_DuplicateName_Returns409WithConflictCode(t *testing
 // a soft-deleted skill returns HTTP 410 with code "skill_deleted" (anti-drift
 // gate — the locked wire code is skill_deleted, NOT prompt_deleted).
 func TestSkillHandler_DeletedSkill_UsesSkillDeletedCode(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "del"
@@ -305,7 +310,7 @@ func TestSkillHandler_DeletedSkill_UsesSkillDeletedCode(t *testing.T) {
 // current_revision (anti-drift gate — prevents the v{undefined} prompt bug
 // from leaking into the skills feature).
 func TestSkillHandler_List_EmitsCurrentRevision(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	for i, name := range []string{"alpha", "bravo"} {
@@ -322,14 +327,14 @@ func TestSkillHandler_List_EmitsCurrentRevision(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
-	var items []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+	var resp skillListResponseShape
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("list len = %d, want 2", len(items))
+	if len(resp.Skills) != 2 {
+		t.Fatalf("list len = %d, want 2", len(resp.Skills))
 	}
-	for _, it := range items {
+	for _, it := range resp.Skills {
 		if _, ok := it["current_revision"]; !ok {
 			t.Errorf("list item missing current_revision (anti-drift gate ADR-SK-008): %v", it)
 		}
@@ -341,7 +346,7 @@ func TestSkillHandler_List_EmitsCurrentRevision(t *testing.T) {
 // 200 means a huge limit clamps to 200. We assert the response shape
 // includes a "skills" array (per spec §8 wire-shape lock).
 func TestSkillHandler_List_DefaultsLimit50AndCapsAt200(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	rec := skillHttpDo(t, e, "GET", "/skills", nil)
@@ -367,7 +372,7 @@ func TestSkillHandler_List_DefaultsLimit50AndCapsAt200(t *testing.T) {
 // TestSkillHandler_GetBySlug_NotFoundReturns404Envelope asserts the missing
 // path returns 404 + code="not_found".
 func TestSkillHandler_GetBySlug_NotFoundReturns404Envelope(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	rec := skillHttpDo(t, e, "GET", "/skills/missing", nil)
@@ -386,7 +391,7 @@ func TestSkillHandler_GetBySlug_NotFoundReturns404Envelope(t *testing.T) {
 // TestSkillHandler_GetBySlug_DeletedReturns404Envelope asserts that GET on a
 // soft-deleted skill returns 404 (NOT 410 — 410 is reserved for update/restore).
 func TestSkillHandler_GetBySlug_DeletedReturns404Envelope(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "toget"
@@ -419,7 +424,7 @@ func TestSkillHandler_GetBySlug_DeletedReturns404Envelope(t *testing.T) {
 // TestSkillHandler_Update_AppendsRevision_AndReturnsNewRevision asserts that
 // PATCH on a live skill returns 200 with current_revision bumped to 2.
 func TestSkillHandler_Update_AppendsRevision_AndReturnsNewRevision(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "upd"
@@ -452,7 +457,7 @@ func TestSkillHandler_Update_AppendsRevision_AndReturnsNewRevision(t *testing.T)
 // TestSkillHandler_Update_400OnInvalidBody asserts that a PATCH whose body
 // fails validation returns 400 + envelope with code="validation".
 func TestSkillHandler_Update_400OnInvalidBody(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "badpatch"
@@ -482,7 +487,7 @@ func TestSkillHandler_Update_400OnInvalidBody(t *testing.T) {
 
 // TestSkillHandler_Update_410OnDeletedSkill asserts the 410 path on update.
 func TestSkillHandler_Update_410OnDeletedSkill(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "upddel"
@@ -515,7 +520,7 @@ func TestSkillHandler_Update_410OnDeletedSkill(t *testing.T) {
 
 // TestSkillHandler_Delete_Returns204 asserts the happy-path delete.
 func TestSkillHandler_Delete_Returns204(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "killme"
@@ -533,7 +538,7 @@ func TestSkillHandler_Delete_Returns204(t *testing.T) {
 
 // TestSkillHandler_Delete_MissingReturns204 asserts idempotence on missing name.
 func TestSkillHandler_Delete_MissingReturns204(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	rec := skillHttpDo(t, e, "DELETE", "/skills/never-existed", nil)
@@ -545,7 +550,7 @@ func TestSkillHandler_Delete_MissingReturns204(t *testing.T) {
 // TestSkillHandler_Delete_AlreadyDeletedReturns204 asserts idempotence on
 // already-deleted name (deleted twice = 204 both times).
 func TestSkillHandler_Delete_AlreadyDeletedReturns204(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "twice"
@@ -571,7 +576,7 @@ func TestSkillHandler_Delete_AlreadyDeletedReturns204(t *testing.T) {
 // TestSkillHandler_ListRevisions_NewestFirst asserts that the list comes
 // back in DESC order (newest first) per spec SCN-5.5.
 func TestSkillHandler_ListRevisions_NewestFirst(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "revhist"
@@ -610,7 +615,7 @@ func TestSkillHandler_ListRevisions_NewestFirst(t *testing.T) {
 
 // TestSkillHandler_ListRevisions_NotFoundReturns404Envelope asserts the missing path.
 func TestSkillHandler_ListRevisions_NotFoundReturns404Envelope(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	rec := skillHttpDo(t, e, "GET", "/skills/never-existed/revisions", nil)
@@ -630,7 +635,7 @@ func TestSkillHandler_ListRevisions_NotFoundReturns404Envelope(t *testing.T) {
 // revision (preserving history per spec SCN-1.3) and returns the restored
 // content as the current body.
 func TestSkillHandler_Restore_AppendsNewRevision(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "restore"
@@ -664,7 +669,7 @@ func TestSkillHandler_Restore_AppendsNewRevision(t *testing.T) {
 
 // TestSkillHandler_Restore_OnDeletedReturns410Envelope asserts the 410 path.
 func TestSkillHandler_Restore_OnDeletedReturns410Envelope(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	name := "restdel"
@@ -701,11 +706,11 @@ func TestSkillHandler_NoPIIInLogs(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
 	}
-	host := osOr("POSTGRES_HOST", "localhost")
-	port := osOr("POSTGRES_PORT", "5432")
-	user := osOr("QUEEN_USER", "queen")
-	pass := osOr("QUEEN_PASSWORD", "changeme-queen")
-	dbname := osOr("POSTGRES_DB", "cachicamas_pg")
+	host := skillOsOr("POSTGRES_HOST", "localhost")
+	port := skillOsOr("POSTGRES_PORT", "5432")
+	user := skillOsOr("QUEEN_USER", "queen")
+	pass := skillOsOr("QUEEN_PASSWORD", "changeme-queen")
+	dbname := skillOsOr("POSTGRES_DB", "cachicamas_pg")
 	dsn := "host=" + host + " port=" + port + " user=" + user + " password=" + pass + " dbname=" + dbname + " sslmode=disable"
 	dbConn, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -751,20 +756,20 @@ func TestSkillHandler_NoPIIInLogs(t *testing.T) {
 // seven endpoints from spec §6 — no spurious routes, no `?deleted=` query
 // params accepted.
 func TestSkillHandler_RouteRegistration_MatchesSpecExactly(t *testing.T) {
-	e, _, db := setupHandler(t)
+	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
 	expected := map[string]string{
-		"GET /skills":                                "GET",
-		"POST /skills":                               "POST",
-		"GET /skills/:name":                          "GET",
-		"PATCH /skills/:name":                        "PATCH",
-		"DELETE /skills/:name":                       "DELETE",
-		"GET /skills/:name/revisions":                "GET",
-		"POST /skills/:name/revisions/:n/restore":    "POST",
+		"GET /skills":                             "GET",
+		"POST /skills":                            "POST",
+		"GET /skills/:name":                       "GET",
+		"PATCH /skills/:name":                     "PATCH",
+		"DELETE /skills/:name":                    "DELETE",
+		"GET /skills/:name/revisions":             "GET",
+		"POST /skills/:name/revisions/:n/restore": "POST",
 	}
 	got := map[string]bool{}
-	for _, r := range e.Routes() {
+	for _, r := range e.Router().Routes() {
 		path := r.Path
 		if !strings.HasPrefix(path, "/skills") {
 			continue
