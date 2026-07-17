@@ -595,6 +595,56 @@ func TestSkillRepo_UpdateBody_PersistsFieldsAndUpdatesTimestamp(t *testing.T) {
 	}
 }
 
+// TestSkillRepo_SoftDelete_SetsDeletedAt covers spec SCN-2.1 + R-SK-002:
+// SoftDelete writes deleted_at = now() to the row. We verify via a raw
+// query because the repo's SelectByID still returns the row but the
+// service contract is that soft-deleted is "no longer active".
+func TestSkillRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+	seeded := seedSkill(t, db, "soft-delete", "d", "b")
+	if err := repo.SoftDelete(ctx, db, seeded.ID); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	var deletedAt *time.Time
+	if err := db.QueryRowContext(ctx, "SELECT deleted_at FROM skill WHERE id = $1", seeded.ID).Scan(&deletedAt); err != nil {
+		t.Fatalf("raw query: %v", err)
+	}
+	if deletedAt == nil {
+		t.Fatalf("SoftDelete did not set deleted_at")
+	}
+}
+
+// TestSkillRepo_SoftDelete_Idempotent covers spec SCN-2.3: calling
+// SoftDelete twice on the same row succeeds both times (the second
+// call finds zero rows matching `deleted_at IS NULL` and returns
+// nil). This is the handler-level "DELETE returns 204 even on
+// missing" promise.
+func TestSkillRepo_SoftDelete_Idempotent(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+	seeded := seedSkill(t, db, "soft-delete-twice", "d", "b")
+	if err := repo.SoftDelete(ctx, db, seeded.ID); err != nil {
+		t.Fatalf("first SoftDelete: %v", err)
+	}
+	if err := repo.SoftDelete(ctx, db, seeded.ID); err != nil {
+		t.Fatalf("second SoftDelete (idempotent): %v", err)
+	}
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
