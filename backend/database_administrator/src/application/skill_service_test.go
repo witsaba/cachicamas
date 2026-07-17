@@ -364,8 +364,86 @@ func TestSkillService_Create_DuplicateName_ReturnsConflictError(t *testing.T) {
 	}
 }
 
-// _ = sync / atomic are used by later concurrency tests; referencing
-// them here avoids unused-import errors as the file grows.
+// ---------------------------------------------------------------------------
+// Task 3.5 — Update appends next revision (rev 3 → rev 4).
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Update_AppendsNextRevision(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "update-rev",
+		Description: "d1",
+		Body:        validSkillBody("update-rev", "d1"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, _, err := svc.Update(ctx, "update-rev", domain.UpdateSkillInput{
+		Body: stringPtrSkill(validSkillBody("update-rev", "d2")),
+	}); err != nil {
+		t.Fatalf("Update 1: %v", err)
+	}
+	sk, rev, err := svc.Update(ctx, "update-rev", domain.UpdateSkillInput{
+		Body:        stringPtrSkill(validSkillBody("update-rev", "d3")),
+		Description: stringPtrSkill("d3"),
+	})
+	if err != nil {
+		t.Fatalf("Update 2: %v", err)
+	}
+	if rev.RevisionNumber != 3 {
+		t.Errorf("revision = %d, want 3", rev.RevisionNumber)
+	}
+	if sk.Description != "d3" {
+		t.Errorf("skill.description = %q, want %q", sk.Description, "d3")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.6 — Update description-only also appends a revision.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "update-desc-only",
+		Description: "orig-desc",
+		Body:        validSkillBody("update-desc-only", "orig-desc"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	sk, rev, err := svc.Update(ctx, "update-desc-only", domain.UpdateSkillInput{
+		Description: stringPtrSkill("new-desc"),
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if rev.RevisionNumber != 2 {
+		t.Errorf("revision = %d, want 2 (desc-only must still append)", rev.RevisionNumber)
+	}
+	if sk.Description != "new-desc" {
+		t.Errorf("description = %q, want %q", sk.Description, "new-desc")
+	}
+	// Body carried forward — should be unchanged from creation.
+	if sk.Body != validSkillBody("update-desc-only", "orig-desc") {
+		t.Errorf("body not carried forward; got %q", sk.Body)
+	}
+}
+
+// stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
+func stringPtrSkill(s string) *string { return &s }
 var (
 	_ = sync.WaitGroup{}
 	_ = atomic.AddInt32
