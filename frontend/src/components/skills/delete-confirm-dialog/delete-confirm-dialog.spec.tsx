@@ -8,12 +8,38 @@
  *
  * RED step: until `delete-confirm-dialog.tsx` exists, the import
  * fails and the suite fails — that failure IS the RED state.
+ *
+ * QRL closure capture pattern: spies live in module-scoped arrays
+ * because Qwik's QRL serialization rejects function values captured
+ * directly inside `$()` closures.
  */
 import { createDOM } from "@builder.io/qwik/testing";
-import { $ } from "@builder.io/qwik";
-import { describe, it, expect, vi } from "vitest";
+import { $, type QRL } from "@builder.io/qwik";
+import { describe, it, expect, beforeEach } from "vitest";
 
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+
+let confirmCalls: number = 0;
+let cancelCalls: number = 0;
+let captureEnabled = false;
+
+beforeEach(() => {
+  confirmCalls = 0;
+  cancelCalls = 0;
+  captureEnabled = true;
+});
+
+function makeConfirmStub(): QRL<() => void> {
+  return $(() => {
+    if (captureEnabled) confirmCalls += 1;
+  });
+}
+
+function makeCancelStub(): QRL<() => void> {
+  return $(() => {
+    if (captureEnabled) cancelCalls += 1;
+  });
+}
 
 describe("components/skills/delete-confirm-dialog", () => {
   it("TestDeleteConfirmDialog_OpensWithName — renders the skill name in the dialog heading", async () => {
@@ -21,8 +47,8 @@ describe("components/skills/delete-confirm-dialog", () => {
     await render(
       <DeleteConfirmDialog
         name="pdf-cleanup"
-        onConfirm$={$(() => {})}
-        onCancel$={$(() => {})}
+        onConfirm$={makeConfirmStub()}
+        onCancel$={makeCancelStub()}
       />,
     );
     const dialog = screen.querySelector(
@@ -36,24 +62,38 @@ describe("components/skills/delete-confirm-dialog", () => {
   });
 
   it("TestDeleteConfirmDialog_CallsOnConfirm — clicking the Delete button invokes onConfirm$ exactly once", async () => {
-    const confirmSpy = vi.fn();
-    const { screen, render } = await createDOM();
+    const { screen, render, userEvent } = await createDOM();
     await render(
       <DeleteConfirmDialog
         name="pdf-cleanup"
-        onConfirm$={$(() => {
-          confirmSpy();
-        })}
-        onCancel$={$(() => {})}
+        onConfirm$={makeConfirmStub()}
+        onCancel$={makeCancelStub()}
       />,
     );
     const okBtn = screen.querySelector(
       '[data-testid="delete-confirm-ok"]',
     ) as HTMLElement | null;
     expect(okBtn).toBeTruthy();
-    okBtn?.click();
-    // Event loop drain so Qwik's QRL dispatch resolves.
-    await new Promise((r) => setTimeout(r, 0));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await userEvent(okBtn!, "click");
+    expect(confirmCalls).toBe(1);
+    expect(cancelCalls).toBe(0);
+  });
+
+  it("TestDeleteConfirmDialog_CancelDoesNotCallOnConfirm — clicking the Cancel button invokes onCancel$ and NOT onConfirm$", async () => {
+    const { screen, render, userEvent } = await createDOM();
+    await render(
+      <DeleteConfirmDialog
+        name="pdf-cleanup"
+        onConfirm$={makeConfirmStub()}
+        onCancel$={makeCancelStub()}
+      />,
+    );
+    const cancelBtn = screen.querySelector(
+      '[data-testid="delete-confirm-cancel"]',
+    ) as HTMLElement | null;
+    expect(cancelBtn).toBeTruthy();
+    await userEvent(cancelBtn!, "click");
+    expect(cancelCalls).toBe(1);
+    expect(confirmCalls).toBe(0);
   });
 });
