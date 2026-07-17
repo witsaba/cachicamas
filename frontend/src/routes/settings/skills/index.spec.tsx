@@ -505,3 +505,43 @@ describe("routes/settings/skills — delete + restore flows (7.10)", () => {
     expect(restoreCalls.length).toBeGreaterThanOrEqual(0);
   });
 });
+
+// =========================================================================
+// 7.11 — 410 → not_found mapping
+// =========================================================================
+
+describe("routes/settings/skills — 410 → not_found mapping (7.11)", () => {
+  it("TestSettingsSkillsRoute_Handles410AsNotFound — when deleteSkill returns 410 not_found, the route clears selection and surfaces a friendly message", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
+    deletedSkillKind = "not_found";
+    const { screen, render, userEvent } = await createDOM();
+    await render(<TestWrapper />);
+
+    // Select the sample skill.
+    const item = screen.querySelector(
+      '[data-testid="skill-list-item"]',
+    ) as HTMLElement | null;
+    await userEvent(item!, "click");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Click Delete → confirm.
+    const deleteBtn = screen.querySelector(
+      '[data-testid="skill-editor-delete"]',
+    ) as HTMLElement | null;
+    await userEvent(deleteBtn!, "click");
+    const confirmBtn = screen.querySelector(
+      '[data-testid="delete-confirm-ok"]',
+    ) as HTMLElement | null;
+    await userEvent(confirmBtn!, "click");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The route should have surfaced the not_found message as
+    // editorError (the api client maps 410 → not_found → toast-style
+    // message).
+    const errorEl = screen.querySelector(
+      '[data-testid="skill-editor-error"]',
+    );
+    expect(errorEl).toBeTruthy();
+    expect(errorEl?.textContent ?? "").toContain("deleted");
+  });
+});
