@@ -461,3 +461,60 @@ describe("skills-api wire shapes (anti-drift obs #1959 items 3,4,5,6)", () => {
     expect(url).not.toMatch(/deleted=/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 5.8 — updateSkill JSDoc MUST say "PATCH" (not "PUT")
+// ---------------------------------------------------------------------------
+
+describe("skills-api JSDoc — PATCH not PUT (anti-drift obs #1959 item 4)", () => {
+  /**
+   * Task 5.8 — updateSkill's JSDoc MUST contain the literal string "PATCH".
+   *
+   * The prompts bug (obs #1959 item 4) is that the JSDoc on
+   * `updatePrompt` says "PUT" while the impl uses `method: "PATCH"`.
+   * That comment-vs-code drift caused ~1h of debugging in the prompts
+   * build (#1899). This source-grep test pins the comment FOREVER.
+   *
+   * The test reads the source file from disk and asserts the literal
+   * "PATCH" appears in the JSDoc block above `updateSkill`. We
+   * deliberately do NOT assert "PUT" should be absent — both strings
+   * may coexist (e.g. "PATCH (not PUT)"); only the "PATCH" presence
+   * is load-bearing.
+   */
+  it("updateSkill JSDoc explicitly mentions PATCH", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const source = await fs.readFile(
+      path.resolve(__dirname, "./skills-api.ts"),
+      "utf8",
+    );
+    // Locate the updateSkill declaration and the JSDoc block above it.
+    const idx = source.indexOf("export async function updateSkill");
+    expect(idx).toBeGreaterThan(-1);
+    // Walk backwards from the declaration looking for the start of
+    // the previous JSDoc block ("/**").
+    const before = source.slice(0, idx);
+    const jsDocStart = before.lastIndexOf("/**");
+    expect(jsDocStart).toBeGreaterThan(-1);
+    const jsDoc = source.slice(jsDocStart, idx);
+    // Anti-drift gate: JSDoc MUST mention PATCH.
+    expect(jsDoc).toContain("PATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Anti-drift — skills-api does NOT import prompts-api (independence gate)
+// ---------------------------------------------------------------------------
+
+describe("skills-api — independence from prompts-api (anti-drift design §4.4)", () => {
+  it("skills-api.ts does NOT import from prompts-api (separate parseResponse)", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const source = await fs.readFile(
+      path.resolve(__dirname, "./skills-api.ts"),
+      "utf8",
+    );
+    expect(source).not.toContain('from "./prompts-api"');
+    expect(source).not.toContain("from \"./prompts-api\"");
+  });
+});
