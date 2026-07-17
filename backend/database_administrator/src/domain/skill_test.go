@@ -19,6 +19,41 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// CRLF + empty-body normalization (spec §4.3, design risk R2).
+// ---------------------------------------------------------------------------
+
+func TestFrontmatter_HandlesCRLF(t *testing.T) {
+	t.Parallel()
+	// Windows-authored files emit CRLF between lines. The YAML parser
+	// accepts CRLF inside the block, but the fence matching code must
+	// also normalize CRLF or the closing fence is never found.
+	body := "---\r\nname: pdf-cleanup\r\ndescription: d\r\n---\r\n# Body\r\n"
+	fm, err := domain.ParseFrontmatter(body)
+	if err != nil {
+		t.Fatalf("expected nil for CRLF body, got %v", err)
+	}
+	if fm.Name != "pdf-cleanup" {
+		t.Errorf("expected Name = %q, got %q", "pdf-cleanup", fm.Name)
+	}
+	if fm.Description != "d" {
+		t.Errorf("expected Description = %q, got %q", "d", fm.Description)
+	}
+}
+
+func TestFrontmatter_HandlesEmptyMarkdownBody(t *testing.T) {
+	t.Parallel()
+	// Closing fence at end of file with no trailing newline.
+	body := "---\nname: pdf-cleanup\ndescription: d\n---"
+	fm, err := domain.ParseFrontmatter(body)
+	if err != nil {
+		t.Fatalf("expected nil for body ending at closing fence, got %v", err)
+	}
+	if fm.Name != "pdf-cleanup" {
+		t.Errorf("expected Name = %q, got %q", "pdf-cleanup", fm.Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // LockStepCheck (spec S-SK-035, S-SK-036, S-SK-007/008).
 //
 // The frontmatter parser returns `name` and `description`. These MUST
