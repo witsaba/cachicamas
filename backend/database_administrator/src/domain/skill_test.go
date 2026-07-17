@@ -1,14 +1,7 @@
-// Package domain_test contains the TDD-locked unit tests for the
-// skills feature. Every assertion below corresponds to a spec scenario
-// in engram obs #1967 (sdd/cachicamas-skills-foundational/spec).
-//
-// This file MUST land before the production code it tests (RED step
-// in strict TDD). The production file is domain/skill.go.
-//
-// Naming convention: each test function asserts one behavioural rule
-// with a `_Accepts_` or `_Rejects_` infix that mirrors the spec
-// scenarios (e.g. S-SK-024..036). The cases stay deterministic
-// because the domain layer has zero infrastructure dependencies.
+// Package domain_test — TDD-locked unit tests for the skills feature.
+// Every assertion corresponds to a spec scenario in engram obs #1967
+// (sdd/cachicamas-skills-foundational/spec). Production code lives
+// in domain/skill.go and MUST land AFTER these tests (strict TDD).
 package domain_test
 
 import (
@@ -20,15 +13,11 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
 
-// ---------------------------------------------------------------------------
 // Architectural invariant — domain MUST NOT import pgx (spec SCN-6.2).
-//
-// This is a stronger scanner than imports_test.go: it walks every .go
-// file under domain/ and rejects the literal "github.com/jackc/pgx"
-// string in any of them. The companion test in imports_test.go uses
-// `go list -deps` to verify transitive imports; this one verifies the
-// direct source. Both MUST pass together.
-// ---------------------------------------------------------------------------
+// Scans every domain/*.go file for a direct "github.com/jackc/pgx"
+// string. The companion imports_test.go uses `go list -deps` for
+// transitive coverage; this scanner verifies direct imports. Both
+// MUST pass together.
 
 func TestDomain_DoesNotImportPgx(t *testing.T) {
 	t.Parallel()
@@ -50,15 +39,10 @@ func TestDomain_DoesNotImportPgx(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Repository ports (hexagonal boundary; implementations land in
-// PR1b under src/infrastructure/postgres/skills/).
-// ---------------------------------------------------------------------------
+// Repository ports — interface surface checks (implementations land in PR1b).
 
 func TestSkillRepository_PortInterface(t *testing.T) {
 	t.Parallel()
-	// Compile-time check: a fake must satisfy the interface. If the
-	// interface surface drifts, this file fails to build.
 	fake := &fakeSkillRepo{}
 	var _ domain.SkillRepository = fake
 	if fake == nil {
@@ -75,9 +59,7 @@ func TestSkillRevisionRepository_PortInterface(t *testing.T) {
 	}
 }
 
-// fakeSkillRepo satisfies domain.SkillRepository at compile time
-// (used only for the port interface test). No real methods; add
-// stubs here if a future test calls them.
+// fakeSkillRepo satisfies domain.SkillRepository at compile time.
 type fakeSkillRepo struct{}
 
 func (*fakeSkillRepo) Insert(context.Context, domain.SQLExecutor, *domain.Skill) error { return nil }
@@ -107,8 +89,7 @@ func (*fakeSkillRepo) MaxRevisionNumber(context.Context, domain.SQLExecutor, int
 	return 0, nil
 }
 
-// fakeSkillRevisionRepo satisfies domain.SkillRevisionRepository at
-// compile time (used only for the port interface test).
+// fakeSkillRevisionRepo satisfies domain.SkillRevisionRepository at compile time.
 type fakeSkillRevisionRepo struct{}
 
 func (*fakeSkillRevisionRepo) Insert(context.Context, domain.SQLExecutor, *domain.SkillRevision) error {
@@ -121,25 +102,16 @@ func (*fakeSkillRevisionRepo) ListBySkillID(context.Context, domain.SQLExecutor,
 	return nil, nil
 }
 
-// ---------------------------------------------------------------------------
 // Error vocabulary (spec §7, design §3.6).
-//
-// Wire codes are the locked vocabulary the handler maps to HTTP
-// statuses (400 / 404 / 409 / 410 / 500). Skill-specific values are
-// `skill_deleted` (added here for the 410 case — organization.go has
-// no 410 type); the rest come from organization.go.
-// ---------------------------------------------------------------------------
 
 func TestSkillValidationError_Fields(t *testing.T) {
 	t.Parallel()
-	err := &domain.ValidationError{
-		Fields: map[string]string{"name": domain.MsgSkillNameLength},
-	}
+	err := &domain.ValidationError{Fields: map[string]string{"name": domain.MsgSkillNameLength}}
 	if err.Code() != domain.CodeValidation {
 		t.Errorf("expected Code() = %q, got %q", domain.CodeValidation, err.Code())
 	}
 	if err.Fields["name"] == "" {
-		t.Errorf("expected Fields[name] to be non-empty, got %+v", err.Fields)
+		t.Errorf("expected Fields[name] non-empty, got %+v", err.Fields)
 	}
 }
 
@@ -156,23 +128,19 @@ func TestSkillNotFoundError_ResourceSkill(t *testing.T) {
 
 func TestSkillConflictError_CodeIsConflict(t *testing.T) {
 	t.Parallel()
-	err := &domain.ConflictError{}
-	if err.Code() != domain.CodeConflict {
-		t.Errorf("expected Code() = %q, got %q", domain.CodeConflict, err.Code())
+	if (&domain.ConflictError{}).Code() != domain.CodeConflict {
+		t.Errorf("expected Code() = %q", domain.CodeConflict)
 	}
 }
 
 func TestSkillGoneError_CodeIsSkillDeleted(t *testing.T) {
 	t.Parallel()
-	err := domain.NewSkillDeleted("pdf-cleanup")
-	if err.Code() != domain.CodeSkillDeleted {
-		t.Errorf("expected Code() = %q, got %q", domain.CodeSkillDeleted, err.Code())
+	if domain.NewSkillDeleted("pdf-cleanup").Code() != domain.CodeSkillDeleted {
+		t.Errorf("expected Code() = %q", domain.CodeSkillDeleted)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Entity structs (spec INV-1, INV-2; mirrors `prompt.go` shape).
-// ---------------------------------------------------------------------------
+// Entity structs (spec INV-1/INV-2; mirrors prompt.go shape).
 
 func TestSkill_EntityFields(t *testing.T) {
 	t.Parallel()
@@ -184,7 +152,7 @@ func TestSkill_EntityFields(t *testing.T) {
 		t.Errorf("expected zero-value Name, got %q", s.Name)
 	}
 	if s.DeletedAt != nil {
-		t.Errorf("expected zero-value (nil) DeletedAt, got %v", s.DeletedAt)
+		t.Errorf("expected nil DeletedAt, got %v", s.DeletedAt)
 	}
 }
 
@@ -202,15 +170,10 @@ func TestSkillRevision_EntityFields(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // CRLF + empty-body normalization (spec §4.3, design risk R2).
-// ---------------------------------------------------------------------------
 
 func TestFrontmatter_HandlesCRLF(t *testing.T) {
 	t.Parallel()
-	// Windows-authored files emit CRLF between lines. The YAML parser
-	// accepts CRLF inside the block, but the fence matching code must
-	// also normalize CRLF or the closing fence is never found.
 	body := "---\r\nname: pdf-cleanup\r\ndescription: d\r\n---\r\n# Body\r\n"
 	fm, err := domain.ParseFrontmatter(body)
 	if err != nil {
@@ -226,7 +189,6 @@ func TestFrontmatter_HandlesCRLF(t *testing.T) {
 
 func TestFrontmatter_HandlesEmptyMarkdownBody(t *testing.T) {
 	t.Parallel()
-	// Closing fence at end of file with no trailing newline.
 	body := "---\nname: pdf-cleanup\ndescription: d\n---"
 	fm, err := domain.ParseFrontmatter(body)
 	if err != nil {
@@ -237,21 +199,12 @@ func TestFrontmatter_HandlesEmptyMarkdownBody(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// LockStepCheck (spec S-SK-035, S-SK-036, S-SK-007/008).
-//
-// The frontmatter parser returns `name` and `description`. These MUST
-// equal the request's `name`/URL slug and `description`; mismatch is
-// user error or spoofing (decision #2 in obs #1962). TrimSpace is
-// applied to both sides so trailing newlines from copy-paste don't
-// break legitimate edits.
-// ---------------------------------------------------------------------------
+// LockStepCheck (spec S-SK-035/036, SCN-3.5). TrimSpace on both sides.
 
 func TestLockStepCheck_RejectsNameMismatch(t *testing.T) {
 	t.Parallel()
 	fm := domain.Frontmatter{Name: "other-skill", Description: "Same."}
-	err := domain.LockStepCheck("pdf-cleanup", "Same.", fm)
-	if err == nil {
+	if err := domain.LockStepCheck("pdf-cleanup", "Same.", fm); err == nil {
 		t.Fatalf("expected error for name mismatch, got nil")
 	}
 }
@@ -259,8 +212,7 @@ func TestLockStepCheck_RejectsNameMismatch(t *testing.T) {
 func TestLockStepCheck_RejectsDescriptionMismatch(t *testing.T) {
 	t.Parallel()
 	fm := domain.Frontmatter{Name: "pdf-cleanup", Description: "From frontmatter."}
-	err := domain.LockStepCheck("pdf-cleanup", "From request.", fm)
-	if err == nil {
+	if err := domain.LockStepCheck("pdf-cleanup", "From request.", fm); err == nil {
 		t.Fatalf("expected error for description mismatch, got nil")
 	}
 }
@@ -276,25 +228,17 @@ func TestLockStepCheck_AcceptsExactMatch(t *testing.T) {
 func TestLockStepCheck_AcceptsAfterTrim(t *testing.T) {
 	t.Parallel()
 	fm := domain.Frontmatter{Name: "pdf-cleanup", Description: "Same."}
-	// Whitespace on either side is silently trimmed; the comparison
-	// is on the trimmed values.
 	if err := domain.LockStepCheck("  pdf-cleanup  ", "\tSame.\n", fm); err != nil {
 		t.Fatalf("expected nil after trim, got %v", err)
 	}
 }
 
-// ---------------------------------------------------------------------------
 // ParseFrontmatter (spec S-SK-031..035 — ANTI-DRIFT GATE).
-//
-// Each frontmatter test below corresponds to a real failure mode the
-// parser MUST surface as a *ValidationError. Frontmatter shape is the
-// critical gateway: a misread here means the rest of the contract is
-// unenforceable (lock-step, reserved-word, etc).
-// ---------------------------------------------------------------------------
+// Each case is a real failure mode the parser MUST surface as a
+// *ValidationError; frontmatter shape is the critical gateway.
 
 func TestParseFrontmatter_RejectsMissingFence(t *testing.T) {
 	t.Parallel()
-	// No leading "---"; body starts with markdown.
 	body := "name: pdf-cleanup\ndescription: d\n---\n\n# Markdown only\n"
 	if _, err := domain.ParseFrontmatter(body); err == nil {
 		t.Fatalf("expected error for missing leading fence, got nil")
@@ -303,7 +247,6 @@ func TestParseFrontmatter_RejectsMissingFence(t *testing.T) {
 
 func TestParseFrontmatter_RejectsMalformedYAML(t *testing.T) {
 	t.Parallel()
-	// Valid fence markers but unparseable YAML inside.
 	body := "---\nname: pdf-cleanup\n  description: [unterminated\n---\n"
 	if _, err := domain.ParseFrontmatter(body); err == nil {
 		t.Fatalf("expected error for malformed YAML, got nil")
@@ -343,21 +286,17 @@ func TestParseFrontmatter_AcceptsValidFrontmatter(t *testing.T) {
 
 func TestParseFrontmatter_AcceptsFrontmatterOnlyBody(t *testing.T) {
 	t.Parallel()
-	// No markdown after the closing fence — the spec allows this for
-	// "metadata-only" skills.
 	body := "---\nname: pdf-cleanup\ndescription: d\n---\n"
 	fm, err := domain.ParseFrontmatter(body)
 	if err != nil {
 		t.Fatalf("expected nil for frontmatter-only body, got %v", err)
 	}
 	if fm.Name != "pdf-cleanup" {
-		t.Errorf("expected fm.Name = %q, got %q", "pdf-cleanup", fm.Name)
+		t.Errorf("expected Name = %q, got %q", "pdf-cleanup", fm.Name)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ValidateSkillBody (spec S-SK-030, S-SK-031, S-SK-003).
-// ---------------------------------------------------------------------------
+// ValidateSkillBody (spec S-SK-030/031).
 
 func TestValidateSkillBody_AcceptsAtMaxLen(t *testing.T) {
 	t.Parallel()
@@ -382,9 +321,7 @@ func TestValidateSkillBody_RejectsEmpty(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ValidateSkillDescription (spec S-SK-028, S-SK-029, S-SK-003).
-// ---------------------------------------------------------------------------
+// ValidateSkillDescription (spec S-SK-028/029).
 
 func TestValidateSkillDescription_Accepts1024Chars(t *testing.T) {
 	t.Parallel()
@@ -416,9 +353,7 @@ func TestValidateSkillDescription_RejectsEmpty(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ValidateSkillName — reserved-word rejection (spec S-SK-026).
-// ---------------------------------------------------------------------------
+// ValidateSkillName (spec S-SK-024..027, S-SK-001..003).
 
 func TestValidateSkillName_RejectsReservedWords(t *testing.T) {
 	t.Parallel()
@@ -443,14 +378,6 @@ func TestValidateSkillName_RejectsReservedWords(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// ValidateName (spec S-SK-024..027, S-SK-001..003).
-//
-// Regex: ^[a-z0-9]+(-[a-z0-9]+)*$  (agentskills.io spec).
-// Length: 1..64 characters.
-// Reserved substrings (case-insensitive): "anthropic", "claude".
-// ---------------------------------------------------------------------------
 
 func TestSkillNameRegex_AcceptsValidNames(t *testing.T) {
 	t.Parallel()
@@ -502,4 +429,3 @@ func TestSkillNameRegex_RejectsInvalidNames(t *testing.T) {
 		})
 	}
 }
-

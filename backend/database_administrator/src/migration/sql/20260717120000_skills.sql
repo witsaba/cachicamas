@@ -4,11 +4,6 @@
 -- 2026-07-17-skills-foundational
 -- Lifts ADR-SK-001..009 (design #1968 §3.3).
 --
--- Two tables: `skill` (current definitive row) + `skill_revision`
--- (append-only history). Soft-delete on `skill.deleted_at`. Name
--- uniqueness is partial over active rows so the name can be reused
--- after delete.
---
 CREATE TABLE IF NOT EXISTS skill (
     id          BIGSERIAL    PRIMARY KEY,
     name        TEXT         NOT NULL
@@ -36,7 +31,7 @@ CREATE TABLE IF NOT EXISTS skill_revision (
 ALTER TABLE skill_revision OWNER TO queen;
 
 COMMENT ON TABLE skill IS
-    'Current definitive row of an Agent Skill (SKILL.md file). Always reflects the latest version. Soft-delete via deleted_at reuses the name.';
+    'Current definitive row of an Agent Skill (SKILL.md). Always reflects the latest version. Soft-delete via deleted_at reuses the name.';
 
 COMMENT ON COLUMN skill.body IS
     'SKILL.md file content (YAML frontmatter + markdown body). Validated 1..524288 bytes by CHECK constraint. Frontmatter MUST contain name and description matching the row.';
@@ -50,7 +45,7 @@ COMMENT ON TABLE skill_revision IS
 COMMENT ON COLUMN skill_revision.revision_number IS
     'Monotonic per skill_id. Strictly increasing positive integer. Assigned by the application under a FOR UPDATE row lock on the parent skill.';
 
--- Name uniqueness scoped to active rows (per ADR-SK-003).
+-- Name uniqueness scoped to active rows (ADR-SK-003).
 CREATE UNIQUE INDEX IF NOT EXISTS skill_slug_active_uidx
     ON skill(name) WHERE deleted_at IS NULL;
 
