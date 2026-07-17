@@ -13,11 +13,42 @@ package domain_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
+
+// ---------------------------------------------------------------------------
+// Architectural invariant — domain MUST NOT import pgx (spec SCN-6.2).
+//
+// This is a stronger scanner than imports_test.go: it walks every .go
+// file under domain/ and rejects the literal "github.com/jackc/pgx"
+// string in any of them. The companion test in imports_test.go uses
+// `go list -deps` to verify transitive imports; this one verifies the
+// direct source. Both MUST pass together.
+// ---------------------------------------------------------------------------
+
+func TestDomain_DoesNotImportPgx(t *testing.T) {
+	t.Parallel()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir(domain): %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		contents, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", e.Name(), err)
+		}
+		if strings.Contains(string(contents), "github.com/jackc/pgx") {
+			t.Errorf("domain/%s must not import pgx; found import", e.Name())
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Repository ports (hexagonal boundary; implementations land in
