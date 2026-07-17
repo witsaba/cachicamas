@@ -137,3 +137,74 @@ test("[skill-sidebar]: empty skill list shows the 'No skills yet' empty hint", a
   expect(listbox).toBeTruthy();
   expect(listbox.textContent?.toLowerCase()).toContain("no skills");
 });
+
+test("[skill-sidebar]: marks the skill matching selectedName as selected (testid is the selected variant)", async () => {
+  // Anti-drift gate: the sidebar MUST thread selectedName through to
+  // each SkillListItem so the highlighted variant uses testid
+  // "skill-list-item-selected" (not "skill-list-item"). PR2c depends
+  // on this to drive the editor's currentSkill binding.
+  const skills = [
+    makeSkill({ id: 1, name: "alpha" }),
+    makeSkill({ id: 2, name: "beta" }),
+    makeSkill({ id: 3, name: "gamma" }),
+  ];
+
+  const { screen, render } = await createDOM();
+  await render(
+    <SkillSidebar
+      skills={skills}
+      selectedName={"beta"}
+      onSelect$={makeSelectingOnSelect()}
+      onNewSkill$={makeStub()}
+    />,
+  );
+
+  // Exactly one item should be in the selected testid slot.
+  const selectedItems = screen.querySelectorAll(
+    '[data-testid="skill-list-item-selected"]',
+  );
+  expect(selectedItems.length).toBe(1);
+  expect(selectedItems[0].textContent).toContain("beta");
+
+  // All OTHER items should be in the unselected testid slot.
+  const unselectedItems = screen.querySelectorAll(
+    '[data-testid="skill-list-item"]',
+  );
+  expect(unselectedItems.length).toBe(2);
+});
+
+test("[skill-sidebar]: clicking a skill item invokes onSelect$ with its name", async () => {
+  const skills = [
+    makeSkill({ id: 1, name: "alpha" }),
+    makeSkill({ id: 2, name: "beta" }),
+  ];
+
+  const { screen, render, userEvent } = await createDOM();
+  await render(
+    <SkillSidebar
+      skills={skills}
+      selectedName={null}
+      onSelect$={makeSelectingOnSelect()}
+      onNewSkill$={makeStub()}
+    />,
+  );
+
+  const betaBtn = screen.querySelector(
+    '[data-testid="skill-list-item-name"]',
+  )?.parentElement as HTMLButtonElement | null;
+  // Find the button that contains "beta"
+  const allButtons = screen.querySelectorAll(
+    '[data-testid="skill-list-item"]',
+  ) as unknown as HTMLButtonElement[];
+  let betaButton: HTMLButtonElement | null = null;
+  for (const b of allButtons) {
+    if (b.textContent?.includes("beta")) {
+      betaButton = b;
+      break;
+    }
+  }
+  expect(betaButton).toBeTruthy();
+  await userEvent(betaButton!, "click");
+
+  expect(selectedNames).toEqual(["beta"]);
+});
