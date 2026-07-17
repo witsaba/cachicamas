@@ -744,6 +744,157 @@ func TestSkillService_ListRevisions_NewestFirst(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.12 — Concurrency: partial unique index + FOR UPDATE enforce
+// the safety invariants (SCN-4.1, SCN-4.2, SCN-4.3).
+// ---------------------------------------------------------------------------
+
+func TestSkillService_ConcurrentCreate_OneSucceedsOneConflicts(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+
+	var successCount, conflictCount int32
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			_, _, err := svc.Create(ctx, domain.CreateSkillInput{
+				Name: "concurrent-create", Description: "d", Body: validSkillBody("concurrent-create", "d"),
+			})
+			if err == nil {
+				atomic.AddInt32(&successCount, 1)
+				return
+			}
+			var cerr *domain.ConflictError
+			if errors.As(err, &cerr) {
+				atomic.AddInt32(&conflictCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successCount != 1 {
+		t.Errorf("successes = %d, want 1", successCount)
+	}
+	if conflictCount != 1 {
+		t.Errorf("conflicts = %d, want 1", conflictCount)
+	}
+}
+
+func TestSkillService_ConcurrentUpdate_ProducesMonotonicRevisions(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name: "concurrent-update", Description: "d", Body: validSkillBody("concurrent-update", "d"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	const N = 5
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			defer wg.Done()
+			body := validSkillBody("concurrent-update", "conc-update")
+			if _, _, err := svc.Update(ctx, "concurrent-update", domain.UpdateSkillInput{
+				Body: &body,
+			}); err != nil {
+				t.Errorf("Update %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	revs, err := svc.ListRevisions(ctx, "concurrent-update")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(revs) != N+1 {
+		t.Errorf("revisions = %d, want %d (1 create + %d updates)", len(revs), N+1, N)
+	}
+	for i, want := 0, N+1; i < len(revs); i, want = i+1, want-1 {
+		if revs[i].RevisionNumber != want {
+			t.Errorf("revs[%d].revision_number = %d, want %d", i, revs[i].RevisionNumber, want)
+		}
+	}
+}
+
+func TestSkillService_ConcurrentRestoreAndUpdate_NoLostUpdate(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name: "concurrent-restore-update", Description: "v1", Body: validSkillBody("concurrent-restore-update", "v1"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, _, err := svc.Update(ctx, "concurrent-restore-update", domain.UpdateSkillInput{
+		Body: stringPtrSkill(validSkillBody("concurrent-restore-update", "v2")),
+	}); err != nil {
+		t.Fatalf("Update v2: %v", err)
+	}
+	if _, _, err := svc.Update(ctx, "concurrent-restore-update", domain.UpdateSkillInput{
+		Body: stringPtrSkill(validSkillBody("concurrent-restore-update", "v3")),
+	}); err != nil {
+		t.Fatalf("Update v3: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		body := validSkillBody("concurrent-restore-update", "from-update")
+		if _, _, err := svc.Update(ctx, "concurrent-restore-update", domain.UpdateSkillInput{
+			Body: &body,
+		}); err != nil {
+			t.Errorf("Update: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, _, err := svc.Restore(ctx, "concurrent-restore-update", 1); err != nil {
+			t.Errorf("Restore: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	revs, err := svc.ListRevisions(ctx, "concurrent-restore-update")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	// create(1) + 2 prior updates (2,3) + 1 new (update or restore) + 1 other = 5.
+	if len(revs) != 5 {
+		t.Errorf("revisions = %d, want 5 (1 create + 2 prior + 2 concurrent)", len(revs))
+	}
+	// Monotonic DESC, no duplicates: 5,4,3,2,1.
+	for i, want := range []int{5, 4, 3, 2, 1} {
+		if revs[i].RevisionNumber != want {
+			t.Errorf("revs[%d].revision_number = %d, want %d", i, revs[i].RevisionNumber, want)
+		}
+	}
+}
+
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
 var (
