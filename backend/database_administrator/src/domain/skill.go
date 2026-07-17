@@ -72,6 +72,20 @@ var skillNameRegex = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // HTTP 400 with code "validation" via the existing envelope.
 // ---------------------------------------------------------------------------
 
+// ValidateSkillDescription returns a *ValidationError if description
+// is empty or longer than MaxSkillDescriptionLen (1024 chars per
+// agentskills.io). Counts RUNES, not bytes, so multi-byte unicode is
+// counted faithfully.
+func ValidateSkillDescription(desc string) error {
+	n := len([]rune(desc))
+	if n < 1 || n > MaxSkillDescriptionLen {
+		return &ValidationError{
+			Fields: map[string]string{"description": MsgSkillDescriptionInvalid},
+		}
+	}
+	return nil
+}
+
 // ValidateSkillName returns a *ValidationError if name does not match
 // the agentskills.io pattern (^[a-z0-9]+(-[a-z0-9]+)*$, length 1..64)
 // or contains a reserved substring (case-insensitive: "anthropic",
@@ -113,7 +127,9 @@ var skillReservedSubstrings = []string{"anthropic", "claude"}
 // MsgSkillNameLength is overridden in GREEN task 1.2 with the spec text;
 // the current value is the placeholder so the test for 1.1 passes.
 const (
-	MsgSkillNameLength  = "Skill name must be 1-64 characters."
-	MsgSkillNameFormat  = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
-	MsgSkillNameReserved = "Skill name cannot contain \"anthropic\" or \"claude\"."
+	MsgSkillNameLength         = "Skill name must be 1-64 characters."
+	MsgSkillNameFormat         = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
+	MsgSkillNameReserved       = "Skill name cannot contain \"anthropic\" or \"claude\"."
+	MsgSkillDescriptionInvalid = "Skill description must be 1-1024 characters."
+	MsgSkillBodyTooLarge       = "Skill body must be 1-524288 characters."
 )
