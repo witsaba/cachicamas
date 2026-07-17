@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -222,6 +223,144 @@ func TestSkillService_Create_RejectsReservedName(t *testing.T) {
 				t.Fatalf("expected *ValidationError for reserved name=%q, got %T (%v)", name, err, err)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.3 — Create rejects long description, oversize body,
+// missing frontmatter, and frontmatter-vs-request lock-step mismatches.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Create_RejectsLongDescription(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	long := strings.Repeat("x", 1025)
+	_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+		Name:        "long-desc",
+		Description: long,
+		Body:        validSkillBody("long-desc", "ok"),
+	})
+	var verr *domain.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *ValidationError, got %T (%v)", err, err)
+	}
+}
+
+func TestSkillService_Create_RejectsOversizeBody(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	huge := strings.Repeat("x", 524289)
+	_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+		Name:        "oversize-body",
+		Description: "ok",
+		Body:        huge,
+	})
+	var verr *domain.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *ValidationError, got %T (%v)", err, err)
+	}
+}
+
+func TestSkillService_Create_RejectsMissingFrontmatter(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	// No leading "---\n" — body is bare markdown.
+	_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+		Name:        "no-frontmatter",
+		Description: "ok",
+		Body:        "# No frontmatter here\n",
+	})
+	var verr *domain.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *ValidationError for missing frontmatter, got %T (%v)", err, err)
+	}
+}
+
+func TestSkillService_Create_RejectsNameLockStep(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	// Frontmatter name "other-name" differs from slug "mismatched".
+	body := "---\nname: other-name\ndescription: ok\n---\nbody\n"
+	_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+		Name:        "mismatched",
+		Description: "ok",
+		Body:        body,
+	})
+	var verr *domain.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *ValidationError for name lock-step, got %T (%v)", err, err)
+	}
+}
+
+func TestSkillService_Create_RejectsDescriptionLockStep(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	// Request description differs from frontmatter description.
+	body := "---\nname: desc-locked\ndescription: frontmatter-desc\n---\nbody\n"
+	_, _, err := svc.Create(context.Background(), domain.CreateSkillInput{
+		Name:        "desc-locked",
+		Description: "request-desc",
+		Body:        body,
+	})
+	var verr *domain.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *ValidationError for description lock-step, got %T (%v)", err, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.4 — Duplicate active name → *ConflictError (409).
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Create_DuplicateName_ReturnsConflictError(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "dup-name",
+		Description: "first",
+		Body:        validSkillBody("dup-name", "first"),
+	}); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	_, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "dup-name",
+		Description: "second",
+		Body:        validSkillBody("dup-name", "second"),
+	})
+	var cerr *domain.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *ConflictError on dup, got %T (%v)", err, err)
 	}
 }
 
