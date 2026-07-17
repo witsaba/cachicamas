@@ -139,6 +139,85 @@ func ValidateSkillName(name string) error {
 // every existing skill name in production.
 var skillReservedSubstrings = []string{"anthropic", "claude"}
 
+// ---------------------------------------------------------------------------
+// Locked wire vocabulary for the skills feature (spec §7).
+//
+// CodeValidation, CodeNotFound, CodeConflict, CodeServer are reused
+// from organization.go (no new 4xx/5xx type definitions needed). The
+// new vocabulary items introduced by Skills are:
+//
+//   - CodeSkillDeleted = "skill_deleted"  — locked code for the 410
+//     Gone response (mirrors CodePromptDeleted).
+//   - ResourceSkill    = "skill"          — used with NotFoundError to
+//     identify which entity was missing.
+// ---------------------------------------------------------------------------
+
+// CodeSkillDeleted is the wire code returned when an operation
+// targets a soft-deleted skill. The handler maps GoneError to HTTP
+// 410. No existing code in organization.go covers 410, so this code
+// is new for the skills feature.
+const CodeSkillDeleted = "skill_deleted"
+
+// ResourceSkill is the value used in NotFoundError.Resource for
+// "skill" lookups; the value is also reused by the prompts feature
+// (ResourcePrompt) so the handler can tell which entity type a
+// not-found error refers to.
+const ResourceSkill = "skill"
+
+// MsgSkillNotFound is the user-facing message when no active skill
+// matches the requested name.
+const MsgSkillNotFound = "Skill not found."
+
+// MsgSkillRevisionNotFound is the user-facing message when the
+// requested revision number does not exist for the skill.
+const MsgSkillRevisionNotFound = "Skill revision not found."
+
+// MsgSkillDeleted is the user-facing message when an operation
+// targets a soft-deleted skill.
+const MsgSkillDeleted = "This skill has been deleted and cannot be modified."
+
+// MsgSkillConflict is the user-facing message when the name collides
+// with another active skill.
+const MsgSkillConflict = "This skill name is already taken. Try another."
+
+// ---------------------------------------------------------------------------
+// SkillGoneError — the skills-specific 410 case.
+//
+// Mirror of prompts.GoneError. The row exists but is soft-deleted;
+// reads hide it (returns NotFoundError → 404); updates and restores
+// reject with GoneError → 410. Reusing NotFoundError would conflate
+// the two and force the handler to infer 410 from message text; a
+// dedicated type keeps the HTTP mapping deterministic.
+// ---------------------------------------------------------------------------
+
+// SkillGoneError signals that a skill row exists but is in a
+// terminal state that disallows the requested operation (e.g.,
+// soft-deleted). The handler maps it to HTTP 410 with code
+// `skill_deleted`.
+type SkillGoneError struct {
+	Name  string
+	Cause error
+}
+
+func (e *SkillGoneError) Error() string {
+	if e.Name == "" {
+		return MsgSkillDeleted
+	}
+	return "skill name=" + e.Name + ": " + MsgSkillDeleted
+}
+
+// Code returns the locked wire code for HTTP 410 mapping
+// ("skill_deleted"). Handler maps to 410 via the AppError interface.
+func (e *SkillGoneError) Code() string { return CodeSkillDeleted }
+
+func (e *SkillGoneError) Unwrap() error { return e.Cause }
+
+// NewSkillDeleted returns a *SkillGoneError for a soft-deleted skill
+// that the caller tried to modify or restore.
+func NewSkillDeleted(name string) *SkillGoneError {
+	return &SkillGoneError{Name: name}
+}
+
 // placeholder message constants — wired in tasks 1.2 and 1.3 below.
 // Keeping them at the top so the locked vocabulary stays together.
 // MsgSkillNameLength is overridden in GREEN task 1.2 with the spec text;
