@@ -82,6 +82,17 @@ func (s *SkillService) Create(ctx context.Context, in domain.CreateSkillInput) (
 	if err := domain.ValidateSkillBody(in.Body); err != nil {
 		return nil, nil, err
 	}
+	// Frontmatter parsing + lock-step (design ADR-SK-005): the body's
+	// YAML frontmatter MUST declare name == slug and description ==
+	// request description. ParseFrontmatter normalizes CRLF; LockStepCheck
+	// trims whitespace before comparing.
+	fm, err := domain.ParseFrontmatter(in.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := domain.LockStepCheck(in.Name, in.Description, fm); err != nil {
+		return nil, nil, err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
