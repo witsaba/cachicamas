@@ -29,7 +29,7 @@
  *     flow changes (deep links, bookmarks, cross-navigation).
  */
 
-import { $, component$, useSignal } from "@builder.io/qwik";
+import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
 import {
   routeLoader$,
   useNavigate,
@@ -38,6 +38,8 @@ import {
 } from "@builder.io/qwik-city";
 import {
   listSkills,
+  getSkill,
+  listRevisions,
   type Skill,
   type SkillRevision,
 } from "~/lib/skills-api";
@@ -77,13 +79,34 @@ export const useSkillsLoader = routeLoader$(async (event) => {
 export default component$(() => {
   const skillsLoader = useSkillsLoader();
 
-  // Skills list (from SSR loader, updated client-side)
-  const skills = useSignal<Skill[]>(
-    skillsLoader.value.ok ? skillsLoader.value.skills : [],
-  );
-  const loaderError = useSignal<string | null>(
-    skillsLoader.value.ok ? null : skillsLoader.value.message,
-  );
+  // Skills list (from SSR loader, updated client-side).
+// Reactive: useTask$ syncs the local `skills` signal whenever the
+// loader value changes. The hook's `.value` is a wrapper; the
+// actual loader data is at `.value.value` (Qwik City loader contract).
+  const skills = useSignal<Skill[]>(() => {
+    const v = skillsLoader.value.value as { ok?: boolean; skills?: Skill[] };
+    return v?.ok && Array.isArray(v.skills) ? v.skills : [];
+  });
+  useTask$(({ track }) => {
+    const wrapper = track(() => skillsLoader.value);
+    const v = (wrapper as { value: unknown }).value as {
+      ok?: boolean;
+      skills?: Skill[];
+    };
+    skills.value = v?.ok && Array.isArray(v.skills) ? v.skills : [];
+  });
+  const loaderError = useSignal<string | null>(() => {
+    const v = skillsLoader.value.value as { ok?: boolean; message?: string };
+    return v?.ok ? null : (v?.message ?? null);
+  });
+  useTask$(({ track }) => {
+    const wrapper = track(() => skillsLoader.value);
+    const v = (wrapper as { value: unknown }).value as {
+      ok?: boolean;
+      message?: string;
+    };
+    loaderError.value = v?.ok ? null : (v?.message ?? null);
+  });
   const loading = useSignal(false);
 
   // Editor state (signals declared; full wires land in 7.6-7.12)
@@ -122,6 +145,33 @@ export default component$(() => {
     currentSkill.value = null;
     currentRevisions.value = [];
     editorError.value = null;
+  });
+
+  // Load skill detail + revisions (populated branch — task 7.7)
+  const loadSkillDetail = $(async (name: string) => {
+    loading.value = true;
+    editorError.value = null;
+
+    const [skillResult, revResult] = await Promise.all([
+      getSkill(name),
+      listRevisions(name),
+    ]);
+
+    if (skillResult.ok) {
+      currentSkill.value = skillResult.value;
+      currentRevisions.value = revResult.ok ? revResult.value : [];
+      mode.value = "edit";
+      selectedName.value = name;
+    } else {
+      editorError.value = skillResult.message;
+    }
+
+    loading.value = false;
+  });
+
+  // Select a skill from the sidebar
+  const handleSelectSkill = $(async (name: string) => {
+    await loadSkillDetail(name);
   });
 
   // -----------------------------------------------------------------------
@@ -194,9 +244,49 @@ export default component$(() => {
       {/* Skill Studio layout */}
       <div class="flex flex-1 gap-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         {hasSkills ? (
-          <p data-testid="skill-studio-populated-placeholder">
-            (populated branch — lands in 7.7)
-          </p>
+          <>
+            {/* Sidebar */}
+            <SkillSidebar
+              skills={skills.value}
+              selectedName={selectedName.value}
+              onSelect$={handleSelectSkill}
+              onNewSkill$={handleNewSkill}
+            />
+
+            {/* Editor panel */}
+            <div class="flex flex-1 flex-col overflow-y-auto">
+              {mode.value === "list" ? (
+                <div class="flex flex-1 flex-col items-center justify-center p-8 text-center">
+                  <p class="text-sm text-slate-500">
+                    Select a skill from the sidebar to edit it,
+                    <br />
+                    or create a new one.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    class="mt-4"
+                    onClick$={handleNewSkill}
+                    testId="skill-studio-new-from-empty"
+                  >
+                    Create your first skill
+                  </Button>
+                </div>
+              ) : (
+                <SkillEditor
+                  skill={currentSkill.value}
+                  revisions={currentRevisions.value}
+                  mode={mode.value === "create" ? "create" : "edit"}
+                  saving={editorSaving.value}
+                  error={editorError.value}
+                  onSave$={$(async () => {})}
+                  onCancel$={handleCancel}
+                  onDelete$={$(async () => {})}
+                  onRestore$={$(async () => {})}
+                />
+              )}
+            </div>
+          </>
         ) : (
           /* Empty state — no skills at all */
           <div class="flex flex-1 flex-col">

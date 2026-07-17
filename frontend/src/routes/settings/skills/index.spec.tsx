@@ -6,15 +6,6 @@
  *   - SCN-1: list empty → EmptyState
  *   - SCN-2: list populated → sidebar + editor
  *
- * This spec covers tasks 7.6-7.12 in feature order:
- *   7.6  empty list → EmptyState CTA visible
- *   7.7  populated list → sidebar + editor visible
- *   7.8  create flow → POST then switch to edit mode
- *   7.9  update flow → PATCH with BOTH description AND body
- *   7.10 delete + restore flows
- *   7.11 410 → not_found mapping (toast)
- *   7.12 validation errors → fields.* surfaced inline
- *
  * Mock strategy — Qwik City context stub:
  *   Mirrors `routes/settings/prompts/index.spec.tsx`. The route uses
  *   `routeLoader$` + `useNavigate`. createDOM() provides no Qwik City
@@ -23,6 +14,14 @@
  *   with stub implementations. The loaderState stub injects a
  *   signal at `useSkillsLoader.__id` so the loader hook returns
  *   whatever shape the test wants.
+ *
+ * Module-scope loader signal:
+ *   Each test sets `testLoaderValue` BEFORE calling `render()`. The
+ *   TestWrapper then captures this value into the store's signal
+ *   inside its component$ body, which runs BEFORE the route's
+ *   useSignal() reads the loader value. This avoids the "first
+ *   render reads empty, subsequent renders are ignored" race that
+ *   plagues mutations inside the test render body.
  *
  * Module-scope capture pattern:
  *   Qwik's `$()` rejects `vi.fn()` and other non-serializable
@@ -40,7 +39,7 @@ import {
 } from "@builder.io/qwik";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ---- Module-scope capture arrays (QRL serialization workaround) -----------
+// ---- Module-scope state (QRL serialization workaround) ---------------------
 
 let createCalls: Array<{
   name: string;
@@ -54,20 +53,28 @@ let updateCalls: Array<{
 }> = [];
 let deleteCalls: string[] = [];
 let restoreCalls: Array<{ name: string; revision: number }> = [];
-let apiBehaviour: "ok" | "validation" | "not_found" | "server" = "ok";
+let validationFields: Record<string, string> = {};
+let deletedSkillKind: "not_found" | null = null;
+/** The value to inject into the route loader for this test. */
+let testLoaderValue: unknown = { ok: true as const, skills: [] };
 
 beforeEach(() => {
   createCalls = [];
   updateCalls = [];
   deleteCalls = [];
   restoreCalls = [];
-  apiBehaviour = "ok";
+  validationFields = {};
+  deletedSkillKind = null;
+  testLoaderValue = { ok: true as const, skills: [] };
 });
 
 // ---- Mock the api client so we can drive behaviour -------------------------
 
 vi.mock("~/lib/skills-api", () => ({
-  listSkills: vi.fn(async () => ({ ok: true as const, value: [] })),
+  listSkills: vi.fn(async () => ({
+    ok: true as const,
+    value: ((testLoaderValue as { skills?: unknown[] })?.skills ?? []),
+  })),
   getSkill: vi.fn(async () => ({
     ok: true as const,
     value: {
@@ -81,50 +88,65 @@ vi.mock("~/lib/skills-api", () => ({
       deleted_at: null,
     },
   })),
-  createSkill: vi.fn(async (input: { name: string; description: string; body: string }) => {
-    (globalThis as { __createCalls?: unknown[] }).__createCalls?.push(input);
-    createCalls.push(input);
-    return { ok: true as const, value: {
-      id: 99,
-      name: input.name,
-      description: input.description,
-      body: input.body,
-      current_revision: 1,
-      created_at: "2026-07-17T10:00:00Z",
-      updated_at: "2026-07-17T10:00:00Z",
-      deleted_at: null,
-    } };
-  }),
-  updateSkill: vi.fn(async (name: string, input: { description: string; body: string }) => {
-    updateCalls.push({ name, ...input });
-    return { ok: true as const, value: {
-      id: 1,
-      name,
-      description: input.description,
-      body: input.body,
-      current_revision: 2,
-      created_at: "2026-07-17T10:00:00Z",
-      updated_at: "2026-07-17T10:01:00Z",
-      deleted_at: null,
-    } };
-  }),
+  createSkill: vi.fn(
+    async (input: { name: string; description: string; body: string }) => {
+      createCalls.push(input);
+      return {
+        ok: true as const,
+        value: {
+          id: 99,
+          name: input.name,
+          description: input.description,
+          body: input.body,
+          current_revision: 1,
+          created_at: "2026-07-17T10:00:00Z",
+          updated_at: "2026-07-17T10:00:00Z",
+          deleted_at: null,
+        },
+      };
+    },
+  ),
+  updateSkill: vi.fn(
+    async (name: string, input: { description: string; body: string }) => {
+      updateCalls.push({ name, ...input });
+      return {
+        ok: true as const,
+        value: {
+          id: 1,
+          name,
+          description: input.description,
+          body: input.body,
+          current_revision: 2,
+          created_at: "2026-07-17T10:00:00Z",
+          updated_at: "2026-07-17T10:01:00Z",
+          deleted_at: null,
+        },
+      };
+    },
+  ),
   deleteSkill: vi.fn(async (name: string) => {
     deleteCalls.push(name);
+    if (deletedSkillKind === "not_found") {
+      return { ok: false, kind: "not_found", message: "Skill has been deleted." };
+    }
     return { ok: true as const, value: undefined };
   }),
   listRevisions: vi.fn(async () => ({ ok: true as const, value: [] })),
   restoreRevision: vi.fn(async (name: string, revision: number) => {
     restoreCalls.push({ name, revision });
-    return { ok: true as const, value: {
-      id: 1,
-      name,
-      description: "(restored)",
-      body: "---\nname: rest\n---\n",
-      current_revision: 99,
-      created_at: "2026-07-17T10:00:00Z",
-      updated_at: "2026-07-17T10:02:00Z",
-      deleted_at: null,
-    } };
+    return {
+      ok: true as const,
+      value: {
+        id: 1,
+        name,
+        description: "(restored)",
+        body: "---\nname: rest\n---\n",
+        current_revision: 99,
+        created_at: "2026-07-17T10:00:00Z",
+        updated_at: "2026-07-17T10:02:00Z",
+        deleted_at: null,
+      },
+    };
   }),
 }));
 
@@ -155,19 +177,20 @@ const QC_N = createContextId<(path: string) => Promise<void>>("qc-n");
 const QC_A = createContextId("qc-a");
 const QC_P = createContextId("qc-p");
 
-interface TestWrapperProps {
-  /** Override the loader's injected value (default: empty list, ok). */
-  loaderValue?: unknown;
-}
-
-const TestWrapper = component$<TestWrapperProps>(({ loaderValue }) => {
+/**
+ * Single TestWrapper. Reads `testLoaderValue` (a module-scope
+ * variable) at the time the wrapper mounts. The test MUST set
+ * `testLoaderValue` before calling `render()`.
+ */
+const TestWrapper = component$(() => {
+  // Use the prompts test pattern: signal created empty, then value
+  // set after useStore(). Setting inside useStore() (initial value)
+  // is being lost in Qwik 1.20 render ordering.
   const loaderState = useStore<Record<string, unknown>>(
     { [loaderId]: useSignal() },
     { deep: false },
   );
-  (loaderState[loaderId] as { value: unknown }).value =
-    loaderValue ?? { ok: true as const, skills: [] };
-
+  (loaderState[loaderId] as { value: unknown }).value = testLoaderValue;
   useContextProvider(QC_S, loaderState);
   useContextProvider(QC_C, { headings: undefined, menu: undefined });
   useContextProvider(QC_IC, undefined);
@@ -187,11 +210,8 @@ const TestWrapper = component$<TestWrapperProps>(({ loaderValue }) => {
   useContextProvider(QC_N, $(async (_path: string) => undefined));
   useContextProvider(QC_A, undefined);
   useContextProvider(QC_P, undefined);
-
   return <Index />;
 });
-
-void apiBehaviour;
 
 // =========================================================================
 // 7.6 — Empty state branch
@@ -199,10 +219,9 @@ void apiBehaviour;
 
 describe("routes/settings/skills — empty state branch (7.6)", () => {
   it("TestSettingsSkillsRoute_RendersEmptyStateWhenListEmpty — shows the EmptyState CTA when the loader returns []", async () => {
+    testLoaderValue = { ok: true as const, skills: [] };
     const { screen, render } = await createDOM();
-    await render(
-      <TestWrapper loaderValue={{ ok: true as const, skills: [] }} />,
-    );
+    await render(<TestWrapper />);
     const cta = screen.querySelector(
       '[data-testid="empty-state-create"]',
     ) as HTMLElement | null;
@@ -210,10 +229,9 @@ describe("routes/settings/skills — empty state branch (7.6)", () => {
   });
 
   it("the empty state CTA invokes handleNewSkill — clicking it switches mode to 'create' and renders SkillEditor", async () => {
+    testLoaderValue = { ok: true as const, skills: [] };
     const { screen, render, userEvent } = await createDOM();
-    await render(
-      <TestWrapper loaderValue={{ ok: true as const, skills: [] }} />,
-    );
+    await render(<TestWrapper />);
     const cta = screen.querySelector(
       '[data-testid="empty-state-create"]',
     ) as HTMLElement | null;
@@ -244,10 +262,9 @@ const sampleSkill = {
 
 describe("routes/settings/skills — populated branch (7.7)", () => {
   it("TestSettingsSkillsRoute_RendersSidebarAndEditorWhenListPopulated — sidebar renders the populated skill list", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
     const { screen, render } = await createDOM();
-    await render(
-      <TestWrapper loaderValue={{ ok: true as const, skills: [sampleSkill] }} />,
-    );
+    await render(<TestWrapper />);
     // Sidebar filter input MUST render when populated.
     const filter = screen.querySelector(
       '[data-testid="skill-sidebar-filter"]',
@@ -262,10 +279,9 @@ describe("routes/settings/skills — populated branch (7.7)", () => {
   });
 
   it("clicking a skill in the sidebar selects it — sidebar shows the selected testid", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
     const { screen, render, userEvent } = await createDOM();
-    await render(
-      <TestWrapper loaderValue={{ ok: true as const, skills: [sampleSkill] }} />,
-    );
+    await render(<TestWrapper />);
     const item = screen.querySelector(
       '[data-testid="skill-list-item"]',
     ) as HTMLElement | null;
