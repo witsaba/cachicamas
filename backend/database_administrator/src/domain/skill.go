@@ -209,22 +209,32 @@ const skillFrontmatterFenceClose = "\n---\n"
 //   - the `name` key is absent or not a string (MsgSkillFrontmatterNameMissing/NotString)
 //   - the `description` key is absent or not a string (MsgSkillFrontmatterDescMissing/NotString)
 func ParseFrontmatter(body string) (Frontmatter, error) {
-	if !strings.HasPrefix(body, skillFrontmatterFenceOpen) {
+	// Normalize CRLF -> LF so Windows-authored files don't fail the
+	// fence checks below. We replace "\r\n" first to avoid leaving
+	// stray "\r" in the YAML block (which the YAML parser happens to
+	// tolerate but is brittle).
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	if !strings.HasPrefix(normalized, skillFrontmatterFenceOpen) {
 		return Frontmatter{}, &ValidationError{
 			Fields: map[string]string{"body": MsgSkillFrontmatterMissing},
 		}
 	}
-	rest := body[len(skillFrontmatterFenceOpen):]
-	// Locate the closing fence from the start of `rest` so the YAML
-	// block itself never contains a "\n---\n" sequence (a valid YAML
-	// document cannot, but we assert defensively).
-	closeIdx := strings.Index(rest, skillFrontmatterFenceClose)
-	if closeIdx < 0 {
+	rest := normalized[len(skillFrontmatterFenceOpen):]
+	// Locate the closing fence. We accept both the canonical
+	// "\n---\n" (with a trailing newline into the markdown body) and
+	// the "\n---" at end-of-file (no markdown after the fence). This
+	// keeps metadata-only skills valid.
+	var closeIdx int
+	if i := strings.Index(rest, skillFrontmatterFenceClose); i >= 0 {
+		closeIdx = i
+	} else if strings.HasSuffix(rest, "\n---") {
+		closeIdx = len(rest) - len("\n---")
+	} else {
 		return Frontmatter{}, &ValidationError{
 			Fields: map[string]string{"body": MsgSkillFrontmatterUnterminated},
 		}
 	}
-	yamlBlock := rest[:closeIdx]
+	yamlBlock := rest[:closeIdx]	
 
 	var raw struct {
 		Name        interface{} `yaml:"name"`
