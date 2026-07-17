@@ -159,3 +159,37 @@ func seedSkillRevisionAt(t *testing.T, db *sql.DB, skillID int64, n int, descrip
          VALUES ($1, $2, $3, $4)`, skillID, n, description, body)
 	return err
 }
+
+// TestSkillRevisionRepo_ListBySkillID_NewestFirst covers spec SCN-5.5:
+// revisions are listed in descending revision_number order
+// (newest first). Used by GET /skills/:name/revisions.
+func TestSkillRevisionRepo_ListBySkillID_NewestFirst(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRevisionRepo(db)
+	skill := seedSkill(t, db, "rev-list", "d", "b")
+	ctx := context.Background()
+	for n := 1; n <= 5; n++ {
+		if err := seedSkillRevisionAt(t, db, skill.ID, n, "d", "body"); err != nil {
+			t.Fatalf("seed rev %d: %v", n, err)
+		}
+	}
+
+	got, err := repo.ListBySkillID(ctx, db, skill.ID)
+	if err != nil {
+		t.Fatalf("ListBySkillID: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("len = %d, want 5", len(got))
+	}
+	// Newest first: 5, 4, 3, 2, 1.
+	for i, want := range []int{5, 4, 3, 2, 1} {
+		if got[i].RevisionNumber != want {
+			t.Errorf("got[%d].revision_number = %d, want %d", i, got[i].RevisionNumber, want)
+		}
+	}
+}
