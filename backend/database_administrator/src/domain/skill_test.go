@@ -19,6 +19,38 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Entity structs (spec INV-1, INV-2; mirrors `prompt.go` shape).
+// ---------------------------------------------------------------------------
+
+func TestSkill_EntityFields(t *testing.T) {
+	t.Parallel()
+	s := domain.Skill{}
+	if s.ID != 0 {
+		t.Errorf("expected zero-value ID, got %d", s.ID)
+	}
+	if s.Name != "" {
+		t.Errorf("expected zero-value Name, got %q", s.Name)
+	}
+	if s.DeletedAt != nil {
+		t.Errorf("expected zero-value (nil) DeletedAt, got %v", s.DeletedAt)
+	}
+}
+
+func TestSkillRevision_EntityFields(t *testing.T) {
+	t.Parallel()
+	r := domain.SkillRevision{}
+	if r.RevisionNumber != 0 {
+		t.Errorf("expected zero-value RevisionNumber, got %d", r.RevisionNumber)
+	}
+	if r.SkillID != 0 {
+		t.Errorf("expected zero-value SkillID, got %d", r.SkillID)
+	}
+	if r.ChangeNote != nil {
+		t.Errorf("expected nil ChangeNote, got %v", r.ChangeNote)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // CRLF + empty-body normalization (spec §4.3, design risk R2).
 // ---------------------------------------------------------------------------
 
