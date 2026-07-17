@@ -38,8 +38,9 @@ describe("components/skills/empty-state", () => {
   it("TestEmptyState_RendersNoSkillsMessage — shows the 'no skills yet' headline + descriptive subtext", async () => {
     const { screen, render } = await createDOM();
     await render(<EmptyState onCreate$={makeCreateStub()} />);
-    const text = document.body.textContent ?? "";
-    expect(text.toLowerCase()).toContain("no skills");
+    const text = (screen.querySelector('[data-testid="empty-state-create"]')
+      ?.parentElement?.parentElement?.textContent ?? "").toLowerCase();
+    expect(text).toContain("no skills");
   });
 
   it("TestEmptyState_HasCreateCTA — clicking the 'Create your first skill' button invokes onCreate$", async () => {
