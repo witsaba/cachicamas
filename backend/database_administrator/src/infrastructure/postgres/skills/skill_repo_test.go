@@ -18,7 +18,6 @@ package skills_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"os"
 	"strings"
 	"testing"
