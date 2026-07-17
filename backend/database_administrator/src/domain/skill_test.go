@@ -49,3 +49,31 @@ func TestSkillNameRegex_AcceptsValidNames(t *testing.T) {
 		})
 	}
 }
+
+func TestSkillNameRegex_RejectsInvalidNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"uppercase", "FooBar"},
+		{"leadingHyphen", "-lead"},
+		{"trailingHyphen", "trail-"},
+		{"consecutiveHyphens", "foo--bar"},
+		{"sixty5chars", strings.Repeat("a", 65)},
+		{"empty", ""},
+		{"underscore", "foo_bar"},
+		{"space", "foo bar"},
+		{"dot", "foo.bar"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := domain.ValidateSkillName(tc.in); err == nil {
+				t.Fatalf("expected error for %q, got nil", tc.in)
+			}
+		})
+	}
+}
+
