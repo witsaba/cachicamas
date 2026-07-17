@@ -90,6 +90,156 @@ export type ApiResult<T> =
     };
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the API base URL.
+ * (Mirrors prompts-api.ts so the rest of the app can stitch the same
+ *  dev/prod wiring. Independent copy: prompts-api.ts does NOT export this.)
+ */
+function apiBaseUrl(): string {
+  const isNode =
+    typeof process !== "undefined" &&
+    typeof (process as { versions?: unknown }).versions !== "undefined";
+
+  if (isNode) {
+    const fromEnv = process.env.SERVER_API_BASE_URL;
+    return (
+      fromEnv && fromEnv.trim().length > 0 ? fromEnv : "http://localhost:8080"
+    ).replace(/\/+$/, "");
+  }
+
+  const fromEnv = (import.meta as { env?: Record<string, string> }).env
+    ?.PUBLIC_API_BASE_URL as string | undefined;
+  return (fromEnv ?? "http://localhost:8080").replace(/\/+$/, "");
+}
+
+/**
+ * Fetch wrapper. In Node SSR resolves relative URLs against apiBaseUrl;
+ * in the browser passes them through.
+ *
+ * Default Content-Type is application/json because every Skills endpoint
+ * that accepts a body (POST, PATCH) decodes via `json.NewDecoder` on
+ * the backend.
+ */
+async function safeFetch(
+  input: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const base = apiBaseUrl();
+  const isNode =
+    typeof process !== "undefined" &&
+    typeof (process as { versions?: unknown }).versions !== "undefined";
+  const fullUrl = isNode
+    ? input.startsWith("http")
+      ? input
+      : `${base}${input}`
+    : input;
+  return await fetch(fullUrl, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+  });
+}
+
+/**
+ * Extract the human-readable error message from a JSON response body.
+ *
+ * **NESTED FIRST** — backend emits `{error:{code,message,fields?}}`, so
+ * we read `body.error?.message` first. Flat `body.message` is a fallback
+ * only (some legacy endpoints may still emit it).
+ *
+ * Anti-drift gate (obs #1959 item 1): the prompts client did it the
+ * other way around and silently dropped rich backend messages.
+ */
+function readErrorMessage(body: Record<string, unknown>, fallback: string): string {
+  const err = body["error"];
+  if (err && typeof err === "object" && err !== null) {
+    const msg = (err as Record<string, unknown>)["message"];
+    if (typeof msg === "string" && msg.length > 0) return msg;
+  }
+  const flat = body["message"];
+  if (typeof flat === "string" && flat.length > 0) return flat;
+  return fallback;
+}
+
+/**
+ * Extract the field-level error map. NESTED FIRST (obs #1959 item 1).
+ * Returns an empty object if no fields are present.
+ */
+function readErrorFields(body: Record<string, unknown>): Record<string, string> {
+  const err = body["error"];
+  if (err && typeof err === "object" && err !== null) {
+    const fields = (err as Record<string, unknown>)["fields"];
+    if (fields && typeof fields === "object" && fields !== null) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(fields as Record<string, unknown>)) {
+        if (typeof v === "string") out[k] = v;
+      }
+      return out;
+    }
+  }
+  const flat = body["fields"];
+  if (flat && typeof flat === "object" && flat !== null) {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(flat as Record<string, unknown>)) {
+      if (typeof v === "string") out[k] = v;
+    }
+    return out;
+  }
+  return {};
+}
+
+/**
+ * Map a fetch Response to ApiResult<T>.
+ *
+ * - 200/201 → { ok: true, value: parsed JSON }
+ * - 204     → { ok: true, value: undefined } (DELETE)
+ * - 400     → { ok: false, kind: "validation",  message, fields }
+ * - 409     → { ok: false, kind: "conflict",    message }
+ * - 404     → { ok: false, kind: "not_found",   message }
+ * - 410     → { ok: false, kind: "not_found",   message } (soft-deleted → ux as not_found)
+ * - 500+    → { ok: false, kind: "server",      message }
+ *
+ * Exported for testability — production callers go through the
+ * domain-named wrappers (listSkills, etc.).
+ */
+export async function parseResponse<T>(resp: Response): Promise<ApiResult<T>> {
+  if (resp.status === 204) {
+    return { ok: true, value: undefined as unknown as T };
+  }
+
+  if (resp.ok) {
+    const data = (await resp.json()) as T;
+    return { ok: true, value: data };
+  }
+
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await resp.json()) as Record<string, unknown>;
+  } catch {
+    // non-JSON body; defaults below handle the fallback.
+  }
+
+  const message = readErrorMessage(body, `HTTP ${resp.status}`);
+  const fields = readErrorFields(body);
+
+  if (resp.status === 400) {
+    return { ok: false, kind: "validation", message, fields };
+  }
+  if (resp.status === 409) {
+    return { ok: false, kind: "conflict", message };
+  }
+  if (resp.status === 404 || resp.status === 410) {
+    return { ok: false, kind: "not_found", message };
+  }
+  return { ok: false, kind: "server", message };
+}
+
+// ---------------------------------------------------------------------------
 // API Functions (7 total — no more, no less)
 // ---------------------------------------------------------------------------
 
@@ -99,9 +249,17 @@ export type ApiResult<T> =
  * (NO `?deleted=` query — backend filters by `deleted_at IS NULL` regardless.
  *  Carrying the param invites confusion; see obs #1959 item 5.)
  */
-export function listSkills(): Promise<ApiResult<Skill[]>> {
-  // Implemented in Task 5.4.
-  throw new Error("not implemented (will land in GREEN of Task 5.4)");
+export async function listSkills(): Promise<ApiResult<Skill[]>> {
+  try {
+    const resp = await safeFetch(`${apiBaseUrl()}/skills`);
+    return await parseResponse<Skill[]>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
@@ -109,9 +267,19 @@ export function listSkills(): Promise<ApiResult<Skill[]>> {
  * GET /skills/:name
  * Returns 404 `not_found` for missing or soft-deleted skills.
  */
-export function getSkill(name: string): Promise<ApiResult<Skill>> {
-  // Implemented in Task 5.5.
-  throw new Error("not implemented (will land in GREEN of Task 5.5)");
+export async function getSkill(name: string): Promise<ApiResult<Skill>> {
+  try {
+    const resp = await safeFetch(
+      `${apiBaseUrl()}/skills/${encodeURIComponent(name)}`,
+    );
+    return await parseResponse<Skill>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
@@ -119,13 +287,24 @@ export function getSkill(name: string): Promise<ApiResult<Skill>> {
  * POST /skills
  * Body: JSON {name, description, body}
  */
-export function createSkill(input: {
+export async function createSkill(input: {
   name: string;
   description: string;
   body: string;
 }): Promise<ApiResult<Skill>> {
-  // Implemented in Task 5.6.
-  throw new Error("not implemented (will land in GREEN of Task 5.6)");
+  try {
+    const resp = await safeFetch(`${apiBaseUrl()}/skills`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return await parseResponse<Skill>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
@@ -133,40 +312,90 @@ export function createSkill(input: {
  * PATCH /skills/:name
  * Body: JSON {description, body} — BOTH fields sent (no silent discard).
  */
-export function updateSkill(
+export async function updateSkill(
   name: string,
   input: { description: string; body: string },
 ): Promise<ApiResult<Skill>> {
-  // Implemented in Task 5.7.
-  throw new Error("not implemented (will land in GREEN of Task 5.7)");
+  try {
+    const resp = await safeFetch(
+      `${apiBaseUrl()}/skills/${encodeURIComponent(name)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    );
+    return await parseResponse<Skill>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
  * Soft-delete a skill (idempotent).
  * DELETE /skills/:name
  */
-export function deleteSkill(name: string): Promise<ApiResult<void>> {
-  // Implemented in Task 5.5.
-  throw new Error("not implemented (will land in GREEN of Task 5.5)");
+export async function deleteSkill(name: string): Promise<ApiResult<void>> {
+  try {
+    const resp = await safeFetch(
+      `${apiBaseUrl()}/skills/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    return await parseResponse<void>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
  * List all revisions for a skill, newest-first.
  * GET /skills/:name/revisions
  */
-export function listRevisions(name: string): Promise<ApiResult<SkillRevision[]>> {
-  // Implemented in Task 5.9.
-  throw new Error("not implemented (will land in GREEN of Task 5.9)");
+export async function listRevisions(
+  name: string,
+): Promise<ApiResult<SkillRevision[]>> {
+  try {
+    const resp = await safeFetch(
+      `${apiBaseUrl()}/skills/${encodeURIComponent(name)}/revisions`,
+    );
+    return await parseResponse<SkillRevision[]>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
 
 /**
  * Restore a specific revision as a NEW latest revision.
  * POST /skills/:name/revisions/:n/restore
  */
-export function restoreRevision(
+export async function restoreRevision(
   name: string,
   revisionNumber: number,
 ): Promise<ApiResult<Skill>> {
-  // Implemented in Task 5.9.
-  throw new Error("not implemented (will land in GREEN of Task 5.9)");
+  try {
+    const resp = await safeFetch(
+      `${apiBaseUrl()}/skills/${encodeURIComponent(name)}/revisions/${revisionNumber}/restore`,
+      { method: "POST" },
+    );
+    return await parseResponse<Skill>(resp);
+  } catch {
+    return {
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the backend. Is docker compose up?",
+    };
+  }
 }
