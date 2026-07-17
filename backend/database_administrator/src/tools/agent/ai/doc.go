@@ -25,9 +25,13 @@
 // production code second, refactor while green. The import-boundary
 // test in import_boundary_test.go is the canary for Layer 1 purity.
 //
-// As of AI-03 this package contains no production code. Subsequent
-// milestones (AI-04..AI-38) introduce roles, content parts, tool
-// declarations, tool calls, the model request shape, finish reasons,
-// usage, the event envelope, the stream shape, and concrete provider
-// adapters — each in its own change.
+// As of AI-04 the package exposes two provider-neutral types:
+//
+//   - Role — typed string with a 4-value canonical set (system, user,
+//     assistant, tool). Zero value is invalid. See role.go.
+//   - Message — the wire turn sent to the model, carrying a Role and
+//     an optional stable ID. Content parts and tool calls are added
+//     by AI-05 and AI-08 respectively. See message.go.
+//
+// Subsequent milestones (AI-05..AI-38) introduce content parts,
 package ai
