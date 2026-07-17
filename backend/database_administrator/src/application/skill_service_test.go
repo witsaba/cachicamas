@@ -559,6 +559,71 @@ func TestSkillService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.9 — SoftDelete is idempotent; soft-deleted name can be reused.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_SoftDelete_Idempotent(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "soft-del-idempotent",
+		Description: "d",
+		Body:        validSkillBody("soft-del-idempotent", "d"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SoftDelete(ctx, "soft-del-idempotent"); err != nil {
+		t.Fatalf("first SoftDelete: %v", err)
+	}
+	// Second call on an already-deleted name: must return nil.
+	if err := svc.SoftDelete(ctx, "soft-del-idempotent"); err != nil {
+		t.Fatalf("second SoftDelete (idempotent): %v", err)
+	}
+}
+
+func TestSkillService_SoftDelete_ThenRecreate_AllowsReuse(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	first, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "reusable",
+		Description: "d1",
+		Body:        validSkillBody("reusable", "d1"),
+	})
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	if err := svc.SoftDelete(ctx, "reusable"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	second, rev2, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "reusable",
+		Description: "d2",
+		Body:        validSkillBody("reusable", "d2"),
+	})
+	if err != nil {
+		t.Fatalf("recreate: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Errorf("recreated skill has same ID as deleted: %d", second.ID)
+	}
+	if rev2.RevisionNumber != 1 {
+		t.Errorf("recreated revision = %d, want 1", rev2.RevisionNumber)
+	}
+}
+
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
 var (
