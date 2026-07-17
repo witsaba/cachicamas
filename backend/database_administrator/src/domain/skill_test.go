@@ -19,6 +19,34 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// ValidateSkillName — reserved-word rejection (spec S-SK-026).
+// ---------------------------------------------------------------------------
+
+func TestValidateSkillName_RejectsReservedWords(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"anthropicToolkit", "anthropic-toolkit"},
+		{"claudeHelper", "claude-helper"},
+		{"uppercaseAnthropic", "Anthropic"},
+		{"uppercaseClaude", "CLAUDE"},
+		{"claudeInMiddle", "my-claude-skill"},
+		{"anthropicPrefix", "anthropic-foo"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := domain.ValidateSkillName(tc.in); err == nil {
+				t.Fatalf("expected error for reserved name %q, got nil", tc.in)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ValidateName (spec S-SK-024..027, S-SK-001..003).
 //
 // Regex: ^[a-z0-9]+(-[a-z0-9]+)*$  (agentskills.io spec).
