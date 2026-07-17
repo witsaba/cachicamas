@@ -30,6 +30,7 @@ import (
 	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
 	promptspg "github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres/prompts"
+	skillspg "github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres/skills"
 	workspacesyncer "github.com/cachicamas/backend/database_administrator/src/infrastructure/workspacesyncer"
 	httpiface "github.com/cachicamas/backend/database_administrator/src/interfaces/http"
 	"github.com/cachicamas/backend/database_administrator/src/migration"
@@ -422,6 +423,17 @@ func main() {
 	promptService := application.NewPromptService(promptRepo, promptRevRepo, db, logger)
 	promptHandler := httpiface.NewPromptHandler(promptService, logger)
 	promptHandler.RegisterPromptRoutes(e)
+
+	// 2026-07-17-skills-foundational PR1d of 7: wire the skills
+	// HTTP surface. Admin-only, no extra header (mirrors prompts).
+	// The 7 routes mount on the public Echo group; the SQL JOIN
+	// that emits current_revision (anti-drift gate ADR-SK-008)
+	// lives in SkillRepo.ListWithCurrentRevision / SelectByIDWithCurrentRevision.
+	skillRepo := skillspg.NewSkillRepo(db)
+	skillRevRepo := skillspg.NewSkillRevisionRepo(db)
+	skillService := application.NewSkillService(skillRepo, skillRevRepo, db, logger)
+	skillHandler := httpiface.NewSkillHandler(skillService, logger)
+	skillHandler.RegisterSkillRoutes(e)
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
