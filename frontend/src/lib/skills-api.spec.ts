@@ -18,6 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { Skill } from "./skills-api";
 
 // ---------------------------------------------------------------------------
 // Helpers (for wire-shape tests; task 5.2+)
@@ -54,16 +55,14 @@ describe("skills-api type contract (anti-drift obs #1959 item 2)", () => {
    * call will fail at type-check time because the module is absent.
    */
   it("Skill.current_revision is exactly `number` (not `number | undefined`, not optional)", async () => {
-    const mod = await import("./skills-api");
-
     // Compile-time assertion: Skill["current_revision"] MUST be assignable to
     // a `number` slot. If the type is `number | undefined`, expectTypeOf
     // reports a type mismatch and the test fails.
-    expectTypeOf<mod.Skill["current_revision"]>().toEqualTypeOf<number>();
+    expectTypeOf<Skill["current_revision"]>().toEqualTypeOf<number>();
 
     // Runtime assertion: build a sample Skill and confirm the field
     // is present at runtime.
-    const sample: mod.Skill = {
+    const sample: Skill = {
       id: 1,
       name: "x",
       description: "d",
