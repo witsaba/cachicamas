@@ -2,19 +2,18 @@
  * Frontend API client for the Skills management endpoints.
  *
  * WIRE CONTRACT — verified against the backend handler at
- *   backend/database_administrator/src/interfaces/http/skill_handler.go
+ * `backend/database_administrator/src/interfaces/http/skill_handler.go`
  * (PR1d, PR #57, merged).
  *
- * Anti-drift guards (from obs #1959) baked into this file's contract:
- *   - parseResponse reads body.error?.message ?? body.message ?? <default>
- *     (the prompts gotcha — flat-fixture vs nested-envelope)
- *   - parseResponse reads body.error?.fields ?? body.fields ?? {}
- *   - Skill.current_revision is `number` (never undefined — backend emits it)
- *   - listSkills() URL is exactly `/skills` (NO `?deleted=` no-op param)
- *   - updateSkill sends BOTH description AND body (no silent discard)
- *   - updateSkill JSDoc says PATCH (not PUT)
- *   - 7 functions exported, no dead exports for nonexistent routes
- *   - INDEPENDENT from prompts-api.ts (separate parseResponse, separate types)
+ * Anti-drift guards (obs #1959):
+ * - parseResponse reads body.error?.message ?? body.message ?? <default>
+ * - parseResponse reads body.error?.fields ?? body.fields ?? {}
+ * - Skill.current_revision is `number` (backend emits it via SQL JOIN)
+ * - listSkills URL is exactly `/skills` (NO `?deleted=` no-op)
+ * - updateSkill sends BOTH description AND body
+ * - updateSkill JSDoc says PATCH (not PUT)
+ * - 7 functions exported, no dead exports
+ * - INDEPENDENT from prompts-api.ts
  */
 
 // ---------------------------------------------------------------------------
@@ -26,20 +25,18 @@
  * Mirror of `backend/database_administrator/src/domain/skill.go` SkillDetail.
  *
  * Anti-drift gate (obs #1959 item 2): `current_revision` is `number`,
- * NOT optional, NOT `number | undefined`. Backend emits it via SQL JOIN
- * (ADR-SK-008). Declaring it as optional would let the `v{undefined}`
- * sidebar render bug slip back in.
+ * NOT optional. Backend emits it via SQL JOIN (ADR-SK-008).
  */
 export interface Skill {
   /** Backend bigserial primary key. */
   id: number;
-  /** URL slug + agentskills.io name. Lowercase alphanum + hyphens, 1..64 chars. */
+  /** URL slug. Lowercase alphanum + hyphens, 1..64 chars. */
   name: string;
-  /** Human-readable description. 1..1024 chars. NOT nullable — backend always emits it. */
+  /** Human-readable description. 1..1024 chars. NOT nullable. */
   description: string;
-  /** Full SKILL.md content (frontmatter + markdown). 1..524288 bytes. */
+  /** Full SKILL.md content. 1..524288 bytes. */
   body: string;
-  /** Latest revision number, ALWAYS present (ADR-SK-008). */
+  /** Latest revision number. ALWAYS present. */
   current_revision: number;
   /** ISO-8601 timestamp. */
   created_at: string;
@@ -196,16 +193,16 @@ function readErrorFields(body: Record<string, unknown>): Record<string, string> 
 /**
  * Map a fetch Response to ApiResult<T>.
  *
- * - 200/201 → { ok: true, value: parsed JSON }
- * - 204     → { ok: true, value: undefined } (DELETE)
- * - 400     → { ok: false, kind: "validation",  message, fields }
- * - 409     → { ok: false, kind: "conflict",    message }
- * - 404     → { ok: false, kind: "not_found",   message }
- * - 410     → { ok: false, kind: "not_found",   message } (soft-deleted → ux as not_found)
- * - 500+    → { ok: false, kind: "server",      message }
+ * Status mapping (anti-drift obs #1959):
+ * - 200/201 → ok:true, parsed JSON
+ * - 204     → ok:true, undefined
+ * - 400     → kind:validation (with fields)
+ * - 409     → kind:conflict
+ * - 404     → kind:not_found
+ * - 410     → kind:not_found (soft-deleted UX)
+ * - 500+    → kind:server
  *
- * Exported for testability — production callers go through the
- * domain-named wrappers (listSkills, etc.).
+ * Exported for testability.
  */
 export async function parseResponse<T>(resp: Response): Promise<ApiResult<T>> {
   if (resp.status === 204) {

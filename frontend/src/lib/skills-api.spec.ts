@@ -1,20 +1,19 @@
 /**
  * Wire-shape tests for the Skills frontend API client.
  *
- * Anti-drift guards (from obs #1959) enforced as RED tests FIRST:
- *   - Task 5.1: Skill.current_revision is `number` (not undefined-allowed)
- *   - Task 5.2: parseResponse reads body.error.message (NESTED envelope)
- *   - Task 5.3: parseResponse maps HTTP status → ApiResult kind
- *   - Task 5.4: listSkills calls GET /skills (NO query string)
- *   - Task 5.5: getSkill + deleteSkill URL/method
- *   - Task 5.6: createSkill calls POST with JSON {name, description, body}
- *   - Task 5.7: updateSkill calls PATCH with BOTH description AND body
- *   - Task 5.8: updateSkill JSDoc says PATCH not PUT (source-grep)
- *   - Task 5.9: listRevisions + restoreRevision URL/method
+ * Anti-drift guards (from obs #1959) each enforced as a failing-then-passing test:
+ *   - 5.1: Skill.current_revision is `number` (not undefined-allowed)
+ *   - 5.2: parseResponse reads body.error.message (NESTED envelope)
+ *   - 5.3: parseResponse maps HTTP status → ApiResult kind
+ *   - 5.4: listSkills calls GET /skills (NO query string)
+ *   - 5.5: getSkill + deleteSkill URL/method
+ *   - 5.6: createSkill calls POST with JSON {name, description, body}
+ *   - 5.7: updateSkill calls PATCH with BOTH description AND body
+ *   - 5.8: updateSkill JSDoc says PATCH not PUT (source-grep)
+ *   - 5.9: listRevisions + restoreRevision URL/method
  *
- * NO test in this file touches prompts-api.ts (independence gate).
- * NO test uses a FLAT envelope `{message:"..."}` — only NESTED
- * envelopes (the prompts gotcha fixture regression).
+ * NO test imports prompts-api.ts (independence gate).
+ * NO test uses FLAT error envelopes — only NESTED.
  */
 
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
@@ -44,24 +43,12 @@ function mockResponse(
 // ---------------------------------------------------------------------------
 
 describe("skills-api type contract (anti-drift obs #1959 item 2)", () => {
-  /**
-   * Task 5.1 RED — Skill declares current_revision: number (not undefined-allowed).
-   * Backend emits `current_revision` via SQL JOIN (ADR-SK-008). If the
-   * type allowed `undefined`, sidebar would render `vundefined` (the
-   * exact prompts bug).
-   *
-   * This test references `./skills-api`, which is the production file
-   * that does NOT exist yet — that is the RED state. The `expectTypeOf`
-   * call will fail at type-check time because the module is absent.
-   */
-  it("Skill.current_revision is exactly `number` (not `number | undefined`, not optional)", async () => {
-    // Compile-time assertion: Skill["current_revision"] MUST be assignable to
-    // a `number` slot. If the type is `number | undefined`, expectTypeOf
-    // reports a type mismatch and the test fails.
+  // Task 5.1 — Skill.current_revision is `number`, not undefined.
+  // If the type allowed `undefined`, sidebar would render `v{undefined}`
+  // (the exact prompts bug). Backend emits via SQL JOIN (ADR-SK-008).
+  it("Skill.current_revision is exactly `number` (not `number | undefined`)", async () => {
+    // Compile-time + runtime assertion.
     expectTypeOf<Skill["current_revision"]>().toEqualTypeOf<number>();
-
-    // Runtime assertion: build a sample Skill and confirm the field
-    // is present at runtime.
     const sample: Skill = {
       id: 1,
       name: "x",
@@ -81,19 +68,10 @@ describe("skills-api type contract (anti-drift obs #1959 item 2)", () => {
 // ---------------------------------------------------------------------------
 
 describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 item 1)", () => {
-  /**
-   * Task 5.2 RED — parseResponse reads body.error.message (NESTED).
-   *
-   * The prompts bug (obs #1959 item 1) is that `parseResponse` read
-   * `body.message ?? <default>` (flat). Backend actually emits
-   * `{error:{code,message,fields?}}` (nested). The result: rich backend
-   * messages are silently dropped.
-   *
-   * This test asserts the nested message is preferred over the flat
-   * one. If the impl reads top-level `body.message` only, the test
-   * FAILS — it sees the flat "Fallback flat message" instead of the
-   * nested "Backend nested message".
-   */
+  // Task 5.2 — parseResponse reads body.error.message (NESTED first).
+  // The prompts bug read body.message (flat) first; backend emits
+  // `{error:{code,message,fields?}}` (nested). Rich backend messages
+  // were silently dropped.
   it("prefers body.error.message (nested) over body.message (flat fallback)", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -103,7 +81,6 @@ describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 ite
       },
       { status: 400 },
     );
-    // parseResponse is exported as a named export for testability.
     const result = await mod.parseResponse<unknown>(resp);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -112,10 +89,6 @@ describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 ite
     }
   });
 
-  /**
-   * Task 5.2 — also reads body.error.fields (NESTED). Same anti-drift
-   * gate, different field.
-   */
   it("prefers body.error.fields (nested) over body.fields (flat fallback)", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -144,9 +117,7 @@ describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 ite
 // ---------------------------------------------------------------------------
 
 describe("skills-api parseResponse — status → kind mapping", () => {
-  /**
-   * Task 5.3 — 400 with envelope → kind=validation + fields populated.
-   */
+  // Task 5.3 — status → kind mapping with NESTED envelopes.
   it("400 → kind=validation with NESTED message + fields", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -170,9 +141,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 409 → kind=conflict (duplicate name).
-   */
   it("409 → kind=conflict", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -187,9 +155,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 404 → kind=not_found.
-   */
   it("404 → kind=not_found", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -204,9 +169,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 410 (soft-deleted) → kind=not_found (UX treats gone as missing).
-   */
   it("410 → kind=not_found (soft-deleted UX)", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -221,9 +183,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 500 → kind=server.
-   */
   it("500 → kind=server", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse(
@@ -238,13 +197,8 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — fetch throw → kind=offline. We exercise this through
-   * the public wrapper (listSkills) which catches and returns offline.
-   */
   it("fetch throw → kind=offline (via listSkills)", async () => {
     const { listSkills } = await import("./skills-api");
-    // Force a network throw by mocking fetch.
     const original = globalThis.fetch;
     globalThis.fetch = (() => {
       throw new Error("ECONNREFUSED");
@@ -260,9 +214,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 204 No Content → ok:true with undefined value.
-   */
   it("204 → ok:true with value undefined", async () => {
     const mod = await import("./skills-api");
     const resp = new Response(undefined, { status: 204 });
@@ -273,9 +224,6 @@ describe("skills-api parseResponse — status → kind mapping", () => {
     }
   });
 
-  /**
-   * Task 5.3 — 200/201 with JSON body → ok:true with parsed value.
-   */
   it("200 + JSON body → ok:true with parsed value", async () => {
     const mod = await import("./skills-api");
     const resp = mockResponse({ hello: "world" }, { status: 200 });
@@ -323,10 +271,6 @@ describe("skills-api wire shapes (anti-drift obs #1959 items 3,4,5,6)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
-
-  // -------------------------------------------------------------------------
-  // Task 5.4 — listSkills calls GET /skills (NO query string)
-  // -------------------------------------------------------------------------
 
   it("Task 5.4 — listSkills calls GET /skills with NO query string", async () => {
     const { listSkills } = await import("./skills-api");
@@ -466,20 +410,9 @@ describe("skills-api wire shapes (anti-drift obs #1959 items 3,4,5,6)", () => {
 // ---------------------------------------------------------------------------
 
 describe("skills-api JSDoc — PATCH not PUT (anti-drift obs #1959 item 4)", () => {
-  /**
-   * Task 5.8 — updateSkill's JSDoc MUST contain the literal string "PATCH".
-   *
-   * The prompts bug (obs #1959 item 4) is that the JSDoc on
-   * `updatePrompt` says "PUT" while the impl uses `method: "PATCH"`.
-   * That comment-vs-code drift caused ~1h of debugging in the prompts
-   * build (#1899). This source-grep test pins the comment FOREVER.
-   *
-   * The test reads the source file from disk and asserts the literal
-   * "PATCH" appears in the JSDoc block above `updateSkill`. We
-   * deliberately do NOT assert "PUT" should be absent — both strings
-   * may coexist (e.g. "PATCH (not PUT)"); only the "PATCH" presence
-   * is load-bearing.
-   */
+  // Task 5.8 — updateSkill JSDoc MUST mention PATCH. The prompts bug
+  // (#1959 item 4) had JSDoc saying PUT while impl used PATCH — this
+  // source-grep pins the comment.
   it("updateSkill JSDoc explicitly mentions PATCH", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
@@ -487,16 +420,12 @@ describe("skills-api JSDoc — PATCH not PUT (anti-drift obs #1959 item 4)", () 
       path.resolve(__dirname, "./skills-api.ts"),
       "utf8",
     );
-    // Locate the updateSkill declaration and the JSDoc block above it.
     const idx = source.indexOf("export async function updateSkill");
     expect(idx).toBeGreaterThan(-1);
-    // Walk backwards from the declaration looking for the start of
-    // the previous JSDoc block ("/**").
     const before = source.slice(0, idx);
     const jsDocStart = before.lastIndexOf("/**");
     expect(jsDocStart).toBeGreaterThan(-1);
     const jsDoc = source.slice(jsDocStart, idx);
-    // Anti-drift gate: JSDoc MUST mention PATCH.
     expect(jsDoc).toContain("PATCH");
   });
 });
