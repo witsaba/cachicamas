@@ -270,3 +270,87 @@ test("[skill-editor]: Save button is DISABLED while saving={true}, even with all
   const saveBtn = getSaveButton(screen);
   expect(saveBtn.disabled).toBe(true);
 });
+
+// ---------------------------------------------------------------------------
+// Task 6.8 — onSave$ payload (anti-drift gate: BOTH description AND body)
+// ---------------------------------------------------------------------------
+
+test("[skill-editor]: clicking Save invokes onSave$ with BOTH description AND body (no silent discard)", async () => {
+  // Anti-drift gate (obs #1959 item 4):
+  //   onSave$ payload MUST include both description AND body, even
+  //   in EDIT mode where the user only changed the body. The prompts
+  //   feature silently discarded description on save; this test pins
+  //   the Skills behavior to "always send both".
+  //
+  // Setup: load an existing skill, then change ONLY the body.
+  // Expected: onSave$ receives { description: ORIGINAL, body: NEW }.
+  const { screen, userEvent } = await renderEditor({
+    mode: "edit",
+    skill: makeSkill({
+      name: "edit-me",
+      description: "Original description",
+      body: "Original body",
+    }),
+  });
+
+  // Edit the body only.
+  const body = getBodyTextarea(screen);
+  body.value = "Updated body content";
+  await userEvent(body, "input", { target: body });
+
+  const saveBtn = getSaveButton(screen);
+  expect(saveBtn.disabled).toBe(false);
+
+  await userEvent(saveBtn, "click");
+
+  // Capture must have one call with BOTH fields populated.
+  expect(capturedCalls.length).toBe(1);
+  expect(capturedCalls[0].description).toBe("Original description");
+  expect(capturedCalls[0].body).toBe("Updated body content");
+});
+
+test("[skill-editor]: clicking Save in create mode emits the typed description and body verbatim", async () => {
+  // Counterpart for create mode: the new skill's description and body
+  // both flow into onSave$. This catches the symmetric bug where
+  // create-mode wires only one of the two fields.
+  const { screen, userEvent } = await renderEditor({
+    mode: "create",
+    skill: null,
+  });
+
+  const desc = getDescriptionInput(screen);
+  desc.value = "Brand new description";
+  await userEvent(desc, "input", { target: desc });
+
+  const body = getBodyTextarea(screen);
+  body.value = "---\nname: brand-new\ndescription: Brand new description\n---\nBrand new body";
+  await userEvent(body, "input", { target: body });
+
+  await userEvent(getSaveButton(screen), "click");
+
+  expect(capturedCalls.length).toBe(1);
+  expect(capturedCalls[0].description).toBe("Brand new description");
+  expect(capturedCalls[0].body).toBe(
+    "---\nname: brand-new\ndescription: Brand new description\n---\nBrand new body",
+  );
+});
+
+test("[skill-editor]: clicking Save when canSave is FALSE does NOT invoke onSave$", async () => {
+  // Regression: clicking the (disabled) Save button must not fire
+  // onSave$. The button is HTML-disabled, so the browser blocks the
+  // event, but we lock the contract here in case the disable logic
+  // regresses and the button is incorrectly enabled.
+  const { screen, userEvent } = await renderEditor({
+    mode: "edit",
+    skill: makeSkill(),
+  });
+
+  // Save is disabled right after load (no changes). Forcing a click
+  // should be a no-op.
+  const saveBtn = getSaveButton(screen);
+  expect(saveBtn.disabled).toBe(true);
+
+  await userEvent(saveBtn, "click");
+
+  expect(capturedCalls.length).toBe(0);
+});
