@@ -1,5 +1,5 @@
 /**
- * SkillListItem spec — covers name + version rendering.
+ * SkillListItem spec — covers name + version rendering, testid, click.
  *
  * Anti-drift gate (obs #1959 item 2):
  *   The component MUST render `v{N}` using `skill.current_revision`,
@@ -36,13 +36,18 @@ function makeOnClickStub(): QRL<() => void> {
   return $(() => {});
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
+// Module-level capture (Qwik `$` forbids vi.fn in closures — see
+// prompt-editor.spec.tsx comment for the pattern).
+let capturedClicks = 0;
 beforeEach(() => {
-  // No module-level capture needed — these tests don't bind to a handler.
+  capturedClicks = 0;
 });
+
+function makeCountingOnClick(): QRL<() => void> {
+  return $(() => {
+    capturedClicks++;
+  });
+}
 
 test("[skill-list-item]: renders the skill name", async () => {
   const { screen, render } = await createDOM();
@@ -100,4 +105,60 @@ test("[skill-list-item]: renders v prefix even when revision is missing", async 
   expect(meta?.textContent).not.toContain("undefined");
   // Should still contain a "v" prefix.
   expect(meta?.textContent).toContain("v");
+});
+
+test("[skill-list-item]: exposes a data-testid that distinguishes selected vs unselected", async () => {
+  // The unselected item has testid "skill-list-item".
+  const { screen: s1, render: r1 } = await createDOM();
+  await r1(
+    <ul>
+      <SkillListItem
+        skill={makeSkill({ name: "one" })}
+        selected={false}
+        onClick$={makeOnClickStub()}
+      />
+    </ul>,
+  );
+  const unselected = s1.querySelector('[data-testid="skill-list-item"]');
+  expect(unselected).toBeTruthy();
+
+  // The selected item has testid "skill-list-item-selected" so PR2c
+  // can query both the generic and the highlighted variants.
+  const { screen: s2, render: r2 } = await createDOM();
+  await r2(
+    <ul>
+      <SkillListItem
+        skill={makeSkill({ name: "two" })}
+        selected={true}
+        onClick$={makeOnClickStub()}
+      />
+    </ul>,
+  );
+  const selected = s2.querySelector('[data-testid="skill-list-item-selected"]');
+  expect(selected).toBeTruthy();
+});
+
+test("[skill-list-item]: clicking the item invokes onClick$", async () => {
+  // Verifies the button wires the click handler (the parent
+  // SkillSidebar passes a QRL that selects the skill in its own
+  // state — this test pins the wiring contract).
+  const { screen, render, userEvent } = await createDOM();
+  await render(
+    <ul>
+      <SkillListItem
+        skill={makeSkill({ name: "clickable" })}
+        selected={false}
+        onClick$={makeCountingOnClick()}
+      />
+    </ul>,
+  );
+
+  const btn = screen.querySelector(
+    '[data-testid="skill-list-item"]',
+  ) as HTMLButtonElement;
+  expect(btn).toBeTruthy();
+
+  await userEvent(btn, "click");
+
+  expect(capturedClicks).toBe(1);
 });
