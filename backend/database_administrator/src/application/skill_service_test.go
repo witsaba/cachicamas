@@ -442,6 +442,62 @@ func TestSkillService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.7 — Update / Restore on a soft-deleted skill return GoneError.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Update_DeletedSkill_ReturnsGoneError(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "update-deleted",
+		Description: "d",
+		Body:        validSkillBody("update-deleted", "d"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SoftDelete(ctx, "update-deleted"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	_, _, err := svc.Update(ctx, "update-deleted", domain.UpdateSkillInput{
+		Body: stringPtrSkill(validSkillBody("update-deleted", "d")),
+	})
+	if _, ok := domain.AsSkillDeleted(err); !ok {
+		t.Fatalf("expected *SkillGoneError, got %T (%v)", err, err)
+	}
+}
+
+func TestSkillService_Restore_OnDeletedSkill_ReturnsGoneError(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "restore-deleted",
+		Description: "d",
+		Body:        validSkillBody("restore-deleted", "d"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SoftDelete(ctx, "restore-deleted"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	_, _, err := svc.Restore(ctx, "restore-deleted", 1)
+	if _, ok := domain.AsSkillDeleted(err); !ok {
+		t.Fatalf("expected *SkillGoneError, got %T (%v)", err, err)
+	}
+}
+
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
 var (
