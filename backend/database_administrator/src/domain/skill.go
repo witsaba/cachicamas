@@ -27,6 +27,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -176,6 +177,16 @@ func (e *SkillGoneError) Unwrap() error { return e.Cause }
 
 func NewSkillDeleted(name string) *SkillGoneError {
 	return &SkillGoneError{Name: name}
+}
+
+// AsSkillDeleted is a convenience that wraps errors.As for the
+// skill-specific GoneError, mirroring the pattern used by prompts.
+func AsSkillDeleted(err error) (*SkillGoneError, bool) {
+	var gone *SkillGoneError
+	if errors.As(err, &gone) {
+		return gone, true
+	}
+	return nil, false
 }
 
 const (
@@ -411,4 +422,23 @@ type SkillRevisionRepository interface {
 	Insert(ctx context.Context, db sqlExecutor, r *SkillRevision) error
 	SelectBySkillAndNumber(ctx context.Context, db sqlExecutor, skillID int64, n int) (*SkillRevision, error)
 	ListBySkillID(ctx context.Context, db sqlExecutor, skillID int64) ([]*SkillRevision, error)
+}
+
+// CreateSkillInput is the handler-facing payload for POST /skills.
+// The handler decodes JSON into this shape, runs the validator chain
+// (ValidateSkillName + ValidateSkillDescription + ValidateSkillBody +
+// ParseFrontmatter + LockStepCheck) and hands the populated input to
+// SkillService.Create.
+type CreateSkillInput struct {
+	Name        string
+	Description string
+	Body        string
+}
+
+// UpdateSkillInput is the handler-facing payload for PATCH /skills/:name.
+// At least one of Description or Body MUST be non-nil; the service
+// enforces that and the frontmatter lock-step before any DB work.
+type UpdateSkillInput struct {
+	Description *string
+	Body        *string
 }
