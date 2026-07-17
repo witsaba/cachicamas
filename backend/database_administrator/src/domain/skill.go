@@ -266,3 +266,25 @@ func ParseFrontmatter(body string) (Frontmatter, error) {
 // future frontmatter parsing wants to read large bodies without
 // allocating a string — currently unused).
 var _ = bytes.NewBufferString
+
+// LockStepCheck enforces frontmatter-vs-request consistency
+// (spec S-SK-035/036, scenarios SCN-3.5). TrimSpace is applied to
+// both sides so trailing newlines from copy-paste don't break
+// legitimate edits (design risk R7).
+//
+// Returns a *ValidationError populated for whichever side failed:
+//   - fields.name          when slug != fm.Name
+//   - fields.description   when reqDescription != fm.Description
+func LockStepCheck(slug, reqDescription string, fm Frontmatter) error {
+	fields := map[string]string{}
+	if strings.TrimSpace(slug) != strings.TrimSpace(fm.Name) {
+		fields["name"] = MsgSkillNameLockStep
+	}
+	if strings.TrimSpace(reqDescription) != strings.TrimSpace(fm.Description) {
+		fields["description"] = MsgSkillDescriptionLockStep
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return &ValidationError{Fields: fields}
+}
