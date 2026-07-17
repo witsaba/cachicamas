@@ -112,9 +112,9 @@ test("[skill-sidebar]: filter input narrows the visible list by name substring (
   input.value = "PDF";
   await userEvent(input, "input", { target: input });
 
-  const visibleNames = screen
-    .querySelectorAll('[data-testid="skill-list-item-name"]')
-    .map((el) => el.textContent);
+  const visibleNames = Array.from(
+    screen.querySelectorAll('[data-testid="skill-list-item-name"]'),
+  ).map((el) => el.textContent);
   expect(visibleNames).toEqual(["pdf-cleanup"]);
 });
 

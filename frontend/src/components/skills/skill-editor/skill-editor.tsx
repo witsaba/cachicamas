@@ -49,14 +49,11 @@ export interface SkillEditorProps {
 export const SkillEditor = component$<SkillEditorProps>(
   ({
     skill,
-    revisions: _revisions,
-    mode: _mode,
     saving,
     error,
     onSave$,
     onCancel$,
     onDelete$,
-    onRestore$: _onRestore$,
   }) => {
     // Class table for the form controls. Pure function — see ./classes.
     const classes = skillEditorClasses();
@@ -70,7 +67,7 @@ export const SkillEditor = component$<SkillEditorProps>(
     // This locks the prompts-style "form keeps old values after switching
     // to create mode" bug — see obs #1959 item 4 for the parallel prompt bug.
     useTask$(({ track }) => {
-      const name = track(() => skill?.name ?? null);
+      track(() => skill?.name ?? null);
       if (skill) {
         description.value = skill.description;
         body.value = skill.body;
@@ -81,7 +78,6 @@ export const SkillEditor = component$<SkillEditorProps>(
       }
       // Any load (including the initial render) is NOT a change.
       hasChanges.value = false;
-      return { name };
     });
 
     // canSave is FALSE initially (no changes), FALSE after a load
