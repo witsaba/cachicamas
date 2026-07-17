@@ -299,3 +299,57 @@ describe("routes/settings/skills — populated branch (7.7)", () => {
     expect(editor).toBeTruthy();
   });
 });
+
+// =========================================================================
+// 7.8 — Create flow
+// =========================================================================
+
+describe("routes/settings/skills — create flow (7.8)", () => {
+  it("TestSettingsSkillsRoute_HandleCreate — submit the create form → POST createSkill → refresh list → switch to edit mode (anti-drift gate #4)", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
+    const { screen, render, userEvent } = await createDOM();
+    await render(<TestWrapper />);
+
+    // 1. Click the "+ New Skill" button on the page header.
+    const newBtn = screen.querySelector(
+      '[data-testid="skill-studio-new"]',
+    ) as HTMLElement | null;
+    expect(newBtn).toBeTruthy();
+    await userEvent(newBtn!, "click");
+
+    // 2. SkillEditor mounts in create mode (description + body fields).
+    const desc = screen.querySelector(
+      '[data-testid="skill-editor-description"]',
+    ) as HTMLInputElement | null;
+    const body = screen.querySelector(
+      '[data-testid="skill-editor-body"]',
+    ) as HTMLTextAreaElement | null;
+    expect(desc).toBeTruthy();
+    expect(body).toBeTruthy();
+
+    // 3. Type into description and body fields.
+    desc!.value = "A new skill";
+    await userEvent(desc!, "input");
+    body!.value = "---\nname: new-skill\ndescription: A new skill\n---\n# Body";
+    await userEvent(body!, "input");
+
+    // 4. Click Save.
+    const saveBtn = screen.querySelector(
+      '[data-testid="skill-editor-save"]',
+    ) as HTMLButtonElement | null;
+    expect(saveBtn).toBeTruthy();
+    expect(saveBtn!.disabled).toBe(false);
+    await userEvent(saveBtn!, "click");
+
+    // 5. Wait a tick for the async save to complete.
+    await new Promise((r) => setTimeout(r, 50));
+
+    // 6. createSkill was called once with name + description + body.
+    expect(createCalls.length).toBe(1);
+    expect(createCalls[0]).toEqual({
+      name: "new-skill",
+      description: "A new skill",
+      body: "---\nname: new-skill\ndescription: A new skill\n---\n# Body",
+    });
+  });
+});
