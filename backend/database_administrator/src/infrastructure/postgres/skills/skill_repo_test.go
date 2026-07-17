@@ -464,6 +464,50 @@ func (c *countingExecutor) QueryRowContext(ctx context.Context, q string, args .
 	return c.inner.QueryRowContext(ctx, q, args...)
 }
 
+// TestSkillRepo_MaxRevisionNumber_EmptyTableReturnsZero covers spec
+// INV-4 + design §3.2: a skill with no revisions returns 0 from
+// MaxRevisionNumber (so the service can assign revision_number=1 to
+// the very first write under FOR UPDATE).
+func TestSkillRepo_MaxRevisionNumber_EmptyTableReturnsZero(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	seeded := seedSkill(t, db, "max-rev-zero", "d", "b")
+	got, err := repo.MaxRevisionNumber(context.Background(), db, seeded.ID)
+	if err != nil {
+		t.Fatalf("MaxRevisionNumber: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("MaxRevisionNumber = %d, want 0", got)
+	}
+}
+
+// TestSkillRepo_MaxRevisionNumber_ReturnsMax covers the happy path:
+// a skill with revisions 1..4 must report MaxRevisionNumber=4 (used
+// by the service to assign revision_number=5 on the next write).
+func TestSkillRepo_MaxRevisionNumber_ReturnsMax(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	seeded := seedSkill(t, db, "max-rev-existing", "d", "b")
+	seedSkillRevisions(t, db, seeded.ID, 4)
+	got, err := repo.MaxRevisionNumber(context.Background(), db, seeded.ID)
+	if err != nil {
+		t.Fatalf("MaxRevisionNumber: %v", err)
+	}
+	if got != 4 {
+		t.Errorf("MaxRevisionNumber = %d, want 4", got)
+	}
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
