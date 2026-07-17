@@ -154,8 +154,24 @@ func (r *SkillRepo) SelectBySlugAny(ctx context.Context, db domain.SQLExecutor, 
 	}
 	return s, nil
 }
-func (r *SkillRepo) SelectByID(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
-	return nil, nil
+// SelectByID returns the row with the given id regardless of its
+// deleted_at state, or *domain.NotFoundError when no row matches.
+// The caller is typically the service layer after LockAndLoad or
+// after a write (for the re-read that produces the response).
+func (r *SkillRepo) SelectByID(ctx context.Context, db domain.SQLExecutor, id int64) (*domain.Skill, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT `+skillColumnList+` FROM `+skillTableName+`
+             WHERE id = $1`,
+		id,
+	)
+	s, err := scanSkill(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: skillTableName}
+		}
+		return nil, fmt.Errorf("postgres.SkillRepo.SelectByID: %w", err)
+	}
+	return s, nil
 }
 // currentRevisionSubquery is the locked SQL fragment for the JOIN
 // against skill_revision. Defined as a constant so the SQL structure
@@ -251,12 +267,76 @@ func (r *SkillRepo) ListWithCurrentRevision(ctx context.Context, db domain.SQLEx
 	}
 	return out, nil
 }
-func (r *SkillRepo) UpdateBody(context.Context, domain.SQLExecutor, int64, string, string) error {
+// UpdateBody updates body, description, and updated_at on a LIVE
+// skill. Used by the service layer after acquiring the FOR UPDATE
+// row lock so the version assignment is monotonic (spec INV-4 +
+// S-SK-021/022). The DB clock owns updated_at.
+//
+// A unique-violation on the partial unique index (e.g. concurrent
+// soft-delete + recreate with the same name) translates to
+// *domain.ConflictError so the handler can map to 409.
+func (r *SkillRepo) UpdateBody(ctx context.Context, db domain.SQLExecutor, id int64, body, description string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE `+skillTableName+`
+             SET body = $1, description = $2, updated_at = now()
+             WHERE id = $3 AND deleted_at IS NULL`,
+		body, description, id,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return &domain.ConflictError{Cause: err}
+		}
+		return fmt.Errorf("postgres.SkillRepo.UpdateBody: %w", err)
+	}
 	return nil
 }
-func (r *SkillRepo) SoftDelete(context.Context, domain.SQLExecutor, int64) error { return nil }
-func (r *SkillRepo) LockAndLoad(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
-	return nil, nil
+
+// SoftDelete sets deleted_at = now() on the skill row. Idempotent:
+// calling it twice on the same row succeeds both times (the second
+// call finds zero rows matching `deleted_at IS NULL`, returns nil).
+// The partial unique index frees the name for reuse after delete
+// (spec R-SK-002, SCN-2.3).
+func (r *SkillRepo) SoftDelete(ctx context.Context, db domain.SQLExecutor, id int64) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE `+skillTableName+`
+             SET deleted_at = now()
+             WHERE id = $1 AND deleted_at IS NULL`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres.SkillRepo.SoftDelete: %w", err)
+	}
+	return nil
+}
+
+// LockAndLoad issues `SELECT … FOR UPDATE` on the skill row and
+// returns the row (live OR soft-deleted — the service checks
+// DeletedAt to decide whether to return *SkillGoneError). The caller
+// MUST be inside a transaction; this is the single concurrency gate
+// for Update, Restore, and SoftDelete. Returns
+// *domain.NotFoundError when no row matches the id.
+//
+// Returns soft-deleted rows: the service needs to know whether the
+// row exists at all. A row that is soft-deleted must produce 410
+// (skill_deleted), not 404 (not_found). Hiding it in the repo would
+// force the service to issue a second SELECT after a 404, which is
+// racy.
+func (r *SkillRepo) LockAndLoad(ctx context.Context, db domain.SQLExecutor, id int64) (*domain.Skill, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT `+skillColumnList+` FROM `+skillTableName+`
+             WHERE id = $1
+             FOR UPDATE`,
+		id,
+	)
+	s, err := scanSkill(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.NotFoundError{Resource: skillTableName}
+		}
+		return nil, fmt.Errorf("postgres.SkillRepo.LockAndLoad: %w", err)
+	}
+	return s, nil
 }
 // MaxRevisionNumber returns COALESCE(MAX(revision_number), 0) for
 // the given skill_id. Used by the service under FOR UPDATE to assign
