@@ -401,6 +401,69 @@ func TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows(t *test
 	}
 }
 
+// TestSkillRepo_N1Query_OneStatementForList covers design §7 R8
+// (anti-drift): ListWithCurrentRevision MUST issue exactly ONE SQL
+// statement for any list size. The test uses pgx's pgx_stat_statements
+// proxy via a counter wrapper: every QueryContext call increments a
+// counter, and the assertion is that one List() call = one statement.
+//
+// To avoid introducing a heavy tracing dependency, we use a
+// sentinel-driver trick: open a *sql.DB with a custom query observer
+// via the `database/sql` driver's instrumentation. The simplest
+// portable approach: capture the call count by wrapping the executor
+// passed to the repo. We wrap the db's QueryContext via a thin
+// proxy struct that the repo accepts as domain.SQLExecutor.
+func TestSkillRepo_N1Query_OneStatementForList(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+
+	// Seed 5 skills, each with a few revisions.
+	for i := 0; i < 5; i++ {
+		name := "n1-skill-" + string(rune('a'+i))
+		s := seedSkill(t, db, name, "d", "b")
+		seedSkillRevisions(t, db, s.ID, i+1) // 1..5 revs
+	}
+
+	// Wrap the DB in a counter proxy.
+	counter := &countingExecutor{inner: db, queryCount: 0}
+
+	_, err := repo.ListWithCurrentRevision(context.Background(), counter, 50)
+	if err != nil {
+		t.Fatalf("ListWithCurrentRevision: %v", err)
+	}
+	if counter.queryCount != 1 {
+		t.Errorf("ListWithCurrentRevision issued %d statements, want 1 (N+1 detected)", counter.queryCount)
+	}
+}
+
+// countingExecutor wraps a domain.SQLExecutor and counts every
+// QueryContext and QueryRowContext call. Domain.SQLExecutor is the
+// repo's input; we implement it on *sql.DB by re-exposing the same
+// surface. We delegate ExecContext (which the repo also uses for
+// inserts) but don't count it for the N+1 assertion — N+1 manifests
+// as per-row reads, not writes.
+type countingExecutor struct {
+	inner      domain.SQLExecutor
+	queryCount int
+}
+
+func (c *countingExecutor) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return c.inner.ExecContext(ctx, q, args...)
+}
+func (c *countingExecutor) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	c.queryCount++
+	return c.inner.QueryContext(ctx, q, args...)
+}
+func (c *countingExecutor) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	c.queryCount++
+	return c.inner.QueryRowContext(ctx, q, args...)
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
