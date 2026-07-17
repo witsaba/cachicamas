@@ -19,6 +19,25 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Repository ports (hexagonal boundary; implementations land in
+// PR1b under src/infrastructure/postgres/skills/).
+// ---------------------------------------------------------------------------
+
+func TestSkillRepository_PortInterface(t *testing.T) {
+	t.Parallel()
+	// Compile-time check: a fake must satisfy the interface. If the
+	// interface surface drifts, this file fails to build.
+	type fakeRepo struct{}
+	var _ domain.SkillRepository = (*fakeRepo)(nil)
+}
+
+func TestSkillRevisionRepository_PortInterface(t *testing.T) {
+	t.Parallel()
+	type fakeRevRepo struct{}
+	var _ domain.SkillRevisionRepository = (*fakeRevRepo)(nil)
+}
+
+// ---------------------------------------------------------------------------
 // Error vocabulary (spec §7, design §3.6).
 //
 // Wire codes are the locked vocabulary the handler maps to HTTP
