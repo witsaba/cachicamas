@@ -14,6 +14,7 @@
  */
 import { component$, type QRL } from "@builder.io/qwik";
 import type { Skill } from "~/lib/skills-api";
+import { listItemClasses } from "./classes";
 
 export interface SkillListItemProps {
   skill: Skill;
@@ -35,22 +36,9 @@ function safeRevision(rev: number | undefined | null): number {
   return typeof rev === "number" && !isNaN(rev) ? rev : 0;
 }
 
-/** Class strings for SkillListItem (extracted to ./classes in task 6.3). */
-function itemClasses(selected: boolean) {
-  const base = "w-full cursor-pointer rounded px-3 py-2 text-left transition-colors";
-  const container = selected
-    ? `${base} bg-slate-100`
-    : `${base} hover:bg-slate-50`;
-  return {
-    container,
-    name: "block truncate text-sm font-medium text-slate-900",
-    meta: "mt-0.5 block truncate text-xs text-slate-500",
-  };
-}
-
 export const SkillListItem = component$<SkillListItemProps>(
   ({ skill, selected, onClick$ }) => {
-    const classes = itemClasses(selected);
+    const classes = listItemClasses(selected);
     const rev = safeRevision(skill.current_revision);
 
     return (
