@@ -12,7 +12,6 @@
 package domain_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
