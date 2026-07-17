@@ -29,6 +29,7 @@ package domain
 
 import (
 	"regexp"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,14 +87,33 @@ func ValidateSkillName(name string) error {
 			Fields: map[string]string{"name": MsgSkillNameFormat},
 		}
 	}
+	// Reserved-word check (case-insensitive substring). The strings
+	// "anthropic" and "claude" are reserved per agentskills.io; we
+	// compare against the lowercased name to defeat case obfuscation
+	// like "aNthropic" or "cLaude-helper".
+	lowered := strings.ToLower(name)
+	for _, reserved := range skillReservedSubstrings {
+		if strings.Contains(lowered, reserved) {
+			return &ValidationError{
+				Fields: map[string]string{"name": MsgSkillNameReserved},
+			}
+		}
+	}
 	return nil
 }
+
+// skillReservedSubstrings is the closed set of substrings that
+// agentskills.io treats as reserved (case-insensitive). The list is
+// small and unlikely to grow; extending it would require a review of
+// every existing skill name in production.
+var skillReservedSubstrings = []string{"anthropic", "claude"}
 
 // placeholder message constants — wired in tasks 1.2 and 1.3 below.
 // Keeping them at the top so the locked vocabulary stays together.
 // MsgSkillNameLength is overridden in GREEN task 1.2 with the spec text;
 // the current value is the placeholder so the test for 1.1 passes.
 const (
-	MsgSkillNameLength = "Skill name must be 1-64 characters."
-	MsgSkillNameFormat = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
+	MsgSkillNameLength  = "Skill name must be 1-64 characters."
+	MsgSkillNameFormat  = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
+	MsgSkillNameReserved = "Skill name cannot contain \"anthropic\" or \"claude\"."
 )
