@@ -210,6 +210,91 @@ func TestSkillRepo_Insert_TranslatesUniqueViolation(t *testing.T) {
 	}
 }
 
+// TestSkillRepo_SelectBySlug_ExcludesDeleted covers spec S-SK-038 +
+// ADR-SK-003: a soft-deleted skill MUST NOT be returned by
+// SelectBySlug (active-only). SelectBySlugAny exists to bridge the
+// "still exists but soft-deleted" → *GoneError (410) flow in the
+// service layer; SelectBySlug returns *NotFoundError on the same row.
+func TestSkillRepo_SelectBySlug_ExcludesDeleted(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	seeded := seedSkill(t, db, "live-skill", "active", "body")
+	deleted := seedSkill(t, db, "dead-skill", "active", "body")
+	if err := repo.SoftDelete(ctx, db, deleted.ID); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	// Live row is returned.
+	got, err := repo.SelectBySlug(ctx, db, "live-skill")
+	if err != nil {
+		t.Fatalf("SelectBySlug(live-skill): %v", err)
+	}
+	if got.ID != seeded.ID {
+		t.Errorf("live ID = %d, want %d", got.ID, seeded.ID)
+	}
+
+	// Soft-deleted row is hidden.
+	_, err = repo.SelectBySlug(ctx, db, "dead-skill")
+	var nerr *domain.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Fatalf("SelectBySlug(deleted): expected *domain.NotFoundError, got %T (%v)", err, err)
+	}
+}
+
+// TestSkillRepo_SelectBySlugAny_IncludesDeleted covers spec S-SK-005 +
+// design §3.2 (PATCH flow): the service needs to distinguish
+// "slug never existed" (→ 404) from "slug exists but is soft-deleted"
+// (→ 410 skill_deleted). SelectBySlugAny returns the row regardless
+// of deleted_at state and the service inspects DeletedAt.
+func TestSkillRepo_SelectBySlugAny_IncludesDeleted(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	live := seedSkill(t, db, "alive", "active", "body")
+	deleted := seedSkill(t, db, "doomed", "active", "body")
+	if err := repo.SoftDelete(ctx, db, deleted.ID); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	// Live row.
+	got, err := repo.SelectBySlugAny(ctx, db, "alive")
+	if err != nil {
+		t.Fatalf("SelectBySlugAny(alive): %v", err)
+	}
+	if got.ID != live.ID {
+		t.Errorf("alive ID = %d, want %d", got.ID, live.ID)
+	}
+	if got.DeletedAt != nil {
+		t.Errorf("alive.DeletedAt = %v, want nil", got.DeletedAt)
+	}
+
+	// Soft-deleted row is returned with DeletedAt set; the service
+	// uses this to emit 410 instead of 404.
+	got, err = repo.SelectBySlugAny(ctx, db, "doomed")
+	if err != nil {
+		t.Fatalf("SelectBySlugAny(doomed): %v", err)
+	}
+	if got.ID != deleted.ID {
+		t.Errorf("doomed ID = %d, want %d", got.ID, deleted.ID)
+	}
+	if got.DeletedAt == nil {
+		t.Errorf("doomed.DeletedAt must be non-nil for soft-deleted row")
+	}
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
