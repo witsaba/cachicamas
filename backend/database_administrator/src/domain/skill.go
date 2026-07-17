@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -164,19 +165,40 @@ const (
 )
 
 // ---------------------------------------------------------------------------
+// Entity types (spec INV-1, INV-2; mirrors prompt.go shape).
+// ---------------------------------------------------------------------------
+
+// Skill is the domain entity for one row of the `skill` table (DDL:
+// migration/sql/20260717120000_skills.sql). The struct mirrors the
+// DDL column-for-column; the `db` tags tell the pgx adapter which
+// column each field reads from, the `json` tags control wire
+// serialization.
+type Skill struct {
+	ID          int64      `db:"id"          json:"id"`
+	Name        string     `db:"name"        json:"name"`
+	Description string     `db:"description" json:"description"`
+	Body        string     `db:"body"        json:"body"`
+	DeletedAt   *time.Time `db:"deleted_at"  json:"deleted_at"`
+	CreatedAt   time.Time  `db:"created_at"  json:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"  json:"updated_at"`
+}
+
+// SkillRevision is the domain entity for one row of the
+// `skill_revision` table. Append-only: never UPDATE, never DELETE
+// except via CASCADE when the parent skill is hard-deleted.
+type SkillRevision struct {
+	ID             int64     `db:"id"              json:"id"`
+	SkillID        int64     `db:"skill_id"        json:"skill_id"`
+	RevisionNumber int       `db:"revision_number" json:"revision_number"`
+	Description    string    `db:"description"     json:"description"`
+	Body           string    `db:"body"            json:"body"`
+	ChangeNote     *string   `db:"change_note"     json:"change_note"`
+	CreatedAt      time.Time `db:"created_at"      json:"created_at"`
+}
+
+// ---------------------------------------------------------------------------
 // Frontmatter parsing (spec S-SK-031..035 — ANTI-DRIFT GATE).
 //
-// Parses the YAML metadata block at the top of a SKILL.md body. The
-// parser is intentionally narrow: it accepts only `name` and
-// `description` scalars (other keys are permitted and ignored), and
-// any deviation from the expected shape surfaces as a *ValidationError
-// so the handler maps it to HTTP 400 with `code = "validation"`.
-//
-// The parser uses gopkg.in/yaml.v3 (added to go.mod in PR1a per
-// engram obs #1963) and never executes custom unmarshalers, anchors,
-// merge keys, or any tag directive — defense in depth against YAML
-// injection (risk R5 in design §7).
-// ---------------------------------------------------------------------------
 
 // Frontmatter is the parsed subset of a SKILL.md YAML metadata block.
 // Only the two required scalars are exported; everything else in the
