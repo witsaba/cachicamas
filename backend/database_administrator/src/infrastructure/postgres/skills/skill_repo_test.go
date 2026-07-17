@@ -297,6 +297,110 @@ func TestSkillRepo_SelectBySlugAny_IncludesDeleted(t *testing.T) {
 	}
 }
 
+// seedSkillRevisions inserts n revisions (1..n) directly via raw SQL
+// for the given skill. Used by tests that need a revision history
+// without depending on SkillRevisionRepo.Insert (which lands in
+// task 2.9). Mirrors the seedPrompt helper pattern.
+func seedSkillRevisions(t *testing.T, db *sql.DB, skillID int64, n int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for i := 1; i <= n; i++ {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO skill_revision (skill_id, revision_number, description, body)
+             VALUES ($1, $2, 'd', 'b')`, skillID, i); err != nil {
+			t.Fatalf("seed revision %d: %v", i, err)
+		}
+	}
+}
+
+// TestSkillRepo_SelectByIDWithCurrentRevision_EmitsCurrentRevision
+// covers spec S-SK-042 + ADR-SK-008 (ANITI-DRIFT GATE from
+// obs #1959 #2 — backend emits current_revision via SQL JOIN, kills
+// the "v{undefined}" bug). A skill with revisions 1..5 must return
+// CurrentRevision=5 from SelectByIDWithCurrentRevision; a skill with
+// NO revisions returns CurrentRevision=0 (or whatever COALESCE yields).
+func TestSkillRepo_SelectByIDWithCurrentRevision_EmitsCurrentRevision(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	withRevs := seedSkill(t, db, "with-revs", "d", "b")
+	seedSkillRevisions(t, db, withRevs.ID, 5)
+	noRevs := seedSkill(t, db, "no-revs", "d", "b")
+
+	// Skill with revisions: CurrentRevision = 5.
+	got, err := repo.SelectByIDWithCurrentRevision(ctx, db, withRevs.ID)
+	if err != nil {
+		t.Fatalf("SelectByIDWithCurrentRevision(with-revs): %v", err)
+	}
+	if got.ID != withRevs.ID {
+		t.Errorf("ID = %d, want %d", got.ID, withRevs.ID)
+	}
+	if got.CurrentRevision != 5 {
+		t.Errorf("CurrentRevision = %d, want 5", got.CurrentRevision)
+	}
+
+	// Skill without revisions: CurrentRevision = 0 (COALESCE on MAX).
+	got, err = repo.SelectByIDWithCurrentRevision(ctx, db, noRevs.ID)
+	if err != nil {
+		t.Fatalf("SelectByIDWithCurrentRevision(no-revs): %v", err)
+	}
+	if got.CurrentRevision != 0 {
+		t.Errorf("CurrentRevision = %d, want 0 (no revisions yet)", got.CurrentRevision)
+	}
+}
+
+// TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows
+// covers spec S-SK-043 + ADR-SK-008: the list endpoint must emit
+// current_revision for EVERY row, not just rows that happen to have
+// revisions. The fixture has 3 skills: skillA (5 revs), skillB (1
+// rev), skillC (no revs). The list query must return 3 items, each
+// with the right CurrentRevision.
+func TestSkillRepo_ListWithCurrentRevision_EmitsCurrentRevisionOnAllRows(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+
+	skillA := seedSkill(t, db, "skill-a", "d", "b")
+	seedSkillRevisions(t, db, skillA.ID, 5)
+	skillB := seedSkill(t, db, "skill-b", "d", "b")
+	seedSkillRevisions(t, db, skillB.ID, 1)
+	seedSkill(t, db, "skill-c", "d", "b") // no revisions
+
+	items, err := repo.ListWithCurrentRevision(ctx, db, 50)
+	if err != nil {
+		t.Fatalf("ListWithCurrentRevision: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len = %d, want 3", len(items))
+	}
+	// Build a map by name for stable assertions regardless of order.
+	byName := map[string]int{}
+	for _, it := range items {
+		byName[it.Name] = it.CurrentRevision
+	}
+	if byName["skill-a"] != 5 {
+		t.Errorf("skill-a.CurrentRevision = %d, want 5", byName["skill-a"])
+	}
+	if byName["skill-b"] != 1 {
+		t.Errorf("skill-b.CurrentRevision = %d, want 1", byName["skill-b"])
+	}
+	if byName["skill-c"] != 0 {
+		t.Errorf("skill-c.CurrentRevision = %d, want 0 (no revisions)", byName["skill-c"])
+	}
+}
+
 // _ = strings.Contains is used so an unused-import regression fails
 // the build deterministically if a future refactor drops it.
 var _ = strings.Contains
