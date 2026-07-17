@@ -55,6 +55,8 @@ import { Button } from "~/components/ui/button/button";
 import { SkillSidebar } from "~/components/skills/skill-sidebar/skill-sidebar";
 import { SkillEditor } from "~/components/skills/skill-editor/skill-editor";
 import { EmptyState } from "~/components/skills/empty-state/empty-state";
+import { DeleteConfirmDialog } from "~/components/skills/delete-confirm-dialog/delete-confirm-dialog";
+import { RestoreConfirmDialog } from "~/components/skills/restore-confirm-dialog/restore-confirm-dialog";
 
 // ---------------------------------------------------------------------------
 // Request guard — cookie capture + auth + ownboarding
@@ -121,6 +123,10 @@ export default component$(() => {
   const currentRevisions = useSignal<SkillRevision[]>([]);
   const editorSaving = useSignal(false);
   const editorError = useSignal<string | null>(null);
+
+  // Dialog state (task 7.10)
+  const deletingName = useSignal<string | null>(null);
+  const restoringRevision = useSignal<number | null>(null);
 
   // Real-history back: navigate to wherever the user came from.
   // Falls back to /settings (the URL hierarchy parent) for
@@ -220,6 +226,67 @@ export default component$(() => {
       editorSaving.value = false;
     },
   );
+
+  // Open delete dialog (task 7.10)
+  const handleDeleteRequest = $(() => {
+    if (!selectedName.value) return;
+    deletingName.value = selectedName.value;
+  });
+
+  // Cancel delete dialog
+  const handleDeleteCancel = $(() => {
+    deletingName.value = null;
+  });
+
+  // Confirm delete
+  const handleDeleteConfirm = $(async () => {
+    const name = deletingName.value;
+    deletingName.value = null;
+    if (!name) return;
+
+    editorSaving.value = true;
+    const result = await deleteSkill(name);
+    if (result.ok) {
+      // Remove from list
+      skills.value = skills.value.filter((s) => s.name !== name);
+      mode.value = "list";
+      currentSkill.value = null;
+      currentRevisions.value = [];
+      selectedName.value = null;
+    } else {
+      editorError.value = result.message;
+    }
+    editorSaving.value = false;
+  });
+
+  // Open restore dialog
+  const handleRestoreRequest = $((revisionNumber: number) => {
+    restoringRevision.value = revisionNumber;
+  });
+
+  // Cancel restore dialog
+  const handleRestoreCancel = $(() => {
+    restoringRevision.value = null;
+  });
+
+  // Confirm restore (task 7.10 + 7.11)
+  const handleRestoreConfirm = $(async (revisionNumber: number) => {
+    restoringRevision.value = null;
+    if (!selectedName.value) return;
+
+    editorSaving.value = true;
+    editorError.value = null;
+
+    const result = await restoreRevision(selectedName.value, revisionNumber);
+    if (result.ok) {
+      currentSkill.value = result.value;
+      const revResult = await listRevisions(selectedName.value);
+      currentRevisions.value = revResult.ok ? revResult.value : [];
+    } else {
+      editorError.value = result.message;
+    }
+    editorSaving.value = false;
+  });
 
   // Load skill detail + revisions (populated branch — task 7.7)
   const loadSkillDetail = $(async (name: string) => {
@@ -355,8 +422,8 @@ export default component$(() => {
                   error={editorError.value}
                   onSave$={handleSave}
                   onCancel$={handleCancel}
-                  onDelete$={$(async () => {})}
-                  onRestore$={$(async () => {})}
+                  onDelete$={handleDeleteRequest}
+                  onRestore$={handleRestoreRequest}
                 />
               )}
             </div>
@@ -375,14 +442,30 @@ export default component$(() => {
                   error={editorError.value}
                   onSave$={handleSave}
                   onCancel$={handleCancel}
-                  onDelete$={$(async () => {})}
-                  onRestore$={$(async () => {})}
-                />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+                  onDelete$={handleDeleteRequest}
+onRestore$={handleRestoreRequest}
+                 />
+               </div>
+             )}
+           </div>
+         )}
+       </div>
+
+      {/* Dialogs (task 7.10) */}
+      {deletingName.value && (
+        <DeleteConfirmDialog
+          name={deletingName.value}
+          onConfirm$={handleDeleteConfirm}
+          onCancel$={handleDeleteCancel}
+        />
+      )}
+      {restoringRevision.value !== null && selectedName.value && (
+        <RestoreConfirmDialog
+          revisionNumber={restoringRevision.value}
+          onConfirm$={handleRestoreConfirm}
+          onCancel$={handleRestoreCancel}
+        />
+      )}
     </main>
   );
 });
