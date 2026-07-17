@@ -72,6 +72,19 @@ var skillNameRegex = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // HTTP 400 with code "validation" via the existing envelope.
 // ---------------------------------------------------------------------------
 
+// ValidateSkillBody returns a *ValidationError if body is empty or
+// longer than MaxSkillBodyLen (524288 bytes — same as prompts).
+// Counts RUNES, not bytes, matching the description validator.
+func ValidateSkillBody(body string) error {
+	n := len([]rune(body))
+	if n < 1 || n > MaxSkillBodyLen {
+		return &ValidationError{
+			Fields: map[string]string{"body": MsgSkillBodyTooLarge},
+		}
+	}
+	return nil
+}
+
 // ValidateSkillDescription returns a *ValidationError if description
 // is empty or longer than MaxSkillDescriptionLen (1024 chars per
 // agentskills.io). Counts RUNES, not bytes, so multi-byte unicode is
