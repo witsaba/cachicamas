@@ -133,7 +133,17 @@ export const PromptEditor = component$<PromptEditorProps>(
         : body.value !== (prompt?.body ?? ""),
     );
 
-    const canSave = useComputed$(() => body.value.trim().length > 0 && !saving);
+    // Save is enabled only when (a) the body has content,
+    // (b) we're not currently saving, AND (c) there ARE changes
+    // to save. The third clause is the one that matters for edit
+    // mode: without it, picking up a prompt with non-empty body
+    // would leave the button enabled for a no-op update. The
+    // existing "No changes to save" text already gated on
+    // !hasChanges — this brings the button in line with it.
+    const canSave = useComputed$(
+      () =>
+        body.value.trim().length > 0 && !saving && hasChanges.value,
+    );
 
     const handleSave = $(() => {
       if (!canSave.value) return;
