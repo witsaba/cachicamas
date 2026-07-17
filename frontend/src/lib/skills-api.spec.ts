@@ -112,4 +112,178 @@ describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 ite
       expect(result.message).not.toBe("Fallback flat message (this should NOT win)");
     }
   });
+
+  /**
+   * Task 5.2 — also reads body.error.fields (NESTED). Same anti-drift
+   * gate, different field.
+   */
+  it("prefers body.error.fields (nested) over body.fields (flat fallback)", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      {
+        message: "x",
+        fields: { name: "should NOT win" },
+        error: {
+          code: "validation",
+          message: "validation",
+          fields: { name: "Backend nested name error" },
+        },
+      },
+      { status: 400 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.kind === "validation") {
+      expect(result.fields).toEqual({ name: "Backend nested name error" });
+      expect(result.fields.name).not.toBe("should NOT win");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 5.3 — parseResponse maps status → ApiErrorKind
+// ---------------------------------------------------------------------------
+
+describe("skills-api parseResponse — status → kind mapping", () => {
+  /**
+   * Task 5.3 — 400 with envelope → kind=validation + fields populated.
+   */
+  it("400 → kind=validation with NESTED message + fields", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      {
+        error: {
+          code: "validation",
+          message: "Skill name must be lowercase.",
+          fields: { name: "must be lowercase" },
+        },
+      },
+      { status: 400 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("validation");
+      expect(result.message).toBe("Skill name must be lowercase.");
+      if (result.kind === "validation") {
+        expect(result.fields).toEqual({ name: "must be lowercase" });
+      }
+    }
+  });
+
+  /**
+   * Task 5.3 — 409 → kind=conflict (duplicate name).
+   */
+  it("409 → kind=conflict", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      { error: { code: "conflict", message: "Skill name already taken." } },
+      { status: 409 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("conflict");
+      expect(result.message).toBe("Skill name already taken.");
+    }
+  });
+
+  /**
+   * Task 5.3 — 404 → kind=not_found.
+   */
+  it("404 → kind=not_found", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      { error: { code: "not_found", message: "Skill not found." } },
+      { status: 404 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("not_found");
+      expect(result.message).toBe("Skill not found.");
+    }
+  });
+
+  /**
+   * Task 5.3 — 410 (soft-deleted) → kind=not_found (UX treats gone as missing).
+   */
+  it("410 → kind=not_found (soft-deleted UX)", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      { error: { code: "skill_deleted", message: "Skill has been deleted." } },
+      { status: 410 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("not_found");
+      expect(result.message).toBe("Skill has been deleted.");
+    }
+  });
+
+  /**
+   * Task 5.3 — 500 → kind=server.
+   */
+  it("500 → kind=server", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      { error: { code: "server", message: "Internal error." } },
+      { status: 500 },
+    );
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("server");
+      expect(result.message).toBe("Internal error.");
+    }
+  });
+
+  /**
+   * Task 5.3 — fetch throw → kind=offline. We exercise this through
+   * the public wrapper (listSkills) which catches and returns offline.
+   */
+  it("fetch throw → kind=offline (via listSkills)", async () => {
+    const { listSkills } = await import("./skills-api");
+    // Force a network throw by mocking fetch.
+    const original = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    try {
+      const result = await listSkills();
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.kind).toBe("offline");
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  /**
+   * Task 5.3 — 204 No Content → ok:true with undefined value.
+   */
+  it("204 → ok:true with value undefined", async () => {
+    const mod = await import("./skills-api");
+    const resp = new Response(undefined, { status: 204 });
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBeUndefined();
+    }
+  });
+
+  /**
+   * Task 5.3 — 200/201 with JSON body → ok:true with parsed value.
+   */
+  it("200 + JSON body → ok:true with parsed value", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse({ hello: "world" }, { status: 200 });
+    const result = await mod.parseResponse<{ hello: string }>(resp);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({ hello: "world" });
+    }
+  });
 });
