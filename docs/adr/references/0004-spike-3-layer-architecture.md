@@ -4,6 +4,8 @@
 > **Date**: 2026-07-17
 > **Source**: orchestrator chat (worker session)
 > **Reference**: [ADR 0004](../0004-adopt-tau-3-layer-agentic-architecture.md)
+>
+> **Note on naming**: this file is a verbatim copy of a public narrative about the **Tau** project (built by Alejandro AO as a port of Pi). Throughout this document the three layers are called `tau_ai`, `tau_agent`, and `tau_coding`, and the CLI command is `tau`. **cachicamas adopts the architecture, not the name.** In ADR 0004 and in all future cachicamas code these become `cachicamas_ai`, `cachicamas_agent`, `cachicamas_coding`, and the CLI command is `cachicamas`. The diagram, dependency rule, and loop/harness split are unchanged — only the names move.
 
 ---
 
