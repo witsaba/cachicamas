@@ -897,8 +897,3 @@ func TestSkillService_ConcurrentRestoreAndUpdate_NoLostUpdate(t *testing.T) {
 
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
-var (
-	_ = sync.WaitGroup{}
-	_ = atomic.AddInt32
-	_ = errors.As
-)
