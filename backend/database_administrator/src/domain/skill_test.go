@@ -19,6 +19,33 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// ValidateSkillBody (spec S-SK-030, S-SK-031, S-SK-003).
+// ---------------------------------------------------------------------------
+
+func TestValidateSkillBody_AcceptsAtMaxLen(t *testing.T) {
+	t.Parallel()
+	b := strings.Repeat("x", domain.MaxSkillBodyLen)
+	if err := domain.ValidateSkillBody(b); err != nil {
+		t.Fatalf("expected nil for body at max length, got %v", err)
+	}
+}
+
+func TestValidateSkillBody_RejectsOverMaxLen(t *testing.T) {
+	t.Parallel()
+	b := strings.Repeat("x", domain.MaxSkillBodyLen+1)
+	if err := domain.ValidateSkillBody(b); err == nil {
+		t.Fatalf("expected error for body over max length, got nil")
+	}
+}
+
+func TestValidateSkillBody_RejectsEmpty(t *testing.T) {
+	t.Parallel()
+	if err := domain.ValidateSkillBody(""); err == nil {
+		t.Fatalf("expected error for empty body, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ValidateSkillDescription (spec S-SK-028, S-SK-029, S-SK-003).
 // ---------------------------------------------------------------------------
 
