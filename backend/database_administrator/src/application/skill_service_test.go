@@ -498,6 +498,67 @@ func TestSkillService_Restore_OnDeletedSkill_ReturnsGoneError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.8 — Restore appends a NEW revision copying historical body +
+// description, with change_note = "restored from revision N".
+// ---------------------------------------------------------------------------
+
+func TestSkillService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "restore-body",
+		Description: "v1-desc",
+		Body:        validSkillBody("restore-body", "v1-desc"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, desc := range []string{"v2-desc", "v3-desc", "v4-desc", "v5-desc"} {
+		if _, _, err := svc.Update(ctx, "restore-body", domain.UpdateSkillInput{
+			Body: stringPtrSkill(validSkillBody("restore-body", desc)),
+		}); err != nil {
+			t.Fatalf("Update %s: %v", desc, err)
+		}
+	}
+	sk, rev, err := svc.Restore(ctx, "restore-body", 2)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if rev.RevisionNumber != 6 {
+		t.Errorf("revision = %d, want 6 (new revision appended, history preserved)", rev.RevisionNumber)
+	}
+	if rev.Description != "v2-desc" {
+		t.Errorf("rev.Description = %q, want %q", rev.Description, "v2-desc")
+	}
+	if rev.ChangeNote == nil {
+		t.Fatalf("ChangeNote must be set on a restore revision")
+	}
+	if *rev.ChangeNote != "restored from revision 2" {
+		t.Errorf("ChangeNote = %q, want %q", *rev.ChangeNote, "restored from revision 2")
+	}
+	if sk.Description != "v2-desc" {
+		t.Errorf("skill.Description = %q, want %q", sk.Description, "v2-desc")
+	}
+	// Revision 2 must still be intact; history is preserved.
+	hist, err := svc.ListRevisions(ctx, "restore-body")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(hist) != 6 {
+		t.Fatalf("len(hist) = %d, want 6", len(hist))
+	}
+	// hist is DESC; index 4 is revision 2.
+	if hist[4].RevisionNumber != 2 {
+		t.Errorf("hist[4].RevisionNumber = %d, want 2", hist[4].RevisionNumber)
+	}
+}
+
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
 var (
