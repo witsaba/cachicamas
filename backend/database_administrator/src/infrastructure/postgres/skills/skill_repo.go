@@ -258,8 +258,19 @@ func (r *SkillRepo) SoftDelete(context.Context, domain.SQLExecutor, int64) error
 func (r *SkillRepo) LockAndLoad(context.Context, domain.SQLExecutor, int64) (*domain.Skill, error) {
 	return nil, nil
 }
-func (r *SkillRepo) MaxRevisionNumber(context.Context, domain.SQLExecutor, int64) (int, error) {
-	return 0, nil
+// MaxRevisionNumber returns COALESCE(MAX(revision_number), 0) for
+// the given skill_id. Used by the service under FOR UPDATE to assign
+// the next revision number (spec INV-4). Returns 0 for a skill with
+// no revisions yet.
+func (r *SkillRepo) MaxRevisionNumber(ctx context.Context, db domain.SQLExecutor, skillID int64) (int, error) {
+	var n sql.NullInt64
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(revision_number), 0) FROM skill_revision WHERE skill_id = $1`,
+		skillID,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("postgres.SkillRepo.MaxRevisionNumber: %w", err)
+	}
+	return int(n.Int64), nil
 }
 
 // ---------------------------------------------------------------------------
