@@ -20,6 +20,25 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 // ---------------------------------------------------------------------------
+// Helpers (for wire-shape tests; task 5.2+)
+// ---------------------------------------------------------------------------
+
+function mockResponse(
+  body: unknown,
+  init: ResponseInit & { status?: number } = {},
+): Response {
+  const { status = 200, ...rest } = init;
+  return new Response(body === undefined ? undefined : JSON.stringify(body), {
+    ...rest,
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...(rest.headers as Record<string, string> | undefined),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Task 5.1 — Type contract (RED)
 // ---------------------------------------------------------------------------
 
@@ -55,5 +74,42 @@ describe("skills-api type contract (anti-drift obs #1959 item 2)", () => {
       deleted_at: null,
     };
     expect(sample.current_revision).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 5.2 — parseResponse reads NESTED envelope (RED)
+// ---------------------------------------------------------------------------
+
+describe("skills-api parseResponse — NESTED envelope (anti-drift obs #1959 item 1)", () => {
+  /**
+   * Task 5.2 RED — parseResponse reads body.error.message (NESTED).
+   *
+   * The prompts bug (obs #1959 item 1) is that `parseResponse` read
+   * `body.message ?? <default>` (flat). Backend actually emits
+   * `{error:{code,message,fields?}}` (nested). The result: rich backend
+   * messages are silently dropped.
+   *
+   * This test asserts the nested message is preferred over the flat
+   * one. If the impl reads top-level `body.message` only, the test
+   * FAILS — it sees the flat "Fallback flat message" instead of the
+   * nested "Backend nested message".
+   */
+  it("prefers body.error.message (nested) over body.message (flat fallback)", async () => {
+    const mod = await import("./skills-api");
+    const resp = mockResponse(
+      {
+        message: "Fallback flat message (this should NOT win)",
+        error: { code: "validation", message: "Backend nested message" },
+      },
+      { status: 400 },
+    );
+    // parseResponse is exported as a named export for testability.
+    const result = await mod.parseResponse<unknown>(resp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toBe("Backend nested message");
+      expect(result.message).not.toBe("Fallback flat message (this should NOT win)");
+    }
   });
 });
