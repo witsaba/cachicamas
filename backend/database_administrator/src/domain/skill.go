@@ -28,8 +28,11 @@
 package domain
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ---------------------------------------------------------------------------
@@ -145,4 +148,121 @@ const (
 	MsgSkillNameReserved       = "Skill name cannot contain \"anthropic\" or \"claude\"."
 	MsgSkillDescriptionInvalid = "Skill description must be 1-1024 characters."
 	MsgSkillBodyTooLarge       = "Skill body must be 1-524288 characters."
+
+	// Frontmatter parser messages (spec SCN-3.5, SCN-3.6).
+	MsgSkillFrontmatterMissing       = "Skill body must start with YAML frontmatter (---)."
+	MsgSkillFrontmatterUnterminated  = "Skill body frontmatter is missing the closing --- fence."
+	MsgSkillFrontmatterMalformed     = "Skill body frontmatter is not valid YAML."
+	MsgSkillFrontmatterNameMissing   = "Skill body frontmatter is missing the required 'name' key."
+	MsgSkillFrontmatterDescMissing   = "Skill body frontmatter is missing the required 'description' key."
+	MsgSkillFrontmatterNameNotString = "Skill body frontmatter 'name' must be a string."
+	MsgSkillFrontmatterDescNotString = "Skill body frontmatter 'description' must be a string."
+
+	// Lock-step (spec S-SK-035, S-SK-036).
+	MsgSkillNameLockStep        = "Skill body frontmatter 'name' must match the URL slug."
+	MsgSkillDescriptionLockStep = "Skill body frontmatter 'description' must match the request description."
 )
+
+// ---------------------------------------------------------------------------
+// Frontmatter parsing (spec S-SK-031..035 — ANTI-DRIFT GATE).
+//
+// Parses the YAML metadata block at the top of a SKILL.md body. The
+// parser is intentionally narrow: it accepts only `name` and
+// `description` scalars (other keys are permitted and ignored), and
+// any deviation from the expected shape surfaces as a *ValidationError
+// so the handler maps it to HTTP 400 with `code = "validation"`.
+//
+// The parser uses gopkg.in/yaml.v3 (added to go.mod in PR1a per
+// engram obs #1963) and never executes custom unmarshalers, anchors,
+// merge keys, or any tag directive — defense in depth against YAML
+// injection (risk R5 in design §7).
+// ---------------------------------------------------------------------------
+
+// Frontmatter is the parsed subset of a SKILL.md YAML metadata block.
+// Only the two required scalars are exported; everything else in the
+// frontmatter is silently ignored.
+type Frontmatter struct {
+	Name        string
+	Description string
+}
+
+// skillFrontmatterFenceOpen is the leading line that every SKILL.md
+// body MUST start with. We check for the literal "---\n" sequence at
+// byte offset 0 (no leading whitespace, no BOM).
+const skillFrontmatterFenceOpen = "---\n"
+
+// skillFrontmatterFenceClose is the closing fence that ends the
+// frontmatter block. Always followed by '\n' (the line after the
+// closing fence starts the markdown body, which may be empty).
+const skillFrontmatterFenceClose = "\n---\n"
+
+// ParseFrontmatter reads the YAML metadata block at the top of a
+// SKILL.md body and returns the two required scalars
+// (name, description). On any malformed input it returns a
+// *ValidationError with a precise `fields.body` message; the function
+// never panics.
+//
+// Returns a *ValidationError when:
+//   - the body does not start with "---\n" (MsgSkillFrontmatterMissing)
+//   - the closing fence is missing (MsgSkillFrontmatterUnterminated)
+//   - the YAML fails to parse (MsgSkillFrontmatterMalformed)
+//   - the `name` key is absent or not a string (MsgSkillFrontmatterNameMissing/NotString)
+//   - the `description` key is absent or not a string (MsgSkillFrontmatterDescMissing/NotString)
+func ParseFrontmatter(body string) (Frontmatter, error) {
+	if !strings.HasPrefix(body, skillFrontmatterFenceOpen) {
+		return Frontmatter{}, &ValidationError{
+			Fields: map[string]string{"body": MsgSkillFrontmatterMissing},
+		}
+	}
+	rest := body[len(skillFrontmatterFenceOpen):]
+	// Locate the closing fence from the start of `rest` so the YAML
+	// block itself never contains a "\n---\n" sequence (a valid YAML
+	// document cannot, but we assert defensively).
+	closeIdx := strings.Index(rest, skillFrontmatterFenceClose)
+	if closeIdx < 0 {
+		return Frontmatter{}, &ValidationError{
+			Fields: map[string]string{"body": MsgSkillFrontmatterUnterminated},
+		}
+	}
+	yamlBlock := rest[:closeIdx]
+
+	var raw struct {
+		Name        interface{} `yaml:"name"`
+		Description interface{} `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(yamlBlock), &raw); err != nil {
+		return Frontmatter{}, &ValidationError{
+			Fields: map[string]string{"body": MsgSkillFrontmatterMalformed},
+		}
+	}
+
+	nameStr, ok := raw.Name.(string)
+	if !ok {
+		if raw.Name == nil {
+			return Frontmatter{}, &ValidationError{
+				Fields: map[string]string{"body": MsgSkillFrontmatterNameMissing},
+			}
+		}
+		return Frontmatter{}, &ValidationError{
+			Fields: map[string]string{"body": MsgSkillFrontmatterNameNotString},
+		}
+	}
+	descStr, ok := raw.Description.(string)
+	if !ok {
+		if raw.Description == nil {
+			return Frontmatter{}, &ValidationError{
+				Fields: map[string]string{"body": MsgSkillFrontmatterDescMissing},
+			}
+		}
+		return Frontmatter{}, &ValidationError{
+			Fields: map[string]string{"body": MsgSkillFrontmatterDescNotString},
+		}
+	}
+
+	return Frontmatter{Name: nameStr, Description: descStr}, nil
+}
+
+// Compile-time assertion that bytes is used (kept around in case
+// future frontmatter parsing wants to read large bodies without
+// allocating a string — currently unused).
+var _ = bytes.NewBufferString
