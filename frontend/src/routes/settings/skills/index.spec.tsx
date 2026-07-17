@@ -226,3 +226,60 @@ describe("routes/settings/skills — empty state branch (7.6)", () => {
     expect(editor).toBeTruthy();
   });
 });
+
+// =========================================================================
+// 7.7 — Populated branch
+// =========================================================================
+
+const sampleSkill = {
+  id: 1,
+  name: "pdf-cleanup",
+  description: "Cleans PDF files",
+  body: "---\nname: pdf-cleanup\ndescription: Cleans PDF files\n---\n# Body",
+  current_revision: 1,
+  created_at: "2026-07-17T10:00:00Z",
+  updated_at: "2026-07-17T10:00:00Z",
+  deleted_at: null,
+};
+
+describe("routes/settings/skills — populated branch (7.7)", () => {
+  it("TestSettingsSkillsRoute_RendersSidebarAndEditorWhenListPopulated — sidebar renders the populated skill list", async () => {
+    const { screen, render } = await createDOM();
+    await render(
+      <TestWrapper loaderValue={{ ok: true as const, skills: [sampleSkill] }} />,
+    );
+    // Sidebar filter input MUST render when populated.
+    const filter = screen.querySelector(
+      '[data-testid="skill-sidebar-filter"]',
+    ) as HTMLElement | null;
+    expect(filter).toBeTruthy();
+    // The skill name MUST appear in the sidebar list.
+    const list = screen.querySelector(
+      '[data-testid="skill-sidebar-list"]',
+    ) as HTMLElement | null;
+    expect(list).toBeTruthy();
+    expect(list?.textContent ?? "").toContain("pdf-cleanup");
+  });
+
+  it("clicking a skill in the sidebar selects it — sidebar shows the selected testid", async () => {
+    const { screen, render, userEvent } = await createDOM();
+    await render(
+      <TestWrapper loaderValue={{ ok: true as const, skills: [sampleSkill] }} />,
+    );
+    const item = screen.querySelector(
+      '[data-testid="skill-list-item"]',
+    ) as HTMLElement | null;
+    expect(item).toBeTruthy();
+    await userEvent(item!, "click");
+    // After click, the list item becomes 'skill-list-item-selected'.
+    const selected = screen.querySelector(
+      '[data-testid="skill-list-item-selected"]',
+    ) as HTMLElement | null;
+    expect(selected).toBeTruthy();
+    // The SkillEditor mounts in edit mode for the selected skill.
+    const editor = screen.querySelector(
+      '[data-testid="skill-editor-description"]',
+    ) as HTMLElement | null;
+    expect(editor).toBeTruthy();
+  });
+});
