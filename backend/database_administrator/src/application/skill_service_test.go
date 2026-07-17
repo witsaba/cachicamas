@@ -703,6 +703,47 @@ func TestSkillService_List_LimitCapEnforced(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.11 — ListRevisions orders newest first.
+// ---------------------------------------------------------------------------
+
+func TestSkillService_ListRevisions_NewestFirst(t *testing.T) {
+	skipIfNoIntegrationSkill(t)
+	db := openSkillAppTestDB(t)
+	defer db.Close()
+	ensureSkillAppMigrations(t, db)
+	cleanSkillAppTables(t, db)
+
+	svc := newSkillAppService(t, db)
+	ctx := context.Background()
+	if _, _, err := svc.Create(ctx, domain.CreateSkillInput{
+		Name:        "list-revs",
+		Description: "d",
+		Body:        validSkillBody("list-revs", "d"),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, desc := range []string{"rev2", "rev3", "rev4", "rev5"} {
+		if _, _, err := svc.Update(ctx, "list-revs", domain.UpdateSkillInput{
+			Body: stringPtrSkill(validSkillBody("list-revs", desc)),
+		}); err != nil {
+			t.Fatalf("Update %s: %v", desc, err)
+		}
+	}
+	got, err := svc.ListRevisions(ctx, "list-revs")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("len = %d, want 5 (1 create + 4 updates)", len(got))
+	}
+	for i, want := range []int{5, 4, 3, 2, 1} {
+		if got[i].RevisionNumber != want {
+			t.Errorf("got[%d].revision_number = %d, want %d", i, got[i].RevisionNumber, want)
+		}
+	}
+}
+
 // stringPtrSkill returns &s for use in *string fields (UpdateSkillInput).
 func stringPtrSkill(s string) *string { return &s }
 var (
