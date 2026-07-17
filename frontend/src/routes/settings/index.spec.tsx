@@ -117,13 +117,17 @@ describe("routes/settings/index — canonical guard chain + grid render", () => 
     expect(grid?.className).toContain("md:grid-cols-4");
   });
 
-  it("renders exactly ONE <SettingCard> (Prompts only in v1)", async () => {
+  it("renders exactly TWO <SettingCard>s (Prompts + Skills) — tile integration anti-drift gate", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    const cards = screen.querySelectorAll(
+    const promptCards = screen.querySelectorAll(
       '[data-testid="settings-card-prompts"]',
     );
-    expect(cards.length).toBe(1);
+    const skillCards = screen.querySelectorAll(
+      '[data-testid="settings-card-skills"]',
+    );
+    expect(promptCards.length).toBe(1);
+    expect(skillCards.length).toBe(1);
   });
 
   it("the Prompts tile carries href='/settings/prompts' + visible label 'Prompts'", async () => {
@@ -135,6 +139,31 @@ describe("routes/settings/index — canonical guard chain + grid render", () => 
     expect(card).toBeTruthy();
     expect(card?.getAttribute("href")).toBe("/settings/prompts");
     expect((card?.textContent ?? "").trim()).toContain("Prompts");
+  });
+
+  it("TestSettingsIndex_RendersSkillsCardWithLabelAndHref — the Skills tile carries href='/settings/skills' + visible label 'Skills' + SkillsIcon (anti-drift gate)", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const card = screen.querySelector(
+      '[data-testid="settings-card-skills"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+    expect(card?.getAttribute("href")).toBe("/settings/skills");
+    expect((card?.textContent ?? "").trim()).toContain("Skills");
+    const icon = card?.querySelector('[data-testid="skills-icon"]');
+    expect(icon).toBeTruthy();
+  });
+
+  it("TestSettingsIndex_DoesNotBreakPromptsTile — the Prompts tile still renders correctly alongside the new Skills tile", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const card = screen.querySelector(
+      '[data-testid="settings-card-prompts"]',
+    ) as HTMLElement | null;
+    expect(card).toBeTruthy();
+    expect(card?.getAttribute("href")).toBe("/settings/prompts");
+    const icon = card?.querySelector('[data-testid="prompts-icon"]');
+    expect(icon).toBeTruthy();
   });
 
   it("the Prompts tile embeds the PromptsIcon (data-testid='prompts-icon') inside the icon container", async () => {

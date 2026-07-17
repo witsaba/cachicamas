@@ -43,6 +43,7 @@ import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
 import { SettingCard } from "~/components/ui/setting-card/setting-card";
 import { PromptsIcon } from "./icons/prompts-icon";
+import { SkillsIcon } from "./icons/skills-icon";
 
 // ---------------------------------------------------------------------------
 // Request guard — cookie capture + auth + ownboarding (canonical chain)
@@ -92,6 +93,12 @@ export default component$(() => (
         label="Prompts"
         icon={<PromptsIcon />}
         testId="settings-card-prompts"
+      />
+      <SettingCard
+        href="/settings/skills"
+        label="Skills"
+        icon={<SkillsIcon />}
+        testId="settings-card-skills"
       />
       {/*
         Future tiles (Profile, Billing, Notifications, ...) slot in
