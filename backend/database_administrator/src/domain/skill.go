@@ -373,17 +373,27 @@ type SkillRevisionItem struct {
 //   - SelectBySlug: active-only; *NotFoundError on miss.
 //   - SelectBySlugAny: any state; caller inspects DeletedAt.
 //   - SelectByID: any state by PK; *NotFoundError on miss.
+//   - SelectByIDWithCurrentRevision: SkillDetail (Skill + CurrentRevision)
+//     via LEFT JOIN (skill_id, MAX(revision_number)). Used by the
+//     handler for response payloads (anti-drift gate from obs #1959).
 //   - List: active rows ordered by updated_at DESC.
 //   - ListWithCurrentRevision: SkillListItem joined with MAX(revision_number).
 //   - UpdateBody: updates fields + updated_at from DB clock.
 //   - SoftDelete: sets deleted_at = now(); idempotent.
 //   - LockAndLoad: SELECT … FOR UPDATE (caller MUST be in a transaction).
 //   - MaxRevisionNumber: COALESCE(MAX(revision_number), 0) under FOR UPDATE.
+//
+// Note: SelectByIDWithCurrentRevision was added during PR1b (the
+// original interface only listed SelectByID). The handler's
+// response-shaping path needs current_revision, and emitting it via
+// a single SQL JOIN (per design ADR-SK-008) is the cleanest
+// implementation — matching ListWithCurrentRevision's pattern.
 type SkillRepository interface {
 	Insert(ctx context.Context, db sqlExecutor, s *Skill) error
 	SelectBySlug(ctx context.Context, db sqlExecutor, name string) (*Skill, error)
 	SelectBySlugAny(ctx context.Context, db sqlExecutor, name string) (*Skill, error)
 	SelectByID(ctx context.Context, db sqlExecutor, id int64) (*Skill, error)
+	SelectByIDWithCurrentRevision(ctx context.Context, db sqlExecutor, id int64) (*SkillDetail, error)
 	List(ctx context.Context, db sqlExecutor, limit int) ([]*Skill, error)
 	ListWithCurrentRevision(ctx context.Context, db sqlExecutor, limit int) ([]*SkillListItem, error)
 	UpdateBody(ctx context.Context, db sqlExecutor, id int64, description, body string) error
