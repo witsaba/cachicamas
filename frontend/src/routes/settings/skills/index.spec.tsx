@@ -353,3 +353,60 @@ describe("routes/settings/skills — create flow (7.8)", () => {
     });
   });
 });
+
+// =========================================================================
+// 7.9 — Update flow
+// =========================================================================
+
+describe("routes/settings/skills — update flow (7.9)", () => {
+  it("TestSettingsSkillsRoute_HandleUpdate — edit form PATCHes updateSkill with BOTH description AND body (anti-drift gate #4)", async () => {
+    testLoaderValue = { ok: true as const, skills: [sampleSkill] };
+    const { screen, render, userEvent } = await createDOM();
+    await render(<TestWrapper />);
+
+    // 1. Select the sample skill from the sidebar.
+    const item = screen.querySelector(
+      '[data-testid="skill-list-item"]',
+    ) as HTMLElement | null;
+    expect(item).toBeTruthy();
+    await userEvent(item!, "click");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // 2. Editor mounts in edit mode — description and body fields visible.
+    const desc = screen.querySelector(
+      '[data-testid="skill-editor-description"]',
+    ) as HTMLInputElement | null;
+    const body = screen.querySelector(
+      '[data-testid="skill-editor-body"]',
+    ) as HTMLTextAreaElement | null;
+    expect(desc).toBeTruthy();
+    expect(body).toBeTruthy();
+
+    // 3. Edit BOTH description and body.
+    desc!.value = "Updated description";
+    await userEvent(desc!, "input", { target: desc! });
+    body!.value = "---\nname: pdf-cleanup\ndescription: Updated description\n---\n# Updated body";
+    await userEvent(body!, "input", { target: body! });
+
+    // 4. Click Save.
+    const saveBtn = screen.querySelector(
+      '[data-testid="skill-editor-save"]',
+    ) as HTMLButtonElement | null;
+    expect(saveBtn).toBeTruthy();
+    expect(saveBtn!.disabled).toBe(false);
+    await userEvent(saveBtn!, "click");
+
+    // 5. Wait for async save.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 6. updateSkill was called with BOTH description AND body.
+    //    (obs #1959 item 4 — the prompts feature silently dropped
+    //    description on edit save; the skills route MUST send both.)
+    expect(updateCalls.length).toBe(1);
+    expect(updateCalls[0]).toEqual({
+      name: "pdf-cleanup",
+      description: "Updated description",
+      body: "---\nname: pdf-cleanup\ndescription: Updated description\n---\n# Updated body",
+    });
+  });
+});
