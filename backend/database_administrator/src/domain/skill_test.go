@@ -19,6 +19,52 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// LockStepCheck (spec S-SK-035, S-SK-036, S-SK-007/008).
+//
+// The frontmatter parser returns `name` and `description`. These MUST
+// equal the request's `name`/URL slug and `description`; mismatch is
+// user error or spoofing (decision #2 in obs #1962). TrimSpace is
+// applied to both sides so trailing newlines from copy-paste don't
+// break legitimate edits.
+// ---------------------------------------------------------------------------
+
+func TestLockStepCheck_RejectsNameMismatch(t *testing.T) {
+	t.Parallel()
+	fm := domain.Frontmatter{Name: "other-skill", Description: "Same."}
+	err := domain.LockStepCheck("pdf-cleanup", "Same.", fm)
+	if err == nil {
+		t.Fatalf("expected error for name mismatch, got nil")
+	}
+}
+
+func TestLockStepCheck_RejectsDescriptionMismatch(t *testing.T) {
+	t.Parallel()
+	fm := domain.Frontmatter{Name: "pdf-cleanup", Description: "From frontmatter."}
+	err := domain.LockStepCheck("pdf-cleanup", "From request.", fm)
+	if err == nil {
+		t.Fatalf("expected error for description mismatch, got nil")
+	}
+}
+
+func TestLockStepCheck_AcceptsExactMatch(t *testing.T) {
+	t.Parallel()
+	fm := domain.Frontmatter{Name: "pdf-cleanup", Description: "Same."}
+	if err := domain.LockStepCheck("pdf-cleanup", "Same.", fm); err != nil {
+		t.Fatalf("expected nil for exact match, got %v", err)
+	}
+}
+
+func TestLockStepCheck_AcceptsAfterTrim(t *testing.T) {
+	t.Parallel()
+	fm := domain.Frontmatter{Name: "pdf-cleanup", Description: "Same."}
+	// Whitespace on either side is silently trimmed; the comparison
+	// is on the trimmed values.
+	if err := domain.LockStepCheck("  pdf-cleanup  ", "\tSame.\n", fm); err != nil {
+		t.Fatalf("expected nil after trim, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ParseFrontmatter (spec S-SK-031..035 — ANTI-DRIFT GATE).
 //
 // Each frontmatter test below corresponds to a real failure mode the
