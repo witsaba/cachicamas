@@ -18,6 +18,7 @@ package skills_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -175,6 +176,37 @@ func TestSkillRepo_Insert_PersistsRowAndReturnsID(t *testing.T) {
 	}
 	if s.DeletedAt != nil {
 		t.Fatalf("Insert set DeletedAt (should be nil): %+v", s)
+	}
+}
+
+// TestSkillRepo_Insert_TranslatesUniqueViolation covers spec S-SK-037
+// + ADR-SK-003: a second INSERT against the partial UNIQUE index
+// `skill_slug_active_uidx` must surface as *domain.ConflictError
+// (with Code() == "conflict") so the handler can map to HTTP 409
+// without importing pgx. This locks the pgconn 23505 → ConflictError
+// translation at the infra boundary.
+func TestSkillRepo_Insert_TranslatesUniqueViolation(t *testing.T) {
+	skipIfNoIntegration(t)
+	db := openTestDB(t)
+	defer func() { _ = db.Close() }()
+	ensureSkillMigrations(t, db)
+	cleanSkillTables(t, db)
+
+	repo := skills.NewSkillRepo(db)
+	ctx := context.Background()
+	if err := repo.Insert(ctx, db, makeSkillInput("dup-name", "first", "body one")); err != nil {
+		t.Fatalf("first Insert: %v", err)
+	}
+	err := repo.Insert(ctx, db, makeSkillInput("dup-name", "second", "body two"))
+	if err == nil {
+		t.Fatalf("expected conflict error on duplicate name, got nil")
+	}
+	var cerr *domain.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *domain.ConflictError, got %T (%v)", err, err)
+	}
+	if cerr.Code() != domain.CodeConflict {
+		t.Errorf("ConflictError.Code() = %q, want %q", cerr.Code(), domain.CodeConflict)
 	}
 }
 
