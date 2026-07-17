@@ -353,6 +353,13 @@ func (s *SkillService) GetBySlug(ctx context.Context, name string) (*domain.Skil
 	return s.skillRepo.SelectBySlug(ctx, s.db, name)
 }
 
+// GetByIDWithCurrentRevision returns the skill joined with its current
+// revision number (anti-drift gate ADR-SK-008 — kills the v{undefined}
+// prompt bug). Single SQL JOIN — no N+1.
+func (s *SkillService) GetByIDWithCurrentRevision(ctx context.Context, id int64) (*domain.SkillDetail, error) {
+	return s.skillRepo.SelectByIDWithCurrentRevision(ctx, s.db, id)
+}
+
 // List returns active skills ordered by updated_at DESC. The service
 // clamps limit to domain.MaxListLimit (200) and defaults to
 // domain.DefaultListLimit (50) when the caller passes 0 or negative.
@@ -364,6 +371,22 @@ func (s *SkillService) List(ctx context.Context, limit int) ([]*domain.Skill, er
 		limit = domain.MaxListLimit
 	}
 	return s.skillRepo.List(ctx, s.db, limit)
+}
+
+// ListWithCurrentRevision returns active skills joined with their
+// current revision number. The handler MUST use this (not List) to
+// satisfy the anti-drift gate from design ADR-SK-008 (kills the
+// "v{undefined}" prompt bug — every list response includes
+// current_revision). Single SQL statement — no N+1 (verified by
+// PR1b's TestSkillRepo_N1Query_OneStatementForList).
+func (s *SkillService) ListWithCurrentRevision(ctx context.Context, limit int) ([]*domain.SkillListItem, error) {
+	if limit <= 0 {
+		limit = domain.DefaultListLimit
+	}
+	if limit > domain.MaxListLimit {
+		limit = domain.MaxListLimit
+	}
+	return s.skillRepo.ListWithCurrentRevision(ctx, s.db, limit)
 }
 
 // ListRevisions returns the revision history of the skill, newest
