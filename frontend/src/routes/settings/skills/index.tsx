@@ -44,6 +44,10 @@ import {
 import { setSsrCookieHeader } from "~/lib/ssr-cookie-context";
 import { requireAuthRedirect } from "~/lib/require-auth-redirect";
 import { requireOwnboarding } from "~/lib/require-ownboarding";
+import { Button } from "~/components/ui/button/button";
+import { SkillSidebar } from "~/components/skills/skill-sidebar/skill-sidebar";
+import { SkillEditor } from "~/components/skills/skill-editor/skill-editor";
+import { EmptyState } from "~/components/skills/empty-state/empty-state";
 
 // ---------------------------------------------------------------------------
 // Request guard — cookie capture + auth + ownboarding
@@ -103,8 +107,25 @@ export default component$(() => {
     }
   });
 
+  // Switch to create mode
+  const handleNewSkill = $(() => {
+    currentSkill.value = null;
+    currentRevisions.value = [];
+    mode.value = "create";
+    selectedName.value = null;
+    editorError.value = null;
+  });
+
+  // Cancel editing
+  const handleCancel = $(() => {
+    mode.value = "list";
+    currentSkill.value = null;
+    currentRevisions.value = [];
+    editorError.value = null;
+  });
+
   // -----------------------------------------------------------------------
-  // Render — skeleton; full UI branches land in tasks 7.6-7.10.
+  // Render — empty branch (task 7.6) + populated branch (7.7) + CRUD (7.8+)
   // -----------------------------------------------------------------------
 
   if (loading.value) {
@@ -124,23 +145,80 @@ export default component$(() => {
           data-testid="skill-studio-error"
         >
           {loaderError.value}
+          <Button
+            type="button"
+            variant="secondary"
+            class="mt-2"
+            onClick$={async () => {
+              const result = await listSkills();
+              if (result.ok) skills.value = result.value;
+              else loaderError.value = result.message;
+            }}
+          >
+            Retry
+          </Button>
         </div>
       </main>
     );
   }
 
-  void mode.value;
-  void selectedName.value;
-  void currentSkill.value;
-  void currentRevisions.value;
-  void editorSaving.value;
-  void editorError.value;
-  void handleBack;
-  void skillsLoader;
+  const hasSkills = skills.value.length > 0;
 
   return (
     <main class="mx-auto flex max-w-5xl flex-col px-4 py-8" data-testid="skill-studio-shell">
-      <p data-testid="skill-studio-skeleton">Skill Studio (skeleton)</p>
+      {/* Page header */}
+      <div class="mb-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            onClick$={handleBack}
+            class="text-sm text-slate-500 hover:text-slate-700"
+            data-testid="skill-studio-back"
+          >
+            &larr; Back
+          </button>
+          <h1 class="text-2xl font-bold text-slate-900">Skills</h1>
+        </div>
+        {hasSkills && mode.value !== "create" && (
+          <Button
+            type="button"
+            variant="primary"
+            onClick$={handleNewSkill}
+            testId="skill-studio-new"
+          >
+            + New Skill
+          </Button>
+        )}
+      </div>
+
+      {/* Skill Studio layout */}
+      <div class="flex flex-1 gap-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        {hasSkills ? (
+          <p data-testid="skill-studio-populated-placeholder">
+            (populated branch — lands in 7.7)
+          </p>
+        ) : (
+          /* Empty state — no skills at all */
+          <div class="flex flex-1 flex-col">
+            <EmptyState onCreate$={handleNewSkill} />
+            {mode.value === "create" && (
+              <div class="flex flex-1">
+                <SkillEditor
+                  skill={null}
+                  revisions={[]}
+                  mode="create"
+                  saving={editorSaving.value}
+                  error={editorError.value}
+                  onSave$={$(async () => {})}
+                  onCancel$={handleCancel}
+                  onDelete$={$(async () => {})}
+                  onRestore$={$(async () => {})}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </main>
   );
 });
