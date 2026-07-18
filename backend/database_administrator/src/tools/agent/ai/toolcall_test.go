@@ -178,7 +178,7 @@ func TestNewToolCall_Arguments_Malformed(t *testing.T) {
 func TestNewToolCall_Arguments_TooLong(t *testing.T) {
 	// Build exactly MaxToolCallArgumentsLength+1 bytes of valid JSON.
 	// Use a simple string of 'a' chars: `"aaaa...` which is valid JSON.
-	 oversized := strings.Repeat("a", ai.MaxToolCallArgumentsLength+1)
+	oversized := strings.Repeat("a", ai.MaxToolCallArgumentsLength+1)
 	args := json.RawMessage(`"` + oversized + `"`)
 	tc, err := ai.NewToolCall("get_weather", args)
 	if !errors.Is(err, ai.ErrToolCallArgumentsTooLong) {
@@ -195,7 +195,7 @@ func TestNewToolCall_Arguments_ExactlyMaxAccepted(t *testing.T) {
 	// The raw message bytes must be exactly MaxToolCallArgumentsLength.
 	// json.RawMessage("\"...") adds 2 bytes for the surrounding quotes,
 	// so the inner string must be 2 bytes shorter to hit the boundary exactly.
-	 oversized := strings.Repeat("a", ai.MaxToolCallArgumentsLength-2)
+	oversized := strings.Repeat("a", ai.MaxToolCallArgumentsLength-2)
 	args := json.RawMessage(`"` + oversized + `"`)
 	if len(args) != ai.MaxToolCallArgumentsLength {
 		t.Fatalf("test payload len = %d, want %d (accounting for JSON quotes)", len(args), ai.MaxToolCallArgumentsLength)
@@ -312,9 +312,9 @@ func TestValidateSelfConsistency(t *testing.T) {
 // distinct under errors.Is.
 func TestToolCall_Sentinels_Distinct(t *testing.T) {
 	sentinels := map[error]string{
-		ai.ErrEmptyToolCallName:         "ErrEmptyToolCallName",
+		ai.ErrEmptyToolCallName:          "ErrEmptyToolCallName",
 		ai.ErrToolCallNameTooLong:        "ErrToolCallNameTooLong",
-		ai.ErrInvalidToolCallName:       "ErrInvalidToolCallName",
+		ai.ErrInvalidToolCallName:        "ErrInvalidToolCallName",
 		ai.ErrMalformedToolCallArguments: "ErrMalformedToolCallArguments",
 		ai.ErrToolCallArgumentsTooLong:   "ErrToolCallArgumentsTooLong",
 	}
@@ -360,9 +360,9 @@ func TestToolCall_Sentinels_Distinct(t *testing.T) {
 // a non-empty message.
 func TestToolCall_Sentinels_ExportedAndTyped(t *testing.T) {
 	cases := map[error]string{
-		ai.ErrEmptyToolCallName:         "ErrEmptyToolCallName",
+		ai.ErrEmptyToolCallName:          "ErrEmptyToolCallName",
 		ai.ErrToolCallNameTooLong:        "ErrToolCallNameTooLong",
-		ai.ErrInvalidToolCallName:       "ErrInvalidToolCallName",
+		ai.ErrInvalidToolCallName:        "ErrInvalidToolCallName",
 		ai.ErrMalformedToolCallArguments: "ErrMalformedToolCallArguments",
 		ai.ErrToolCallArgumentsTooLong:   "ErrToolCallArgumentsTooLong",
 	}
