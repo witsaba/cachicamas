@@ -95,19 +95,21 @@ type ContentPart interface {
 // concrete value). See AI-05 § Validation rules and message.go.
 var ErrNilContentPart = errors.New("ai: nil content part in message")
 
-// textPart is the sealed v1 implementation of ContentPart for text
+// textPart is the sealed v1 implementation of ContentPart for Text
 // values. Unexported so callers MUST go through ContentPartFromText;
 // this prevents third parties from constructing a ContentPart with
 // a mismatched Kind(). See AI-05 § Construction ergonomics.
 //
-// Commit-2 GREEN note: the underlying field is `v string` here as a
-// placeholder. Commit 4 (GREEN text) introduces the ai.Text value type
-// and wires ContentPartFromText to call NewText; in that commit the
-// field is renamed to `t Text` and the constructor propagates
-// validation errors. The discriminator (KindText) and the constructor
-// signature are stable across that refactor.
+// The underlying field is ai.Text (the value type introduced in
+// commit 4 / text.go). Typed-nil trap: textPart is a struct (NOT a
+// pointer), so a ContentPart interface slot holding textPart{...} is
+// always non-nil by `part == nil` comparison. The only way to get a
+// nil interface in a ContentPart slot is via the explicit `var p
+// ContentPart; p == nil` (interface-nil literal). Message.Validate
+// uses the interface-nil check (`part == nil`) and rejects both
+// interface-nil literals and any future pointer-typed wrappers.
 type textPart struct {
-	v string
+	t Text
 }
 
 // Kind returns KindText. The discriminator is fixed by the sealed
@@ -122,10 +124,16 @@ func (p textPart) Kind() Kind {
 // etc.) will be added by AI-06, AI-07, AI-08 following the same
 // unexported-wrapper + exported-constructor pattern.
 //
-// Commit-2 GREEN note: this implementation does not yet validate the
-// input. Validation against NewText's empty / whitespace-only / max-
-// length rules is wired in commit 4 (GREEN text) when ai.Text exists.
-// The signature is stable across that refactor.
+// The string is validated by NewText (text.go) — empty, whitespace-
+// only, and > MaxTextLength inputs are rejected with the corresponding
+// sentinel error and a nil ContentPart. This means ContentPartFromText
+// cannot bypass the Text validation contract: the discriminator and
+// the validator are wired together so a malformed text never reaches
+// the ContentPart union.
 func ContentPartFromText(s string) (ContentPart, error) {
-	return textPart{v: s}, nil
+	t, err := NewText(s)
+	if err != nil {
+		return nil, err
+	}
+	return textPart{t: t}, nil
 }
