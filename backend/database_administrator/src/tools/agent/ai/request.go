@@ -1,6 +1,9 @@
 package ai
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
 // ErrEmptyModel is returned when a Request model identifier is empty.
 var ErrEmptyModel = errors.New("ai: empty model identifier")
@@ -65,23 +68,65 @@ type GenerationOptions struct {
 	toolChoice        ToolChoice
 }
 
-// NewGenerationOptions constructs generation options in field order.
+// NewGenerationOptions constructs generation options in field order and
+// returns the zero value with the first validation error.
 func NewGenerationOptions(systemInstruction string, maxOutputTokens int, temperature, topP float64, stopSequences []string, toolChoice ToolChoice) (GenerationOptions, error) {
 	if toolChoice == "" {
 		toolChoice = ToolChoiceAuto
 	}
-	return GenerationOptions{
+	opts := GenerationOptions{
 		systemInstruction: systemInstruction,
 		maxOutputTokens:   maxOutputTokens,
 		temperature:       temperature,
 		topP:              topP,
 		stopSequences:     stopSequences,
 		toolChoice:        toolChoice,
-	}, nil
+	}
+	if err := opts.Validate(); err != nil {
+		return GenerationOptions{}, err
+	}
+	return opts, nil
 }
 
 // Validate reports whether every generation option satisfies its field rule.
-func (o GenerationOptions) Validate() error { return nil }
+// Checks run in field order and stop at the first failure.
+func (o GenerationOptions) Validate() error {
+	if o.systemInstruction != "" && isAllWhitespace(o.systemInstruction) {
+		return ErrWhitespaceSystemInstruction
+	}
+	if len(o.systemInstruction) > MaxRequestSystemInstructionLength {
+		return ErrSystemInstructionTooLong
+	}
+	if o.maxOutputTokens != 0 && (o.maxOutputTokens < 0 || o.maxOutputTokens > MaxRequestMaxOutputTokens) {
+		return ErrInvalidMaxOutputTokens
+	}
+	if math.IsNaN(o.temperature) || math.IsInf(o.temperature, 0) || o.temperature < 0 || o.temperature > 2 {
+		return ErrTemperatureOutOfRange
+	}
+	if math.IsNaN(o.topP) || math.IsInf(o.topP, 0) || o.topP < 0 || o.topP > 1 {
+		return ErrTopPOutOfRange
+	}
+	if len(o.stopSequences) > MaxRequestStopSequences {
+		return ErrTooManyStopSequences
+	}
+	for _, stop := range o.stopSequences {
+		if stop == "" {
+			return ErrEmptyStopSequence
+		}
+		if isAllWhitespace(stop) {
+			return ErrWhitespaceStopSequence
+		}
+		if len(stop) > MaxRequestStopSequenceLength {
+			return ErrStopSequenceTooLong
+		}
+	}
+	switch o.ToolChoice() {
+	case ToolChoiceAuto, ToolChoiceNone, ToolChoiceRequired:
+		return nil
+	default:
+		return ErrInvalidToolChoice
+	}
+}
 
 // SystemInstruction returns the verbatim system instruction.
 func (o GenerationOptions) SystemInstruction() string { return o.systemInstruction }
@@ -144,7 +189,16 @@ func (r Request) Validate() error {
 			return err
 		}
 	}
-	return ValidateTools(r.tools)
+	if err := ValidateTools(r.tools); err != nil {
+		return err
+	}
+	if err := r.options.Validate(); err != nil {
+		return err
+	}
+	if r.options.ToolChoice() == ToolChoiceRequired && len(r.tools) == 0 {
+		return ErrToolChoiceRequiresTools
+	}
+	return nil
 }
 
 // Model returns the verbatim model identifier.
