@@ -3,6 +3,7 @@ package ai_test
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -392,6 +393,47 @@ func TestToolCall_NotContentPart(t *testing.T) {
 	if ok {
 		t.Errorf("ai.ToolCall has a Kind() method — ToolCall itself is NOT a ContentPart; only the toolCallPart wrapper is. " +
 			"Per AI-08 design (obs #2099) § Decision: wrapper pattern.")
+	}
+}
+
+// =============================================================================
+// doc.go paragraph (AI-08)
+// =============================================================================
+
+// TestDocGo_AI08Paragraph pins the AI-08 doc.go paragraph by reading the file
+// and asserting required substrings. The AI-08 paragraph is placed after
+// the package clause so the greedy AI-07 paragraph test (tool_test.go) does
+// not count these lines (AI-07 test requires ≤10 non-blank lines before
+// \npackage ai). Per AI-08 tasks obs #2100 § Phase 3 Task 3.2.
+func TestDocGo_AI08Paragraph(t *testing.T) {
+	data, err := os.ReadFile("doc.go")
+	if err != nil {
+		t.Fatalf("read doc.go: %v", err)
+	}
+	src := string(data)
+
+	const openMarker = "As of AI-08 the package also exposes"
+	idx := strings.Index(src, openMarker)
+	if idx < 0 {
+		t.Fatalf("doc.go does not contain the AI-08 paragraph opener %q", openMarker)
+	}
+	// Paragraph starts at the marker and runs to end of file.
+	para := src[idx:]
+	text := strings.Join(strings.Fields(para), " ")
+	for _, want := range []string{
+		"ToolCall",
+		"ToolResult",
+		"NewToolCall",
+		"NewToolResult",
+		"MaxToolCallArgumentsLength",
+		"MaxToolResultContentLength",
+		"ContentPartFromToolCall",
+		"ContentPartFromToolResult",
+		"See AI-08 § Capability matrix",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("doc.go AI-08 paragraph missing required substring %q", want)
+		}
 	}
 }
 

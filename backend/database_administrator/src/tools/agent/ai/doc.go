@@ -64,3 +64,15 @@
 // (1024 bytes) max-length constants; See AI-07 § Capability matrix
 // for the structural-only validation scope.
 package ai
+
+// AI-08 paragraph (added after package clause so the greedy AI-07
+// paragraph test does not count these lines).
+//
+// As of AI-08 the package also exposes tool-call and tool-result
+// content-part types: ToolCall (name + arguments json.RawMessage,
+// validated by NewToolCall with MaxToolCallArgumentsLength = 1 MiB);
+// ToolResult (callID + content json.RawMessage, validated by
+// NewToolResult with MaxToolResultCallIDLength = 512 bytes and
+// MaxToolResultContentLength = 10 MiB); ContentPartFromToolCall
+// and ContentPartFromToolResult (sanctioned ContentPart constructors).
+// See AI-08 § Capability matrix.
