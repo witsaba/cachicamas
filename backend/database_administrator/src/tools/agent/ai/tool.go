@@ -92,6 +92,10 @@ var ErrDuplicateToolName = errors.New("ai: duplicate tool name")
 // at the top level only — nested occurrences are out of scope for
 // structural-only validation (see AI-07 proposal R3).
 //
+// The 13 keywords are sorted alphabetically so containsUnsupportedKeyword
+// can iterate the deny-list (not the parsed map) and return a
+// deterministic first match. Per AI-07 verify-report WARNING #1.
+//
 // Why these keywords:
 //
 //   - $ref / $schema / $id: cross-file / metadata references that
@@ -106,19 +110,19 @@ var ErrDuplicateToolName = errors.New("ai: duplicate tool name")
 // Per AI-07 spec § A req scenario "Schema with each deny-listed
 // top-level keyword is rejected".
 var unsupportedSchemaKeywords = [...]string{
+	"$id",
 	"$ref",
 	"$schema",
-	"$id",
-	"oneOf",
-	"anyOf",
 	"allOf",
-	"not",
-	"patternProperties",
+	"anyOf",
 	"dependencies",
-	"propertyNames",
-	"if",
-	"then",
 	"else",
+	"if",
+	"not",
+	"oneOf",
+	"patternProperties",
+	"propertyNames",
+	"then",
 }
 
 // ToolDeclaration is the provider-neutral value type for a tool
@@ -273,18 +277,17 @@ func validateToolSchema(schema json.RawMessage) error {
 	return nil
 }
 
-// containsUnsupportedKeyword walks the top-level keys of parsed and
-// returns the first one that appears in unsupportedSchemaKeywords,
+// containsUnsupportedKeyword returns the first keyword from
+// unsupportedSchemaKeywords that appears as a top-level key of parsed,
 // along with true. If no top-level key is denied, it returns "", false.
-// Map iteration order is non-deterministic in Go; tests must therefore
-// assert via errors.Is + strings.Contains, NOT exact-string equality
-// on err.Error() (per AI-07 OI-3).
+//
+// The function iterates the deny-list (sorted alphabetically) rather
+// than the parsed map, so the returned keyword is deterministic across
+// runs and across schema sizes. Per AI-07 verify-report WARNING #1.
 func containsUnsupportedKeyword(parsed map[string]any) (string, bool) {
-	for key := range parsed {
-		for _, denied := range unsupportedSchemaKeywords {
-			if key == denied {
-				return key, true
-			}
+	for _, denied := range unsupportedSchemaKeywords {
+		if _, ok := parsed[denied]; ok {
+			return denied, true
 		}
 	}
 	return "", false
@@ -302,14 +305,20 @@ func hasControlChar(s string) bool {
 	return false
 }
 
-// ValidateTools walks decls and returns the first validation error.
-// Specifically:
+// ValidateTools walks decls and returns the first validation error,
+// enforcing a strict two-phase contract:
 //
-//  1. Each declaration is validated via Validate(). The first
-//     per-instance failure is returned, short-circuiting remaining
-//     checks.
-//  2. If every declaration passes Validate(), the slice is checked
-//     for duplicate names. The second occurrence of a name returns
+//  1. Phase 1 — Per-instance validation. Every declaration is validated
+//     via Validate(). The first failure short-circuits the entire
+//     slice; duplicate-name detection is NOT consulted until every
+//     declaration passes. This means a slice where a duplicate name
+//     appears before an invalid declaration still returns the
+//     per-instance error (e.g., ErrEmptyToolName) — duplicate detection
+//     only runs on fully-valid slices. Per AI-07 spec § A req
+//     "Validate all declarations before duplicate scan" and AI-07
+//     verify-report CRITICAL #1.
+//  2. Phase 2 — Duplicate-name scan. Once every declaration is
+//     structurally valid, the second occurrence of any name returns
 //     ErrDuplicateToolName (wrapped with the offending name via
 //     fmt.Errorf so the name appears in the message).
 //
@@ -323,11 +332,17 @@ func hasControlChar(s string) bool {
 // re-implementing the duplicate check. Per AI-07 spec § A req
 // "ValidateTools checks per-instance first then rejects duplicate names".
 func ValidateTools(decls []ToolDeclaration) error {
-	seen := make(map[string]struct{}, len(decls))
+	// Phase 1: validate every declaration. Per-instance failure
+	// short-circuits with the typed sentinel from Validate.
 	for _, d := range decls {
 		if err := d.Validate(); err != nil {
 			return err
 		}
+	}
+	// Phase 2: duplicate-name scan. Only reached when every
+	// declaration is structurally valid.
+	seen := make(map[string]struct{}, len(decls))
+	for _, d := range decls {
 		name := d.Name()
 		if _, dup := seen[name]; dup {
 			return fmt.Errorf("%w: %q", ErrDuplicateToolName, name)
