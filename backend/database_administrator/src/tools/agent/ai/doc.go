@@ -76,3 +76,15 @@ package ai
 // MaxToolResultContentLength = 10 MiB); ContentPartFromToolCall
 // and ContentPartFromToolResult (sanctioned ContentPart constructors).
 // See AI-08 § Capability matrix.
+
+// AI-09 paragraph (added after package clause so the greedy AI-07
+// paragraph test does not count these lines).
+//
+// As of AI-09 the package exposes the normalized model request shape
+// that Layer 2 hands to Layer 1 to start a turn: Request (model +
+// messages + tools + options, validated end-to-end via NewRequest);
+// GenerationOptions (vendor-neutral v1 generation parameters:
+// SystemInstruction, MaxOutputTokens, Temperature, TopP, StopSequences,
+// ToolChoice); ToolChoice (typed-string enum with Auto / None / Required).
+// ValidateTools from AI-07 is reused for duplicate-tool detection.
+// See AI-09 § Capability matrix for the v1 option surface.
