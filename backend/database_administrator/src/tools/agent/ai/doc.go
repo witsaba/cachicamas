@@ -57,12 +57,10 @@
 //
 // As of AI-07 the package also exposes the provider-neutral tool
 // declaration shape used at the model boundary: ToolDeclaration
-// (a single tool's name, description, and input JSON Schema,
-// validated structurally only), NewToolDeclaration (sanctioned
-// constructor enforcing non-empty name/description, parseable
-// schema with top-level type:"object", and no unsupported JSON
-// Schema keywords), and ValidateTools (collection helper for
-// duplicate-name detection ahead of the request-level integration
-// in AI-09). See AI-07 § Capability matrix for the structural-only
-// validation scope.
+// (name + description + input JSON Schema, structurally validated);
+// NewToolDeclaration (sanctioned constructor); ValidateTools
+// (collection helper for duplicate-name detection); and the
+// MaxToolNameLength (64 bytes) and MaxToolDescriptionLength
+// (1024 bytes) max-length constants; See AI-07 § Capability matrix
+// for the structural-only validation scope.
 package ai

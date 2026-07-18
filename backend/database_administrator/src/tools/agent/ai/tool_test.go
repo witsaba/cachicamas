@@ -869,6 +869,8 @@ func TestDocGo_ToolDeclarationParagraph(t *testing.T) {
 		"ToolDeclaration",
 		"NewToolDeclaration",
 		"ValidateTools",
+		"MaxToolNameLength",
+		"MaxToolDescriptionLength",
 		"See AI-07 \u00a7 Capability matrix",
 	} {
 		if !strings.Contains(text, want) {
