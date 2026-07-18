@@ -54,4 +54,15 @@
 // ReasoningAbsent (see AI-02 § Reasoning policy); Redacted and Streamed
 // are reserved for v1.1+ but kept in the type system for forward
 // compatibility.
+//
+// As of AI-07 the package also exposes the provider-neutral tool
+// declaration shape used at the model boundary: ToolDeclaration
+// (a single tool's name, description, and input JSON Schema,
+// validated structurally only), NewToolDeclaration (sanctioned
+// constructor enforcing non-empty name/description, parseable
+// schema with top-level type:"object", and no unsupported JSON
+// Schema keywords), and ValidateTools (collection helper for
+// duplicate-name detection ahead of the request-level integration
+// in AI-09). See AI-07 § Capability matrix for the structural-only
+// validation scope.
 package ai
