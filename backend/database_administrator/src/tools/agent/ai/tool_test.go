@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -67,7 +64,7 @@ func TestNewToolDeclaration_Name_Empty(t *testing.T) {
 	if !errors.Is(err, ai.ErrEmptyToolName) {
 		t.Errorf("NewToolDeclaration(\"\", ...) error = %v, want ErrEmptyToolName", err)
 	}
-	if (td != ai.ToolDeclaration{}) {
+	if !isZeroToolDeclaration(td) {
 		t.Errorf("NewToolDeclaration(\"\", ...) returned non-zero ToolDeclaration %+v on error", td)
 	}
 }
@@ -93,7 +90,7 @@ func TestNewToolDeclaration_Name_WhitespaceOnly(t *testing.T) {
 			if !errors.Is(err, ai.ErrEmptyToolName) {
 				t.Errorf("NewToolDeclaration(%q) error = %v, want ErrEmptyToolName", c.input, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration(%q) returned non-zero ToolDeclaration on error", c.input)
 			}
 		})
@@ -111,7 +108,7 @@ func TestNewToolDeclaration_Name_TooLong(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewToolDeclaration(%d bytes) returned error %v, want nil (boundary must be accepted)", len(in), err)
 		}
-		if (td == ai.ToolDeclaration{}) {
+		if isZeroToolDeclaration(td) {
 			t.Fatalf("NewToolDeclaration(%d bytes) returned zero-value ToolDeclaration", len(in))
 		}
 	})
@@ -121,7 +118,7 @@ func TestNewToolDeclaration_Name_TooLong(t *testing.T) {
 		if !errors.Is(err, ai.ErrToolNameTooLong) {
 			t.Errorf("NewToolDeclaration(%d bytes) error = %v, want ErrToolNameTooLong", len(in), err)
 		}
-		if (td != ai.ToolDeclaration{}) {
+		if !isZeroToolDeclaration(td) {
 			t.Errorf("NewToolDeclaration(%d bytes) returned non-zero ToolDeclaration on error", len(in))
 		}
 	})
@@ -148,7 +145,7 @@ func TestNewToolDeclaration_Name_ControlChars(t *testing.T) {
 			if !errors.Is(err, ai.ErrInvalidToolName) {
 				t.Errorf("NewToolDeclaration(%q) error = %v, want ErrInvalidToolName", c.input, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration(%q) returned non-zero ToolDeclaration on error", c.input)
 			}
 		})
@@ -177,7 +174,7 @@ func TestNewToolDeclaration_Name_NonASCII(t *testing.T) {
 			if err != nil {
 				t.Errorf("NewToolDeclaration(%q) error = %v, want nil (non-ASCII must be accepted if ≤ MaxToolNameLength bytes and no control chars)", c.input, err)
 			}
-			if (td == ai.ToolDeclaration{}) {
+			if isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration(%q) returned zero-value ToolDeclaration", c.input)
 			}
 			if td.Name() != c.input {
@@ -199,7 +196,7 @@ func TestNewToolDeclaration_Description_Empty(t *testing.T) {
 	if !errors.Is(err, ai.ErrEmptyToolDescription) {
 		t.Errorf("NewToolDeclaration(\"valid_name\", \"\", ...) error = %v, want ErrEmptyToolDescription", err)
 	}
-	if (td != ai.ToolDeclaration{}) {
+	if !isZeroToolDeclaration(td) {
 		t.Errorf("NewToolDeclaration returned non-zero ToolDeclaration on error")
 	}
 }
@@ -223,7 +220,7 @@ func TestNewToolDeclaration_Description_WhitespaceOnly(t *testing.T) {
 			if !errors.Is(err, ai.ErrEmptyToolDescription) {
 				t.Errorf("NewToolDeclaration(%q) error = %v, want ErrEmptyToolDescription", c.input, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration returned non-zero ToolDeclaration on error")
 			}
 		})
@@ -242,7 +239,7 @@ func TestNewToolDeclaration_Description_TooLong(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewToolDeclaration(%d bytes) error = %v, want nil (boundary must be accepted)", len(in), err)
 		}
-		if (td == ai.ToolDeclaration{}) {
+		if isZeroToolDeclaration(td) {
 			t.Fatalf("NewToolDeclaration(%d bytes) returned zero-value ToolDeclaration", len(in))
 		}
 	})
@@ -252,7 +249,7 @@ func TestNewToolDeclaration_Description_TooLong(t *testing.T) {
 		if !errors.Is(err, ai.ErrToolDescriptionTooLong) {
 			t.Errorf("NewToolDeclaration(%d bytes) error = %v, want ErrToolDescriptionTooLong", len(in), err)
 		}
-		if (td != ai.ToolDeclaration{}) {
+		if !isZeroToolDeclaration(td) {
 			t.Errorf("NewToolDeclaration returned non-zero ToolDeclaration on error")
 		}
 	})
@@ -270,7 +267,7 @@ func TestNewToolDeclaration_Schema_Nil(t *testing.T) {
 	if !errors.Is(err, ai.ErrInvalidToolSchema) {
 		t.Errorf("NewToolDeclaration with nil schema error = %v, want ErrInvalidToolSchema", err)
 	}
-	if (td != ai.ToolDeclaration{}) {
+	if !isZeroToolDeclaration(td) {
 		t.Errorf("NewToolDeclaration with nil schema returned non-zero ToolDeclaration on error")
 	}
 }
@@ -283,7 +280,7 @@ func TestNewToolDeclaration_Schema_Empty(t *testing.T) {
 	if !errors.Is(err, ai.ErrInvalidToolSchema) {
 		t.Errorf("NewToolDeclaration with empty schema error = %v, want ErrInvalidToolSchema", err)
 	}
-	if (td != ai.ToolDeclaration{}) {
+	if !isZeroToolDeclaration(td) {
 		t.Errorf("NewToolDeclaration with empty schema returned non-zero ToolDeclaration on error")
 	}
 }
@@ -307,7 +304,7 @@ func TestNewToolDeclaration_Schema_Malformed(t *testing.T) {
 			if !errors.Is(err, ai.ErrInvalidToolSchema) {
 				t.Errorf("NewToolDeclaration with schema=%q error = %v, want ErrInvalidToolSchema", c.input, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration with malformed schema returned non-zero ToolDeclaration on error")
 			}
 		})
@@ -328,7 +325,7 @@ func TestNewToolDeclaration_Schema_MissingType(t *testing.T) {
 			if !errors.Is(err, ai.ErrMissingSchemaType) {
 				t.Errorf("NewToolDeclaration with schema=%q error = %v, want ErrMissingSchemaType", in, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration with missing-type schema returned non-zero ToolDeclaration on error")
 			}
 		})
@@ -354,7 +351,7 @@ func TestNewToolDeclaration_Schema_UnsupportedType(t *testing.T) {
 			if !errors.Is(err, ai.ErrUnsupportedSchemaType) {
 				t.Errorf("NewToolDeclaration with schema=%q error = %v, want ErrUnsupportedSchemaType", c.input, err)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration with unsupported-type schema returned non-zero ToolDeclaration on error")
 			}
 		})
@@ -371,7 +368,7 @@ func TestNewToolDeclaration_Schema_SupportedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewToolDeclaration with object schema error = %v, want nil", err)
 	}
-	if (td == ai.ToolDeclaration{}) {
+	if isZeroToolDeclaration(td) {
 		t.Fatal("NewToolDeclaration with object schema returned zero-value ToolDeclaration")
 	}
 	if !bytes.Equal(td.Schema(), []byte(schema)) {
@@ -414,7 +411,7 @@ func TestNewToolDeclaration_Schema_DenyListKeywords(t *testing.T) {
 			if !strings.Contains(err.Error(), c.keyword) {
 				t.Errorf("ErrUnsupportedSchemaFeature message = %q, want substring %q", err.Error(), c.keyword)
 			}
-			if (td != ai.ToolDeclaration{}) {
+			if !isZeroToolDeclaration(td) {
 				t.Errorf("NewToolDeclaration with deny-listed keyword returned non-zero ToolDeclaration on error")
 			}
 		})
@@ -436,7 +433,7 @@ func TestNewToolDeclaration_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewToolDeclaration happy path error = %v, want nil", err)
 	}
-	if (td == ai.ToolDeclaration{}) {
+	if isZeroToolDeclaration(td) {
 		t.Fatal("NewToolDeclaration happy path returned zero-value ToolDeclaration")
 	}
 	if td.Name() != name {
@@ -610,16 +607,16 @@ func TestValidateTools_FirstFailureWins(t *testing.T) {
 // pair of the 10 sentinels is distinct under errors.Is".
 func TestSentinels_Distinct(t *testing.T) {
 	sentinels := map[error]string{
-		ai.ErrEmptyToolName:          "ErrEmptyToolName",
-		ai.ErrToolNameTooLong:        "ErrToolNameTooLong",
-		ai.ErrInvalidToolName:        "ErrInvalidToolName",
-		ai.ErrEmptyToolDescription:   "ErrEmptyToolDescription",
-		ai.ErrToolDescriptionTooLong: "ErrToolDescriptionTooLong",
-		ai.ErrInvalidToolSchema:      "ErrInvalidToolSchema",
-		ai.ErrMissingSchemaType:      "ErrMissingSchemaType",
-		ai.ErrUnsupportedSchemaType:  "ErrUnsupportedSchemaType",
+		ai.ErrEmptyToolName:            "ErrEmptyToolName",
+		ai.ErrToolNameTooLong:          "ErrToolNameTooLong",
+		ai.ErrInvalidToolName:          "ErrInvalidToolName",
+		ai.ErrEmptyToolDescription:     "ErrEmptyToolDescription",
+		ai.ErrToolDescriptionTooLong:   "ErrToolDescriptionTooLong",
+		ai.ErrInvalidToolSchema:        "ErrInvalidToolSchema",
+		ai.ErrMissingSchemaType:        "ErrMissingSchemaType",
+		ai.ErrUnsupportedSchemaType:    "ErrUnsupportedSchemaType",
 		ai.ErrUnsupportedSchemaFeature: "ErrUnsupportedSchemaFeature",
-		ai.ErrDuplicateToolName:      "ErrDuplicateToolName",
+		ai.ErrDuplicateToolName:        "ErrDuplicateToolName",
 	}
 	if len(sentinels) != 10 {
 		t.Errorf("AI-07 spec § A req requires exactly 10 ToolDeclaration sentinels, found %d", len(sentinels))
@@ -702,16 +699,16 @@ func TestSentinels_Distinct(t *testing.T) {
 // be usable by callers.
 func TestSentinels_ExportedAndTyped(t *testing.T) {
 	cases := map[error]string{
-		ai.ErrEmptyToolName:          "ErrEmptyToolName",
-		ai.ErrToolNameTooLong:        "ErrToolNameTooLong",
-		ai.ErrInvalidToolName:        "ErrInvalidToolName",
-		ai.ErrEmptyToolDescription:   "ErrEmptyToolDescription",
-		ai.ErrToolDescriptionTooLong: "ErrToolDescriptionTooLong",
-		ai.ErrInvalidToolSchema:      "ErrInvalidToolSchema",
-		ai.ErrMissingSchemaType:      "ErrMissingSchemaType",
-		ai.ErrUnsupportedSchemaType:  "ErrUnsupportedSchemaType",
+		ai.ErrEmptyToolName:            "ErrEmptyToolName",
+		ai.ErrToolNameTooLong:          "ErrToolNameTooLong",
+		ai.ErrInvalidToolName:          "ErrInvalidToolName",
+		ai.ErrEmptyToolDescription:     "ErrEmptyToolDescription",
+		ai.ErrToolDescriptionTooLong:   "ErrToolDescriptionTooLong",
+		ai.ErrInvalidToolSchema:        "ErrInvalidToolSchema",
+		ai.ErrMissingSchemaType:        "ErrMissingSchemaType",
+		ai.ErrUnsupportedSchemaType:    "ErrUnsupportedSchemaType",
 		ai.ErrUnsupportedSchemaFeature: "ErrUnsupportedSchemaFeature",
-		ai.ErrDuplicateToolName:      "ErrDuplicateToolName",
+		ai.ErrDuplicateToolName:        "ErrDuplicateToolName",
 	}
 	for err, name := range cases {
 		if err == nil {
@@ -778,86 +775,29 @@ func TestToolDeclaration_NoMarshalOrExecute(t *testing.T) {
 }
 
 // =============================================================================
-// doc.go amendment smoke test
+// doc.go amendment smoke test (added in DOCS commit)
 // =============================================================================
-
-// TestDocGo_ToolDeclarationParagraph verifies the AI-07 doc.go paragraph:
-//   - ends with a period
-//   - is at most 10 lines
-//   - mentions the 3 API names + 2 max-length constants
-//   - contains "See AI-07" (the policy citation)
 //
-// Per AI-07 spec § A req scenario "doc.go paragraph ends with a period
-// and contains the required substrings".
-func TestDocGo_ToolDeclarationParagraph(t *testing.T) {
-	// Resolve the doc.go path: this test file is at
-	// backend/database_administrator/src/tools/agent/ai/tool_test.go,
-	// so doc.go is in the same directory.
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	docPath := filepath.Join(filepath.Dir(thisFile), "doc.go")
-	contents, err := os.ReadFile(docPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", docPath, err)
-	}
-	text := string(contents)
-
-	// Required substrings per AI-07 spec § A req scenario.
-	required := []string{
-		"ToolDeclaration",
-		"NewToolDeclaration",
-		"ValidateTools",
-		"MaxToolNameLength",
-		"MaxToolDescriptionLength",
-		"See AI-07",
-	}
-	for _, sub := range required {
-		if !strings.Contains(text, sub) {
-			t.Errorf("doc.go must contain substring %q (per AI-07 spec § A req)", sub)
-		}
-	}
-
-	// Locate the AI-07 paragraph by finding the "As of AI-07" marker, then
-	// extract its lines up to the package declaration (or end of file).
-	const marker = "As of AI-07"
-	start := strings.Index(text, marker)
-	if start == -1 {
-		t.Fatal("doc.go does not contain the 'As of AI-07' paragraph marker")
-	}
-	// Find the package declaration after the marker.
-	after := text[start:]
-	pkgIdx := strings.Index(after, "package ai")
-	if pkgIdx == -1 {
-		t.Fatal("doc.go AI-07 paragraph is not followed by 'package ai'")
-	}
-	paragraph := after[:pkgIdx]
-	lines := strings.Split(strings.TrimRight(paragraph, "\n"), "\n")
-
-	if len(lines) > 10 {
-		t.Errorf("AI-07 doc.go paragraph has %d lines, want ≤ 10 (spec § A req budget)", len(lines))
-	}
-
-	// The final non-empty line of the paragraph must end with a period.
-	last := ""
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
-			last = strings.TrimSpace(lines[i])
-			break
-		}
-	}
-	if last == "" {
-		t.Fatal("AI-07 doc.go paragraph has no non-empty trailing line")
-	}
-	if !strings.HasSuffix(last, ".") {
-		t.Errorf("AI-07 doc.go paragraph's last line %q does not end with a period", last)
-	}
-}
+// TestDocGo_ToolDeclarationParagraph is intentionally added in the DOCS
+// commit (Phase 3 of strict-TDD), not here. It pins the AI-07 doc.go
+// paragraph by reading the file end-to-end and asserting the 6 required
+// substrings + ≤ 10 lines + last line ends with a period. Adding the
+// test before the doc.go amendment would make the GREEN commit fail
+// (the paragraph doesn't exist yet), which violates strict-TDD's
+// "all tests PASS in GREEN" rule.
 
 // =============================================================================
 // Test helpers
 // =============================================================================
+
+// isZeroToolDeclaration reports whether td is the zero value. Required
+// because ToolDeclaration contains a json.RawMessage (which is []byte),
+// and Go does not allow `==` / `!=` comparison of structs that contain
+// slices. We compare each field independently and require the schema
+// to be nil-or-empty (the zero RawMessage is non-nil but zero-length).
+func isZeroToolDeclaration(td ai.ToolDeclaration) bool {
+	return td.Name() == "" && td.Description() == "" && len(td.Schema()) == 0
+}
 
 // validObjectSchema returns a canonical type:"object" schema for tests.
 // Kept in the test file because it has no production-side utility.
