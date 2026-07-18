@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -597,6 +598,49 @@ func TestValidateTools_FirstFailureWins(t *testing.T) {
 	}
 }
 
+// TestValidateTools_Precedence_DuplicateBeforeInvalid pins the spec
+// requirement that per-instance validation wins over duplicate-name
+// detection EVEN WHEN a duplicate name is encountered before the
+// invalid declaration in iteration order. Per AI-07 spec § A req
+// "Validate all declarations before duplicate scan" and AI-07
+// verify-report CRITICAL #1.
+func TestValidateTools_Precedence_DuplicateBeforeInvalid(t *testing.T) {
+	a := mustToolDeclaration(t, "alpha", "Alpha 1", validObjectSchema())
+	b := mustToolDeclaration(t, "alpha", "Alpha 2 duplicate", validObjectSchema())
+	invalid := ai.ToolDeclaration{} // zero value — Validate() returns ErrEmptyToolName
+	err := ai.ValidateTools([]ai.ToolDeclaration{a, b, invalid})
+	if !errors.Is(err, ai.ErrEmptyToolName) {
+		t.Errorf("ValidateTools([valid, dup, invalid]) = %v, want ErrEmptyToolName (per-instance wins even when dup precedes invalid in iteration order)", err)
+	}
+}
+
+// TestNewToolDeclaration_Schema_DenyListKeyword_Deterministic pins
+// the requirement that when a schema contains MULTIPLE deny-listed
+// keywords, the error message reports a deterministic (alphabetically
+// first) keyword — not whichever Go map iteration yields first. Per
+// AI-07 verify-report WARNING #1. The test runs 200 iterations to
+// expose Go map iteration non-determinism reliably.
+func TestNewToolDeclaration_Schema_DenyListKeyword_Deterministic(t *testing.T) {
+	// Schema with multiple deny-listed keywords: $ref, oneOf, if.
+	schema := json.RawMessage(`{"type":"object","$ref":"x","oneOf":[{"type":"object"}],"if":{"type":"object"}}`)
+	// Alphabetical deny-list order: $id, $ref, $schema, allOf, anyOf,
+	// dependencies, else, if, not, oneOf, patternProperties,
+	// propertyNames, then. The first match in the schema is "$ref".
+	const wantKeyword = "$ref"
+	for i := 0; i < 200; i++ {
+		td, err := ai.NewToolDeclaration("valid_name", "valid description", schema)
+		if !errors.Is(err, ai.ErrUnsupportedSchemaFeature) {
+			t.Fatalf("iter %d: NewToolDeclaration = %v, want ErrUnsupportedSchemaFeature", i, err)
+		}
+		if !strings.Contains(err.Error(), wantKeyword) {
+			t.Errorf("iter %d: error message = %q; want substring %q (deterministic first match from sorted deny-list)", i, err.Error(), wantKeyword)
+		}
+		if !isZeroToolDeclaration(td) {
+			t.Errorf("iter %d: NewToolDeclaration returned non-zero ToolDeclaration on error", i)
+		}
+	}
+}
+
 // =============================================================================
 // Sentinel distinctness + package prefix
 // =============================================================================
@@ -778,13 +822,60 @@ func TestToolDeclaration_NoMarshalOrExecute(t *testing.T) {
 // doc.go amendment smoke test (added in DOCS commit)
 // =============================================================================
 //
-// TestDocGo_ToolDeclarationParagraph is intentionally added in the DOCS
-// commit (Phase 3 of strict-TDD), not here. It pins the AI-07 doc.go
-// paragraph by reading the file end-to-end and asserting the 6 required
-// substrings + ≤ 10 lines + last line ends with a period. Adding the
-// test before the doc.go amendment would make the GREEN commit fail
-// (the paragraph doesn't exist yet), which violates strict-TDD's
-// "all tests PASS in GREEN" rule.
+// TestDocGo_ToolDeclarationParagraph pins the AI-07 doc.go paragraph by
+// reading the file end-to-end and asserting the required substrings,
+// the line count, and the trailing-period invariant. Per AI-07 spec § A
+// req "doc.go discipline" and AI-07 verify-report CRITICAL #2.
+//
+// The test runs with the working directory set to the package directory,
+// so doc.go is read as a sibling file.
+func TestDocGo_ToolDeclarationParagraph(t *testing.T) {
+	data, err := os.ReadFile("doc.go")
+	if err != nil {
+		t.Fatalf("read doc.go: %v", err)
+	}
+	src := string(data)
+
+	// Locate the AI-07 paragraph by its opening marker.
+	const openMarker = "// As of AI-07 the package also exposes"
+	idx := strings.Index(src, openMarker)
+	if idx < 0 {
+		t.Fatalf("doc.go does not contain the AI-07 paragraph opener %q", openMarker)
+	}
+	// The paragraph ends at the next package clause.
+	tail := src[idx:]
+	end := strings.Index(tail, "\npackage ai")
+	if end < 0 {
+		t.Fatalf("doc.go AI-07 paragraph has no terminating package clause")
+	}
+	para := tail[:end]
+
+	// Strip blank-only lines; the remaining lines are the paragraph body.
+	var lines []string
+	for _, ln := range strings.Split(para, "\n") {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		lines = append(lines, strings.TrimSpace(ln))
+	}
+	if len(lines) > 10 {
+		t.Errorf("doc.go AI-07 paragraph has %d non-blank lines; spec requires \u2264 10", len(lines))
+	}
+	if !strings.HasSuffix(lines[len(lines)-1], ".") {
+		t.Errorf("doc.go AI-07 paragraph last line %q does not end with a period", lines[len(lines)-1])
+	}
+	text := strings.Join(lines, " ")
+	for _, want := range []string{
+		"ToolDeclaration",
+		"NewToolDeclaration",
+		"ValidateTools",
+		"See AI-07 \u00a7 Capability matrix",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("doc.go AI-07 paragraph missing required substring %q", want)
+		}
+	}
+}
 
 // =============================================================================
 // Test helpers
