@@ -158,7 +158,7 @@ func TestNewToolResult_Content_Malformed(t *testing.T) {
 // TestNewToolResult_Content_TooLong verifies ErrToolResultContentTooLong when
 // content exceeds MaxToolResultContentLength.
 func TestNewToolResult_Content_TooLong(t *testing.T) {
-	 oversized := strings.Repeat("a", ai.MaxToolResultContentLength+1)
+	oversized := strings.Repeat("a", ai.MaxToolResultContentLength+1)
 	content := json.RawMessage(`"` + oversized + `"`)
 	tr, err := ai.NewToolResult("call-42", content)
 	if !errors.Is(err, ai.ErrToolResultContentTooLong) {
@@ -172,7 +172,7 @@ func TestNewToolResult_Content_TooLong(t *testing.T) {
 // TestNewToolResult_Content_ExactlyMaxAccepted verifies that content at
 // exactly MaxToolResultContentLength is accepted.
 func TestNewToolResult_Content_ExactlyMaxAccepted(t *testing.T) {
-	 oversized := strings.Repeat("a", ai.MaxToolResultContentLength-2)
+	oversized := strings.Repeat("a", ai.MaxToolResultContentLength-2)
 	content := json.RawMessage(`"` + oversized + `"`)
 	if len(content) != ai.MaxToolResultContentLength {
 		t.Fatalf("test payload len = %d, want %d", len(content), ai.MaxToolResultContentLength)
@@ -301,10 +301,10 @@ func TestToolResult_ValidateSelfConsistency(t *testing.T) {
 // pairwise distinct under errors.Is.
 func TestToolResult_Sentinels_Distinct(t *testing.T) {
 	sentinels := map[error]string{
-		ai.ErrEmptyToolResultCallID:       "ErrEmptyToolResultCallID",
-		ai.ErrToolResultCallIDTooLong:     "ErrToolResultCallIDTooLong",
-		ai.ErrMalformedToolResultContent:   "ErrMalformedToolResultContent",
-		ai.ErrToolResultContentTooLong:    "ErrToolResultContentTooLong",
+		ai.ErrEmptyToolResultCallID:      "ErrEmptyToolResultCallID",
+		ai.ErrToolResultCallIDTooLong:    "ErrToolResultCallIDTooLong",
+		ai.ErrMalformedToolResultContent: "ErrMalformedToolResultContent",
+		ai.ErrToolResultContentTooLong:   "ErrToolResultContentTooLong",
 	}
 	if len(sentinels) != 4 {
 		t.Errorf("AI-08 spec § E requires exactly 4 ToolResult sentinels, found %d", len(sentinels))
@@ -341,7 +341,7 @@ func TestToolResult_Sentinels_Distinct(t *testing.T) {
 // and has a non-empty message.
 func TestToolResult_Sentinels_ExportedAndTyped(t *testing.T) {
 	cases := map[error]string{
-		ai.ErrEmptyToolResultCallID:     "ErrEmptyToolResultCallID",
+		ai.ErrEmptyToolResultCallID:      "ErrEmptyToolResultCallID",
 		ai.ErrToolResultCallIDTooLong:    "ErrToolResultCallIDTooLong",
 		ai.ErrMalformedToolResultContent: "ErrMalformedToolResultContent",
 		ai.ErrToolResultContentTooLong:   "ErrToolResultContentTooLong",
