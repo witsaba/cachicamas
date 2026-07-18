@@ -88,3 +88,23 @@ package ai
 // ToolChoice); ToolChoice (typed-string enum with Auto / None / Required).
 // ValidateTools from AI-07 is reused for duplicate-tool detection.
 // See AI-09 § Capability matrix for the v1 option surface.
+
+// AI-10 paragraph (added after package clause so the greedy AI-07
+// paragraph test does not count these lines).
+//
+// As of AI-10 the package exposes the provider-neutral completion
+// metadata that AI-11 / AI-12 stream events carry as terminal metadata:
+// FinishReason (typed-string enum with 6 canonical values: Stop,
+// Length, ToolCall, ContentFilter, Cancellation, Unknown) plus
+// FinishReasonFromProvider (case-insensitive, trimmed, vendor-synonym
+// normalization; unknown input collapses to Unknown with no error and
+// no raw upward leakage); Usage (3 required int64 counts — InputTokens,
+// OutputTokens, TotalTokens — plus 3 optional *int64 detail counts —
+// CacheReadTokens, CacheWriteTokens, ReasoningTokens — with MaxUsageTokenCount
+// = math.MaxInt64, validated end-to-end via NewUsage); IsAbsent()
+// reports "no usage reported" (zero required + all optional absent).
+// Cancellation is value-level only (model-reported cancel); transport
+// cancellation is owned by AI-01 § Cancellation contract. Usage and
+// FinishReason are value types — they do NOT implement ContentPart and
+// have NO wire-format methods; AI-11 owns marshaling. No billing /
+// quota fields; no JSON serialization. See AI-10 § Capability matrix.
