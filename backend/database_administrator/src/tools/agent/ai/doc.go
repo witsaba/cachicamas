@@ -33,8 +33,14 @@
 //     an optional stable ID. Content parts and tool calls are added
 //     by AI-05 and AI-08 respectively. See message.go.
 //
-// Subsequent milestones (AI-05..AI-38) introduce content parts,
-// tool declarations, tool calls, the model request shape, finish reasons,
-// usage, the event envelope, the stream shape, and concrete provider
-// adapters — each in its own change.
+// As of AI-05 the package also exposes content-part types: Text
+// (a string-typed value validated by NewText; see text.go) and
+// ContentPart (a discriminated union with a Kind enum that reserves
+// slots for reasoning, image, audio, tool declarations, tool calls,
+// and tool results; see content.go). Message.Content is a
+// []ContentPart slice so multi-part text and future variants are
+// additive; subsequent milestones (AI-06..AI-38) introduce reasoning
+// content, tool declarations, tool calls, the model request shape,
+// finish reasons, usage, the event envelope, the stream shape, and
+// concrete provider adapters — each in its own change.
 package ai
