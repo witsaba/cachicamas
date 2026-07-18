@@ -1,6 +1,9 @@
 package ai
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // Kind is the discriminator for the ContentPart discriminated union.
 // See AI-00 § content part and AI-05 § ContentPart interface.
@@ -136,4 +139,58 @@ func ContentPartFromText(s string) (ContentPart, error) {
 		return nil, err
 	}
 	return textPart{t: t}, nil
+}
+
+// toolCallPart is the unexported wrapper that implements ContentPart for
+// ToolCall values. Mirrors textPart+Text. Per AI-08 design obs #2099.
+//
+// Typed-nil trap: toolCallPart is a struct (NOT a pointer), so a
+// ContentPart interface slot holding toolCallPart{...} is always non-nil
+// by `part == nil` comparison.
+type toolCallPart struct {
+	t ToolCall
+}
+
+// Kind returns KindToolCall. Per AI-08 spec § C req 1.
+func (p toolCallPart) Kind() Kind {
+	return KindToolCall
+}
+
+// ContentPartFromToolCall is the sanctioned constructor for a tool-call
+// ContentPart. It wraps NewToolCall and returns a textPart-style wrapper.
+// On validation failure it returns nil and the corresponding sentinel.
+// Per AI-08 spec § C req 3.
+func ContentPartFromToolCall(name string, arguments json.RawMessage) (ContentPart, error) {
+	t, err := NewToolCall(name, arguments)
+	if err != nil {
+		return nil, err
+	}
+	return toolCallPart{t: t}, nil
+}
+
+// toolResultPart is the unexported wrapper that implements ContentPart for
+// ToolResult values. Mirrors textPart+Text. Per AI-08 design obs #2099.
+//
+// Typed-nil trap: toolResultPart is a struct (NOT a pointer), so a
+// ContentPart interface slot holding toolResultPart{...} is always non-nil
+// by `part == nil` comparison.
+type toolResultPart struct {
+	t ToolResult
+}
+
+// Kind returns KindToolResult. Per AI-08 spec § C req 2.
+func (p toolResultPart) Kind() Kind {
+	return KindToolResult
+}
+
+// ContentPartFromToolResult is the sanctioned constructor for a tool-result
+// ContentPart. It wraps NewToolResult and returns a textPart-style wrapper.
+// On validation failure it returns nil and the corresponding sentinel.
+// Per AI-08 spec § C req 4.
+func ContentPartFromToolResult(callID string, content json.RawMessage) (ContentPart, error) {
+	t, err := NewToolResult(callID, content)
+	if err != nil {
+		return nil, err
+	}
+	return toolResultPart{t: t}, nil
 }
