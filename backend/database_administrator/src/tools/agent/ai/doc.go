@@ -43,4 +43,15 @@
 // content, tool declarations, tool calls, the model request shape,
 // finish reasons, usage, the event envelope, the stream shape, and
 // concrete provider adapters — each in its own change.
+//
+// As of AI-06 the package exposes an optional Reasoning content-part
+// type with three variants — ReasoningAbsent, ReasoningRedacted, and
+// ReasoningStreamed. ContentPartFromReasoning is the sanctioned
+// constructor that validates state first and payload per variant:
+// Absent ignores its payload, Redacted caps at MaxReasoningSummaryLength,
+// and Streamed requires non-empty, non-whitespace input capped at
+// MaxReasoningStreamedLength. v1 Layer 1 adapters only emit
+// ReasoningAbsent (see AI-02 § Reasoning policy); Redacted and Streamed
+// are reserved for v1.1+ but kept in the type system for forward
+// compatibility.
 package ai
