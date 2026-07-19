@@ -1,3 +1,28 @@
+// Package-level note for the AI-11 event envelope (event.go).
+//
+// This file implements the event envelope defined by milestone AI-11
+// of the cachicamas_ai Layer 1 contract. See ADR 0004 for the
+// layer-boundary rule (cachicamas_coding -> cachicamas_agent ->
+// cachicamas_ai; this package may import only the Go standard library
+// and vendor SDKs) and AI-01 for the streaming contract that
+// every ModelProvider producer-owned <-chan Event must satisfy
+// (closure semantics, cancellation contract, error delivery).
+//
+// Event is the value type that crosses the Layer 1 boundary. It is
+// NOT a pointer, NOT a generic carrier (`any` / `json.RawMessage`
+// are forbidden by the AI-11 vendor-leak guard), and NOT a wire
+// format — AI-16+ owns marshaling. The payload is sealed via the
+// unexported aiPayload() marker on eventPayload, so external packages
+// cannot construct a payload implementation; only this package can.
+//
+// Ordering invariants (documented fully in doc.go's AI-11 paragraph):
+//   - Exactly one EventKindResponseStart per stream (sequence 1).
+//   - Sequence is 1-based, producer-assigned, contiguous.
+//   - At most one EventKindResponseComplete per stream, mutually
+//     exclusive with EventKindError.
+//   - AI-01 cancellation is best-effort: a cancelled stream may close
+//     without any terminal event.
+
 package ai
 
 import (
