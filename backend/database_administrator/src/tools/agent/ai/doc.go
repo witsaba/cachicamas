@@ -108,3 +108,47 @@ package ai
 // FinishReason are value types — they do NOT implement ContentPart and
 // have NO wire-format methods; AI-11 owns marshaling. No billing /
 // quota fields; no JSON serialization. See AI-10 § Capability matrix.
+
+// AI-11 paragraph (added after package clause so the greedy AI-07
+// paragraph test does not count these lines).
+//
+// As of AI-11 the package exposes the provider-neutral event envelope
+// that crosses Layer 1 through a ModelProvider producer-owned <-chan
+// Event: Event (Kind EventKind + Sequence uint64 + sealed Payload);
+// EventKind (typed-string discriminator with 12 canonical values:
+// EventKindResponseStart, EventKindResponseComplete, EventKindTextStart,
+// EventKindTextDelta, EventKindTextEnd, EventKindReasoningStart,
+// EventKindReasoningDelta, EventKindReasoningEnd,
+// EventKindToolCallStart, EventKindToolCallDelta, EventKindToolCallEnd,
+// EventKindError; zero value is invalid); NewEvent (sanctioned
+// constructor that derives Kind from payload.Kind() and stamps the
+// next Sequence from the package-private atomic counter); Validate
+// (idempotent kind/registry/payload-parity check); AllEventKinds
+// (canonical registry accessor returning a defensive copy in
+// registration order for AI-20 / AI-21 conformance). The Payload
+// field uses the sealed eventPayload interface (unexported
+// aiPayload() marker), so payload implementations live exclusively
+// in this package. See event.go for the envelope, ordering rules,
+// and sentinel errors.
+//
+// # Ordering rules for the event envelope
+//
+//   - Exactly one EventKindResponseStart is required per stream; the
+//     first event on a fresh producer is sequence 1 and MUST be
+//     response.start. Duplicates are illegal.
+//   - Sequence is 1-based, producer-assigned, and contiguous. NewEvent
+//     reads the next value from the package-private atomic counter;
+//     AI-20 (stream testkit) detects dropped events by inspecting gaps.
+//   - At most one EventKindResponseComplete may appear per stream, and
+//     it MUST NOT coexist with EventKindError. Exactly one of these
+//     two terminal kinds closes a successful stream; neither is a
+//     hard guarantee under cancellation (see next rule).
+//   - AI-01 § Cancellation contract: cancellation is best-effort —
+//     a cancelled stream may close without any terminal event
+//     (no response.complete, no error). AI-31 reconciles the
+//     "exactly-one-terminal" guarantee with transport-level
+//     cancellation; until AI-31 lands, consumers MUST tolerate an
+//     empty terminal under cancellation.
+//
+// See AI-11 § "Requirement: ai-event-envelope-ordering-rules" for the
+// authoritative ordering contract.

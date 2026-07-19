@@ -12,7 +12,6 @@ import (
 	"os"
 	"reflect"
 	"strings"
-	"sync/atomic"
 	"testing"
 )
 
@@ -35,7 +34,7 @@ func newTestPayload(k EventKind) testPayload { return testPayload{k: k} }
 // is process-scoped and survives across test functions within a single
 // `go test` invocation. Per AI-11 design decision #3 (sequence is
 // producer-assigned; the test simulates a fresh producer per test).
-func resetSequenceCounter() { atomic.StoreUint64(&sequenceCounter, 0) }
+func resetSequenceCounter() { sequenceCounter.Store(0) }
 
 // ---------------------------------------------------------------------------
 // Scenario: Construct an event with kind + payload (spec req #1)
@@ -213,17 +212,22 @@ func TestNewEvent_RejectsPayloadDeclaringZeroKind(t *testing.T) {
 
 // TestValidate_RejectsUnregisteredEventKind verifies that an Event whose
 // Kind is a string outside the 12-slot canonical set fails Validate.
-// The sentinel must be errors.Is-compatible.
+// The sentinel must be errors.Is-compatible. The test cases must be
+// strings that are NOT equal to any of the 12 registered constants —
+// note "response.start" and "tool_call.delta" are registered (EventKind
+// ResponseStart and ToolCallDelta respectively) and would silently pass
+// the IsValid gate.
 func TestValidate_RejectsUnregisteredEventKind(t *testing.T) {
 	payload := newTestPayload(EventKindResponseStart)
 	cases := []EventKind{
-		"start",           // not in registry
-		"response.start",  // dotty variant, not the underscore wire format
-		"RESPONSE_START",  // case mismatch
-		"tool-call",       // hyphenated variant
-		"response.end",    // not in registry (response.complete is)
-		"tool_call.delta", // not in registry (delta lives under text/reasoning)
-		"image",           // reserved for ContentPart, not for Event
+		"start",              // bare prefix, not a registered wire format
+		"RESPONSE_START",     // case mismatch
+		"tool-call",          // hyphenated variant
+		"response.end",       // not in registry (response.complete is)
+		"tool_call.complete", // not in registry (tool_call.end is)
+		"image",              // reserved for ContentPart, not for Event
+		"audio",              // reserved for ContentPart, not for Event
+		"tool_declaration",   // ContentPart wire format, not an Event kind
 	}
 	for _, bad := range cases {
 		t.Run(string(bad), func(t *testing.T) {
@@ -532,27 +536,38 @@ func TestEvent_NoDynamicPayloadCarrier(t *testing.T) {
 // fields of Event are simple value types: typed string, uint64, and
 // the sealed interface. This is the same vendor-leak guard from a
 // different angle — fields must not be maps, slices, or pointers
-// other than the sealed interface.
+// other than the sealed interface. We compare reflect.Type values
+// directly so the assertion is robust to Type.String() formatting.
 func TestEvent_AllFieldsHaveDocumentedJSONShape(t *testing.T) {
 	evType := reflect.TypeOf(Event{})
-	want := map[string]string{
-		"Kind":     "ai.EventKind",
-		"Sequence": "uint64",
-		"Payload":  "ai.eventPayload",
+	if evType.NumField() != 3 {
+		t.Fatalf("Event has %d fields, want exactly 3 (Kind, Sequence, Payload)", evType.NumField())
 	}
+
+	fields := map[string]reflect.StructField{}
 	for i := 0; i < evType.NumField(); i++ {
-		f := evType.Field(i)
-		expected, ok := want[f.Name]
-		if !ok {
-			t.Errorf("Event has unexpected field %q (only Kind, Sequence, Payload are allowed)", f.Name)
-			continue
-		}
-		if got := f.Type.String(); got != expected {
-			t.Errorf("Event.%s type = %q, want %q", f.Name, got, expected)
-		}
+		fields[evType.Field(i).Name] = evType.Field(i)
 	}
-	if evType.NumField() != len(want) {
-		t.Errorf("Event has %d fields, want exactly %d", evType.NumField(), len(want))
+
+	kindField, ok := fields["Kind"]
+	if !ok {
+		t.Fatal("Event missing Kind field")
+	} else if kindField.Type != reflect.TypeOf(EventKind("")) {
+		t.Errorf("Event.Kind type = %v, want EventKind", kindField.Type)
+	}
+
+	seqField, ok := fields["Sequence"]
+	if !ok {
+		t.Fatal("Event missing Sequence field")
+	} else if seqField.Type.Kind() != reflect.Uint64 {
+		t.Errorf("Event.Sequence kind = %v, want uint64", seqField.Type.Kind())
+	}
+
+	payloadField, ok := fields["Payload"]
+	if !ok {
+		t.Fatal("Event missing Payload field")
+	} else if payloadField.Type != reflect.TypeOf((*eventPayload)(nil)).Elem() {
+		t.Errorf("Event.Payload type = %v, want eventPayload interface", payloadField.Type)
 	}
 }
 
@@ -639,18 +654,22 @@ func TestDoc_ReferencesEventAndOrderingRules(t *testing.T) {
 
 // TestEvent_IsNotContentPart verifies via reflection that Event does
 // NOT implement ContentPart. This is the cross-coupling guard from
-// design risk table: ContentPart.Kind is the wire-side discriminator,
-// Event.Kind is the stream-side discriminator; conflating them would
-// be a layering violation.
+// the design risk table: ContentPart.Kind is the wire-side
+// discriminator (Kind), Event.Kind is the stream-side discriminator
+// (EventKind); conflating them would be a layering violation. The
+// reflection-based check is robust to method-set changes.
 func TestEvent_IsNotContentPart(t *testing.T) {
-	if _, ok := reflect.TypeOf(Event{}).MethodByName("Kind"); ok {
-		// Event has a Kind method — but it's of type EventKind, not Kind.
-		// The ContentPart interface requires `Kind() Kind`. Event's Kind
-		// method would only satisfy the signature if both returned Kind
-		// — which they don't (one returns EventKind, the other returns
-		// the content-side Kind). The runtime check below confirms.
-		var _ ContentPart = Event{} // MUST fail to compile if Event implements ContentPart
-		t.Fatal("Event must NOT implement ContentPart (Kind() Kind vs Kind() EventKind)")
+	eventType := reflect.TypeOf(Event{})
+	contentPartType := reflect.TypeOf((*ContentPart)(nil)).Elem()
+	if eventType.Implements(contentPartType) {
+		t.Errorf("Event (%v) must NOT implement ContentPart (%v) — "+
+			"the EventKind and Kind discriminators are intentionally distinct",
+			eventType, contentPartType)
+	}
+	// Also verify the runtime type assertion to ContentPart fails.
+	var i interface{} = Event{}
+	if _, ok := i.(ContentPart); ok {
+		t.Error("type assertion Event -> ContentPart must fail")
 	}
 }
 
