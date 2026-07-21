@@ -77,16 +77,33 @@ const (
 	// AI-13 owns the end payload.
 	EventKindTextEnd EventKind = "text.end"
 
+	// Reasoning-event kinds — reserved-but-unsupported in v1.
+	// ---------------------------------------------------------------
+	// The three EventKindReasoning* constants below are reserved for a
+	// future AI-XX milestone that adds a provider emitting ReasoningRedacted
+	// or ReasoningStreamed. In v1, AI-06 § Reasoning policy locks adapter
+	// emission to ReasoningAbsent (see AI-06 spec #2057 § v1 emits only
+	// ReasoningAbsent), so no ReasoningStart/Delta/End payloads exist;
+	// AI-14 design documents this as an explicit no-op contract (see
+	// AI-14 spec #2204 REQ-AI14-5). AI-21 conformance skips reasoning
+	// payload cases with reason citing "see AI-02 § Reasoning policy".
+	// The EventKind values and wire strings stay in the canonical
+	// AllEventKinds() registry so future provider enablement is additive
+	// (one new payload type per reserved slot, no registry change).
+
 	// EventKindReasoningStart marks the opening of a reasoning
-	// content stream. AI-14 owns the reasoning payload.
+	// content stream. Reserved for a future AI-XX; v1 has no payload
+	// implementation (AI-14 design, AI-06 § Reasoning policy).
 	EventKindReasoningStart EventKind = "reasoning.start"
 
 	// EventKindReasoningDelta carries an incremental reasoning chunk.
-	// AI-14 owns the delta payload.
+	// Reserved for a future AI-XX; v1 has no payload implementation
+	// (AI-14 design, AI-06 § Reasoning policy).
 	EventKindReasoningDelta EventKind = "reasoning.delta"
 
 	// EventKindReasoningEnd marks the closing of a reasoning content
-	// stream. AI-14 owns the end payload.
+	// stream. Reserved for a future AI-XX; v1 has no payload
+	// implementation (AI-14 design, AI-06 § Reasoning policy).
 	EventKindReasoningEnd EventKind = "reasoning.end"
 
 	// EventKindToolCallStart marks the opening of a tool-call stream.
