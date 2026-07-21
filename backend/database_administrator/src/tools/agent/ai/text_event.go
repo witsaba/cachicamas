@@ -238,9 +238,36 @@ func validateUTF8Boundary(s string) error {
 	if len(s) == 0 {
 		return nil
 	}
-	last := s[len(s)-1]
-	if last >= 0xC2 && last <= 0xF4 {
-		return ErrInvalidUTF8Boundary
+	for i := 0; i < len(s); {
+		b := s[i]
+		switch {
+		case b < 0x80:
+			i++
+		case b < 0xC2:
+			i++
+		case b > 0xF4:
+			i++
+		default:
+			var expected int
+			switch {
+			case b < 0xE0:
+				expected = 2
+			case b < 0xF0:
+				expected = 3
+			default:
+				expected = 4
+			}
+			if i+expected > len(s) {
+				return ErrInvalidUTF8Boundary
+			}
+			for j := 1; j < expected; j++ {
+				cont := s[i+j]
+				if cont < 0x80 || cont > 0xBF {
+					return ErrInvalidUTF8Boundary
+				}
+			}
+			i += expected
+		}
 	}
 	return nil
 }
