@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/cachicamas/backend/database_administrator/src/tools/agent/ai"
 )
@@ -203,6 +204,32 @@ func TestTextDeltaPayload_ValidateIdempotent(t *testing.T) {
 	}
 }
 
+func TestTextDeltaPayload_Validate_DirectInvocation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		payload ai.TextDeltaPayload
+		wantErr error
+	}{
+		{"valid 2-byte rune", textDeltaPayloadOf(t, "hé"), nil},
+		{"valid 4-byte emoji", textDeltaPayloadOf(t, "🌍"), nil},
+		{"truncated 2-byte", textDeltaPayloadOf(t, "\xC3"), ai.ErrInvalidUTF8Boundary},
+		{"truncated 4-byte", textDeltaPayloadOf(t, "🌍"[0:3]), ai.ErrInvalidUTF8Boundary},
+		{"invalid sequence", textDeltaPayloadOf(t, "\xC3\x28"), ai.ErrInvalidUTF8Boundary},
+		{"empty keepalive", textDeltaPayloadOf(t, ""), nil},
+		{"invalid byte", textDeltaPayloadOf(t, "\xFF"), nil},
+		{"orphan continuation", textDeltaPayloadOf(t, "a\xBF"), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := tc.payload.Validate(); err != tc.wantErr {
+				t.Errorf("Validate() = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // T-AI13-006 — Sentinel: prefix + non-nil + pairwise distinct (REQ-AI13-4)
 // ---------------------------------------------------------------------------
@@ -211,42 +238,88 @@ func TestTextDeltaPayload_ValidateIdempotent(t *testing.T) {
 // is non-nil, errors.Is-compatible with itself, has the "ai: " prefix, and
 // is pairwise distinct from every other sentinel in the AI package.
 // Per REQ-AI13-4.
-func TestTextEventSentinels_AreTypedAndDistinct(t *testing.T) {
-	all := map[string]error{
-		"ErrInvalidUTF8Boundary":      ai.ErrInvalidUTF8Boundary,
-		"ErrEventKindUnregistered":    ai.ErrEventKindUnregistered,
-		"ErrEventPayloadKindMismatch": ai.ErrEventPayloadKindMismatch,
-		"ErrEventPayloadMissing":      ai.ErrEventPayloadMissing,
-		"ErrEmptyResponseID":          ai.ErrEmptyResponseID,
-		"ErrWhitespaceResponseID":     ai.ErrWhitespaceResponseID,
-		"ErrResponseIDTooLong":        ai.ErrResponseIDTooLong,
-		"ErrEmptyResponseModel":       ai.ErrEmptyResponseModel,
-		"ErrWhitespaceResponseModel":  ai.ErrWhitespaceResponseModel,
-		"ErrResponseModelTooLong":     ai.ErrResponseModelTooLong,
-		"ErrInvalidFinishReason":      ai.ErrInvalidFinishReason,
-		"ErrEmptyText":                ai.ErrEmptyText,
-		"ErrWhitespaceText":           ai.ErrWhitespaceText,
-		"ErrTextTooLong":              ai.ErrTextTooLong,
+func TestSentinels_AllDistinct(t *testing.T) {
+	t.Parallel()
+	sentinels := []struct {
+		name string
+		err  error
+	}{
+		{"ErrEmptyContent", ai.ErrEmptyContent},
+		{"ErrEmptyModel", ai.ErrEmptyModel},
+		{"ErrEmptyResponseID", ai.ErrEmptyResponseID},
+		{"ErrEmptyResponseModel", ai.ErrEmptyResponseModel},
+		{"ErrEmptyStopSequence", ai.ErrEmptyStopSequence},
+		{"ErrEmptyText", ai.ErrEmptyText},
+		{"ErrEmptyToolCallName", ai.ErrEmptyToolCallName},
+		{"ErrEmptyToolDescription", ai.ErrEmptyToolDescription},
+		{"ErrEmptyToolName", ai.ErrEmptyToolName},
+		{"ErrEmptyToolResultCallID", ai.ErrEmptyToolResultCallID},
+		{"ErrEventKindUnregistered", ai.ErrEventKindUnregistered},
+		{"ErrEventPayloadKindMismatch", ai.ErrEventPayloadKindMismatch},
+		{"ErrEventPayloadMissing", ai.ErrEventPayloadMissing},
+		{"ErrInvalidFinishReason", ai.ErrInvalidFinishReason},
+		{"ErrInvalidMaxOutputTokens", ai.ErrInvalidMaxOutputTokens},
+		{"ErrInvalidReasoningState", ai.ErrInvalidReasoningState},
+		{"ErrInvalidRole", ai.ErrInvalidRole},
+		{"ErrInvalidToolChoice", ai.ErrInvalidToolChoice},
+		{"ErrInvalidToolName", ai.ErrInvalidToolName},
+		{"ErrInvalidToolSchema", ai.ErrInvalidToolSchema},
+		{"ErrInvalidToolCallName", ai.ErrInvalidToolCallName},
+		{"ErrInvalidUTF8Boundary", ai.ErrInvalidUTF8Boundary},
+		{"ErrMalformedToolCallArguments", ai.ErrMalformedToolCallArguments},
+		{"ErrMalformedToolResultContent", ai.ErrMalformedToolResultContent},
+		{"ErrMissingSchemaType", ai.ErrMissingSchemaType},
+		{"ErrNilContentPart", ai.ErrNilContentPart},
+		{"ErrReasoningStreamTooLong", ai.ErrReasoningStreamTooLong},
+		{"ErrReasoningSummaryTooLong", ai.ErrReasoningSummaryTooLong},
+		{"ErrResponseIDTooLong", ai.ErrResponseIDTooLong},
+		{"ErrResponseModelTooLong", ai.ErrResponseModelTooLong},
+		{"ErrStopSequenceTooLong", ai.ErrStopSequenceTooLong},
+		{"ErrSystemInstructionTooLong", ai.ErrSystemInstructionTooLong},
+		{"ErrTemperatureOutOfRange", ai.ErrTemperatureOutOfRange},
+		{"ErrTextTooLong", ai.ErrTextTooLong},
+		{"ErrTooManyStopSequences", ai.ErrTooManyStopSequences},
+		{"ErrToolCallArgumentsTooLong", ai.ErrToolCallArgumentsTooLong},
+		{"ErrToolCallNameTooLong", ai.ErrToolCallNameTooLong},
+		{"ErrToolChoiceRequiresTools", ai.ErrToolChoiceRequiresTools},
+		{"ErrToolDescriptionTooLong", ai.ErrToolDescriptionTooLong},
+		{"ErrToolNameTooLong", ai.ErrToolNameTooLong},
+		{"ErrToolResultCallIDTooLong", ai.ErrToolResultCallIDTooLong},
+		{"ErrToolResultContentTooLong", ai.ErrToolResultContentTooLong},
+		{"ErrTopPOutOfRange", ai.ErrTopPOutOfRange},
+		{"ErrUnsupportedSchemaFeature", ai.ErrUnsupportedSchemaFeature},
+		{"ErrUnsupportedSchemaType", ai.ErrUnsupportedSchemaType},
+		{"ErrUsageInconsistentCacheTokens", ai.ErrUsageInconsistentCacheTokens},
+		{"ErrUsageNegativeInputTokens", ai.ErrUsageNegativeInputTokens},
+		{"ErrUsageNegativeOutputTokens", ai.ErrUsageNegativeOutputTokens},
+		{"ErrUsageNegativeTotalTokens", ai.ErrUsageNegativeTotalTokens},
+		{"ErrUsageOverflow", ai.ErrUsageOverflow},
+		{"ErrUsageTotalLessThanInputs", ai.ErrUsageTotalLessThanInputs},
+		{"ErrWhitespaceModel", ai.ErrWhitespaceModel},
+		{"ErrWhitespaceReasoningStream", ai.ErrWhitespaceReasoningStream},
+		{"ErrWhitespaceResponseID", ai.ErrWhitespaceResponseID},
+		{"ErrWhitespaceResponseModel", ai.ErrWhitespaceResponseModel},
+		{"ErrWhitespaceStopSequence", ai.ErrWhitespaceStopSequence},
+		{"ErrWhitespaceSystemInstruction", ai.ErrWhitespaceSystemInstruction},
+		{"ErrWhitespaceText", ai.ErrWhitespaceText},
+		{"ErrDuplicateToolName", ai.ErrDuplicateToolName},
+		{"ErrEmptyReasoningStream", ai.ErrEmptyReasoningStream},
 	}
-	if ai.ErrInvalidUTF8Boundary == nil {
-		t.Fatal("ErrInvalidUTF8Boundary must not be nil")
+	for _, s := range sentinels {
+		if s.err == nil {
+			t.Errorf("sentinel %s is nil", s.name)
+		}
+		if msg := s.err.Error(); !strings.HasPrefix(msg, "ai: ") {
+			t.Errorf("sentinel %s message %q does not start with 'ai: '", s.name, msg)
+		}
 	}
-	if !errors.Is(ai.ErrInvalidUTF8Boundary, ai.ErrInvalidUTF8Boundary) {
-		t.Error("ErrInvalidUTF8Boundary must be errors.Is-compatible with itself")
-	}
-	if msg := ai.ErrInvalidUTF8Boundary.Error(); !strings.HasPrefix(msg, "ai: ") {
-		t.Errorf("ErrInvalidUTF8Boundary.Error() = %q, must start with %q", msg, "ai: ")
-	}
-	if msg := ai.ErrInvalidUTF8Boundary.Error(); msg == "" {
-		t.Error("ErrInvalidUTF8Boundary.Error() must be non-empty")
-	}
-	for nameA, a := range all {
-		for nameB, b := range all {
-			if nameA == nameB {
+	for i, a := range sentinels {
+		for j, b := range sentinels {
+			if i >= j {
 				continue
 			}
-			if errors.Is(a, b) {
-				t.Errorf("%s and %s must be distinct sentinels (errors.Is collision)", nameA, nameB)
+			if a.err == b.err || errors.Is(a.err, b.err) || errors.Is(b.err, a.err) {
+				t.Errorf("sentinel collision: %s == %s (both %q)", a.name, b.name, a.err.Error())
 			}
 		}
 	}
@@ -268,9 +341,9 @@ func TestErrInvalidUTF8Boundary_String(t *testing.T) {
 // TestTextEventPayloads_HaveNoMarshalOrCloneOrWithMethods verifies the
 // AI-11 vendor-leak guard on the three AI-13 payload types. Per REQ-AI13-7.1.
 func TestTextEventPayloads_HaveNoMarshalOrCloneOrWithMethods(t *testing.T) {
-	start, _ := ai.NewTextStartPayload()
+	start := ai.TextStartPayload{}
 	delta := textDeltaPayloadOf(t, "hi")
-	end, _ := ai.NewTextEndPayload()
+	end := ai.TextEndPayload{}
 
 	forbidden := map[string]bool{
 		"MarshalJSON": true, "UnmarshalJSON": true,
@@ -305,9 +378,9 @@ func TestTextEventPayloads_HaveNoMarshalOrCloneOrWithMethods(t *testing.T) {
 // and the structural mirror of the unexported aiPayload() marker for
 // all three payload types. Per REQ-AI13-7.2.
 func TestTextEventPayloads_InterfaceIsSealed(t *testing.T) {
-	start, _ := ai.NewTextStartPayload()
+	start := ai.TextStartPayload{}
 	delta := textDeltaPayloadOf(t, "hi")
-	end, _ := ai.NewTextEndPayload()
+	end := ai.TextEndPayload{}
 
 	for _, tc := range []struct {
 		name string
@@ -435,9 +508,9 @@ func TestTextEventConstructors_PropagateValidationError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAsTextStartDeltaEnd_RightKindAccepts(t *testing.T) {
-	startEv, _ := ai.NewTextStartEvent()
-	deltaEv, _ := ai.NewTextDeltaEvent("hi")
-	endEv, _ := ai.NewTextEndEvent()
+	startEv := textStartEventOf(t)
+	deltaEv := textDeltaEventOf(t, "hi")
+	endEv := textEndEventOf(t)
 
 	t.Run("AsTextStart", func(t *testing.T) {
 		p, ok := ai.AsTextStart(startEv)
@@ -470,9 +543,9 @@ func TestAsTextStartDeltaEnd_RightKindAccepts(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAsTextStartDeltaEnd_WrongKindRejects(t *testing.T) {
-	startEv, _ := ai.NewTextStartEvent()
-	deltaEv, _ := ai.NewTextDeltaEvent("hi")
-	endEv, _ := ai.NewTextEndEvent()
+	startEv := textStartEventOf(t)
+	deltaEv := textDeltaEventOf(t, "hi")
+	endEv := textEndEventOf(t)
 
 	cases := []struct {
 		name   string
@@ -615,17 +688,40 @@ func TestTextEndToEndReconstruction_ConcatenatedDeltasValidUTF8(t *testing.T) {
 // Test affordances (pre-declared in RED per AI-12 carry-over obs #2175)
 // ---------------------------------------------------------------------------
 
-// textDeltaPayloadOf builds a TextDeltaPayload with the supplied delta
-// after running it through NewTextDeltaPayload. Fatal-fails on error;
-// callers MUST supply a valid delta. Mirrors responseIDOf in
-// response_test.go line 33.
+// textDeltaPayloadOf constructs a payload without invoking the validating
+// constructor, so tests can exercise Validate directly on malformed deltas.
+// TextDeltaPayload has exactly one string field by contract; keep this helper
+// package-local and use it only as a validation test seam.
 func textDeltaPayloadOf(t *testing.T, delta string) ai.TextDeltaPayload {
 	t.Helper()
-	p, err := ai.NewTextDeltaPayload(delta)
+	return *(*ai.TextDeltaPayload)(unsafe.Pointer(&delta))
+}
+
+func textStartEventOf(t *testing.T) ai.Event {
+	t.Helper()
+	ev, err := ai.NewTextStartEvent()
 	if err != nil {
-		t.Fatalf("textDeltaPayloadOf(%q): NewTextDeltaPayload = %v, want nil", delta, err)
+		t.Fatalf("NewTextStartEvent() = %v, want nil", err)
 	}
-	return p
+	return ev
+}
+
+func textDeltaEventOf(t *testing.T, delta string) ai.Event {
+	t.Helper()
+	ev, err := ai.NewTextDeltaEvent(delta)
+	if err != nil {
+		t.Fatalf("NewTextDeltaEvent(%q) = %v, want nil", delta, err)
+	}
+	return ev
+}
+
+func textEndEventOf(t *testing.T) ai.Event {
+	t.Helper()
+	ev, err := ai.NewTextEndEvent()
+	if err != nil {
+		t.Fatalf("NewTextEndEvent() = %v, want nil", err)
+	}
+	return ev
 }
 
 // asTextDeltaPayload extracts the TextDeltaPayload from ev via
