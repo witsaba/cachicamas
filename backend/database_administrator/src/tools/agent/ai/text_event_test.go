@@ -580,7 +580,13 @@ func TestTextEventGo_ImportsOnlyStdlib(t *testing.T) {
 func TestTextEndToEndReconstruction_ConcatenatedDeltasValidUTF8(t *testing.T) {
 	var valid []string
 	for _, tc := range sampleUTF8BoundaryCases() {
-		if tc.wantErr == nil {
+		// Per-byte boundary check rejects leading-byte splits but accepts
+		// lone invalid bytes like "\xFF" and continuation bytes like 0xBF
+		// (per REQ-AI13-5 rows 10 and 12). Concatenating those produces
+		// an invalid UTF-8 stream, so for the end-to-end reconstruction
+		// acceptance we filter to deltas that are BOTH boundary-valid
+		// AND full UTF-8 valid.
+		if tc.wantErr == nil && utf8.ValidString(tc.input) {
 			valid = append(valid, tc.input)
 		}
 	}
