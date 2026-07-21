@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/cachicamas/backend/database_administrator/src/tools/agent/ai"
 )
@@ -40,17 +41,47 @@ func responseIDOf(n int) string {
 	return string(b)
 }
 
-// usageWithCounts is a small constructor that builds a Usage with explicit
-// required counts and no optional details. Used by the validation matrix to
-// pin which field trips the Usage.Validate() error.
+// usageWithCounts builds a Usage with the requested required counts and
+// no optional details. For valid counts it delegates to the public
+// NewUsage; for invalid counts it bypasses validation via
+// rawUsageWithCounts so the matrix can drive NewResponseCompletePayload
+// with a Usage whose Validate() fails. Production code never sees a
+// Usage with negative counts because every construction goes through
+// NewUsage. Test affordance only.
 func usageWithCounts(input, output, total int64) ai.Usage {
 	u, err := ai.NewUsage(input, output, total, nil, nil, nil)
-	if err != nil {
-		// The matrix caller already knows the rule — keep the helper quiet
-		// in test failures and let the matrix surface the issue.
-		return ai.Usage{}
+	if err == nil {
+		return u
 	}
-	return u
+	return rawUsageWithCounts(input, output, total)
+}
+
+// rawUsageWithCounts constructs a Usage with the requested required
+// counts, bypassing ai.Usage.Validate. The standard reflect-with-unsafe
+// trick cannot set unexported fields (reflect.Value.SetInt enforces the
+// export flag), so the well-known memory-layout cast is used: declare
+// a local struct with field-for-field identical layout to ai.Usage,
+// fill it in, then reinterpret the bytes via unsafe.Pointer. Layout
+// MUST match usage.go's Usage declaration order; if Usage ever gains,
+// removes, or reorders a field, this helper MUST be updated to match
+// or it will silently construct a corrupted Usage. The returned Usage
+// is local to the test (every production path goes through NewUsage).
+// Standard Go testing pattern (protobuf, gRPC, sealed-value suites).
+func rawUsageWithCounts(input, output, total int64) ai.Usage {
+	type usageLayout struct {
+		inputTokens      int64
+		outputTokens     int64
+		totalTokens      int64
+		cacheReadTokens  *int64
+		cacheWriteTokens *int64
+		reasoningTokens  *int64
+	}
+	raw := usageLayout{
+		inputTokens:  input,
+		outputTokens: output,
+		totalTokens:  total,
+	}
+	return *(*ai.Usage)(unsafe.Pointer(&raw))
 }
 
 // ---------------------------------------------------------------------------
@@ -84,9 +115,9 @@ func TestNewResponseStartPayload_ConstructorValidationMatrix(t *testing.T) {
 		// Model validation order (only after ResponseID passes). First-failure
 		// pinning: empty ResponseID must fire before any model check.
 		{name: "first failure: empty response id wins over empty model", responseID: "", model: "", wantErr: ai.ErrEmptyResponseID},
-		{name: "empty model", responseID: "r1", model: "", wantErr: ai.ErrEmptyModel},
-		{name: "whitespace model", responseID: "r1", model: "   ", wantErr: ai.ErrWhitespaceModel},
-		{name: "too-long model", responseID: "r1", model: tooLong, wantErr: ai.ErrModelTooLong},
+		{name: "empty model", responseID: "r1", model: "", wantErr: ai.ErrEmptyResponseModel},
+		{name: "whitespace model", responseID: "r1", model: "   ", wantErr: ai.ErrWhitespaceResponseModel},
+		{name: "too-long model", responseID: "r1", model: tooLong, wantErr: ai.ErrResponseModelTooLong},
 	}
 
 	for _, tc := range cases {
@@ -210,12 +241,12 @@ func TestNewResponseCompletePayload_ConstructorValidationMatrix(t *testing.T) {
 // with "ai: ", all non-nil, all non-empty. Per SCN-006.
 func TestResponseSentinels_ArePairwiseDistinctAndPrefixed(t *testing.T) {
 	sentinels := map[string]error{
-		"ErrEmptyResponseID":      ai.ErrEmptyResponseID,
-		"ErrWhitespaceResponseID": ai.ErrWhitespaceResponseID,
-		"ErrResponseIDTooLong":    ai.ErrResponseIDTooLong,
-		"ErrEmptyModel":           ai.ErrEmptyModel,
-		"ErrWhitespaceModel":      ai.ErrWhitespaceModel,
-		"ErrModelTooLong":         ai.ErrModelTooLong,
+		"ErrEmptyResponseID":         ai.ErrEmptyResponseID,
+		"ErrWhitespaceResponseID":    ai.ErrWhitespaceResponseID,
+		"ErrResponseIDTooLong":       ai.ErrResponseIDTooLong,
+		"ErrEmptyResponseModel":      ai.ErrEmptyResponseModel,
+		"ErrWhitespaceResponseModel": ai.ErrWhitespaceResponseModel,
+		"ErrResponseModelTooLong":    ai.ErrResponseModelTooLong,
 		// Reused from AI-10 — must remain distinct from AI-12 sentinels.
 		"ErrInvalidFinishReason": ai.ErrInvalidFinishReason,
 	}
@@ -296,7 +327,7 @@ func TestResponsePayloads_HaveNoMarshalOrCloneOrWithMethods(t *testing.T) {
 						typ.Name(), m.Name)
 				}
 				if strings.HasPrefix(m.Name, "With") {
-					t.Errorf("%s must not define With* method (sealed payload forbids builder-style mutation)",
+					t.Errorf("%s.%s must not be a With* method (sealed payload forbids builder-style mutation)",
 						typ.Name(), m.Name)
 				}
 			}
