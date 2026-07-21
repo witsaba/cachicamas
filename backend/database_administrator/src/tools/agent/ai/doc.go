@@ -189,3 +189,23 @@ package ai
 // zero or more deltas, one end per span) are documented but NOT
 // runtime-enforced; AI-20 (stream testkit) and AI-21 (conformance suite)
 // own per-producer stream validation. See text_event.go.
+
+// AI-14 paragraph (added after package clause; greedy AI-07 paragraph test does not count).
+//
+// As of AI-14: the v1 reasoning-event contract is an explicit no-op /
+// unsupported contract under AI-06 § Reasoning policy. v1 Layer 1
+// adapters MUST NOT emit EventKindReasoningStart, EventKindReasoningDelta,
+// or EventKindReasoningEnd events. The three reserved kinds and their
+// wire strings (reasoning.start, reasoning.delta, reasoning.end) stay
+// in the canonical AllEventKinds() registry for future provider
+// enablement (additive one-line slot, no registry change). The v1
+// ABSENT policy is enforced by the absence of sanctioned producer
+// constructors: no NewReasoning*Event, no AsReasoning* helpers, no
+// ReasoningStartPayload / ReasoningDeltaPayload / ReasoningEndPayload
+// types. Reasoning content cannot masquerade as text-answer content:
+// the ContentPart discriminator (KindText vs KindReasoning) is the
+// single source of truth, and a Reasoning value is never assignable to
+// a Text slot. AI-21 conformance skips reasoning payload cases with
+// reason citing see AI-02 § Reasoning policy. Concrete reasoning event
+// payloads are deferred to a future AI-XX when a provider capability
+// requires them.
