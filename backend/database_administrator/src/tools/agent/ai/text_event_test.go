@@ -79,7 +79,7 @@ func TestTextDeltaPayload_Matrix(t *testing.T) {
 		delta string
 	}{
 		{"ascii", "hello"},
-		{"two-byte rune continuation at end", "hé"}, // bytes: 68 c3 a9, last = 0xA9
+		{"two-byte rune continuation at end", "hé"},  // bytes: 68 c3 a9, last = 0xA9
 		{"four-byte emoji continuation at end", "🌍"}, // bytes: f0 9f 8c 8d, last = 0x8D
 		{"empty keepalive", ""},
 	}
