@@ -168,3 +168,21 @@ package ai
 // reuse of ErrInvalidFinishReason and the ErrUsage* family from AI-10.
 // Ordering is documented, NOT runtime-enforced; AI-20 (stream testkit)
 // and AI-21 (conformance suite) own runtime validation.
+
+// AI-13 paragraph (added after package clause; greedy AI-07 paragraph test does not count).
+//
+// As of AI-13: TextStartPayload, TextDeltaPayload, and TextEndPayload
+// are concrete eventPayload implementations that stream normalized text
+// increments through the three-event lifecycle text.start -> text.delta*
+// -> text.end. TextStartPayload and TextEndPayload are zero-field markers;
+// TextDeltaPayload carries an unexported delta string validated against
+// ErrInvalidUTF8Boundary when its last byte is a UTF-8 leading byte in
+// 0xC2-0xF4 (rune-level boundary safety; the boundary check prevents
+// mid-rune splits but does NOT enforce full UTF-8 validity). An empty
+// TextDeltaPayload delta is VALID (keepalive / zero-content frame).
+// Grapheme-cluster, ZWJ-sequence, and combining-mark boundaries are
+// documented limits — guaranteeing them requires golang.org/x/text and
+// would need its own ADR per ADR 0004. Lifecycle ordering invariants
+// (one start, zero or more deltas, one end per span) are documented but
+// NOT runtime-enforced; AI-20 (stream testkit) and AI-21 (conformance
+// suite) own per-producer stream validation. See text_event.go.
