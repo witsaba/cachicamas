@@ -20,13 +20,13 @@ import (
 )
 
 // ErrInvalidUTF8Boundary is returned by NewTextDeltaPayload when the
-// supplied delta ends with a UTF-8 leading byte (0xC2–0xF4), which would
-// split a multi-byte rune across the delta boundary and produce invalid
-// UTF-8 in the reconstructed stream. Per AI-13 spec § "Requirement:
-// Rune-boundary safety" and REQ-AI13-4. Continuation bytes (0x80–0xBF)
-// are always the END of a multi-byte rune and are NOT rejected; bytes
-// in 0xF5–0xFF are also NOT rejected (the per-byte check accepts them;
-// utf8.ValidString on the CONCATENATED stream is a separate concern).
+// supplied delta contains a UTF-8 leading byte (0xC2–0xF4) without its
+// expected 1–3 continuation bytes (0x80–0xBF). Such a truncated or
+// malformed sequence would split a multi-byte rune across a delta
+// boundary. Per AI-13 spec § "Requirement: Rune-boundary safety" and
+// REQ-AI13-4. Orphan continuation bytes, overlong lead bytes 0xC0–0xC1,
+// and invalid bytes 0xF5–0xFF are not mid-rune splits and pass this
+// boundary check; full UTF-8 validity remains a separate concern.
 var ErrInvalidUTF8Boundary = errors.New("ai: text delta ends mid-rune (UTF-8 boundary violation)")
 
 // TextStartPayload is the AI-13 event payload for text.start events.
@@ -130,13 +130,16 @@ func (p TextDeltaPayload) Validate() error {
 //
 //  1. Empty delta "" → returns (TextDeltaPayload{}, nil) — keepalive /
 //     zero-content frame is valid.
-//  2. Non-empty delta whose last byte is a UTF-8 leading byte
-//     (0xC2–0xF4) → returns (TextDeltaPayload{}, ErrInvalidUTF8Boundary).
-//  3. Otherwise → returns (TextDeltaPayload{delta: delta}, nil).
+//  2. The validator walks the complete string. ASCII, orphan continuation,
+//     overlong lead, and invalid bytes advance one byte and pass.
+//  3. Each UTF-8 leading byte (0xC2–0xF4) must be followed by the expected
+//     1–3 continuation bytes (0x80–0xBF); otherwise the constructor returns
+//     (TextDeltaPayload{}, ErrInvalidUTF8Boundary).
+//  4. A complete walk returns (TextDeltaPayload{delta: delta}, nil).
 //
-// The check is per-byte; see validateUTF8Boundary for the byte-level
-// rationale and the verification table in the design doc. Per AI-13
-// spec REQ-AI13-2 and REQ-AI13-5.
+// See validateUTF8Boundary for the byte-level rationale and the
+// verification table in the design doc. Per AI-13 spec REQ-AI13-2 and
+// REQ-AI13-5.
 //
 // Returns the zero value TextDeltaPayload{} with the first validation
 // error — never a half-constructed payload.
@@ -204,36 +207,31 @@ func NewTextEndEvent() (Event, error) {
 	return NewEvent(p)
 }
 
-// validateUTF8Boundary reports whether s is a valid UTF-8 streaming
-// boundary:
+// validateUTF8Boundary walks s and reports whether every UTF-8 leading
+// byte has the complete continuation-byte sequence required to keep the
+// delta boundary outside a multi-byte rune:
 //
 //   - Empty strings are valid (keepalive / zero-content frame).
-//   - A non-empty string whose last byte is a UTF-8 leading byte
-//     (0xC2–0xF4 inclusive) is REJECTED because the leading byte
-//     indicates an incomplete multi-byte sequence: splitting a
-//     multi-byte rune across the delta boundary would produce invalid
-//     UTF-8 in the reconstructed stream.
-//   - Continuation bytes (0x80–0xBF) always end a multi-byte rune
-//     and PASS.
-//   - ASCII bytes (0x00–0x7F) are single-byte runes and PASS.
-//   - Bytes 0xF5–0xFF are invalid in UTF-8 but are NOT a boundary
-//     violation this guard catches — they PASS at this layer. The
-//     consumer MAY apply utf8.ValidString to the CONCATENATED stream
-//     if it needs that guarantee (per REQ-AI13-5 row 12).
+//   - ASCII bytes (0x00–0x7F) are complete single-byte runes and advance
+//     the walk by one byte.
+//   - Orphan continuation bytes (0x80–0xBF) and overlong lead bytes
+//     (0xC0–0xC1) are not mid-rune splits; they advance one byte and pass
+//     per REQ-AI13-5 row 10.
+//   - Invalid bytes (0xF5–0xFF) likewise advance one byte and pass per
+//     REQ-AI13-5 row 12.
+//   - A leading byte (0xC2–0xF4) determines a 2-, 3-, or 4-byte rune. The
+//     walk rejects the string with ErrInvalidUTF8Boundary when fewer than
+//     the required bytes remain or any required continuation byte falls
+//     outside 0x80–0xBF; otherwise it advances by the complete rune length.
 //
-// The check is O(1) per call. The empty short-circuit prevents a
-// negative-length access on s[len(s)-1].
+// The check is O(n) in len(s), idempotent, and deliberately narrower than
+// full UTF-8 validation: it validates rune completeness at delta boundaries,
+// not Unicode scalar validity or canonical encoding.
 //
-// DO NOT introduce a utf8.ValidString check here. REQ-AI13-5 row 12
-// requires `"\xFF"` to PASS the per-delta check (because
-// utf8.ValidString("\xFF") == false but the boundary semantics allow
-// lone invalid bytes; the consumer applies utf8.ValidString on the
-// CONCATENATED stream — see REQ-AI13-5 row 12). Adding utf8.ValidString
-// would over-reject and break row 12.
-//
-// DO NOT widen the range to `last >= 0xC2` without an upper bound.
-// Bytes 0xF5–0xFF are NOT UTF-8 leading bytes and MUST be accepted at
-// this layer for the same reason (REQ-AI13-5 row 12).
+// DO NOT introduce utf8.ValidString here. REQ-AI13-5 row 12 requires
+// `"\xFF"` to pass because a lone invalid byte is not a mid-rune split.
+// A consumer that requires full validity may apply utf8.ValidString to the
+// concatenated stream.
 func validateUTF8Boundary(s string) error {
 	if len(s) == 0 {
 		return nil

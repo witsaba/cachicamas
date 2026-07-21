@@ -175,14 +175,17 @@ package ai
 // are concrete eventPayload implementations that stream normalized text
 // increments through the three-event lifecycle text.start -> text.delta*
 // -> text.end. TextStartPayload and TextEndPayload are zero-field markers;
-// TextDeltaPayload carries an unexported delta string validated against
-// ErrInvalidUTF8Boundary when its last byte is a UTF-8 leading byte in
-// 0xC2-0xF4 (rune-level boundary safety; the boundary check prevents
-// mid-rune splits but does NOT enforce full UTF-8 validity). An empty
-// TextDeltaPayload delta is VALID (keepalive / zero-content frame).
-// Grapheme-cluster, ZWJ-sequence, and combining-mark boundaries are
-// documented limits — guaranteeing them requires golang.org/x/text and
-// would need its own ADR per ADR 0004. Lifecycle ordering invariants
-// (one start, zero or more deltas, one end per span) are documented but
-// NOT runtime-enforced; AI-20 (stream testkit) and AI-21 (conformance
-// suite) own per-producer stream validation. See text_event.go.
+// TextDeltaPayload carries an unexported delta string validated by
+// validateUTF8Boundary, which walks the string checking each rune for
+// completeness (a UTF-8 leading byte 0xC2-0xF4 must be followed by the
+// expected 1-3 continuation bytes 0x80-0xBF); any truncated or malformed
+// sequence returns ErrInvalidUTF8Boundary. An empty TextDeltaPayload delta
+// is VALID (keepalive / zero-content frame); orphan continuation bytes,
+// overlong lead bytes 0xC0-0xC1, and invalid bytes 0xF5-0xFF pass per
+// spec rows 10 and 12 because they are not mid-rune splits. Grapheme-
+// cluster, ZWJ-sequence, and combining-mark boundaries are documented
+// limits — guaranteeing them requires golang.org/x/text and would need
+// its own ADR per ADR 0004. Lifecycle ordering invariants (one start,
+// zero or more deltas, one end per span) are documented but NOT
+// runtime-enforced; AI-20 (stream testkit) and AI-21 (conformance suite)
+// own per-producer stream validation. See text_event.go.
