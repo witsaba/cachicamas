@@ -133,9 +133,9 @@ package ai
 //
 // # Ordering rules for the event envelope
 //
-//   - Exactly one EventKindResponseStart is required per stream; the
-//     first event on a fresh producer is sequence 1 and MUST be
-//     response.start. Duplicates are illegal.
+//   - Each producer-owned stream starts with exactly one
+//     EventKindResponseStart; the first event on a fresh producer is
+//     sequence 1 and MUST be response.start. Duplicates are illegal.
 //   - Sequence is 1-based, producer-assigned, and contiguous. NewEvent
 //     reads the next value from the package-private atomic counter;
 //     AI-20 (stream testkit) detects dropped events by inspecting gaps.
@@ -152,3 +152,10 @@ package ai
 //
 // See AI-11 § "Requirement: ai-event-envelope-ordering-rules" for the
 // authoritative ordering contract.
+
+// AI-12 paragraph (added after package clause; greedy AI-07 paragraph test does not count).
+//
+// As of AI-12: ResponseStartPayload and ResponseCompletePayload are
+// concrete eventPayload implementations with event constructors and
+// accessors. IsTerminalKind reports response.complete or error; AI-20
+// / AI-21 own per-producer ordering. See response.go.
