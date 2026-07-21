@@ -159,3 +159,12 @@ package ai
 // concrete eventPayload implementations with event constructors and
 // accessors. IsTerminalKind reports response.complete or error; AI-20
 // / AI-21 own per-producer ordering. See response.go.
+//
+// NewResponseStartEvent / NewResponseCompleteEvent wrap payloads into
+// the envelope with NewEvent's Kind/sequence discipline. Sentinels
+// (ErrEmptyResponseID, ErrWhitespaceResponseID, ErrResponseIDTooLong,
+// ErrEmptyResponseModel, ErrWhitespaceResponseModel, ErrResponseModelTooLong)
+// are ai:-prefixed and pairwise distinct via errors.Is, including
+// reuse of ErrInvalidFinishReason and the ErrUsage* family from AI-10.
+// Ordering is documented, NOT runtime-enforced; AI-20 (stream testkit)
+// and AI-21 (conformance suite) own runtime validation.

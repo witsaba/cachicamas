@@ -16,7 +16,10 @@
 // cannot construct a payload implementation; only this package can.
 //
 // Ordering invariants (documented fully in doc.go's AI-11 paragraph):
-//   - Exactly one EventKindResponseStart per stream (sequence 1).
+//   - Exactly one EventKindResponseStart per producer's stream
+//     (the first event on a fresh producer carries sequence 1).
+//     Sequence ordering across producers is not enforced; AI-20/AI-21
+//     own cross-producer conformance.
 //   - Sequence is 1-based, producer-assigned, contiguous.
 //   - At most one EventKindResponseComplete per stream, mutually
 //     exclusive with EventKindError.
