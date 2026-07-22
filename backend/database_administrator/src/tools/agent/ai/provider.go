@@ -31,19 +31,19 @@ import (
 //
 // # Contract preamble (every provider implementation's GoDoc MUST include)
 //
-//   Stream(ctx, req) returns a receive-only chan ai.Event. The first
-//   event on a fresh producer is EventKindResponseStart (sequence 1);
-//   the stream terminates with at most one EventKindResponseComplete
-//   OR one EventKindError (the two are mutually exclusive). The caller
-//   MUST drain the channel until it is closed. The producer goroutine
-//   is the sole owner of the channel's lifetime; the caller MUST NOT
-//   attempt to close it (the type system prevents this). On ctx
-//   cancellation, the producer observes ctx.Done(), terminates its
-//   work within a bounded time, and closes the channel. Under
-//   cancellation while the producer is blocked or unblockable on a
-//   full channel, late events are dropped and the channel is closed
-//   without a terminal event (Proposal #2235 § 2 D1, AI-01 § 4
-//   Scenario C).
+//	Stream(ctx, req) returns a receive-only chan ai.Event. The first
+//	event on a fresh producer is EventKindResponseStart (sequence 1);
+//	the stream terminates with at most one EventKindResponseComplete
+//	OR one EventKindError (the two are mutually exclusive). The caller
+//	MUST drain the channel until it is closed. The producer goroutine
+//	is the sole owner of the channel's lifetime; the caller MUST NOT
+//	attempt to close it (the type system prevents this). On ctx
+//	cancellation, the producer observes ctx.Done(), terminates its
+//	work within a bounded time, and closes the channel. Under
+//	cancellation while the producer is blocked or unblockable on a
+//	full channel, late events are dropped and the channel is closed
+//	without a terminal event (Proposal #2235 § 2 D1, AI-01 § 4
+//	Scenario C).
 //
 // # Lifecycle anchors
 //
@@ -56,21 +56,21 @@ import (
 //
 // # Import boundary
 //
-//   The public interface declaration mentions only context.Context,
-//   Request, Event, <-chan, and error. Layer 1 (this package) may
-//   import only the Go standard library and vendor SDKs (ADR 0004).
-//   A concrete provider adapter MAY use vendor SDKs privately; the
-//   conversion to ai.Event MUST occur before any value crosses this
-//   method boundary.
+//	The public interface declaration mentions only context.Context,
+//	Request, Event, <-chan, and error. Layer 1 (this package) may
+//	import only the Go standard library and vendor SDKs (ADR 0004).
+//	A concrete provider adapter MAY use vendor SDKs privately; the
+//	conversion to ai.Event MUST occur before any value crosses this
+//	method boundary.
 //
 // # Sequence gap detection
 //
-//   Event.Sequence is per-stream, 1-based, contiguous, and
-//   producer-assigned. The v1 implementation uses a process-scoped
-//   atomic counter (event.go:235) so two concurrent streams MAY
-//   interleave their sequence values; AI-20 (stream testkit) and
-//   AI-21 (conformance suite) own per-stream gap detection.
-//   TODO(ai-20): Sequence gap detection belongs here.
+//	Event.Sequence is per-stream, 1-based, contiguous, and
+//	producer-assigned. The v1 implementation uses a process-scoped
+//	atomic counter (event.go:235) so two concurrent streams MAY
+//	interleave their sequence values; AI-20 (stream testkit) and
+//	AI-21 (conformance suite) own per-stream gap detection.
+//	TODO(ai-20): Sequence gap detection belongs here.
 type ModelProvider interface {
 	// Stream starts a model turn and returns a receive-only channel of
 	// normalized events. The first event MUST be EventKindResponseStart
