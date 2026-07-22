@@ -209,3 +209,30 @@ package ai
 // reason citing see AI-02 § Reasoning policy. Concrete reasoning event
 // payloads are deferred to a future AI-XX when a provider capability
 // requires them.
+
+// AI-15 paragraph (added after package clause; greedy AI-07 paragraph test does not count).
+//
+// As of AI-15: ToolCallStartPayload, ToolCallDeltaPayload, and
+// ToolCallEndPayload are concrete eventPayload implementations that stream
+// normalized tool-call lifecycles through the three-event pattern
+// tool_call.start -> tool_call.delta* -> tool_call.end, with multiple
+// parallel calls interleavable on the same producer channel and correlated
+// by an opaque per-call callID. ToolCallStartPayload carries (callID, name);
+// ToolCallDeltaPayload carries (callID, delta json.RawMessage) with
+// Validate enforcing len(delta) > 0 and len(delta) <= MaxToolCallDeltaLength
+// (64 KiB); ToolCallEndPayload carries (callID, name, arguments
+// json.RawMessage) with Validate reusing NewToolCall's structural checks
+// verbatim (toolcall.go:128–142). The callID correlation handle reuses
+// MaxToolResultCallIDLength = 512 bytes (toolresult.go:12) and the
+// ToolResult callID sentinels (ErrEmptyToolResultCallID,
+// ErrToolResultCallIDTooLong) so callID bounds and validation are
+// consistent across tool-call emission and tool-result echo. The
+// reconstruction contract is byte-level: concatenating Delta fragments for
+// a callID MUST equal the End payload's arguments verbatim, and the End
+// payload's arguments MUST be parseable as JSON (validateToolCallArguments
+// at toolcall.go:99–111). Layer 2 owns the accumulation buffer; Layer 1
+// enforces only per-event validity. Lifecycle ordering invariants (one
+// start, zero or more deltas, one end per call; interleavable across
+// callIDs) are documented but NOT runtime-enforced; AI-20 (stream testkit)
+// and AI-21 (conformance suite) own per-producer stream validation. See
+// toolcall_event.go.
