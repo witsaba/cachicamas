@@ -495,5 +495,146 @@ transcript the model never saw.
 
 ---
 
-> **Continues in §§ 6–9** — the twelve seams, the forward-requirements register for G1–G13,
-> non-goals for v1, and the review checklist.
+## 6. The twelve seams that must exist now
+
+A **seam** is a place where a decision can later be inserted without reshaping anything around it.
+The twelve below are the ones this design cannot retrofit cheaply, because each sits on the
+signature of a call that everything else goes through. Most will have exactly one implementation
+for a long time — several will have a deliberately trivial one — and that is fine. The cost of
+naming a seam early is one parameter; the cost of adding one late is every call site.
+
+| # | Seam | Lives on | Trivial v1 implementation | Why it cannot be added later |
+| --- | --- | --- | --- | --- |
+| 1 | **Pre-request hook** | the loop, immediately before the provider call | identity | It is the only point where the outgoing request still exists as data. Cache breakpoints (§ 3.2), injected repository context, and prompt trimming all need it, and none of them can reach that moment from anywhere else |
+| 2 | **Permission decision** | the tool-scheduling path in the loop | allow-all | If approval is not a suspension in the loop, it happens out of band and the event stream stops being a complete description of the session. Every frontend then reimplements it, differently |
+| 3 | **Sandbox policy** | the tool *execution* call, not the tool | none | Confinement is a property of the call site. Without a parameter to carry it, adding confinement means changing every tool |
+| 4 | **Tool source** | session construction, re-readable per turn | a static list of built-ins | Tools that can change between turns invalidate the cache prefix and require a supervisor for the processes that provide them. A fixed slice models neither |
+| 5 | **Context strategy** | the harness, before each turn | never compact | Compaction must see the whole transcript and the model's budget at the same moment. Nothing above the harness has both |
+| 6 | **Token counting** | an *optional* provider capability, discovered by type assertion | absent, fall back to an estimate | Compaction that estimates by character count is wrong by enough to matter. Making this optional rather than part of the provider contract is what stops it from forcing every adapter to implement it |
+| 7 | **Retry classification** | the typed error a provider returns | everything fatal | Whether a failure is retryable is knowable only where the wire error is. Whether to *act* on that is a policy decision one layer up. Collapsing the two loses both |
+| 8 | **Failover policy** | the harness | none | Switching model mid-session re-opens the token budget, the price table and the cache prefix. Only the harness holds all three |
+| 9 | **Provider escape hatch** | the normalized request | empty | The alternative is growing the neutral vocabulary once per provider quirk, forever. See § 3.3 |
+| 10 | **Cache breakpoints** | the normalized request | no markers | A flat system instruction has nowhere to put one, and the first adapter freezes the shape |
+| 11 | **Reasoning round-trip token** | reasoning content | empty | Correctness, not metadata: without it, multi-turn extended thinking with tool use fails |
+| 12 | **Delegation** | the harness, invoked from inside a tool | no subagents | Re-entrancy is a structural property. A harness that forbids a concurrent run cannot host one, and the restriction is usually load-bearing elsewhere by the time anyone notices |
+
+Skills and prompts are a thirteenth seam in practice; they are specified separately in
+[ADR 0006](../adr/0006-resolve-skill-and-prompt-source-of-truth.md) because the decision they carry
+is policy rather than mechanism.
+
+**Seams 1, 9, 10 and 11 sit on Layer 1 contracts and are therefore the urgent ones.** They are the
+only four on this list that a shipped Layer 1 must change to accommodate, which is why they appear
+in § 3.2 with milestone numbers while the rest are recorded as forward requirements below.
+
+---
+
+## 7. Forward-requirements register
+
+Every concern the review raised, with its owner and its disposition. A row marked *seam now* means
+[§ 6](#6-the-twelve-seams-that-must-exist-now) reserves the place and no further work happens in
+v1. A row marked *in v1* has a milestone. Verdicts are decided in
+[ADR 0005 § D4](../adr/0005-promote-agent-stack-to-own-module.md#d4--v1-scope-for-cross-cutting-concerns);
+this table adds the architectural detail behind each.
+
+| ID | Concern | Owner | Seam | Layer 1 impact | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| **G1** | Permission as a suspendable protocol, with allow-once / allow-always / deny / modify-input, remembered per session and derived for subagents | L2 protocol, L3 policy | 2 | none | seam now |
+| **G2** | Sandboxed tool execution, applied to the whole spawned process tree rather than the direct child | L3 | 3 | none | seam now |
+| **G3** | Context compaction: protect recent turns, never orphan a call/result pair, record what was removed, survive interruption | L2 | 5, 6 | an *optional* token-counting capability, discovered by type assertion — it does **not** widen the provider contract | seam now |
+| **G4** | Prompt caching — breakpoint placement at Layer 1, prefix stability at Layer 2 | L1 places, L2 stabilises | 1, 10 | **breaking**: the system instruction must become ordered markable segments, and tool declarations and messages must accept breakpoint markers | **in v1 — AI-43** |
+| **G5** | Parallel tool execution with deterministic, call-ordered re-join and per-tool concurrency policy | L2 | 2 | the tool-call ordinal must survive normalisation | seam now |
+| **G6** | Tool sources that are dynamic, supervised, and may also supply prompts and resources | L3 | 4 | none — tool declarations already exist | seam now |
+| **G7** | Subagents as a harness invoked from a tool, with nested cancellation, cost and permission scope, and parent-identified events | L2 | 12 | none | seam now |
+| **G8** | Typed error taxonomy, retry with backoff, and provider failover. **The partial-output case is the important one**: a stream that dies after emitting output is the most common real failure and the one naive retry logic excludes | L1 taxonomy, L2 policy | 7, 8 | a constructible terminal error payload (C4) plus a partial-output discriminator | **in v1 — AI-18, AI-30, AI-33** |
+| **G9** | Per-request options plus a typed-but-opaque provider pass-through | L1 | 9 | the request needs extension points and copy-on-write rebuilding | **in v1 — AI-44** |
+| **G10** | Cost and usage as first-class events rather than something each frontend re-derives | L2 emits, L3 prices | 11 | **none — already satisfied.** Usage already carries cache-read, cache-write and reasoning token counts | deferred to L2/L3 |
+| **G11** | Hook taxonomy: pre-request, pre-compact, post-turn, session-start. Observers must never be synchronous on the streaming path | L2 + L3 | 1 | requires G9's rebuildable request | seam now |
+| **G12** | Provider leakage — see the nine-row register in [§ 3.3](#33-the-provider-leakage-register) | split | 9, 11 | three contract changes (delta-optional tool calls, reasoning round-trip token, two new finish reasons); six adapter-local | **in v1 — AI-45, AI-46, + amendments** |
+| **G13** | Stream carrier: channel versus iterator at the package boundary | L1 | — | none | **decision only — AI-47**, default keep channels |
+
+### Two dispositions worth their reasoning
+
+**G10 needs no Layer 1 work, contrary to first appearances.** The usage type already carries the
+cache and reasoning token counts an adapter would report. What is missing is entirely above it: a
+per-turn and per-session cost event on the Layer 2 stream, and a Layer 3 price table to convert
+tokens into money. One nuance the price table must respect — on models with adaptive reasoning, the
+reasoning token count only arrives on the final streamed usage update, so any mid-stream cost
+figure is structurally an estimate and should be labelled as one.
+
+**G13 must not be scheduled as implementation work.** The canonical objection to channels at a
+package boundary is that a consumer who stops reading strands the producer goroutine forever, and
+goroutines are not collected. The shipped v1 contract already closes that: every send selects on
+the channel and on cancellation, and the caller owns the cancellable context. What remains is a
+caller who abandons the stream *and* never cancels — a contract violation, not a design flaw.
+Against that, switching carriers today would invalidate the interface signature guard and the
+behavioural scenarios that merged days ago. The decision is nonetheless worth *closing* before the
+first adapter exists, because after that it is roughly three times the work. Recommended default:
+keep channels, and expose an iterator view from the test kit for ergonomics.
+
+---
+
+## 8. Non-goals for v1
+
+Recorded so that their absence reads as a decision rather than an oversight.
+
+- **A second Layer 1 provider.** One adapter, proven against a conformance suite, is the v1 target.
+  The suite is what makes the second adapter cheap; building two adapters before the suite makes
+  both expensive.
+- **`database_administrator` driving an agent session.** Permitted by
+  [ADR 0005 § D1 row 5](../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2),
+  unexercised, and priced there.
+- **A TUI.** Print mode is the minimum viable frontend and the one that proves the event stream is
+  sufficient. A TUI that is written first tends to acquire state the stream does not carry.
+- **Sandboxing, MCP, and subagents.** Seams 3, 4 and 12 exist; the implementations do not.
+- **Session branching UI.** The append-only session format with parent chains supports it; nothing
+  in v1 exposes it.
+- **Multimodal content beyond text.** Image and audio discriminators exist in the content
+  vocabulary and no constructor produces them. Enabling them requires per-provider capability
+  detection that v1 does not model.
+- **Cross-session or org-wide cost aggregation.** Per-turn and per-session cost is a v1 seam;
+  rolling it up is a `database_administrator` concern and needs its own decision.
+
+---
+
+## 9. Review checklist
+
+For anyone reviewing a milestone that touches the agent stack.
+
+**Boundaries**
+
+- [ ] No package of `backend/agent` imports another backend module — including from `cmd/`.
+- [ ] Layer 1 imports only stdlib, `net/http`, a vendor SDK, and the OpenTelemetry **API**. No SDK,
+      no exporter, no `otelslog`.
+- [ ] Layer 2 performs no I/O of its own, reads no environment, and touches no filesystem.
+- [ ] Layer 3 reaches other modules over HTTP only, never by import.
+- [ ] Both import guards still run, and the reverse guard still covers the whole module.
+
+**Contracts**
+
+- [ ] No vendor wire type crosses the Layer 1 method boundary.
+- [ ] Every event kind that can be emitted has a payload that can actually be constructed.
+- [ ] Anything a provider must receive back byte-identical is carried opaquely, not reconstructed.
+- [ ] A new neutral field is genuinely neutral. If it exists to satisfy one provider, it belongs in
+      the escape hatch instead — see [§ 3.3](#33-the-provider-leakage-register).
+- [ ] Tool-call deltas remain optional. Nothing requires at least one before the end event.
+
+**Streams and concurrency**
+
+- [ ] Every producer goroutine has a documented exit path, and every send selects on cancellation.
+- [ ] Nothing closes a channel it does not own.
+- [ ] Cancellation is a context, not a polled flag, and backoff waits on it rather than sleeping.
+- [ ] Delta events carry an index, never a snapshot of the accumulated message.
+- [ ] Tests assert no goroutine leak on the early-abandon path, and run under the race detector.
+
+**Observability and safety**
+
+- [ ] No span attribute or log field carries prompt, completion, reasoning, tool-argument or
+      tool-result text, a header, or a credential.
+- [ ] Errors are typed and inspectable, and a mid-stream failure preserves its partial output.
+- [ ] A tool that spawns processes kills the process group, not just the direct child.
+
+**Process**
+
+- [ ] The change fits the review budget, or says in its description why it does not.
+- [ ] Milestone identifiers are appended, never renumbered.
+- [ ] Anything this milestone deliberately leaves unsupported is stated explicitly.
