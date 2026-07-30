@@ -41,7 +41,7 @@ The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-a
 | 1 | [What is cachicamas?](#1-what-is-cachicamas) | Witsaba's SDLC framework, v0.0.1, wraps `/sdd-*` as its per-task engine. |
 | 2 | [Why does it exist?](#2-why-does-it-exist) | To enable a competitive engineering org with many internal companies, all running the same playbook. |
 | 3 | [v0.0.1 Scope](#3-v001-scope) | Thin slice: schema + PRD intake + metadata analysis + 1:1 milestone→task decomposition. |
-| 4 | [Architecture](#4-architecture) | Hexagonal Go services (`database_administrator`, `prd_orchestrator`) + Qwik frontend on Postgres 18. |
+| 4 | [Architecture](#4-architecture) | Hexagonal Go services (`database_administrator`, `workspace_syncer`) + the layered `agent` module + Qwik frontend on Postgres 18. |
 | 5 | [Repository Layout](#5-repository-layout) | `backend/`, `frontend/`, `openspec/`, `infra/`, `scripts/`, `wiki/`, `docs/`, `spikes/`, `.worktrees/`. |
 | 6 | [Tech Stack](#6-tech-stack) | Go 1.26.3, Echo v5.2.1, Postgres 18, OpenTelemetry → Jaeger v2, docker-compose v2, Qwik 1.20.0, pnpm 11. |
 | 7 | [SDD Pipeline Mapping](#7-sdd-pipeline-mapping) | cachicamas blocks 1–6 map to `sdd-explore`, `sdd-propose`, `sdd-design`, `sdd-tasks`, `sdd-spec`+`sdd-apply`+`sdd-verify`, `branch-pr`. |

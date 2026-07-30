@@ -1,6 +1,6 @@
 # Layer 1 milestone map — `cachicamas_ai` model adapter
 
-> **Status:** In progress — **17 of 48** milestones shipped (AI-00 … AI-16). Last merged: AI-15 (PR #79, 2026-07-22). In flight: AI-16 (PR #80, open).
+> **Status:** In progress — **17 of 48** milestones shipped (AI-00 … AI-16). Last merged: AI-16 (PR #87, 2026-07-30). Phase C is complete; **Phase 0 (AI-39) is the next milestone**.
 > **Amended:** 2026-07-30 by ADR 0005, ADR 0006, and the adversarial architecture review of the same date (Engram `obs #2243`). See [Phase 0](#phase-0--structural-corrections-retro-inserted-2026-07-30) and [Phase H](#phase-h--contract-gaps-found-by-the-2026-07-30-review).
 > **Source decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) (original) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) (module boundary, dependency rule v2, v1 scope — supersedes 0004 in part) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md) (skill/prompt sources)
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md)
@@ -145,9 +145,10 @@ Nothing here adds capability. AI-39 is a move; AI-40 through AI-42 make three sh
 - **Goal:** Move the agent stack out of `database_administrator` into the sibling module `backend/agent`, per [ADR 0005 § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2).
 - **Deliverable:** New module (`go.mod`, `Makefile`, `.golangci.yml`, `README.md`, `.gitignore`); `src/ai/` and `src/agenttest/` relocated; import paths rewritten; the forward import guard upgraded to a module allowlist and to `go list -deps`; a **new reverse guard** in `database_administrator`; a repo-root `go.work`.
 - **Acceptance:** `make test` is green in every module; both import directions are mechanically guarded; `git log --follow` traverses the move; no behavior changes.
-- **Depends on:** ADR 0005; **AI-16 (PR #80) merged**.
+- **Depends on:** ADR 0005 (merged, PR #81); AI-16 (merged, PR #87). **Both satisfied — AI-39 is unblocked.**
 - **Blocks:** AI-17 and everything after it.
 - **Out of scope:** Adding any dependency, including OpenTelemetry. `go.mod` stays empty — Layer 1 is stdlib-only today.
+- **Also in scope — three lint findings confirmed on 2026-07-30** when AI-16 landed. `make lint` reports `newStreamBuffer` and `validatePreStream` in `provider.go` as **unused**, plus unreachable code in `agenttest/consumer_test.go`. The two helpers are documented as *"Adapters MUST call this helper … so the pre-stream branch is mechanically identical across implementations"* — but they are **unexported**, and adapters live in other packages, so no adapter can ever call them. The comment two lines below each concedes it (*"Adapters may inline the same two-line check"*). The module move is the natural moment to resolve this, because it is the point at which adapters get a known home: export them, delete them, or relocate them. Note `make lint` already exits non-zero on `main` for unrelated pre-existing reasons (~56 issues, mostly `errcheck` in tests), so this milestone should state whether it is also fixing the baseline or only its own three.
 - **Note:** The `git mv` and the import-path rewrite are **separate commits**. Committing the move with byte-identical content makes every file a 100 % similarity rename; combining them destroys `git blame` for ~38 files. The build is broken between those two commits — say so in the PR body.
 
 ### AI-40 — Make the event sequence per-stream
@@ -656,7 +657,7 @@ Nothing here adds capability. AI-39 is a move; AI-40 through AI-42 make three sh
 | --- | --- | --- |
 | 1 — Decide | AI-00 to AI-02 | ✅ **Shipped.** Vocabulary, lifecycle, and v1 capabilities are unambiguous. |
 | 2 — Model | AI-03 to AI-10 | ✅ **Shipped.** Neutral request values compile and validate independently. |
-| 3 — Stream | AI-11 to AI-16 | ✅ **Shipped** (AI-16 in PR #80). Layer 2-facing provider interface is defined without vendor leakage. |
+| 3 — Stream | AI-11 to AI-16 | ✅ **Shipped** (AI-16 in PR #87). Layer 2-facing provider interface is defined without vendor leakage. |
 | **3.5 — Relocate** | **AI-39** | The agent stack is its own module and **both** import directions are mechanically guarded. |
 | **3.6 — Correct** | **AI-40 to AI-42** | No shipped contract contradicts its own documentation. Content is readable from another package. |
 | 4 — Prove contracts | AI-17 to AI-21 | Errors — including a constructible terminal error — fake provider, test helpers, and conformance suite are reusable. |
@@ -669,7 +670,7 @@ Waves 3.5, 3.6 and 4.5 were inserted on 2026-07-30. Their placement is not arbit
 
 ## Next SDD to start
 
-Start with **AI-39 — `cachicamas-agent-module-promotion`**, as soon as PR #80 merges and the tree is quiet. It is mechanical and touches 18 files' import paths, so it conflicts with anything else in flight.
+Start with **AI-39 — `cachicamas-agent-module-promotion`**. Its preconditions are satisfied: ADR 0005 merged (PR #81) and AI-16 merged (PR #87). Run it on a quiet tree — it is mechanical, but it rewrites the import path in 18 files and conflicts with anything else in flight.
 
 Then **AI-40**, before the test kit exists — a conformance suite written against the process-global sequence counter freezes that bug permanently. Then **AI-41** and **AI-42** in parallel; AI-41 is a hard blocker on AI-24, so it cannot slip.
 
