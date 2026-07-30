@@ -1,6 +1,6 @@
 ---
 name: task-graph-milestone-doc
-description: Turn a PRD, project, or requirement into a fractal TDD task-graph milestone document — the docs 0002/0003/0004 format — with typed nodes, milestone charters, waves and entry gates, a traceability spine, and a mandatory adversarial review pass. Use whenever planning work that will be executed milestone-by-milestone through the SDD pipeline.
+description: Turn a PRD, project, or requirement into a fractal TDD task-DAG milestone document — the docs 0002/0003/0004 format — with typed nodes, milestone charters, waves and entry gates, a traceability spine, and a mandatory adversarial review pass. Output conforms to the ADR 0007 DAG contract, so it is renderable in-file (mermaid) and on the web without per-document parser work. Use whenever planning work that will be executed milestone-by-milestone through the SDD pipeline.
 ---
 
 # Specify a PRD / project / requirement as a graph task milestone document
@@ -17,6 +17,28 @@ is a recorded decision. The exemplars are the three shipped documents:
 Read at least one exemplar before writing. Doc 0002 owns the canonical definitions of the node
 grammar, leaf anatomy, split triggers, and the living-graph clause — a new document **cites** those
 sections; it never re-defines them.
+
+## The DAG contract (ADR 0007 — every document must conform)
+
+A task-graph document describes **two structures, named by these terms everywhere** (files, ADRs,
+Engram, skills):
+
+- **The containment tree** — document → wave → milestone → node. Strict tree, single parent at
+  every level. This is the drawable skeleton: the wave is the root, milestones its children, typed
+  nodes the leaves.
+- **The dependency DAG** — the edges declared by `Depends on:` / `Blocks:` fields. Multi-parent,
+  cross-wave, and cross-document edges are legal and expected; a **cycle is a bug**.
+
+Renderers parse these shapes with no per-document code, so they are contract, not style:
+`## Wave <id> — <name>` · `### XX-NN — <title>` + `**Charter**` bullets (`- **<Label>:** …`) ·
+`#### XX-NN.p — <title> ` + backticked `[type]` tag · every dependency edge is a **bare node id**
+inside a `Depends on:`/`Blocks:` field (prose may surround ids; the ids alone are the edge list) ·
+the delivery-sequence table carries range, gate, and exit condition per wave. The `Depends on:`
+fields are the **single source of truth for edges**; every mermaid block and table is a derived
+summary. New mermaid blocks use the canonical type palette from
+[ADR 0007 § D4](../../../docs/adr/0007-adopt-dag-convention-for-task-graphs.md#d4--the-canonical-node-type-palette)
+(guard amber, decision violet, leaf slate, mechanical gray, compound teal), and color never encodes
+alone — the type tag text always accompanies it.
 
 ## Step 0 — Gather the sources
 
@@ -128,6 +150,9 @@ section, per leaf.
 2. **Id audit:** `grep -o 'XX-[0-9]*\(\.[0-9]*\)*' | sort | uniq -c` — every cited id must exist in
    the target document's headings. Cite **milestone-level ids only** into documents that are not
    yet frozen; sub-node citations survive only into merged docs.
+   **Acyclicity:** extract the edge list from the `Depends on:` fields — excluding `Blocks:` and
+   `Parallel with:` segments first (mutual parallelism read as dependency yields false 2-cycles) —
+   and verify it has no cycle (ADR 0007 D1 invariant); a failing topological sort names the edge.
 3. **Anchor check:** verify every intra-repo `#anchor` against the real GitHub slug. Trap: a
    heading containing ` — ` (em dash) slugs to a **double hyphen** (`alive--the`), not one.
 4. **Grammar audit:** no bite-proof-less `[guard]`, no mechanical scan hiding inside a `[leaf]`
