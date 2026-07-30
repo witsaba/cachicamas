@@ -14,7 +14,11 @@
    - `make lint` — runs `go vet` then `golangci-lint` (auto-installs v2.9.0)
    - `make fmt` — `gofmt` + `goimports`
    - `make build` — compiles `./bin/database_administrator`
-2. **Hexagonal layout is sacred.** Code goes in `backend/database_administrator/src/{cmd,application,domain,interfaces,otel}/`. `domain/` MUST NOT import `interfaces/` or `otel/`. `application/` orchestrates `domain/` ports and is consumed by `interfaces/http/`.
+2. **Hexagonal layout is sacred — in `database_administrator` and `workspace_syncer`.** Code goes in `backend/<service>/src/{cmd,application,domain,interfaces,otel}/`. `domain/` MUST NOT import `interfaces/` or `otel/`. `application/` orchestrates `domain/` ports and is consumed by `interfaces/http/`.
+
+   **`backend/agent` is the exception and is NOT hexagonal.** It is a *layered* module — `src/ai` (Layer 1) ← `src/agent` (Layer 2) ← `src/coding` (Layer 3) ← `src/cmd/cachicamas` — governed by [ADR 0005 § D1](../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2). Applying hexagonal rules to it produces nonsense. Its own targets: `cd backend/agent && make test | lint | fmt | build`.
+
+   **The agent module imports nothing from the other two, in any package including `cmd/`.** Go enforces this (a module cycle is a build error); the reverse direction — anything outside `application/` and `cmd/server` naming `github.com/cachicamas/backend/agent/…` — is enforced by a test and belongs on every review checklist.
 3. **Observability is via OTLP env vars.** Do not hardcode endpoints. Follow the pattern in `src/otel/otel.go` and `src/otel/logging.go` (`slog` + `otelslog` bridge).
 4. **Conventional commits only.** No `Co-Authored-By` trailer, no AI attribution.
 5. **New top-level dependency ⇒ ADR first.** Document rationale, alternatives, rollback.

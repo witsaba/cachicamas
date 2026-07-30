@@ -28,7 +28,14 @@
 
 ## Architecture
 
+- **Modules**: three Go modules under `backend/` — `database_administrator` (API + migrations),
+  `workspace_syncer` (git clone/validate worker), and `agent` (the 3-layer agentic stack, from
+  milestone AI-39). No module imports another; `go.work` at the repo root is for editor ergonomics
+  only.
 - **Style**: Hexagonal (ports & adapters) under `backend/database_administrator/src/`
+  and `backend/workspace_syncer/src/`. **`backend/agent` is layered, not hexagonal** —
+  `src/ai` ← `src/agent` ← `src/coding` ← `src/cmd/cachicamas`, per
+  [ADR 0005](../docs/adr/0005-promote-agent-stack-to-own-module.md).
   - `cmd/server/` — entrypoint (`main.go`)
   - `application/` — use cases (e.g., `health_service.go`)
   - `domain/` — entities and contracts (e.g., `health.go`)
@@ -47,7 +54,9 @@
 - `golangci-lint` pinned to `v2.9.0`; config at `backend/database_administrator/.golangci.yml`
 - Linters enabled: `govet`, `errcheck`, `staticcheck`, `unused`, `revive`
 - Logging: `slog` + `otelslog`, OTLP via env vars (no hardcoded endpoints)
-- New top-level dependencies require an ADR
+- New top-level dependencies require an ADR — per module. For `backend/agent`, the OpenTelemetry
+  **API** modules are pre-authorised by [ADR 0005 § D3](../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary)
+  and the OTel **SDK** and exporters are restricted to `src/cmd/`; anything else still needs its own ADR
 
 ## Testing
 
@@ -97,3 +106,4 @@ the compose stack are expected to grow as services stabilize.
 - [ ] reviewer can confirm `openspec/config.yaml` already had `tdd: true` before this init
 - [ ] reviewer can confirm no source files under `backend/database_administrator/src/` were modified by init
 - [ ] reviewer can confirm `openspec/project.md` reflects the current hexagonal layout (cmd/application/domain/interfaces/otel)
+- [ ] for any change touching `backend/agent`: no package of it imports another backend module, and nothing outside `application/` and `cmd/server` imports it — both directions are covered by tests, not by convention

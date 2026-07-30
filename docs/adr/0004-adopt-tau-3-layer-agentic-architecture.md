@@ -4,6 +4,14 @@
 > Author: cachicamas SDD pipeline (parent orchestrator)
 > Source narrative: [spike](./references/0004-spike-3-layer-architecture.md)
 > Origin: architecture demonstrated by Alejandro AO in his *How to Build a Coding Agent | 3-Layer Architecture* talk; cachicamas adopts the architecture, not the name. See [References](#references).
+>
+> ⚠️ **Superseded in part** by [ADR 0005](./0005-promote-agent-stack-to-own-module.md)
+> (2026-07-30): the *Layer → location mapping*, the *Dependency rule*, and the first
+> Consequence bullet are replaced. The three-layer split, the loop/harness separation, and
+> the one-way dependency **direction** are unchanged and remain in force. The skills and
+> project-instruction rows are further amended by
+> [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md). This document is kept
+> intact as the record of the 2026-07-17 decision.
 
 ---
 
@@ -197,6 +205,11 @@ sequenceDiagram
 
 ### Layer → location mapping
 
+> **Superseded by [ADR 0005 § D2](./0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2).**
+> The table below records the 2026-07-17 decision. The agent stack no longer lives under
+> `src/tools/`; it is the sibling Go module `backend/agent/`. The Skills row is further
+> superseded by [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md).
+
 | Component | Cachicamas location | Notes |
 | --- | --- | --- |
 | `cachicamas_coding` (Layer 3 — application) | `backend/database_administrator/src/tools/agent/coding/` | New Go package; holds `CodingSession`, slash commands, skills loader |
@@ -215,11 +228,24 @@ sequenceDiagram
 
 ### Dependency rule
 
+> **Superseded by [ADR 0005 § D1](./0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2).**
+> The direction is unchanged; the *granularity* is now the Go module, and Layer 3 is no
+> longer unbounded. The `cachicamas_coding` row's empty "may NOT import" cell was correct
+> for three top-level sibling packages and wrong once the layers were nested inside a
+> hexagonal service (review finding S2).
+
 | Layer | May import from | May NOT import from |
 | --- | --- | --- |
 | `cachicamas_ai` | stdlib + vendor SDKs | anything in `cachicamas_agent` or `cachicamas_coding` |
 | `cachicamas_agent` | `cachicamas_ai` | `interfaces/http`, `migration`, `application`, `domain`, `infrastructure`, `cmd`, `otel`, tools outside `tools/agent` |
 | `cachicamas_coding` | `cachicamas_agent`, `cachicamas_ai` | — (top of the stack) |
+
+> **Superseded by [ADR 0005 § D1](./0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2).**
+> The paragraph below contradicts the first Consequence bullet — you cannot consume
+> `<-chan ai.Event` without importing the package that declares it (review finding S1).
+> ADR 0005 resolves the contradiction by moving the stack out of the module entirely, so
+> the permitted direction becomes an ordinary cross-module dependency with a named build
+> cost rather than a rule that forbids its own stated benefit.
 
 The `tools/agent/{ai,agent,coding}/` packages are the only place allowed to hold
 the agent's model-adapter (`cachicamas_ai`) and brain (`cachicamas_agent`)
@@ -234,7 +260,7 @@ running session.
 
 ### Positive
 
-- **Single brain for the whole repo**: any package (`cmd/`, `migration/`, `application/`) can drive an agent session without reimplementing the loop. The `AgentHarness` is shared infrastructure.
+- **Single brain for the whole repo**: any package (`cmd/`, `migration/`, `application/`) can drive an agent session without reimplementing the loop. The `AgentHarness` is shared infrastructure. **(Amended by [ADR 0005 § D1](./0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2): true only as a cross-module import from `application/` or `cmd/server`, and not exercised in v1 — the Docker build context copies a single module, so the first such import breaks `docker compose build`. ADR 0005 names the three-part cost.)**
 - **Stateless brain = trivial to unit-test**: `RunTurn(...)` in `loop.go` takes a `ModelProvider` interface; pass a mock or a deterministic test provider and assert on the `AgentEventStream`.
 - **Provider swap is a config change**: adding Claude, OpenRouter, or a local model means adding one entry to `catalog.toml` and one `ModelProvider` implementation — no change to `loop.go` or `harness.go`.
 - **Frontend independence**: a future IDE plugin, a VS Code extension, and the TUI all consume the same `CodingSessionEvent` stream. The brain does not know or care which is running.
