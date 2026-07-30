@@ -56,7 +56,7 @@ that move imposes. Six of the seven structural findings follow directly from tha
 This ADR closes findings **S1 – S6**. [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md)
 closes **S7**. The four shipped-contract defects (C1 – C4) enter code through the normal SDD
 pipeline as milestones AI-40, AI-41, AI-42 and AI-18; see the
-[Layer 1 roadmap](../architecture/milestones/0001-cachicamas-ai-layer-1.md).
+[Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md).
 
 ---
 
@@ -309,8 +309,8 @@ has something to read.
 
 ## Migration
 
-Milestone **AI-39** (`cachicamas-agent-module-promotion`) owns the mechanics; see the
-[Layer 1 roadmap](../architecture/milestones/0001-cachicamas-ai-layer-1.md) Phase 0. It is a
+Milestone **AI-39** (`cachicamas-agent-module-promotion`) owns the mechanics; see
+[AI-39 in the Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-39--promote-the-agent-stack-to-its-own-module). It is a
 mechanical change with no behaviour change, and it must land before AI-17 so that no further
 milestone deepens the current path.
 
@@ -383,7 +383,7 @@ yet, and a `replace` with no requirer is dead weight that also disguises the D1 
   original external narrative, unchanged and deliberately so
 - [cachicamas agent stack — hardened architecture (v2)](../architecture/0001-cachicamas-agent-stack-v2.md)
   — the architecture behind § D4's verdicts
-- [Layer 1 milestone map](../architecture/milestones/0001-cachicamas-ai-layer-1.md) — AI-39 (this
+- [Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) — AI-39 (this
   migration), AI-40 … AI-47 (the review's remaining code work)
 - Adversarial architecture review, 2026-07-30 — Engram `obs #2243`, topic
   `review/2026-07-30-agent-adversarial`
