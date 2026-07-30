@@ -236,3 +236,30 @@ package ai
 // callIDs) are documented but NOT runtime-enforced; AI-20 (stream testkit)
 // and AI-21 (conformance suite) own per-producer stream validation. See
 // toolcall_event.go.
+
+// AI-16 paragraph (added after package clause; greedy AI-07 paragraph test does not count).
+//
+// As of AI-16: ModelProvider is the single-method Go interface that
+// cachicamas_agent holds to start a model turn. It declares one method
+// Stream(ctx context.Context, req Request) (<-chan Event, error) whose
+// exported signature references only context.Context, Request, Event,
+// <-chan, and error — no vendor SDK types, no net/http, no
+// json.RawMessage as a stream carrier, no marshaler-style escape
+// hatches. DefaultBufferSize is the v1 channel buffer constant (16;
+// AI-01 § 3.6, AI-32 follow-on). The contract preamble (drain-to-
+// close, producer-owns-closure, context as the sole liveness signal,
+// and the D1 saturated-channel drop rule) lives on the ModelProvider
+// GoDoc. The compile-time consumer example/test lives at
+// `tools/agent/agenttest/consumer_test.go` in `package agenttest_test`
+// and is the canonical proof that a sibling Go package can hold the
+// interface, build a normalized Request, drain the channel, and never
+// import any vendor SDK or any Cachicamas package outside
+// `tools/agent/`. Per-stream Event.Sequence isolation is documented in
+// the interface GoDoc and is runtime-checked by AI-20 (stream testkit)
+// and AI-21 (conformance suite); the v1 counter is process-scoped
+// (event.go:235) and AI-16 leaves that invariant unchanged. Cites:
+// AI-01 § 3.1–§ 3.10 for channel lifecycle; ADR 0004 dependency rule
+// for Layer 1 purity; proposal #2235 § 2 D1/D2/D3/D4 for the saturated-
+// channel drop rule, the per-stream Sequence contract, the
+// consumer-test location, and the interface-vs-function-vs-generic
+// shape decision. See provider.go.
