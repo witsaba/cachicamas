@@ -6,7 +6,7 @@
 > **Decisions** live in [ADR 0004](../adr/0004-adopt-tau-3-layer-agentic-architecture.md) as
 > amended by [ADR 0005](../adr/0005-promote-agent-stack-to-own-module.md) and
 > [ADR 0006](../adr/0006-resolve-skill-and-prompt-source-of-truth.md).
-> **Schedule** lives in the [Layer 1 milestone map](./milestones/0001-cachicamas-ai-layer-1.md).
+> **Schedule** lives in the [Layer 1 milestones and task graph](./milestones/0002-cachicamas-ai-layer-1-task-graph.md).
 > **Date**: 2026-07-30. **Review source**: Engram `obs #2243`.
 
 > [!IMPORTANT]

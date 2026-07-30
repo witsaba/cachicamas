@@ -1,10 +1,12 @@
-# Layer 1 task graph — fractal TDD decomposition of the milestone map
+# Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Draft — decomposes the **31 unshipped** milestones of the Layer 1 map (AI-39 … AI-42, AI-17 … AI-21, AI-43 … AI-47, AI-22 … AI-38) into TDD-executable task graphs. Shipped milestones AI-00 … AI-16 are recorded, not decomposed.
-> **Companion to:** [Layer 1 milestone map](./0001-cachicamas-ai-layer-1.md) — that document owns milestone identity, scope, amendments and delivery sequence. This document owns the *inside* of each milestone: the subtask graph an implementer walks with red-green-refactor. Where the two disagree, the map wins and this document has a bug.
+> **Status:** In progress — **17 of 48** milestones shipped (AI-00 … AI-16; recorded in [the shipped baseline](#shipped-baseline--ai-00--ai-16), not decomposed). Last merged: AI-16 (PR #87, 2026-07-30). **AI-39 is the next milestone.** The **31 unshipped** milestones (AI-39 … AI-42, AI-17 … AI-21, AI-43 … AI-47, AI-22 … AI-38) are each decomposed below into a TDD-executable task graph.
+> **Single source.** This document absorbed the retired Layer 1 milestone map (`0001-cachicamas-ai-layer-1.md`, removed 2026-07-30; its full text remains in git history) and now owns milestone identity, scope, amendments and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. Where body text cites "the map", it cites that absorbed content: each milestone's **Charter** block carries the goal, deliverable, acceptance and amendments the citation points at.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
+> **Target module:** `backend/agent/` (`github.com/cachicamas/backend/agent`) — the package **moves** out of `backend/database_administrator/src/tools/agent/ai/` in AI-39. **Target package:** `backend/agent/src/ai/`.
 > **Date:** 2026-07-30.
-> **Node identifiers are append-only.** A node is `AI-NN.p` (subtask of milestone AI-NN) or `AI-NN.p.q` (fractal subdivision of `AI-NN.p`). Splitting a node appends children under it; it never renumbers siblings. A node discovered during implementation is appended with the next free ordinal and an edge, exactly like the map's own append-only rule.
+> **Milestone identifiers are append-only.** AI-NN ids appear in ~37 source files' GoDoc, every commit message, 15 merged PR titles, ~200 test names, and Engram topic keys. Renumbering invalidates that audit trail for no benefit. New work appends AI-39 … AI-47; logical insertion points are expressed with a `Blocks:` field, not by renumbering.
+> **Node identifiers are append-only.** A node is `AI-NN.p` (subtask of milestone AI-NN) or `AI-NN.p.q` (fractal subdivision of `AI-NN.p`). Splitting a node appends children under it; it never renumbers siblings. A node discovered during implementation is appended with the next free ordinal and an edge, exactly like the milestone rule above.
 
 > [!IMPORTANT]
 > **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures for code that does not exist yet — each leaf's SDD cycle owns those. Identifiers that appear here (`sequenceCounter`, `newStreamBuffer`, `T-AI16-006`, file paths) are **evidence citations of shipped code at HEAD**, permitted for the same reason the map cites them: they locate a defect, they do not design its fix.
@@ -19,9 +21,12 @@ Every leaf in this document is sized to be implemented test-first in one sitting
 
 ## Quick navigation
 
-- [How to read this document](#how-to-read-this-document) — node grammar, leaf anatomy, split triggers, evidence gate
+- [Layer boundary](#layer-boundary) — what Layer 1 owns and must not own
+- [Rules for every future SDD milestone](#rules-for-every-future-sdd-milestone)
+- [How to read this document](#how-to-read-this-document) — node grammar, leaf anatomy, milestone charter, split triggers, evidence gate
 - [The graph is alive](#the-graph-is-alive-the-revert-and-record-clause) — what to do when implementation disproves the plan
-- [Global dependency graph](#global-dependency-graph)
+- [Shipped baseline — AI-00 … AI-16](#shipped-baseline--ai-00--ai-16)
+- [Global dependency graph](#global-dependency-graph) · [Delivery sequence](#delivery-sequence)
 - [Wave 3.5 — Relocate](#wave-35--relocate): [AI-39](#ai-39--promote-the-agent-stack-to-its-own-module)
 - [Wave 3.6 — Correct](#wave-36--correct-the-shipped-contracts): [AI-40](#ai-40--make-the-event-sequence-per-stream) · [AI-41](#ai-41--make-content-parts-readable-from-another-package) · [AI-42](#ai-42--close-the-content-part-construction-bypass)
 - [Wave 4 — Prove contracts](#wave-4--prove-the-contracts): [AI-17](#ai-17--define-validation-error-taxonomy) · [AI-18](#ai-18--define-provider-error-taxonomy) · [AI-19](#ai-19--build-a-scripted-fake-provider) · [AI-20](#ai-20--build-stream-recording-and-assertion-helpers) · [AI-21](#ai-21--create-provider-conformance-suite)
@@ -29,8 +34,35 @@ Every leaf in this document is sized to be implemented test-first in one sitting
 - [Wave 5 — Connect the vendor](#wave-5--connect-the-vendor): [AI-22](#ai-22--select-first-provider-and-transport) · [AI-23](#ai-23--provider-configuration-and-client-construction) · [AI-24](#ai-24--translate-normalized-requests-to-wire-requests) · [AI-25](#ai-25--implement-the-streaming-frame-decoder) · [AI-26](#ai-26--translate-response-lifecycle-and-text) · [AI-27](#ai-27--translate-the-reasoning-stream) · [AI-28](#ai-28--translate-the-tool-call-stream) · [AI-29](#ai-29--translate-usage-and-finish-reasons) · [AI-30](#ai-30--map-http-and-provider-failures)
 - [Wave 6 — Harden](#wave-6--harden): [AI-31](#ai-31--prove-cancellation-and-goroutine-cleanup) · [AI-32](#ai-32--lock-backpressure-and-buffer-behavior) · [AI-33](#ai-33--define-retry-and-idempotency-policy) · [AI-34](#ai-34--enforce-secret-redaction) · [AI-35](#ai-35--add-the-observability-boundary)
 - [Wave 7 — Hand off](#wave-7--hand-off): [AI-36](#ai-36--run-full-deterministic-adapter-conformance) · [AI-37](#ai-37--add-the-opt-in-live-smoke-test) · [AI-38](#ai-38--publish-the-layer-2-readiness-contract)
+- [Layer 1 completion checklist](#layer-1-completion-checklist)
+- [Explicitly deferred until after Layer 1](#explicitly-deferred-until-after-layer-1)
 - [Traceability spine](#traceability-spine) — every defect, gap and checklist item mapped to the node that closes it
 - [Method sources](#method-sources)
+
+---
+
+## Layer boundary
+
+Settled by ADR 0004 (as amended by ADR 0005) — constraints, not questions for later milestones: dependencies flow only `cachicamas_coding -> cachicamas_agent -> cachicamas_ai`, and the reverse direction is forbidden; Layer 1 owns provider-specific request/stream translation and exposes provider-neutral contracts to Layer 2; Layer 1 imports only the Go standard library, provider-specific dependencies, and the OpenTelemetry **API** per ADR 0005 § D3; streaming uses Go primitives rather than copying Python async-iterator APIs; frontends and session persistence are outside Layer 1.
+
+**Layer 1 owns:** provider-neutral model request contracts; message and content-part contracts at the model boundary; tool declaration and emitted tool-call contracts; streaming event contracts; the provider interface and stream lifecycle contract; the provider/transport error taxonomy; concrete provider adapters; adapter conformance tests and deterministic fakes.
+
+**Layer 1 must not own:** agent turns, loop termination, or transcript mutation; tool execution or tool-result scheduling; session history persistence; provider/model catalog files or user preference storage; environment-variable loading, login flows, or secret persistence; CLI, TUI, HTTP handlers, slash commands, skills, prompts, or project instructions; application-specific retries that could duplicate an agent turn.
+
+Two wording traps, kept because both keep resurfacing: **"Layer 1 does not know what a tool is" is too broad** — Layer 1 must understand the provider-neutral *transport representation* of tool declarations and tool calls because those cross the model API; it must not execute tools, resolve tool names, or own application behavior. **"Provider swap is a config change" applies only after adapters exist** — switching between already-supported providers can be configuration-only; adding a new vendor still requires a new adapter unless it is genuinely compatible with an existing transport.
+
+## Rules for every future SDD milestone
+
+Each milestone below should become its **own change** unless its SDD exploration proves it is too small to review independently.
+
+- One primary contract or behavior per milestone.
+- Tests travel with the behavior they prove.
+- Prefer less than 250 changed lines; stop and reassess before 400.
+- No production secrets or live-network dependency in normal tests.
+- Imports are governed by [ADR 0005 § D1](../../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) and [§ D3](../../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary): the Go standard library, the selected provider dependency, and the OpenTelemetry **API** modules only. The OTel **SDK**, any exporter, and every package of `database_administrator` / `workspace_syncer` remain forbidden.
+- Public types need stable semantics before a concrete adapter depends on them.
+- A milestone may refine later names, but it must not violate ADR 0004.
+- Each SDD must state what remains intentionally unsupported.
 
 ---
 
@@ -68,10 +100,14 @@ A node **must** be subdivided — before or during implementation — when any o
 1. Its test list exceeds ~7 items, or spans more than one publicly observable behavior.
 2. It cannot plausibly go green-to-green inside one sitting (half a day at most).
 3. Making its first test pass would require touching a seam that does not exist yet — the missing seam becomes a prerequisite node (see the living-graph clause).
-4. Its projected diff, tests included, pushes the milestone past the review budget: **prefer < 250 changed lines, stop and reassess before 400** ([map rules](./0001-cachicamas-ai-layer-1.md#rules-for-every-future-sdd-milestone)). The node boundary is the PR-chain boundary. Byte-identical mechanical moves (AI-39.2's `git mv`) are exempt from this trigger — similarity-preserving bulk is the point of such a commit, not a review burden.
+4. Its projected diff, tests included, pushes the milestone past the review budget: **prefer < 250 changed lines, stop and reassess before 400** ([milestone rules](#rules-for-every-future-sdd-milestone)). The node boundary is the PR-chain boundary. Byte-identical mechanical moves (AI-39.2's `git mv`) are exempt from this trigger — similarity-preserving bulk is the point of such a commit, not a review burden.
 5. Two people (or agents) could work it concurrently without conflict — then it was two nodes all along.
 
 Split along these axes, in preference order: **data subsets** (text before tool calls before reasoning), **paths** (happy before error), **rules** (relaxed validation first, tightened later), **interfaces** (fake provider before real one), **spikes** (an unknown becomes a time-boxed decision leaf).
+
+### Milestone charter
+
+Every milestone section opens with a **Charter** — its identity block, absorbed 2026-07-30 from the retired milestone map: goal, deliverable, acceptance, dependency edges, out-of-scope clauses, and any dated amendments. The charter is the normative scope; the graph below it is the decomposition. The two must agree at every depth — a node proving something outside its charter, or a charter clause no node proves, is a bug, and the [traceability spine](#traceability-spine) is the audit trail.
 
 ### Ordering inside a milestone
 
@@ -84,13 +120,41 @@ Implementation *will* disprove parts of this plan; that is expected and priced i
 1. If a leaf's first red test cannot be driven green in small steps, **do not push through on a broken tree.** Revert to green.
 2. Record what was learned as graph structure: append the discovered prerequisite as a new node (next free ordinal), draw the edge, and — if the original leaf is now compound — move its remaining test items into new children.
 3. The graph amendment lands **in the same PR** that resumes work, so this document remains the single true map. Newly discovered *test cases* (not prerequisites) are appended to the owning leaf's test list instead.
-4. Amendments follow the map's own convention: blockquote `> **Amended YYYY-MM-DD** …` under the touched node's heading; struck-through text for superseded claims; never silent edits.
+4. Amendments follow one convention for milestones and nodes alike: blockquote `> **Amended YYYY-MM-DD** …` under the touched heading; struck-through text for superseded claims; never silent edits.
+
+---
+
+## Shipped baseline — AI-00 … AI-16
+
+Seventeen milestones shipped before this document existed (waves 1–3; last merged AI-16, PR #87, 2026-07-30). They are the contract surface the unshipped waves correct, prove, and build on — recorded here for identity and audit, not decomposed. Their full charters live in git history with the retired map.
+
+| ID | Milestone | SDD change |
+| --- | --- | --- |
+| AI-00 | Record the Layer 1 contract vocabulary | `cachicamas-ai-contract-vocabulary` |
+| AI-01 | Decide stream lifecycle and ownership | `cachicamas-ai-stream-lifecycle` |
+| AI-02 | Decide the minimum first-provider capability set | `cachicamas-ai-minimum-capabilities` |
+| AI-03 | Introduce package scaffold and import boundary | `cachicamas-ai-package-scaffold` |
+| AI-04 | Define roles and message identity | `cachicamas-ai-message-roles` |
+| AI-05 | Define text content parts | `cachicamas-ai-text-content` |
+| AI-06 | Define optional reasoning content | `cachicamas-ai-reasoning-content` |
+| AI-07 | Define tool declarations | `cachicamas-ai-tool-declarations` |
+| AI-08 | Define tool calls and tool results | `cachicamas-ai-tool-messages` |
+| AI-09 | Define normalized model request | `cachicamas-ai-model-request` |
+| AI-10 | Define finish reasons and usage | `cachicamas-ai-completion-metadata` |
+| AI-11 | Define event envelope and ordering invariants | `cachicamas-ai-event-envelope` |
+| AI-12 | Add response lifecycle events | `cachicamas-ai-response-events` |
+| AI-13 | Add text delta events | `cachicamas-ai-text-events` |
+| AI-14 | Add reasoning delta events | `cachicamas-ai-reasoning-events` |
+| AI-15 | Add tool-call delta events | `cachicamas-ai-tool-call-events` |
+| AI-16 | Define provider interface | `cachicamas-ai-model-provider` |
+
+Three shipped charters carry 2026-07-30 amendments that unshipped milestones execute: **AI-02** adds token counting to the explicitly-optional capability list, discovered by type assertion (finding G3 — the prerequisite for Layer 2 context compaction); **AI-10** freezes the finish-reason enum as shipped — `refusal` and `pause_turn` arrive additively via AI-46, and the usage type already carries cache-read, cache-write and reasoning token counts, completing the Layer 1 half of cost tracking (finding G10); **AI-15** makes delta events optional — a tool call MUST be representable as start-then-end with zero deltas, and no consumer may require a delta before the end event (finding G12a), the case AI-21 and AI-28 test.
 
 ---
 
 ## Global dependency graph
 
-Phase-level order is the map's; this diagram adds the shipped baseline and the two long parallel tracks inside wave 5.
+Phase-level order comes from the retired map; this diagram adds the shipped baseline and the two long parallel tracks inside wave 5.
 
 ```mermaid
 flowchart LR
@@ -109,12 +173,33 @@ flowchart LR
     class W35,W36,W45 corr
 ```
 
-Two divergences from the map's phase-level diagram, recorded here rather than left silent:
+Two divergences from the retired map's phase-level diagram, recorded here rather than left silent:
 
-1. **Waves 4 and 4.5 run in parallel above.** The map's phase diagram draws Phase D → Phase H sequential, but its own milestone-level `Depends on:` fields never make a Phase H milestone depend on a Phase D one — the map disagrees with itself, and this document follows the milestone-level edges. Adopting the parallel reading into the map's phase diagram is a one-line map amendment this document proposes.
+1. **Waves 4 and 4.5 run in parallel above.** The retired map's phase diagram drew Phase D → Phase H sequential, but its own milestone-level `Depends on:` fields never made a Phase H milestone depend on a Phase D one — the map disagreed with itself, and this document follows the milestone-level edges. With the map absorbed here, the parallel reading is canonical; the sequential phase diagram was retired with the map.
 2. **Three edges cross between the parallel waves:** AI-20.5 (iterator view) depends on AI-47; AI-19.7 (scripted reasoning) depends on AI-45; AI-21.8 (optional-capability cases) depends on AI-45 and AI-46. So milestones AI-19, AI-20 and AI-21 cannot *fully* close before those wave-4.5 milestones land — schedule AI-46 and AI-47 early (both are cheap), and sequence AI-45 before the fake's reasoning node.
 
-Within waves, the per-milestone graphs below expose finer parallelism than the map's phase ordering: e.g. AI-46 depends only on AI-39; AI-25 runs parallel to AI-24.
+Within waves, the per-milestone graphs below expose finer parallelism than the phase ordering: e.g. AI-46 depends only on AI-39; AI-25 runs parallel to AI-24.
+
+### Delivery sequence
+
+| Wave | Milestones | Exit condition |
+| --- | --- | --- |
+| 1 — Decide | AI-00 to AI-02 | ✅ **Shipped.** Vocabulary, lifecycle, and v1 capabilities are unambiguous. |
+| 2 — Model | AI-03 to AI-10 | ✅ **Shipped.** Neutral request values compile and validate independently. |
+| 3 — Stream | AI-11 to AI-16 | ✅ **Shipped** (AI-16 in PR #87). Layer 2-facing provider interface is defined without vendor leakage. |
+| **3.5 — Relocate** | **AI-39** | The agent stack is its own module and **both** import directions are mechanically guarded. |
+| **3.6 — Correct** | **AI-40 to AI-42** | No shipped contract contradicts its own documentation. Content is readable from another package. |
+| 4 — Prove contracts | AI-17 to AI-21 | Errors — including a constructible terminal error — fake provider, test helpers, and conformance suite are reusable. |
+| **4.5 — Close contract gaps** | **AI-43 to AI-47** | Cache breakpoints, per-request options, reasoning round-trip and stop reasons are expressible; the stream carrier is decided. |
+| 5 — Connect vendor | AI-22 to AI-30 | First adapter streams normalized text/tools/metadata and maps failures. |
+| 6 — Harden | AI-31 to AI-35 | Cancellation, pressure, retries, redaction, and observability are safe. |
+| 7 — Hand off | AI-36 to AI-38 | Adapter passes conformance and Layer 2 can consume the stable v1 API. |
+
+Waves 3.5, 3.6 and 4.5 were inserted on 2026-07-30. Their placement is not arbitrary: 3.5 and 3.6 must precede wave 4, or the test kit and conformance suite freeze the current defects into assertions; 4.5 must precede wave 5, or every contract-gap change has to migrate an existing adapter in lock-step.
+
+**Next SDD to start: AI-39** (`cachicamas-agent-module-promotion`). Its preconditions are satisfied: ADR 0005 merged (PR #81) and AI-16 merged (PR #87). Run it on a quiet tree — it is mechanical, but it rewrites the import path in 18 files and conflicts with anything else in flight. Then AI-40, before the test kit exists — a conformance suite written against the process-global sequence counter freezes that bug permanently. Then AI-41 and AI-42 in parallel; AI-41 is a hard blocker on AI-24, so it cannot slip. Only then AI-17 and the rest of wave 4.
+
+> The original guidance, retained because it still explains *why* the ordering matters: the model adapter is a boundary. If the boundary vocabulary and stream ownership are vague, provider details harden into accidental architecture and every later layer pays for it. The 2026-07-30 review is that principle applied to what already shipped — four contracts hardened into shapes their own documentation contradicts, and they are cheapest to correct now, while no adapter depends on them.
 
 ---
 
@@ -122,7 +207,17 @@ Within waves, the per-milestone graphs below expose finer parallelism than the m
 
 ### AI-39 — Promote the agent stack to its own module
 
-Map entry: [AI-39](./0001-cachicamas-ai-layer-1.md#ai-39--promote-the-agent-stack-to-its-own-module) · SDD change: `cachicamas-agent-module-promotion` · Closes: ADR 0005 § D2. Mostly mechanical; its TDD content is concentrated in the two guards, which follow the guard-leaf discipline (prove they bite).
+SDD change: `cachicamas-agent-module-promotion` · Closes: ADR 0005 § D2. Mostly mechanical; its TDD content is concentrated in the two guards, which follow the guard-leaf discipline (prove they bite).
+
+**Charter**
+
+- **Goal:** Move the agent stack out of `database_administrator` into the sibling module `backend/agent`, per [ADR 0005 § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2).
+- **Deliverable:** New module (`go.mod`, `Makefile`, `.golangci.yml`, `README.md`, `.gitignore`); `src/ai/` and `src/agenttest/` relocated; import paths rewritten; the forward import guard upgraded to a module allowlist and to `go list -deps`; a **new reverse guard** in `database_administrator`; a repo-root `go.work`.
+- **Acceptance:** `make test` is green in every module; both import directions are mechanically guarded; `git log --follow` traverses the move; no behavior changes.
+- **Depends on:** ADR 0005 (merged, PR #81); AI-16 (merged, PR #87). **Both satisfied — AI-39 is unblocked.** · **Blocks:** AI-17 and everything after it.
+- **Out of scope:** Adding any dependency, including OpenTelemetry. `go.mod` stays empty — Layer 1 is stdlib-only today.
+- **Also in scope — three lint findings confirmed on 2026-07-30** when AI-16 landed: `make lint` reports `newStreamBuffer` and `validatePreStream` in `provider.go` as **unused**, plus unreachable code in `agenttest/consumer_test.go`. The two helpers are documented as *"Adapters MUST call this helper … so the pre-stream branch is mechanically identical across implementations"* — but they are **unexported**, and adapters live in other packages, so no adapter can ever call them; the comment two lines below each concedes it. The module move is the natural moment to resolve this, because it is the point at which adapters get a known home: export them, delete them, or relocate them. Note `make lint` already exits non-zero on `main` for unrelated pre-existing reasons (~56 issues, mostly `errcheck` in tests), so this milestone should state whether it is also fixing the baseline or only its own three.
+- **Note:** The `git mv` and the import-path rewrite are **separate commits**. Committing the move with byte-identical content makes every file a 100 % similarity rename; combining them destroys `git blame` for ~38 files. The build is broken between those two commits — say so in the PR body.
 
 ```mermaid
 flowchart LR
@@ -204,7 +299,15 @@ The three milestones share one constraint the map states and this graph enforces
 
 ### AI-40 — Make the event sequence per-stream
 
-Map entry: [AI-40](./0001-cachicamas-ai-layer-1.md#ai-40--make-the-event-sequence-per-stream) · SDD change: `cachicamas-ai-per-stream-sequence` · Closes: **C3**. The map flags this as likely over budget — the node boundary AI-40.2 / AI-40.3 is the planned PR-chain point.
+SDD change: `cachicamas-ai-per-stream-sequence` · Closes: **C3**. The charter flags this as likely over budget — the node boundary AI-40.2 / AI-40.3 is the planned PR-chain point.
+
+**Charter**
+
+- **Goal:** Close review finding **C3**. The sequence counter is a package-global atomic, so the contract's "the first event of every stream carries sequence 1" is achievable only for the first stream in a process. The same GoDoc block admits the contradiction.
+- **Deliverable:** Per-stream, 1-based, contiguous, producer-assigned sequence, with the process-global counter removed.
+- **Acceptance:** Two concurrent streams each start at 1 and are independently contiguous; gap detection becomes possible.
+- **Depends on:** AI-39. · **Blocks:** AI-19, AI-20, AI-21, AI-26.
+- **Note:** Contract-breaking, and **it flips a green test**: the existing concurrent-stream test documents the cross-stream gaps as expected behavior and must be rewritten. Expect a reviewer to read that test as a spec. Likely over the review budget — plan a chained PR. One design worth the SDD's consideration, though the SDD owns the decision: keep the event constructors' signatures, have them emit sequence 0, and add a producer-owned stamper — that turns a break across every constructor into a test-only change.
 
 ```mermaid
 flowchart LR
@@ -251,7 +354,15 @@ flowchart LR
 
 ### AI-41 — Make content parts readable from another package
 
-Map entry: [AI-41](./0001-cachicamas-ai-layer-1.md#ai-41--make-content-parts-readable-from-another-package) · SDD change: `cachicamas-ai-contentpart-accessors` · Closes: **C2** — the hard blocker on AI-24.
+SDD change: `cachicamas-ai-contentpart-accessors` · Closes: **C2** — the hard blocker on AI-24.
+
+**Charter**
+
+- **Goal:** Close review finding **C2**. The text, tool-call and tool-result wrappers are unexported and expose only their discriminator, so **a provider adapter in another package cannot read content back out of a request**.
+- **Deliverable:** A readable accessor for every content-part variant, and a reconciliation of the two competing strategies now in the package — the reasoning type implements the part interface directly and is therefore inspectable; the other three are wrapped and are not.
+- **Acceptance:** An external-package test can extract text, tool-call arguments and tool-result content from a constructed request.
+- **Depends on:** AI-39. · **Blocks:** **AI-24 (hard blocker — request translation is structurally impossible without this)**, AI-19, AI-21.
+- **Note:** The reasoning type's own GoDoc already explains why direct implementation was chosen for inspectability, in terms that apply verbatim to the three types that actually carry payload data.
 
 ```mermaid
 flowchart LR
@@ -306,7 +417,15 @@ flowchart LR
 
 ### AI-42 — Close the content-part construction bypass
 
-Map entry: [AI-42](./0001-cachicamas-ai-layer-1.md#ai-42--close-the-content-part-construction-bypass) · SDD change: `cachicamas-ai-text-seal` · Closes: **C1**. Parallel with AI-41 after the shared decision.
+SDD change: `cachicamas-ai-text-seal` · Closes: **C1**. Parallel with AI-41 after the shared decision.
+
+**Charter**
+
+- **Goal:** Close review finding **C1**. The exported text value type satisfies the content-part interface directly, so its zero value is a valid part that passes message validation and bypasses every construction rule.
+- **Deliverable:** A seal that actually seals, plus correction of the package comment that currently claims this is already prevented.
+- **Acceptance:** A zero-value text part cannot reach a request; the claim in the package comment is true.
+- **Depends on:** AI-39. **Parallel with:** AI-41. · **Blocks:** AI-24.
+- **Note:** Not theoretical — a zero-value text part serializes to an empty text block, which at least one provider rejects at the API.
 
 ```mermaid
 flowchart LR
@@ -346,7 +465,15 @@ flowchart LR
 
 ### AI-17 — Define validation error taxonomy
 
-Map entry: [AI-17](./0001-cachicamas-ai-layer-1.md#ai-17--define-validation-error-taxonomy) · SDD change: `cachicamas-ai-validation-errors`.
+SDD change: `cachicamas-ai-validation-errors`.
+
+**Charter**
+
+- **Goal:** Separate caller-contract failures from network/provider failures.
+- **Deliverable:** Typed validation errors with stable `errors.Is`/`errors.As` behavior.
+- **Acceptance:** Invalid requests fail before a stream goroutine or HTTP request starts.
+- **Depends on:** AI-09.
+- **Out of scope:** Provider status-code mapping.
 
 ```mermaid
 flowchart LR
@@ -379,7 +506,21 @@ flowchart LR
 
 ### AI-18 — Define provider error taxonomy
 
-Map entry: [AI-18](./0001-cachicamas-ai-layer-1.md#ai-18--define-provider-error-taxonomy) · SDD change: `cachicamas-ai-provider-errors` · Closes: **C4** and half of **G8**. This is the wave's keystone: AI-19 and AI-21 are blocked on it.
+SDD change: `cachicamas-ai-provider-errors` · Closes: **C4** and half of **G8**. This is the wave's keystone: AI-19 and AI-21 are blocked on it.
+
+**Charter**
+
+> **Amended 2026-07-30. This milestone owns review finding C4.** The provider interface and the terminal-kind helper both declare that a stream ends with exactly one completion event **or** one error event — but no error payload type exists and the payload interface is sealed, so **no adapter can construct the error terminal today**. AI-16 shipped the contract before AI-18 enabled it.
+>
+> Deliverable gains: a terminal error payload implementing the sealed payload interface, its constructor, and its accessor. Deliverable also gains a **partial-output discriminator** (finding G8), so a mid-stream disconnect after emitted events is distinguishable from a pre-stream failure — that is the most common real-world failure and the one naive retry logic excludes.
+>
+> Acceptance gains: after this milestone an adapter can actually emit the terminal error the provider interface declares mandatory. `Depends on:` gains AI-16 (shipped).
+
+- **Goal:** Normalize authentication, authorization, rate limit, unavailable, timeout, cancellation, malformed response, unsupported capability, and unknown failures.
+- **Deliverable:** Typed errors carrying safe metadata and retry hints.
+- **Acceptance:** Error strings never require secrets or full response bodies; wrapped causes remain inspectable.
+- **Depends on:** AI-01, AI-16, AI-17.
+- **Out of scope:** Automatic retry behavior.
 
 ```mermaid
 flowchart LR
@@ -433,7 +574,17 @@ flowchart LR
 
 ### AI-19 — Build a scripted fake provider
 
-Map entry: [AI-19](./0001-cachicamas-ai-layer-1.md#ai-19--build-a-scripted-fake-provider) · SDD change: `cachicamas-ai-fake-provider`. Everything Layer 2 will ever test against starts here; the walking skeleton is deliberately the first node.
+SDD change: `cachicamas-ai-fake-provider`. Everything Layer 2 will ever test against starts here; the walking skeleton is deliberately the first node.
+
+**Charter**
+
+> **Amended 2026-07-30:** `Depends on:` gains **AI-40** and **AI-41**. The fake must script a terminal error (impossible before AI-18), start each scripted stream at sequence 1 (impossible before AI-40), and inspect request content to assert what it received (impossible before AI-41).
+
+- **Goal:** Let Layer 1 and future Layer 2 tests script events, delays, failures, and cancellation without network access.
+- **Deliverable:** Test-only or exported testing package implementing the provider interface.
+- **Acceptance:** Tests can script a text response, tool call, terminal error, blocked stream, and context cancellation deterministically.
+- **Depends on:** AI-16, AI-18.
+- **Out of scope:** Mocking a particular vendor wire format.
 
 ```mermaid
 flowchart LR
@@ -509,7 +660,15 @@ flowchart LR
 
 ### AI-20 — Build stream recording and assertion helpers
 
-Map entry: [AI-20](./0001-cachicamas-ai-layer-1.md#ai-20--build-stream-recording-and-assertion-helpers) · SDD change: `cachicamas-ai-stream-testkit`.
+SDD change: `cachicamas-ai-stream-testkit`.
+
+**Charter**
+
+- **Goal:** Make event-order and goroutine-lifecycle assertions concise and repeatable.
+- **Deliverable:** Package-importable drain/record helpers, timeout-safe assertions, and leak-sensitive test patterns; unlike AI-19, this milestone provides assertions rather than a provider implementation.
+- **Acceptance:** A broken producer cannot hang the test suite indefinitely; event differences are readable.
+- **Depends on:** AI-19.
+- **Out of scope:** General-purpose testing framework.
 
 ```mermaid
 flowchart LR
@@ -557,7 +716,17 @@ flowchart LR
 
 ### AI-21 — Create provider conformance suite
 
-Map entry: [AI-21](./0001-cachicamas-ai-layer-1.md#ai-21--create-provider-conformance-suite) · SDD change: `cachicamas-ai-conformance-suite`. The suite is the reason a second adapter will ever be cheap; every required case is a node so that omissions are visible.
+SDD change: `cachicamas-ai-conformance-suite`. The suite is the reason a second adapter will ever be cheap; every required case is a node so that omissions are visible.
+
+**Charter**
+
+> **Amended 2026-07-30:** the suite gains two required cases — a **tool call delivered whole, with zero delta events** (finding G12a), and a **mid-stream disconnect that preserves partial output** (finding G8). Both are behaviours a real provider exhibits and neither is exercised by a naive happy-path suite. `Depends on:` gains AI-40, since a conformance suite written against the process-global sequence counter would freeze that bug permanently.
+
+- **Goal:** Define behavior every concrete adapter must pass.
+- **Deliverable:** Reusable contract tests for text, tools, completion, errors, cancellation, stream closure, and redaction.
+- **Acceptance:** A provider factory can be plugged into the suite without copying assertions.
+- **Depends on:** AI-18, AI-20.
+- **Out of scope:** Live API credentials.
 
 ```mermaid
 flowchart LR
@@ -641,7 +810,15 @@ flowchart LR
 
 ### AI-43 — Make cache breakpoints expressible
 
-Map entry: [AI-43](./0001-cachicamas-ai-layer-1.md#ai-43--make-cache-breakpoints-expressible) · SDD change: `cachicamas-ai-cache-breakpoints` · Closes: **G4** (Layer 1 half). Blocks AI-22 and AI-24.
+SDD change: `cachicamas-ai-cache-breakpoints` · Closes: **G4** (Layer 1 half). Blocks AI-22 and AI-24.
+
+**Charter**
+
+- **Goal:** Close gap **G4**. The system instruction is a flat string, so there is nowhere to mark a prompt-cache boundary.
+- **Deliverable:** Ordered, markable segments for the system instruction, plus breakpoint markers on tool declarations and messages. Markers are advisory — an adapter for an auto-caching provider ignores them.
+- **Acceptance:** A request can express a breakpoint set that honours the vendor cap on breakpoint count and the tools → system → messages invalidation ordering, and an adapter can render or ignore it.
+- **Depends on:** AI-41, AI-42. · **Blocks:** **AI-22, AI-24**.
+- **Out of scope:** Any measurement of actual cache hit rate. Also **out of scope: usage reporting** — the usage type already carries the cache-read and cache-write token counts.
 
 ```mermaid
 flowchart LR
@@ -682,7 +859,15 @@ flowchart LR
 
 ### AI-44 — Add per-request options and a provider escape hatch
 
-Map entry: [AI-44](./0001-cachicamas-ai-layer-1.md#ai-44--add-per-request-options-and-a-provider-escape-hatch) · SDD change: `cachicamas-ai-request-extension-points` · Closes: **G9**. Blocks AI-22, AI-24, and Layer 2's pre-request hook.
+SDD change: `cachicamas-ai-request-extension-points` · Closes: **G9**. Blocks AI-22, AI-24, and Layer 2's pre-request hook.
+
+**Charter**
+
+- **Goal:** Close gap **G9**. Generation options are fixed at request construction, and there is no way to carry a provider-specific field the neutral vocabulary does not model.
+- **Deliverable:** Per-request options, a typed-but-opaque provider pass-through, and copy-on-write rebuilding so a caller can derive a modified request from an existing one.
+- **Acceptance:** A provider-specific field survives to its adapter without any other adapter needing to know it exists; a request can be rebuilt without mutating the original.
+- **Depends on:** AI-43. · **Blocks:** AI-22, AI-24; and Layer 2's pre-request hook.
+- **Note:** The design principle is deliberate and worth restating in the SDD — the correct response to provider divergence is a typed pass-through, **not** a wider neutral vocabulary. Every field added to the neutral model for one provider becomes a field every other adapter must ignore.
 
 ```mermaid
 flowchart LR
@@ -723,7 +908,15 @@ flowchart LR
 
 ### AI-45 — Carry a reasoning round-trip token
 
-Map entry: [AI-45](./0001-cachicamas-ai-layer-1.md#ai-45--carry-a-reasoning-round-trip-token) · SDD change: `cachicamas-ai-reasoning-roundtrip` · Closes: **G12(b)**. Blocks AI-27.
+SDD change: `cachicamas-ai-reasoning-roundtrip` · Closes: **G12(b)**. Blocks AI-27.
+
+**Charter**
+
+- **Goal:** Close gap **G12(b)**. Reasoning content exposes its state and its text and cannot carry a provider blob that must be returned byte-identical.
+- **Deliverable:** An opaque round-trip token on reasoning content, never interpreted by cachicamas, preserved exactly through normalization and session persistence.
+- **Acceptance:** A reasoning block survives a full round trip byte-for-byte; nothing in Layer 1 parses or reformats it.
+- **Depends on:** AI-41. · **Blocks:** AI-27.
+- **Note:** Correctness, not metadata. At least one provider signs thinking blocks cryptographically; if the signature is not returned exactly, multi-turn extended thinking with tool use fails.
 
 ```mermaid
 flowchart LR
@@ -754,7 +947,15 @@ flowchart LR
 
 ### AI-46 — Add refusal and pause finish reasons
 
-Map entry: [AI-46](./0001-cachicamas-ai-layer-1.md#ai-46--add-refusal-and-pause-finish-reasons) · SDD change: `cachicamas-ai-finishreason-refusal-pause` · Closes: **G12(c)**. Depends only on AI-39 (the relocation gates everything) — the earliest schedulable milestone after it.
+SDD change: `cachicamas-ai-finishreason-refusal-pause` · Closes: **G12(c)**. Depends only on AI-39 (the relocation gates everything) — the earliest schedulable milestone after it.
+
+**Charter**
+
+- **Goal:** Close gap **G12(c)**. Refusal and pause-turn both collapse into the unknown fallback.
+- **Deliverable:** Two additional finish reasons, added additively to the frozen enum.
+- **Acceptance:** Layer 2 can distinguish "the model declined", "the model paused, resume it", and "I do not recognise this provider string" — three states with three different correct responses.
+- **Blocks:** AI-29.
+- **Note:** This is a loop-termination bug, not a cosmetic gap.
 
 ```mermaid
 flowchart LR
@@ -778,7 +979,15 @@ flowchart LR
 
 ### AI-47 — Close the stream-carrier decision
 
-Map entry: [AI-47](./0001-cachicamas-ai-layer-1.md#ai-47--close-the-stream-carrier-decision) · SDD change: `cachicamas-ai-stream-carrier-decision` · Closes: **G13**. Decision only.
+SDD change: `cachicamas-ai-stream-carrier-decision` · Closes: **G13**. Decision only.
+
+**Charter**
+
+- **Goal:** Close gap **G13**. Re-evaluate the receive-only channel against a range-over-func iterator at the package boundary, **before** a concrete adapter exists.
+- **Deliverable:** **A decision, no production code.**
+- **Acceptance:** The decision is recorded with its rationale, and it is closed before AI-22 starts.
+- **Depends on:** AI-16. · **Blocks:** AI-22.
+- **Note — documented default: keep channels**, and expose an iterator view from the AI-20 test kit for ergonomics. The canonical objection — a consumer who stops reading strands the producer goroutine — is already closed by the v1 contract, which selects on cancellation for every send and makes the caller's context the sole liveness signal. What remains is a caller who abandons the stream *and* never cancels, which is a contract violation rather than a design flaw. Against that, switching carriers now would invalidate AI-16's interface signature guard and its behavioural scenarios, merged days ago.
 
 #### AI-47.1 — Record the carrier decision `[decision]`
 
@@ -795,7 +1004,17 @@ Map entry: [AI-47](./0001-cachicamas-ai-layer-1.md#ai-47--close-the-stream-carri
 
 ### AI-22 — Select first provider and transport
 
-Map entry: [AI-22](./0001-cachicamas-ai-layer-1.md#ai-22--select-first-provider-and-transport) · SDD change: `cachicamas-ai-first-provider-decision`.
+SDD change: `cachicamas-ai-first-provider-decision`.
+
+**Charter**
+
+> **Amended 2026-07-30:** `Depends on:` gains **AI-43, AI-44, AI-47** — all of wave 4.5 must be closed first. Acceptance gains four questions the decision must answer explicitly, because each is a documented cross-provider divergence ([v2 architecture § 3.3](../0001-cachicamas-agent-stack-v2.md#33-the-provider-leakage-register)): how this provider expresses cache breakpoints (or whether it caches automatically); whether tool results are a block in a user-role message, a distinct role, or a nested object; whether an explicit output-token limit is mandatory; and whether the provider assigns tool-call identifiers at all.
+
+- **Goal:** Choose the first vendor/protocol and `net/http` versus SDK using evidence.
+- **Deliverable:** Decision covering capability fit, streaming quality, testability, dependency weight, endpoint configurability, maintenance, and credential handling boundary.
+- **Acceptance:** The decision names one first adapter and explains rejected alternatives. If the transport adds a top-level `go.mod` dependency, its artifact must include or be promoted to the ADR required by `openspec/AGENTS.md` before AI-23 adds that dependency.
+- **Depends on:** AI-02, AI-21.
+- **Out of scope:** Adapter implementation.
 
 #### AI-22.1 — The provider decision `[decision]`
 
@@ -814,7 +1033,15 @@ Map entry: [AI-22](./0001-cachicamas-ai-layer-1.md#ai-22--select-first-provider-
 
 ### AI-23 — Provider configuration and client construction
 
-Map entry: [AI-23](./0001-cachicamas-ai-layer-1.md#ai-23--add-provider-configuration-value-and-client-construction) · SDD change: `cachicamas-ai-provider-client`.
+SDD change: `cachicamas-ai-provider-client`.
+
+**Charter**
+
+- **Goal:** Construct the adapter from injected endpoint, credential/token source, HTTP client, and safe defaults.
+- **Deliverable:** Adapter shell with testable constructor.
+- **Acceptance:** Tests inject `httptest.Server`; invalid endpoint/config fails early; the adapter does not read environment variables itself.
+- **Depends on:** AI-22.
+- **Out of scope:** Catalog files, login, persistence, request sending.
 
 ```mermaid
 flowchart LR
@@ -848,7 +1075,19 @@ flowchart LR
 
 ### AI-24 — Translate normalized requests to wire requests
 
-Map entry: [AI-24](./0001-cachicamas-ai-layer-1.md#ai-24--translate-normalized-requests-to-provider-wire-requests) · SDD change: `cachicamas-ai-request-translation` · Was structurally impossible before AI-41; that is why its first dependency edge points there. Pure translation, golden-tested, no network. **Likely over one review budget: the node boundaries below are the planned chain points.**
+SDD change: `cachicamas-ai-request-translation` · Was structurally impossible before AI-41; that is why its first dependency edge points there. Pure translation, golden-tested, no network. **Likely over one review budget: the node boundaries below are the planned chain points.**
+
+**Charter**
+
+> **Amended 2026-07-30:** `Depends on:` gains **AI-41 (hard blocker)**, AI-42 and AI-43. Until AI-41 lands, this milestone is **structurally impossible** — the content-part wrappers are unexported and expose only their discriminator, so translation code in the adapter package cannot read the text, tool-call arguments or tool-result content out of the request it is translating.
+>
+> Acceptance gains: consecutive same-role messages are merged where the provider enforces strict alternation; a mandatory output-token limit is supplied from a documented default rather than silently truncating; and synthetic tool-call identifiers, if the provider assigns none, are minted here and recorded so they survive session reload.
+
+- **Goal:** Map system instructions, messages, text, tools, and options into the selected provider request.
+- **Deliverable:** Pure translation code and golden/table tests.
+- **Acceptance:** No credential appears in serialized test fixtures; unsupported normalized features fail explicitly rather than being dropped silently.
+- **Depends on:** AI-09, AI-23.
+- **Out of scope:** Network execution and stream parsing.
 
 ```mermaid
 flowchart TB
@@ -943,7 +1182,14 @@ Exit check: no expressible request feature can be silently dropped by translatio
 
 ### AI-25 — Implement the streaming frame decoder
 
-Map entry: [AI-25](./0001-cachicamas-ai-layer-1.md#ai-25--implement-streaming-frame-decoder) · SDD change: `cachicamas-ai-stream-decoder` · Framing only — no semantic mapping (that is AI-26's front, and keeping the layers separate is the decomposition every mature SDK independently arrived at). Runs **parallel to AI-24** after AI-23.
+SDD change: `cachicamas-ai-stream-decoder` · Framing only — no semantic mapping (that is AI-26's front, and keeping the layers separate is the decomposition every mature SDK independently arrived at). Runs **parallel to AI-24** after AI-23.
+
+**Charter**
+
+- **Goal:** Decode the selected transport framing independently from semantic event mapping.
+- **Deliverable:** Incremental decoder for split frames, multiple frames per read, keep-alives, EOF, and malformed data.
+- **Acceptance:** Arbitrary read boundaries do not change decoded frames; malformed/truncated frames return typed failures.
+- **Depends on:** AI-18, AI-23. **Parallel with:** AI-24 after AI-23.
 
 ```mermaid
 flowchart TB
@@ -1004,7 +1250,15 @@ flowchart TB
 
 ### AI-26 — Translate response lifecycle and text
 
-Map entry: [AI-26](./0001-cachicamas-ai-layer-1.md#ai-26--translate-response-lifecycle-and-text) · SDD change: `cachicamas-ai-provider-text-stream` · The adapter's walking skeleton: the first node is the first time a real wire transcript becomes a normalized event stream end-to-end.
+SDD change: `cachicamas-ai-provider-text-stream` · The adapter's walking skeleton: the first node is the first time a real wire transcript becomes a normalized event stream end-to-end.
+
+**Charter**
+
+- **Goal:** Map provider response-start, text deltas, and completion into neutral events.
+- **Deliverable:** End-to-end `httptest` stream for a text-only response.
+- **Acceptance:** Event order satisfies AI-11/12/13 and the conformance text cases pass.
+- **Depends on:** AI-24, AI-25.
+- **Out of scope:** Tool calls and reasoning.
 
 ```mermaid
 flowchart LR
@@ -1075,7 +1329,16 @@ Exit check: a recorded text transcript replayed through `httptest` drains as a f
 
 ### AI-27 — Translate the reasoning stream
 
-Map entry: [AI-27](./0001-cachicamas-ai-layer-1.md#ai-27--translate-reasoning-stream) · SDD change: `cachicamas-ai-provider-reasoning-stream`.
+SDD change: `cachicamas-ai-provider-reasoning-stream`.
+
+**Charter**
+
+> **Amended 2026-07-30** (finding G12b): `Depends on:` gains **AI-45**. The provider's reasoning round-trip token must be captured here and preserved byte-exact — never parsed, never reformatted. Acceptance gains a round-trip test proving the bytes are unchanged.
+
+- **Goal:** Implement the chosen optional reasoning behavior for the first provider.
+- **Deliverable:** Mapping, unsupported behavior, or documented capability absence.
+- **Acceptance:** Provider reasoning never leaks into text events; conformance behavior matches AI-06/14.
+- **Depends on:** AI-14, AI-26. **Parallel with:** AI-28 where adapter internals permit.
 
 ```mermaid
 flowchart LR
@@ -1115,7 +1378,17 @@ flowchart LR
 
 ### AI-28 — Translate the tool-call stream
 
-Map entry: [AI-28](./0001-cachicamas-ai-layer-1.md#ai-28--translate-tool-call-stream) · SDD change: `cachicamas-ai-provider-tool-stream`.
+SDD change: `cachicamas-ai-provider-tool-stream`.
+
+**Charter**
+
+> **Amended 2026-07-30** (finding G5): acceptance gains that the tool-call **ordinal survives normalization**, so Layer 2 can restore results in call order regardless of completion order — several providers require tool results to correspond positionally to their calls. If the first provider needs an explicit index to make this work, the SDD promotes it to the AI-15 payload as an **additive** change. Also gains the zero-delta case from AI-15's amendment.
+
+- **Goal:** Map fragmented and interleaved provider tool calls into neutral events.
+- **Deliverable:** Tool-call mapping and reconstruction tests.
+- **Acceptance:** Multiple interleaved calls preserve identity, order, and exact argument bytes; malformed completion yields a typed failure.
+- **Depends on:** AI-15, AI-26.
+- **Out of scope:** JSON argument validation against the tool schema and tool execution.
 
 ```mermaid
 flowchart TB
@@ -1165,7 +1438,16 @@ flowchart TB
 
 ### AI-29 — Translate usage and finish reasons
 
-Map entry: [AI-29](./0001-cachicamas-ai-layer-1.md#ai-29--translate-usage-and-finish-reasons) · SDD change: `cachicamas-ai-provider-completion`.
+SDD change: `cachicamas-ai-provider-completion`.
+
+**Charter**
+
+> **Amended 2026-07-30** (finding G12c): `Depends on:` gains **AI-46**. Refusal and pause-turn map to their own finish reasons, not to the unknown fallback. Acceptance gains that mapping.
+
+- **Goal:** Complete terminal metadata mapping for the first provider.
+- **Deliverable:** Usage, finish reason, unknown-value, and partial-metadata handling.
+- **Acceptance:** Terminal events contain every available normalized field and never invent unavailable usage.
+- **Depends on:** AI-10, AI-26. **Parallel with:** AI-27 and AI-28 after AI-26.
 
 ```mermaid
 flowchart LR
@@ -1200,7 +1482,16 @@ flowchart LR
 
 ### AI-30 — Map HTTP and provider failures
 
-Map entry: [AI-30](./0001-cachicamas-ai-layer-1.md#ai-30--map-http-and-provider-failures) · SDD change: `cachicamas-ai-provider-error-mapping` · Converts wire failures into AI-18's taxonomy; runs parallel to AI-26 after AI-25.
+SDD change: `cachicamas-ai-provider-error-mapping` · Converts wire failures into AI-18's taxonomy; runs parallel to AI-26 after AI-25.
+
+**Charter**
+
+> **Amended 2026-07-30** (finding G8): a mid-stream disconnect must produce a **terminal error event** carrying AI-18's partial-output discriminator, not merely a returned error. The distinction matters because the harness's retry decision depends on whether anything was already emitted.
+
+- **Goal:** Convert transport/status/body failures into the AI-18 taxonomy.
+- **Deliverable:** Tests for auth, permission, rate limit, unavailable, timeout, malformed body, unexpected status, and mid-stream disconnect.
+- **Acceptance:** Response bodies are size-limited and sanitized; retry hints and status metadata are preserved safely.
+- **Depends on:** AI-18, AI-25. **Parallel with:** AI-26 after shared decoder dependencies.
 
 ```mermaid
 flowchart TB
@@ -1254,7 +1545,15 @@ flowchart TB
 
 ### AI-31 — Prove cancellation and goroutine cleanup
 
-Map entry: [AI-31](./0001-cachicamas-ai-layer-1.md#ai-31--prove-cancellation-and-goroutine-cleanup) · SDD change: `cachicamas-ai-cancellation`. Four cancellation moments, one node each — they fail differently and are debugged differently. Every node runs its scenarios over text **and tool-call** streams (the map's AI-28 edge): a cancellation proof that never crosses the tool-call accumulation path proves nothing about its buffers.
+SDD change: `cachicamas-ai-cancellation`. Four cancellation moments, one node each — they fail differently and are debugged differently. Every node runs its scenarios over text **and tool-call** streams (the charter's AI-28 edge): a cancellation proof that never crosses the tool-call accumulation path proves nothing about its buffers.
+
+**Charter**
+
+- **Goal:** Ensure cancellation works before headers, between chunks, during a blocked send, and after completion.
+- **Deliverable:** Cancellation-safe producer logic and deterministic tests.
+- **Acceptance:** Requests stop, channels close once, no send occurs forever without observing context, and no goroutine leak is detected.
+- **Depends on:** AI-26, AI-28, AI-30.
+- **Out of scope:** Agent-level stop UX.
 
 ```mermaid
 flowchart LR
@@ -1298,7 +1597,15 @@ flowchart LR
 
 ### AI-32 — Lock backpressure and buffer behavior
 
-Map entry: [AI-32](./0001-cachicamas-ai-layer-1.md#ai-32--lock-backpressure-and-buffer-behavior) · SDD change: `cachicamas-ai-backpressure`.
+SDD change: `cachicamas-ai-backpressure`.
+
+**Charter**
+
+- **Goal:** Implement the AI-01 decision with measurements rather than arbitrary channel sizes.
+- **Deliverable:** Buffer constant/configuration, slow-consumer tests, and rationale.
+- **Acceptance:** Ordering is stable, memory is bounded, and cancellation unblocks a saturated producer.
+- **Depends on:** AI-31.
+- **Out of scope:** Dropping text or tool-call events; those must remain lossless.
 
 ```mermaid
 flowchart LR
@@ -1332,7 +1639,17 @@ flowchart LR
 
 ### AI-33 — Define retry and idempotency policy
 
-Map entry: [AI-33](./0001-cachicamas-ai-layer-1.md#ai-33--define-retry-and-idempotency-policy) · SDD change: `cachicamas-ai-retry-policy` · The amendment's core sentence, promoted to structure: **the partial-output case is never retried at Layer 1.**
+SDD change: `cachicamas-ai-retry-policy` · The amendment's core sentence, promoted to structure: **the partial-output case is never retried at Layer 1.**
+
+**Charter**
+
+> **Amended 2026-07-30** (finding G8): make explicit what the current wording only implies. The **partial-output case is never retried at Layer 1** — it is handed up as a typed error and the harness decides. The acceptance clause must say not only what must *not* happen but what *does*. This matters because a stream that dies after emitting output is the single most common real-world failure, and the naive retry predicate ("retry if nothing was emitted") is precisely the one that excludes it.
+
+- **Goal:** Decide and implement only retries that cannot duplicate a partially observed response.
+- **Deliverable:** Explicit pre-stream retry conditions, backoff bounds, `Retry-After` handling, or a documented no-auto-retry v1 policy.
+- **Acceptance:** No automatic retry occurs after any semantic event has been emitted unless the protocol provides a proven resume mechanism.
+- **Depends on:** AI-30, AI-31.
+- **Out of scope:** Agent-turn retries and fallback to another model.
 
 ```mermaid
 flowchart LR
@@ -1378,7 +1695,14 @@ flowchart LR
 
 ### AI-34 — Enforce secret redaction
 
-Map entry: [AI-34](./0001-cachicamas-ai-layer-1.md#ai-34--enforce-secret-redaction-and-safe-diagnostics) · SDD change: `cachicamas-ai-redaction` · Adversarial by design: every test plants a sentinel and asserts absence.
+SDD change: `cachicamas-ai-redaction` · Adversarial by design: every test plants a sentinel and asserts absence.
+
+**Charter**
+
+- **Goal:** Prevent credentials, authorization headers, sensitive prompt bodies, and unbounded provider errors from entering logs/errors.
+- **Deliverable:** Safe diagnostic metadata and adversarial redaction tests.
+- **Acceptance:** Sentinel secrets do not appear in errors, logs, fixtures, event metadata, or test failure output.
+- **Depends on:** AI-23, AI-30. **Parallel with:** AI-31 through AI-33 after error mapping.
 
 ```mermaid
 flowchart LR
@@ -1411,7 +1735,17 @@ flowchart LR
 
 ### AI-35 — Add the observability boundary
 
-Map entry: [AI-35](./0001-cachicamas-ai-layer-1.md#ai-35--add-adapter-observability-boundary) · SDD change: `cachicamas-ai-observability` · Governed by ADR 0005 § D3: OTel **API** only, allowlist attributes, absolute content denylist.
+SDD change: `cachicamas-ai-observability` · Governed by ADR 0005 § D3: OTel **API** only, allowlist attributes, absolute content denylist.
+
+**Charter**
+
+> **Amended 2026-07-30** (finding S5): reword to [ADR 0005 § D3](../../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary). Layer 1 **may** import the OpenTelemetry **API** and **must not** import the OTel SDK, any exporter, or `database_administrator/src/otel`. The existing acceptance clause "Layer 1 does not import Cachicamas `otel`" stays literally true and becomes precise rather than accidental. Deliverable gains the § D3 attribute **allowlist** (GenAI semantic conventions) and its **absolute denylist**: no prompt, completion, reasoning, tool-argument or tool-result text, no header, no credential, no raw response body.
+
+- **Goal:** Expose enough safe timing/request metadata for callers without coupling Layer 1 to application telemetry policy.
+- **Deliverable:** Decision and minimal hooks/attributes, preferably through context and safe result metadata.
+- **Acceptance:** Layer 1 does not import Cachicamas `otel`; model content and secrets are not recorded by default.
+- **Depends on:** AI-29, AI-30, AI-34.
+- **Out of scope:** Dashboards, exporters, and application tracing setup.
 
 ```mermaid
 flowchart LR
@@ -1453,7 +1787,15 @@ flowchart LR
 
 ### AI-36 — Run full deterministic adapter conformance
 
-Map entry: [AI-36](./0001-cachicamas-ai-layer-1.md#ai-36--run-full-deterministic-adapter-conformance) · SDD change: `cachicamas-ai-adapter-conformance`.
+SDD change: `cachicamas-ai-adapter-conformance`.
+
+**Charter**
+
+- **Goal:** Run the reusable AI-21 suite against the first concrete adapter through `httptest`.
+- **Deliverable:** One deterministic end-to-end test matrix covering text, reasoning policy, tools, usage, all terminal paths, errors, cancellation, and closure.
+- **Acceptance:** The first adapter passes every required capability; optional capability results are recorded explicitly.
+- **Depends on:** AI-27 through AI-35.
+- **Out of scope:** Real vendor network calls.
 
 ```mermaid
 flowchart LR
@@ -1483,7 +1825,15 @@ flowchart LR
 
 ### AI-37 — Add the opt-in live smoke test
 
-Map entry: [AI-37](./0001-cachicamas-ai-layer-1.md#ai-37--add-opt-in-live-smoke-test) · SDD change: `cachicamas-ai-live-smoke`.
+SDD change: `cachicamas-ai-live-smoke`.
+
+**Charter**
+
+- **Goal:** Prove the real provider still matches recorded assumptions without making CI depend on credentials.
+- **Deliverable:** Explicitly gated test infrastructure, such as an internal smoke-test package unreachable from application `cmd/` entry points, with safe setup instructions.
+- **Acceptance:** It skips cleanly without credentials, uses a bounded request, has a timeout, and never prints the credential or full sensitive prompt.
+- **Depends on:** AI-36.
+- **Out of scope:** A user-facing CLI, production deployment, and scheduled billing-consuming CI.
 
 #### AI-37.1 — Gated, bounded, silent about secrets `[leaf]`
 
@@ -1497,7 +1847,15 @@ Map entry: [AI-37](./0001-cachicamas-ai-layer-1.md#ai-37--add-opt-in-live-smoke-
 
 ### AI-38 — Publish the Layer 2 readiness contract
 
-Map entry: [AI-38](./0001-cachicamas-ai-layer-1.md#ai-38--publish-layer-2-readiness-contract) · SDD change: `cachicamas-ai-layer2-handoff` · Layer 1's exit: the surface freezes here.
+SDD change: `cachicamas-ai-layer2-handoff` · Layer 1's exit: the surface freezes here.
+
+**Charter**
+
+- **Goal:** Freeze the v1 surface that `cachicamas_agent` may consume.
+- **Deliverable:** Package examples, compatibility statement, supported-capability matrix, and a fake-provider example for future `AgentLoop` tests.
+- **Acceptance:** A tiny external-package test can construct a request, invoke a fake provider, drain events, handle cancellation/errors, and compile without vendor imports.
+- **Depends on:** AI-36; AI-37 may remain optional.
+- **Out of scope:** Implementing `AgentLoop` or `AgentHarness`.
 
 ```mermaid
 flowchart LR
@@ -1528,6 +1886,64 @@ flowchart LR
 
 ---
 
+## Layer 1 completion checklist
+
+Layer 1 is complete when every box holds. The [traceability spine](#completion-checklist--nodes) maps each item, in this order, to the node that proves it.
+
+- [ ] Package exists at the ADR-defined location.
+- [ ] Import direction is mechanically guarded.
+- [ ] Neutral request/message/content/tool contracts are documented and tested.
+- [ ] Event order and stream ownership are explicit.
+- [ ] Cancellation cannot leak goroutines.
+- [ ] Backpressure is bounded and lossless.
+- [ ] Provider interface exposes no vendor type.
+- [ ] Error taxonomy is typed, safe, and inspectable.
+- [ ] Fake provider supports deterministic Layer 2 tests.
+- [ ] Conformance suite can be reused for every future adapter.
+- [ ] First concrete adapter passes deterministic conformance tests.
+- [ ] Secrets and sensitive bodies are absent from diagnostics by default.
+- [ ] Live test is optional and bounded.
+- [ ] Layer 2 handoff example compiles without vendor dependencies.
+- [ ] The package lives in `backend/agent` and `src/tools/` is vacated. *(added 2026-07-30)*
+- [ ] **Both** import directions are mechanically guarded, not just Layer 1 purity. *(added 2026-07-30)*
+- [ ] Event sequence is per-stream and provably starts at 1 for every stream. *(added 2026-07-30)*
+- [ ] Every content-part variant is readable from another package. *(added 2026-07-30)*
+- [ ] Cache breakpoints are expressible, and per-request provider options have an escape hatch. *(added 2026-07-30)*
+- [ ] Provider round-trip tokens survive byte-exact through normalization and persistence. *(added 2026-07-30)*
+
+## Explicitly deferred until after Layer 1
+
+- `AgentLoop` and `AgentHarness`.
+- Agent-level events such as `AgentStart`, `TurnStart`, and tool-execution events.
+- Tool execution.
+- `CodingSession` and JSONL persistence.
+- Provider catalog and model-selection UI.
+- Skills, project instructions, slash commands, CLI, TUI, and print mode.
+- Multi-provider fallback/routing.
+- Cost policy, quota management, and organization billing.
+- Production rollout.
+
+### Named Layer 2 / Layer 3 forward requirements *(added 2026-07-30)*
+
+These are deferred **with a reserved seam**, not merely unscheduled. Each is placed in
+[the v2 architecture reference § 6](../0001-cachicamas-agent-stack-v2.md#6-the-twelve-seams-that-must-exist-now)
+and dispositioned in [§ 7](../0001-cachicamas-agent-stack-v2.md#7-forward-requirements-register). None
+requires Layer 1 work, which is why they appear here rather than as milestones — but all of them
+shape Layer 2's design, so none should be rediscovered later as a surprise.
+
+| ID | Deferred requirement | Owner |
+| --- | --- | --- |
+| G1 | Permission as a suspendable protocol on the event stream, with allow-once / allow-always / deny / modify-input | L2 protocol, L3 policy |
+| G2 | Sandboxed tool execution, applied to the whole spawned process tree | L3 |
+| G3 | Context compaction that protects recent turns, never orphans a call/result pair, and is recoverable | L2 |
+| G5 | Parallel tool execution with call-ordered re-join | L2 |
+| G6 | Dynamic, supervised tool sources | L3 |
+| G7 | Subagents as a harness invoked from a tool | L2 |
+| G10 | Cost as first-class events plus a price table — **the Layer 1 half is already done** | L2 emits, L3 prices |
+| G11 | Hook taxonomy: pre-request, pre-compact, post-turn, session-start. Observers never synchronous on the streaming path | L2 + L3 |
+
+---
+
 ## Traceability spine
 
 Two-way coverage: every review finding, contract gap, and completion-checklist item maps to the node(s) that close it; every node traces back to a map milestone. A finding with no node, or a node with no purpose, is a bug in this document.
@@ -1555,7 +1971,7 @@ Two-way coverage: every review finding, contract gap, and completion-checklist i
 
 ### Completion checklist → nodes
 
-Each of the map's twenty completion-checklist items, in the map's order: (1) package at the ADR location — AI-39.2/39.3 · (2) import direction guarded — AI-39.4 · (3) neutral contracts documented and tested — shipped + wave 3.6 · (4) event order and ownership explicit — AI-40, AI-20.3 · (5) cancellation leak-free — AI-31 · (6) backpressure bounded and lossless — AI-32 · (7) no vendor type on the interface — AI-38.1 · (8) typed error taxonomy — AI-17/AI-18 · (9) fake provider — AI-19 · (10) reusable conformance — AI-21, AI-36.1 · (11) first adapter passes conformance — AI-36 · (12) secrets absent from diagnostics — AI-34, suite case AI-21.7 · (13) live test optional and bounded — AI-37 · (14) handoff example — AI-38.1 · (15) `src/tools/` vacated — AI-39.2 · (16) **both** import directions guarded — AI-39.4 + AI-39.5 · (17) per-stream sequence from 1 — AI-40.2 · (18) every part readable — AI-41.5 · (19) breakpoints + escape hatch — AI-43/AI-44 · (20) round-trip tokens byte-exact — AI-45.2, AI-27.2.
+Each of [the completion checklist](#layer-1-completion-checklist)'s twenty items, in that order: (1) package at the ADR location — AI-39.2/39.3 · (2) import direction guarded — AI-39.4 · (3) neutral contracts documented and tested — shipped + wave 3.6 · (4) event order and ownership explicit — AI-40, AI-20.3 · (5) cancellation leak-free — AI-31 · (6) backpressure bounded and lossless — AI-32 · (7) no vendor type on the interface — AI-38.1 · (8) typed error taxonomy — AI-17/AI-18 · (9) fake provider — AI-19 · (10) reusable conformance — AI-21, AI-36.1 · (11) first adapter passes conformance — AI-36 · (12) secrets absent from diagnostics — AI-34, suite case AI-21.7 · (13) live test optional and bounded — AI-37 · (14) handoff example — AI-38.1 · (15) `src/tools/` vacated — AI-39.2 · (16) **both** import directions guarded — AI-39.4 + AI-39.5 · (17) per-stream sequence from 1 — AI-40.2 · (18) every part readable — AI-41.5 · (19) breakpoints + escape hatch — AI-43/AI-44 · (20) round-trip tokens byte-exact — AI-45.2, AI-27.2.
 
 ## Method sources
 
