@@ -121,13 +121,16 @@ These live in `openspec/changes/prd-orchestrator/proposal.md` → "Out of Scope"
 
 ## 4. Architecture
 
-The framework is built as **hexagonal Go services** sharing a Postgres database. Each service owns its own HTTP layer, application layer, domain layer, and adapters — and communicates only through Postgres (no service-to-service HTTP).
+The framework is built as **hexagonal Go services** sharing a Postgres database. Each service owns its own HTTP layer, application layer, domain layer, and adapters. Most inter-service coupling is through Postgres; `database_administrator → workspace_syncer` is the one direct HTTP call (`src/infrastructure/workspacesyncer/client.go`).
+
+The agent stack is the exception to "hexagonal": `backend/agent` is a **layered** module (see [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md)), not a hexagonal service, and hexagonal review rules do not apply to it.
 
 | Service | Purpose | Status |
 | --------- | --------- | -------- |
-| `database_administrator` | Migration runner + observability scaffolding. Owns all schema migrations under `src/migration/sql/`. | Live on `main` |
-| `prd_orchestrator` | The framework. PRD intake, analysis, decomposition. v0.0.1 thin slice. | In development (PR #11 open, chained-PR strategy) |
-| `frontend` (Qwik 1.20.0) | Operator UI for the orchestrator. | Scaffolded on `feat/qwik-frontend` worktree branch |
+| `database_administrator` | The backend API. Identity/OAuth callback, organizations, workspaces, sync jobs + SSE, GitHub adapter, prompts, skills. Also owns all schema migrations under `src/migration/sql/`. | Live on `main` |
+| `workspace_syncer` | Git clone + validate worker. `POST /internal/clone-and-validate`, HMAC callback to `database_administrator`. | Live on `main` |
+| `agent` | The 3-layer agentic stack — model adapter (`src/ai/`), portable brain (`src/agent/`), coding application (`src/coding/`), CLI (`src/cmd/cachicamas/`). See [ADR 0004](docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) as amended by [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md). | Layer 1 in progress — moves into this module in milestone AI-39 |
+| `frontend` (Qwik 1.20.0) | Operator UI. Auth.js GitHub login, workspaces, Prompt Studio, Skill Studio. | Live on `main` |
 
 **Hexagonal layout** (under `backend/<service>/src/`):
 
@@ -140,7 +143,7 @@ otel/               → observability wiring (logging, tracing)
 migration/sql/      → goose-style .sql migrations (in database_administrator only)
 ```
 
-The orchestrator reuses the migration runner from `database_administrator` via `go.mod replace ../database_administrator` — it does NOT call it over HTTP.
+A service that needs another module's Go code uses `go.mod replace ../<module>` rather than an HTTP call. **Note the cost before reaching for it:** each service's Docker build context is its own directory (`docker-compose.yaml`), and each `Dockerfile` copies only that module's `go.mod`, `go.sum` and `src/`. The first cross-module import therefore also requires moving the compose build context up to `./backend` and rewriting every `COPY` path. `backend/agent` does not import, and is not imported by, any other module — see [ADR 0005 § D1](docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2).
 
 **Hierarchy:**
 
@@ -162,8 +165,10 @@ organization
 
 | Path | Contents |
 | ------ | ---------- |
-| `backend/` | Go services. `database_administrator/` (live) and `prd_orchestrator/` (in flight). |
-| `frontend/` | Qwik 1.20.0 app. Scaffolded on the `feat/qwik-frontend` worktree branch. |
+| `backend/` | Go modules. `database_administrator/` (API + migrations), `workspace_syncer/` (git worker), `agent/` (the 3-layer agentic stack). Each is a separate Go module with its own `Makefile` and `.golangci.yml`; `make test` runs per module. |
+| `frontend/` | Qwik 1.20.0 operator UI. |
+| `docs/adr/` | Architecture Decision Records, with the external source material they cite under `docs/adr/references/`. |
+| `docs/architecture/` | cachicamas-authored architecture documents and milestone maps. |
 | `openspec/` | OpenSpec artifacts. `project.md` (bootstrap), `AGENTS.md`, `config.yaml`, `changes/<change>/`, `specs/`. |
 | `infra/` | Infrastructure configs. Postgres init scripts under `infra/postgres/init/`. |
 | `scripts/` | Utility shell scripts. |
