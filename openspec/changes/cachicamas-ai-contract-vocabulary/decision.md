@@ -116,6 +116,8 @@ What comes back, and what carries it. Owners AI-02, AI-09, AI-14 … AI-18. **Cl
 
 > **Definition order is load-bearing here.** The container nouns are defined before the content nouns, and `sequence` is defined **after** and **as a property of** `stream`. Defect **C3** — a process-global counter that made "the first event of every stream carries sequence 1" achievable only for the first stream in a process — is a direct consequence of the reverse order. Encoding the order in the vocabulary excludes the defect at the definitional level, where no test can reach it.
 
+> **Amended 2026-07-31** — appended `V-STR-22` **carrier view** and `V-STR-23` **backpressure** to § 4.1, both owned by **AI-02**, in the pull request for `cachicamas-ai-stream-lifecycle` (AI-02.1) that needed them. Per § 9 rule 2, a milestone that needs a Layer 1 noun this register lacks appends it here rather than defining it locally. `carrier view` was needed because AI-02.1 delegates iterator ergonomics to AI-22.5 and had no noun for the delegated thing; without one, every downstream restatement says "iterator view", a phrase welded to one carrier choice. `backpressure` was needed because AI-02.1's buffering decision turns on "backpressure means waiting, never dropping", and the word already appeared *inside* `V-STR-08`'s definition without being defined — exactly the drift this register exists to prevent. No existing row was renumbered, reworded or removed; § 9 rule 3 holds. Term counts in § 10 updated accordingly.
+
 ### 4.1 Container terms — the stream itself
 
 | Id | Term | Definition | Owner | Provenance |
@@ -129,6 +131,8 @@ What comes back, and what carries it. Owners AI-02, AI-09, AI-14 … AI-18. **Cl
 | `V-STR-07` | **abandonment** | A consumer that stops reading a stream **and never cancels it**. A documented contract violation rather than a supported mode, stated because it cannot be tested to termination. It is restated at the v1 freeze. | AI-02 | 0001 § 7 **G13** |
 | `V-STR-08` | **bounded buffer** | The finite capacity between producer and consumer. Bounded by contract: an unbounded buffer converts backpressure into memory growth. Its starting capacity is AI-02's decision and is revisited with measurements later. | AI-02 | 0001 § 6, § 9 |
 | `V-STR-09` | **sanctioned loss path** | The single, named, documented circumstance in which events may be dropped — a saturated buffer during cancellation drops late events and closes without a terminal. Exactly one such path exists; any other loss is a defect. | AI-02 | 0001 § 9 |
+| `V-STR-22` | **carrier view** | A convenience adaptation of a stream into an iteration shape other than the decided carrier, offered **outside** the package boundary. A view over a stream the consumer already holds; it does not own the stream, never closes it, and is **never a second contract** — the boundary keeps speaking the decided carrier. *(Appended 2026-07-31 by AI-02.1.)* | AI-02 | 0001 § 7 **G13** ("expose an iterator view from the test kit for ergonomics") |
+| `V-STR-23` | **backpressure** | The posture a bounded buffer takes when it is full: the producer **waits**. Waiting, never dropping — a full buffer slows a stream and never shortens it. Distinct from the `V-STR-09` sanctioned loss path, which is not backpressure but its one documented exception. Defined because the word already appeared inside `V-STR-08` undefined, and an undefined word is how "backpressure" comes to mean discarding. *(Appended 2026-07-31 by AI-02.1.)* | AI-02 | 0001 § 6, § 9 |
 
 ### 4.2 Content terms — what a stream carries
 
@@ -306,13 +310,13 @@ AI-01.1's six items, each against this artifact.
 | # | Closing-checklist item | Where answered | Status |
 | --- | --- | --- | --- |
 | 1 | Request-side terms: role, message, content part and its kinds, tool declaration, tool choice, tool call, tool result, system-instruction segment, cache-boundary marker, generation option, provider escape hatch | § 3 — `V-REQ-01` … `V-REQ-29`; all eleven named terms present | **answered** |
-| 2 | Stream-side terms: event, event kind, payload, sequence, stream, terminal event, delta, block index, call ordinal | § 4 — `V-STR-01` … `V-STR-21`; all nine named terms present, with `call ordinal` grouped here and owned by AI-09 | **answered** |
+| 2 | Stream-side terms: event, event kind, payload, sequence, stream, terminal event, delta, block index, call ordinal | § 4 — `V-STR-01` … `V-STR-23`; all nine named terms present, with `call ordinal` grouped here and owned by AI-09 | **answered** |
 | 3 | Metadata terms: finish reason, usage, token-count field, absence versus zero | § 5 — `V-MET-01` … `V-MET-12`; all four named terms present, plus the complete closed finish-reason vocabulary | **answered** |
 | 4 | Failure terms defined and separated: caller-contract (AI-04) versus provider/transport (AI-19), and the pre-stream versus mid-stream delivery split | § 6 — the two-axis diagram, `V-FAIL-01` … `V-FAIL-15`, the decidability-without-I/O rule, and four worked borderline cases | **answered** |
 | 5 | Terms explicitly excluded, with their owner named: agent turn, transcript, session, tool execution, permission, compaction, cost, price, frontend | § 8.1 — `V-OUT-01` … `V-OUT-09`, all nine with a non-Layer-1 owner and the Layer 1 neighbour each is confused with; § 8.2 appends eight more | **answered** |
 | 6 | The two wording traps from the layer boundary restated, because both have already caused one wrong decision each | § 2 — both quoted verbatim, each with the record of its wrong decision and its operational consequence for this register | **answered** |
 
-**Term count:** 29 request-side · 21 stream-side · 12 metadata · 15 failure · 15 provider-surface · 17 excluded = **109 terms**.
+**Term count:** 29 request-side · 23 stream-side · 12 metadata · 15 failure · 15 provider-surface · 17 excluded = **111 terms**. *(Amended 2026-07-31: `V-STR-22`, `V-STR-23` appended by AI-02.1 — see the amendment blockquote in § 4.)*
 
 **Node status.** AI-01.1 closes on merge of this artifact. Per doc 0002's node grammar, a `[decision]` leaf produces no production code and closes when "the decision artifact answers every listed question and is merged." No `make test` gate applies; there is nothing in `backend/agent/` that this change touches.
 
