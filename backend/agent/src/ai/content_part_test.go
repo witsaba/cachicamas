@@ -10,6 +10,8 @@ package ai_test
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -530,4 +532,163 @@ func TestMessage_UnconstructedContentElement_IsRejected(t *testing.T) {
 			}
 		}
 	})
+}
+
+// AI-06.3 item 2 — an external package cannot implement the part contract, and
+// the proof is the compiler's.
+//
+// The seal is two mechanisms with a clean boundary between them, and this is the
+// half that no in-process assertion can reach. decision.md § 3.3 works eight
+// bypasses; five of them are answered by the language rather than by a check
+// this package wrote, and a language rule is observable only by asking the
+// toolchain to compile something and watching it refuse. AI-00's import guard
+// established the precedent for shelling out — a property of the build graph is
+// not visible from inside the test binary — and this is the same argument one
+// level down, about the type graph.
+//
+// The other half — the one value external code can still produce, the zero
+// Part — is rejected at runtime and is proven by
+// TestMessage_UnconstructedContentElement_IsRejected.
+//
+// # Why there are two programs
+//
+// A test that asserts "this does not compile" is satisfied by every reason a
+// build can fail: a misspelled import path, an unresolvable module, a broken
+// package ai, an absent toolchain. testdata/constructed is the control. It is
+// written against the same package through the same import path from the same
+// directory and it must build, so a hand-rolled failure means the seal and not
+// the weather.
+//
+// # Why testdata
+//
+// The go tool and golangci-lint both exclude a directory named testdata from
+// package patterns, so a program that must not compile is not part of
+// `go build ./...`, `make test`'s package set, or `make lint`.
+func TestPart_HandRolledFromAnotherPackage_DoesNotCompile(t *testing.T) {
+	t.Parallel()
+
+	// Each entry is one row of decision.md § 3.3, named by its bypass number,
+	// with the diagnostic the toolchain must produce for it. The substrings are
+	// matched, not the line numbers: the fixture is allowed to move.
+	bypasses := []struct {
+		bypass     int
+		attempt    string
+		diagnostic string
+	}{
+		{2, "a named composite literal", "cannot refer to unexported field payload in struct literal of type ai.Part"},
+		{3, "a positional composite literal", "implicit assignment to unexported field payload in struct literal of type ai.Part"},
+		{4, "offering a type that embeds Part as message content", "as ai.Part value in argument to ai.NewMessage"},
+		{6, "naming the payload contract", "name partPayload not exported by package ai"},
+		{6, "implementing the payload contract", "does not implement ai.partPayload (unexported method kind)"},
+		{7, "assigning the field on a Part value", "p.payload undefined (cannot refer to unexported field payload)"},
+	}
+
+	t.Run("the control program builds", func(t *testing.T) {
+		t.Parallel()
+
+		if out, err := buildTestdataProgram(t, "constructed"); err != nil {
+			t.Fatalf("testdata/constructed must build, but the toolchain refused it.\n"+
+				"Until it does, a failure from testdata/handrolled proves nothing about the seal.\n%v\n%s", err, out)
+		}
+	})
+
+	t.Run("the hand-rolled program does not build", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := buildTestdataProgram(t, "handrolled")
+		if err == nil {
+			t.Fatalf("testdata/handrolled compiled, want a build failure.\n"+
+				"Every bypass in decision.md § 3.3 that the compiler is supposed to answer is now open.\n%s", out)
+		}
+
+		for _, b := range bypasses {
+			if !strings.Contains(out, b.diagnostic) {
+				t.Errorf("bypass %d (%s): the build output does not carry the expected diagnostic.\n"+
+					"  want substring: %s\n  got:\n%s", b.bypass, b.attempt, b.diagnostic, out)
+			}
+		}
+	})
+}
+
+// AI-06.3 item 2 *(appended)* — reflection is not a way in either.
+//
+// Bypass 7 of decision.md § 3.3 is answered by the language and not by a check
+// this package wrote, and unlike bypasses 2, 3, 4 and 6 it is answerable from
+// inside the test binary: reflect refuses to Set an unexported field, and refuses
+// to read one into an interface. Appended to AI-06.3's list when writing the
+// compile proof made it obvious that the runtime half of bypass 7 had no home.
+//
+// The exported-field count is the assertion that fails the day someone widens
+// the struct, which is the only edit that would make every other assertion here
+// vacuous.
+func TestPart_ExportedSurface_ExposesNoConstructibleState(t *testing.T) {
+	t.Parallel()
+
+	partType := reflect.TypeOf(ai.Part{})
+
+	t.Run("the struct declares exactly one field, and it is unexported", func(t *testing.T) {
+		t.Parallel()
+
+		if got := partType.NumField(); got != 1 {
+			t.Fatalf("reflect.TypeOf(ai.Part{}).NumField() = %d, want 1", got)
+		}
+		if field := partType.Field(0); field.IsExported() {
+			t.Errorf("ai.Part declares the exported field %q; the seal is a property of the field being unexported", field.Name)
+		}
+	})
+
+	t.Run("reflection cannot write the payload", func(t *testing.T) {
+		t.Parallel()
+
+		valid, err := ai.NewText("constructed the only way in")
+		if err != nil {
+			t.Fatalf("ai.NewText returned %v, want no failure", err)
+		}
+
+		target := valid
+		field := reflect.ValueOf(&target).Elem().Field(0)
+		if field.CanSet() {
+			t.Fatal("reflect reports the payload field as settable from another package, want CanSet() = false")
+		}
+		if field.CanInterface() {
+			t.Error("reflect reports the payload field as readable into an interface, want CanInterface() = false")
+		}
+
+		// The part is unchanged, and still the one NewText built.
+		if target != valid {
+			t.Error("the part changed under a reflection attempt, want it untouched")
+		}
+	})
+
+	t.Run("a Part value carries no exported method that sets anything", func(t *testing.T) {
+		t.Parallel()
+
+		// Every exported method must be a reader: no arguments, and results
+		// only. A setter would be construction wearing a method name.
+		for i := range partType.NumMethod() {
+			method := partType.Method(i)
+			if method.Type.NumIn() != 1 {
+				t.Errorf("ai.Part.%s takes an argument; every exported method on a sealed value type is a reader", method.Name)
+			}
+			if method.Type.NumOut() == 0 {
+				t.Errorf("ai.Part.%s returns nothing, so it exists to mutate", method.Name)
+			}
+		}
+	})
+}
+
+// buildTestdataProgram compiles one program under testdata and returns the
+// toolchain's combined output.
+//
+// The output is discarded with -o os.DevNull: what is under test is whether the
+// build succeeds and what it says, never the binary. `go test` runs with the
+// working directory set to the package under test, so the relative path resolves
+// against src/ai — the same assumption AI-00's import guard documents, from the
+// other direction.
+func buildTestdataProgram(t *testing.T, name string) (string, error) {
+	t.Helper()
+
+	cmd := exec.Command("go", "build", "-o", os.DevNull, "./testdata/"+name)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
