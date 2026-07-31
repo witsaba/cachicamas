@@ -206,7 +206,7 @@ AI-20.1 (documentation), AI-20.3 (proof), AI-21 (the fake obeys it), AI-24 onwar
 
 > **Abandoning a stream without cancelling it is a documented contract violation, not a supported mode.**
 
-This sentence belongs in the package contract. It is not testable to termination — no test proves a goroutine never exits, and a bounded observation that it has not exited *yet* is a strictly weaker claim that would be mistaken for the stronger one. doc 0001's defect **C3** is what that mistake looks like when it ships: "a shipped test documented the resulting gaps as expected behavior." A rule that no test enforces survives only if it is written where the next reader will find it, which is why doc 0002 requires it in the contract and why **AI-40.3 restates it at the v1 freeze**.
+This sentence belongs in the package contract. It is not testable to termination — no test proves a goroutine never exits, and a bounded observation that it has not exited *yet* is a strictly weaker claim that would be mistaken for the stronger one. doc 0001's defect **C3** is what that mistake looks like when it ships: "A shipped test documents the resulting gaps as expected." A rule that no test enforces survives only if it is written where the next reader will find it, which is why doc 0002 requires it in the contract and why **AI-40.3 restates it at the v1 freeze**.
 
 ### Why
 

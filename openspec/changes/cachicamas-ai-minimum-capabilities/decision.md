@@ -190,7 +190,7 @@ Three entries, **closed**. Each carries the reason it is optional rather than re
 
 > **A provider that lacks every one of these is fully conformant.** That is `V-PRV-07`'s clause and it is restated here because it is the sentence a conformance suite is most likely to contradict in practice: an adapter implementing only the required surface passes, completely, with three recorded absences.
 
-### `CAP-O-01` — reasoning content
+### 6.1 `CAP-O-01` — reasoning content
 
 **What it is.** Emitting a model's intermediate reasoning as reasoning content (`V-REQ-09`), with its state (`V-REQ-10`) and its opaque round-trip token (`V-REQ-11`).
 
@@ -202,7 +202,7 @@ Three entries, **closed**. Each carries the reason it is optional rather than re
 
 **Not sub-dividable.** An adapter that advertises this capability inherits `V-REQ-11` whole: the round-trip token is byte-exact, always. Splitting the capability into "emits reasoning" and "round-trips the token" would license an adapter that emits reasoning and drops signatures — and doc 0001 § 3.2 records what that breaks: multi-turn extended thinking with tool use fails, because at least one provider signs reasoning cryptographically. An advertised capability is advertised whole.
 
-### `CAP-O-02` — token counting
+### 6.2 `CAP-O-02` — token counting
 
 **What it is.** `V-PRV-17`: answering how many tokens a given request would consume, asked of the provider **before** the request is sent. Distinct from `V-MET-09` **usage**, which reports what a response consumed after the fact.
 
@@ -227,7 +227,7 @@ Test 2 then holds trivially: (a) not every vendor exposes a counting endpoint; (
 
 **The corollary, promoted to a standing rule** (§ 13 rule 4), because it is the same argument turned on Layer 1 itself: **Layer 1 must never supply a fallback estimate for an absent capability.** A default implementation that estimates is a fabrication with better provenance — the consumer cannot tell it apart from a real count, which is precisely the harm. Layer 1 states the absence; the consumer owns the fallback, because the consumer is the only party that knows what it can tolerate.
 
-### `CAP-O-03` — honoring cache-boundary markers
+### 6.3 `CAP-O-03` — honoring cache-boundary markers
 
 **What it is.** An adapter rendering the cache-boundary markers a request carries (`V-REQ-23`) into its vendor's explicit cache annotation, and enforcing the vendor's breakpoint cap (`V-REQ-24`).
 
