@@ -1,7 +1,7 @@
 # Verify report — Layer 1 stream lifecycle, ownership and carrier
 
 > **Change**: `cachicamas-ai-stream-lifecycle`
-> **Milestone**: AI-02 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-02--decide-stream-lifecycle-ownership-and-the-carrier)
+> **Milestone**: AI-02 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-02--decide-stream-lifecycle-ownership-and-the-carrier)
 > **Node**: AI-02.1 — Lifecycle, ownership and carrier `[decision]`
 > **Phase**: verify
 > **Status**: **PASS**
@@ -37,7 +37,7 @@ Clause 4 is the load-bearing one. The documented default was channels, and the d
 | `design.md` | ✅ | names the two failure modes it targets: the restated default, and the unfalsifiable constant |
 | `explore.md` | ✅ | |
 | `tasks.md` | ✅ | six tasks + a ten-check verification pass, all `[x]` |
-| amendment to `../cachicamas-ai-contract-vocabulary/decision.md` | ✅ | append-only; § 5 |
+| amendment to `../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md` | ✅ | append-only; § 5 |
 | anything under `backend/` | ✅ absent | § 7 |
 
 `git show --name-only 6da8593` lists **seven files**: the six above plus the register amendment. `tasks.md` acceptance criterion 5 — "adds six markdown files and amends exactly one existing file, append-only" — holds.

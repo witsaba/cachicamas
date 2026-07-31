@@ -1,7 +1,7 @@
 # Proposal — Create the `backend/agent` module and both boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 (Wave 0 — Found) of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 (Wave 0 — Found) of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Status**: proposed
 > **Created**: 2026-07-31
 > **Driver**: braejan
@@ -9,7 +9,7 @@
 > **Branch**: `feat/2026-07-31-cachicamas-ai-layer1-wave-0`
 > **Scope**: new `backend/agent` Go module + repo-root `go.work` + one modified test file in `backend/database_administrator`
 > **Predecessor artifact**: `openspec/changes/cachicamas-agent-module-scaffold/explore.md`
-> **Decisions implemented**: [ADR 0005 § D2](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), [§ D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Enforcement](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
+> **Decisions implemented**: [ADR 0005 § D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), [§ D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Enforcement](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
 > **Stack**: Go 1.26.3. **Zero third-party dependencies** — that is the point of the change, not an omission.
 
 ---
@@ -204,7 +204,7 @@ The change is shippable when:
 
 ## Known stale cross-reference (do not fix here)
 
-[ADR 0005 § Migration](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration) assigns the module move to milestone **AI-39** (`cachicamas-agent-module-promotion`) and says it must land before AI-17. Neither identifier means what the ADR meant any more: doc 0002 renumbered Layer 1 from zero and **folded the module promotion into AI-00**, which is this change. AI-39 in the current plan is a Wave 6 hand-off milestone, and the ADR's link into doc 0002 points at an anchor that no longer exists.
+[ADR 0005 § Migration](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration) assigns the module move to milestone **AI-39** (`cachicamas-agent-module-promotion`) and says it must land before AI-17. Neither identifier means what the ADR meant any more: doc 0002 renumbered Layer 1 from zero and **folded the module promotion into AI-00**, which is this change. AI-39 in the current plan is a Wave 6 hand-off milestone, and the ADR's link into doc 0002 points at an anchor that no longer exists.
 
 Doc 0002 § "What changed from the retired plan" already records this: *"ADR 0005's Context and Migration sections are now stale. They describe seventeen shipped milestones and assign the move to AI-39. The decisions themselves (D1–D4, Enforcement) stand unchanged and this document implements them; the narrative around them describes a history that was undone. Amending the ADR is out of this document's scope and worth doing separately."*
 

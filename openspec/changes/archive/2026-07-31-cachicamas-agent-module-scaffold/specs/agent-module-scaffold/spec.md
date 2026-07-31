@@ -1,7 +1,7 @@
 # Spec — Agent module scaffold and boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 of [doc 0002](../../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Phase**: spec (new capability)
 > **Canonical path** (after `sdd-archive`): `openspec/specs/agent-module-scaffold/spec.md`
 > **Format**: Given/When/Then + RFC 2119 keywords per `openspec/config.yaml`
@@ -18,10 +18,10 @@ The module contains no behavior. Its entire deliverable surface is a boundary pl
 
 These hold for the lifetime of the module, not only at the moment this change merges. A later milestone that breaks one of them is in violation of ADR 0005, not merely of this spec.
 
-- **Zero dependencies until an ADR grants one.** `backend/agent/go.mod` carries no `require` directive. AI-24 adds a transport behind its own ADR gate; AI-37 adds the OpenTelemetry **API** modules, pre-authorized by [ADR 0005 § D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) and by nothing else.
-- **`src/agenttest/` is a direct sibling of `src/ai/`.** AI-20.4's signature guard resolves `../ai/provider.go` from `runtime.Caller(0)`. Any other layout breaks it silently ([ADR 0005 § D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), Guard C).
+- **Zero dependencies until an ADR grants one.** `backend/agent/go.mod` carries no `require` directive. AI-24 adds a transport behind its own ADR gate; AI-37 adds the OpenTelemetry **API** modules, pre-authorized by [ADR 0005 § D3](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) and by nothing else.
+- **`src/agenttest/` is a direct sibling of `src/ai/`.** AI-20.4's signature guard resolves `../ai/provider.go` from `runtime.Caller(0)`. Any other layout breaks it silently ([ADR 0005 § D2](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), Guard C).
 - **No import reaches out of the module.** Go makes a sibling-module import a build error; the forward guard covers everything Go does not — vendor SDKs, the OTel SDK, and transitive dependencies of either.
-- **No import reaches back in.** Only `database_administrator/src/application/` and `…/src/cmd/server` may ever name the agent module ([ADR 0005 § D1 row 5](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2)), and neither does so in v1.
+- **No import reaches back in.** Only `database_administrator/src/application/` and `…/src/cmd/server` may ever name the agent module ([ADR 0005 § D1 row 5](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2)), and neither does so in v1.
 - **No CI.** `.github/workflows/` is absent. Every gate in this spec runs when a human runs `make test` inside a module directory, and "recorded green" means output pasted into the PR.
 
 ---
@@ -87,7 +87,7 @@ The module MUST NOT contain `src/agent/`, `src/coding/`, or `src/cmd/`, in any f
 
 The module MUST carry an executable guard at `backend/agent/src/ai/import_boundary_test.go` that fails when any package of `backend/agent` — including its test packages and its transitive dependencies — depends on anything outside an explicit allowlist.
 
-The guard MUST use `go list -deps -test` over the module's own package pattern. Bare `go list -deps` is insufficient: it does not report test-only imports, and `go list -f '{{range .Imports}}'` reports neither test imports nor transitive dependencies ([ADR 0005 § Guard A](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement), finding S6).
+The guard MUST use `go list -deps -test` over the module's own package pattern. Bare `go list -deps` is insufficient: it does not report test-only imports, and `go list -f '{{range .Imports}}'` reports neither test imports nor transitive dependencies ([ADR 0005 § Guard A](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement), finding S6).
 
 The allowlist MUST be **deny-by-default**: an import path that is neither a member of the Go standard library set nor a package of this module fails the guard *even when no rule names it*. The allowlist MUST be expressed as three groups — the standard library, this module's own packages, and a third-party group that MUST be empty at this milestone and whose only permitted growth path is a milestone with its own ADR (AI-24 for a transport, AI-37 for the OpenTelemetry API per ADR 0005 § D3).
 
@@ -112,9 +112,9 @@ The guard closes only on **bite proof**: it MUST be shown to fail against three 
 `backend/database_administrator` MUST carry an executable guard, in `src/domain/imports_test.go`, with two assertions:
 
 1. The existing forbidden-prefix test over `src/domain` MUST be extended to name `github.com/cachicamas/backend/agent`. This assertion is **transitive** (`go list -deps`): `src/domain` MUST NOT reach the agent module by any path.
-2. A new module-scope assertion MUST verify that no package of `database_administrator` outside `src/application/` and `src/cmd/server` **names** the agent module. This assertion MUST scan **direct imports only** — `.Imports`, `.TestImports` and `.XTestImports` — and MUST NOT be transitive, because [ADR 0005 § D1 row 5](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) permits `src/application` and `src/cmd/server` to import the agent module, and a transitive scan would therefore indict every consumer of `application` the moment row 5 is exercised.
+2. A new module-scope assertion MUST verify that no package of `database_administrator` outside `src/application/` and `src/cmd/server` **names** the agent module. This assertion MUST scan **direct imports only** — `.Imports`, `.TestImports` and `.XTestImports` — and MUST NOT be transitive, because [ADR 0005 § D1 row 5](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) permits `src/application` and `src/cmd/server` to import the agent module, and a transitive scan would therefore indict every consumer of `application` the moment row 5 is exercised.
 
-Both assertions are green from birth, because the current count of such imports is zero. That is the point: the guard fails on the first accidental import rather than on the first production incident ([ADR 0005 § Guard B](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)).
+Both assertions are green from birth, because the current count of such imports is zero. That is the point: the guard fails on the first accidental import rather than on the first production incident ([ADR 0005 § Guard B](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)).
 
 The guard closes only on **bite proof**: one deliberate violation, recorded failing, then removed.
 
@@ -134,7 +134,7 @@ The guard closes only on **bite proof**: one deliberate violation, recorded fail
 
 This change MUST NOT alter the behavior of `backend/database_administrator` or `backend/workspace_syncer`.
 
-`backend/database_administrator/go.mod` MUST NOT gain a `replace` directive. [ADR 0005 § Migration](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration): a `replace` with no requirer is dead weight that also disguises the D1 row-5 build cost.
+`backend/database_administrator/go.mod` MUST NOT gain a `replace` directive. [ADR 0005 § Migration](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration): a `replace` with no requirer is dead weight that also disguises the D1 row-5 build cost.
 
 `backend/database_administrator/src/tools/tools.go` MUST remain byte-identical. S3 is resolved by *vacating* the name `tools`, not by relocating a standard-idiom file, and the change MUST record a diff proving the file is untouched.
 

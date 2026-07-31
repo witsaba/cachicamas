@@ -7,7 +7,7 @@
 > **Format**: RFC 2119 keywords + Given/When/Then, per `openspec/config.yaml`
 > **Date**: 2026-07-31
 > **Requirement IDs**: `R-AIS-0NN` · **Scenario IDs**: `S-AIS-0NN`
-> **Binding input**: [AI-01's register](../../../cachicamas-ai-contract-vocabulary/decision.md)
+> **Binding input**: [AI-01's register](../../../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md)
 
 ---
 

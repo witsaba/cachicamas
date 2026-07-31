@@ -7,8 +7,8 @@
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
 > **Target module**: `backend/agent/` — **no code is written by this change**
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0005 § D4](../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
-> **Binding inputs**: [AI-01's register](../cachicamas-ai-contract-vocabulary/decision.md) — `V-PRV-06` … `V-PRV-09` are the four rows this milestone was pre-assigned · [AI-02's decision](../cachicamas-ai-stream-lifecycle/decision.md) — cancellation and failure delivery already have fixed observable shapes
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0005 § D4](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
+> **Binding inputs**: [AI-01's register](../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md) — `V-PRV-06` … `V-PRV-09` are the four rows this milestone was pre-assigned · [AI-02's decision](../2026-07-31-cachicamas-ai-stream-lifecycle/decision.md) — cancellation and failure delivery already have fixed observable shapes
 > **Predecessors**: AI-01 (`cachicamas-ai-contract-vocabulary`), AI-02 (`cachicamas-ai-stream-lifecycle`)
 > **Authoring constraint**: doc 0002's authoring constraint binds every artifact of this change. **No Go type name, field name, method name, or package identifier appears anywhere.** Where a language mechanism has to be discussed it is named descriptively — "an additional contract asserted on the provider value", never spelled.
 

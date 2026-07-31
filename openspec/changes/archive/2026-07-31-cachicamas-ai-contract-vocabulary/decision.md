@@ -6,7 +6,7 @@
 > **Status**: decided
 > **Date**: 2026-07-31
 > **Project**: cachicamas (witsaba) · **Target package**: `backend/agent/src/ai/` (Layer 1)
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../../docs/adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../../docs/adr/0006-resolve-skill-and-prompt-source-of-truth.md)
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../../../docs/adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 
 > [!IMPORTANT]
 > **This artifact names concepts, not code.** No Go type name, field name, method name, or package identifier appears here. Each owning milestone's own SDD cycle chooses spellings — that is doc 0002's authoring constraint and AI-01's explicit out-of-scope clause. A term here is a noun phrase and a definition; it is never an API.
@@ -48,7 +48,7 @@ The hazard is not theoretical, and one case is worse than stale: doc 0001 § 3.1
 
 ## 2. The two wording traps
 
-Both are quoted verbatim from doc 0002's [Layer boundary](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#layer-boundary) section. They are restated here rather than paraphrased **because each has already caused one wrong decision**, and paraphrase is how the first one went wrong in the first place.
+Both are quoted verbatim from doc 0002's [Layer boundary](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#layer-boundary) section. They are restated here rather than paraphrased **because each has already caused one wrong decision**, and paraphrase is how the first one went wrong in the first place.
 
 ### Trap 1 — the tool trap
 

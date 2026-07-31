@@ -1,7 +1,7 @@
 # Verify report — Agent module scaffold and boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Phase**: verify
 > **Status**: **PASS**
 > **Date**: 2026-07-31

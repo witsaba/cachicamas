@@ -1,7 +1,7 @@
 # Design — Agent module scaffold and boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Phase**: design
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
@@ -51,7 +51,7 @@ backend/agent/src/
         └── agenttest/   ───┘  `../ai` resolves here, from any file in agenttest
 ```
 
-[ADR 0005 § D2](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) and Guard C: AI-20.4 will land a signature guard that resolves `../ai/provider.go` relative to `runtime.Caller(0)` — that is, relative to *its own source file*, which lives in `agenttest`. Nesting `agenttest` one level deeper, or moving it under `ai/`, breaks that resolution with no compile error and no warning anywhere in the tree. The guard fails loudly when it fails, but a future reorganisation will hit it blind, which is why the constraint is written down in three places (the ADR, doc 0002's AI-00.2 check 2, and `agenttest/doc.go` itself).
+[ADR 0005 § D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) and Guard C: AI-20.4 will land a signature guard that resolves `../ai/provider.go` relative to `runtime.Caller(0)` — that is, relative to *its own source file*, which lives in `agenttest`. Nesting `agenttest` one level deeper, or moving it under `ai/`, breaks that resolution with no compile error and no warning anywhere in the tree. The guard fails loudly when it fails, but a future reorganisation will hit it blind, which is why the constraint is written down in three places (the ADR, doc 0002's AI-00.2 check 2, and `agenttest/doc.go` itself).
 
 At AI-00 `src/ai` exports nothing, so `import_compile_test.go` can only prove *importability*. That is the whole assignment: a blank-identifier import in an external test package (`package agenttest_test`) that compiles. AI-06.2 is the leaf that proves external *readability* of a real type.
 
@@ -83,7 +83,7 @@ use (
 )
 ```
 
-[ADR 0005 § Migration](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration) asks for this "for editor and future-CI ergonomics". Two consequences are worth stating rather than discovering:
+[ADR 0005 § Migration](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration) asks for this "for editor and future-CI ergonomics". Two consequences are worth stating rather than discovering:
 
 **It changes how the two existing modules resolve dependencies.** In workspace mode the toolchain computes one build list by running MVS across every listed module, and verifies module hashes against `go.work.sum` rather than the per-module `go.sum`. `backend/agent` has zero requires and therefore contributes nothing to MVS, and the other two pin the same versions of their shared dependencies (`go.opentelemetry.io/otel v1.44.0`, `github.com/labstack/echo/v5 v5.2.1`), so no version bump is expected. *Expected* is not evidence. R-AGM-007 requires a pre-change `make test` baseline in both modules, re-run and compared after `go.work` lands. If the toolchain writes a `go.work.sum`, it is committed (S-AGM-022) — an uncommitted one produces "missing go.sum entry" failures on a fresh clone.
 
@@ -97,11 +97,11 @@ use (
 
 **File**: `backend/agent/src/ai/import_boundary_test.go`
 **Package**: `ai_test` (external — the guard inspects the module, it does not participate in it)
-**Enforces**: [ADR 0005 § D1 row 1](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2), [§ D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Guard A](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
+**Enforces**: [ADR 0005 § D1 row 1](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2), [§ D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Guard A](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
 
 ### 3.1 Why `go list -deps -test`, measured
 
-[ADR 0005 § Guard A](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) records that the retired guard used `go list -f '{{range .Imports}}'`, which sees neither `.TestImports` / `.XTestImports` nor transitive dependencies — the two blind spots of finding S6. The ADR prescribes moving to `go list -deps` with an allowlist.
+[ADR 0005 § Guard A](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) records that the retired guard used `go list -f '{{range .Imports}}'`, which sees neither `.TestImports` / `.XTestImports` nor transitive dependencies — the two blind spots of finding S6. The ADR prescribes moving to `go list -deps` with an allowlist.
 
 `-deps` alone closes the *transitive* blind spot but **not** the test-import one. Measured on this worktree against a package that has tests:
 
@@ -227,7 +227,7 @@ An alternative that avoids touching `go.mod` for bites 1 and 3 was considered �
 
 **File**: `backend/database_administrator/src/domain/imports_test.go` (modified)
 **Package**: `domain_test` (already)
-**Enforces**: [ADR 0005 § D1 rows 5–7](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2), [§ Guard B](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
+**Enforces**: [ADR 0005 § D1 rows 5–7](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2), [§ Guard B](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
 **Evidence gate**: `make test` in `backend/database_administrator/` — the single documented exception to doc 0002's global gate.
 
 ### 4.1 Where it lives, and why not somewhere better-named
@@ -306,7 +306,7 @@ The alternatives and why each loses:
 | A shared `.golangci.yml` at the repo root, included per module | `golangci-lint` resolves config relative to the invocation directory; making three modules point at one file means three relative paths that break the first time a module moves. It also couples the lint posture of a stdlib-only module to that of a Postgres/Echo/OTel service, which will want different linters as it grows. |
 | A `replace`-linked internal tooling module | A dependency, which this module is not permitted to have, for the benefit of build config. |
 
-**The drift risk ADR 0005 records.** [§ D2](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) maps build/lint config to `backend/agent/Makefile` and `backend/agent/.golangci.yml` as *copies* and records the resulting drift risk. Three copies of a `Makefile` will diverge; the only question is whether the divergence is visible.
+**The drift risk ADR 0005 records.** [§ D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) maps build/lint config to `backend/agent/Makefile` and `backend/agent/.golangci.yml` as *copies* and records the resulting drift risk. Three copies of a `Makefile` will diverge; the only question is whether the divergence is visible.
 
 The mitigation is not synchronization — it is **naming the load-bearing surface**. R-AGM-002 pins two targets by name and body: `test` is `go test -race -v ./...`, and `lint` runs `golangci-lint` at `v2.9.0`. Every evidence gate in doc 0002, doc 0003 and doc 0004 is spelled `make test` in a module directory. If those two targets stay identical across the three modules, drift anywhere else — a `run` target here, an integration target there — is harmless and arguably correct, because the modules genuinely differ. If either target drifts, it is a spec violation with a named requirement to point at, not an unnoticed edit.
 

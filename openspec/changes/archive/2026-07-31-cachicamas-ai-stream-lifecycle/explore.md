@@ -7,8 +7,8 @@
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
 > **Target module**: `backend/agent/` — **no code is written by this change**
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0003 — Layer 2 task graph](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0005 § D4](../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
-> **Binding input**: [AI-01's vocabulary](../cachicamas-ai-contract-vocabulary/decision.md) — `V-STR-01` … `V-STR-09` and `V-FAIL-11` / `V-FAIL-12` are the exact concepts this milestone decides
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0003 — Layer 2 task graph](../../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0005 § D4](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
+> **Binding input**: [AI-01's vocabulary](../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md) — `V-STR-01` … `V-STR-09` and `V-FAIL-11` / `V-FAIL-12` are the exact concepts this milestone decides
 > **Predecessor**: AI-01 (`cachicamas-ai-contract-vocabulary`)
 > **Authoring constraint**: doc 0002's authoring constraint binds every artifact of this change. **No Go type name, field name, method name, or package identifier appears anywhere.** Language and standard-library shapes are named descriptively, not as identifiers — "the single-value iterator function shape", never a spelled type.
 

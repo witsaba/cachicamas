@@ -7,9 +7,9 @@
 > **Date**: 2026-07-31
 > **Project**: cachicamas (witsaba) · **Target package**: `backend/agent/src/ai/` (Layer 1)
 > **Closes**: the Layer 1 half of the concern doc 0001 and ADR 0005 track as **G3**
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 § D4](../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
-> **Binding vocabulary**: [AI-01's register](../cachicamas-ai-contract-vocabulary/decision.md) — every noun below is one of its rows, cited by identifier
-> **Binding predecessor**: [AI-02's decision](../cachicamas-ai-stream-lifecycle/decision.md) — the observable shapes of cancellation and failure delivery are already fixed there, and are cited rather than re-decided
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 § D4](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
+> **Binding vocabulary**: [AI-01's register](../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md) — every noun below is one of its rows, cited by identifier
+> **Binding predecessor**: [AI-02's decision](../2026-07-31-cachicamas-ai-stream-lifecycle/decision.md) — the observable shapes of cancellation and failure delivery are already fixed there, and are cited rather than re-decided
 
 > [!IMPORTANT]
 > **This artifact decides standings, not code.** No Go type name, field name, method name, or package identifier appears here — doc 0002's authoring constraint. AI-20 chooses spellings. Where a language mechanism must be discussed it is named descriptively ("an additional contract asserted on the provider value"), so the constraint holds inside § 9, which is where it is most tempting to break.

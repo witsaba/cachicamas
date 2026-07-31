@@ -7,8 +7,8 @@
 > **Date**: 2026-07-31
 > **Project**: cachicamas (witsaba) · **Target package**: `backend/agent/src/ai/` (Layer 1)
 > **Closes**: the concern doc 0001 and ADR 0005 track as **G13**
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0003 — Layer 2 task graph](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 § D4](../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
-> **Binding vocabulary**: [AI-01's register](../cachicamas-ai-contract-vocabulary/decision.md) — every noun below is one of its rows, cited by identifier
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0003 — Layer 2 task graph](../../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 § D4](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
+> **Binding vocabulary**: [AI-01's register](../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md) — every noun below is one of its rows, cited by identifier
 
 > [!IMPORTANT]
 > **This artifact decides behavior, not code.** No Go type name, field name, method name, or package identifier appears here — doc 0002's authoring constraint. AI-14 and AI-20 choose spellings. Where a language or standard-library shape has to be discussed, it is named descriptively ("the single-value iterator function shape") rather than spelled, so that the constraint holds even inside the argument that most tempts a reader to break it.

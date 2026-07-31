@@ -1,7 +1,7 @@
 # Tasks — Agent module scaffold and boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Phase**: tasks
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
@@ -45,7 +45,7 @@ AI-00.3 forward     AI-00.4 reverse        ← PARALLEL, disjoint modules
 
 ## Review budget exception
 
-Doc 0002's milestone rules say *prefer under 250 changed lines; stop and reassess before 400*. This change ships as **one PR** at a forecast ~530 lines, by explicit user decision. [Doc 0001 § 9 (Process)](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md#9-review-checklist) requires the PR description to say why a change does not fit. Paste this into the PR description:
+Doc 0002's milestone rules say *prefer under 250 changed lines; stop and reassess before 400*. This change ships as **one PR** at a forecast ~530 lines, by explicit user decision. [Doc 0001 § 9 (Process)](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md#9-review-checklist) requires the PR description to say why a change does not fit. Paste this into the PR description:
 
 > **Why this exceeds the review budget.** AI-00 is not decomposable into shippable slices. Its four leaves form a strict chain — the module must exist before a package can go in it, and a package must exist before a guard can scan it — and none of the three intermediate states is mergeable on its own. A PR with `go.mod` and a `Makefile` but no package passes its own acceptance vacuously; a PR with the package but neither guard merges an unguarded module, which is the exact failure ADR 0005 exists to prevent.
 >
@@ -459,4 +459,4 @@ Three implementation-level refinements were made inside those leaves and are rec
 2. The stdlib allowlist is the exact set from `go list std`, not a "first path segment contains no dot" heuristic. Measured: `go list std` contains 17 `vendor/golang.org/x/...` paths that appear verbatim in real `-deps` output, which the heuristic mishandles.
 3. The module-scope half of the reverse guard scans direct imports only, while the `src/domain` half stays transitive. ADR 0005 § D1 row 5 permits two packages to import the agent module, so a transitive module-scope scan would produce false positives the moment row 5 is exercised.
 
-If implementation disproves any of the above, doc 0002's [living-graph clause](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#the-graph-is-alive--the-revert-and-record-clause) applies: revert to green, append the discovered prerequisite as a new node with the next free ordinal, draw the edge, and land the graph amendment **in the same PR** that resumes work.
+If implementation disproves any of the above, doc 0002's [living-graph clause](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#the-graph-is-alive--the-revert-and-record-clause) applies: revert to green, append the discovered prerequisite as a new node with the next free ordinal, draw the edge, and land the graph amendment **in the same PR** that resumes work.

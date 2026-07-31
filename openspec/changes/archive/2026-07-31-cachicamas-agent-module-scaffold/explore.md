@@ -1,12 +1,12 @@
 # Explore — Create the `backend/agent` module and both boundary guards
 
 > **Change**: `cachicamas-agent-module-scaffold`
-> **Milestone**: AI-00 (Wave 0 — Found), the first milestone of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
+> **Milestone**: AI-00 (Wave 0 — Found), the first milestone of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards)
 > **Phase**: explore
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
 > **Branch**: `feat/2026-07-31-cachicamas-ai-layer1-wave-0`
-> **Decisions this change implements**: [ADR 0005 § D2](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), [§ D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Enforcement](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
+> **Decisions this change implements**: [ADR 0005 § D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2), [§ D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), [§ Enforcement](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement)
 > **Blocks**: every other milestone of doc 0002, and the first milestone of docs 0003 and 0004. There is nowhere to put a Layer 1 test until this merges.
 
 ---
@@ -31,14 +31,14 @@ The module is deliberately empty of behavior. Its whole value is that the *shape
 | `backend/agent/` does not exist | `ls backend/` → `database_administrator`, `workspace_syncer` |
 | No `go.work` at the repo root | `ls go.work` → no such file |
 | Two Go modules today | `backend/database_administrator/go.mod`, `backend/workspace_syncer/go.mod`, both `go 1.26.3` |
-| No CI | `.github/workflows/` absent — matches [ADR 0005 § Enforcement](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) |
+| No CI | `.github/workflows/` absent — matches [ADR 0005 § Enforcement](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) |
 | Local toolchain matches the target | `go version` → `go1.26.3 darwin/arm64` |
 | `database_administrator` has 13 Go packages | `go list github.com/cachicamas/backend/database_administrator/... \| wc -l` → 13 |
 | The reverse guard has a host file already | `backend/database_administrator/src/domain/imports_test.go`, `package domain_test`, already shells out to `go list -deps` |
 | `src/tools/tools.go` is the only file under `src/tools/` | `ls backend/database_administrator/src/tools/` → `tools.go` |
 | The root `.gitignore` does not exclude `go.work` | `grep go.work .gitignore` → no match |
 
-There is no `src/tools/agent/` package anywhere on disk. The Layer 1 code the retired plan produced was removed before this branch; this change is not a migration, it is a creation. That is why [ADR 0005 § Migration](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration)'s advice about "the `git mv` and the import-path rewrite are separate commits" has no work to govern here — there is nothing to move.
+There is no `src/tools/agent/` package anywhere on disk. The Layer 1 code the retired plan produced was removed before this branch; this change is not a migration, it is a creation. That is why [ADR 0005 § Migration](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration)'s advice about "the `git mv` and the import-path rewrite are separate commits" has no work to govern here — there is nothing to move.
 
 ## 3. What `database_administrator` gives us to copy
 
@@ -56,7 +56,7 @@ Not copied: `Dockerfile`, `.dockerignore`, `scripts/`, the `test/integration` ta
 
 ### 4.1 Forward — Layer 1 purity (AI-00.3)
 
-[ADR 0005 § Guard A](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) records finding S6: the guard the retired plan shipped used `go list -f '{{range .Imports}}'`, which sees neither test imports nor transitive dependencies. Both blind spots were verified on this worktree rather than taken on trust:
+[ADR 0005 § Guard A](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) records finding S6: the guard the retired plan shipped used `go list -f '{{range .Imports}}'`, which sees neither test imports nor transitive dependencies. Both blind spots were verified on this worktree rather than taken on trust:
 
 ```
 $ go list -deps ./src/domain        | grep -c '^testing$'   → 0
@@ -78,7 +78,7 @@ $ go list -deps -test ./src/domain  | grep -c '^testing$'   → 1
 Two assertions, and they must use **different** `go list` modes. This is the finding that most affects the design:
 
 - The `src/domain` assertion is **transitive** (`-deps`): domain must not reach the agent module by any path. Nothing in `database_administrator` imports domain-upward, so there is no false-positive risk.
-- The module-scope assertion must be **direct-imports only** (`.Imports` + `.TestImports` + `.XTestImports`). [ADR 0005 § D1 row 5](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) *permits* `src/application` and `src/cmd/server` to import the agent module. The moment row 5 is exercised, every package that depends on `application` — `interfaces/http`, `cmd/server` — inherits the agent module transitively. A transitive module-scope guard would then fail on packages that did nothing wrong, and the natural fix would be to weaken the guard. Direct-import scanning is correct for a "who may *name* this module" rule.
+- The module-scope assertion must be **direct-imports only** (`.Imports` + `.TestImports` + `.XTestImports`). [ADR 0005 § D1 row 5](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) *permits* `src/application` and `src/cmd/server` to import the agent module. The moment row 5 is exercised, every package that depends on `application` — `interfaces/http`, `cmd/server` — inherits the agent module transitively. A transitive module-scope guard would then fail on packages that did nothing wrong, and the natural fix would be to weaken the guard. Direct-import scanning is correct for a "who may *name* this module" rule.
 
 Verified that the direct-import listing is available in one command:
 
@@ -87,14 +87,14 @@ go list -f '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{jo
   github.com/cachicamas/backend/database_administrator/...
 ```
 
-Today it returns 13 lines and zero occurrences of the agent module, so the module-scope guard is green from birth. [ADR 0005 § Guard B](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) states that this is the point: it fails on the first accidental import rather than on the first production incident.
+Today it returns 13 lines and zero occurrences of the agent module, so the module-scope guard is green from birth. [ADR 0005 § Guard B](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#enforcement) states that this is the point: it fails on the first accidental import rather than on the first production incident.
 
 ## 5. Constraints carried in from the ADR and the task graph
 
 1. **Zero requires.** No dependency, not even OpenTelemetry. The OTel API arrives at AI-37 (pre-authorized by ADR 0005 § D3); the transport arrives at AI-24 behind its own ADR gate. `backend/agent/go.mod` is two directives long and there is no `go.sum`.
-2. **`src/agenttest/` is a direct sibling of `src/ai/`.** [ADR 0005 § D2](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) and Guard C: AI-20.4's signature guard will resolve `../ai/provider.go` from `runtime.Caller(0)`. Any other layout breaks it silently, years from now.
+2. **`src/agenttest/` is a direct sibling of `src/ai/`.** [ADR 0005 § D2](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) and Guard C: AI-20.4's signature guard will resolve `../ai/provider.go` from `runtime.Caller(0)`. Any other layout breaks it silently, years from now.
 3. **Do not create `src/agent/`, `src/coding/`, `src/cmd/`** — not even empty. Doc 0002 AI-00.2 check 3: creating them makes the forward guard's forbidden-prefix list untestable, because a prefix that matches a package that exists is no longer a *forbidden* prefix.
-4. **No `replace` directive** in `database_administrator/go.mod`. [ADR 0005 § Migration](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration): a `replace` with no requirer is dead weight, and it disguises the D1 row-5 build cost (the Dockerfile copies only `./backend/database_administrator`; the first cross-module import breaks `docker compose build`).
+4. **No `replace` directive** in `database_administrator/go.mod`. [ADR 0005 § Migration](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#migration): a `replace` with no requirer is dead weight, and it disguises the D1 row-5 build cost (the Dockerfile copies only `./backend/database_administrator`; the first cross-module import breaks `docker compose build`).
 5. **`database_administrator/src/tools/tools.go` stays byte-identical.** S3 is resolved by vacating the name `tools`, not by relocating a standard-idiom file.
 6. **Strict TDD is on** (`openspec/AGENTS.md`). Guard leaves are RED-first by construction — a guard that has never failed is not a guard. Mechanical leaves are exempt from red-green but never from their recorded Check list.
 7. **No CI.** "Recorded green" means output pasted into the PR description. After this change there are three module directories in which `make test` must be run by hand.
@@ -144,7 +144,7 @@ Deliberately untouched:
 - `backend/database_administrator/go.mod` (no `replace`)
 - `backend/database_administrator/src/tools/tools.go` (byte-identical, diff recorded)
 - `backend/workspace_syncer/**` (listed in `go.work`, otherwise unchanged)
-- `docker-compose.yaml`, `infra/`, `Dockerfile`s — [ADR 0005 § D1 row 5](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) prices that work; it is not this change's.
+- `docker-compose.yaml`, `infra/`, `Dockerfile`s — [ADR 0005 § D1 row 5](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) prices that work; it is not this change's.
 
 ## 9. Skills to load in later phases
 

@@ -1,7 +1,7 @@
 # Verify report — Layer 1 contract vocabulary
 
 > **Change**: `cachicamas-ai-contract-vocabulary`
-> **Milestone**: AI-01 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-01--record-the-layer-1-contract-vocabulary)
+> **Milestone**: AI-01 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-01--record-the-layer-1-contract-vocabulary)
 > **Node**: AI-01.1 — The vocabulary `[decision]`
 > **Phase**: verify
 > **Status**: **PASS**

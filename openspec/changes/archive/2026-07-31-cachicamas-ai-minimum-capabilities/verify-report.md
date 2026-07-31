@@ -1,7 +1,7 @@
 # Verify report — the v1 capability set and optional-capability discovery
 
 > **Change**: `cachicamas-ai-minimum-capabilities`
-> **Milestone**: AI-03 of [doc 0002](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-03--decide-the-v1-capability-set-and-optional-capability-discovery)
+> **Milestone**: AI-03 of [doc 0002](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-03--decide-the-v1-capability-set-and-optional-capability-discovery)
 > **Node**: AI-03.1 — The capability matrix `[decision]`
 > **Phase**: verify
 > **Status**: **PASS**
@@ -37,7 +37,7 @@ Clause 2 is the one that determines whether this artifact works. § 4 shows that
 | `design.md` | ✅ | names the three failure modes it targets |
 | `explore.md` | ✅ | |
 | `tasks.md` | ✅ | six tasks + a twelve-check verification pass, all `[x]` |
-| amendment to `../cachicamas-ai-contract-vocabulary/decision.md` | ✅ | append-only; § 5 |
+| amendment to `../2026-07-31-cachicamas-ai-contract-vocabulary/decision.md` | ✅ | append-only; § 5 |
 | anything under `backend/` | ✅ absent | § 9 |
 
 `git show --name-only f701e58` lists **seven files**: the six above plus the register amendment. `tasks.md` acceptance criterion 5 holds.

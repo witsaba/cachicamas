@@ -7,7 +7,7 @@
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-07-31
 > **Target module**: `backend/agent/` — **no code is written by this change**
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 §§ D1, D3, D4](../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) · [doc 0001 — agent stack v2](../../../../docs/architecture/0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../../../docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005 §§ D1, D3, D4](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md)
 > **Predecessor**: AI-00 (`cachicamas-agent-module-scaffold`) — the module and both import guards
 > **Authoring constraint**: doc 0002's authoring constraint binds this whole change. The vocabulary is **conceptual**. No Go type name, field name, or signature appears in any artifact of this change.
 
