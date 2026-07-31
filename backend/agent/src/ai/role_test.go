@@ -15,25 +15,26 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// part is one element of a message's ordered content, built from outside
-// package ai.
+// newPart builds one element of a message's ordered content, from outside
+// package ai, for tests that need content and do not care what it holds.
 //
-// The seam's only method is unexported, so a type in another package cannot
-// implement it — but it can satisfy it by embedding the interface, which
-// promotes the method. That is the bypass message.go's own documentation
-// records and AI-06.3 item 2 closes; here it is what lets an external test hold
-// content at all, a milestone before a content part exists.
+// Until AI-06 it built a struct that embedded the ai.Content interface, which
+// was the only route an external package had and was the bypass message.go's own
+// documentation recorded. AI-06 closed the seam: message content is now a
+// concrete opaque type, embedding it yields a different type that cannot be
+// offered at all, and the only door in is a constructor. So the helper calls
+// one.
 //
-// The embedded interface is nil, so calling a method on it would panic. Nothing
-// does: this milestone stores content and reads it back, and never calls into
-// an element.
-type part struct {
-	ai.Content
-
-	label string
+// It panics rather than returning an error because every caller below passes a
+// label that satisfies the text rules; a panic here means the helper was
+// misused, not that a test's subject failed.
+func newPart(label string) ai.Part {
+	p, err := ai.NewText(label)
+	if err != nil {
+		panic("newPart(" + label + "): " + err.Error())
+	}
+	return p
 }
-
-func newPart(label string) part { return part{label: label} }
 
 // AI-05.1 — a message is constructible with each vocabulary role, and the role
 // reads back exactly.
