@@ -85,12 +85,18 @@ func TestViolation_WrappedFailure_StillMatchesItsSentinel(t *testing.T) {
 // ruleClasses mirrors the package's own closed registry. It is written out here
 // rather than exported from the package: a consumer never needs to iterate the
 // set, and exporting it to satisfy a test would widen the surface AI-40 freezes.
+//
+// Being a hand-written mirror is the point rather than a duplication: a class
+// appended to the package registry is covered by the assertions above only once
+// somebody adds it here deliberately, which is where the append rule is read a
+// second time. ErrDuplicate was appended by AI-08 under that rule.
 var ruleClasses = []error{
 	ai.ErrEmpty,
 	ai.ErrNotInVocabulary,
 	ai.ErrOutOfRange,
 	ai.ErrMalformed,
 	ai.ErrUnresolvedReference,
+	ai.ErrDuplicate,
 }
 
 // AI-04.2 — a failure carrying positional context is extracted by errors.As,

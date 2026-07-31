@@ -94,6 +94,19 @@ var (
 	// request does not declare. Register § 6.3: a tool choice naming a tool
 	// absent from the declared set is decidable from the request alone.
 	ErrUnresolvedReference = errors.New("value names something the request does not declare")
+
+	// ErrDuplicate is the class for a value that repeats another the same
+	// collection already carries, where the rule requires them to differ.
+	// AI-08.2 item 1: two tool declarations with the same name in one tool set
+	// are decidable from the request alone.
+	//
+	// It is not [ErrMalformed], and the difference is the whole reason it
+	// exists. Each repeated value is perfectly well-formed on its own; what
+	// fails is uniqueness across the collection, which no single value can be
+	// inspected for. The fix a consumer is being told to make differs
+	// accordingly — "remove one of them", not "spell it differently" — and
+	// errors.Is is the only place a consumer can read that difference.
+	ErrDuplicate = errors.New("value repeats another the collection already carries")
 )
 
 // ruleClasses is the closed, ordered registry of rule classes.
@@ -107,6 +120,7 @@ var ruleClasses = []error{
 	ErrOutOfRange,
 	ErrMalformed,
 	ErrUnresolvedReference,
+	ErrDuplicate,
 }
 
 // Step is one segment of a position: a named field of a Layer 1 contract, and
