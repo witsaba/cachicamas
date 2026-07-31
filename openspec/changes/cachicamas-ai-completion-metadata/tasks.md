@@ -218,13 +218,44 @@ Scratch removed; the suite returns to `ok`. Four failures for one omission, each
 
 ## Phase AI-13.2 — Three-way distinguishability `[leaf]`
 
-Two test-list items.
+Two test-list items — **and a finding about the plan, reported rather than papered over.**
+
+Neither item drives production code. AI-13.1's landed constants already make refusal, pause-turn and unknown three distinct values, so both of AI-13.2's tests were green the first time they ran. doc 0002 marks neither item `*(pin)*`, but in practice both behave as pins: they assert a property an earlier leaf established rather than driving a new one. That is not a defect in the plan — the property is worth its own leaf precisely because it is the one G12(c) says gets lost — but "red first" was not available, and inventing a stub to manufacture one would have been theatre.
+
+Both are therefore recorded the way doc 0002 records a guard leaf: **landed green, then shown to bite** against a deliberate reintroduction of the defect. The revert-and-record clause did not fire; no graph amendment is proposed. What is proposed is a note for whoever next reads AI-13.2: its two items would be more honestly marked `*(pin)*`.
 
 ### T-ACM-6 — Item 1: three states, and collapsing them is compile-visible
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **LANDED GREEN** — `TestFinishReason_RefusalPauseAndUnknown_AreThreeSeparateStates`, with `consumerResponse` — an exhaustive Layer 2-shaped switch whose fallback branch fails the test. `ok ... 1.323s`. No red was available; see the phase note above.
+
+- [x] **SHOWN TO BITE (1) — the collapse does not compile.** The G12(c) defect written out literally: `FinishReasonRefusal` and `FinishReasonPauseTurn` removed from the `iota` block and re-declared as `= FinishReasonUnknown`, exactly the state doc 0001 § 3.2 describes as "both currently collapse into the unknown fallback".
+
+```
+# github.com/cachicamas/backend/agent/src/ai_test [github.com/cachicamas/backend/agent/src/ai.test]
+src/ai/finish_reason_test.go:351:7: duplicate case ai.FinishReasonPauseTurn (constant 5 of uint8 type ai.FinishReason) in expression switch
+	src/ai/finish_reason_test.go:349:9: previous case
+src/ai/finish_reason_test.go:353:7: duplicate case ai.FinishReasonUnknown (constant 5 of uint8 type ai.FinishReason) in expression switch
+	src/ai/finish_reason_test.go:349:9: previous case
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+FAIL
+```
+
+This is the strongest available evidence for `S-ACM-017`, and it is stronger than a failing assertion: the **compiler** rejects the collapse in every consumer that switches exhaustively, because two collapsed constants are a duplicate case. "Reintroducing the collapse requires a compile-visible change" is not asserted here — it is enforced by the language.
+
+- [x] **SHOWN TO BITE (2) — a partial collapse that still compiles.** The values kept distinct but their string forms collapsed onto `"unknown"`, which is how the distinction dies at the boundary where a consumer logs or serialises it:
+
+```
+--- FAIL: TestFinishReason_RefusalPauseAndUnknown_AreThreeSeparateStates (0.00s)
+    --- FAIL: .../the_three_are_distinct_values_with_distinct_string_forms (0.00s)
+        finish_reason_test.go:384: unknown and unknown share the string form "unknown", want three
+        finish_reason_test.go:384: unknown and unknown share the string form "unknown", want three
+        finish_reason_test.go:384: unknown and unknown share the string form "unknown", want three
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.304s
+```
+
+Both mutations reverted; the suite returns to `ok`.
+
+- [x] **REFACTOR** — none.
 
 **Proves:** `R-ACM-007` (`S-ACM-015`, `S-ACM-016`, `S-ACM-017`).
 
@@ -232,11 +263,26 @@ Two test-list items.
 
 ### T-ACM-7 — Item 2: the obligation attached to each value
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+The obligation is documentation, because `V-OUT-10` keeps the decision in Layer 2. doc 0002 nevertheless puts it in a **test list** rather than in a verify-report checklist, and its own leaf anatomy says prose claims with no objective check do not belong in a test list. So the claim is made objective: the test parses `finish_reason.go` with `go/parser` and asserts the required clauses on each constant's documentation comment. doc 0002 already names AST scans as a guard mechanism, and `go/ast` is standard library, so the zero-require rule holds.
 
-**Proves:** `R-ACM-008` (`S-ACM-018`, `S-ACM-019`).
+- [x] **LANDED GREEN** — `TestFinishReason_EachValue_CarriesItsDocumentedObligation`, seven constants plus a whole-vocabulary response-distinctness subtest. `ok ... 1.310s`.
+
+- [x] **SHOWN TO BITE** — the pause-turn obligation replaced with the plausible-sounding but wrong "the consumer should send the request again", which is the defect: re-sending a request is not resuming a turn.
+
+```
+--- FAIL: TestFinishReason_EachValue_CarriesItsDocumentedObligation (0.00s)
+    --- FAIL: .../FinishReasonPauseTurn (0.00s)
+        finish_reason_test.go:500: FinishReasonPauseTurn documentation does not state "obligation"
+        finish_reason_test.go:500: FinishReasonPauseTurn documentation does not state "verbatim"
+        finish_reason_test.go:500: FinishReasonPauseTurn documentation does not state "AI-31.1"
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.305s
+```
+
+Reverted; the suite returns to `ok`.
+
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-008` (`S-ACM-018`, `S-ACM-019`). The recorded pause-turn obligation is *resume the turn, replaying the content already received verbatim*, and the test requires the citation of **AI-31.1** to survive alongside it, so the node that must honor it cannot be edited out of the comment quietly. `S-ACM-019` — that no method answers "should the loop continue?" — is held by `design.md` § 4.3 and by the surface itself: the package exports no such method.
 
 ---
 

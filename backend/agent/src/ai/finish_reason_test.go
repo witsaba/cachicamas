@@ -9,6 +9,9 @@ package ai_test
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -315,4 +318,201 @@ func TestFinishReason_AddingAValue_FailsWithoutATableAndAStringForm(t *testing.T
 			t.Errorf("this test names FinishReason(%d), which the package does not validate", reason)
 		}
 	}
+}
+
+// fallbackBranch is what consumerResponse returns when a finish reason reaches
+// the fallback of an exhaustive switch. Reaching it is the defect, not a value.
+const fallbackBranch = "FALLBACK"
+
+// consumerResponse is a Layer 2 consumer's decision, written the way a consumer
+// would write it: one exhaustive switch over the vocabulary, with a branch per
+// value.
+//
+// It lives in the test and not in the package on purpose. V-OUT-10 reserves loop
+// termination for Layer 2 — "the finish reason is the input to that decision,
+// not the decision" — so what Layer 1 owes is a vocabulary over which three
+// different responses are *writable*, not the responses themselves
+// (design.md § 4.3).
+//
+// This function is also where "reintroducing the collapse requires a
+// compile-visible change" is enforced rather than asserted. It names all seven
+// constants; deleting one stops this file compiling, and making two of them
+// equal is a duplicate case the compiler rejects outright. Every Layer 2
+// consumer's own switch has the same property, which is the whole of G12(c).
+func consumerResponse(r ai.FinishReason) string {
+	switch r {
+	case ai.FinishReasonStop:
+		return "the turn is complete"
+	case ai.FinishReasonLength:
+		return "the response is truncated; continuing it is a new request"
+	case ai.FinishReasonToolCalls:
+		return "schedule the calls and continue the turn with their results"
+	case ai.FinishReasonContentFilter:
+		return "surface the provider-side intervention; the model may have been willing"
+	case ai.FinishReasonRefusal:
+		return "the turn is complete and the answer is no; do not retry"
+	case ai.FinishReasonPauseTurn:
+		return "resume the turn, replaying the received content verbatim"
+	case ai.FinishReasonUnknown:
+		return "end the turn and make the unrecognised stop condition visible"
+	default:
+		return fallbackBranch
+	}
+}
+
+// AI-13.2 — refusal, pause-turn and unknown are three separate states.
+//
+// doc 0001 § 3.2: Layer 2 must be able to tell "the model declined" from "the
+// model paused, resume it" from "I do not recognise this string" — three states
+// with three different correct responses. Collapsing them is a loop-termination
+// bug, not a cosmetic gap.
+func TestFinishReason_RefusalPauseAndUnknown_AreThreeSeparateStates(t *testing.T) {
+	t.Parallel()
+
+	theThree := []ai.FinishReason{
+		ai.FinishReasonRefusal,
+		ai.FinishReasonPauseTurn,
+		ai.FinishReasonUnknown,
+	}
+
+	t.Run("the three are distinct values with distinct string forms", func(t *testing.T) {
+		t.Parallel()
+
+		for i, left := range theThree {
+			for _, right := range theThree[i+1:] {
+				if left == right {
+					t.Errorf("%v and %v are the same value, want three states", left, right)
+				}
+				if left.String() == right.String() {
+					t.Errorf("%v and %v share the string form %q, want three", left, right, left.String())
+				}
+			}
+		}
+	})
+
+	t.Run("the three carry three different correct responses", func(t *testing.T) {
+		t.Parallel()
+
+		seen := make(map[string]ai.FinishReason, len(theThree))
+		for _, reason := range theThree {
+			response := consumerResponse(reason)
+			if previous, taken := seen[response]; taken {
+				t.Errorf("%v and %v share one response %q, want three different responses",
+					previous, reason, response)
+			}
+			seen[response] = reason
+		}
+	})
+
+	t.Run("no value of the vocabulary reaches the fallback branch", func(t *testing.T) {
+		t.Parallel()
+
+		for _, reason := range theVocabulary {
+			if consumerResponse(reason) == fallbackBranch {
+				t.Errorf("%v reached the fallback branch of an exhaustive switch — the collapse G12(c) forbids", reason)
+			}
+		}
+	})
+}
+
+// constantDoc returns the documentation comment of one constant of the package
+// under test, with its whitespace collapsed to single spaces.
+//
+// It reads the source rather than a value because the obligation attached to a
+// finish reason is documentation, not behavior — V-OUT-10 keeps the behavior in
+// Layer 2. doc 0002 nonetheless puts "the documented obligation is stated" in a
+// test list rather than in a review checklist, which means it must be
+// objectively checkable; an AST scan is how a documentation claim becomes
+// mechanical, and doc 0002 already names AST scans as a guard mechanism.
+//
+// go test runs with the working directory set to the package under test, so the
+// relative path resolves.
+func constantDoc(t *testing.T, constantName string) string {
+	t.Helper()
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "finish_reason.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parsing finish_reason.go: %v", err)
+	}
+
+	for _, declaration := range file.Decls {
+		general, isGeneral := declaration.(*ast.GenDecl)
+		if !isGeneral || general.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range general.Specs {
+			value, isValue := spec.(*ast.ValueSpec)
+			if !isValue || len(value.Names) == 0 || value.Names[0].Name != constantName {
+				continue
+			}
+			if value.Doc == nil {
+				return ""
+			}
+			return strings.Join(strings.Fields(value.Doc.Text()), " ")
+		}
+	}
+
+	t.Fatalf("no constant named %s found in finish_reason.go", constantName)
+	return ""
+}
+
+// AI-13.2 — each value carries its documented obligation.
+//
+// The obligation is recorded on the declaration and not implemented, because
+// V-OUT-10 reserves loop termination for Layer 2: "the finish reason is the
+// input to that decision, not the decision" (design.md § 4.3). What is testable
+// here is that the record exists, that it says the right thing for the value
+// whose obligation is easiest to get wrong, and that no two values of the
+// vocabulary share one consumer response.
+func TestFinishReason_EachValue_CarriesItsDocumentedObligation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		constantName string
+		mustContain  []string
+	}{
+		{"FinishReasonStop", []string{"obligation"}},
+		{"FinishReasonLength", []string{"obligation", "truncated"}},
+		{"FinishReasonToolCalls", []string{"obligation", "continue the turn"}},
+		{"FinishReasonContentFilter", []string{"provider", "not FinishReasonRefusal"}},
+		{"FinishReasonRefusal", []string{"obligation", "declined", "final answer"}},
+		// The one AI-31.1 and Layer 2 have to honor, and the one a consumer gets
+		// wrong by resending a re-serialised transcript.
+		{"FinishReasonPauseTurn", []string{"obligation", "resume", "verbatim", "AI-31.1"}},
+		{"FinishReasonUnknown", []string{"obligation", "visible"}},
+	}
+
+	if len(cases) != len(theVocabulary) {
+		t.Fatalf("this test documents %d values, want the whole vocabulary of %d", len(cases), len(theVocabulary))
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.constantName, func(t *testing.T) {
+			t.Parallel()
+
+			documentation := constantDoc(t, tc.constantName)
+			if documentation == "" {
+				t.Fatalf("%s carries no documentation, want its consumer obligation", tc.constantName)
+			}
+			for _, phrase := range tc.mustContain {
+				if !strings.Contains(documentation, phrase) {
+					t.Errorf("%s documentation does not state %q", tc.constantName, phrase)
+				}
+			}
+		})
+	}
+
+	t.Run("no two values of the vocabulary share one consumer response", func(t *testing.T) {
+		t.Parallel()
+
+		seen := make(map[string]ai.FinishReason, len(theVocabulary))
+		for _, reason := range theVocabulary {
+			response := consumerResponse(reason)
+			if previous, taken := seen[response]; taken {
+				t.Errorf("%v and %v share one response %q", previous, reason, response)
+			}
+			seen[response] = reason
+		}
+	})
 }
