@@ -86,10 +86,14 @@ func TestViolation_WrappedFailure_StillMatchesItsSentinel(t *testing.T) {
 // rather than exported from the package: a consumer never needs to iterate the
 // set, and exporting it to satisfy a test would widen the surface AI-40 freezes.
 //
-// Being a hand-written mirror is the point rather than a duplication: a class
-// appended to the package registry is covered by the assertions above only once
-// somebody adds it here deliberately, which is where the append rule is read a
-// second time. ErrDuplicate was appended by AI-08 under that rule.
+// It is a mirror, and a mirror can drift, so it is not trusted to be one. The
+// guard in validation_registry_internal_test.go scans both sources and fails
+// unless this list holds exactly the members of the package registry, in the
+// same order. Until that guard existed, a class appended to the package
+// registry stayed outside the assertions above until somebody remembered to
+// edit this list — which is what AI-08's ErrDuplicate append revealed. Append a
+// class here in the same commit that appends it there; the guard is what tells
+// you if you did not.
 var ruleClasses = []error{
 	ai.ErrEmpty,
 	ai.ErrNotInVocabulary,
