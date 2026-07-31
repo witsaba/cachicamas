@@ -1,6 +1,7 @@
 # ADR 0005: Promote the agent stack to the `backend/agent` Go module
 
-> Status: **Proposed** (2026-07-30, change `cachicamas-agent-module-promotion`)
+> Status: **Proposed** (2026-07-30, implemented by change `cachicamas-agent-module-scaffold` — see
+> the § Migration amendment of 2026-07-31)
 > Author: cachicamas SDD pipeline (parent orchestrator)
 > Amends: [ADR 0004](./0004-adopt-tau-3-layer-agentic-architecture.md) — supersedes its
 > *Layer → location mapping*, its *Dependency rule*, and its first Consequence bullet.
@@ -37,10 +38,29 @@
 
 ## Context
 
-[ADR 0004](./0004-adopt-tau-3-layer-agentic-architecture.md) was accepted on 2026-07-17. Since
-then **17 of the 39 Layer 1 milestones have shipped** (AI-00 … AI-16) into
-`backend/database_administrator/src/tools/agent/ai/` — roughly 38 files and 10.9k lines, with
-mechanical import-boundary guards and a strict RED/GREEN/DOCS/POLISH commit discipline.
+> **Amended 2026-07-31 — the history this section reports was undone.** The Layer 1 code described
+> below was **removed** on 2026-07-30, and the Layer 1 plan was rebuilt from zero
+> ([doc 0002 § what changed from the retired plan](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> Nothing described as shipped here survives, and every milestone identifier below has been remapped
+> to the rebuilt plan. **The decisions this ADR records — D1 – D4 and Enforcement — are unchanged
+> and in force**, and the rebuilt plan implements them: AI-00 creates `backend/agent` and both
+> boundary guards exactly as § D2 and § Enforcement require. Only the narrative around the decisions
+> is stale, and it is corrected rather than deleted, because the review that produced those
+> decisions was performed against the code described here.
+>
+> **Reading rule for the whole document: every struck-through AI-NN below is a *retired-plan*
+> identifier and must never be followed.** Four of them — AI-16, AI-17, AI-18 and AI-39 — name
+> completely different milestones in the rebuilt plan, so a struck number resolves silently to the
+> wrong place. Only the unstruck identifiers are live.
+
+[ADR 0004](./0004-adopt-tau-3-layer-agentic-architecture.md) was accepted on 2026-07-17.
+~~Since then **17 of the 39 Layer 1 milestones have shipped** (AI-00 … AI-16) into
+`backend/database_administrator/src/tools/agent/ai/`~~ **Between 2026-07-17 and 2026-07-30, 17 of a
+then-39-milestone Layer 1 plan were built into
+`backend/database_administrator/src/tools/agent/ai/`** — roughly 38 files and 10.9k lines, with
+mechanical import-boundary guards and a strict RED/GREEN/DOCS/POLISH commit discipline. **That code
+was subsequently removed. The rebuilt plan is 41 milestones, AI-00 … AI-40, of which four have
+shipped: AI-00 … AI-03.**
 
 An adversarial architecture review on 2026-07-30 found that **the decomposition is sound and the
 location mapping is not**. The three-layer split, the stateless-loop / stateful-harness separation,
@@ -54,8 +74,11 @@ into a subdirectory of a subdirectory of one hexagonal service without re-derivi
 that move imposes. Six of the seven structural findings follow directly from that transplant.
 
 This ADR closes findings **S1 – S6**. [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md)
-closes **S7**. The four shipped-contract defects (C1 – C4) enter code through the normal SDD
-pipeline as milestones AI-40, AI-41, AI-42 and AI-18; see the
+closes **S7**. ~~The four shipped-contract defects (C1 – C4) enter code through the normal SDD
+pipeline as milestones AI-40, AI-41, AI-42 and AI-18~~ **The four contract defects (C1 – C4) no
+longer have corrective milestones of their own: each is prevented at the milestone that defines the
+contract — C1 and C2 at AI-06, C3 at AI-14, and C4 at AI-19, which lands the error taxonomy before
+AI-20 defines the interface that requires it**; see the
 [Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md).
 
 ---
@@ -227,9 +250,9 @@ are process-lifecycle concerns that belong to a composition root.
 `stream.event_count`, `error.type`.
 
 **Attribute denylist, absolute:** any prompt, completion, reasoning, tool-argument or tool-result
-text; any HTTP header; any credential; any raw provider response body. Layer 1 already owns this
-discipline as milestone AI-34 (redaction). Under this rule, AI-35's acceptance clause "Layer 1 does
-not import Cachicamas `otel`" stays literally true and becomes *precise* rather than accidental.
+text; any HTTP header; any credential; any raw provider response body. Layer 1 owns this discipline
+as milestone AI-36 (redaction). Under this rule, AI-37's acceptance clause "Layer 1 does not import
+Cachicamas `otel`" stays literally true and becomes *precise* rather than accidental.
 
 > **This section is the dependency ADR for OpenTelemetry.** Adding `go.opentelemetry.io/otel*` to
 > a new `go.mod` is a new top-level dependency, which `openspec/AGENTS.md` rule 5 and `README.md`
@@ -238,6 +261,14 @@ not import Cachicamas `otel`" stays literally true and becomes *precise* rather 
 > requires its own ADR.
 
 ### D4 — v1 scope for cross-cutting concerns
+
+> **Amended 2026-07-31 — two verdicts cited code that no longer exists; the verdicts themselves are
+> unchanged.** Every row of the table below stands exactly as decided. What was repaired is the
+> *evidence* under it: the G10 and G13 reasons pointed at shipped files (`usage.go`, an AST
+> signature guard and its behavioural scenarios) that were removed with the rest of the retired
+> Layer 1 implementation on 2026-07-30. Both now state the requirement rather than the vanished
+> proof, and their milestone identifiers are remapped to the rebuilt plan
+> ([doc 0002 § identifier map](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
 
 The review found thirteen concerns (G1 – G13) that the three-layer split is silent on. A dependency
 rule answers "what may import what"; it does not answer permissions, sandboxing, compaction,
@@ -264,31 +295,42 @@ carries only the verdict.
 
 Two verdicts deserve their reasoning stated, because both contradict a plausible first reading:
 
-- **G10 needs no Layer 1 work.** `usage.go:71-73` already carries `cacheReadTokens`,
-  `cacheWriteTokens` and `reasoningTokens`. Only the Layer 2 turn/session cost event and the
-  Layer 3 price table remain.
+- **G10 needs no Layer 1 work of its own.** The usage record must carry cache-read, cache-write and
+  reasoning token counts, and the milestone that defines usage already owes exactly that (AI-13.3).
+  Only the Layer 2 turn/session cost event and the Layer 3 price table remain.
 - **G13 must not be scheduled as implementation work.** The canonical hazard — a consumer that
-  stops reading strands the producer goroutine forever — is *already closed* by the shipped
-  contract: every send is a `select` on the channel and `ctx.Done()`, and the caller owns a
-  cancellable context. The residual risk is a caller who abandons the stream *and* never cancels,
-  which is a contract violation rather than a design flaw. Switching carriers today would
-  invalidate AI-16's AST signature guard and its behavioural scenarios, merged days ago. It is a
-  decision milestone with a documented default, to be closed before the first adapter — after which
-  the same change is roughly three times larger.
+  stops reading strands the producer goroutine forever — is closed by the **send discipline** rather
+  than by the carrier: every send is a `select` on the stream and `ctx.Done()`, and the caller owns
+  a cancellable context. The residual risk is a caller who abandons the stream *and* never cancels,
+  which is a contract violation rather than a design flaw. ~~Switching carriers today would
+  invalidate AI-16's AST signature guard and its behavioural scenarios, merged days ago.~~ **The
+  signature guard that argument relied on was never shipped, so it constrains nothing; the guard is
+  now AI-20.4's obligation and the carrier was decided on its merits by AI-02, which chose a
+  receive-only channel and delegated iterator ergonomics to a carrier view in the stream test kit.**
+  It is a decision milestone with a documented default, to be closed before the first adapter —
+  after which the same change is roughly three times larger.
 
 ---
 
 ## Enforcement
 
-Three guards, two of them upgrades of guards that already exist.
+> **Amended 2026-07-31 — the decisions in this section stand; two statements of fact in it did not.**
+>
+> **First, no guard was upgraded.** This section was written when a Layer 1 import test existed inside `database_administrator`. That tree was removed in the from-zero restart, so AI-00.3 and AI-00.4 built both guards from nothing. Guard A's description below should be read as a specification of the guard to build, not as a diff against a predecessor. Guard B's `src/domain` half is the only one that genuinely extended an existing file.
+>
+> **Second, `go list -deps` does not deliver the property this section claims for it.** The flag closes the transitive blind spot but **not** the test-import one, so as specified below Guard A would have closed only half of S6. Measured at `database_administrator/src/domain` on go1.26.3: `go list -deps` reports 2 non-stdlib packages, `go list -deps -test` reports 5 — the three it adds being the external test package, the synthesized test binary, and their closure. A Layer 1 *test file* importing a sibling backend module would have passed the guard silently.
+>
+> The shipped guard therefore uses **`go list -deps -test`**, and normalizes the three synthesized shapes that flag introduces (`pkg [pkg.test]`, `pkg_test [pkg.test]`, `pkg.test`) before matching — unnormalized, they are measured against the allowlist and the guard fails on its own module. It also filters the standard library with the toolchain's own `.Standard` field rather than a maintained set, because `go list std` contains vendored `golang.org/x/...` paths that appear verbatim in real dependency output. The same correction is recorded as a dated amendment on [AI-00.3 in doc 0002](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-003--forward-guard-layer-1-purity-guard).
 
-**Guard A — forward (Layer 1 purity).** `backend/agent/src/ai/import_boundary_test.go`, upgraded:
-the single forbidden prefix becomes a slice covering both other backend modules and the three
-sibling layers; the allowlist retargets to the new import path; the OTel API/SDK split from § D3 is
-added. Separately, the test currently uses `go list -f '{{range .Imports}}'`, which sees neither
-`.TestImports` / `.XTestImports` nor transitive dependencies — it moves to `go list -deps` with an
-allowlist, so a vendor SDK that transitively pulls in a cachicamas package is also caught. That
-upgrade is the forward half of S6.
+Three guards. ~~two of them upgrades of guards that already exist~~ **All three were built from nothing by AI-00 — see the amendment above.**
+
+**Guard A — forward (Layer 1 purity).** `backend/agent/src/ai/import_boundary_test.go`:
+the forbidden prefix is a slice covering both other backend modules and the three
+sibling layers; the allowlist targets this module's own import path; the OTel API/SDK split from § D3 is
+added. The mechanism must see `.TestImports` / `.XTestImports` **and** transitive dependencies, so that a
+vendor SDK which transitively pulls in a cachicamas package is also caught — ~~it moves to `go list -deps` with an
+allowlist~~ **which requires `go list -deps -test`, not bare `-deps`; see the amendment above.** That
+is the forward half of S6.
 
 **Guard B — reverse (the half that never existed).** `database_administrator/src/domain/imports_test.go`
 is extended to forbid `github.com/cachicamas/backend/agent/`, and a new module-scope test asserts
@@ -309,15 +351,31 @@ has something to read.
 
 ## Migration
 
-Milestone **AI-39** (`cachicamas-agent-module-promotion`) owns the mechanics; see
-[AI-39 in the Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-39--promote-the-agent-stack-to-its-own-module). It is a
-mechanical change with no behaviour change, and it must land before AI-17 so that no further
-milestone deepens the current path.
+> **Amended 2026-07-31 — there was no migration.** This section planned a move of shipped code out
+> of `database_administrator`. That code was **removed** on 2026-07-30 instead, and the module was
+> created empty
+> ([doc 0002 § what changed from the retired plan](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> The owning milestone is now **AI-00**, which is a creation rather than a relocation, and it has
+> shipped. Two consequences follow. The identifiers below are remapped. And **the rename discipline
+> this section exists to state now governs no work at all** — there was nothing to `git mv`, so no
+> file history was at stake and none was lost. It is kept, unstruck, as the standing rule for the
+> next repository-scale move, which is the only situation it was ever about.
+>
+> The struck **AI-39** and **AI-17** below are retired-plan numbers; both now name unrelated
+> milestones (the opt-in live smoke test, and reasoning delta events). Do not follow them.
+
+~~Milestone **AI-39** (`cachicamas-agent-module-promotion`) owns the mechanics~~ **Milestone AI-00
+(`cachicamas-agent-module-scaffold`) owns the mechanics**; see
+[AI-00 in the Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md#ai-00--create-the-module-and-both-boundary-guards). It is a
+mechanical change with no behaviour change, and it must land before ~~AI-17~~ **AI-04 — that is,
+before the first milestone that writes a contract** — so that no further milestone deepens the
+current path.
 
 The one discipline worth stating at ADR level: **the move and the import-path rewrite are separate
 commits.** Committing the `git mv` with byte-identical content makes every file a 100 % similarity
 rename, so `git log --follow` and `git blame` traverse the move and GitHub renders it as a rename
-rather than a delete-plus-add. Combining the two commits destroys that history for ~38 files.
+rather than a delete-plus-add. Combining the two commits destroys that history. **This is now a
+forward-looking rule only: AI-00 moved nothing.**
 
 A repo-root `go.work` listing all three modules is added for editor and future-CI ergonomics. **No
 `replace` directive** is added to `database_administrator/go.mod`: nothing imports the agent module
@@ -353,8 +411,11 @@ yet, and a `replace` with no requirer is dead weight that also disguises the D1 
 - **The D1 row-5 capability is stated but unbuilt.** Anyone who reads row 5 and tries to import the
   agent module from `database_administrator` will break `docker compose build` and discover the
   three-part cost the hard way. The cost is named above; it is not eliminated.
-- **AI-39 conflicts with everything in flight.** The import-path rewrite touches 18 files; any open
-  branch under `src/tools/agent/ai/` will need a rebase. It must land on a quiet tree.
+- ~~**AI-39 conflicts with everything in flight.** The import-path rewrite touches 18 files; any open
+  branch under `src/tools/agent/ai/` will need a rebase. It must land on a quiet tree.~~
+  **Amended 2026-07-31 — this risk did not materialise.** The retired implementation was removed
+  rather than moved, so AI-00 created the module empty: no import path was rewritten and no branch
+  needed a rebase.
 - **A second SKILL.md parser becomes necessary**, because D1 forbids importing
   `domain/skill.go`. That duplication and its guard are the subject of
   [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md) and must not be left implicit.
@@ -366,8 +427,11 @@ yet, and a `replace` with no requirer is dead weight that also disguises the D1 
 - The three-layer decomposition, the stateless-loop / stateful-harness separation, the event stream
   as the only inter-layer contract, and the one-way dependency direction are all **unchanged**.
   This ADR moves boxes; it does not redraw arrows.
-- The 17 shipped Layer 1 milestones survive the move unmodified. AI-39 is an import-path change,
-  not a redesign.
+- ~~The 17 shipped Layer 1 milestones survive the move unmodified. AI-39 is an import-path change,
+  not a redesign.~~ **Amended 2026-07-31 — they did not survive.** The implementation was removed
+  and Layer 1 was replanned from zero, so AI-00 creates the module empty. This ADR is unaffected:
+  its decisions constrain where Layer 1 lives and what it may import, not what had already been
+  built inside it.
 - Whether `database_administrator` ever drives an agent session remains an open product question.
   This ADR only makes the answer expressible.
 
@@ -383,8 +447,9 @@ yet, and a `replace` with no requirer is dead weight that also disguises the D1 
   original external narrative, unchanged and deliberately so
 - [cachicamas agent stack — hardened architecture (v2)](../architecture/0001-cachicamas-agent-stack-v2.md)
   — the architecture behind § D4's verdicts
-- [Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) — AI-39 (this
-  migration), AI-40 … AI-47 (the review's remaining code work)
+- [Layer 1 milestones and task graph](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) —
+  ~~AI-39 (this migration), AI-40 … AI-47 (the review's remaining code work)~~ **AI-00 (the module,
+  the § D2 layout and both § Enforcement guards) and AI-01 … AI-40 (the rest of Layer 1)**
 - Adversarial architecture review, 2026-07-30 — Engram `obs #2243`, topic
   `review/2026-07-30-agent-adversarial`
 - [OpenTelemetry semantic conventions for GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/)

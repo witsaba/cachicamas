@@ -1,0 +1,12 @@
+# Local tool binaries installed by `make tools`
+bin/
+
+# Coverage artifacts
+coverage.out
+coverage.html
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/

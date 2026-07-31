@@ -26,9 +26,9 @@
 | [2.1](#21-module-view) | Module boundaries | Three modules; the agent imports nobody |
 | [2.2](#22-layer-view) | Layer boundaries | One composition root; resources fan in at Layer 3 |
 | [2.3](#23-turn-sequence) | What one turn actually does | Six things happen per turn that the v1 sequence diagram omits |
-| [3.1](#31-what-is-frozen-today) | Shipped Layer 1 surface | 17 milestones, four self-contradicting contracts |
-| [3.2](#32-what-must-change-before-a-vendor-adapter-exists) | Layer 1 work remaining | Five contract changes, all cheaper before the first adapter |
-| [3.3](#33-the-provider-leakage-register) | Where "provider-neutral" leaks | Nine divergences; three need a contract change, six are adapter-local |
+| [3.1](#31-what-is-frozen-today) | The retired Layer 1 surface | Four self-contradicting contracts, now prevented rather than corrected |
+| [3.2](#32-what-must-change-before-a-vendor-adapter-exists) | Layer 1 work remaining | Five contract requirements, all cheaper before the first adapter |
+| [3.3](#33-the-provider-leakage-register) | Where "provider-neutral" leaks | Nine divergences; five carry L1 contract impact, four are adapter-local |
 | [4.1](#41-the-loop--stateless) | Loop responsibilities | The loop owns scheduling, not policy |
 | [4.2](#42-the-harness--stateful) | Harness responsibilities | History, suspension, cancellation tree, delegation |
 | [4.3](#43-the-agent-event-envelope) | The Layer 2 contract | Six event families, three of them absent from v1 |
@@ -72,11 +72,13 @@ dependency rule that forbids its own stated benefit, an unbounded Layer 3 that i
 and a TUI mapped into a container that runs an HTTP server. [ADR 0005](../adr/0005-promote-agent-stack-to-own-module.md)
 closes this. § 2 draws the result.
 
-**Four shipped Layer 1 contracts contradict their own documentation.** The sealed content-part
-wrapper is bypassable; content parts cannot be read from another package, which structurally blocks
-request translation; the per-stream sequence guarantee is unachievable because the counter is
-process-global; and the terminal error event that two files declare mandatory cannot be constructed
-at all. § 3.1 lists them against the milestones that fix them.
+~~**Four shipped Layer 1 contracts contradict their own documentation.**~~ **Four Layer 1 contracts
+in the now-retired implementation contradicted their own documentation** (see the amendment under
+§ 3.1). The sealed content-part wrapper was bypassable; content parts could not be read from another
+package, which structurally blocked request translation; the per-stream sequence guarantee was
+unachievable because the counter was process-global; and the terminal error event that two files
+declared mandatory could not be constructed at all. § 3.1 lists them against the milestones that
+now prevent them.
 
 **The provider-neutral abstraction leaks, and the leaks are known in advance.** Reasoning
 signatures that must round-trip byte-exact, providers that deliver tool calls whole rather than in
@@ -296,61 +298,100 @@ Six things happen here that ADR 0004's sequence diagram omits, and each one is l
 
 ### 3.1 What is frozen today
 
-Seventeen milestones have shipped: roles and message identity, text and reasoning content parts,
-tool declarations, tool calls and results, the normalized request, finish reasons and usage, the
-event envelope with its ordering invariants, response/text/tool-call event payloads, and the
-provider interface with its stream lifecycle contract. The package is stdlib-only, has no vendor
-SDK, and is mechanically guarded against importing anything else.
+> **Amended 2026-07-31 — this section describes an implementation that no longer exists.** The
+> Layer 1 code it reports on lived in `database_administrator/src/tools/agent/ai/` and was
+> **removed** when the Layer 1 plan was rebuilt from zero on 2026-07-30
+> ([doc 0002 § what changed from the retired plan](./milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> Nothing described below is frozen, because nothing described below is on disk. Four milestones
+> have shipped under the rebuilt plan — AI-00 … AI-03, the module, both boundary guards and the
+> Wave 0 decisions — and none of them freezes a contract.
+>
+> The section is kept, not rewritten, because **C1 – C4 are load-bearing architectural input**: they
+> are why the v2 design looks the way it does, and every § 3.2 requirement traces back to one of
+> them. What changed is their disposition. Each defect is no longer *corrected by a later
+> milestone*; it is **prevented at the milestone that defines the contract**, which is why the
+> rebuilt plan has five fewer milestones than the retired one. The "Fixed by" column has been
+> remapped to the new identifiers and now names the milestone that prevents the defect, not one
+> that repairs it.
 
-That surface is good. Four contracts within it currently contradict their own documentation, and
-all four must be corrected before an adapter is written against them.
+~~Seventeen milestones have shipped:~~ **The retired implementation covered** roles and message
+identity, text and reasoning content parts, tool declarations, tool calls and results, the
+normalized request, finish reasons and usage, the event envelope with its ordering invariants,
+response/text/tool-call event payloads, and the provider interface with its stream lifecycle
+contract. That package was stdlib-only, had no vendor SDK, and was mechanically guarded against
+importing anything else — the one property AI-00 re-established on day one in `backend/agent/src/ai/`.
+
+That surface was good. Four contracts within it contradicted their own documentation, and all four
+had to be corrected before an adapter could be written against them. Built from zero, they are
+never created.
 
 | # | The contract says | The code does | Fixed by |
 | --- | --- | --- | --- |
-| C1 | The content-part wrapper is sealed, so a part cannot be constructed with a mismatched or unvalidated payload | The exported text value type satisfies the part interface directly, so its zero value is a valid part that passes message validation and bypasses every construction rule | AI-42 |
-| C2 | Layer 2 and adapters consume normalized content parts | The wrappers are unexported and expose only their discriminator. **Content cannot be read back out of a request from another package**, which makes request translation structurally impossible | **AI-41 — hard blocker on AI-24** |
-| C3 | The first event of every stream carries sequence 1, and sequences are per-stream and contiguous | The counter is a package-global atomic, so only the first stream in a process can satisfy this. A shipped test documents the resulting gaps as expected | AI-40 |
-| C4 | A stream terminates with exactly one completion event **or** one error event | No error payload type exists and the payload interface is sealed, so **no adapter can construct the error terminal** either file declares mandatory | AI-18 |
+| C1 | The content-part wrapper is sealed, so a part cannot be constructed with a mismatched or unvalidated payload | The exported text value type satisfies the part interface directly, so its zero value is a valid part that passes message validation and bypasses every construction rule | AI-06 |
+| C2 | Layer 2 and adapters consume normalized content parts | The wrappers are unexported and expose only their discriminator. **Content cannot be read back out of a request from another package**, which makes request translation structurally impossible | **AI-06 — hard blocker on AI-26** |
+| C3 | The first event of every stream carries sequence 1, and sequences are per-stream and contiguous | The counter is a package-global atomic, so only the first stream in a process can satisfy this. A shipped test documents the resulting gaps as expected | AI-14 |
+| C4 | A stream terminates with exactly one completion event **or** one error event | No error payload type exists and the payload interface is sealed, so **no adapter can construct the error terminal** either file declares mandatory | AI-19 |
 
-C2 deserves emphasis because it is the one that blocks work rather than merely misleading a reader.
+C2 deserves emphasis because it is the one that blocked work rather than merely misleading a reader.
 The reasoning content type avoided the problem by implementing the part interface directly — and
-its own documentation explains why, in terms that apply verbatim to the three types that actually
-carry payload data. The wrapper pattern was retained for those three anyway. The two strategies
-must be reconciled, in the direction the reasoning type already chose.
+its own documentation explained why, in terms that applied verbatim to the three types that actually
+carried payload data. The wrapper pattern was retained for those three anyway. The two strategies
+had to be reconciled, in the direction the reasoning type already chose — which is exactly what
+AI-06 now decides once, before a second variant exists.
 
 ### 3.2 What must change before a vendor adapter exists
 
-Each of these is a breaking change to a contract that no adapter yet depends on. After the first
-adapter lands, each becomes roughly three times the work, because every adapter must be migrated in
-lock-step with the contract.
+> **Amended 2026-07-31 — milestone identifiers remapped.** The numbers in the last column pointed at
+> the plan retired on 2026-07-30. Each now names the milestone that *defines* the contract rather
+> than a later one that would have changed it
+> ([doc 0002 § identifier map](./milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> The requirements themselves are unchanged, and so is the reason none of them can wait — that
+> reason is precisely why they were pulled forward into Waves 0 and 1 of the rebuilt plan. The first
+> column's present tense ("the system instruction is a flat string") describes the retired starting
+> point, which is what made each of these a gap worth naming; read it alongside § 3.1's amendment.
+
+~~Each of these is a breaking change to a contract that no adapter yet depends on.~~ **Each of these
+is now a defining requirement of the milestone that first states the contract, rather than a
+breaking change applied to a frozen one.** After the first adapter lands, each becomes roughly three
+times the work, because every adapter must be migrated in lock-step with the contract.
 
 | Must become expressible | Why it cannot wait | Milestone |
 | --- | --- | --- |
-| **Cache breakpoints.** The system instruction is a flat string, so there is nowhere to mark a cache boundary. The request must be able to carry ordered, markable segments for the system instruction, and breakpoint markers on tool declarations and messages | Anthropic caching is opt-in per breakpoint with a strict tools → system → messages invalidation cascade and a hard cap on breakpoint count. Cached reads cost a tenth of fresh input. A design that cannot express a breakpoint cannot ever get that discount, and the omission is invisible until the bill arrives | AI-43 |
-| **Per-request options and a provider escape hatch.** Generation options are fixed at request construction; there is no way to carry a provider-specific field the neutral vocabulary does not model | Two separate needs. First, a pre-request hook cannot rebuild a request it cannot modify. Second, every unified-provider abstraction eventually meets a field it cannot model — the survivable answer is a typed-but-opaque pass-through, not a lowest-common-denominator interface that silently drops it | AI-44 |
-| **An opaque round-trip token on reasoning content.** Reasoning exposes its state and its text; it cannot carry a provider blob that must be returned byte-identical | Anthropic thinking blocks carry cryptographic signatures. If they are not returned exactly, multi-turn extended thinking with tool use fails. This is not optional metadata; it is a correctness requirement, and the storage has to exist before the adapter that produces it | AI-45 |
-| **Refusal and pause as distinct finish reasons.** Both currently collapse into the unknown fallback | A loop-termination bug, not a cosmetic one. Layer 2 cannot distinguish "the model declined" from "the model paused, resume it" from "I do not recognise this string" — three states with three different correct responses | AI-46 |
-| **A settled stream carrier.** Channels versus an iterator at the package boundary | Decision only; the documented default is to keep channels. The v1 contract already closes the canonical stranded-producer hazard by selecting on cancellation for every send. The decision must nonetheless be *closed* before an adapter exists, because reopening it afterwards is far more expensive | AI-47 |
+| **Cache breakpoints.** The system instruction is a flat string, so there is nowhere to mark a cache boundary. The request must be able to carry ordered, markable segments for the system instruction, and breakpoint markers on tool declarations and messages | Anthropic caching is opt-in per breakpoint with a strict tools → system → messages invalidation cascade and a hard cap on breakpoint count. Cached reads cost a tenth of fresh input. A design that cannot express a breakpoint cannot ever get that discount, and the omission is invisible until the bill arrives | AI-10 + AI-11 |
+| **Per-request options and a provider escape hatch.** Generation options are fixed at request construction; there is no way to carry a provider-specific field the neutral vocabulary does not model | Two separate needs. First, a pre-request hook cannot rebuild a request it cannot modify. Second, every unified-provider abstraction eventually meets a field it cannot model — the survivable answer is a typed-but-opaque pass-through, not a lowest-common-denominator interface that silently drops it | AI-12 |
+| **An opaque round-trip token on reasoning content.** Reasoning exposes its state and its text; it cannot carry a provider blob that must be returned byte-identical | Anthropic thinking blocks carry cryptographic signatures. If they are not returned exactly, multi-turn extended thinking with tool use fails. This is not optional metadata; it is a correctness requirement, and the storage has to exist before the adapter that produces it | AI-07 |
+| **Refusal and pause as distinct finish reasons.** Both currently collapse into the unknown fallback | A loop-termination bug, not a cosmetic one. Layer 2 cannot distinguish "the model declined" from "the model paused, resume it" from "I do not recognise this string" — three states with three different correct responses | AI-13 |
+| **A settled stream carrier.** Channels versus an iterator at the package boundary | Decision only; the documented default is to keep channels. The canonical stranded-producer hazard is closed by the send discipline — every send selects on cancellation and the caller owns the context — not by the carrier. The decision must nonetheless be *closed* before an adapter exists, because reopening it afterwards is far more expensive | AI-02 |
 
 ### 3.3 The provider-leakage register
 
+> **Amended 2026-07-31 — the "Where" column is remapped, and the preamble was miscounting its own
+> table.** The milestone identifiers point at the rebuilt Layer 1 plan
+> ([doc 0002 § identifier map](./milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> The old preamble said three rows require a contract change and the rest are adapter-local, while
+> the table itself marks five: rows 1 – 3 **and** rows 8 – 9. Reading rows 8 – 9 as adapter-local
+> deletes AI-11 from the plan, so the sentence is corrected rather than the table.
+
 "Provider-neutral" is a goal, not an achieved state. These are the divergences known in advance.
-Three require a contract change; the rest are absorbed inside an adapter. The value of the register
-is that no adapter author has to rediscover them.
+~~Three require a contract change; the rest are absorbed inside an adapter.~~ **Five carry Layer 1
+contract impact and four are absorbed inside an adapter, and the five split across two gaps: rows
+1 – 3 are G12's three contract items, and rows 8 – 9 are the Layer 1 half of G4, which AI-10 and
+AI-11 own between them — the segmented system instruction and the markers on it.** The value of the
+register is that no adapter author has to rediscover them.
 
 | # | Divergence | Neutral shape that absorbs it | Where |
 | --- | --- | --- | --- |
-| 1 | Some providers stream tool-call arguments incrementally; at least one delivers each call whole, in a single chunk | Tool-call **delta events are optional**. A call must be representable as start-then-end with zero deltas. No consumer may require at least one delta before the end event | **L1 contract** — AI-15 acceptance |
-| 2 | Reasoning is returned as signed blocks by one provider, as an opaque token count only by another, and as thought signatures by a third | An opaque, byte-exact round-trip token on reasoning content, plus a state that can say "this provider emitted no reasoning text" | **L1 contract** — AI-45 |
-| 3 | Stop reasons include refusal and pause-turn variants with no neutral equivalent | Two additional finish reasons, added additively | **L1 contract** — AI-46 |
+| 1 | Some providers stream tool-call arguments incrementally; at least one delivers each call whole, in a single chunk | Tool-call **delta events are optional**. A call must be representable as start-then-end with zero deltas. No consumer may require at least one delta before the end event | **L1 contract** — AI-18 acceptance |
+| 2 | Reasoning is returned as signed blocks by one provider, as an opaque token count only by another, and as thought signatures by a third | An opaque, byte-exact round-trip token on reasoning content, plus a state that can say "this provider emitted no reasoning text" | **L1 contract** — AI-07 |
+| 3 | Stop reasons include refusal and pause-turn variants with no neutral equivalent | Two additional finish reasons, added additively | **L1 contract** — AI-13 |
 | 4 | Tool results are a block inside a user-role message on one provider, a distinct role on another, and a nested response object on a third | The normalized tool-result content part already models this. Each adapter maps it on the way out | Adapter-local |
 | 5 | Only one provider enforces strict user/assistant alternation | Adapters merge consecutive same-role messages before sending. Queued steering messages make this a live hazard, not a theoretical one | Adapter-local |
 | 6 | One provider always requires an explicit output-token limit | The adapter supplies a documented default when the request omits one, and says so in its documentation rather than silently truncating | Adapter-local |
 | 7 | One provider assigns no tool-call identifiers | The adapter mints synthetic identifiers and keeps the mapping — which must survive session serialisation and reload, so it is a session concern too | Adapter-local + L3 |
-| 8 | The system instruction is a top-level field, a differently-named top-level field, or a nested object depending on provider | Ordered markable segments (see § 3.2); each adapter renders them into its own shape | L1 contract via AI-43 |
-| 9 | Two providers cache prefixes automatically; one requires explicit annotation | Breakpoint markers are advisory. An adapter for an auto-caching provider ignores them; an adapter for an explicit one honours them | L1 contract via AI-43 |
+| 8 | The system instruction is a top-level field, a differently-named top-level field, or a nested object depending on provider | Ordered markable segments (see § 3.2); each adapter renders them into its own shape | L1 contract via AI-10 + AI-11 |
+| 9 | Two providers cache prefixes automatically; one requires explicit annotation | Breakpoint markers are advisory. An adapter for an auto-caching provider ignores them; an adapter for an explicit one honours them | L1 contract via AI-11 |
 
-One conclusion is worth stating plainly, because it shapes AI-44: **the correct response to
+One conclusion is worth stating plainly, because it shapes AI-12: **the correct response to
 leakage is a typed pass-through, not a wider neutral vocabulary.** Every field added to the neutral
 model to accommodate one provider becomes a field every other adapter must ignore, and the model
 grows without bound. An escape hatch keeps the neutral surface small and honest about its limits.
@@ -530,6 +571,15 @@ in § 3.2 with milestone numbers while the rest are recorded as forward requirem
 
 ## 7. Forward-requirements register
 
+> **Amended 2026-07-31 — milestone identifiers remapped.** Every AI-NN in the Disposition column
+> pointed at the Layer 1 plan retired on 2026-07-30 and now points at its replacement
+> ([doc 0002 § identifier map](./milestones/0002-cachicamas-ai-layer-1-task-graph.md#what-changed-from-the-retired-plan)).
+> No verdict changed: the same concerns are in v1, deferred, or reserved as seams. What changed is
+> that the *in v1* rows no longer name corrective milestones — they name the milestones that define
+> the contract correctly the first time. G4's Layer 1 impact is therefore ~~breaking~~ **structural**
+> for the same reason § 3.2 gives: there is no frozen contract left to break, and the ordered
+> markable system instruction is built at AI-10.2 rather than retrofitted.
+
 Every concern the review raised, with its owner and its disposition. A row marked *seam now* means
 [§ 6](#6-the-twelve-seams-that-must-exist-now) reserves the place and no further work happens in
 v1. A row marked *in v1* has a milestone. Verdicts are decided in
@@ -541,21 +591,22 @@ this table adds the architectural detail behind each.
 | **G1** | Permission as a suspendable protocol, with allow-once / allow-always / deny / modify-input, remembered per session and derived for subagents | L2 protocol, L3 policy | 2 | none | seam now |
 | **G2** | Sandboxed tool execution, applied to the whole spawned process tree rather than the direct child | L3 | 3 | none | seam now |
 | **G3** | Context compaction: protect recent turns, never orphan a call/result pair, record what was removed, survive interruption | L2 | 5, 6 | an *optional* token-counting capability, discovered by type assertion — it does **not** widen the provider contract | seam now |
-| **G4** | Prompt caching — breakpoint placement at Layer 1, prefix stability at Layer 2 | L1 places, L2 stabilises | 1, 10 | **breaking**: the system instruction must become ordered markable segments, and tool declarations and messages must accept breakpoint markers | **in v1 — AI-43** |
+| **G4** | Prompt caching — breakpoint placement at Layer 1, prefix stability at Layer 2 | L1 places, L2 stabilises | 1, 10 | **structural**: the system instruction is ordered markable segments from birth (AI-10.2), and tool declarations and messages accept breakpoint markers (AI-11) | **in v1 — AI-10 + AI-11** |
 | **G5** | Parallel tool execution with deterministic, call-ordered re-join and per-tool concurrency policy | L2 | 2 | the tool-call ordinal must survive normalisation | seam now |
 | **G6** | Tool sources that are dynamic, supervised, and may also supply prompts and resources | L3 | 4 | none — tool declarations already exist | seam now |
 | **G7** | Subagents as a harness invoked from a tool, with nested cancellation, cost and permission scope, and parent-identified events | L2 | 12 | none | seam now |
-| **G8** | Typed error taxonomy, retry with backoff, and provider failover. **The partial-output case is the important one**: a stream that dies after emitting output is the most common real failure and the one naive retry logic excludes | L1 taxonomy, L2 policy | 7, 8 | a constructible terminal error payload (C4) plus a partial-output discriminator | **in v1 — AI-18, AI-30, AI-33** |
-| **G9** | Per-request options plus a typed-but-opaque provider pass-through | L1 | 9 | the request needs extension points and copy-on-write rebuilding | **in v1 — AI-44** |
-| **G10** | Cost and usage as first-class events rather than something each frontend re-derives | L2 emits, L3 prices | 11 | **none — already satisfied.** Usage already carries cache-read, cache-write and reasoning token counts | deferred to L2/L3 |
+| **G8** | Typed error taxonomy, retry with backoff, and provider failover. **The partial-output case is the important one**: a stream that dies after emitting output is the most common real failure and the one naive retry logic excludes | L1 taxonomy, L2 policy | 7, 8 | a constructible terminal error payload (C4) plus a partial-output discriminator | **in v1 — AI-19, AI-32, AI-35** |
+| **G9** | Per-request options plus a typed-but-opaque provider pass-through | L1 | 9 | the request needs extension points and copy-on-write rebuilding | **in v1 — AI-12** |
+| **G10** | Cost and usage as first-class events rather than something each frontend re-derives | L2 emits, L3 prices | 11 | **none of its own.** The usage record AI-13.3 defines already carries cache-read, cache-write and reasoning token counts, so G10 adds no Layer 1 milestone | deferred to L2/L3 |
 | **G11** | Hook taxonomy: pre-request, pre-compact, post-turn, session-start. Observers must never be synchronous on the streaming path | L2 + L3 | 1 | requires G9's rebuildable request | seam now |
-| **G12** | Provider leakage — see the nine-row register in [§ 3.3](#33-the-provider-leakage-register) | split | 9, 11 | three contract changes (delta-optional tool calls, reasoning round-trip token, two new finish reasons); six adapter-local | **in v1 — AI-45, AI-46, + amendments** |
-| **G13** | Stream carrier: channel versus iterator at the package boundary | L1 | — | none | **decision only — AI-47**, default keep channels |
+| **G12** | Provider leakage — see the nine-row register in [§ 3.3](#33-the-provider-leakage-register) | split | 9, 11 | three contract changes (delta-optional tool calls, reasoning round-trip token, two new finish reasons); four adapter-local — register rows 8 – 9 are G4's, not G12's | **in v1 — AI-07, AI-13, AI-18** |
+| **G13** | Stream carrier: channel versus iterator at the package boundary | L1 | — | none | **decision only — AI-02**, default keep channels |
 
 ### Two dispositions worth their reasoning
 
-**G10 needs no Layer 1 work, contrary to first appearances.** The usage type already carries the
-cache and reasoning token counts an adapter would report. What is missing is entirely above it: a
+**G10 needs no Layer 1 work of its own, contrary to first appearances.** The usage record is
+required to carry the cache and reasoning token counts an adapter would report, and AI-13.3 already
+owes that. What is missing is entirely above it: a
 per-turn and per-session cost event on the Layer 2 stream, and a Layer 3 price table to convert
 tokens into money. One nuance the price table must respect — on models with adaptive reasoning, the
 reasoning token count only arrives on the final streamed usage update, so any mid-stream cost
@@ -563,13 +614,16 @@ figure is structurally an estimate and should be labelled as one.
 
 **G13 must not be scheduled as implementation work.** The canonical objection to channels at a
 package boundary is that a consumer who stops reading strands the producer goroutine forever, and
-goroutines are not collected. The shipped v1 contract already closes that: every send selects on
-the channel and on cancellation, and the caller owns the cancellable context. What remains is a
-caller who abandons the stream *and* never cancels — a contract violation, not a design flaw.
-Against that, switching carriers today would invalidate the interface signature guard and the
-behavioural scenarios that merged days ago. The decision is nonetheless worth *closing* before the
-first adapter exists, because after that it is roughly three times the work. Recommended default:
-keep channels, and expose an iterator view from the test kit for ergonomics.
+goroutines are not collected. That hazard is closed by the **send discipline**, not by the carrier:
+every send selects on the stream and on cancellation, and the caller owns the cancellable context.
+What remains is a caller who abandons the stream *and* never cancels — a contract violation, not a
+design flaw. ~~Against that, switching carriers today would invalidate the interface signature guard
+and the behavioural scenarios that merged days ago.~~ **Amended 2026-07-31: that second argument is
+void. Nothing was shipped, so there was no signature guard and no behavioural scenario to
+invalidate, and AI-02 therefore had to decide the carrier on its merits alone — which it did, in
+favour of a receive-only channel, delegating iterator ergonomics to a carrier view exposed by the
+stream test kit.** The decision was nonetheless worth *closing* before the first adapter exists,
+because after that it is roughly three times the work.
 
 ---
 
