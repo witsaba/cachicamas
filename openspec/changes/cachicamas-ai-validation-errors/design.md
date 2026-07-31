@@ -115,7 +115,9 @@ func (v *Violation) Unwrap() error { return v.rule }
 
 `decision.md` § 5.3 requires redaction to be a property of the type. Two mechanisms, both mechanical:
 
-**Structural names are filtered at construction and stored filtered.** The filter admits ASCII letters, digits and underscore, up to 32 bytes, and rejects everything else — a name that fails is replaced *whole* by `"?"`, never trimmed, because a prefix of a secret is still a secret. Filtering at construction rather than at rendering means the value itself never holds caller data, so a future milestone that logs `Step.Name()` directly is still safe.
+**Structural names are filtered at construction and stored filtered.** The filter admits ASCII letters and underscore, up to 32 bytes, and rejects everything else — a name that fails is replaced *whole* by `"?"`, never trimmed, because a prefix of a secret is still a secret. Digits are excluded as well as punctuation: a structural field name never needs one, and their absence removes the shape most credentials and opaque identifiers take. Filtering at construction rather than at rendering means the value itself never holds caller data, so a future milestone that logs `Step.Name()` directly is still safe.
+
+The filter is a **backstop, not the contract**. The contract is that a position is built from names this package wrote; the filter is what makes a value that is not one unable to render. A caller string that happens to be identifier-shaped and short would survive it, and that is the stated limit of the mechanism rather than a gap in it — the pin is what keeps the contract honest.
 
 **The message renders the registered class's text, never the supplied error's.**
 
@@ -191,8 +193,10 @@ Three properties, each load-bearing:
 
 | File | Contents | Approximate size |
 | --- | --- | --- |
-| `backend/agent/src/ai/validation.go` | The whole surface, in the order: package documentation for the taxonomy, sentinels and registry, `Step`/`Path`, `Violation`, `Rule`/`FirstFailure`, unexported helpers | ~190 lines including GoDoc |
-| `backend/agent/src/ai/validation_test.go` | `package ai_test`. Six test functions, one per test-list item, each with a leaf-ID banner | ~230 lines |
+| `backend/agent/src/ai/validation.go` | The whole surface, in the order: file documentation for the taxonomy, sentinels and registry, `Step`/`Path`, `Violation`, `Rule`/`FirstFailure`, unexported helpers | ~190 lines including GoDoc *(landed at 337: 127 lines of code under 210 of contract documentation)* |
+| `backend/agent/src/ai/validation_test.go` | `package ai_test`. Six test functions, one per test-list item, each with a leaf-ID banner | ~230 lines *(landed at 568)* |
+
+The file documentation block is separated from `package ai` by a blank line on purpose: `doc.go` owns the package comment, and a second one would be a duplicate package doc. This block is a file banner, which is the same shape AI-00's two guard files use.
 
 One production file, because the surface is one concept and splitting it would make a reader open two files to answer one question. `doc.go` is not touched: it describes the package, and a milestone's own contract documentation belongs on its declarations.
 
