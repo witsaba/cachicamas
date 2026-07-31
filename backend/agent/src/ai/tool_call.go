@@ -185,3 +185,48 @@ func (c ToolCall) String() string { return "toolcall" }
 // It exists so the posture covers every fmt verb rather than the three a reader
 // thinks of: without it, %#v falls back to reflection and prints the arguments.
 func (c ToolCall) GoString() string { return c.String() }
+
+// ToolCalls returns the tool calls of a content sequence, in content order.
+//
+// # The index of a call in the result is its ordinal
+//
+// That sentence is the whole of V-STR-21 at this layer, and it is the reason
+// [ToolCall] carries no ordinal field. An ordinal stored at construction is a
+// second copy of a fact the sequence already holds — and a part is placed in a
+// message *after* it is built, so the two copies are guaranteed to be writable
+// independently. This is [Part.Kind]'s argument one level up: the discriminator
+// is asked of the payload rather than stored beside it, so the two cannot
+// disagree, because there is only one of them.
+//
+// The ordinal counts tool calls and not content elements: a part of another kind
+// is skipped rather than numbered, so a message that interleaves text with calls
+// numbers its calls 0, 1, 2 exactly as a message holding calls alone does. That
+// is what "the position of a tool call among the calls of one response" means,
+// and it is what several providers compare a tool result against.
+//
+// # Why a function over a content sequence
+//
+// AI-10 walks a request's messages, AI-30 assembles content out of a stream, and
+// neither holds a [Message] at the point it needs the ordinal. Both hold
+// []Part. AI-06's objection to free functions was about two call shapes for one
+// question about one part; a sequence is not a part and has no method set of
+// this package's.
+//
+// # Total
+//
+// It never fails and never panics. An empty or nil sequence yields an empty
+// result; a part of another kind is skipped; a part that was never constructed
+// carries no payload, so it is skipped too rather than counted as a call with
+// nothing in it.
+//
+// The result is a fresh slice on every call, so a consumer that rewrites what it
+// received cannot rewrite anyone else's view of the ordinals.
+func ToolCalls(content []Part) []ToolCall {
+	out := make([]ToolCall, 0, len(content))
+	for _, part := range content {
+		if call, ok := part.ToolCall(); ok {
+			out = append(out, call)
+		}
+	}
+	return out
+}

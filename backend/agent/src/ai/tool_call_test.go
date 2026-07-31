@@ -337,6 +337,160 @@ func TestToolCall_Rendering_NeverReproducesItsPayload(t *testing.T) {
 	}
 }
 
+// AI-09.2 item 1 — the call ordinal is observable and stable.
+//
+// V-STR-21 defines the ordinal as "the observable position of a tool call among
+// the calls of one response". It is derived from position rather than stored on
+// the call, for AI-06's own reason one level up: a stored ordinal and the
+// position a message actually holds are two facts that can disagree, and a part
+// is placed in a message after it is built. design.md § 5 records the choice and
+// both of its consequences.
+//
+// Layer 2's parallel-execution re-join is ordered by this (doc 0001 § 7 G5), and
+// several providers reject tool results that do not correspond positionally to
+// their calls.
+func TestToolCalls_InterleavedContent_AreObservableInOrderWithStableOrdinals(t *testing.T) {
+	t.Parallel()
+
+	// Interleaved with another kind on purpose: the ordinal counts calls, not
+	// content elements, so a message whose calls are not at content indices
+	// 0, 1, 2 is the case that separates the two.
+	message, err := ai.NewMessage(
+		ai.RoleAssistant,
+		mustText(t, "I will read three files."),
+		mustToolCall(t, "call-alpha", "read_file", []byte(`{"path":"a"}`)),
+		mustText(t, "and then"),
+		mustToolCall(t, "call-beta", "read_file", []byte(`{"path":"b"}`)),
+		mustToolCall(t, "call-gamma", "read_file", []byte(`{"path":"c"}`)),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+	}
+
+	want := []string{"call-alpha", "call-beta", "call-gamma"}
+
+	t.Run("the calls appear in content order and nothing else does", func(t *testing.T) {
+		t.Parallel()
+
+		assertOrdinals(t, ai.ToolCalls(message.Content()), want)
+	})
+
+	t.Run("every read yields the same ordinals", func(t *testing.T) {
+		t.Parallel()
+
+		for range 16 {
+			assertOrdinals(t, ai.ToolCalls(message.Content()), want)
+		}
+	})
+}
+
+// AI-09.2 item 2 — the ordinal survives message copy and readback.
+//
+// The middle sub-test is the one that proves the ordinal is *derived* rather
+// than stored: the calls are read out of one message and rebuilt into a second
+// in the opposite order, and the ordinals follow the position the second message
+// holds. An implementation that recorded an ordinal at construction, or that
+// imposed an order of its own, disagrees here and agrees everywhere else.
+func TestToolCalls_MessageCopyAndReadback_PreserveEveryOrdinal(t *testing.T) {
+	t.Parallel()
+
+	built := []ai.Part{
+		mustToolCall(t, "call-alpha", "read_file", []byte(`{"path":"a"}`)),
+		mustToolCall(t, "call-beta", "read_file", []byte(`{"path":"b"}`)),
+		mustToolCall(t, "call-gamma", "read_file", []byte(`{"path":"c"}`)),
+	}
+	message, err := ai.NewMessage(ai.RoleAssistant, built...)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+	}
+
+	t.Run("a value copy of the message observes the same ordinals", func(t *testing.T) {
+		t.Parallel()
+
+		copied := message
+		assertOrdinals(t, ai.ToolCalls(copied.Content()), []string{"call-alpha", "call-beta", "call-gamma"})
+	})
+
+	t.Run("the ordinal follows the position a message holds, not the order the calls were built in", func(t *testing.T) {
+		t.Parallel()
+
+		read := ai.ToolCalls(message.Content())
+		rebuilt := make([]ai.Part, 0, len(read))
+		for i := len(read) - 1; i >= 0; i-- {
+			rebuilt = append(rebuilt, mustToolCall(t, read[i].ID(), read[i].Name(), read[i].Arguments()))
+		}
+
+		reversed, err := ai.NewMessage(ai.RoleAssistant, rebuilt...)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+
+		assertOrdinals(t, ai.ToolCalls(reversed.Content()), []string{"call-gamma", "call-beta", "call-alpha"})
+		// And the original is untouched by the second message existing.
+		assertOrdinals(t, ai.ToolCalls(message.Content()), []string{"call-alpha", "call-beta", "call-gamma"})
+	})
+
+	t.Run("a consumer that rewrites the sequence it received cannot change the ordinals", func(t *testing.T) {
+		t.Parallel()
+
+		first := ai.ToolCalls(message.Content())
+		first[0], first[2] = first[2], first[0]
+
+		assertOrdinals(t, ai.ToolCalls(message.Content()), []string{"call-alpha", "call-beta", "call-gamma"})
+	})
+
+	t.Run("the derivation is total", func(t *testing.T) {
+		t.Parallel()
+
+		for _, testCase := range []struct {
+			what    string
+			content []ai.Part
+			want    []string
+		}{
+			{"a nil sequence", nil, nil},
+			{"an empty sequence", []ai.Part{}, nil},
+			{"a sequence holding no tool call", []ai.Part{mustText(t, "no calls here")}, nil},
+			{"a sequence holding a part that was never constructed", []ai.Part{{}, built[0], {}}, []string{"call-alpha"}},
+		} {
+			t.Run(testCase.what, func(t *testing.T) {
+				t.Parallel()
+
+				got := ai.ToolCalls(testCase.content)
+				if len(got) != len(testCase.want) {
+					t.Fatalf("ai.ToolCalls(%s) returned %d calls, want %d", testCase.what, len(got), len(testCase.want))
+				}
+				assertOrdinals(t, got, testCase.want)
+			})
+		}
+	})
+}
+
+// assertOrdinals checks that a derived call sequence carries the expected
+// identities at the expected ordinals.
+func assertOrdinals(t *testing.T, calls []ai.ToolCall, want []string) {
+	t.Helper()
+
+	if len(calls) != len(want) {
+		t.Fatalf("ai.ToolCalls returned %d calls, want %d — a part of another kind is skipped, not counted", len(calls), len(want))
+	}
+	for ordinal, call := range calls {
+		if got := call.ID(); got != want[ordinal] {
+			t.Errorf("the call at ordinal %d is %q, want %q", ordinal, got, want[ordinal])
+		}
+	}
+}
+
+// mustText constructs a text part or fails the test.
+func mustText(t *testing.T, text string) ai.Part {
+	t.Helper()
+
+	part, err := ai.NewText(text)
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want no failure", err)
+	}
+	return part
+}
+
 // assertViolation checks that a failure carries the expected rule class at the
 // expected position, and no other registered class.
 func assertViolation(t *testing.T, err error, rule error, at string) {
