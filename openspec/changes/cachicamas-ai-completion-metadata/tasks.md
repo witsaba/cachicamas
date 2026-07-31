@@ -480,16 +480,22 @@ ok  	github.com/cachicamas/backend/agent/src/ai	1.553s
 
 ### Actuals against the forecast
 
-| Slice | Forecast | **Actual** |
-| --- | --- | --- |
-| SDD planning artifacts | ~600 prose | **~700 prose** across five files |
-| AI-13.1 + AI-13.2 | ~380 Go | **~570 Go** (`finish_reason.go` 236, `finish_reason_test.go` 335) |
-| AI-13.3 + AI-13.4 | ~370 Go | **~570 Go** (`usage.go` 216, `usage_test.go` 355) |
-| **Total** | ~750 Go | **~1140 Go**, of which roughly half is contract documentation and test prose |
+Measured with `git diff --stat` against the branch point and `wc -l`, not estimated.
 
-The overrun is 50 % on the Go figure and lands where the pre-recorded reassessment said it would: in documentation and tests, not in production logic. Production code is 452 lines across two files, of which about 250 lines are GoDoc — the two semantic decisions (`Input` exclusive, `Reasoning` inside `Output`) are documented on the declarations because that is where an adapter author reads them, and an AST-scanning test now requires them to stay there. The commit split on the chain boundary stands: `finish_reason*` and `usage*` share no symbol and can be reviewed as two PRs with no rework.
+| Slice | Files | Forecast | **Actual** |
+| --- | --- | --- | --- |
+| SDD planning artifacts | 5 markdown | ~600 prose | **1272 prose** — `design.md` 301, `tasks.md` 503, `spec.md` 206, `proposal.md` 146, `explore.md` 116 |
+| AI-13.1 + AI-13.2 | `finish_reason.go`, `finish_reason_test.go` | ~380 Go | **745 Go** — 227 + 518 |
+| AI-13.3 + AI-13.4 | `usage.go`, `usage_test.go` | ~370 Go | **703 Go** — 193 + 510 |
+| **Total** | 9 new files | ~750 Go | **1448 Go, 1272 prose; 2720 lines added, 0 removed** |
 
----
+The Go figure came in at nearly twice the forecast, and the forecast was already over doc 0002's budget. The reassessment recorded before the first test said the overrun would land in documentation and tests rather than in production logic, and that is where it landed — but the size of it was not foreseen and is worth stating plainly rather than filing under "as predicted":
+
+- **Production logic is 113 non-comment lines** across the two files: 67 in `finish_reason.go` and 46 in `usage.go`. The rest of those two files — 307 of 420 lines — is contract documentation. That ratio is deliberate for this milestone in particular: both semantic decisions (`Input` excludes cached tokens, `Reasoning` is inside `Output`) are the kind an adapter author must meet at the declaration or not at all, and two AST-scanning tests now require them to stay there. It is not a ratio to copy into a milestone whose decisions are not load-bearing on someone else's arithmetic.
+- **Tests are 1028 lines, 685 of them non-comment** — more than twice the production files. Three things drive it: every absent-versus-zero property is asserted once per count rather than once, because `V-MET-10` makes the five counts independent; the normalization table is asserted family by family; and two AST helpers plus two pins carry roughly 150 lines between them.
+- **The two chains are almost exactly half the diff each** (745 against 703), which is the strongest available evidence that the commit split on the chain boundary is the right cut if a reviewer wants two PRs. `finish_reason*` and `usage*` share no symbol.
+
+**Recommendation to the reviewer, unchanged by the actuals:** one PR, two passes, in commit order. `CAP-R-03` makes the finish reason and the usage record one capability, and AI-15.2 consumes both in one event, so landing half of it is the partial-contract state defect **C4** came from.
 
 ## What a later milestone inherits
 
