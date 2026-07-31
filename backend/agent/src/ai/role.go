@@ -36,6 +36,7 @@
 //     derived from the table lists exactly the members that have an entry, so a
 //     member declared without one would be invisible to every assertion over
 //     the enumeration, and the exhaustiveness pin would be decorative.
+
 package ai
 
 import "strconv"
