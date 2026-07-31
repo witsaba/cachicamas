@@ -282,9 +282,11 @@ Compared word for word against `V-PRV-16`'s definition text in the register: **i
 
 `decision.md` cites its own subsections `§ 6.1`, `§ 6.2` and `§ 6.3` seven times — for instance *"§ 6.2's corollary"*, *"honoring is `CAP-O-03` (§ 6.3)"*, *"`CAP-O-01` carries `V-REQ-11`'s byte-exact round trip with it (§ 6.1)"*, and § 1's *"§ 6.2 is where the argument is load-bearing"*.
 
-No heading in § 6 carries those numbers. The three subsections are headed `### \`CAP-O-01\` — reasoning content`, `### \`CAP-O-02\` — token counting` and `### \`CAP-O-03\` — honoring cache-boundary markers`, while the fourth is headed `### 6.4 Why the list is exactly three`. § 10 has the same asymmetry: § 10.4 is numbered and its five siblings are not.
+No heading in § 6 carried those numbers **at the time of this verification**. The three subsections were headed by their capability identifier alone — `CAP-O-01` reasoning content, `CAP-O-02` token counting, `CAP-O-03` honoring cache-boundary markers — while the fourth was headed *6.4 Why the list is exactly three*. § 10 has the same asymmetry: § 10.4 is numbered and its five siblings are not.
 
 Every reference is **correct by position** — § 6.1 is the first subsection of § 6, and so on — so no reader is misdirected to the wrong content. But § 1's reading guide sends a reviewer to "§ 6.2", which cannot be found by searching for that string. **Not a checklist failure and not a spec violation** — no requirement constrains heading numbering — but a real navigability defect in an artifact whose § 1 is explicitly a "read only the section you need" guide. Worth numbering the three headings, or renumbering § 6.4, at archive.
+
+> **Resolved 2026-07-31, before merge.** The three subsection headings are now numbered **6.1** (`CAP-O-01`, reasoning content), **6.2** (`CAP-O-02`, token counting) and **6.3** (`CAP-O-03`, honoring cache-boundary markers), so all seven references resolve by search as well as by position. § 6.4 is unchanged and the § 10 asymmetry is left as-is: § 10's siblings are not cross-referenced by number, so numbering them would add noise without removing a defect.
 
 ### 7.3 A new identifier namespace, and why it does not belong in the register
 

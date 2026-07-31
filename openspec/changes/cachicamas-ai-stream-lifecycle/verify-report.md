@@ -234,6 +234,8 @@ The tense is changed (`documents` → `documented`) and the word **behavior** is
 
 It is recorded as a finding because this change's own § 11 rule 4 and AI-01 § 9's anti-paraphrase discipline are what the register exists to enforce, and a paraphrase inside quotation marks is the first step of the drift both rules name. **Not a checklist failure**; worth correcting to a verbatim quotation or an unquoted paraphrase at archive.
 
+> **Resolved 2026-07-31, before merge.** The quotation now reads verbatim: *"A shipped test documents the resulting gaps as expected."* Corrected before merge rather than at archive, because a paraphrase inside quotation marks in a document whose purpose is anti-paraphrase discipline is the one defect class this change is least entitled to carry.
+
 For contrast, the two quotations that carry real argumentative weight were both checked and are both **verbatim**: doc 0003 AG-10.3 item 1 (ground 1's decisive citation) and doc 0001 § 7 **G8** (§ 7's rejection of "the first event").
 
 ### 7.2 One sentence states a standing that AI-03 owns

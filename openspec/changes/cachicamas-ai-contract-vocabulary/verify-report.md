@@ -212,6 +212,8 @@ Compared against `V-PRV-16`'s definition text: **identical wording**. It is a qu
 
 Rule 3 forbids renumbering, reusing and reordering *identifiers*; no identifier moved, and the placement is semantically correct — a carrier view and backpressure are container properties, and § 4's own preamble states that definition order in this category is load-bearing. **Not a violation.** Cosmetic, and worth a sentence in § 4's preamble at archive if anyone cares.
 
+> **Resolved 2026-07-31, before merge.** A paragraph was added to § 4's amendment blockquote stating that identifiers are append-only while rows are grouped by meaning, so the two orders diverge the first time a category is extended; a range such as `V-STR-01 … V-STR-23` denotes the identifier span, never a reading order. No identifier or row moved.
+
 ### 7.3 A path token that the constraint does not reach
 
 The header of `decision.md` carries `**Target package**: `backend/agent/src/ai/` (Layer 1)`, and § 10's node-status paragraph says "there is nothing in `backend/agent/` that this change touches". These are repository directory paths in metadata, not Go package paths (`github.com/cachicamas/backend/agent/src/ai`) and not spellings of any Layer 1 surface. `S-AIV-019`'s scan targets camel-case names, declarations and field lists, none of which is present. **Not a violation**; recorded because the sibling specs for AI-02 and AI-03 word the same prohibition as "a package path", where the literal reading is tighter.
