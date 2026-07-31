@@ -34,12 +34,14 @@ func declare(t *testing.T, name string) ai.Tool {
 // holds the set — resolves it to a name in one step without a caller value
 // reaching a message that will be logged.
 //
-// The class is ErrMalformed. A duplicate is cleanly none of AI-04's five, which
-// is a real finding rather than a gap: it is not a bound (ErrOutOfRange), the
-// set is not a closed vocabulary (ErrNotInVocabulary), and AI-04's decision
-// record is explicit that the set grows only in the pull request that needs a
-// new class. "Not well-formed for what this field must be" describes a set with
-// a repeated name accurately, and the position says which element broke it.
+// The class is ErrDuplicate, appended by this milestone under AI-04's own rule:
+// a milestone that meets a violation no landed class describes appends a class
+// in the pull request that needs it. A duplicate is cleanly none of the five
+// AI-04 landed — it is not a bound (ErrOutOfRange) and the set is not a closed
+// vocabulary (ErrNotInVocabulary) — and it is specifically not ErrMalformed:
+// each name here is perfectly well-formed, and what fails is uniqueness across
+// the set. The assertion is the contract, because errors.Is is where a consumer
+// reads "remove one of them" rather than "spell it differently".
 func TestNewToolSet_DuplicateNames_FailWithASentinelAtTheSecondOccurrence(t *testing.T) {
 	t.Parallel()
 
@@ -67,8 +69,11 @@ func TestNewToolSet_DuplicateNames_FailWithASentinelAtTheSecondOccurrence(t *tes
 			if err == nil {
 				t.Fatalf("NewToolSet(%v) returned no failure, want one", tc.names)
 			}
-			if !errors.Is(err, ai.ErrMalformed) {
-				t.Errorf("errors.Is(err, ErrMalformed) = false, want true (err = %v)", err)
+			if !errors.Is(err, ai.ErrDuplicate) {
+				t.Errorf("errors.Is(err, ErrDuplicate) = false, want true (err = %v)", err)
+			}
+			if errors.Is(err, ai.ErrMalformed) {
+				t.Errorf("errors.Is(err, ErrMalformed) = true, want false — a duplicate name is well-formed (err = %v)", err)
 			}
 
 			var violation *ai.Violation
@@ -120,7 +125,7 @@ func TestNewToolSet_DuplicateNames_FailWithASentinelAtTheSecondOccurrence(t *tes
 		if err == nil {
 			t.Fatal("NewToolSet returned no failure, want one")
 		}
-		if got := err.Error(); got != "tools[1]: "+ai.ErrMalformed.Error() {
+		if got := err.Error(); got != "tools[1]: "+ai.ErrDuplicate.Error() {
 			t.Errorf("Error() = %q, want it composed only of the position and the rule class", got)
 		}
 	})
@@ -385,8 +390,8 @@ func TestNewToolSet_AnUnconstructedDeclaration_IsRejected(t *testing.T) {
 		if !errors.Is(err, ai.ErrEmpty) {
 			t.Errorf("errors.Is(err, ErrEmpty) = false, want true (err = %v)", err)
 		}
-		if errors.Is(err, ai.ErrMalformed) {
-			t.Errorf("errors.Is(err, ErrMalformed) = true, want false (err = %v)", err)
+		if errors.Is(err, ai.ErrDuplicate) {
+			t.Errorf("errors.Is(err, ErrDuplicate) = true, want false (err = %v)", err)
 		}
 
 		var violation *ai.Violation

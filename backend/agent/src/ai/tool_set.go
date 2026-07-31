@@ -32,19 +32,22 @@ type ToolSet struct {
 
 // NewToolSet constructs a tool set from an ordered sequence of declarations.
 //
-// A name that repeats an earlier one fails with [ErrMalformed] positioned at
+// A name that repeats an earlier one fails with [ErrDuplicate] positioned at
 // the *second* occurrence by index. The position is an index and not a name
 // because V-REQ-14 makes the set deterministically iterable, so an index
 // identifies one declaration unambiguously and the caller — which holds the set
 // — resolves it in one step, without a caller-supplied value reaching a message
 // that will be logged.
 //
-// [ErrMalformed] is the reading rather than a sixth sentinel: a duplicate is
-// cleanly none of AI-04's five classes, and AI-04's decision record is explicit
-// that the set grows only in the pull request that needs a class. It is not a
-// bound, and the set is not a closed vocabulary; "the value you gave is not
-// well-formed for what this field must be" describes a set with a repeated name
-// accurately, and the position says which element broke it.
+// [ErrDuplicate] is a class this milestone appended, and appending is what
+// AI-04's decision record asks for: a duplicate is cleanly none of the five
+// classes AI-04 landed, and a milestone that meets a violation no landed class
+// describes appends one in the pull request that needs it rather than
+// stretching a neighbour. The neighbour it would have stretched is
+// [ErrMalformed], and the reason that is wrong is worth stating where the
+// failure is: every name in the set is perfectly well-formed, and what fails is
+// uniqueness across the set — so a consumer told "malformed" would go looking
+// for the badly spelled name, and there is none.
 //
 // A declaration that never passed [NewTool] is rejected with [ErrEmpty] at its
 // index, before the duplicate check. Its name is empty, which no constructed
@@ -67,7 +70,7 @@ func NewToolSet(tools ...Tool) (ToolSet, error) {
 		}
 		for j := range i {
 			if tools[j].Name() == tool.Name() {
-				return ToolSet{}, Invalid(ErrMalformed, AtIndex("tools", i))
+				return ToolSet{}, Invalid(ErrDuplicate, AtIndex("tools", i))
 			}
 		}
 	}
