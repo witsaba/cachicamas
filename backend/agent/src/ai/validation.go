@@ -137,12 +137,22 @@ func At(name string) Step {
 // the caller — which holds the request — can resolve it to a name in one step.
 // Rendering the name here instead would put caller data in a message that will
 // be logged.
+//
+// An index below zero names no element and is treated as if [At] had been used:
+// rendering "[-1]" would be a segment a reader has to decode.
 func AtIndex(name string, index int) Step {
+	if index < 0 {
+		return At(name)
+	}
 	return Step{name: structuralName(name), index: index, indexed: true}
 }
 
-// Name returns the step's structural name.
+// Name returns the step's structural name. A step with no name — the zero value
+// — reports the same placeholder a rejected name does.
 func (s Step) Name() string {
+	if s.name == "" {
+		return redactedName
+	}
 	return s.name
 }
 
@@ -212,6 +222,9 @@ func Invalid(rule error, at ...Step) *Violation {
 // the text of the error the failure was built from, so a wrapper carrying a
 // content body, an argument payload or a credential cannot leak through it.
 func (v *Violation) Error() string {
+	if v == nil {
+		return "no violation"
+	}
 	if len(v.at) == 0 {
 		return ruleText(v.rule)
 	}
@@ -223,6 +236,9 @@ func (v *Violation) Error() string {
 // It makes the class the failure's cause, so a failure stays matchable through
 // any number of intermediate wrappers — V-FAIL-02's own requirement.
 func (v *Violation) Unwrap() error {
+	if v == nil {
+		return nil
+	}
 	return v.rule
 }
 
@@ -232,6 +248,9 @@ func (v *Violation) Unwrap() error {
 // that appends to the position it received must not be able to rewrite the
 // failure's own.
 func (v *Violation) Path() Path {
+	if v == nil {
+		return nil
+	}
 	return slices.Clone(v.at)
 }
 
@@ -241,6 +260,9 @@ func (v *Violation) Path() Path {
 // package wrote, which is what makes the redaction posture a property of the
 // type rather than of everyone's discipline.
 func ruleText(rule error) string {
+	if rule == nil {
+		return "value violates an unnamed rule"
+	}
 	for _, class := range ruleClasses {
 		if errors.Is(rule, class) {
 			return class.Error()
@@ -280,4 +302,36 @@ func structuralName(name string) string {
 		return redactedName
 	}
 	return name
+}
+
+// Rule is one check a Layer 1 contract makes against a value it is validating.
+//
+// It is a function rather than an already-built violation so that a rule after
+// the first failure is never evaluated: eager construction would allocate on the
+// success path and would be aggregation wearing a first-failure hat.
+type Rule func() *Violation
+
+// FirstFailure evaluates rules in order and reports the first violation, or a
+// nil error when every rule passes. A nil rule is skipped.
+//
+// The order of the slice is the documented order (V-FAIL-04). Making the order
+// data rather than control flow is the point: a reviewer reads which rule wins
+// instead of tracing it, and there is nowhere for an unordered iteration to
+// decide it.
+//
+// It returns error and not *Violation deliberately. A nil *Violation placed in
+// an error interface is not a nil error, and that trap would otherwise be
+// reproduced at every call site in every contract of this package. Converting
+// once, here, makes "if err := FirstFailure(...); err != nil" correct
+// everywhere.
+func FirstFailure(rules ...Rule) error {
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if violation := rule(); violation != nil {
+			return violation
+		}
+	}
+	return nil
 }
