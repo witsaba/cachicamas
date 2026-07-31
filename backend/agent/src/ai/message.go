@@ -5,20 +5,18 @@
 // owns the unit and never the collection: message order across a request is
 // AI-10's, and a transcript is V-OUT-02, which belongs to Layer 2.
 //
-// # The content seam, and what it deliberately does not decide
+// # The content seam, closed by AI-06
 //
-// A message holds ordered content, and AI-06 — the keystone of wave 1 — decides
-// what a content part is. Those two milestones are in that order on purpose, so
-// this file names the position a content part occupies and settles nothing
-// about the part itself. [Content] declares one unexported method and nothing
-// else: no payload, no kind, no accessor, no constructor, no rendering.
+// A message holds ordered content, and AI-06 — the keystone of wave 1 — decided
+// what a content part is. This file held the position open for it: an interface
+// named Content, declaring one unexported method and nothing else, documented as
+// "not a seal on purpose" because closing it would have taken a decision that
+// was not AI-05's to take.
 //
-// Both of AI-06.1's properties therefore remain open. V-REQ-06 content-part
-// readability is open because the seam exposes nothing to read; V-REQ-07
-// content-part sealing is open because the seam validates nothing, and this
-// milestone rejects no content element — not even a nil one. AI-06.3 item 1 is
-// the assertion that rejects an unconstructed part, and it has to be able to
-// fail before it passes.
+// AI-06 took it. Message content is now [Part], a concrete opaque value type, so
+// the seam is closed by the type system rather than by an interface anyone could
+// satisfy by embedding. What that buys is recorded on [Part] itself; what it
+// costs this file is one rule, stated in [NewMessage].
 //
 // # Copy on construct, copy on read
 //
@@ -34,9 +32,9 @@
 // message. doc 0002 calls its absence "the most confusing class of test failure
 // in a streaming package".
 //
-// What this does not promise: the sequence is copied, not the parts in it.
-// Whether a part's own payload can be mutated after construction is a property
-// of the part, and the part is AI-06's.
+// What this does not promise: the sequence is copied, not the parts in it. A
+// part carries no mutable state, so the distinction costs nothing today — but it
+// is a property of the part, not of the message, and it is [Part]'s to keep.
 
 package ai
 
@@ -45,33 +43,6 @@ import (
 	"strconv"
 	"sync/atomic"
 )
-
-// Content is the seam through which a message holds one element of its ordered
-// content. AI-06 decides what a content part is.
-//
-// # This is not a seal
-//
-// The method is unexported, so a type in another package cannot implement
-// Content — but it can satisfy it by embedding the interface, which promotes
-// the method:
-//
-//	type part struct {
-//		ai.Content
-//		label string
-//	}
-//
-// That door is open on purpose. AI-06.3 item 2 says the seal may be "the
-// compiler or validation, whichever the AI-06.1 strategy chose", and closing
-// the compile-time half here would take a decision that is not this milestone's
-// to take. It is also what lets an external test hold content at all, one
-// milestone before a content part exists.
-//
-// A part built that way carries a nil embedded interface, so any method AI-06
-// later calls on it panics. That is precisely why AI-06.3 item 1 must reject an
-// unconstructed part at validation rather than trusting the compiler.
-type Content interface {
-	isContent()
-}
 
 // MessageID is the stable handle by which one message is distinguished from
 // another (V-REQ-03).
@@ -141,7 +112,7 @@ func mintMessageID() MessageID { return MessageID{n: lastMessageID.Add(1)} }
 type Message struct {
 	id      MessageID
 	role    Role
-	content []Content
+	content []Part
 }
 
 // NewMessage constructs a message from a role and its ordered content.
@@ -159,10 +130,7 @@ type Message struct {
 // unset.
 //
 // The content sequence is copied, so a caller may reuse the slice it passed.
-// The elements are not inspected: a nil element is accepted, because rejecting
-// an unconstructed content part is AI-06.3's rule and it needs AI-06.1's
-// strategy to know what one is.
-func NewMessage(role Role, content ...Content) (Message, error) {
+func NewMessage(role Role, content ...Part) (Message, error) {
 	if err := FirstFailure(
 		func() *Violation {
 			if roleName(role) == "" {
@@ -193,7 +161,7 @@ func (m Message) ID() MessageID { return m.id }
 // be able to observe each other. The elements themselves are returned as they
 // are held — what a content part is, and whether its payload can be read or
 // mutated, is AI-06's.
-func (m Message) Content() []Content { return slices.Clone(m.content) }
+func (m Message) Content() []Part { return slices.Clone(m.content) }
 
 // Role returns the role the message is attributed to.
 func (m Message) Role() Role { return m.role }

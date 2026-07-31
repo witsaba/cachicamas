@@ -149,12 +149,12 @@ func TestMessage_ContentOrder_RoundTripsExactly(t *testing.T) {
 
 	cases := []struct {
 		name string
-		want []ai.Content
+		want []ai.Part
 	}{
-		{"one element", []ai.Content{a}},
-		{"three distinct elements", []ai.Content{a, b, c}},
-		{"the same element repeated", []ai.Content{a, a, a}},
-		{"repetitions interleaved with distinct elements", []ai.Content{a, b, a, a, c, b}},
+		{"one element", []ai.Part{a}},
+		{"three distinct elements", []ai.Part{a, b, c}},
+		{"the same element repeated", []ai.Part{a, a, a}},
+		{"repetitions interleaved with distinct elements", []ai.Part{a, b, a, a, c, b}},
 	}
 
 	for _, tc := range cases {
@@ -192,14 +192,14 @@ func TestMessage_NoContent_FailsWithTheEmptySentinel(t *testing.T) {
 	t.Run("the three ways of saying nothing fail identically", func(t *testing.T) {
 		t.Parallel()
 
-		var nilContent []ai.Content
+		var nilContent []ai.Part
 
 		cases := []struct {
 			name    string
-			content []ai.Content
+			content []ai.Part
 		}{
 			{"no arguments", nil},
-			{"an empty slice", []ai.Content{}},
+			{"an empty slice", []ai.Part{}},
 			{"a nil slice", nilContent},
 		}
 
@@ -270,7 +270,7 @@ func TestMessage_CallerMutatesWhatItPassed_MessageIsUnchanged(t *testing.T) {
 	t.Run("replacing an element in place", func(t *testing.T) {
 		t.Parallel()
 
-		parts := []ai.Content{a, b}
+		parts := []ai.Part{a, b}
 		msg, err := ai.NewMessage(ai.RoleUser, parts...)
 		if err != nil {
 			t.Fatalf("NewMessage returned %v, want no failure", err)
@@ -279,13 +279,13 @@ func TestMessage_CallerMutatesWhatItPassed_MessageIsUnchanged(t *testing.T) {
 		parts[0] = c
 		parts[1] = d
 
-		assertContent(t, msg, []ai.Content{a, b})
+		assertContent(t, msg, []ai.Part{a, b})
 	})
 
 	t.Run("reusing the backing array for a second message", func(t *testing.T) {
 		t.Parallel()
 
-		buf := make([]ai.Content, 0, 4)
+		buf := make([]ai.Part, 0, 4)
 		buf = append(buf, a, b)
 
 		first, err := ai.NewMessage(ai.RoleUser, buf...)
@@ -301,13 +301,13 @@ func TestMessage_CallerMutatesWhatItPassed_MessageIsUnchanged(t *testing.T) {
 			t.Fatalf("NewMessage returned %v, want no failure", err)
 		}
 
-		assertContent(t, first, []ai.Content{a, b})
-		assertContent(t, second, []ai.Content{c, d})
+		assertContent(t, first, []ai.Part{a, b})
+		assertContent(t, second, []ai.Part{c, d})
 	})
 }
 
 // assertContent reports every way msg's content differs from want.
-func assertContent(t *testing.T, msg ai.Message, want []ai.Content) {
+func assertContent(t *testing.T, msg ai.Message, want []ai.Part) {
 	t.Helper()
 
 	got := msg.Content()
@@ -354,7 +354,7 @@ func TestMessage_CallerMutatesWhatItRead_MessageIsUnchanged(t *testing.T) {
 		read := msg.Content()
 		read[0] = c
 
-		assertContent(t, msg, []ai.Content{a, b})
+		assertContent(t, msg, []ai.Part{a, b})
 	})
 
 	t.Run("two readers are independent", func(t *testing.T) {
@@ -368,7 +368,7 @@ func TestMessage_CallerMutatesWhatItRead_MessageIsUnchanged(t *testing.T) {
 		if second[0] != a {
 			t.Errorf("the second reader saw %v at index 0, want %v", second[0], a)
 		}
-		assertContent(t, msg, []ai.Content{a, b})
+		assertContent(t, msg, []ai.Part{a, b})
 	})
 
 	t.Run("a message copied by assignment is independent", func(t *testing.T) {
@@ -379,8 +379,8 @@ func TestMessage_CallerMutatesWhatItRead_MessageIsUnchanged(t *testing.T) {
 
 		copied.Content()[0] = c
 
-		assertContent(t, msg, []ai.Content{a, b})
-		assertContent(t, copied, []ai.Content{a, b})
+		assertContent(t, msg, []ai.Part{a, b})
+		assertContent(t, copied, []ai.Part{a, b})
 		if msg.ID() != copied.ID() {
 			t.Errorf("a copy has identity %v, want the original's %v — a copy is the same message", copied.ID(), msg.ID())
 		}
@@ -420,7 +420,7 @@ func TestMessage_ExtremeInputs_NeverPanics(t *testing.T) {
 
 	const huge = 10_000
 
-	many := make([]ai.Content, huge)
+	many := make([]ai.Part, huge)
 	for i := range many {
 		many[i] = newPart("x")
 	}
@@ -429,12 +429,12 @@ func TestMessage_ExtremeInputs_NeverPanics(t *testing.T) {
 		name string
 		act  func()
 	}{
-		{"a nil content element", func() {
-			msg, _ := ai.NewMessage(ai.RoleUser, nil)
+		{"an unconstructed content element", func() {
+			msg, _ := ai.NewMessage(ai.RoleUser, ai.Part{})
 			_ = msg.Content()
 		}},
-		{"a mixture of nil and constructed elements", func() {
-			msg, _ := ai.NewMessage(ai.RoleUser, nil, newPart("a"), nil)
+		{"a mixture of unconstructed and constructed elements", func() {
+			msg, _ := ai.NewMessage(ai.RoleUser, ai.Part{}, newPart("a"), ai.Part{})
 			_ = msg.Content()
 		}},
 		{"ten thousand elements", func() {
