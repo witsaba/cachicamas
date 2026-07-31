@@ -244,8 +244,12 @@ flowchart LR
 
 #### AI-00.1 — Module skeleton `[mechanical]`
 
+> **Amended 2026-07-31 — check 1's "empty pass" is not achievable.** Implementation disproved it, and the correction is recorded here rather than applied silently. A Go module containing **no packages at all** fails both gates: `go test ./...` exits 1 with `no packages to test`, and `go vet ./...` exits 1 likewise (measured on go1.26.3; a module holding one package with only a doc comment exits 0). So `make test` cannot pass "trivially" at this leaf — there must be at least one package for the tooling to have anything to be wired *to*.
+>
+> Check 1 is therefore split at the node boundary that already exists: this leaf owns the **files**, and the `make test` / `make lint` gate moves to AI-00.2, which is the leaf that creates the first package. No node is added, none is renumbered, and neither leaf's scope changes — AI-00.2 already owned "the package exists"; it now also owns the first green run that proves the tooling around it works. `make build` and `make help` remain valid evidence at AI-00.1 and both exit 0 on the empty module.
+
 - **Check list:**
-  1. WHEN `backend/agent/` exists with `go.mod` (module path and Go version as chartered, **zero requires**), `Makefile`, `.golangci.yml`, `README.md`, `.gitignore` THEN `make test` and `make lint` run and pass inside the new module (trivially — there is nothing to test yet, and an empty pass is still evidence the tooling is wired).
+  1. WHEN `backend/agent/` exists with `go.mod` (module path and Go version as chartered, **zero requires**), `Makefile`, `.golangci.yml`, `README.md`, `.gitignore` THEN ~~`make test` and `make lint` run and pass inside the new module (trivially — there is nothing to test yet, and an empty pass is still evidence the tooling is wired)~~ **`make build` and `make help` run and exit 0 inside the new module, and the `test` and `lint` recipes are present with their pinned bodies. The first green `make test` is AI-00.2's check 4 — see the amendment above.**
   2. WHEN a repo-root `go.work` lists all three modules THEN `go build ./...` succeeds from each module directory independently, and `make test` in `database_administrator` and `workspace_syncer` is unchanged from its pre-change output.
   3. `database_administrator/go.mod` gains **no** `replace` directive, and `database_administrator/src/tools/tools.go` is byte-identical (diff recorded).
   4. The `README.md` states the module's one-paragraph purpose, its three-layer contents, and the fact that `make test` must be run here separately because no CI exists.
@@ -258,12 +262,17 @@ flowchart LR
   1. `src/ai/` exists as the Layer 1 package with a package documentation file that states the layer boundary and the import rule, and nothing else — the contract text grows one milestone at a time and each milestone's doc paragraph is guarded where it makes a checkable claim.
   2. `src/agenttest/` exists as a **direct sibling** of `src/ai/`, holding an external-package test that imports `src/ai` and compiles. This is the structural constraint of [ADR 0005 § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2) and Guard C: AI-20.4's signature guard will resolve the Layer 1 source path relative to its own source file, so any other layout breaks it silently.
   3. The layout leaves room for the sibling layers `src/agent/`, `src/coding/` and `src/cmd/cachicamas/` without creating them — they belong to docs 0003 and 0004, and creating empty directories now would make the forward guard's forbidden-prefix list untestable.
+  4. **Added 2026-07-31, moved from AI-00.1 check 1** (see the amendment under AI-00.1): `make test` and `make lint` run and pass inside the new module. This is the first point at which they *can* — an empty module fails both — so it is here that the build tooling is first proven wired.
 - **Depends on:** AI-00.1.
 
 #### AI-00.3 — Forward guard: Layer 1 purity `[guard]`
 
+> **Amended 2026-07-31 — the flag in item 1 does not deliver the property item 1 claims for it.** Bare `go list -deps` reports transitive dependencies but **not test imports**, so it closes only one of the two blind spots ADR 0005 § Guard A names. Measured on this repository at `database_administrator/src/domain`: `go list -deps` returns 2 non-stdlib packages, `go list -deps -test` returns 5 — the three it adds being the external test package and the synthesized test binary and their closure. A Layer 1 *test file* importing a sibling backend module or a third-party library would pass a bare-`-deps` guard silently, which is the exact failure this leaf exists to prevent.
+>
+> `-test` is therefore required, and with it comes a normalization obligation: `go list -test` emits `pkg [pkg.test]` and `pkg_test [pkg.test]` forms plus a synthesized `pkg.test` binary package. Left unnormalized these are measured against the allowlist and the guard fails on its own module. This corrects the item's stated mechanism; the leaf's scope, dependencies and closing condition are unchanged, so no node is added or renumbered.
+
 - **Test list:**
-  1. The boundary test uses **`go list -deps` with an allowlist** (stdlib plus this module's own packages), so it covers test imports and transitive dependencies — the two blind spots ADR 0005 § Guard A records in the `.Imports`-only approach it replaces.
+  1. The boundary test uses ~~**`go list -deps` with an allowlist**~~ **`go list -deps -test` with an allowlist** (stdlib plus this module's own packages), so it covers test imports and transitive dependencies — the two blind spots ADR 0005 § Guard A records in the `.Imports`-only approach it replaces. **Output must be normalized before matching — see the amendment above.**
   2. Forbidden-prefix coverage names both sibling backend modules **and** the future sibling layers (`src/agent`, `src/coding`, `src/cmd`), plus the § D3 split: OTel **API** paths allowed, OTel **SDK**, exporter and `otelslog` paths forbidden.
   3. The allowlist is a *deny-by-default* list: a dependency that is neither stdlib nor own-module fails the guard even if nobody thought to forbid it by name. This is what makes AI-24's transport choice a visible, ADR-gated event rather than a quiet `go get`.
   4. **Bite proof:** three scratch violations — an import of `database_administrator`, an import of the OTel SDK, and an import of an arbitrary third-party module — each make the guard fail; the red output is recorded in the PR, then the violations are dropped.
