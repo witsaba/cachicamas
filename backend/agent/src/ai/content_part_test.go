@@ -65,6 +65,21 @@ func TestPart_KindAndPayload_Agree(t *testing.T) {
 				if call.ID() == "" {
 					t.Errorf("part.ToolCall().ID() is empty on a part of kind %v, want the payload it was built from", kind)
 				}
+			case ai.PartKindToolResult:
+				part, err := ai.NewToolResult("toolu_01A09Kf7", "127.0.0.1\tlocalhost\n")
+				if err != nil {
+					t.Fatalf("ai.NewToolResult returned %v, want no failure", err)
+				}
+				if got := part.Kind(); got != kind {
+					t.Errorf("part.Kind() = %v, want %v", got, kind)
+				}
+				result, ok := part.ToolResult()
+				if !ok {
+					t.Errorf("part.ToolResult() reported no tool result on a part of kind %v", kind)
+				}
+				if result.CallID() == "" {
+					t.Errorf("part.ToolResult().CallID() is empty on a part of kind %v, want the payload it was built from", kind)
+				}
 			default:
 				t.Errorf("kind %v is registered but this test does not exercise it — AI-06.4 mechanizes what this default catches by hand", kind)
 			}

@@ -60,6 +60,7 @@ import (
 //
 //   - text — model-visible natural-language text (V-REQ-08).
 //   - tool_call — a model's intent to invoke a tool (V-REQ-16).
+//   - tool_result — the answer to a tool call (V-REQ-18).
 //
 // The list above is not prose. AI-06.4 scans it and fails when it disagrees with
 // the registration table, so a kind cannot be added without documenting it and
@@ -82,11 +83,17 @@ const (
 	// an intent to invoke; this package never acts on it.
 	PartKindToolCall
 
+	// PartKindToolResult is the kind carrying the answer to a tool call
+	// (V-REQ-18): its correlation to the originating call, its content, and
+	// whether the tool reported failure. A result that reports failure is
+	// ordinary content, not a failure of this package's taxonomy.
+	PartKindToolResult
+
 	// partKindFirst and partKindEnd bound the declared constant space. They are
 	// not members and are never exported: partKindEnd is one past the last kind,
 	// and moving it is what makes a newly declared member visible to PartKinds.
 	partKindFirst = PartKindText
-	partKindEnd   = PartKindToolCall + 1
+	partKindEnd   = PartKindToolResult + 1
 )
 
 // partKindNames is the registration table, and the single source of a kind's
@@ -96,8 +103,9 @@ const (
 // reason: nothing in this package may let an unordered iteration decide
 // anything, and a registry is where that temptation is strongest.
 var partKindNames = []string{
-	PartKindText:     "text",
-	PartKindToolCall: "tool_call",
+	PartKindText:       "text",
+	PartKindToolCall:   "tool_call",
+	PartKindToolResult: "tool_result",
 }
 
 // PartKinds returns the content-part kind vocabulary in declaration order.

@@ -141,6 +141,30 @@ var partKindWitnesses = map[PartKind]partKindWitness{
 			return Part{payload: ToolCall{id: "", name: "read_file", arguments: emptyToolArguments}}
 		},
 	},
+
+	PartKindToolResult: {
+		constantName:   "PartKindToolResult",
+		registeredName: "tool_result",
+
+		constructValid: func() (Part, error) {
+			return NewToolResult("toolu_01A09Kf7", "127.0.0.1\tlocalhost\n")
+		},
+
+		// An empty correlation is rejected by the payload's only rule: a result
+		// that names no call is an answer to nothing. Note what is *not* the
+		// invalid witness — a result reporting that the tool failed is a
+		// perfectly valid part, because V-REQ-18 makes a failing tool ordinary
+		// content rather than a caller-contract failure.
+		constructInvalid: func() (Part, error) {
+			return NewToolResult("", "127.0.0.1\tlocalhost\n")
+		},
+
+		read: func(p Part) (any, bool) { return p.ToolResult() },
+
+		skipRules: func() Part {
+			return Part{payload: ToolResult{callID: "", content: "done"}}
+		},
+	},
 }
 
 // TestPartKindRegistration_EveryDeclaredKind_HasConstructorAccessorAndValidationPath
