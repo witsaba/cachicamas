@@ -92,9 +92,23 @@ This is the one place this milestone spends a name to buy a property. The proper
 
 It also matches the repository's own posture: retired defect **C1** was a type whose zero value passed validation, and doc 0002 answers it at AI-06.1 with "zero-value-invalid".
 
-### 3.2 A note on AI-05, running concurrently
+### 3.2 A note on AI-05, running concurrently — and where the two shapes differ
 
-AI-05 lands roles, and a role is also a closed vocabulary that will also want an exhaustiveness pin. The two were built without sight of each other, so **a reconciliation pass is expected after both land** — either extracting a shared shape or, more likely, recording that two small enums do not justify one shared abstraction. Nothing here anticipates that pass: no name is reserved for it, and no helper is exported in the hope of being reused. Whichever pattern reads better after both are visible is the one that should survive.
+AI-05 lands roles, and a role is also a closed vocabulary that also wants an exhaustiveness pin. The two were built without sight of each other, so **a reconciliation pass is expected after both land** — either extracting a shared shape or, more likely, recording that two small enums do not justify one shared abstraction. Nothing here anticipates that pass: no name is reserved for it, and no helper is exported in the hope of being reused.
+
+AI-05's landed shape was reported after this milestone's code was written: `uint8`, `iota + 1`, an unexported name table, an exported `Roles()` accessor, and an exhaustiveness pin. Three of those five agree with this file. The differences, so the reconciliation has something concrete to work from:
+
+| | AI-05 roles | AI-13 finish reasons | Reconcilable? |
+| --- | --- | --- | --- |
+| Underlying type | `uint8` | `uint8` | Same |
+| Zero value | excluded via `iota + 1` | excluded via a blank `_` at `iota` 0 | Same effect, two spellings. Trivially reconcilable; `_` was chosen so the exclusion is visible on its own line rather than inferred from an offset |
+| Name table | unexported | unexported **array sized by an in-block bound** (`finishReasonLimit`, declared as the block's last member) | The sizing is the part worth keeping: appending a value grows the array with an empty entry and moves the validity bound in one edit, so there is no second declaration to forget. If `Roles()` uses a slice or map, this is the one asymmetry with a real argument behind it |
+| Accessor | exported `Roles()` | **none** | The substantive difference. See below |
+| Exhaustiveness pin | present | present, plus a normalization round-trip | Compatible |
+
+**On the missing accessor.** This package exports no `FinishReasons()`, and that is a decision rather than an omission. A pin that reads the vocabulary from an exported accessor compares the package's list against the package's list, so a value added to the constant block *and* to the accessor passes while still having no string form. This pin instead discovers the vocabulary through a second, independent channel — it walks all 256 values the underlying `uint8` can hold and asks `Validate` which of them are members — and compares that against a list the *test* names by hand. Adding a constant then fails three assertions rather than none. It also keeps one fewer symbol on a surface AI-40 freezes.
+
+That argument is about the pin, not about roles: if Layer 2 has a real use for `Roles()` beyond testing, the two are not in conflict and both can stand. What should not survive reconciliation is a `FinishReasons()` added *for the pin's benefit*, because it would weaken the pin it was added to serve.
 
 ---
 

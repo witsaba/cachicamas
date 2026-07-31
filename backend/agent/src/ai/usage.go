@@ -85,12 +85,67 @@ const absentTokenCount = "absent"
 // five counts absent, and any subset can be populated by naming it:
 //
 //	usage := ai.Usage{Input: ai.Tokens(1200), Output: ai.Tokens(340)}
+//
+// # The cost formula, and which fields are terms of it
+//
+// V-MET-12 requires the arithmetic to be writable "without guessing whether a
+// count is inclusive of another". The rule this record follows, stated once so
+// that a field added later knows which side it lands on: **a count priced
+// differently from every other is a term of the formula; a count priced the same
+// as another is a breakdown of it.**
+//
+// Applied to the five fields, and pinned by test:
+//
+//	cost = Input      × the input rate
+//	     + CacheRead  × the cache-read rate
+//	     + CacheWrite × the cache-write rate
+//	     + Output     × the output rate
+//
+// Input, CacheRead and CacheWrite are disjoint: no token is counted in more than
+// one of them, and the total input is their sum. Reasoning is not a term — it is
+// inside Output.
+//
+// The rates themselves are Layer 3's (V-OUT-08), and the money is never Layer
+// 1's. What Layer 1 owes is counts a consumer can add up without guessing, which
+// is where its obligation ends.
 type Usage struct {
-	Input      TokenCount
-	Output     TokenCount
-	CacheRead  TokenCount
+	// Input is the tokens of the request the provider processed fresh,
+	// excluding everything counted in CacheRead and CacheWrite.
+	//
+	// Vendors disagree here and the disagreement is expensive: one reports its
+	// input figure exclusive of cached tokens, another reports it inclusive of
+	// them. This record is exclusive, so an adapter for an inclusive vendor
+	// subtracts before it fills this field in. Summing an inclusive figure with
+	// CacheRead double-counts every cached token; reading an exclusive figure
+	// alone under-reports a cache hit by most of the prompt. Both mistakes are
+	// invisible until the bill arrives.
+	Input TokenCount
+
+	// Output is the tokens the model produced, including everything counted in
+	// Reasoning.
+	//
+	// The opposite rule from the input side, and the type documentation gives
+	// the reason: reasoning tokens are billed at the output rate, so they are a
+	// breakdown of a billed quantity rather than a quantity of their own. It
+	// also keeps a mid-stream figure honest — V-MET-12 records that the
+	// reasoning count arrives only on the final usage update, and under this
+	// rule Output is complete at every update while the attribution fills in
+	// later.
+	Output TokenCount
+
+	// CacheRead is the tokens served from a cached prefix rather than processed
+	// fresh. Disjoint from Input, and priced far below it, which is why it is a
+	// term of its own rather than a breakdown of anything.
+	CacheRead TokenCount
+
+	// CacheWrite is the tokens written into a cache by this request. Disjoint
+	// from Input and from CacheRead, and priced above fresh input.
 	CacheWrite TokenCount
-	Reasoning  TokenCount
+
+	// Reasoning is the tokens the model spent reasoning: a breakdown of Output,
+	// not a term beside it. Adding it to Output claims tokens the response never
+	// produced.
+	Reasoning TokenCount
 }
 
 // Validate reports the first rule this usage record violates, positioned at the

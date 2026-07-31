@@ -397,33 +397,97 @@ Two test-list items.
 
 ### T-ACM-11 — Item 1: the inclusive-or-exclusive semantics, pinned against a cache-hit record
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+The item asks for the semantics to be **documented AND pinned**, so the test does both halves. The documentation half is made objective the same way AI-13.2's obligation was: `go/parser` reads `usage.go` and asserts the required clause on each field's comment. The pinning half constructs one cache hit and builds the record the way an adapter for **each** vendor style must, so the assertion is about the conversion rather than about arithmetic on numbers the test itself chose.
+
+- [x] **RED** — `TestUsage_ACacheHitRecord_ExcludesCachedTokensFromTheInputCount`, against the bare `Usage` struct AI-13.3 landed, whose fields carried no documentation.
+
+```
+--- FAIL: TestUsage_ACacheHitRecord_ExcludesCachedTokensFromTheInputCount (0.00s)
+    --- FAIL: .../the_five_counts_document_which_side_of_the_formula_they_are_on (0.01s)
+        usage_test.go:347: Usage.Input carries no documentation, want its side of the cost formula
+        usage_test.go:347: Usage.Output carries no documentation, want its side of the cost formula
+        usage_test.go:347: Usage.CacheRead carries no documentation, want its side of the cost formula
+        usage_test.go:347: Usage.CacheWrite carries no documentation, want its side of the cost formula
+        usage_test.go:347: Usage.Reasoning carries no documentation, want its side of the cost formula
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.483s
+```
+
+- [x] **GREEN** — the cost formula on the `Usage` type documentation, and the per-field statement of which side each count is on. `ok ... 1.333s`.
+
+- [x] **SHOWN TO BITE** — the semantics flipped to inclusive on the declaration, which is the silent version of the change this item exists to prevent:
+
+```
+--- FAIL: TestUsage_ACacheHitRecord_ExcludesCachedTokensFromTheInputCount (0.00s)
+    --- FAIL: .../the_five_counts_document_which_side_of_the_formula_they_are_on (0.01s)
+        usage_test.go:352: Usage.Input documentation does not state "excluding"
+        usage_test.go:352: Usage.Input documentation does not state "CacheWrite"
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.325s
+```
+
+Reverted; the suite returns to `ok`.
+
+- [x] **REFACTOR** — none.
 
 **Proves:** `R-ACM-011` (`S-ACM-026`, `S-ACM-027`, `S-ACM-028`).
+
+**The decision, and the two halves of it.** Cached tokens are **excluded** from the input count: `Input`, `CacheRead` and `CacheWrite` are disjoint and the total input is their sum. Reasoning is **included** in the output count: it is a breakdown, not a term. The rule behind both, stated on the type so a later field knows which side it lands on — *a count priced differently from every other is a term of the formula; a count priced the same as another is a breakdown of it.* The full argument, with the inclusive reading stated at full strength first, is `design.md` § 5.3.
+
+The fixture is one cache hit — 1000 prompt tokens, 900 of them served from a cached prefix — converted by an adapter of each vendor style. Both converge on `Input: 100, CacheRead: 900, CacheWrite: 0`, and the documented sum recovers the 1000 tokens the request actually carried, while the input count alone is asserted to be **strictly less** than that: the under-reporting this item names, made into a failing condition rather than a warning. Verification against a real cache-hit transcript is **AI-31.3's**, which doc 0002 assigns in those words.
 
 ---
 
 ### T-ACM-12 — Item 2 *(pin)*: the formula's term list is the field set
 
-- [ ] **PIN LANDED GREEN**
-- [ ] **SHOWN TO BITE** against a scratch field, then scratch removed
-- [ ] **REFACTOR**
+- [x] **PIN LANDED GREEN** — `TestUsage_TheFieldSet_MatchesTheDocumentedCostFormula`. `ok ... 1.317s`. Exempt from red-first by doc 0002's leaf anatomy.
+- [x] **SHOWN TO BITE** — one scratch field appended to `Usage`, nothing else changed:
 
-**Proves:** `R-ACM-012` (`S-ACM-029`, `S-ACM-030`, `S-ACM-031`).
+```
+--- FAIL: TestUsage_TheFieldSet_MatchesTheDocumentedCostFormula (0.00s)
+    usage_test.go:465: ai.Usage has 6 fields, want exactly the 5 the documented cost formula accounts for — decide whether the new field is a term of the formula or a breakdown of another field (usage.go, the Usage type documentation), then update this pin
+    usage_test.go:492: ai.Usage field 5 is "Scratch" — a field the documented cost formula does not name; decide whether it is a term or a breakdown (usage.go, the Usage type documentation) and update both
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.285s
+```
+
+Scratch removed; the suite returns to `ok`. The message names the **decision** the author of a new field has to make and the file to make it in, because the whole value of the pin is stopping someone at the moment that decision is still cheap.
+
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-012` (`S-ACM-029`, `S-ACM-030`, `S-ACM-031`). The pin covers names, types, order and exportedness, so a rename or a reorder fails as loudly as an addition — and the order it pins is the one `V-MET-09` lists, the struct declares and `Validate` reports, three orders that agree. `S-ACM-031` is held by the surface itself: no exported derivation over the counts exists, and `design.md` § 5.4 argues that rejection at full strength.
 
 ---
 
 ## Verification pass
 
-- [ ] `make test` in `backend/agent/` — green, `-race`, every package. Tail recorded.
-- [ ] `make lint` — `go vet` plus `golangci-lint` at the pinned `v2.9.0`, clean.
-- [ ] `go.mod` still declares **zero requires**.
-- [ ] Both AI-00 import guards pass.
-- [ ] `validation.go` and `validation_test.go` untouched — this change is a consumer of AI-04, not an editor of it.
-- [ ] No file under `openspec/specs/` touched: this milestone needs no register amendment.
-- [ ] Revert-and-record clause: whether it fired, and any doc 0002 amendment it required.
+- [x] `make test` in `backend/agent/` — green, `-race`, every package.
+
+```
+--- PASS: TestUsage_AnySubsetOfCounts_ProducesAValidRecord (0.00s)
+--- PASS: TestUsage_ACacheHitRecord_ExcludesCachedTokensFromTheInputCount (0.00s)
+--- PASS: TestViolation_ExtremeInputs_NeverPanics (0.00s)
+--- PASS: TestLayer1_ModuleHasNoDependencies_ZeroRequires (0.03s)
+--- PASS: TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault (0.03s)
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.275s
+ok  	github.com/cachicamas/backend/agent/src/ai	1.553s
+```
+
+- [x] `make lint` — `go vet` plus `golangci-lint` at the pinned `v2.9.0`: **`0 issues.`**
+- [x] `go.mod` still declares **zero requires** — the file is three lines, and `TestLayer1_ModuleHasNoDependencies_ZeroRequires` passes.
+- [x] Both AI-00 import guards pass: `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` and `TestLayer1_ModuleHasNoDependencies_ZeroRequires`. Every import added by this milestone is standard library: `strings`, `strconv`, `slices` in production; `errors`, `go/ast`, `go/parser`, `go/token`, `reflect`, `strings`, `testing` in tests.
+- [x] `validation.go` and `validation_test.go` untouched — this change is a **consumer** of AI-04, which is the point of AI-04 having landed first. `git diff --stat` against the branch point names four new files and nothing else under `src/ai/`.
+- [x] No file under `openspec/specs/` touched: this milestone needs no register amendment, the first in Wave 1 for which that is true.
+- [x] `src/agenttest/` untouched — reserved for AI-06.2.
+- [x] **Revert-and-record clause: it did not fire.** Every leaf's first red test drove green in small steps, no leaf needed a seam that did not exist, and no doc 0002 amendment is proposed. Three observations are recorded above instead, none of which is a graph change: AI-13.2's two items and AI-13.3's item 3 had no red available and are recorded as pins-in-practice; one TDD slip at T-ACM-4 was reverted and retaken; and one comment claim at T-ACM-9 was checked, found false, and withdrawn.
+
+### Actuals against the forecast
+
+| Slice | Forecast | **Actual** |
+| --- | --- | --- |
+| SDD planning artifacts | ~600 prose | **~700 prose** across five files |
+| AI-13.1 + AI-13.2 | ~380 Go | **~570 Go** (`finish_reason.go` 236, `finish_reason_test.go` 335) |
+| AI-13.3 + AI-13.4 | ~370 Go | **~570 Go** (`usage.go` 216, `usage_test.go` 355) |
+| **Total** | ~750 Go | **~1140 Go**, of which roughly half is contract documentation and test prose |
+
+The overrun is 50 % on the Go figure and lands where the pre-recorded reassessment said it would: in documentation and tests, not in production logic. Production code is 452 lines across two files, of which about 250 lines are GoDoc — the two semantic decisions (`Input` exclusive, `Reasoning` inside `Output`) are documented on the declarations because that is where an adapter author reads them, and an AST-scanning test now requires them to stay there. The commit split on the chain boundary stands: `finish_reason*` and `usage*` share no symbol and can be reviewed as two PRs with no rework.
 
 ---
 
