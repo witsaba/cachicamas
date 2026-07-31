@@ -21,6 +21,11 @@
 // fail before it passes.
 package ai
 
+import (
+	"strconv"
+	"sync/atomic"
+)
+
 // Content is the seam through which a message holds one element of its ordered
 // content. AI-06 decides what a content part is.
 //
@@ -48,13 +53,36 @@ type Content interface {
 	isContent()
 }
 
+// MessageID is the stable handle by which one message is distinguished from
+// another.
+type MessageID struct{ n uint64 }
+
+// IsZero reports whether the identity was never minted.
+func (id MessageID) IsZero() bool { return id.n == 0 }
+
+// String renders the identity.
+func (id MessageID) String() string {
+	if id.IsZero() {
+		return "msg-unset"
+	}
+	return "msg-" + strconv.FormatUint(id.n, 10)
+}
+
+// lastMessageID is the source of minted identities.
+var lastMessageID atomic.Uint64
+
+// mintMessageID returns an identity no other message in this process holds.
+func mintMessageID() MessageID { return MessageID{n: lastMessageID.Add(1)} }
+
 // Message is the smallest addressable unit of a transcript: one role plus
 // ordered content.
 //
 // It is a value. Copying a Message is safe: every read returns a fresh
 // sequence, so two copies cannot observe each other's content.
 type Message struct {
-	role Role
+	id      MessageID
+	role    Role
+	content []Content
 }
 
 // NewMessage constructs a message from a role and its ordered content.
@@ -71,11 +99,23 @@ func NewMessage(role Role, content ...Content) (Message, error) {
 			}
 			return nil
 		},
+		func() *Violation {
+			if len(content) == 0 {
+				return Invalid(ErrEmpty, At("content"))
+			}
+			return nil
+		},
 	); err != nil {
 		return Message{}, err
 	}
-	return Message{role: role}, nil
+	return Message{id: mintMessageID(), role: role, content: content}, nil
 }
+
+// ID returns the message's identity.
+func (m Message) ID() MessageID { return m.id }
+
+// Content returns the message's ordered content.
+func (m Message) Content() []Content { return m.content }
 
 // Role returns the role the message is attributed to.
 func (m Message) Role() Role { return m.role }
