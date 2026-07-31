@@ -2,7 +2,7 @@
 # Cachicamas — database_administrator microservice
 #
 # Multi-stage build:
-#   1. builder   — golang:1.26.4-alpine3.24. Compiles a fully-static binary
+#   1. builder   — golang:1.26.5-alpine3.24. Compiles a fully-static binary
 #                  (CGO disabled — the service has no C dependencies: only
 #                  net/http + Echo v5, both pure Go).
 #   2. runtime   — gcr.io/distroless/static-debian12:nonroot. Smallest
@@ -28,7 +28,7 @@
 # ============================================================================
 
 # ---------- 1. Build stage -------------------------------------------------
-FROM golang:1.26.4-alpine3.24 AS builder
+FROM golang:1.26.5-alpine3.24 AS builder
 
 # Rebuild-triggerable build args. Bumping these busts the cache.
 ARG BUILD_VERSION=dev

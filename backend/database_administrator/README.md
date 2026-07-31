@@ -66,34 +66,34 @@ module's go.sum would dwarf the real attack surface).
 ### Current baseline
 
 Scanned against `govulncheck@v1.1.4` (Go Vulnerability Database snapshot
-2026-07-27). Five reachable findings exist in the module's dependency
-graph at the time this target was added:
+2026-07-31). **Zero reachable findings** as of 2026-07-31. The five
+findings originally surfaced when this target landed have been
+remediated (see Remediation history below).
 
-| # | ID | Package | Found in | Fixed in | Reachability origin |
-|---|----|---------|----------|----------|---------------------|
-| 1 | [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) | `google.golang.org/grpc` | v1.81.1 | v1.82.1 | OTel batch log processor (`src/otel/logging.go`) |
-| 2 | [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) | `golang.org/x/text` | v0.38.0 | v0.39.0 | `database/sql` driver stack (`src/migration/postgres/driver.go`) |
-| 3 | [GO-2026-5856](https://pkg.go.dev/vuln/GO-2026-5856) | stdlib `crypto/tls` | go1.26.3 | go1.26.5 | OTel OTLP/gRPC + Echo HTTPS + GitHub API + sync stream handler |
-| 4 | [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) | stdlib `net/textproto` | go1.26.3 | go1.26.4 | GitHub HTTP response header parsing |
-| 5 | [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) | stdlib `crypto/x509` | go1.26.3 | go1.26.4 | Echo HTTPS handler + organization hostname checks |
+| # | ID | Package | Found in | Fixed in | Status |
+|---|----|---------|----------|----------|--------|
+| 1 | [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) | `google.golang.org/grpc` | v1.81.1 | v1.82.1 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 2 | [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) | `golang.org/x/text` | v0.38.0 | v0.39.0 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 3 | [GO-2026-5856](https://pkg.go.dev/vuln/GO-2026-5856) | stdlib `crypto/tls` | go1.26.3 | go1.26.5 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 4 | [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) | stdlib `net/textproto` | go1.26.3 | go1.26.4 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 5 | [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) | stdlib `crypto/x509` | go1.26.3 | go1.26.4 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
 
-The target is wired to FAIL on these so the baseline is enforced rather
-than silently carried. First-time operators should expect a non-zero exit
-code until the remediation PR lands.
+The target is wired to FAIL on any reachable finding so the baseline is
+enforced rather than silently carried.
 
-### Remediation
+### Remediation history
 
-Fixing the five reachable vulns above is **explicitly out of scope** for
-this change. Upgrades land in a separate follow-up PR to keep this slice
-focused on exposing the SCA signal. The intent of `make vuln-check` is
-to keep the dependency-attack surface visible and gate new
-vulnerabilities from being introduced — not to silently re-pin the
-world.
-
-`GOVULNCHECK_VERSION` should be bumped periodically (typically every
-release or two as the Go security team ships new scanner versions).
-Bumps are one-line Makefile edits; the target will reinstall on the next
-run.
+**2026-07-31** — All five findings above were remediated in branch
+`chore/2026-07-31-cachicamas-go-vuln-remediation`. The change bumped
+the `go` directive to `1.26.5`, promoted `google.golang.org/grpc` from
+indirect to direct at `v1.82.1`, promoted `golang.org/x/text` from
+indirect to direct at `v0.39.0`, and bumped the Dockerfile builder
+image to `golang:1.26.5-alpine3.24` in lockstep with `go.mod`. The
+workspace `go.work` was also bumped to `go 1.26.5`. Verification:
+`go build ./...`, `make test`, and `make vuln-check` all exit 0.
+Out of scope (follow-up): adding unit tests for `src/otel/` (the
+silent-regression gap on the grpc bump) and remediating the same
+stdlib vulns in the sibling `backend/workspace_syncer/` module.
 
 ## API
 
