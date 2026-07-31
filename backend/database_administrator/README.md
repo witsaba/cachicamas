@@ -44,7 +44,56 @@ make test                  # unit tests with race detector
 INTEGRATION=1 make test    # also run the pgx integration tests
 make test/integration      # boot compose Postgres, run integration tests, stop Postgres
 make lint                  # golangci-lint + go vet (requires `make tools` first)
+make vuln-check            # govulncheck SCA — auto-installs + scans ./... (requires network egress to vuln.go.dev)
 ```
+
+## Vulnerability scanning
+
+This module ships with a `make vuln-check` target that wraps
+[`govulncheck`](https://go.dev/doc/security/vuln/), the official scanner
+backed by the [Go Vulnerability Database](https://vuln.go.dev/). It runs
+against `./...` and exits non-zero when a reachable vulnerability is
+detected, so it can act as a CI gate without conflating dependency risk
+with source lint noise.
+
+`govulncheck` is **reachability-aware**: it does static call-graph
+analysis and only reports advisories whose vulnerable symbols are
+actually reachable from this module's code paths. Imported-but-uncalled
+packages and unreachable transitive modules are filtered out, which keeps
+the signal-to-noise ratio tight (the full unfiltered CVE list against a
+module's go.sum would dwarf the real attack surface).
+
+### Current baseline
+
+Scanned against `govulncheck@v1.1.4` (Go Vulnerability Database snapshot
+2026-07-27). Five reachable findings exist in the module's dependency
+graph at the time this target was added:
+
+| # | ID | Package | Found in | Fixed in | Reachability origin |
+|---|----|---------|----------|----------|---------------------|
+| 1 | [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) | `google.golang.org/grpc` | v1.81.1 | v1.82.1 | OTel batch log processor (`src/otel/logging.go`) |
+| 2 | [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) | `golang.org/x/text` | v0.38.0 | v0.39.0 | `database/sql` driver stack (`src/migration/postgres/driver.go`) |
+| 3 | [GO-2026-5856](https://pkg.go.dev/vuln/GO-2026-5856) | stdlib `crypto/tls` | go1.26.3 | go1.26.5 | OTel OTLP/gRPC + Echo HTTPS + GitHub API + sync stream handler |
+| 4 | [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) | stdlib `net/textproto` | go1.26.3 | go1.26.4 | GitHub HTTP response header parsing |
+| 5 | [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) | stdlib `crypto/x509` | go1.26.3 | go1.26.4 | Echo HTTPS handler + organization hostname checks |
+
+The target is wired to FAIL on these so the baseline is enforced rather
+than silently carried. First-time operators should expect a non-zero exit
+code until the remediation PR lands.
+
+### Remediation
+
+Fixing the five reachable vulns above is **explicitly out of scope** for
+this change. Upgrades land in a separate follow-up PR to keep this slice
+focused on exposing the SCA signal. The intent of `make vuln-check` is
+to keep the dependency-attack surface visible and gate new
+vulnerabilities from being introduced — not to silently re-pin the
+world.
+
+`GOVULNCHECK_VERSION` should be bumped periodically (typically every
+release or two as the Go security team ships new scanner versions).
+Bumps are one-line Makefile edits; the target will reinstall on the next
+run.
 
 ## API
 
