@@ -292,31 +292,102 @@ Three test-list items.
 
 ### T-ACM-8 — Item 1: absent is distinguishable from zero on every count
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **RED** — `TestUsage_AnAbsentCount_IsDistinguishableFromZero`, against a `TokenCount` carrying only an `int64` and a `Count` returning `(t.count, true)`.
 
-**Proves:** `R-ACM-009` (`S-ACM-020`, `S-ACM-021`, `S-ACM-022`).
+```
+--- FAIL: TestUsage_AnAbsentCount_IsDistinguishableFromZero (0.00s)
+    --- FAIL: .../cache_write (0.00s)
+        usage_test.go:55: absent cache_write: Count() = (0, true), want (0, false) — an unreported count must not report as present
+        usage_test.go:72: absent cache_write and cache_write reported as nought both render as "0", want two renderings
+    --- FAIL: .../reasoning (0.00s)
+        usage_test.go:55: absent reasoning: Count() = (0, true), want (0, false) — an unreported count must not report as present
+        usage_test.go:72: absent reasoning and reasoning reported as nought both render as "0", want two renderings
+    --- FAIL: .../input (0.00s)
+        usage_test.go:55: absent input: Count() = (0, true), want (0, false) — an unreported count must not report as present
+        usage_test.go:72: absent input and input reported as nought both render as "0", want two renderings
+    --- FAIL: .../cache_read (0.00s)
+        usage_test.go:55: absent cache_read: Count() = (0, true), want (0, false) — an unreported count must not report as present
+        usage_test.go:72: absent cache_read and cache_read reported as nought both render as "0", want two renderings
+    --- FAIL: .../output (0.00s)
+        usage_test.go:55: absent output: Count() = (0, true), want (0, false) — an unreported count must not report as present
+        usage_test.go:72: absent output and output reported as nought both render as "0", want two renderings
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.429s
+```
+
+- [x] **GREEN** — `TokenCount{count, present}`, `Tokens` setting the flag, `Count` returning both, `String` rendering `"absent"` for the zero value. `ok ... 1.462s`.
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-009` (`S-ACM-020`, `S-ACM-021`, `S-ACM-022`). The table runs the assertion once per field rather than once, because `V-MET-10` makes each count independently present or absent and a property proven on `Input` alone would be a property of `Input`. The rendering assertion is not decoration: a log line is where the distinction is otherwise lost first.
 
 ---
 
 ### T-ACM-9 — Item 2: constructible with any subset present
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **RED** — `TestUsage_AnySubsetOfCounts_ProducesAValidRecord`, against a stub `Validate` returning `Invalid(ErrEmpty, at...)` — a validator with an opinion about presence, which is the defect `CAP-R-03` clause 2 forbids.
 
-**Proves:** `R-ACM-010` (`S-ACM-023`, `S-ACM-024`, `S-ACM-025`).
+```
+--- FAIL: TestUsage_AnySubsetOfCounts_ProducesAValidRecord (0.00s)
+    --- FAIL: .../several_negative_counts_report_the_first_in_the_documented_order (0.00s)
+        usage_test.go:171: violation position = "usage", want "usage.output" — output precedes cache_read and reasoning
+    --- FAIL: .../a_provider_that_reports_nothing (0.00s)
+        usage_test.go:119: Validate() = usage: required value is empty, want <nil> — any subset of counts is a valid record
+    --- FAIL: .../a_provider_that_reports_only_input_and_output (0.00s)
+        usage_test.go:119: Validate() = usage: required value is empty, want <nil> — any subset of counts is a valid record
+    --- FAIL: .../a_negative_count_is_rejected_out_of_range_at_its_own_field (0.00s)
+        usage_test.go:145: errors.Is(err, ErrOutOfRange) = false, want true; err = completion.usage: required value is empty
+        usage_test.go:153: violation position = "completion.usage", want "completion.usage.cache_read"
+    --- FAIL: .../a_provider_that_reports_everything (0.00s)
+        usage_test.go:119: Validate() = usage: required value is empty, want <nil> — any subset of counts is a valid record
+    --- FAIL: .../a_provider_that_reports_only_a_reported_nought (0.00s)
+        usage_test.go:119: Validate() = usage: required value is empty, want <nil> — any subset of counts is a valid record
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.289s
+```
+
+- [x] **GREEN** — `Validate` built from `FirstFailure` over five `Rule` closures in the documented field order, each reporting `ErrOutOfRange` at its own field. `ok ... 1.315s`.
+- [x] **REFACTOR** — the five rules were extracted to one `nonNegative` helper.
+
+**A claim withdrawn after checking it.** The helper clones the caller's position with `append(slices.Clone(at), At(name))`, and the first version of its comment — and of `design.md` § 5.2 — justified that by saying five closures appending to one variadic slice would overwrite each other's last step. **That is false**, and it was checked rather than believed: with a bare `append` the whole suite still passes, because `FirstFailure` evaluates lazily and stops at the first failure and `Invalid` copies the position it is given, so at most one rule ever builds one.
+
+```
+(bare append, no slices.Clone)
+ok  	github.com/cachicamas/backend/agent/src/ai	1.292s
+```
+
+The clone is kept for the narrower reason that is true: `at` is the caller's slice, and appending to a variadic parameter can write into the caller's backing array past its length. Both the declaration comment and `design.md` § 5.2 now say that instead, and both record that the tests do not distinguish the two.
+
+**Proves:** `R-ACM-010` (`S-ACM-023`, `S-ACM-024`, `S-ACM-025`). The nested-position case (`completion.usage.cache_read`) is load-bearing for a different reason than first supposed: it proves the caller's prefix survives into the reported position rather than being replaced by it.
 
 ---
 
 ### T-ACM-10 — Item 3: readable from an external package, field by field
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+Landed green: items 1 and 2 already exported the fields and surfaced absence, so no red was available. Recorded the way AI-13.2's items were, with two mutations that between them cover both halves of the item.
 
-**Proves:** `R-ACM-009`, `R-ACM-010`.
+- [x] **LANDED GREEN** — `TestUsage_FromAnExternalPackage_IsReadableFieldByField`, written **without** the `usageFields` helper because the point of the item is the shape a real consumer writes. `ok ... 1.292s`.
+
+- [x] **SHOWN TO BITE (1) — "readable field by field".** One field unexported:
+
+```
+# github.com/cachicamas/backend/agent/src/ai_test [github.com/cachicamas/backend/agent/src/ai.test]
+src/ai/usage_test.go:36:57: u.CacheWrite undefined (type *ai.Usage has no field or method CacheWrite, but does have unexported field cacheWrite)
+src/ai/usage_test.go:109:4: unknown field CacheWrite in struct literal of type ai.Usage, but does have unexported cacheWrite
+src/ai/usage_test.go:205:40: usage.CacheWrite undefined (type ai.Usage has no field or method CacheWrite, but does have unexported field cacheWrite)
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+```
+
+- [x] **SHOWN TO BITE (2) — "with absence surfaced rather than defaulted".** `Count` returning `(t.count, true)`:
+
+```
+--- FAIL: TestUsage_FromAnExternalPackage_IsReadableFieldByField (0.00s)
+    usage_test.go:212: cache_write never reported: Count() = (0, true), want (0, false)
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.281s
+```
+
+Both reverted; the suite returns to `ok`.
+
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-009`, `R-ACM-010`. This is retired defect **C2**'s equivalent for the usage record — a contract unreadable from another package makes translation structurally impossible — proven one milestone before AI-06.2 makes the same proof for content parts. `src/agenttest/` is untouched: its own comment reserves that file for AI-06.2.
 
 ---
 

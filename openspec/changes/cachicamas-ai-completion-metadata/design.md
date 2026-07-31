@@ -185,7 +185,11 @@ func (u Usage) Validate(at ...Step) error {
 
 The order of the argument list is the documented order (`V-FAIL-04`, inherited from AI-04.1 decision 3), and it is the same order as `V-MET-09`'s list and the struct's own field order. Three orders that agree is not an accident worth leaving to chance — `R-ACM-012`'s field-set pin holds all three together.
 
-One trap this design must not fall into: each rule appends a step to the caller's position, and five closures appending to one slice would share a backing array and overwrite each other's last step. The position is therefore extended with `append(slices.Clone(at), At(name))`, never with a bare `append` on the variadic. The test for `S-ACM-025` positions the record inside a parent path precisely so this is exercised rather than assumed.
+Each rule extends the caller's position with `append(slices.Clone(at), At(name))` rather than a bare `append` on the variadic. The reason is narrower than the obvious one, and the obvious one is wrong: five closures appending to one slice would *not* overwrite each other here, because `FirstFailure` evaluates lazily and stops at the first failure and `Invalid` copies the position it is given, so at most one rule ever builds one. That was checked empirically — the tests pass with a bare `append` — and is recorded on the declaration so the next reader does not have to check it again.
+
+The real reason is that `at` is the caller's slice, and appending to a variadic parameter can write into the caller's backing array past its length. Cloning keeps the position purely local, which is the posture AI-04 already took when it made `Invalid` copy and `Path()` return a copy.
+
+The test for `S-ACM-025` positions the record inside a parent path (`completion.usage.cache_read`) for a different reason that *is* load-bearing: it proves the caller's prefix survives into the reported position instead of being replaced by it.
 
 ### 5.3 The two semantic decisions
 
