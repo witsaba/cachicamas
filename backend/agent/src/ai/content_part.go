@@ -43,7 +43,10 @@
 
 package ai
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+)
 
 // PartKind is the closed discriminator naming which payload a content part
 // carries (V-REQ-05).
@@ -188,5 +191,69 @@ type Part struct{ payload partPayload }
 // answer cannot drift from the payload it describes. A part that was never
 // constructed reports the zero kind, which is not a member of the vocabulary.
 func (p Part) Kind() PartKind {
-	return 0
+	if p.payload == nil {
+		return 0
+	}
+	return p.payload.kind()
+}
+
+// String renders the part for a diagnostic reader, naming its kind and never its
+// payload.
+//
+// A content part is the second thing in this package that formats caller data —
+// validation.go records that a validation failure is the first — and here the
+// default is worse than silence: fmt prints the unexported fields of a struct it
+// has no String method for, so "%v" on a part would print the prompt. A consumer
+// that wants the payload calls the accessor, which is what an accessor is for.
+//
+// The rendering names the kind alone. Not the payload, and not its length: a
+// length is caller-derived, and a prefix of a secret is still a secret.
+func (p Part) String() string {
+	if p.payload == nil {
+		return "part(unset)"
+	}
+	return "part(" + p.Kind().String() + ")"
+}
+
+// GoString renders the part for the %#v verb.
+//
+// It exists so the redaction posture covers every fmt verb rather than the three
+// a reader thinks of. Without it, %#v falls back to reflection and prints the
+// payload — which makes the posture a property of which verb someone reached
+// for, and V-FAIL-13 puts it on the type instead.
+func (p Part) GoString() string { return p.String() }
+
+// under composes a position: a prefix followed by the steps beneath it.
+//
+// It concatenates rather than appending, so a caller's prefix is never rewritten
+// by a rule that extends it — the aliasing hazard AI-05's copy semantics are
+// about, one line long and one dimension smaller.
+func under(prefix Path, steps ...Step) []Step {
+	return slices.Concat([]Step(prefix), steps)
+}
+
+// firstViolation evaluates rules in order and reports the first violation, or
+// nil when every rule passes. A nil rule is skipped.
+//
+// It is [FirstFailure] with a narrower result, and it exists because a rule that
+// runs inside another rule needs to report *Violation rather than error. AI-04
+// documented why the exported composer returns error: a nil *Violation placed in
+// an error interface is not a nil error, and reproducing that trap at every call
+// site of every contract was the cost it removed. This sibling does not
+// reintroduce it. Its result is only ever compared to nil as a *Violation, and
+// the single conversion to error happens once, at the exported boundary that
+// returns it.
+//
+// Keeping the order as data rather than as control flow is the reason it is
+// worth three lines: a reviewer reads which rule wins instead of tracing it.
+func firstViolation(rules ...Rule) *Violation {
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if violation := rule(); violation != nil {
+			return violation
+		}
+	}
+	return nil
 }
