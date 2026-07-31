@@ -31,6 +31,8 @@ var (
 	ErrOutOfRange          error // a value is outside a documented bound
 	ErrMalformed           error // a value is not well-formed for its documented encoding
 	ErrUnresolvedReference error // a value names something the request does not declare
+	ErrDuplicate           error // a value repeats another the collection already carries
+	//                             (appended 2026-07-31 by AI-08 — see § 3.1)
 )
 
 // Positional context (V-FAIL-03).
@@ -62,7 +64,7 @@ type Rule func() *Violation
 func FirstFailure(rules ...Rule) error
 ```
 
-Five sentinels, four types, nine functions and methods. A Layer 2 consumer writes at most two calls against it: `errors.Is` for the class and `errors.As` for the position.
+Five sentinels at AI-04 — six from 2026-07-31, see § 3.1 — four types, nine functions and methods. A Layer 2 consumer writes at most two calls against it: `errors.Is` for the class and `errors.As` for the position. The sentinel count is the only part of this surface the append rule may move; the types, functions and methods are what AI-40 freezes.
 
 ---
 
@@ -72,13 +74,17 @@ Five sentinels, four types, nine functions and methods. A Layer 2 consumer write
 | --- | --- | --- |
 | `Violation` | It names the *thing that happened* — a rule was violated — and reads as a noun at the call site: `var v *ai.Violation; errors.As(err, &v)`. The sentinel already carries which class and the path carries where, so the type is literally the record of one violation | `ValidationError`. Idiomatic in the standard library's sense, but it invites the pairing `ValidationError` / `ProviderError` at AI-19 and with it the false symmetry that both are errors of the same kind. They are not: one is the caller's bug and is knowable without I/O, the other is neither. The register keeps the two vocabularies apart; the names should too |
 | `Invalid` | The call site reads as a sentence: `return ai.Invalid(ai.ErrEmpty, ai.At("model"))` — "invalid: empty, at model" | `NewViolation`. Correct and noisier. Nine milestones write this call hundreds of times |
-| `ErrEmpty`, `ErrNotInVocabulary`, `ErrOutOfRange`, `ErrMalformed`, `ErrUnresolvedReference` | Each names a **rule class**, never a rule instance or a type. `revive`'s `error-naming` rule requires the `Err` prefix; the rest of each name is the class | `ErrEmptyModelIdentity` and its kin — per-instance sentinels, rejected in `decision.md` § 3.2 |
+| `ErrEmpty`, `ErrNotInVocabulary`, `ErrOutOfRange`, `ErrMalformed`, `ErrUnresolvedReference`, `ErrDuplicate` | Each names a **rule class**, never a rule instance or a type. `revive`'s `error-naming` rule requires the `Err` prefix; the rest of each name is the class | `ErrEmptyModelIdentity` and its kin — per-instance sentinels, rejected in `decision.md` § 3.2. For `ErrDuplicate` specifically: `ErrDuplicateToolName`, which is the same per-instance mistake wearing the new class's clothes — the class is uniqueness, and a tool set is only the first collection to need it |
 | `At`, `AtIndex` | They read as location at the call site and they are unlikely to collide with a domain noun a later milestone wants | `Field` and `Element`. Both are words AI-10 may well want for the request's own vocabulary, and a collision in package `ai` is a rename across nine milestones |
 | `Step`, `Path` | A path is a sequence of steps; both are the ordinary words and neither is a domain noun of Layer 1 | `Location`, `Position`. Longer, and "position" is already the register's conceptual term — reusing it as a Go name would blur the artifact/code line the register draws |
 | `Rule`, `FirstFailure` | `Rule` is `V-FAIL-16`'s noun. `FirstFailure` names the policy in the call, so a reader of AI-05's validator sees which policy is in force without opening this file | `Validate`, `Check`, `All`. `Validate` says nothing about ordering, and ordering is the entire point |
 | `Path()` on the failure | The accessor is the extraction `V-FAIL-03` requires | Exporting the field. An exported slice field is mutable from outside and would make the failure's position rewritable by a consumer |
 
 ### 3.1 Why the sentinels are five, and not four or eight
+
+> **Amended 2026-07-31** — six, not five. `ErrDuplicate` was appended by **AI-08** under `decision.md` § 3.5's append rule, and the row for it is in the table below with the citable case the rule requires: AI-08.2 item 1, two tool declarations carrying the same name in one tool set. The heading is left as it was written rather than renumbered, because the question it asks — *why this many* — is answered by the citable-case rule and not by the number, and a heading rewritten each time the set grows would make the append look like a revision of the reasoning instead of an application of it. § 2's surface listing and § 3's name table carry the same amendment. `ruleClasses` in § 4.2 is the enumeration in code; it grew by one entry, at the end.
+>
+> The reason it is `ErrDuplicate` and not `ErrMalformed` stretched one notch is stated where a reader meets it, in `NewToolSet`'s own GoDoc: each name in a set with a repeated entry is perfectly well-formed, and what fails is uniqueness across the set — a property no single value can be inspected for. The two classes name the two different fixes a consumer must make, which is the only thing `errors.Is` is for.
 
 Each has a citable case, per `R-AIE-003` and `S-AIE-007`:
 
@@ -89,8 +95,9 @@ Each has a citable case, per `R-AIE-003` and `S-AIE-007`:
 | `ErrOutOfRange` | `V-REQ-24` breakpoint cap: "a request that exceeds it is a caller-contract failure rather than a silent truncation" |
 | `ErrMalformed` | Register § 6.3: "Argument bytes that are not well-formed for the documented encoding are decidable from the request alone → caller-contract" |
 | `ErrUnresolvedReference` | Register § 6.3: "a tool choice naming a tool absent from the declared set is decidable from the request alone → caller-contract" |
+| `ErrDuplicate` *(appended 2026-07-31 by AI-08)* | doc 0002 AI-08.2 item 1: two tool declarations with the same name in one tool set. Both halves of the fact are in the request, so it is decidable from the request alone |
 
-A sixth class for conflicting values is plausible and has no citable case; it is not landed. The append rule (`decision.md` § 3.5) is what makes that cheap to correct.
+~~A sixth class for conflicting values is plausible and has no citable case; it is not landed.~~ The append rule (`decision.md` § 3.5) is what makes that cheap to correct — and it did: the sixth class was landed by AI-08 when the case arrived, at the cost of one line at one call site. The struck sentence is left visible rather than deleted, because a prediction that came true is worth more as evidence than as a tidy paragraph.
 
 ---
 
@@ -135,7 +142,7 @@ func ruleText(rule error) string {
 }
 ```
 
-`ruleClasses` is an ordered slice — not a map — of the five sentinels. `errors.Is` is used so a *wrapped* sentinel is still recognised as its class, and the text printed is the class's own, so a wrapper whose message carries caller data contributes nothing to the rendering while remaining fully matchable. Nothing in the standard library does this; it is the difference between "we agreed not to put values in messages" and "there is nowhere to put them".
+`ruleClasses` is an ordered slice — not a map — of the sentinels (five at AI-04; `ErrDuplicate` appended at the end on 2026-07-31, see § 3.1). `errors.Is` is used so a *wrapped* sentinel is still recognised as its class, and the text printed is the class's own, so a wrapper whose message carries caller data contributes nothing to the rendering while remaining fully matchable. Nothing in the standard library does this; it is the difference between "we agreed not to put values in messages" and "there is nowhere to put them".
 
 The rendered form is therefore composed only of: the class's own fixed text, filtered names, decimal integers, `.`, `[`, `]` and `: `.
 

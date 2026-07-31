@@ -59,11 +59,16 @@ Layer 1 MUST expose exactly one concrete type for caller-contract failures. Ever
 
 A validation sentinel MUST identify a **rule class**, reusable across every Layer 1 type, and MUST NOT be specific to one type's one rule. The sentinel set MUST be closed: a violation MUST report a member of the landed set. The set MUST be extended by appending a class in the pull request that needs it, never by a milestone defining a local sentinel of its own.
 
+A milestone that meets a violation **no landed class describes** MUST append a class rather than report the nearest-fitting one. A class reported for a violation it does not describe is a defect of the same kind as a local sentinel: it is not detectable by any test of this requirement, and it silently makes `errors.Is` answer a question the consumer did not ask.
+
+> **Amended 2026-07-31** — the second paragraph was appended after **AI-08** met the first violation no landed class described, duplicate tool names in one set, and reported it through the nearest-fitting class (`ErrMalformed`) instead of appending. The original wording forbade a *local sentinel* and said nothing about a *stretched* one, and only the first of those two is visible in a diff. `ErrDuplicate` was appended and the call site moved; `S-AIE-034` was added below so the gap is a scenario rather than a habit. `R-AIE-003`'s original sentence is unchanged.
+
 ### Scenarios
 
 - **S-AIE-006** — Given two different Layer 1 contracts each rejecting an empty required value, when a consumer matches both against the empty-value sentinel, then both match — "empty value" is one thing everywhere.
 - **S-AIE-007** — Given the landed sentinel set, when a reviewer asks why each member exists, then each has a citable case in the register or in doc 0002, AND no member exists only in anticipation of a milestone that has not landed.
 - **S-AIE-008** — Given a caller-contract failure, when a consumer matches it against every member of the sentinel set in turn, then exactly one member matches.
+- **S-AIE-034** — Given a violation that no landed class describes, when the milestone meeting it reports the failure, then the reported class is one appended for that violation AND is not a landed class whose text describes something else. *(Appended 2026-07-31 by AI-08. Its worked case: a set carrying two values with the same name reports the uniqueness class and explicitly does not match the well-formedness class, because every value in it is well-formed on its own.)*
 
 ---
 

@@ -277,7 +277,7 @@ func NewToolSet(tools ...Tool) (ToolSet, error) {
 		}
 		for j := 0; j < i; j++ {
 			if tools[j].Name() == tool.Name() {
-				return ToolSet{}, Invalid(ErrNotInVocabulary /* see below */, AtIndex("tools", i))
+				return ToolSet{}, Invalid(ErrDuplicate /* see § 6.1 */, AtIndex("tools", i))
 			}
 		}
 	}
@@ -297,13 +297,19 @@ Three decisions in that body.
 
 `ErrNotInVocabulary` is wrong for a duplicate and is written above only to mark the decision point. The five landed classes are: empty, not-in-vocabulary, out-of-range, malformed, unresolved-reference. A duplicate name is none of them cleanly — which is a real finding, not a gap to paper over.
 
-The choice is **`ErrMalformed`, positioned at the second occurrence**: the tool set as a whole is not well-formed for its documented encoding, and the position says which element broke it. The alternative readings and why they lose:
+The choice is **`ErrDuplicate`, appended by this milestone, positioned at the second occurrence.** The alternative readings and why they lose:
 
 - `ErrOutOfRange` — a duplicate is not a bound.
 - `ErrNotInVocabulary` — the set is not a closed vocabulary.
-- A sixth sentinel — AI-04's decision record is explicit that the set grows "by appending a class in the pull request that needs it", and this change does not need one: "the value you gave is not well-formed for what this field must be" describes a set with a repeated name accurately.
+- `ErrMalformed` — **every name in the set is well-formed.** What fails is uniqueness *across* the set, which is not a property any single value has, so no inspection of any one declaration finds it. A consumer told "malformed" goes looking for the badly spelled name, and there is none.
 
-The GoDoc on `NewToolSet` states this reading in one sentence, because a reader who hits `ErrMalformed` on a duplicate will want the reasoning where the failure is, not in a change directory.
+The last of those is the one that decides it, and it decides it against the class this milestone first shipped. The two classes name the two different fixes a consumer must make — `ErrMalformed` says *spell it differently*, `ErrDuplicate` says *remove one of them* — and `errors.Is` is the only place that difference is readable. Collapsing them makes the taxonomy answer a question the consumer did not ask, which is `V-FAIL-06`'s recorded failure mode one class at a time.
+
+Appending is what AI-04's decision record asks for, not an exception to it. `decision.md` § 3.5 makes the set "closed and appended, never invented": a milestone that meets a violation no landed class describes appends a class **in the pull request that needs it**, rather than defining a local sentinel. It forecast this exact class — "a 'two values conflict' class is plausible and has no citable case yet" — and named the citable case as the thing it was waiting for. AI-08.2 item 1 *is* that case. The rule was never "do not grow the set"; it was "do not grow it in anticipation".
+
+The GoDoc on `NewToolSet` states this reading, because a reader who hits the failure will want the reasoning where the failure is, not in a change directory.
+
+> **Amended 2026-07-31** — this section originally chose `ErrMalformed`, reading the *set as a whole* as not well-formed and citing AI-04's append rule as the reason not to add a class. That inverted the rule: § 3.5 says a milestone appends a class in the pull request that needs it, and AI-08 was that pull request. The class was appended and `NewToolSet` moved to it in a follow-up commit, with the assertion taken red first. The rejected-alternative list is kept and `ErrMalformed` moved into it, because the argument that defeats it is the substance of the correction and deleting it would leave the next reader to re-derive it. `decision.md` § 3.5, `design.md` § 3.1 and the AI-04 delta spec carry the matching amendments; no register row was needed, because `V-FAIL-17` states that which rule classes exist is AI-04's and not the register's.
 
 ---
 

@@ -191,12 +191,43 @@ Three test-list items in doc 0002's order, plus one appended.
 FAIL	github.com/cachicamas/backend/agent/src/ai	0.305s
 ```
 
-- [x] **GREEN** — a linear scan over the ordered sequence, reporting `Invalid(ErrMalformed, AtIndex("tools", i))` at the second occurrence. All six subtests `--- PASS`.
+- [x] **GREEN** — a linear scan over the ordered sequence, reporting `Invalid(ErrDuplicate, AtIndex("tools", i))` at the second occurrence. All six subtests `--- PASS`. *(Shipped as `ErrMalformed`; corrected to `ErrDuplicate` on 2026-07-31 — the second red/green cycle is recorded below.)*
 - [x] **REFACTOR** — none. The scan is deliberately not a map lookup; see below.
 
-**Proves:** `R-ATD-007`, `S-ATD-023` … `S-ATD-025`.
+**Proves:** `R-ATD-007`, `S-ATD-023` … `S-ATD-025`, and — from the correction below — `R-AIE-003`/`S-AIE-034` of the AI-04 delta spec.
 
-**The sentinel choice is a real finding, recorded rather than papered over.** A duplicate name is cleanly **none** of AI-04's five classes. `ErrOutOfRange` is wrong (not a bound); `ErrNotInVocabulary` is wrong (a tool set is not a closed vocabulary); a sixth sentinel is available but AI-04's decision record is explicit that the set grows "by appending a class in the pull request that needs it", and this change does not need one. `ErrMalformed` — "the value you gave is not well-formed for what this field must be" — describes a set with a repeated name accurately, and the position says which element broke it. The reasoning is in `NewToolSet`'s own GoDoc, because a reader who hits `ErrMalformed` on a duplicate will look at the failure, not in a change directory.
+> **Amended 2026-07-31 — the sentinel choice was wrong, and correcting it exercised AI-04's append rule.**
+>
+> **What was recorded here originally:** that a duplicate name is cleanly none of AI-04's five classes (true), and that a sixth sentinel was therefore unavailable because "AI-04's decision record is explicit that the set grows by appending a class in the pull request that needs it, and this change does not need one" (an inversion of that rule). `decision.md` § 3.5 says a milestone appends a class **in the pull request that needs it** precisely so that no milestone defines a local sentinel or stretches a neighbouring class. AI-08 met the "two values conflict" case AI-04 explicitly forecast, so AI-08 *was* the pull request that needed it.
+>
+> **Why the wrong class is a contract defect and not a cosmetic one:** a duplicate tool name is not malformed. Each name in the set is perfectly well-formed — `NewTool` already accepted every one of them — and what fails is uniqueness *across* the set, which is not a property any single value has. An adapter author reading `ErrMalformed` goes looking for the badly spelled name and finds none, and `errors.Is` cannot separate *spell it differently* from *you have two of these*, which are the two different fixes a consumer must make.
+>
+> **The correction, in two commits.** First, `ErrDuplicate` was appended to `validation.go`'s rule-class registry and to the hand-written mirror in `validation_test.go`, with no behaviour change and the whole suite green. Then the behaviour change, red first:
+>
+> ```
+> --- FAIL: TestNewToolSet_DuplicateNames_FailWithASentinelAtTheSecondOccurrence (0.00s)
+>     --- FAIL: .../three_of_the_same_name (0.00s)
+>         tool_set_test.go:73: errors.Is(err, ErrDuplicate) = false, want true (err = tools[1]: value is not well-formed for its documented encoding)
+>         tool_set_test.go:76: errors.Is(err, ErrMalformed) = true, want false — a duplicate name is well-formed (err = tools[1]: value is not well-formed for its documented encoding)
+>     --- FAIL: .../an_adjacent_pair (0.00s)
+>         tool_set_test.go:73: errors.Is(err, ErrDuplicate) = false, want true (err = tools[1]: value is not well-formed for its documented encoding)
+>         tool_set_test.go:76: errors.Is(err, ErrMalformed) = true, want false — a duplicate name is well-formed (err = tools[1]: value is not well-formed for its documented encoding)
+>     --- FAIL: .../the_first_of_several_duplicate_pairs (0.00s)
+>         tool_set_test.go:73: errors.Is(err, ErrDuplicate) = false, want true (err = tools[2]: value is not well-formed for its documented encoding)
+>         tool_set_test.go:76: errors.Is(err, ErrMalformed) = true, want false — a duplicate name is well-formed (err = tools[2]: value is not well-formed for its documented encoding)
+>     --- FAIL: .../the_offered_name_never_reaches_the_failure (0.00s)
+>         tool_set_test.go:129: Error() = "tools[1]: value is not well-formed for its documented encoding", want it composed only of the position and the rule class
+>     --- FAIL: .../a_separated_pair (0.00s)
+>         tool_set_test.go:73: errors.Is(err, ErrDuplicate) = false, want true (err = tools[3]: value is not well-formed for its documented encoding)
+>         tool_set_test.go:76: errors.Is(err, ErrMalformed) = true, want false — a duplicate name is well-formed (err = tools[3]: value is not well-formed for its documented encoding)
+> FAIL	github.com/cachicamas/backend/agent/src/ai	0.467s
+> ```
+>
+> Green followed from one changed argument in `NewToolSet`. The assertion is now two-sided — it requires `ErrDuplicate` **and** requires the failure not to match `ErrMalformed` — so the two readings can never be silently merged again. T-ATD-9's ordering subtest was updated in the same cycle: "emptiness is reported before duplication" now asserts the absence of `ErrDuplicate`, which is the class that subtest was always about.
+>
+> **What the cost of the mistake actually was:** one line at one call site, plus its assertions. That is the append rule's whole argument. Had AI-08 defined a local `errDuplicateToolName` in `tool_set.go` instead — the alternative § 3.5 forbids — the same correction would have been a change to every consumer that had learned to match it.
+
+**The sentinel choice was a real finding, and the finding was recorded correctly while the conclusion drawn from it was not.** A duplicate name is cleanly **none** of AI-04's five landed classes. `ErrOutOfRange` is wrong (not a bound); `ErrNotInVocabulary` is wrong (a tool set is not a closed vocabulary); `ErrMalformed` is wrong (every name in the set is well-formed). The right move on a violation no landed class describes is to append one, which is what `decision.md` § 3.5 asks for and what this milestone now does. The reasoning is in `NewToolSet`'s own GoDoc, because a reader who hits the failure will look at the failure, not in a change directory.
 
 **The linear scan buys determinism, not just simplicity.** A map-based duplicate check would be `O(n)`, over a collection whose realistic size makes that irrelevant, and it would put an unordered structure in the one place AI-04 warns about. The ordered scan guarantees the *reported* duplicate is always the lowest index whose name repeats an earlier one — asserted over 64 repeated runs.
 
@@ -288,6 +319,8 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.297s
 
 - [x] **GREEN** — an emptiness check per element, **before** the duplicate scan. All four subtests `--- PASS`.
 - [x] **REFACTOR** — none.
+
+> **Amended 2026-07-31** — the transcript above is left verbatim, as recorded. Its `ErrMalformed` lines are the duplicate class *as it was then spelled*; T-ATD-4's amendment replaced it with `ErrDuplicate`, and the `emptiness_is_reported_before_duplication` subtest now asserts the absence of `ErrDuplicate`. What the subtest pins is unchanged — that the unconstructed fact wins over the duplicate fact — and it is a stronger pin under the new class, because "not the duplicate class" now means exactly that instead of doubling as "not the malformed class".
 
 **Why it exists.** A `Tool{}` that skipped `NewTool` has an empty name, which no constructed declaration's is — so emptiness is a sound detector without a separate `constructed` flag. Without the check, a value that skipped its constructor reaches the wire carrying a name no provider accepts. This is AI-06.3 item 1's shape applied one contract over, and the last subtest pins the ordering: two zero declarations are *both* unconstructed and duplicates of one another, and the unconstructed fact — the more fundamental one — is reported first, at the earlier index.
 
@@ -463,7 +496,7 @@ Where a reviewer's attention pays for itself, in order:
 3. **`tool_set_test.go`'s order assertion.** Check that it compares against the caller's order and not against a previous read. Self-comparison passes for a stable-but-wrong implementation.
 4. **`design.md` § 5 and `tool_choice.go`'s file comment — the pattern extension.** AI-13 will copy whichever of these two is clearer. They must agree.
 5. **`ValidateAgainst`'s rule order.** Rule 2 before rule 3 is a judgement call with a defensible alternative. The test pins it; the reviewer should decide whether it pinned the right one.
-6. **`NewToolSet`'s use of `ErrMalformed` for a duplicate.** A real finding: no landed class fits cleanly. The alternatives and their rejections are in `design.md` § 6.1 and in the GoDoc.
+6. **`NewToolSet`'s duplicate class.** ~~A real finding: no landed class fits cleanly.~~ *(Amended 2026-07-31 — review found the conclusion inverted AI-04's append rule. `ErrMalformed` was replaced by `ErrDuplicate`, appended to AI-04's registry in this pull request; see T-ATD-4's amendment, `design.md` § 6.1, and the GoDoc. What a reviewer should still check is whether "uniqueness across a collection" is the right **class**, or whether the class is narrower than that — it is the first class appended after AI-04 and the next collection to need one will inherit its wording.)*
 7. **The two discipline corrections** (T-ATD-1's over-implementation, T-ATD-10's green-from-birth). Both are recorded rather than hidden, and both produced better red evidence than the straight path would have.
 
 ---
@@ -477,7 +510,7 @@ Where a reviewer's attention pays for itself, in order:
 5. Order determinism asserted over 64 declarations, 100 reads plus concurrent readers, against the caller's order. ✅
 6. The empty tool set is legal; the zero `ToolSet` is that empty set. ✅
 7. Every tool-choice member constructible; the payload-carrying one carries its name; cross-validation runs in the documented order. ✅
-8. No new sentinel, no error type, no register amendment, no doc 0002 amendment. ✅
+8. ~~No new sentinel~~, no error type, no register amendment, no doc 0002 amendment. ✅ *(Amended 2026-07-31 — **one** sentinel was appended, `ErrDuplicate`, under `decision.md` § 3.5's append rule and with the citable case that rule requires: AI-08.2 item 1. The criterion as written treated a stable sentinel set as the goal; the goal is a set that grows only by appending, only for a violation no landed class describes, and only in the pull request that meets it. All three held. No error type was added, no register row was needed — `V-FAIL-17` states that which rule classes exist is AI-04's, not the register's — and doc 0002 is untouched.)*
 
 ---
 

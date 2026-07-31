@@ -120,6 +120,12 @@ The set is **closed and appended, never invented** — the same discipline the r
 
 Only classes with a citable case in the register or in doc 0002 are landed by AI-04. A "two values conflict" class is plausible and has no citable case yet; AI-10 or AI-12 will meet it or will not, and the append rule is what makes waiting cheap. Which classes exist at merge is `design.md`'s to enumerate and `spec.md`'s to constrain.
 
+> **Amended 2026-07-31** — the forecast class arrived, and the append rule was exercised as this section wrote it. **AI-08** met the "two values conflict" case: two tool declarations carrying the same name in one tool set (AI-08.2 item 1), which is decidable from the request alone and is cleanly none of the five classes AI-04 landed. `ErrDuplicate` — *"value repeats another the collection already carries"* — was appended for it, and the citable case this section required is that milestone's own item.
+>
+> Two facts are recorded rather than smoothed over. First, the forecast was accurate in substance and wrong only in which milestone would meet it: this section named AI-10 and AI-12, and it was AI-08. That is the argument *for* waiting, not against it — a class landed at AI-04 in anticipation would have been landed for the wrong contract. Second, AI-08 initially reported the duplicate through `ErrMalformed` and appended the class one pull request later, on review. The append rule survived that: the correction was a one-line change of class at a single call site plus its assertion, because nothing downstream had been built on the wrong reading yet. An open set — a local `errToolSet` sentinel defined in `tool_set.go` — would have made the same correction a change to every consumer that had learned to match it. **The cost of a late append is one line; the cost of a local sentinel is unbounded.** That asymmetry is the whole reason § 3.5 is a rule.
+>
+> Nothing above is retracted. § 3.4's `errors.Is` consequence holds unchanged — a duplicate matches exactly one class — and it now distinguishes the two readings a consumer actually has to act on: `ErrMalformed` says *spell it differently*, `ErrDuplicate` says *remove one of them*. The class set at merge is enumerated in `design.md` § 3.1, amended in the same pull request.
+
 ---
 
 ## 4. Decision 3 — ordered first-failure
