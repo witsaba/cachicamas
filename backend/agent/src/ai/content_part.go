@@ -150,6 +150,11 @@ type partPayload interface {
 	// than a field so that declaring a payload without a kind is a compile
 	// error.
 	kind() PartKind
+
+	// validate reports the payload's first broken rule at the given position,
+	// or nil. It is called by the kind's constructor and by the message
+	// boundary — two entry points, one rule set.
+	validate(at Path) *Violation
 }
 
 // Part is one element of a message's ordered content, carrying exactly one kind
@@ -195,6 +200,57 @@ func (p Part) Kind() PartKind {
 		return 0
 	}
 	return p.payload.kind()
+}
+
+// validate reports the part's first broken rule at the given position, or nil.
+//
+// The rules are checked in the order written, per V-FAIL-04:
+//
+//  1. the part carries a payload, else [ErrNotInVocabulary] — a value that
+//     skipped construction has no payload, therefore no kind, therefore no
+//     membership of the closed kind vocabulary. That is why this failure needs
+//     no rule class of its own: doc 0001's defect C1 is a vocabulary failure,
+//     and AI-05 already answered the identical question for the role nobody set;
+//  2. the payload's kind is registered, else [ErrNotInVocabulary] — a payload
+//     type added without a table entry makes every part carrying it invalid,
+//     which is what keeps the registration table load-bearing rather than
+//     decorative;
+//  3. the payload satisfies its own rules, reported beneath this position.
+func (p Part) validate(at Path) *Violation {
+	if p.payload == nil {
+		return Invalid(ErrNotInVocabulary, at...)
+	}
+	if partKindName(p.payload.kind()) == "" {
+		return Invalid(ErrNotInVocabulary, at...)
+	}
+	return p.payload.validate(at)
+}
+
+// validateContent reports the first broken rule in a content sequence, or nil.
+//
+// # The prefix, and the caller it is for
+//
+// The prefix is prepended to every position this function reports. [NewMessage]
+// passes none, so a failure renders as "content[0]". AI-10 holds a request,
+// whose content sits one level deeper, and will pass AtIndex("messages", i) so
+// the same failure renders as "messages[2].content[0]".
+//
+// That parameter is the whole of AI-06.3 item 3. "The same value offered through
+// the request path is rejected there too" is one rule applied at two depths, not
+// two implementations that have to be kept in agreement — and AI-10 does not
+// exist yet, so the alternative would have been a speculative request type this
+// milestone has no charter to build. The reuse point is pinned by
+// content_part_internal_test.go, which fails if the position stops composing.
+//
+// Elements are checked in index order, so the first failing element is the one
+// reported: V-FAIL-04 applied to a sequence.
+func validateContent(prefix Path, content []Part) *Violation {
+	for i, part := range content {
+		if violation := part.validate(under(prefix, AtIndex("content", i))); violation != nil {
+			return violation
+		}
+	}
+	return nil
 }
 
 // String renders the part for a diagnostic reader, naming its kind and never its

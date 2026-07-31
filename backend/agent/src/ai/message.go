@@ -124,6 +124,13 @@ type Message struct {
 //     at "role".
 //  2. The content is not empty, else [ErrEmpty] at "content". No arguments, an
 //     empty sequence and a nil sequence are one fact and report one failure.
+//  3. Every element is a constructed content part, checked in index order, so
+//     the first failing element is the one reported. A value that skipped its
+//     constructor — the zero [Part], or one promoted out of a type that embeds
+//     it — carries no payload, therefore no kind, and fails with
+//     [ErrNotInVocabulary] at "content[i]". This is the seal: doc 0001's defect
+//     C1 was an exported part type whose zero value passed message validation
+//     and bypassed every construction rule.
 //
 // On failure the zero Message is returned, so a caller that ignored the error
 // cannot mistake the result for a constructed message — its identity reports
@@ -143,6 +150,9 @@ func NewMessage(role Role, content ...Part) (Message, error) {
 				return Invalid(ErrEmpty, At("content"))
 			}
 			return nil
+		},
+		func() *Violation {
+			return validateContent(nil, content)
 		},
 	); err != nil {
 		return Message{}, err
