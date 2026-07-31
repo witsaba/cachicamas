@@ -65,29 +65,95 @@ Five test-list items, in doc 0002's order.
 
 ### T-ACM-1 — Item 1: the vocabulary is closed and each value is constructible
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **RED** — `TestFinishReason_TheVocabulary_IsClosedAndEachValueIsConstructible`, naming all seven constants, against a stub whose `String` returned `""` and whose `Validate` returned `nil` for everything.
 
-**Proves:** `R-ACM-001` (`S-ACM-001`, `S-ACM-002`), `R-ACM-002` (`S-ACM-003`, `S-ACM-004`).
+```
+--- FAIL: TestFinishReason_TheVocabulary_IsClosedAndEachValueIsConstructible (0.00s)
+    --- FAIL: .../the_zero_value_names_no_finish_reason (0.00s)
+        finish_reason_test.go:50: FinishReason(0).Validate() = <nil>, want a violation — the zero value must name no finish reason
+    --- FAIL: .../every_value_of_the_vocabulary_is_constructible_and_valid (0.00s)
+        finish_reason_test.go:73: FinishReason(1).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(2).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(3).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(4).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(5).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(6).String() = "", want a non-empty stable string form
+        finish_reason_test.go:73: FinishReason(7).String() = "", want a non-empty stable string form
+    --- FAIL: .../the_seven_values_and_their_string_forms_are_pairwise_distinct (0.00s)
+        finish_reason_test.go:91: string form "" is shared by two values of the vocabulary
+        (× 6)
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.311s
+```
+
+- [x] **GREEN** — the constant block with the blank `iota` zero, `finishReasonLimit` derived from the last constant, the name array sized by that bound, and `Validate` reporting `ErrNotInVocabulary` through `FirstFailure`.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.326s
+```
+
+- [x] **REFACTOR** — none needed; the implementation is a constant block, an array and a bounds check. One speculative `strings` import written by reflex was removed before the green run was recorded.
+
+**Proves:** `R-ACM-001` (`S-ACM-001`, `S-ACM-002`), `R-ACM-002` (`S-ACM-003`, `S-ACM-004`). The zero-value subtest asserts the class **and** the position, so a `Validate` that rejected everything with a bare error would still fail.
 
 ---
 
 ### T-ACM-2 — Item 2: refusal and content filter are distinct, and the line is documented
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **RED** — `TestFinishReason_RefusalAndContentFilter_AreDistinctValues`, against a stub `NormalizeFinishReason` returning `FinishReasonUnknown` for every input.
 
-**Proves:** `R-ACM-003` (`S-ACM-005`, `S-ACM-006`).
+```
+--- FAIL: TestFinishReason_RefusalAndContentFilter_AreDistinctValues (0.00s)
+    --- FAIL: .../the_refusal_family (0.00s)
+        finish_reason_test.go:129: NormalizeFinishReason("refusal") = unknown, want refusal
+        finish_reason_test.go:129: NormalizeFinishReason("refused") = unknown, want refusal
+    --- FAIL: .../the_content-filter_family (0.00s)
+        finish_reason_test.go:139: NormalizeFinishReason("content_filter") = unknown, want content_filter
+        finish_reason_test.go:139: NormalizeFinishReason("safety") = unknown, want content_filter
+        finish_reason_test.go:139: NormalizeFinishReason("recitation") = unknown, want content_filter
+        finish_reason_test.go:139: NormalizeFinishReason("prohibited_content") = unknown, want content_filter
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.438s
+```
+
+- [x] **GREEN** — the lookup table, carrying **only** the two families this item demands. `ok ... 1.309s`.
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-003` (`S-ACM-005`, `S-ACM-006`). Note which assertion is load-bearing: `FinishReasonRefusal != FinishReasonContentFilter` is nearly vacuous, so the weight is on the family assertions — no provider string about a filter may land on the model's decision to decline, and none about declining may land on the filter. The line itself is documented on the two declarations (`design.md` § 4.4).
 
 ---
 
 ### T-ACM-3 — Item 3: provider strings normalize after trimming and lowering
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+- [x] **RED** — `TestNormalizeFinishReason_ProviderStrings_MapIntoTheVocabulary`: 21 cases across all seven families plus casing and whitespace variants, against the two-family table from item 2.
+
+```
+--- FAIL: TestNormalizeFinishReason_ProviderStrings_MapIntoTheVocabulary (0.00s)
+    finish_reason_test.go:199: NormalizeFinishReason("stop") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("end_turn") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("stop_sequence") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("complete") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("length") = unknown, want length
+    finish_reason_test.go:199: NormalizeFinishReason("max_tokens") = unknown, want length
+    finish_reason_test.go:199: NormalizeFinishReason("max_output_tokens") = unknown, want length
+    finish_reason_test.go:199: NormalizeFinishReason("tool_calls") = unknown, want tool_calls
+    finish_reason_test.go:199: NormalizeFinishReason("tool_use") = unknown, want tool_calls
+    finish_reason_test.go:199: NormalizeFinishReason("function_call") = unknown, want tool_calls
+    finish_reason_test.go:199: NormalizeFinishReason("pause_turn") = unknown, want pause_turn
+    finish_reason_test.go:199: NormalizeFinishReason("pause") = unknown, want pause_turn
+    finish_reason_test.go:199: NormalizeFinishReason("  stop  ") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("STOP") = unknown, want stop
+    finish_reason_test.go:199: NormalizeFinishReason("MAX_TOKENS") = unknown, want length
+    finish_reason_test.go:199: NormalizeFinishReason("\tSAFETY\n") = unknown, want content_filter
+    finish_reason_test.go:199: NormalizeFinishReason(" Tool_Use ") = unknown, want tool_calls
+    --- FAIL: .../every_string_form_of_the_vocabulary_round-trips (0.00s)
+        finish_reason_test.go:208: NormalizeFinishReason("stop") = unknown, want stop
+        finish_reason_test.go:208: NormalizeFinishReason("length") = unknown, want length
+        finish_reason_test.go:208: NormalizeFinishReason("tool_calls") = unknown, want tool_calls
+        finish_reason_test.go:208: NormalizeFinishReason("pause_turn") = unknown, want pause_turn
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.322s
+```
+
+- [x] **GREEN** — the full table, and `strings.TrimSpace` then `strings.ToLower` before the lookup. `ok ... 1.314s`.
+- [x] **REFACTOR** — none. No hyphen folding and no prefix matching were added: `design.md` § 4.2 records why the normalizer stays exactly as clever as the spec says.
 
 **Proves:** `R-ACM-004` (`S-ACM-007`, `S-ACM-008`), `R-ACM-005` (`S-ACM-011`).
 
@@ -95,21 +161,58 @@ Five test-list items, in doc 0002's order.
 
 ### T-ACM-4 — Item 4: an unrecognized string maps to unknown without error
 
-- [ ] **RED**
-- [ ] **GREEN**
-- [ ] **REFACTOR**
+**A TDD slip, recorded rather than hidden.** Item 3's green step was written with a miss branch returning `FinishReasonUnknown` — production behavior that no failing test had asked for, and precisely what this item exists to drive in. It was **reverted to the minimal form that still passes items 1 to 3** (`return finishReasonBySpelling[spelling]`, a bare map index) so that this item's red could be taken honestly.
 
-**Proves:** `R-ACM-004` (`S-ACM-009`, `S-ACM-010`), `R-ACM-005` (`S-ACM-012`), `NFR-ACM-B`.
+The revert produced a better red than the one forecast. A Go map returns the zero value on a miss, so the minimal implementation handed a consumer `FinishReason(0)` — a value outside the closed vocabulary, rendering as the placeholder — for every string it did not know. The bug class doc 0002 names is a crash; this is its quieter sibling, and it is the one that would actually have shipped.
+
+- [x] **RED** — `TestNormalizeFinishReason_UnrecognizedString_MapsToUnknownWithoutError`, eight cases.
+
+```
+--- FAIL: TestNormalizeFinishReason_UnrecognizedString_MapsToUnknownWithoutError (0.00s)
+    --- FAIL: .../a_vendor_value_added_after_this_table (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("model_context_window_exceeded") = invalid, want unknown
+    --- FAIL: .../a_real_spelling_with_a_suffix (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("stop_reason") = invalid, want unknown
+    --- FAIL: .../the_placeholder_for_a_value_outside_the_vocabulary (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("invalid") = invalid, want unknown
+    --- FAIL: .../the_empty_string (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("") = invalid, want unknown
+    --- FAIL: .../an_enormous_value (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") = invalid, want unknown
+    --- FAIL: .../whitespace_only (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("   \t\n  ") = invalid, want unknown
+    --- FAIL: .../control_bytes (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("\x00\x01\x02") = invalid, want unknown
+    --- FAIL: .../a_near-miss_of_a_real_spelling (0.00s)
+        finish_reason_test.go:252: NormalizeFinishReason("end-turn") = invalid, want unknown
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.333s
+```
+
+- [x] **GREEN** — the comma-ok lookup with the `FinishReasonUnknown` fallback restored. `ok ... 1.312s`.
+- [x] **REFACTOR** — none.
+
+**Proves:** `R-ACM-004` (`S-ACM-009`, `S-ACM-010`), `R-ACM-005` (`S-ACM-012`), `NFR-ACM-B`. Each subtest recovers from a panic and fails on it, so the crash class is covered as well as the leak class.
 
 ---
 
 ### T-ACM-5 — Item 5 *(pin)*: exhaustiveness
 
-- [ ] **PIN LANDED GREEN**
-- [ ] **SHOWN TO BITE** against a scratch value, then scratch removed
-- [ ] **REFACTOR**
+- [x] **PIN LANDED GREEN** — `TestFinishReason_AddingAValue_FailsWithoutATableAndAStringForm`. `ok ... 1.318s`. Exempt from red-first by doc 0002's leaf anatomy.
+- [x] **REFACTOR** — the first bite proof exposed a weakness and the refactor closed it. `finishReasonLimit` was originally declared *outside* the constant block as `FinishReasonUnknown + 1`, so appending a value required a second, separate edit to the bound before the pin would notice it. The bound now lives inside the constant block as its last member, so it moves with the vocabulary and no second edit exists to be forgotten. Re-run after the refactor: `ok ... 1.371s`.
+- [x] **SHOWN TO BITE** — one scratch constant appended above the bound, nothing else changed:
 
-**Proves:** `R-ACM-006` (`S-ACM-013`, `S-ACM-014`).
+```
+--- FAIL: TestFinishReason_AddingAValue_FailsWithoutATableAndAStringForm (0.00s)
+    finish_reason_test.go:296: the package validates FinishReason(8), which this test does not name — add it to theVocabulary and give it an obligation
+    finish_reason_test.go:300: FinishReason(8) validates but renders as the placeholder "invalid" — add it to finishReasonNames
+    finish_reason_test.go:304: FinishReason(8): NormalizeFinishReason("invalid") = unknown, want the value back — add it to finishReasonBySpelling
+    finish_reason_test.go:310: the package validates 8 values, want exactly the 7 named in this test
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.297s
+```
+
+Scratch removed; the suite returns to `ok`. Four failures for one omission, each naming the file to edit.
+
+**Proves:** `R-ACM-006` (`S-ACM-013`, `S-ACM-014`). The walk covers all 256 values of the underlying `uint8`, so there is no bound in the test to keep in step with the package and the pin cannot rot. The placeholder is read from `ai.FinishReason(0).String()` rather than written out, so renaming it does not silently disarm the assertion.
 
 ---
 
