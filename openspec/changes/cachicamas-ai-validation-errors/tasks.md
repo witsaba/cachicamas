@@ -270,6 +270,51 @@ The second bite is why the pin was extended with a *name past the length bound* 
 
 ---
 
+### T-AIE-12 `*(guard)*` — the rule-class registry is enforced, not mirrored
+
+> **Amended 2026-07-31** — this leaf was appended after AI-08's `ErrDuplicate` append exposed a hole in the way this milestone landed the closed set. `ruleClasses` in `validation.go` is unexported on purpose, so `validation_test.go` carried a hand-written copy of it, and its comment argued that being hand-written *was the point* — the append rule read a second time. It was not. **Nothing compared the two.** A class appended to the package registry stayed outside the "a failure matches exactly one rule class" pin until somebody remembered to edit the copy, and a sentinel declared in `validation.go` but never added to `ruleClasses` was caught by nothing at all — it renders as `"value violates an unregistered rule"` and no test of this package covers it. doc 0002 defines a guard leaf as a mechanical check that must keep failing forever when violated, closed only by showing it bite; a mirror that cannot fail was never that, and AI-10 and AI-12 were about to copy the shape.
+
+- [x] **GUARD** — `backend/agent/src/ai/validation_registry_internal_test.go`, package `ai` and not `ai_test`, so it reads the unexported registry directly and nothing is exported to satisfy a test. It scans source with `go/ast`, `go/parser` and `go/token` — standard library, in the idiom of AI-00's `import_boundary_test.go` and AI-13's vocabulary pin — because a list obtained from the thing under test agrees with itself no matter what is added to it. Two directions:
+
+  1. `TestRuleClasses_EverySentinelDeclaredInTheSource_IsInTheRegistry` collects every top-level `var X = errors.New("…")` of `validation.go` and requires each to appear in the `ruleClasses` composite literal, and each registry element to be one of those sentinels. It then binds what it read to the running slice by comparing `ruleClasses[i].Error()` against the string literal the sentinel at position `i` was declared with — without that step the guard would prove two lists in one file agree and say nothing about the registry `ruleText` iterates.
+  2. `TestRuleClasses_TheExternalTestMirror_MatchesTheRegistryExactly` scans the elements of `validation_test.go`'s mirror and requires the same members in the same order. The order is asserted and not only the membership: `ruleClasses` is a slice and not a map precisely so no unordered iteration decides anything, and a mirror free to reorder would be a second, disagreeing answer to which class comes first.
+
+- [x] **Shown to bite**, once per direction. Both scratch violations were reverted immediately, and the output below is verbatim from `go test -race -run TestRuleClasses ./src/ai/`.
+
+**Bite 1 — a sentinel declared in `validation.go`'s rule-class block and not appended to `ruleClasses`:**
+
+```
+--- FAIL: TestRuleClasses_EverySentinelDeclaredInTheSource_IsInTheRegistry (0.00s)
+    validation_registry_internal_test.go:116: validation.go declares the sentinel ErrScratch, which ruleClasses does not list.
+          rule: the rule-class set is closed, and a class is appended in the pull request that needs it (design.md § 3.1) — declaring the sentinel is half of that append.
+          A sentinel outside ruleClasses renders as "value violates an unregistered rule", and no test of this package covers it.
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.323s
+```
+
+**Bite 2 — one element removed from `validation_test.go`'s mirror, which is exactly the drift AI-08 could have caused:**
+
+```
+--- FAIL: TestRuleClasses_TheExternalTestMirror_MatchesTheRegistryExactly (0.01s)
+    validation_registry_internal_test.go:174: validation.go registers the rule class ErrDuplicate, which the mirror in validation_test.go omits.
+          rule: the mirror is what the "a failure matches exactly one rule class" pin iterates, so a class missing from it is a class that pin does not cover.
+          Append it to ruleClasses in validation_test.go, at the same position it holds here.
+    validation_registry_internal_test.go:192: the mirror is not the registry.
+          validation.go: ErrEmpty, ErrNotInVocabulary, ErrOutOfRange, ErrMalformed, ErrUnresolvedReference, ErrDuplicate
+          validation_test.go: ErrEmpty, ErrNotInVocabulary, ErrOutOfRange, ErrMalformed, ErrUnresolvedReference
+          rule: same members, same order. ruleClasses is ordered on purpose, and a mirror free to reorder it is a second answer to which class comes first.
+```
+
+- [x] **No drift was already present.** The guard was green on the registry as AI-08 left it, so it records a closed hole rather than an open defect.
+
+- [x] **The misleading comment is gone.** The doc comment above the mirror in `validation_test.go` claimed the hand-written copy was deliberate; it now points at the guard that enforces it and says to append in the same commit.
+
+**Vacuity, closed three ways** — a guard that reads two files by name must not confuse *"the thing I was pointed at is gone"* with *"it agrees"*. A `validation.go` declaring no sentinel fails, a `ruleClasses` with no elements fails, and a file declaring no top-level `ruleClasses` at all fails with a message naming the rename.
+
+**Proves:** `R-AIE-003`, `S-AIE-007`, `S-AIE-008`, and the new `S-AIE-035`.
+
+---
+
 ## Verification pass (closes the milestone)
 
 Ordered by cost of a missed defect. The first three run; the rest are inspection.
