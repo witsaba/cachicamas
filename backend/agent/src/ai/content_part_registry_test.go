@@ -114,6 +114,24 @@ var partKindWitnesses = map[PartKind]partKindWitness{
 
 		skipRules: func() Part { return Part{payload: textPayload{text: "   "}} },
 	},
+
+	PartKindReasoning: {
+		constantName:   "PartKindReasoning",
+		registeredName: "reasoning",
+
+		constructValid: func() (Part, error) {
+			return NewReasoning("the user asked for a sum, so I will add the two numbers", nil)
+		},
+
+		// Whitespace-only reasoning text is rejected by rule 1 of the payload's
+		// own rules, for text content's reason: a part carrying only separators
+		// carries nothing.
+		constructInvalid: func() (Part, error) { return NewReasoning("  \t\n ", nil) },
+
+		read: func(p Part) (any, bool) { return p.Reasoning() },
+
+		skipRules: func() Part { return Part{payload: Reasoning{text: "   "}} },
+	},
 }
 
 // TestPartKindRegistration_EveryDeclaredKind_HasConstructorAccessorAndValidationPath

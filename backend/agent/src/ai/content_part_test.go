@@ -50,6 +50,26 @@ func TestPart_KindAndPayload_Agree(t *testing.T) {
 				if text == "" {
 					t.Errorf("part.Text() = %q on a part of kind %v, want the payload it was built from", text, kind)
 				}
+			// AI-07.1 — appended when reasoning was registered. The default
+			// branch below is what required it: this pin is AI-06.2's by hand,
+			// and a kind added without a branch here fails it. Adding the
+			// branch is the by-hand half of the five-step procedure that
+			// AI-06.4's guard mechanizes.
+			case ai.PartKindReasoning:
+				part, err := ai.NewReasoning("the model's intermediate reasoning", nil)
+				if err != nil {
+					t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+				}
+				if got := part.Kind(); got != kind {
+					t.Errorf("part.Kind() = %v, want %v", got, kind)
+				}
+				reasoning, ok := part.Reasoning()
+				if !ok {
+					t.Errorf("part.Reasoning() reported no reasoning on a part of kind %v", kind)
+				}
+				if reasoning.Text() == "" {
+					t.Errorf("part.Reasoning() yielded empty text on a part of kind %v, want the payload it was built from", kind)
+				}
 			default:
 				t.Errorf("kind %v is registered but this test does not exercise it — AI-06.4 mechanizes what this default catches by hand", kind)
 			}
