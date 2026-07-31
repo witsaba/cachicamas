@@ -114,6 +114,33 @@ var partKindWitnesses = map[PartKind]partKindWitness{
 
 		skipRules: func() Part { return Part{payload: textPayload{text: "   "}} },
 	},
+
+	PartKindToolCall: {
+		constantName:   "PartKindToolCall",
+		registeredName: "tool_call",
+
+		constructValid: func() (Part, error) {
+			return NewToolCall("toolu_01A09Kf7", "read_file", []byte(`{"path":"/etc/hosts"}`))
+		},
+
+		// Argument bytes that are not well-formed for the documented encoding
+		// are rejected by rule 3 of the payload's own rules. AI-04's
+		// ErrMalformed was landed with this exact case as its citable example,
+		// and design.md § 4 records why the check lands here and not on AI-08's
+		// schema bytes.
+		constructInvalid: func() (Part, error) {
+			return NewToolCall("toolu_01A09Kf7", "read_file", []byte(`{"path":`))
+		},
+
+		read: func(p Part) (any, bool) { return p.ToolCall() },
+
+		// An empty identity, which rule 1 rejects. Constructed from the payload
+		// directly so the constructor's absent-argument normalization is
+		// bypassed too — a smuggled call carries what it was given.
+		skipRules: func() Part {
+			return Part{payload: ToolCall{id: "", name: "read_file", arguments: emptyToolArguments}}
+		},
+	},
 }
 
 // TestPartKindRegistration_EveryDeclaredKind_HasConstructorAccessorAndValidationPath

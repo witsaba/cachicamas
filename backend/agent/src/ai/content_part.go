@@ -59,6 +59,7 @@ import (
 // # Registered kinds
 //
 //   - text — model-visible natural-language text (V-REQ-08).
+//   - tool_call — a model's intent to invoke a tool (V-REQ-16).
 //
 // The list above is not prose. AI-06.4 scans it and fails when it disagrees with
 // the registration table, so a kind cannot be added without documenting it and
@@ -76,11 +77,16 @@ const (
 	// (V-REQ-08). It is the first subject the part contract is proven against.
 	PartKindText PartKind = iota + 1
 
+	// PartKindToolCall is the kind carrying a model's request to invoke a tool
+	// (V-REQ-16): its identity, the tool's name, and exact argument bytes. It is
+	// an intent to invoke; this package never acts on it.
+	PartKindToolCall
+
 	// partKindFirst and partKindEnd bound the declared constant space. They are
 	// not members and are never exported: partKindEnd is one past the last kind,
 	// and moving it is what makes a newly declared member visible to PartKinds.
 	partKindFirst = PartKindText
-	partKindEnd   = PartKindText + 1
+	partKindEnd   = PartKindToolCall + 1
 )
 
 // partKindNames is the registration table, and the single source of a kind's
@@ -90,7 +96,8 @@ const (
 // reason: nothing in this package may let an unordered iteration decide
 // anything, and a registry is where that temptation is strongest.
 var partKindNames = []string{
-	PartKindText: "text",
+	PartKindText:     "text",
+	PartKindToolCall: "tool_call",
 }
 
 // PartKinds returns the content-part kind vocabulary in declaration order.
