@@ -47,6 +47,25 @@ import (
 	"strings"
 )
 
+// MaxReasoningTokenLen is the documented byte bound on a round-trip token. A
+// token longer than this is a caller-contract failure reported as
+// [ErrOutOfRange].
+//
+// It is the **only** rule this package applies to a token, and it is a sanity
+// bound rather than a provider limit — the identical position [MaxTextLen]
+// takes, for the identical reason: Layer 1 holds no model catalog (V-OUT-14),
+// so it cannot know what any provider will accept, and a bound that pretended
+// to would be wrong for every provider the day after it was written. What the
+// bound is for is making an unbounded value decidable from the request alone.
+//
+// It counts bytes, because bytes are what the token is: it is not text, it has
+// no encoding this package knows, and counting anything else would mean
+// decoding it — which is precisely what V-REQ-11 forbids.
+//
+// It is exported so a caller can check before constructing rather than by
+// catching a failure.
+const MaxReasoningTokenLen = 1 << 20
+
 // ReasoningState is the closed vocabulary distinguishing the shapes reasoning
 // content can take (V-REQ-10).
 //
@@ -164,8 +183,21 @@ func (Reasoning) kind() PartKind { return PartKindReasoning }
 //  1. reasoning in the [ReasoningStateText] state holds at least one
 //     non-whitespace character, else [ErrEmpty] — a part carrying only
 //     separators carries nothing a reader reads;
-//  2. reasoning in any other state carries a token, else [ErrEmpty] — a part
-//     with neither text nor token carries nothing at all.
+//  2. the reasoning text is at most [MaxTextLen] bytes, else [ErrOutOfRange] —
+//     reasoning text is model-visible text and takes the package's existing
+//     bound rather than a second name for one number;
+//  3. reasoning in any other state carries a token, else [ErrEmpty] — a part
+//     with neither text nor token carries nothing at all. A token that is
+//     present and zero bytes long satisfies this rule: an empty token the
+//     provider sent is a fact to record, not one to correct;
+//  4. the token, when present, is at most [MaxReasoningTokenLen] bytes, else
+//     [ErrOutOfRange]. This is the only rule the token itself meets.
+//
+// Text before token because text is the model-visible half, and within each,
+// emptiness before bound: "you gave me nothing" and "you gave me too much" are
+// different facts with different fixes, and a caller fixing one at a time must
+// make progress in a predictable direction. That is text_content.go's ordering,
+// restated here so a reader does not have to fetch it.
 func (r Reasoning) validate(at Path) *Violation {
 	return firstViolation(
 		func() *Violation {
@@ -175,8 +207,20 @@ func (r Reasoning) validate(at Path) *Violation {
 			return nil
 		},
 		func() *Violation {
+			if len(r.text) > MaxTextLen {
+				return Invalid(ErrOutOfRange, under(at, At("text"))...)
+			}
+			return nil
+		},
+		func() *Violation {
 			if r.State() != ReasoningStateText && !r.hasToken {
 				return Invalid(ErrEmpty, under(at, At("token"))...)
+			}
+			return nil
+		},
+		func() *Violation {
+			if r.hasToken && len(r.token) > MaxReasoningTokenLen {
+				return Invalid(ErrOutOfRange, under(at, At("token"))...)
 			}
 			return nil
 		},
@@ -201,6 +245,22 @@ func (r Reasoning) State() ReasoningState {
 		return ReasoningStateTokenOnly
 	}
 }
+
+// Token returns the opaque round-trip token and whether one is present at all
+// (V-REQ-11).
+//
+// The second result is the distinction the whole milestone turns on: **absent
+// is not empty**. A provider that returned an empty token and a provider that
+// returned no token are two facts, and an adapter rebuilding the request must
+// reproduce the one that happened. Presence is stored beside the bytes rather
+// than inferred from their length, so nothing that touches the bytes — a copy,
+// a clone, a conversion — can collapse the two.
+//
+// The bytes come back exactly as they were supplied: nothing on the
+// construction path or the read path parses, verifies, decrypts, normalizes,
+// trims or re-encodes them. Called on reasoning that carries no token, it
+// returns nil and false.
+func (r Reasoning) Token() ([]byte, bool) { return r.token, r.hasToken }
 
 // Text returns the model's reasoning text, byte for byte as it was supplied.
 //
