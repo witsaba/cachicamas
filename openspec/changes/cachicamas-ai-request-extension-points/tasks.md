@@ -57,15 +57,19 @@ Chained PRs recommended: No
 Chain strategy: size-exception
 400-line budget risk: High
 
-### Per-slice forecast
+### Per-slice forecast — **actuals filled in 2026-08-01, apply agent**
 
-| Slice | Files | Forecast prod | Forecast test | Risk | Reviewer time |
-| --- | --- | --- | --- | --- | --- |
-| SDD planning artifacts | `explore.md`, `proposal.md`, `spec.md`, `design.md`, `tasks.md` | — | ~1600 prose | Low | 50 min |
-| AI-12.1 rebuild | `request.go`, `request_test.go` | ~145 *(+15: `draft.freeze()`)* | ~355 *(+25: four option rows not one, plus `S-REX-053`)* | **High** — every later request milestone and Layer 2's hook inherit the derive shape | 50 min |
-| AI-12.2 per-request options | `request.go`, `request_test.go` | ~15 | ~135 | Low — the mechanism is AI-10's last-wins, reached through AI-12.1 | 15 min |
-| AI-12.3 pass-through | `request_extension.go`, `request_extension_test.go`, `request.go`, **`agenttest/request_test.go`** | ~165 | ~270 *(+20: the two `agenttest` walks, `S-REX-054`)* | Medium-High — the shape AI-24's first adapter reads, and the leaf that repairs the round-trip pin's blind spot | 45 min |
-| AI-12.4 determinism | `request_extension_test.go`, `request_test.go` | 0 | ~70 | Low | 10 min |
+| Slice | Files | Forecast prod | **Actual prod** | Forecast test | **Actual test** | Risk | Reviewer time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SDD planning artifacts | `explore.md`, `proposal.md`, `spec.md`, `design.md`, `tasks.md` | — | — | ~1600 prose | **~1391 prose** *(planning phase, before apply)* | Low | 50 min |
+| AI-12.1 rebuild | `request.go`, `request_test.go` | ~145 | **155** (`request.go`, +133/−22) | ~355 | **657** (`request_test.go`, all additions) | **High** — every later request milestone and Layer 2's hook inherit the derive shape | 50 min |
+| AI-12.2 per-request options | `request.go`, `request_test.go` | ~15 | **0** (no production change — R-REX-005 held structurally, from AI-12.1's shared `rules()`) | ~135 | **258** (`request_test.go` 219 + `request_internal_test.go` 39) | Low — the mechanism is AI-10's last-wins, reached through AI-12.1 | 15 min |
+| AI-12.3 pass-through | `request_extension.go`, `request_extension_test.go`, `request.go`, `agenttest/request_test.go` | ~165 | **163** (`request_extension.go` 142 + `request.go` +21/−0) | ~270 | **513** (`request_extension_test.go` 420 + `request_test.go` +47/−7 + `agenttest/request_test.go` 39) | Medium-High — the shape AI-24's first adapter reads, and the leaf that repairs the round-trip pin's blind spot | 45 min |
+| AI-12.4 determinism | `request_extension_test.go`, `request_test.go` | 0 | **0** | ~70 | **140** (`request_extension_test.go`, all additions) | Low | 10 min |
+| **Totals (Go)** | | **~325** | **318** | **~830** | **1568** | | |
+| Apply-phase markdown (evidence, corrections) | `tasks.md`, `design.md` | — | **~364** *(not part of the original planning forecast — RED/GREEN transcripts and Phase 0 corrections)* | — | — | | |
+
+**Reading the actuals**: production landed almost exactly on forecast (318 vs ~325) — the design's "small production, large tests and docs" prediction held. Test volume is roughly 1.9× the forecast (1568 vs ~830), driven by strict TDD's triangulation and bite-proof requirements (every "green from birth" item required an explicit closing bite proof or an honestly-recorded absence of one) and by the discovered items (AI-12.1's totality table gaining an 11th row, AI-12.1 item 3's deferred extension sibling). Nothing was cut to fit the original estimate; the forecast was a planning aid, not a budget enforced against rigor.
 
 **Two contingencies still open** (AI-11, `design.md` § 13.2), neither changing the strategy: row 7 branch B adds ~15 prod + ~20 test to AI-12.1; row 8 branch A adds ~15 test to AI-12.2, branch B adds one recorded line.
 
@@ -388,28 +392,61 @@ ok  	github.com/cachicamas/backend/agent/src/ai
 **Depends on:** AI-12.2, AI-12.3.
 **Out of scope:** wire-byte determinism — owned by **AI-26.1** and **AI-26.4**, where wire bytes first exist. This node only guarantees the neutral surface cannot be the source of the nondeterminism.
 
-- [ ] **Item 1** — Reading or iterating the option set and the pass-through values of one request twice yields identical order and content — the extension surfaces expose no map-iteration nondeterminism to a future serializer or wire body.
-- [ ] **Item 2** *(appended)* — Two requests built from identical inputs in the same order read back identical sequences, and the string rendering of one request is byte-identical across repeated calls.
+- [x] **Item 1** — Reading or iterating the option set and the pass-through values of one request twice yields identical order and content. `TestRequest_ReadingExtensionsAndOptionsRepeatedly_YieldsIdenticalOrderAndContent`.
+- [x] **Item 2** *(appended)* — Two requests built from identical inputs in the same order read back identical sequences, and the string rendering of one request is byte-identical across repeated calls. `TestRequest_IdenticalInputsAndRepeatedRendering_AreDeterministic`.
 
 ### Ordered work
 
-- [ ] 4.1 RED → GREEN **item 1**: read the extension set of a five-extension request 100 times and the applied-option set of a four-option request 100 times; assert identical order and byte-equal values every time (`S-REX-046`, `S-REX-048`).
-- [ ] 4.2 RED → GREEN **item 2**: same-inputs-two-requests comparison, and repeated `String()` rendering (`S-REX-047`, `S-REX-049`).
-- [ ] 4.3 Record in this file the one-line statement that wire-byte determinism was **not** attempted and belongs to AI-26.1/AI-26.4, so a later reader does not read the omission as an oversight.
-- [ ] 4.4 `make lint && make test`, record both, commit `test(ai): pin read-back determinism of options and extensions (AI-12.4)`.
+- [x] 4.1 RED → GREEN **item 1**: `TestRequest_ReadingExtensionsAndOptionsRepeatedly_YieldsIdenticalOrderAndContent` — read the extension set of a five-extension request 100 times, and the applied-option order (via `String()`, since `appliedNames()` is unexported) of a four-option request 100 times; identical order and byte-equal values every time (`S-REX-046`, `S-REX-048`). Green from birth; closed by a bite proof.
+- [x] 4.2 RED → GREEN **item 2**: `TestRequest_IdenticalInputsAndRepeatedRendering_AreDeterministic` — same-inputs-two-requests extension-sequence comparison, and repeated `String()` rendering (`S-REX-047`, `S-REX-049`). Green from birth.
+- [x] 4.3 **Wire-byte determinism was not attempted in this milestone.** This leaf pins the neutral in-memory surface only — `ProviderExtensions()`, the applied generation-option order, and `Request.String()`'s rendering. No wire bytes exist yet at this layer; wire-byte determinism belongs to **AI-26.1** and **AI-26.4**, where a serializer first exists. This line exists so a later reader does not read the omission as an oversight.
+- [x] 4.4 `make lint && make test` — both green, recorded below. Commit `test(ai): pin read-back determinism of options and extensions (AI-12.4)`.
+
+### AI-12.4 evidence
+
+**Both items green from birth**, structurally: `ProviderExtensions()` clones a slice (never a map), and the four generation options are read from four named struct fields in a fixed, documented order — there is no unordered iteration anywhere on this path to begin with.
+
+```
+$ go test -race -count=1 -run 'TestRequest_ReadingExtensionsAndOptionsRepeatedly...|TestRequest_IdenticalInputsAndRepeatedRendering...' -v ./src/ai/...
+--- PASS: TestRequest_ReadingExtensionsAndOptionsRepeatedly_YieldsIdenticalOrderAndContent (0.00s)
+    --- PASS: .../five_extensions_read_a_hundred_times
+    --- PASS: .../the_applied_option_set_read_back_a_hundred_times_keeps_the_documented_order
+--- PASS: TestRequest_IdenticalInputsAndRepeatedRendering_AreDeterministic (0.00s)
+    --- PASS: .../two_requests_from_identical_inputs_read_back_identical_extension_sequences
+    --- PASS: .../string_rendering_is_byte-identical_across_repeated_calls
+```
+
+**Bite proof — item 1, S-REX-046.** Scratch-rewrote `ProviderExtensions()` to route through a `map[string]ProviderExtension` (simulating the exact nondeterminism `R-REX-009` forbids), then ran the five-extension, hundred-read sub-test three independent times:
+```
+run 1: request_extension_test.go:457: ProviderExtensions()[0].Namespace() = "c", want "d" — order changed between reads
+run 2: request_extension_test.go:457: ProviderExtensions()[0].Namespace() = "a", want "d" — order changed between reads
+run 3: request_extension_test.go:457: ProviderExtensions()[0].Namespace() = "c", want "a" — order changed between reads
+```
+Caught reliably on all three runs — Go's map-iteration randomization shows up well within 100 reads for a 5-element map. Reverted to `slices.Clone(r.options.extensions)`; re-ran: green again.
+
+**A real lint catch, left in the record rather than silently fixed.** `make lint` on the first attempt at task 4.2's test flagged `QF1001` (staticcheck): `!(iMax < iTemp && iTemp < iTopP && iTopP < iStop)` should apply De Morgan's law. Rewritten as `iMax >= iTemp || iTemp >= iTopP || iTopP >= iStop`; re-ran the affected test (still green) and `make lint` (clean). This is the "`make lint` runs before every commit" line in this file's own preamble doing its job.
+
+**Full gate:**
+```
+$ make lint
+0 issues.
+$ make test 2>&1 | grep -E "^(ok|FAIL)"
+ok  	github.com/cachicamas/backend/agent/src/agenttest
+ok  	github.com/cachicamas/backend/agent/src/ai
+```
 
 ---
 
 ## Closing checklist for the milestone
 
-- [ ] All four leaves' items taken red → green → refactored, in order, both outputs recorded above.
-- [ ] `make test` green with `-race`; `make lint` clean; both AI-00 import guards passing; `go.mod` at zero requires.
-- [ ] **AI-10.4's guard still green**: `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` passes, and `request_extension.go` imports no `fmt` and no `encoding/json`.
-- [ ] **AI-10.5's round-trip pin still bites**: `agenttest`'s `rebuildFromReadback` and `requireRequestsEqual` both carry the extension region (task 3.6a), and the pre-extension red was recorded.
-- [ ] `openspec/specs/ai-contract-vocabulary/spec.md` **untouched**; `openspec/changes/cachicamas-ai-model-request/` and `openspec/changes/cachicamas-ai-cache-breakpoints/` **untouched**; `validation.go` carries **no** new rule class.
-- [ ] Phase 0's eight-row register complete: rows 1–6 already resolved (§ 0.2 table); rows 7–8's branches recorded once AI-11 lands.
-- [ ] The `S-AMR-046` finding (§ 0.5) carried to the **Wave 1 verify phase**, and **not** fixed from this change.
-- [ ] If row 8 took branch B, the "breakpoint cap is not re-run on the derive path" gap is recorded here for Wave 1 verify.
-- [ ] Any discovered prerequisite appended to doc 0002 under the revert-and-record clause, **in the same PR**; any discovered *test case* appended to its owning leaf's list here.
-- [ ] Actuals filled into the per-slice forecast table.
-- [ ] **Region-level exhaustiveness guard — considered, deferred to Wave 2.** Three milestones in a row (AI-10.5's `agenttest` round trip, AI-11's `Message.Equal`/`toolsEqual`, now AI-12.3's `Request.Equal` and the same two `agenttest` helpers) each had a hand-rolled region walk that did not see a new region "for free". A `go/parser` AST guard over `Request`/`requestDraft`'s own field declarations, in AI-06.4's idiom, was considered and judged **out of scope for AI-12**: `design.md` § 8 already provides the enumeration-based totality proof for today's regions and explicitly calls itself "the cheap half of AI-06.4's guard idea without adding a `[guard]` node the charter does not carry"; a struct's fields are not a closed constant-space vocabulary the way `PartKind` is, so a faithful guard needs a field-pairing heuristic (value field vs. `hasX` presence flag) that is a real design decision in its own right, not a mechanical extension of the landed pattern — and this milestone is already `High` risk with `size-exception` delivery. Recorded here as a **Wave 2 proposal**: a `[guard]` node, charter-authorised, that AST-scans `requestDraft`'s field declarations against the totality-table regions and against `agenttest`'s two walks and `Request.Equal`'s region list, so a future field added without a matching entry in all three fails a test rather than a re-verification gate. See `design.md` § 14 for the same note.
+- [x] All four leaves' items taken red → green → refactored, in order, both outputs recorded above.
+- [x] `make test` green with `-race`; `make lint` clean; both AI-00 import guards passing; `go.mod` at zero requires. Re-verified at the close of every leaf (see each leaf's evidence section) and again at milestone close, below.
+- [x] **AI-10.4's guard still green**: `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` passes (re-run explicitly after `request_extension.go` landed, AI-12.3 evidence), and `request_extension.go` imports no `fmt` and no `encoding/json` — only `bytes`, `slices`, `strings`, all already in the closure.
+- [x] **AI-10.5's round-trip pin still bites**: `agenttest`'s `rebuildFromReadback` and `requireRequestsEqual` both carry the extension region (task 3.6a), and the pre-extension red was recorded (`len(ProviderExtensions()) = 0, want 1` — the exact blind spot design.md § 7.2 predicted).
+- [x] `openspec/specs/ai-contract-vocabulary/spec.md` **untouched**; `openspec/changes/cachicamas-ai-model-request/` and `openspec/changes/cachicamas-ai-cache-breakpoints/` **untouched**; `validation.go` carries **no** new rule class. Verified: `git diff --stat 66e960d..HEAD` over all four paths is empty.
+- [x] Phase 0's eight-row register complete: rows 1–6 resolved by the Phase 0 gate (§ 0.2 table); rows 7–8 resolved by task 0.3, both branch A, against the landed AI-11 surface at `66e960d`.
+- [x] The `S-AMR-046` finding (§ 0.5) carried to the **Wave 1 verify phase**, and **not** fixed from this change. Confirmed untouched (see the `git diff` check above).
+- [x] **Row 8 took branch A**, not branch B — N/A. No "cap not re-run on derive" gap exists to record; AI-12.2 item 5 asserts the cap positively (task 2.5).
+- [x] Any discovered prerequisite appended to doc 0002 under the revert-and-record clause, **in the same PR**; any discovered *test case* appended to its owning leaf's list here. No discovered *prerequisite* (nothing needed reverting); three discovered *test cases* — AI-12.1's totality table gaining an 11th `provider_extensions` row (task 3.10a), AI-12.1 item 3's deferred extension-value sibling (task 3.10) — both appended to their owning leaf's list, never substituted or pruned.
+- [x] Actuals filled into the per-slice forecast table (above): production landed within 2% of forecast (318 vs ~325); test volume ran ~1.9× forecast (1568 vs ~830), driven by triangulation and bite-proof requirements, not by scope creep.
+- [x] **Region-level exhaustiveness guard — considered, deferred to Wave 2.** Three milestones in a row (AI-10.5's `agenttest` round trip, AI-11's `Message.Equal`/`toolsEqual`, now AI-12.3's `Request.Equal` and the same two `agenttest` helpers) each had a hand-rolled region walk that did not see a new region "for free". A `go/parser` AST guard over `Request`/`requestDraft`'s own field declarations, in AI-06.4's idiom, was considered and judged **out of scope for AI-12**: `design.md` § 8 already provides the enumeration-based totality proof for today's regions and explicitly calls itself "the cheap half of AI-06.4's guard idea without adding a `[guard]` node the charter does not carry"; a struct's fields are not a closed constant-space vocabulary the way `PartKind` is, so a faithful guard needs a field-pairing heuristic (value field vs. `hasX` presence flag) that is a real design decision in its own right, not a mechanical extension of the landed pattern — and this milestone is already `High` risk with `size-exception` delivery. Recorded here as a **Wave 2 proposal**: a `[guard]` node, charter-authorised, that AST-scans `requestDraft`'s field declarations against the totality-table regions and against `agenttest`'s two walks and `Request.Equal`'s region list, so a future field added without a matching entry in all three fails a test rather than a re-verification gate. See `design.md` § 14 for the same note.

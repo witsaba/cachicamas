@@ -418,3 +418,143 @@ func TestProviderExtension_Formatting_RendersNoPayloadThroughAnyVerbButNamesTheC
 		t.Errorf("request.String() = %q, want it to contain %q", rendered, "1 extensions")
 	}
 }
+
+// --- AI-12.4 — read-back determinism ------------------------------------
+
+// AI-12.4 item 1 — reading or iterating the extension set and the applied
+// generation-option set of ONE request twice yields identical order and
+// identical content: neither surface exposes map-iteration nondeterminism
+// to a future serializer or wire body (R-REX-009, S-REX-046, S-REX-048).
+func TestRequest_ReadingExtensionsAndOptionsRepeatedly_YieldsIdenticalOrderAndContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("five_extensions_read_a_hundred_times", func(t *testing.T) {
+		// S-REX-046.
+		t.Parallel()
+
+		namespaces := []string{"a", "b", "c", "d", "e"}
+		opts := make([]ai.RequestOption, 0, len(namespaces))
+		for _, ns := range namespaces {
+			opts = append(opts, ai.WithProviderExtension(ns, []byte(ns+"-value")))
+		}
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, opts...)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		first := request.ProviderExtensions()
+		if len(first) != len(namespaces) {
+			t.Fatalf("len(ProviderExtensions()) = %d, want %d", len(first), len(namespaces))
+		}
+
+		for range 100 {
+			got := request.ProviderExtensions()
+			if len(got) != len(first) {
+				t.Fatalf("len(ProviderExtensions()) = %d, want %d", len(got), len(first))
+			}
+			for i := range first {
+				if got[i].Namespace() != first[i].Namespace() {
+					t.Fatalf("ProviderExtensions()[%d].Namespace() = %q, want %q — order changed between reads",
+						i, got[i].Namespace(), first[i].Namespace())
+				}
+				if !bytes.Equal(got[i].Value(), first[i].Value()) {
+					t.Fatalf("ProviderExtensions()[%d].Value() = %q, want %q", i, got[i].Value(), first[i].Value())
+				}
+			}
+		}
+	})
+
+	t.Run("the_applied_option_set_read_back_a_hundred_times_keeps_the_documented_order", func(t *testing.T) {
+		// S-REX-048.
+		t.Parallel()
+
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")},
+			ai.WithMaxOutputTokens(2048), ai.WithTemperature(0.5), ai.WithTopP(0.8), ai.WithStopSequences("</a>"),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		first := request.String()
+		iMax := strings.Index(first, "maxOutputTokens")
+		iTemp := strings.Index(first, "temperature")
+		iTopP := strings.Index(first, "topP")
+		iStop := strings.Index(first, "stopSequences")
+		if iMax < 0 || iTemp < 0 || iTopP < 0 || iStop < 0 {
+			t.Fatalf("request.String() = %q, want all four option names present", first)
+		}
+		if iMax >= iTemp || iTemp >= iTopP || iTopP >= iStop {
+			t.Fatalf("request.String() = %q, options are not in the documented order "+
+				"maxOutputTokens < temperature < topP < stopSequences", first)
+		}
+
+		for range 100 {
+			if got := request.String(); got != first {
+				t.Fatalf("request.String() changed between reads: first = %q, got = %q", first, got)
+			}
+		}
+	})
+}
+
+// AI-12.4 item 2 (appended) — two requests built from identical inputs in
+// the same order read back identical sequences, and the string rendering of
+// one request is byte-identical across repeated calls (R-REX-009,
+// S-REX-047, S-REX-049).
+func TestRequest_IdenticalInputsAndRepeatedRendering_AreDeterministic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("two_requests_from_identical_inputs_read_back_identical_extension_sequences", func(t *testing.T) {
+		// S-REX-047.
+		t.Parallel()
+
+		build := func(t *testing.T) ai.Request {
+			t.Helper()
+
+			request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")},
+				ai.WithProviderExtension("a", []byte("va")),
+				ai.WithProviderExtension("b", []byte("vb")),
+				ai.WithProviderExtension("c", []byte("vc")),
+			)
+			if err != nil {
+				t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+			}
+			return request
+		}
+
+		first := build(t).ProviderExtensions()
+		second := build(t).ProviderExtensions()
+
+		if len(first) != len(second) {
+			t.Fatalf("len(ProviderExtensions()) = %d and %d, want equal", len(first), len(second))
+		}
+		for i := range first {
+			if first[i].Namespace() != second[i].Namespace() {
+				t.Errorf("extensions[%d].Namespace() = %q and %q, want equal", i, first[i].Namespace(), second[i].Namespace())
+			}
+			if !bytes.Equal(first[i].Value(), second[i].Value()) {
+				t.Errorf("extensions[%d].Value() = %q and %q, want equal", i, first[i].Value(), second[i].Value())
+			}
+		}
+	})
+
+	t.Run("string_rendering_is_byte-identical_across_repeated_calls", func(t *testing.T) {
+		// S-REX-049.
+		t.Parallel()
+
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")},
+			ai.WithTemperature(0.5),
+			ai.WithProviderExtension("a", []byte("va")),
+			ai.WithProviderExtension("b", []byte("vb")),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		first := request.String()
+		for range 100 {
+			if got := request.String(); got != first {
+				t.Fatalf("request.String() changed between reads: first = %q, got = %q", first, got)
+			}
+		}
+	})
+}
