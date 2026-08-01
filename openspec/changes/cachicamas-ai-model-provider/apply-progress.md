@@ -151,9 +151,19 @@ regression green.
 |---|---|---|---|
 | 5 — AI-20.5 `TokenCounter` | `go test ./src/agenttest/... -run TokenCounter -v` → 2/2 PASS; method-set pin mutation produced the expected guard failure, reverted clean | Real type assertions on real stub values, no mocking framework | revert `TokenCounter` in `provider.go` + its tests in `agenttest/provider_test.go` |
 
-## Phases 6–7
+## Phase 6 — Wiring & docs — COMPLETE
 
-Pending — see `tasks.md` for the authoritative checklist; this file is updated after each phase closes.
+`src/ai/doc.go` gained a "# The provider boundary" paragraph naming `ModelProvider`/`TokenCounter`
+and attributing concrete adapters to AI-24 onward. Confirmed `go.mod` still carries zero requires (no
+`require` block, no `go.sum`) and both AI-00 import guards plus the request-path guard pass directly
+(`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`,
+`TestLayer1_ModuleHasNoDependencies_ZeroRequires`,
+`TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` — all 3 PASS), which also
+confirms Phase 4's transient `encoding/json` bite-mutation import left no trace.
+
+## Phase 7
+
+Pending — see `tasks.md` for the authoritative checklist; this file is updated when it closes.
 
 ## Session
 

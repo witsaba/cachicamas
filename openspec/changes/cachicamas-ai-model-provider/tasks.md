@@ -177,10 +177,18 @@ Chain strategy: size-exception
 - [x] 5.5 REFACTOR — confirmed exactly one optional contract (`TokenCounter`), no aggregate
       capabilities type, no `Capabilities()` query method anywhere in `src/ai` (S-AMP-046…048).
 
-## Phase 6 — Wiring & docs
+## Phase 6 — Wiring & docs — COMPLETE
 
-- [ ] 6.1 Modify `src/ai/doc.go`: one paragraph naming `ModelProvider`/`TokenCounter`.
-- [ ] 6.2 Confirm `backend/agent/go.mod` zero requires; both AI-00 import guards pass (S-AMP-060).
+- [x] 6.1 Modified `src/ai/doc.go`: added a "# The provider boundary" paragraph naming
+      `ModelProvider`/`TokenCounter`, their contracts, and that concrete vendor adapters arrive from
+      AI-24 onward.
+- [x] 6.2 Confirmed `backend/agent/go.mod` still `go 1.26.3` with no `require` block, no `go.sum`;
+      ran both AI-00 import guards directly:
+      `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`,
+      `TestLayer1_ModuleHasNoDependencies_ZeroRequires`, and the request-path guard
+      `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` — all 3 PASS
+      (S-AMP-060). Confirms the transient `encoding/json` import used during Phase 4's bite mutation 1
+      never persisted.
 
 ## Phase 7 — Verification & closeout
 

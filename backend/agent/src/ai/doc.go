@@ -56,4 +56,19 @@
 // mean, across two different streams. This milestone registers no concrete
 // event kind; AI-15 … AI-20 add those without editing this package's
 // AI-14-owned contracts.
+//
+// # The provider boundary
+//
+// AI-20 closes the loop: [ModelProvider] is the one call every adapter
+// offers — a cancellable context and a normalized [Request] in, a
+// receive-only [Event] stream out — with the ownership, cancellation,
+// buffering and failure-delivery rules ai-stream-lifecycle decided
+// restated on its own GoDoc, and a pre-stream contract that validates req
+// exactly once before consulting the context at all. [TokenCounter] is the
+// one optional capability this package asks a provider value to advertise
+// in v1, discovered only by asserting the value against it — never a
+// widening of [ModelProvider] itself, mechanically pinned by the signature
+// guard in src/agenttest. Concrete vendor adapters implementing
+// [ModelProvider] arrive from AI-24 onward; this package owns the
+// contract, never a vendor's satisfaction of it.
 package ai
