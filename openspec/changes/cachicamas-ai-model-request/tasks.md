@@ -64,11 +64,240 @@ doc 0002's rule is "prefer less than 250 changed lines; stop and reassess before
 **Deliverable:** `backend/agent/src/ai/request.go`, `backend/agent/src/ai/request_test.go`.
 **Spec:** `R-AMR-001` … `R-AMR-004`, `R-AMR-017`. **Design:** §§ 2, 4, 8.
 
-- [ ] **Item 1** — WHEN a request is constructed with a model identity and one user text message THEN it validates, and both read back exactly **from an external package**.
-- [ ] **Item 2** — WHEN the model identity is empty, or there are no messages, THEN validation fails with AI-04 sentinels.
-- [ ] **Item 3** — Generation options carry through construction and read back — the neutral vocabulary decided in AI-01, no more.
+- [x] **Item 1** — WHEN a request is constructed with a model identity and one user text message THEN it validates, and both read back exactly **from an external package**.
+- [x] **Item 2** — WHEN the model identity is empty, or there are no messages, THEN validation fails with AI-04 sentinels.
+- [x] **Item 3** — Generation options carry through construction and read back — the neutral vocabulary decided in AI-01, no more.
+- [x] **Item 4** *(appended)* — Option bounds decidable from the request alone are enforced, and temperature deliberately carries no upper bound.
+- [x] **Item 5** *(appended)* — The message region is copied on the way out, so a reader cannot rewrite the request it was handed.
+- [x] **Item 6** *(appended)* — The content rules are AI-06's, **called** at request depth: a failing part reports the composed position.
+- [x] **Item 7** *(appended)* — A request renders no region's payload through any of the four fmt verbs, and still names its shape.
 
-_Appended items are added below as they are discovered._
+### AI-10.1 item 1 — the skeleton
+
+**Red.** `request_test.go` written first, against a `NewRequest` that returns the zero request and no error.
+
+```
+--- FAIL: TestRequest_ModelAndOneUserTextMessage_ReadBackFromAnExternalPackage (0.00s)
+    request_test.go:50: request.Model() = "", want "cachicamas-neutral-model-1"
+    request_test.go:55: request.Messages() has 0 elements, want 1
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.447s
+FAIL
+```
+
+**Green.** `NewRequest` keeps the model and clones the message slice; `Model()` and `Messages()` read them back.
+
+```
+=== RUN   TestRequest_ModelAndOneUserTextMessage_ReadBackFromAnExternalPackage
+=== PAUSE TestRequest_ModelAndOneUserTextMessage_ReadBackFromAnExternalPackage
+=== CONT  TestRequest_ModelAndOneUserTextMessage_ReadBackFromAnExternalPackage
+--- PASS: TestRequest_ModelAndOneUserTextMessage_ReadBackFromAnExternalPackage (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.324s
+```
+
+**Refactor.** None. The test reads the message's role and its content part's text through the exported surface only, which is the readability property doc 0002 makes constitutive.
+
+### AI-10.1 item 2 — the required regions
+
+**Red.** Six sub-cases in one table, against a constructor holding no rules. Trimmed to the failing lines; every sub-case failed.
+
+```
+--- FAIL: TestNewRequest_MissingRequiredRegion_FailsWithAnAI04Sentinel (0.00s)
+    --- FAIL: .../an_empty_message_sequence (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "messages"
+    --- FAIL: .../a_nil_message_sequence (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "messages"
+    --- FAIL: .../a_whitespace-only_model_identity (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "model"
+    --- FAIL: .../a_skipped_message_after_a_valid_one (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "messages[1]"
+    --- FAIL: .../a_message_that_skipped_its_constructor (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "messages[0]"
+    --- FAIL: .../an_empty_model_identity (0.00s)
+        request_test.go:131: got no failure, want required value is empty at "model"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.327s
+FAIL
+```
+
+**Green.** Rules 1–3 of `design.md` § 4 landed as a `FirstFailure` rule slice.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.346s
+```
+
+**Refactor.** The unconstructed-message detector reads `Message.ID().IsZero()` rather than inspecting role or content. `message.go` documents that accessor as existing for exactly this question, and role and content are what a forged value would set.
+
+The companion test `TestNewRequest_UnrecognisedModelIdentity_ConstructsBecauseRecognitionIsNotDecidableHere` was written in the same step, green from the start, and is kept: it is the pin that stops the emptiness rule becoming a catalog check.
+
+### AI-10.1 item 3 — the generation options carry through
+
+**Before red** — the compile failure, which is the state before red, not red:
+
+```
+src/ai/request_test.go:175:6: undefined: ai.WithMaxOutputTokens
+src/ai/request_test.go:176:6: undefined: ai.WithTemperature
+src/ai/request_test.go:177:6: undefined: ai.WithTopP
+src/ai/request_test.go:178:6: undefined: ai.WithStopSequences
+src/ai/request_test.go:184:25: request.MaxOutputTokens undefined (type ai.Request has no field or method MaxOutputTokens)
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+```
+
+**Red**, with the option constructors landed and the accessors returning their zero values:
+
+```
+--- FAIL: TestRequest_ReappliedGenerationOption_IsLastWins (0.00s)
+    request_test.go:258: request.Temperature() = (0, false), want (0.1, true)
+--- FAIL: TestRequest_UnappliedGenerationOption_IsDistinguishableFromOneSetToItsZeroValue (0.00s)
+    request_test.go:236: zeroed.Temperature() = (0, false), want (0, true)
+--- FAIL: TestRequest_GenerationOptions_CarryThroughConstructionAndReadBack (0.00s)
+    request_test.go:185: request.MaxOutputTokens() = (0, false), want (4096, true)
+    request_test.go:188: request.Temperature() = (0, false), want (0.2, true)
+    request_test.go:191: request.TopP() = (0, false), want (0.9, true)
+    request_test.go:195: request.StopSequences() reported unset, want set
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.500s
+FAIL
+```
+
+**Green.** The draft is frozen into the request and each accessor returns its value with its presence flag.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.354s
+```
+
+**Refactor.** The four presence flags stayed as separate fields rather than becoming a bitset: a bitset is one indirection between the reader and the fact, and the fact — absence is not zero — is the whole of `V-MET-11`'s distinction.
+
+### AI-10.1 item 4 *(appended)* — the option bounds
+
+**Discovered while writing item 3.** A request carrying `WithMaxOutputTokens(-1)` constructed happily. That is a value no provider accepts and it is decidable without I/O, which is the register's own definition of a caller-contract failure. Appended rather than deferred: adding a bound later is the **tightening** direction, which `proposal.md` records as the expensive one.
+
+**Red.** Trimmed to the failing lines; all eight sub-cases failed.
+
+```
+--- FAIL: TestNewRequest_OutOfBoundGenerationOption_FailsAtItsOwnPosition (0.00s)
+    --- FAIL: .../zero_maximum_output_tokens (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "maxOutputTokens"
+    --- FAIL: .../negative_maximum_output_tokens (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "maxOutputTokens"
+    --- FAIL: .../a_top-p_above_one (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "topP"
+    --- FAIL: .../the_stop-sequence_option_applied_with_no_sequences (0.00s)
+        request_test.go:295: got no failure, want required value is empty at "stopSequences"
+    --- FAIL: .../a_negative_top-p (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "topP"
+    --- FAIL: .../an_empty_stop_sequence (0.00s)
+        request_test.go:295: got no failure, want required value is empty at "stopSequences[1]"
+    --- FAIL: .../a_top-p_of_zero (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "topP"
+    --- FAIL: .../a_negative_temperature (0.00s)
+        request_test.go:295: got no failure, want value is outside a documented bound at "temperature"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.356s
+FAIL
+```
+
+**Green.** Rule 10 of `design.md` § 4 landed as `requestDraft.boundsRule`, four sub-rules in the documented order, each skipped when its option was not applied.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.357s
+```
+
+**Refactor.** The companion `TestNewRequest_BoundaryGenerationOptions_ConstructBecauseNoRuleForbidsThem` pins the bounds that are deliberately **absent** — chiefly a temperature of `4`, which constructs. Without it, `design.md` § 8.3's missing cap reads as an oversight and the next reader closes it. A whitespace-only stop sequence is legal in the same test, because unlike a system-instruction segment it is a real string to match on.
+
+### AI-10.1 item 5 *(appended)* — copy out on the message region
+
+**Discovered while implementing item 3's `StopSequences` accessor**, which clones. `Messages()` did not, so a reader could rewrite the request it was handed.
+
+**AI-10.6 still owns immutability as a whole** — both directions, the constructor side, and equality. This appended case covers only the leak that was landing here, because carrying a known aliasing bug across a commit boundary is how the failures `message.go` warns about survive.
+
+**Red.**
+
+```
+--- FAIL: TestRequest_Messages_AreNotMutableThroughWhatAReaderReceived (0.00s)
+    request_test.go:359: request.Messages()[0] changed after a reader rewrote the slice it received
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.326s
+FAIL
+```
+
+**Green.** `Messages()` returns `slices.Clone(r.messages)`, matching `Message.Content()` and `ToolSet.Tools()`.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.331s
+```
+
+**Refactor.** None.
+
+### AI-10.1 item 6 *(appended)* — the `validateContent` prefix, consumed
+
+**The seam this milestone exists to cash.** `content_part.go` names this caller by name, and AI-06.3 item 3 pinned the request-shaped prefix `messages[2].content[0]` before a request existed.
+
+The tests live in `request_internal_test.go`, and **internally by necessity rather than preference**. A constructed message cannot hold an invalid content part — `NewMessage` validates its content and `Part` is sealed — so no consumer in another package can assemble the value the test needs. That is itself the argument for landing the rule: it is what keeps `request.go` free of per-kind logic on the day a path that is not `NewMessage` produces a message. `content_part_internal_test.go` is the precedent for reaching inside to pin a seam whose failure mode is unreachable from outside.
+
+**Red.**
+
+```
+--- FAIL: TestNewRequest_InvalidContentPart_ReportsAI06sRuleAtTheComposedPosition (0.00s)
+    request_internal_test.go:48: NewRequest returned no failure, want ErrNotInVocabulary at messages[1].content[0]
+--- FAIL: TestNewRequest_OverlongTextPart_ReportsAI06sDeepPositionBeneathTheRequestPrefix (0.00s)
+    request_internal_test.go:77: NewRequest returned no failure, want a bound failure at messages[0].content[0].text
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.474s
+FAIL
+```
+
+**Green.** Rule 4 landed as one call:
+
+```go
+validateContent(Path{AtIndex("messages", i)}, message.Content())
+```
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.344s
+```
+
+**Refactor.** None — and the absence of a refactor is the deliverable. `request.go` holds **no** per-kind content logic: no text bound, no reasoning-token rule, no tool-call argument rule. The second test asserts the three-level position `messages[0].content[0].text`, of which AI-10 supplies one level and AI-06 supplies two; a request that had reimplemented the text rule would have had to know the third level exists.
+
+### AI-10.1 item 7 *(appended)* — the redaction posture
+
+**Red.** The compile failure first (`request.String undefined`), then, with `String` landed returning `"request()"`:
+
+```
+--- FAIL: TestRequest_Formatting_NamesThePresentRegionsAndTheirElementCounts (0.00s)
+    request_test.go:436: request.String() = "request()", want it to contain "model"
+    request_test.go:436: request.String() = "request()", want it to contain "2 messages"
+    request_test.go:436: request.String() = "request()", want it to contain "temperature"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.369s
+FAIL
+```
+
+Note which half of the pair was red. The **leak** half passed against `"request()"`, because a rendering of nothing leaks nothing — which is precisely why the second test exists. Redaction that renders nothing is not a posture, it is a deleted method, and a leak test alone would have accepted one.
+
+**Green.** `String` renders the present regions and the message count; `GoString` delegates to it. An unapplied option is omitted rather than named as absent.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.349s
+```
+
+**Refactor.** The applied-option names moved to `requestDraft.appliedNames()`, a slice built in the documented order, so the rendering of one request is identical on every call and across processes — the same reason `ruleClasses` is a slice and not a map.
+
+### AI-10.1 evidence gate
+
+```
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+
+$ go test -race ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.301s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.381s
+```
+
+Both AI-00 import guards pass (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`), and `go.mod` carries zero `require` lines.
 
 ---
 
