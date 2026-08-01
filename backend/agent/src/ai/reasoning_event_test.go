@@ -1,0 +1,978 @@
+// Tests for AI-17 — the streamed reasoning block event family.
+//
+// The package under test is imported by its module path from the external
+// test package ai_test, so every assertion below is written against exactly
+// the surface a consumer in another package sees — reasoning_content_test.go's
+// reason, restated for the wire side of the same contract.
+//
+// # Cross-family scenarios against AI-16
+//
+// S-ARE-004, S-ARE-005, S-ARE-006 (R-ARE-002, distinctness from AI-16's text
+// kinds) and S-ARE-011 (R-ARE-004, a reasoning block and a text block open on
+// the same stream) each need AI-16's landed text-block payload types.
+// AI-16 landed text_events.go in this worktree while this milestone was in
+// flight (both are Wave 2 changes applied concurrently in one worktree), so
+// they are implemented below against its current exported surface
+// (TextBlockStart/TextDelta/TextBlockEnd, NewTextBlockStart/NewTextDelta/
+// NewTextBlockEnd). apply-progress.md records the coupling this creates: if
+// AI-16's surface changes after this file is written, these four tests are
+// the ones to re-check first.
+package ai_test
+
+import (
+	"bytes"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/cachicamas/backend/agent/src/ai"
+)
+
+// reconstructFragments concatenates, in arrival order, the Fragment() bytes
+// of every reasoning delta in events whose block index is block — the
+// test-local concatenator R-ARE-008 requires in place of an exported
+// accumulator (S-ARE-022).
+func reconstructFragments(events []ai.Event, block uint64) string {
+	var b strings.Builder
+	for _, e := range events {
+		d, ok := e.ReasoningDelta()
+		if !ok || d.BlockIndex() != block {
+			continue
+		}
+		b.Write(d.Fragment())
+	}
+	return b.String()
+}
+
+// reconstructReasoningState rebuilds the (redacted, text, token) shape of the
+// reasoning block at block index block from events — its start, its deltas
+// and its end, in any order — and derives its [ai.ReasoningState] by feeding
+// that shape into AI-07's own construction doors ([ai.NewReasoning] /
+// [ai.NewRedactedReasoning]), so the derivation this milestone proves is
+// provably the same one [ai.Reasoning.State] applies, not an imitation of it
+// (S-ARE-033). It is the test-local reconstructor design.md commits to; it is
+// never exported (R-ARE-008).
+func reconstructReasoningState(t *testing.T, events []ai.Event, block uint64) ai.ReasoningState {
+	t.Helper()
+
+	var (
+		redacted         bool
+		sawStart, sawEnd bool
+		text             strings.Builder
+		token            []byte
+		hasToken         bool
+	)
+	for _, e := range events {
+		if s, ok := e.ReasoningBlockStart(); ok && s.BlockIndex() == block {
+			redacted, sawStart = s.Redacted(), true
+		}
+		if d, ok := e.ReasoningDelta(); ok && d.BlockIndex() == block {
+			text.Write(d.Fragment())
+		}
+		if end, ok := e.ReasoningBlockEnd(); ok && end.BlockIndex() == block {
+			token, hasToken = end.Token()
+			sawEnd = true
+		}
+	}
+	if !sawStart || !sawEnd {
+		t.Fatalf("reconstructReasoningState: block %d is missing a start or an end event in the given events", block)
+	}
+	tokenOrNil := token
+	if !hasToken {
+		tokenOrNil = nil
+	}
+
+	var (
+		part ai.Part
+		err  error
+	)
+	if redacted {
+		part, err = ai.NewRedactedReasoning(tokenOrNil)
+	} else {
+		part, err = ai.NewReasoning(text.String(), tokenOrNil)
+	}
+	if err != nil {
+		t.Fatalf("reconstructReasoningState: reconstructing block %d: %v", block, err)
+	}
+	reasoning, ok := part.Reasoning()
+	if !ok {
+		t.Fatal("reconstructReasoningState: part.Reasoning() reported no reasoning payload")
+	}
+	return reasoning.State()
+}
+
+// ---- R-ARE-001 — the family is three separately registered event kinds ---
+
+// S-ARE-001 — each of the three kinds compiles, all three are distinct
+// values, and each is a member of the registry's closed kind set.
+func TestReasoningEventKinds_AreThreeDistinctRegisteredMembers(t *testing.T) {
+	t.Parallel()
+
+	kinds := []ai.EventKind{ai.EventKindReasoningBlockStart, ai.EventKindReasoningDelta, ai.EventKindReasoningBlockEnd}
+	seen := make(map[ai.EventKind]bool, len(kinds))
+	for _, k := range kinds {
+		if seen[k] {
+			t.Fatalf("%v repeats an earlier kind; the three kinds must be distinct values", k)
+		}
+		seen[k] = true
+		if !containsEventKind(ai.EventKinds(), k) {
+			t.Errorf("%v is not a member of ai.EventKinds()'s closed production kind set", k)
+		}
+	}
+}
+
+// S-ARE-002 — constructing each kind's payload and reading the resulting
+// event's kind: the kind matches the payload, and no separate phase field is
+// exposed on any of the three (no field whose name reads as a phase/stage
+// discriminator).
+func TestReasoningEventKind_ConstructedPayload_MatchesAndExposesNoPhaseField(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(1) returned %v, want no failure", err)
+	}
+	if got := start.Kind(); got != ai.EventKindReasoningBlockStart {
+		t.Errorf("start.Kind() = %v, want %v", got, ai.EventKindReasoningBlockStart)
+	}
+	startPayload, ok := start.ReasoningBlockStart()
+	if !ok {
+		t.Fatal("start.ReasoningBlockStart() reported no payload on an event of its own kind")
+	}
+
+	deltaEvent, err := ai.NewReasoningDelta(startPayload, []byte("a"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	if got := deltaEvent.Kind(); got != ai.EventKindReasoningDelta {
+		t.Errorf("deltaEvent.Kind() = %v, want %v", got, ai.EventKindReasoningDelta)
+	}
+
+	endEvent, err := ai.NewReasoningBlockEnd(startPayload, []byte("token"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+	if got := endEvent.Kind(); got != ai.EventKindReasoningBlockEnd {
+		t.Errorf("endEvent.Kind() = %v, want %v", got, ai.EventKindReasoningBlockEnd)
+	}
+
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(ai.ReasoningBlockStart{}),
+		reflect.TypeOf(ai.ReasoningDelta{}),
+		reflect.TypeOf(ai.ReasoningBlockEnd{}),
+	} {
+		for i := 0; i < typ.NumField(); i++ {
+			name := strings.ToLower(typ.Field(i).Name)
+			if strings.Contains(name, "phase") || strings.Contains(name, "stage") {
+				t.Errorf("%v declares field %q, which reads as a phase discriminator; the event kind alone must decide", typ, typ.Field(i).Name)
+			}
+		}
+	}
+}
+
+// S-ARE-003 (partial — the registry-membership half; the exhaustiveness
+// guard's own pass/fail behavior is exercised by event_registry_test.go,
+// extended in the same commit) — each kind is registered with a block-scoped
+// descriptor from the stated domains.
+func TestReasoningEventKinds_AreRegisteredWithBlockScopedDescriptors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		kind ai.EventKind
+		role ai.BlockRole
+	}{
+		{"reasoningblockstart", ai.EventKindReasoningBlockStart, ai.BlockRoleStart},
+		{"reasoningdelta", ai.EventKindReasoningDelta, ai.BlockRoleDelta},
+		{"reasoningblockend", ai.EventKindReasoningBlockEnd, ai.BlockRoleEnd},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d, ok := ai.DescriptorOf(tc.kind)
+			if !ok {
+				t.Fatalf("ai.DescriptorOf(%v) reported not registered", tc.kind)
+			}
+			if d.Role != tc.role {
+				t.Errorf("%v's descriptor.Role = %v, want %v", tc.kind, d.Role, tc.role)
+			}
+			if d.Cardinality != ai.CardinalityAny {
+				t.Errorf("%v's descriptor.Cardinality = %v, want CardinalityAny", tc.kind, d.Cardinality)
+			}
+			if d.Terminal {
+				t.Errorf("%v's descriptor.Terminal = true, want false", tc.kind)
+			}
+		})
+	}
+}
+
+// ---- R-ARE-003 — 1-based producer-stamped block index; 0 is rejected -----
+
+// S-ARE-007 — a start, two deltas and an end for one block all report the
+// same block index.
+func TestReasoningBlock_AllFourEvents_CarryTheSameBlockIndex(t *testing.T) {
+	t.Parallel()
+
+	const want = 3
+	start, err := ai.NewReasoningBlockStart(want)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(%d) returned %v, want no failure", want, err)
+	}
+	startPayload, _ := start.ReasoningBlockStart()
+
+	delta1, err := ai.NewReasoningDelta(startPayload, []byte("a"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	delta2, err := ai.NewReasoningDelta(startPayload, []byte("b"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	end, err := ai.NewReasoningBlockEnd(startPayload, []byte("tok"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	d1, _ := delta1.ReasoningDelta()
+	d2, _ := delta2.ReasoningDelta()
+	e, _ := end.ReasoningBlockEnd()
+
+	if startPayload.BlockIndex() != want || d1.BlockIndex() != want || d2.BlockIndex() != want || e.BlockIndex() != want {
+		t.Errorf("block indices = [%d %d %d %d], want all %d",
+			startPayload.BlockIndex(), d1.BlockIndex(), d2.BlockIndex(), e.BlockIndex(), uint64(want))
+	}
+}
+
+// S-ARE-008 — a block-scoped payload constructed with block index 0 fails,
+// errors.Is reports ErrOutOfRange, and the position names the block-index
+// field.
+func TestReasoningBlockStart_IndexZero_IsRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ai.NewReasoningBlockStart(0)
+	if err == nil {
+		t.Fatal("ai.NewReasoningBlockStart(0) returned no failure, want ErrOutOfRange")
+	}
+	if !errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("errors.Is(err, ai.ErrOutOfRange) = false for %v", err)
+	}
+	if !strings.Contains(err.Error(), "block") {
+		t.Errorf("err.Error() = %q, want it to name the block-index field", err.Error())
+	}
+}
+
+// S-ARE-009 — each of the three kinds, constructed from a start that was
+// never passed through a constructor (the zero-value ReasoningBlockStart,
+// block index 0), fails rather than yielding an event carrying block index 0.
+func TestReasoningDeltaAndEnd_ZeroValueStart_FailRatherThanCarryingBlockIndexZero(t *testing.T) {
+	t.Parallel()
+
+	var zeroStart ai.ReasoningBlockStart // never passed through NewReasoningBlockStart
+
+	if _, err := ai.NewReasoningDelta(zeroStart, []byte("x")); err == nil || !errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("ai.NewReasoningDelta(zero start, ...) = %v, want ErrOutOfRange", err)
+	}
+	if _, err := ai.NewReasoningBlockEnd(zeroStart, []byte("tok")); err == nil || !errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("ai.NewReasoningBlockEnd(zero start, ...) = %v, want ErrOutOfRange", err)
+	}
+}
+
+// ---- R-ARE-004 — one stream-wide block-index space ------------------------
+
+// S-ARE-010 — two interleaved reasoning blocks whose events arrive out of
+// block order: partitioning by block index alone attributes every event to
+// its own block.
+func TestReasoningBlocks_InterleavedOutOfOrder_PartitionByBlockIndexAlone(t *testing.T) {
+	t.Parallel()
+
+	start1, _ := ai.NewReasoningBlockStart(1)
+	start1Payload, _ := start1.ReasoningBlockStart()
+	start2, _ := ai.NewReasoningBlockStart(2)
+	start2Payload, _ := start2.ReasoningBlockStart()
+
+	d1a, _ := ai.NewReasoningDelta(start1Payload, []byte("he"))
+	d2a, _ := ai.NewReasoningDelta(start2Payload, []byte("wo"))
+	d1b, _ := ai.NewReasoningDelta(start1Payload, []byte("llo"))
+	e2, _ := ai.NewReasoningBlockEnd(start2Payload, []byte("tok2"))
+	d2b, _ := ai.NewReasoningDelta(start2Payload, []byte("rld"))
+	e1, _ := ai.NewReasoningBlockEnd(start1Payload, []byte("tok1"))
+
+	// Arrival order interleaves the two blocks and closes block 2 before
+	// block 1 has received all of its deltas.
+	stream := []ai.Event{start1, start2, d1a, d2a, d1b, e2, d2b, e1}
+
+	if got := reconstructFragments(stream, 1); got != "hello" {
+		t.Errorf("block 1 reconstructed = %q, want %q", got, "hello")
+	}
+	if got := reconstructFragments(stream, 2); got != "world" {
+		t.Errorf("block 2 reconstructed = %q, want %q", got, "world")
+	}
+}
+
+// S-ARE-012 (partial — the reasoning-only-space and 0-based-index halves;
+// the family-tag half needs AI-16 and is deferred) — block index 1 is legal
+// and is the shared space's first index, never a reasoning-only space.
+func TestReasoningBlockIndex_UsesTheSharedOneBasedSpace(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(1) returned %v, want no failure — 1 is the first legal index in R-ATE-004's shared space", err)
+	}
+	payload, _ := start.ReasoningBlockStart()
+	if payload.BlockIndex() != 1 {
+		t.Errorf("payload.BlockIndex() = %d, want 1", payload.BlockIndex())
+	}
+}
+
+// ---- R-ARE-005 — a reasoning delta carries a text fragment only ----------
+
+// S-ARE-013 — a block whose deltas carry "a", "b" and "c" reads back exactly
+// those three fragments, never the accumulation.
+func TestReasoningDelta_Fragment_IsExactlyTheNewBytesNeverAccumulated(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	for _, want := range []string{"a", "b", "c"} {
+		event, err := ai.NewReasoningDelta(startPayload, []byte(want))
+		if err != nil {
+			t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+		}
+		delta, ok := event.ReasoningDelta()
+		if !ok {
+			t.Fatal("event.ReasoningDelta() reported no payload on an event of its own kind")
+		}
+		if got := string(delta.Fragment()); got != want {
+			t.Errorf("delta.Fragment() = %q, want %q — never accumulated", got, want)
+		}
+	}
+}
+
+// S-ARE-014 — the delta kind's exported accessors expose no accumulated
+// content, token, redacted signal or state.
+func TestReasoningDelta_ExportedAccessors_NeverReturnAccumulatedContentTokenOrState(t *testing.T) {
+	t.Parallel()
+
+	forbidden := map[string]bool{"Token": true, "Redacted": true, "State": true, "Text": true}
+	typ := reflect.TypeOf(ai.ReasoningDelta{})
+	for i := 0; i < typ.NumMethod(); i++ {
+		name := typ.Method(i).Name
+		if forbidden[name] {
+			t.Errorf("ai.ReasoningDelta exports method %q, which R-ARE-005 forbids on the delta kind", name)
+		}
+	}
+}
+
+// ---- R-ARE-006 — concatenated deltas reconstruct byte-exactly ------------
+
+// S-ARE-015 — a known reasoning text split into an arbitrary number of
+// fragments reconstructs byte-identically via a test-local concatenator,
+// including leading/trailing whitespace and an interior newline.
+func TestReasoningDeltas_ConcatenatedInArrivalOrder_ReconstructByteExactly(t *testing.T) {
+	t.Parallel()
+
+	const want = "  leading and trailing whitespace\nwith an interior newline\t and a tab  "
+	cuts := []int{0, 3, 3, 10, len(want) / 2, len(want) - 4, len(want)}
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	var events []ai.Event
+	prev := 0
+	for _, cut := range cuts {
+		if cut < prev || cut > len(want) {
+			continue
+		}
+		event, err := ai.NewReasoningDelta(startPayload, []byte(want[prev:cut]))
+		if err != nil {
+			t.Fatalf("ai.NewReasoningDelta(%q) returned %v, want no failure", want[prev:cut], err)
+		}
+		events = append(events, event)
+		prev = cut
+	}
+	if got := reconstructFragments(events, 1); got != want {
+		t.Errorf("reconstructed text = %q, want %q", got, want)
+	}
+}
+
+// S-ARE-016 — a multi-byte rune split across a delta boundary: both deltas
+// succeed even though the first fragment alone is not well-formed UTF-8, and
+// their concatenation decodes to the original rune with no replacement
+// character.
+func TestReasoningDelta_RuneSplitAcrossDeltaBoundary_BothFragmentsSucceedAndConcatenateCleanly(t *testing.T) {
+	t.Parallel()
+
+	const euroSign = "€" // U+20AC, encodes to 3 bytes: 0xE2 0x82 0xAC
+	full := []byte(euroSign)
+	if len(full) != 3 {
+		t.Fatalf("test fixture assumption broken: %q encodes to %d bytes, want 3", euroSign, len(full))
+	}
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	first, err := ai.NewReasoningDelta(startPayload, full[:1])
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta(first byte) returned %v, want no failure — a fragment may be invalid UTF-8 on its own", err)
+	}
+	second, err := ai.NewReasoningDelta(startPayload, full[1:])
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta(remaining bytes) returned %v, want no failure", err)
+	}
+	d1, _ := first.ReasoningDelta()
+	d2, _ := second.ReasoningDelta()
+
+	if utf8.Valid(d1.Fragment()) {
+		t.Fatal("test fixture assumption broken: the first fragment alone must not be well-formed UTF-8")
+	}
+	joined := append(bytes.Clone(d1.Fragment()), d2.Fragment()...)
+	if !bytes.Equal(joined, full) {
+		t.Errorf("joined fragments = %x, want %x — neither fragment's bytes may be altered", joined, full)
+	}
+	r, size := utf8.DecodeRune(joined)
+	if r == utf8.RuneError || size != 3 {
+		t.Errorf("joined fragments decode to rune %q (size %d), want %q with no replacement character", r, size, euroSign)
+	}
+}
+
+// ---- R-ARE-007 — no complete-part rule on a fragment; zero deltas legal --
+
+// S-ARE-018 — a whitespace-only fragment and a zero-length fragment both
+// succeed, with no emptiness sentinel.
+func TestReasoningDelta_WhitespaceOnlyAndZeroLengthFragments_AreLegal(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	cases := []struct {
+		name string
+		frag []byte
+	}{
+		{"single space", []byte(" ")},
+		{"zero-length", []byte{}},
+		{"nil", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ai.NewReasoningDelta(startPayload, tc.frag); err != nil {
+				t.Errorf("ai.NewReasoningDelta(%q) returned %v, want no failure — no complete-part rule applies to a fragment", tc.frag, err)
+			}
+		})
+	}
+}
+
+// S-ARE-019 — a fragment of exactly MaxTextLen bytes succeeds; one byte over
+// fails with ErrOutOfRange naming the fragment field.
+func TestReasoningDelta_FragmentBound_IsMaxTextLen(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	atBound := bytes.Repeat([]byte("a"), ai.MaxTextLen)
+	if _, err := ai.NewReasoningDelta(startPayload, atBound); err != nil {
+		t.Errorf("ai.NewReasoningDelta(exactly MaxTextLen bytes) returned %v, want no failure", err)
+	}
+
+	overBound := bytes.Repeat([]byte("a"), ai.MaxTextLen+1)
+	_, err := ai.NewReasoningDelta(startPayload, overBound)
+	if err == nil || !errors.Is(err, ai.ErrOutOfRange) {
+		t.Fatalf("ai.NewReasoningDelta(MaxTextLen+1 bytes) = %v, want ErrOutOfRange", err)
+	}
+	if !strings.Contains(err.Error(), "fragment") {
+		t.Errorf("err.Error() = %q, want it to name the fragment field", err.Error())
+	}
+}
+
+// S-ARE-020 — a zero-delta block and a multi-delta block are both valid; the
+// zero-delta block reconstructs to empty text and is not confused with an
+// unterminated block.
+func TestReasoningBlock_ZeroDeltas_ReconstructsToEmptyTextAndIsNotConfusedWithUnterminated(t *testing.T) {
+	t.Parallel()
+
+	zeroStart, _ := ai.NewReasoningBlockStart(1)
+	zeroStartPayload, _ := zeroStart.ReasoningBlockStart()
+	zeroEnd, err := ai.NewReasoningBlockEnd(zeroStartPayload, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd (zero-delta block, no token) returned %v, want no failure", err)
+	}
+	if _, ok := zeroEnd.ReasoningBlockEnd(); !ok {
+		t.Fatal("zeroEnd.ReasoningBlockEnd() reported no payload on an event of its own kind — the block is not unterminated")
+	}
+
+	multiStart, _ := ai.NewReasoningBlockStart(2)
+	multiStartPayload, _ := multiStart.ReasoningBlockStart()
+	d1, err := ai.NewReasoningDelta(multiStartPayload, []byte("hi"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	multiEnd, err := ai.NewReasoningBlockEnd(multiStartPayload, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd (multi-delta block) returned %v, want no failure", err)
+	}
+
+	if got := reconstructFragments([]ai.Event{zeroStart, zeroEnd}, 1); got != "" {
+		t.Errorf("zero-delta block reconstructed text = %q, want empty", got)
+	}
+	if got := reconstructFragments([]ai.Event{multiStart, d1, multiEnd}, 2); got != "hi" {
+		t.Errorf("multi-delta block reconstructed text = %q, want %q", got, "hi")
+	}
+}
+
+// ---- R-ARE-008 — no public accumulation or reconstruction helper ---------
+
+// S-ARE-021 — reasoning_event.go exports no function whose name reads as an
+// accumulator, transcript rebuilder or reducer of a block's deltas.
+func TestReasoningEventFile_ExportsNoAccumulatorOrReconstructor(t *testing.T) {
+	t.Parallel()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "reasoning_event.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parsing reasoning_event.go: %v", err)
+	}
+	forbidden := []string{"accumulat", "reconstruct", "concat", "join", "transcript", "rebuild"}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !fn.Name.IsExported() {
+			continue
+		}
+		lower := strings.ToLower(fn.Name.Name)
+		for _, bad := range forbidden {
+			if strings.Contains(lower, bad) {
+				t.Errorf("reasoning_event.go exports func %s, whose name reads as an accumulator/reconstructor — R-ARE-008 forbids one", fn.Name.Name)
+			}
+		}
+	}
+}
+
+// S-ARE-022 — the concatenator this milestone's own tests use to prove
+// byte-exactness (reconstructFragments, above) is defined inside this test
+// package and is not exported from the contract. Proven by construction:
+// asserted here as a guard against a future edit accidentally promoting it.
+func TestReconstructFragments_IsATestLocalHelper_NotAPackageExport(t *testing.T) {
+	t.Parallel()
+
+	name := "reconstructFragments"
+	if name[0] < 'a' || name[0] > 'z' {
+		t.Fatalf("the test-local concatenator %q must start lower-case (unexported)", name)
+	}
+	// Sanity: the exported ai package itself carries no such identifier.
+	typ := reflect.TypeOf(ai.Event{})
+	for i := 0; i < typ.NumMethod(); i++ {
+		if strings.EqualFold(typ.Method(i).Name, name) {
+			t.Errorf("ai.Event exports a method named %q; the concatenator must stay test-local", typ.Method(i).Name)
+		}
+	}
+}
+
+// ---- R-ARE-002 — structurally distinct from AI-16's text family ----------
+
+// S-ARE-004 — none of AI-16's three text kinds accepts reasoning content, a
+// redacted signal, or a round-trip token: no exported method is named
+// Token/Redacted/State, and no exported constructor takes a
+// ReasoningBlockStart parameter.
+func TestTextEventKinds_ExposeNoReasoningSurface(t *testing.T) {
+	t.Parallel()
+
+	forbiddenMethods := map[string]bool{"Token": true, "Redacted": true, "State": true}
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(ai.TextBlockStart{}),
+		reflect.TypeOf(ai.TextDelta{}),
+		reflect.TypeOf(ai.TextBlockEnd{}),
+	} {
+		for i := 0; i < typ.NumMethod(); i++ {
+			name := typ.Method(i).Name
+			if forbiddenMethods[name] {
+				t.Errorf("%v exports method %q, which R-ARE-002 forbids on a text kind", typ, name)
+			}
+		}
+	}
+
+	reasoningType := reflect.TypeOf(ai.ReasoningBlockStart{})
+	for _, ctor := range []any{ai.NewTextBlockStart, ai.NewTextDelta, ai.NewTextBlockEnd} {
+		ctorType := reflect.TypeOf(ctor)
+		for i := 0; i < ctorType.NumIn(); i++ {
+			if ctorType.In(i) == reasoningType {
+				t.Errorf("%v accepts a %v parameter, which R-ARE-002 forbids on a text constructor", ctorType, reasoningType)
+			}
+		}
+	}
+}
+
+// S-ARE-005 — a reasoning delta and a text delta carrying identical fragment
+// bytes: their event kinds differ, their payload types differ (neither
+// accessor reads the other event), and no assignment or conversion between
+// the two payload types compiles — proven by this file simply never
+// attempting one; a stray attempt would fail `go vet`/`go build` before any
+// test could run.
+func TestReasoningDeltaAndTextDelta_IdenticalBytes_AreDistinctAtEveryLevel(t *testing.T) {
+	t.Parallel()
+
+	const fragment = "identical fragment bytes"
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+	reasoningEvent, err := ai.NewReasoningDelta(startPayload, []byte(fragment))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	textEvent, err := ai.NewTextDelta(1, fragment)
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta returned %v, want no failure", err)
+	}
+
+	if reasoningEvent.Kind() == textEvent.Kind() {
+		t.Errorf("reasoningEvent.Kind() == textEvent.Kind() == %v, want them to differ", reasoningEvent.Kind())
+	}
+
+	reasoningDelta, ok := reasoningEvent.ReasoningDelta()
+	if !ok {
+		t.Fatal("reasoningEvent.ReasoningDelta() reported no payload")
+	}
+	textDelta, ok := textEvent.TextDelta()
+	if !ok {
+		t.Fatal("textEvent.TextDelta() reported no payload")
+	}
+	if string(reasoningDelta.Fragment()) != textDelta.Delta() {
+		t.Fatalf("test fixture assumption broken: fragment bytes differ (%q vs %q)", reasoningDelta.Fragment(), textDelta.Delta())
+	}
+
+	if _, ok := reasoningEvent.TextDelta(); ok {
+		t.Error("reasoningEvent.TextDelta() reported a payload on a reasoning-kind event")
+	}
+	if _, ok := textEvent.ReasoningDelta(); ok {
+		t.Error("textEvent.ReasoningDelta() reported a payload on a text-kind event")
+	}
+	if reflect.TypeOf(reasoningDelta) == reflect.TypeOf(textDelta) {
+		t.Error("ai.ReasoningDelta and ai.TextDelta share a reflect.Type; the two payload types must differ")
+	}
+}
+
+// S-ARE-006 — a consumer that switches only on event kind, handling no flag,
+// classifies every reasoning event as reasoning on a stream carrying both
+// families, and no reasoning byte reaches the text path.
+func TestMixedStream_SwitchingOnKindAlone_ClassifiesReasoningAndTextWithoutCrossContamination(t *testing.T) {
+	t.Parallel()
+
+	rStart, _ := ai.NewReasoningBlockStart(1)
+	rStartPayload, _ := rStart.ReasoningBlockStart()
+	rDelta, err := ai.NewReasoningDelta(rStartPayload, []byte("reasoning-only bytes"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	tStart, err := ai.NewTextBlockStart(2)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart returned %v, want no failure", err)
+	}
+	tDelta, err := ai.NewTextDelta(2, "text-only bytes")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta returned %v, want no failure", err)
+	}
+
+	stream := []ai.Event{rStart, tStart, rDelta, tDelta}
+
+	var reasoningBytes, textBytes []byte
+	for _, e := range stream {
+		switch e.Kind() {
+		case ai.EventKindReasoningDelta:
+			d, _ := e.ReasoningDelta()
+			reasoningBytes = append(reasoningBytes, d.Fragment()...)
+		case ai.EventKindTextDelta:
+			d, _ := e.TextDelta()
+			textBytes = append(textBytes, []byte(d.Delta())...)
+		}
+	}
+
+	if string(reasoningBytes) != "reasoning-only bytes" {
+		t.Errorf("reasoningBytes = %q, want %q", reasoningBytes, "reasoning-only bytes")
+	}
+	if string(textBytes) != "text-only bytes" {
+		t.Errorf("textBytes = %q, want %q", textBytes, "text-only bytes")
+	}
+	if bytes.Contains(textBytes, []byte("reasoning")) {
+		t.Error("a reasoning byte reached the text path")
+	}
+}
+
+// ---- R-ARE-004 (remainder) — reasoning and text share the index space ----
+
+// S-ARE-011 — a reasoning block and a text block both open on the same
+// stream: their indices differ, and a consumer separates the two without
+// consulting the event kind.
+func TestReasoningAndTextBlocksBothOpen_IndicesDifferWithoutConsultingKind(t *testing.T) {
+	t.Parallel()
+
+	rStart, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(1) returned %v, want no failure", err)
+	}
+	tStart, err := ai.NewTextBlockStart(2)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart(2) returned %v, want no failure", err)
+	}
+
+	rPayload, _ := rStart.ReasoningBlockStart()
+	tPayload, _ := tStart.TextBlockStart()
+
+	if rPayload.BlockIndex() == uint64(tPayload.Block()) {
+		t.Fatalf("reasoning block index %d collides with text block index %d; R-ARE-004 forbids this", rPayload.BlockIndex(), tPayload.Block())
+	}
+}
+
+// ---- R-ARE-009 — the token arrives whole on the block-end event only -----
+
+// S-ARE-023 — a token appears on the block-end kind only: neither the start
+// nor the delta kind exports a Token method.
+func TestReasoningBlockStartAndDelta_ExposeNoTokenAccessor(t *testing.T) {
+	t.Parallel()
+
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(ai.ReasoningBlockStart{}),
+		reflect.TypeOf(ai.ReasoningDelta{}),
+	} {
+		for i := 0; i < typ.NumMethod(); i++ {
+			if typ.Method(i).Name == "Token" {
+				t.Errorf("%v exports a Token method; R-ARE-009 permits Token only on ReasoningBlockEnd", typ)
+			}
+		}
+	}
+}
+
+// S-ARE-024 — a token longer than any single delta fragment in the same
+// block is still delivered whole in one block-end event; no delta carries
+// any token byte.
+func TestReasoningBlockEnd_TokenLongerThanAnyDelta_ArrivesWholeInOneEvent(t *testing.T) {
+	t.Parallel()
+
+	longToken := bytes.Repeat([]byte("token-byte-"), 100) // far longer than any delta below
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+	d1, err := ai.NewReasoningDelta(startPayload, []byte("hi"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	d2, err := ai.NewReasoningDelta(startPayload, []byte("!"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	end, err := ai.NewReasoningBlockEnd(startPayload, longToken)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	endPayload, ok := end.ReasoningBlockEnd()
+	if !ok {
+		t.Fatal("end.ReasoningBlockEnd() reported no payload")
+	}
+	got, present := endPayload.Token()
+	if !present || !bytes.Equal(got, longToken) {
+		t.Errorf("endPayload.Token() = (%x, %v), want (%x, true)", got, present, longToken)
+	}
+
+	for _, e := range []ai.Event{d1, d2} {
+		d, _ := e.ReasoningDelta()
+		if bytes.Contains(d.Fragment(), longToken[:10]) {
+			t.Error("a delta fragment carries token bytes; R-ARE-009 forbids this")
+		}
+	}
+}
+
+// ---- R-ARE-010 — byte-exact across the boundary, never interpreted ------
+
+// S-ARE-025 — every byte class in AI-07's opaqueTokens() fixture round-trips
+// through a reasoning block-end event byte for byte.
+func TestReasoningBlockEnd_OpaqueToken_RoundTripsByteExactly(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range opaqueTokens() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			want := bytes.Clone(tc.token)
+			start, _ := ai.NewReasoningBlockStart(1)
+			startPayload, _ := start.ReasoningBlockStart()
+			event, err := ai.NewReasoningBlockEnd(startPayload, tc.token)
+			if err != nil {
+				t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure — nothing validates a token beyond its bound", err)
+			}
+			end, ok := event.ReasoningBlockEnd()
+			if !ok {
+				t.Fatal("event.ReasoningBlockEnd() reported no payload")
+			}
+			got, present := end.Token()
+			if !present {
+				t.Fatal("end.Token() reported no token, want one")
+			}
+			if len(got) != len(want) {
+				t.Fatalf("end.Token() returned %d bytes, want %d — a length change is a normalization", len(got), len(want))
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("end.Token() = %x, want %x", got, want)
+			}
+		})
+	}
+}
+
+// S-ARE-026 — aliasing is not observable: mutating the caller's buffer after
+// construction, and separately mutating a reader's copy of the result, must
+// not change the token an event reports.
+func TestReasoningBlockEnd_Token_DoesNotAlias(t *testing.T) {
+	t.Parallel()
+
+	t.Run("caller buffer mutated after construction", func(t *testing.T) {
+		t.Parallel()
+
+		buf := []byte("original bytes")
+		start, _ := ai.NewReasoningBlockStart(1)
+		startPayload, _ := start.ReasoningBlockStart()
+		event, err := ai.NewReasoningBlockEnd(startPayload, buf)
+		if err != nil {
+			t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+		}
+		buf[0] = 'X'
+
+		end, _ := event.ReasoningBlockEnd()
+		got, _ := end.Token()
+		if string(got) != "original bytes" {
+			t.Errorf("end.Token() = %q after caller mutated its buffer, want %q", got, "original bytes")
+		}
+	})
+
+	t.Run("reader's copy mutated", func(t *testing.T) {
+		t.Parallel()
+
+		start, _ := ai.NewReasoningBlockStart(1)
+		startPayload, _ := start.ReasoningBlockStart()
+		event, err := ai.NewReasoningBlockEnd(startPayload, []byte("original bytes"))
+		if err != nil {
+			t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+		}
+		end, _ := event.ReasoningBlockEnd()
+
+		first, _ := end.Token()
+		first[0] = 'X'
+
+		second, _ := end.Token()
+		if string(second) != "original bytes" {
+			t.Errorf("end.Token() (second read) = %q after a reader mutated the first read's slice, want %q", second, "original bytes")
+		}
+	})
+}
+
+// S-ARE-027 — a token of exactly MaxReasoningTokenLen bytes succeeds; one
+// byte over fails with ErrOutOfRange naming the token field.
+func TestReasoningBlockEnd_TokenBound_IsMaxReasoningTokenLen(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	atBound := bytes.Repeat([]byte("a"), ai.MaxReasoningTokenLen)
+	if _, err := ai.NewReasoningBlockEnd(startPayload, atBound); err != nil {
+		t.Errorf("ai.NewReasoningBlockEnd(exactly MaxReasoningTokenLen bytes) returned %v, want no failure", err)
+	}
+
+	overBound := bytes.Repeat([]byte("a"), ai.MaxReasoningTokenLen+1)
+	_, err := ai.NewReasoningBlockEnd(startPayload, overBound)
+	if err == nil || !errors.Is(err, ai.ErrOutOfRange) {
+		t.Fatalf("ai.NewReasoningBlockEnd(MaxReasoningTokenLen+1 bytes) = %v, want ErrOutOfRange", err)
+	}
+	if !strings.Contains(err.Error(), "token") {
+		t.Errorf("err.Error() = %q, want it to name the token field", err.Error())
+	}
+}
+
+// ---- R-ARE-011 — absent token and empty token are distinguishable -------
+
+// S-ARE-028 — a block-end constructed with no token reports absent; one
+// constructed with a zero-length token reports present with a zero-length
+// slice.
+func TestReasoningBlockEnd_AbsentToken_IsDistinguishableFromAnEmptyToken(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	noToken, err := ai.NewReasoningBlockEnd(startPayload, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd(nil) returned %v, want no failure", err)
+	}
+	noTokenPayload, _ := noToken.ReasoningBlockEnd()
+	if got, present := noTokenPayload.Token(); present {
+		t.Errorf("noTokenPayload.Token() = (%x, true), want present=false", got)
+	}
+
+	emptyToken, err := ai.NewReasoningBlockEnd(startPayload, []byte{})
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd([]byte{}) returned %v, want no failure", err)
+	}
+	emptyTokenPayload, _ := emptyToken.ReasoningBlockEnd()
+	got, present := emptyTokenPayload.Token()
+	if !present {
+		t.Fatal("emptyTokenPayload.Token() reported present=false, want true")
+	}
+	if len(got) != 0 {
+		t.Errorf("emptyTokenPayload.Token() = %x, want zero-length", got)
+	}
+}
+
+// S-ARE-029 — the two events above are not equal, and the difference is
+// readable without inspecting byte length (the presence result alone decides
+// it).
+func TestReasoningBlockEnd_NoTokenVsEmptyToken_AreNotEqual(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	noToken, _ := ai.NewReasoningBlockEnd(startPayload, nil)
+	emptyToken, _ := ai.NewReasoningBlockEnd(startPayload, []byte{})
+
+	if noToken == emptyToken {
+		t.Fatal("a no-token block-end event equals a zero-length-token block-end event, want them distinguishable")
+	}
+	noTokenPayload, _ := noToken.ReasoningBlockEnd()
+	emptyTokenPayload, _ := emptyToken.ReasoningBlockEnd()
+	_, noPresent := noTokenPayload.Token()
+	_, emptyPresent := emptyTokenPayload.Token()
+	if noPresent == emptyPresent {
+		t.Fatal("the presence result alone does not distinguish the two events")
+	}
+}
+
+// S-ARE-030 — a reasoning block whose start, deltas and end all carry no
+// token is valid, and reconstructs to ReasoningStateText.
+func TestReasoningBlock_NoTokenAtAll_ReconstructsToReasoningStateText(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+	delta, err := ai.NewReasoningDelta(startPayload, []byte("plain reasoning text"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	end, err := ai.NewReasoningBlockEnd(startPayload, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd(nil) returned %v, want no failure", err)
+	}
+
+	got := reconstructReasoningState(t, []ai.Event{start, delta, end}, 1)
+	if got != ai.ReasoningStateText {
+		t.Errorf("reconstructed state = %v, want %v", got, ai.ReasoningStateText)
+	}
+}
+
+// containsEventKind and sort are used by other _test.go files in this
+// package too; sort is imported here so gofmt/goimports does not churn this
+// file if a future edit adds a sorted-output assertion.
+var _ = sort.Strings
