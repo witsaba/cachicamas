@@ -15,9 +15,11 @@
 
 ## Entry point for the resuming agent
 
-**AI-10.1, AI-10.2, AI-10.3 and AI-10.4 are implemented and green.** AI-10.5 and AI-10.6 are not implemented.
+**AI-10.1 … AI-10.5 are implemented and green.** AI-10.6 is not implemented — the milestone's last leaf.
 
-The resuming agent starts at **§ Phase AI-10.5**, below. Every box in phases AI-10.5 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 10–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
+The resuming agent starts at **§ Phase AI-10.6**, below. Every box in that phase is unchecked, and every decision it needs is already made in `design.md` § 11 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written. Item 3's decision — whether to export `Equal` — defaults to **yes**; `design.md` § 11.2 states the reason and what exporting it obliges (`Message` and `SystemInstruction` need matching `Equal` methods).
+
+**AI-10.5's round trip compares requests without a production `Equal` method**, because AI-10.6 (which lands it) depends on AI-10.5, not the reverse. `backend/agent/src/agenttest/request_test.go` carries its own local `requireRequestsEqual`. If AI-10.6 exports `Request.Equal`, consider (not required) refactoring that test to call it — an approval-testing opportunity, not a new behavior — but AI-10.5 does not need this and is already closed either way.
 
 AI-10.3's rule insertion order matters for what follows: `NewRequest`'s `FirstFailure` list is, in order, model, messages, messages-constructed, content (AI-06's), system, role-vs-kind (`ErrMisplaced`), duplicate-tool-call (`ErrDuplicate`), unresolved-tool-result (`ErrUnresolvedReference`), tool-choice-vs-tool-set (AI-08.3's three), bounds — exactly `design.md` § 4's documented order, rules 1–10. AI-10.4 item 1 proved this order deterministic across runs, by construction, with a bite proof.
 
@@ -912,13 +914,89 @@ go 1.26.3
 
 ---
 
-## Phase AI-10.5 — whole-request round trip `[leaf]` — **NOT IMPLEMENTED**
+## Phase AI-10.5 — whole-request round trip `[leaf]` — **IMPLEMENTED**
 
-**Deliverable:** a new test file under `backend/agent/src/agenttest/`.
+**Deliverable:** `backend/agent/src/agenttest/request_test.go` (new file).
 **Spec:** `R-AMR-015`. **Design:** § 10.
 
-- [ ] **Item 1** — An external-package test walks a request holding every part variant plus segments, tools and options, and reconstructs an **equal** request from what it read.
-- [ ] **Item 2** *(pin)* — The walk's kind handling is exhaustive over `PartKinds()`: a kind added without a readable accessor fails this pin.
+- [x] ~~**Item 1** — An external-package test walks a request holding every part variant plus segments, tools and options, and reconstructs an **equal** request from what it read.~~
+- [x] ~~**Item 2** *(pin)* — The walk's kind handling is exhaustive over `PartKinds()`: a kind added without a readable accessor fails this pin.~~
+
+No production change: this phase's whole deliverable is the test file. Both items are pins — the round trip and its exhaustiveness are already true of the exported surface AI-10.1–AI-10.3 landed — closed by showing them bite, in the same idiom as AI-10.4.
+
+### AI-10.5 item 2 — the exhaustiveness pin, landed first
+
+`partKindReaders` — a `map[ai.PartKind]func(*testing.T, ai.Part) ai.Part`, one entry per registered kind — is the single source both items share: item 1's walk calls it to rebuild content, item 2 asserts it is complete against `ai.PartKinds()`. Landed first because item 1's walk depends on it.
+
+**Green from birth**, with all four kinds present:
+
+```
+--- PASS: TestPartKindReaders_EveryRegisteredKind_HasAReader (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.439s
+```
+
+**Closed by showing it bite.** Scratch violation: the `ai.PartKindToolResult` entry deleted from `partKindReaders`.
+
+```
+=== CONT  TestPartKindReaders_EveryRegisteredKind_HasAReader
+    request_test.go:95: ai.PartKind tool_result is registered in ai.PartKinds() but this round-trip walk's partKindReaders has no reader for it — a kind added without a readable accessor here fails this pin (R-AMR-015, S-AMR-056)
+--- FAIL: TestPartKindReaders_EveryRegisteredKind_HasAReader (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.282s
+FAIL
+```
+
+Restored (diffed byte-identical against the pre-scratch file); re-ran green, shown above.
+
+### AI-10.5 item 1 — the round trip
+
+`buildFullRequest` constructs one request holding all four content-part kinds — text (user), reasoning with a round-trip token and a tool call (assistant), a tool result correlating to that call (tool) — plus two system segments, two declared tools, a specific tool choice, and all four generation options. `rebuildFromReadback` reads every region through the exported surface alone (never touching a field) and constructs a second request from what it read. `requireRequestsEqual` compares the two region-wise, message identity excluded per `design.md` § 11.2 — `Request.Equal` does not exist yet (AI-10.6 lands it, and depends on AI-10.5 per the milestone's own dependency graph), so this comparison is local to the test, not a call to production code.
+
+**Green from birth:**
+
+```
+--- PASS: TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.439s
+```
+
+**Closed by showing it bite.** Scratch violation: the tool-call reader in `partKindReaders` rebuilt with a corrupted name (`call.Name()+"-SCRATCH-BITE-corrupted"`), proving the comparison is real rather than trivially satisfied:
+
+```
+=== CONT  TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest
+    request_test.go:143: messages[1].content[1].ToolCall() = ("call-1", "search_flights-SCRATCH-BITE-corrupted"), want ("call-1", "search_flights")
+--- FAIL: TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.283s
+FAIL
+```
+
+Restored (diffed byte-identical against the pre-scratch file); re-ran green, both tests together:
+
+```
+--- PASS: TestPartKindReaders_EveryRegisteredKind_HasAReader (0.00s)
+--- PASS: TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/agenttest	(cached)
+```
+
+**Refactor.** None.
+
+### AI-10.5 evidence gate
+
+```
+$ go test -race ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.268s
+ok  	github.com/cachicamas/backend/agent/src/ai	(cached)
+
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+```
+
+`go.mod` carries zero `require` lines; both AI-00 import guards and the AI-10.4 no-I/O guard pass.
 
 ---
 
