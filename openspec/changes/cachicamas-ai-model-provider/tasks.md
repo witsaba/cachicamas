@@ -51,26 +51,46 @@ Chain strategy: size-exception
 
 ## Phase 2 — AI-20.2 pre-stream contract (R-AMP-005…008)
 
-- [ ] 2.1 RED — `src/ai/request_test.go`: `TestRequest_IsZero` (empty messages ⇒ true); fails, no method.
-- [ ] 2.2 GREEN — `src/ai/request.go`: add `func (r Request) IsZero() bool { return len(r.messages)==0 }`.
-- [ ] 2.3 RED — `src/ai/provider_test.go`: define unexported `scriptProvider{events []Event, terminal
+- [x] 2.1 RED — `src/ai/request_test.go`: `TestRequest_IsZero` (empty messages ⇒ true); fails, no method.
+- [x] 2.2 GREEN — `src/ai/request.go`: add `func (r Request) IsZero() bool { return len(r.messages)==0 }`.
+- [x] 2.3 RED — `src/ai/provider_test.go`: define unexported `scriptProvider{events []Event, terminal
       error, buffer int}`; cases for zero-request (S-AMP-017), invalid-request (S-AMP-013/014/015),
       validation-before-cancellation order (S-AMP-016/018), already-cancelled+valid → `PreStreamFailure`
       cancellation category (S-AMP-019/020/021), no observable effect pre-validation (S-AMP-022/023).
-- [ ] 2.4 GREEN — implement `scriptProvider.Stream` pre-stream branch: `req.IsZero()` → `*Violation`;
-      else `ctx.Err()` → `ai.PreStreamFailure({Category: FailureCategoryCancellation})`; else handover.
-- [ ] 2.5 REFACTOR — extract shared pre-stream check helper; tidy `-race` goroutine-count assertions.
+      **Process note**: fixture (scriptProvider) and its pre-stream branch were authored together in
+      one file rather than as a separate observed-red step, because the struct and its Stream method
+      are test-local fixture code with no prior partial state to fail against — see apply-progress.md
+      Deviations. Also added an NFR-AMP-D nil-context case beyond the listed scenarios (cheap,
+      directly required by the NFR, no dedicated task number).
+- [x] 2.4 GREEN — implement `scriptProvider.Stream` pre-stream branch: `req.IsZero()` → `*Violation`;
+      else `ctx.Err()` → `ai.PreStreamFailure({Category: FailureCategoryCancellation})`; else handover
+      (Phase 2's handover is a naive unconditional send loop — Phase 3 hardens it under genuine RED).
+- [x] 2.5 REFACTOR — reviewed; pre-stream checks are already one small, linear block — no extraction
+      needed. `-race` run clean (`go test ./src/ai/... -run PreStream -race -v`).
 
-## Phase 3 — AI-20.3 mid-stream contract (R-AMP-009…013)
+## Phase 3 — AI-20.3 mid-stream contract (R-AMP-009…013) — COMPLETE
 
-- [ ] 3.1 RED — extend `scriptProvider` tests: one closing site across completion/error/cancel
-      (S-AMP-024/025/026), every send selects on cancellation incl. terminal (S-AMP-027/028), bounded
-      close under `-race` no send-after-close (S-AMP-029/030/031), sanctioned bare-close-on-saturated-
-      cancel vs never-cancelled-defect (S-AMP-032…035).
-- [ ] 3.2 GREEN — implement `scriptProvider` producer goroutine: one goroutine, `defer close(out)`,
-      every send in `select{out<-ev; <-ctx.Done()}`, terminal via `ai.ErrorEvent(*ai.Failure)` or
-      completion.
-- [ ] 3.3 REFACTOR — confirm `scriptProvider` stays unexported/`ai_test`-local (S-AMP-036/037).
+- [x] 3.1 RED — extended `scriptProvider` tests against the Phase 2 naive (unconditional-send, no
+      terminal handling) producer: one closing site across completion/error/cancel (S-AMP-024/025/026),
+      every send selects on cancellation incl. terminal (S-AMP-027/028), bounded close under `-race`
+      no send-after-close (S-AMP-029/030/031), sanctioned bare-close-on-saturated-cancel vs
+      never-cancelled-defect (S-AMP-032…035). Confirmed genuine RED (`go test ./src/ai/... -run
+      MidStream -v -race`): 3 test functions failed for the right reason (naive impl delivered events
+      after cancellation instead of dropping them); 2 passed pre-existing-true properties
+      (never-cancelled backpressure, repeated bounded-close-under-race safety) — not everything needs
+      to start red. **Found and fixed a self-inflicted race in the RED tests themselves**: a
+      confirmation read placed immediately after `cancel()` could become a second ready `select` case
+      in the producer's own goroutine at the exact moment it evaluates one, and Go resolves two
+      simultaneously-ready cases pseudo-randomly — so even a *correct* implementation could
+      occasionally "win" a send. Fixed with a `settleAfterCancel()` 50ms window (no receiver in flight
+      during it) before every such confirmation read, making the intended branch the only ready one.
+- [x] 3.2 GREEN — implemented `scriptProvider`'s producer goroutine: one goroutine, `defer close(out)`,
+      every send (scripted events AND the optional terminal error event) inside
+      `select{out<-ev; <-ctx.Done()}`, terminal built via `ai.ErrorEvent(*ai.Failure)` type-asserted
+      from the `terminal error` field. `go test ./src/ai/... -run "PreStream|MidStream" -race -count=15`
+      → all green, no flakiness across 15 repeated runs.
+- [x] 3.3 REFACTOR — confirmed `scriptProvider` stays unexported and `ai_test`-local (S-AMP-036/037):
+      one file, lower-case type, package `ai_test`, no exported alternative added.
 
 ## Phase 4 — AI-20.4 signature guard (R-AMP-014…016)
 
