@@ -32,7 +32,10 @@
 // unconstructible rather than merely undocumented.
 package ai
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // FailureCategory is the closed vocabulary value classifying why a request
 // failed after it left the process (R-AIP-004).
@@ -160,6 +163,53 @@ func FailureCategories() []FailureCategory {
 		out = append(out, c)
 	}
 	return out
+}
+
+// The per-category sentinels (R-AIP-014): one per charter member, so
+// errors.Is(err, ai.ErrRateLimited) works without unwrapping first.
+//
+// There is deliberately no umbrella "any provider failure" sentinel —
+// design.md D4 rejects it by name, because it would be the lazy alternative
+// R-AIP-014 forbids: a consumer that wants "is this any provider failure at
+// all?" already has one — errors.As(err, &f) — and a shared sentinel every
+// category matched would make errors.Is(err, ai.ErrTimeout) true for a
+// rate-limit failure too, defeating the whole point of a per-category
+// vocabulary.
+var (
+	ErrAuthentication        = errors.New("provider rejected the request's credentials")
+	ErrAuthorization         = errors.New("provider refused the request its credentials authorize")
+	ErrRateLimited           = errors.New("provider is rate-limiting the request")
+	ErrUnavailable           = errors.New("provider is unavailable or overloaded")
+	ErrTimeout               = errors.New("provider request timed out")
+	ErrCancelled             = errors.New("provider request was cancelled")
+	ErrMalformedResponse     = errors.New("provider response was not well-formed")
+	ErrUnsupportedCapability = errors.New("provider does not support a capability the request used")
+	ErrUnknownFailure        = errors.New("provider failure does not match a modelled category")
+)
+
+// failureCategorySentinels maps each category to its own sentinel —
+// array-pinned like failureCategoryNames, so an appended category without a
+// matching sentinel is caught by exhaustiveness (provider_failure_internal_test.go)
+// rather than passing unnoticed.
+var failureCategorySentinels = [failureCategoryLimit]error{
+	FailureCategoryAuthentication:        ErrAuthentication,
+	FailureCategoryAuthorization:         ErrAuthorization,
+	FailureCategoryRateLimit:             ErrRateLimited,
+	FailureCategoryUnavailable:           ErrUnavailable,
+	FailureCategoryTimeout:               ErrTimeout,
+	FailureCategoryCancellation:          ErrCancelled,
+	FailureCategoryMalformedResponse:     ErrMalformedResponse,
+	FailureCategoryUnsupportedCapability: ErrUnsupportedCapability,
+	FailureCategoryUnknown:               ErrUnknownFailure,
+}
+
+// failureCategorySentinel reports c's own sentinel, and whether c is a
+// member with one — eventRegistryEntry's bound-check idiom, restated.
+func failureCategorySentinel(c FailureCategory) (error, bool) {
+	if c == 0 || c >= failureCategoryLimit {
+		return nil, false
+	}
+	return failureCategorySentinels[c], true
 }
 
 // DeliveryPath is which carrier handed a [Failure] over (V-FAIL-11,
@@ -308,6 +358,23 @@ func (f *Failure) Unwrap() error {
 		return nil
 	}
 	return f.cause
+}
+
+// Is reports whether target is this failure's own category sentinel
+// (R-AIP-014, design.md D4) — errors.Is's extension point, consulted at
+// every hop before Unwrap is tried, so errors.Is(err, ai.ErrRateLimited)
+// works without a caller unwrapping first. It matches only the one sentinel
+// [Failure.Category] maps to; every other target — including another
+// category's sentinel and the wrapped cause itself — is left for Unwrap to
+// reach on the next hop, which is how [Failure.Unwrap] keeps the cause's own
+// sentinel chain intact rather than shadowing it here. A nil *Failure
+// matches nothing (NFR-AIP-B).
+func (f *Failure) Is(target error) bool {
+	if f == nil {
+		return false
+	}
+	sentinel, ok := failureCategorySentinel(f.category)
+	return ok && target == sentinel
 }
 
 // kind reports this payload's registered kind, satisfying the unexported

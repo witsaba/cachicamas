@@ -124,3 +124,30 @@ func TestFailureCategoryNames_Exhaustiveness(t *testing.T) {
 		}
 	}
 }
+
+// TestFailureCategorySentinels_Exhaustiveness completes task 3.5's deferred
+// half (see apply-progress.md deviation 3): every named category has its own
+// non-nil sentinel, the sentinel array's length tracks failureCategoryLimit,
+// and — R-AIP-014's "no umbrella sentinel" restated internally — every
+// sentinel in the array is a distinct value, so no two categories could ever
+// share one by accident.
+func TestFailureCategorySentinels_Exhaustiveness(t *testing.T) {
+	if got, want := len(failureCategorySentinels), int(failureCategoryLimit); got != want {
+		t.Fatalf("len(failureCategorySentinels) = %d, want %d (failureCategoryLimit) — an appended "+
+			"category must move the array bound with it", got, want)
+	}
+
+	seen := make(map[error]FailureCategory, int(failureCategoryLimit)-1)
+	for c := FailureCategory(1); c < failureCategoryLimit; c++ {
+		sentinel := failureCategorySentinels[c]
+		if sentinel == nil {
+			t.Errorf("failureCategorySentinels[%d] is nil for named member %v, want its own sentinel", c, c)
+			continue
+		}
+		if owner, dup := seen[sentinel]; dup {
+			t.Errorf("category %v and category %v share the same sentinel %v — R-AIP-014 forbids an "+
+				"umbrella sentinel; each category must have its own", c, owner, sentinel)
+		}
+		seen[sentinel] = c
+	}
+}

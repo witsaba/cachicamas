@@ -567,6 +567,244 @@ func TestFailure_NoAccessorCombinesPartialOutputAndDelivery(t *testing.T) {
 	})
 }
 
+// R-AIP-013 — the same concrete type is returned pre-stream and carried as
+// the terminal event's payload mid-stream. No second failure type, no
+// second vocabulary, no converter. validation.go's AI-04 rule-class
+// registry is untouched by this milestone — a review-only, git-verifiable
+// fact (`git diff` shows no edit to validation.go), per S-ARP-026's "not
+// repeated here" precedent, not re-proven by a test.
+func TestFailure_SameConcreteTypeOnBothPaths_NoSecondTypeOrVocabulary(t *testing.T) {
+	t.Parallel()
+
+	t.Run("PreStreamFailure and MidStreamFailure return the identical dynamic type (S-AIP-041)", func(t *testing.T) {
+		t.Parallel()
+
+		pre := mustPreStreamFailure(t, ai.FailureCategoryTimeout)
+		mid := mustMidStreamFailure(t, ai.FailureCategoryTimeout, false)
+		if reflect.TypeOf(pre) != reflect.TypeOf(mid) {
+			t.Fatalf("reflect.TypeOf(pre) = %v, reflect.TypeOf(mid) = %v, want identical", reflect.TypeOf(pre), reflect.TypeOf(mid))
+		}
+	})
+
+	t.Run("the value ErrorEvent carries IS the value passed to it — no converter or copy in between (S-AIP-041/043)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustMidStreamFailure(t, ai.FailureCategoryTimeout, false)
+		event := mustErrorEvent(t, f)
+		carried, ok := event.ErrorPayload()
+		if !ok {
+			t.Fatal("event.ErrorPayload() reported no payload on an event of its own kind")
+		}
+		if carried != f {
+			t.Error("event.ErrorPayload() returned a different *Failure than the one passed to ErrorEvent, " +
+				"want the identical pointer — proof that no converter or copy runs in between")
+		}
+	})
+
+	t.Run("provider_failure.go declares exactly five types — no second failure type or vocabulary (S-AIP-042/044)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "provider_failure.go", nil, 0)
+		if err != nil {
+			t.Fatalf("parsing provider_failure.go: %v", err)
+		}
+		var declaredTypes []string
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				if typed, ok := spec.(*ast.TypeSpec); ok {
+					declaredTypes = append(declaredTypes, typed.Name.Name)
+				}
+			}
+		}
+		want := []string{"FailureCategory", "DeliveryPath", "RetryDelay", "FailureReport", "Failure"}
+		if !reflect.DeepEqual(declaredTypes, want) {
+			t.Errorf("provider_failure.go declares types %v, want exactly %v — R-AIP-013 forbids a second "+
+				"failure type or a second vocabulary", declaredTypes, want)
+		}
+	})
+
+	t.Run("no converter/mapper identifier is exported (S-AIP-043)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "provider_failure.go", nil, 0)
+		if err != nil {
+			t.Fatalf("parsing provider_failure.go: %v", err)
+		}
+		forbidden := []string{"Convert", "ToFailure", "FromFailure", "Adapt"}
+		for _, name := range exportedTopLevelNames(file) {
+			for _, bad := range forbidden {
+				if strings.Contains(name, bad) {
+					t.Errorf("provider_failure.go exports %q — R-AIP-013 forbids a converter between a "+
+						"pre-stream and a mid-stream representation; there is only one representation", name)
+				}
+			}
+		}
+	})
+}
+
+// theCategorySentinels pairs every charter category with its own sentinel
+// (design.md's exact list), named by hand — theFailureCategoryVocabulary's
+// own precedent: a table the package supplied would agree with itself no
+// matter what was added to it. It also proves R-AIP-014's "no umbrella
+// sentinel": each row's sentinel matches only its own category, so there is
+// no single value every category would match.
+var theCategorySentinels = []struct {
+	category ai.FailureCategory
+	sentinel error
+}{
+	{ai.FailureCategoryAuthentication, ai.ErrAuthentication},
+	{ai.FailureCategoryAuthorization, ai.ErrAuthorization},
+	{ai.FailureCategoryRateLimit, ai.ErrRateLimited},
+	{ai.FailureCategoryUnavailable, ai.ErrUnavailable},
+	{ai.FailureCategoryTimeout, ai.ErrTimeout},
+	{ai.FailureCategoryCancellation, ai.ErrCancelled},
+	{ai.FailureCategoryMalformedResponse, ai.ErrMalformedResponse},
+	{ai.FailureCategoryUnsupportedCapability, ai.ErrUnsupportedCapability},
+	{ai.FailureCategoryUnknown, ai.ErrUnknownFailure},
+}
+
+// R-AIP-014 — per-category sentinels for errors.Is without pre-unwrapping;
+// errors.As reaches the full failure; both survive at least one wrap;
+// Unwrap() keeps the cause's own chain intact. No umbrella sentinel: each
+// category matches its own sentinel and no other.
+func TestFailure_PerCategorySentinels_SurviveAWrapForBothIsAndAs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every category matches its own sentinel, and no other — no umbrella sentinel (S-AIP-045)", func(t *testing.T) {
+		t.Parallel()
+
+		if len(theCategorySentinels) != 9 {
+			t.Fatalf("test fixture error: theCategorySentinels has %d rows, want 9", len(theCategorySentinels))
+		}
+		for _, row := range theCategorySentinels {
+			f := mustPreStreamFailure(t, row.category)
+			if !errors.Is(f, row.sentinel) {
+				t.Errorf("category %v: errors.Is(f, its own sentinel) = false, want true", row.category)
+			}
+			for _, other := range theCategorySentinels {
+				if other.category == row.category {
+					continue
+				}
+				if errors.Is(f, other.sentinel) {
+					t.Errorf("category %v: errors.Is(f, %v's sentinel) = true, want false — no umbrella sentinel", row.category, other.category)
+				}
+			}
+		}
+	})
+
+	t.Run("errors.Is matches the failure's own category sentinel through one wrap, without pre-unwrapping (S-AIP-045)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailure(t, ai.FailureCategoryRateLimit)
+		wrapped := fmt.Errorf("adapter: %w", f)
+		if !errors.Is(wrapped, ai.ErrRateLimited) {
+			t.Error("errors.Is(wrapped, ai.ErrRateLimited) = false, want true")
+		}
+		if errors.Is(wrapped, ai.ErrTimeout) {
+			t.Error("errors.Is(wrapped, ai.ErrTimeout) = true, want false — the failure's category is rate-limit, not timeout")
+		}
+	})
+
+	t.Run("errors.As reaches the full *Failure through one wrap (S-AIP-046)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailure(t, ai.FailureCategoryUnavailable)
+		wrapped := fmt.Errorf("adapter: %w", f)
+		var got *ai.Failure
+		if !errors.As(wrapped, &got) {
+			t.Fatal("errors.As(wrapped, &got) = false, want true")
+		}
+		if got != f {
+			t.Error("errors.As reached a different *Failure than the one wrapped")
+		}
+	})
+
+	t.Run("the cause's own identity survives through Unwrap(), through the failure's own wrap and a second, adapter-added wrap (S-AIP-047)", func(t *testing.T) {
+		t.Parallel()
+
+		sentinelCause := errors.New("upstream io timeout")
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryTimeout, Cause: sentinelCause})
+		if !errors.Is(f, sentinelCause) {
+			t.Error("errors.Is(f, sentinelCause) = false, want true — the cause's own identity must survive through Unwrap()")
+		}
+		wrapped := fmt.Errorf("adapter: %w", f)
+		if !errors.Is(wrapped, sentinelCause) {
+			t.Error("errors.Is(wrapped, sentinelCause) = false, want true — through both the adapter's wrap and the failure's own Unwrap()")
+		}
+		// The category sentinel is still reachable through the same wrap —
+		// the cause's chain and the category sentinel coexist, neither
+		// shadowing the other.
+		if !errors.Is(wrapped, ai.ErrTimeout) {
+			t.Error("errors.Is(wrapped, ai.ErrTimeout) = false, want true — the category sentinel must remain reachable alongside the cause's own chain")
+		}
+	})
+}
+
+// R-AIP-015 — either delivery path alone classifies every failure; the
+// accessor sets on both paths are identical (they are the same concrete
+// type, S-AIP-041, so this is the behavioral consequence of that structural
+// fact, proven per category rather than asserted once).
+func TestFailure_BothDeliveryPaths_ClassifyEveryCategoryWithIdenticalAccessors(t *testing.T) {
+	t.Parallel()
+
+	for _, row := range theCategorySentinels {
+		t.Run(row.category.String(), func(t *testing.T) {
+			t.Parallel()
+
+			// "a pre-stream-only consumer" — never sees an Event at all.
+			preStream := mustPreStreamFailure(t, row.category)
+
+			// "a terminal-event-only consumer" — only ever reaches a
+			// *Failure through event.ErrorPayload(), after MidStreamFailure
+			// + ErrorEvent.
+			mid, err := ai.MidStreamFailure(ai.FailureReport{Category: row.category}, false)
+			if err != nil {
+				t.Fatalf("ai.MidStreamFailure(category=%v) returned %v, want no failure", row.category, err)
+			}
+			event := mustErrorEvent(t, mid)
+			terminalEventOnly, ok := event.ErrorPayload()
+			if !ok {
+				t.Fatal("event.ErrorPayload() reported no payload on an event of its own kind")
+			}
+
+			// Both consumers classify the same category through the exact
+			// same accessor calls (S-AIP-048/049).
+			if preStream.Category() != terminalEventOnly.Category() {
+				t.Errorf("Category(): pre-stream = %v, terminal-event = %v, want equal", preStream.Category(), terminalEventOnly.Category())
+			}
+			if !errors.Is(preStream, row.sentinel) {
+				t.Errorf("a pre-stream-only consumer cannot classify category %v via errors.Is", row.category)
+			}
+			if !errors.Is(terminalEventOnly, row.sentinel) {
+				t.Errorf("a terminal-event-only consumer cannot classify category %v via errors.Is", row.category)
+			}
+
+			// Identical accessor sets on both paths (S-AIP-050): every
+			// accessor this milestone exports is callable on both values
+			// with no compile error and no panic — which is what
+			// "identical set" means for two values of one concrete type.
+			for _, f := range []*ai.Failure{preStream, terminalEventOnly} {
+				_ = f.Category()
+				_ = f.Retryable()
+				_, _ = f.RetryAfter()
+				_ = f.PartialOutput()
+				_ = f.Delivery()
+				_ = f.RawLabel()
+				_, _ = f.StatusClass()
+				_ = f.RequestID()
+				_ = f.Error()
+				_ = f.Unwrap()
+			}
+		})
+	}
+}
+
 // R-AIP-006 — an unmodelled failure becomes unknown with the raw provider
 // label preserved, bounded and sanitized; no cross-vendor normalizer ships
 // in this package.

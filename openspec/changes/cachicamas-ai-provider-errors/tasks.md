@@ -70,12 +70,12 @@ Chain strategy: size-exception
 
 ## Phase 6: AI-19.5 — One vocabulary, two delivery paths (R-AIP-013..015)
 
-- [ ] 6.1 RED S-AIP-041..044: dynamic type identical on both delivery paths; no second failure type, second vocabulary, converter, or AI-04 rule-class registry edit.
-- [ ] 6.2 GREEN: confirm structurally (delivered by Phases 1–5); add `Is(target error) bool` matching the failure's own category sentinel (D4), **no umbrella sentinel**.
-- [ ] 6.3 RED S-AIP-045..047: `errors.Is`/`errors.As` reach through at least one wrap, including the cause's own sentinel chain via `Unwrap()`.
-- [ ] 6.4 GREEN: per-category sentinels (`ErrAuthentication` … `ErrUnknownFailure`); finalize `Is`/`Unwrap` wiring.
-- [ ] 6.5 RED S-AIP-048..050: pre-stream-only and terminal-event-only consumers each classify every category; identical accessor sets on both paths.
-- [ ] 6.6 GREEN/REFACTOR: both-paths parity table test; `make test -run TestFailure`; record red/green.
+- [x] 6.1 RED S-AIP-041..044: dynamic type identical on both delivery paths (via `reflect.TypeOf` and pointer-identity through `ErrorEvent`); no second failure type/vocabulary (exact 5-type AST enumeration); no converter (AST name scan); no AI-04 rule-class registry edit (`validation.go` untouched, git-verifiable, review-only per S-ARP-026 precedent). Passed immediately — task 6.2's own "confirm structurally, delivered by Phases 1-5" — genuinely no new code needed.
+- [x] 6.2 GREEN: confirmed structurally; `Is(target error) bool` added together with 6.4's sentinels (batched — `Is` has nothing real to compare against until the sentinels exist, same class of ordering issue as deviation 3, disclosed rather than forcing an empty stub cycle).
+- [x] 6.3 RED S-AIP-045..047: `errors.Is`/`errors.As` reach through at least one wrap; the cause's own sentinel chain survives via `Unwrap()` alongside the category sentinel (both reachable through the same wrap, neither shadows the other) — batched with the sentinel/Is addition into one compile-failure-then-pass cycle.
+- [x] 6.4 GREEN: per-category sentinels (`ErrAuthentication` … `ErrUnknownFailure`, no umbrella sentinel — proven by an exhaustive N×N cross-check, not just the diagonal); finalized `Is`/`Unwrap` wiring. Completes the deferred sentinel-exhaustiveness half of task 3.5 (`TestFailureCategorySentinels_Exhaustiveness`, internal).
+- [x] 6.5 RED S-AIP-048..050: pre-stream-only vs. terminal-event-only consumers, swept across all 9 categories, each classify via `Category()` and `errors.Is`; identical accessor set exercised on both.
+- [x] 6.6 GREEN/REFACTOR: both-paths parity table test (`TestFailure_BothDeliveryPaths_ClassifyEveryCategoryWithIdenticalAccessors`); `go test -race ./src/ai/...` green; gofmt/vet clean.
 
 ## Phase 7: Cross-cutting NFRs and closeout
 
