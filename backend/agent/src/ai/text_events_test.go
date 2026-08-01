@@ -804,3 +804,87 @@ func receiverTypeName(expr ast.Expr) string {
 	}
 	return "?"
 }
+
+// NFR-ATE-B, S-ATE-030 — totality: no exported function or method of the
+// three text-event kinds panics for any input, including the zero value of
+// each payload, a zero block index, a zero-length fragment, a fragment that
+// is invalid UTF-8 alone, and an over-long fragment. Mirrors
+// completion_test.go's TestResponseEvents_ExtremeInputs_NeverPanic shape:
+// each case recovers its own panic, so one panicking case does not hide the
+// rest.
+func TestTextEvents_ExtremeInputs_NeverPanic(t *testing.T) {
+	t.Parallel()
+
+	// An overlong two-byte encoding of NUL: invalid UTF-8 on its own, with no
+	// dependency on where a legal rune boundary happens to fall.
+	invalidUTF8Alone := string([]byte{0xC0, 0xAF})
+
+	cases := []struct {
+		name string
+		act  func()
+	}{
+		{"the zero TextBlockStart, read every way", func() {
+			var zero ai.TextBlockStart
+			_ = zero.Block()
+			_ = zero.String()
+			_ = zero.GoString()
+		}},
+		{"NewTextBlockStart with block index 0", func() {
+			_, _ = ai.NewTextBlockStart(0)
+		}},
+		{"the zero TextDelta, read every way", func() {
+			var zero ai.TextDelta
+			_ = zero.Block()
+			_ = zero.Delta()
+			_ = zero.String()
+			_ = zero.GoString()
+		}},
+		{"NewTextDelta with block index 0 and a zero-length fragment", func() {
+			_, _ = ai.NewTextDelta(0, "")
+		}},
+		{"NewTextDelta with a fragment that is invalid UTF-8 alone", func() {
+			_, _ = ai.NewTextDelta(1, invalidUTF8Alone)
+		}},
+		{"NewTextDelta with a fragment one byte over MaxTextLen", func() {
+			_, _ = ai.NewTextDelta(1, strings.Repeat("a", ai.MaxTextLen+1))
+		}},
+		{"the zero TextBlockEnd, read every way", func() {
+			var zero ai.TextBlockEnd
+			_ = zero.Block()
+			_ = zero.String()
+			_ = zero.GoString()
+		}},
+		{"NewTextBlockEnd with block index 0", func() {
+			_, _ = ai.NewTextBlockEnd(0)
+		}},
+		{"wrong-kind accessors on the zero Event", func() {
+			_, _ = ai.Event{}.TextBlockStart()
+			_, _ = ai.Event{}.TextDelta()
+			_, _ = ai.Event{}.TextBlockEnd()
+		}},
+		{"CheckEmit over an unstamped, unconstructed zero Event", func() {
+			_ = ai.CheckEmit(ai.Event{})
+		}},
+		{"CheckStream over a stream mixing all three kinds, unstamped and invalid on failure", func() {
+			start, _ := ai.NewTextBlockStart(0) // deliberately invalid/zero on failure
+			delta, _ := ai.NewTextDelta(0, invalidUTF8Alone)
+			end, _ := ai.NewTextBlockEnd(0)
+			report := ai.CheckStream([]ai.Event{start, delta, end})
+			_ = report.Violation()
+			_ = report.Terminated()
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("panicked: %v", recovered)
+				}
+			}()
+			tc.act()
+		})
+	}
+}
