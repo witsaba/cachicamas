@@ -12,6 +12,11 @@
 
 ## Entry point for the resuming agent
 
+**STATUS 2026-08-01: COMPLETE.** All four leaves are implemented, tested and committed (`ad4c942`, `634bec9`, `0f6097b`, `22d449d`, in order). Every item and ordered-work box below is checked, with RED/GREEN transcripts and bite proofs recorded under each leaf's "evidence" section. `make test -race` and `make lint` are both green as of the last commit. The closing checklist at the bottom of this file is fully checked. Nothing below this paragraph needs re-deriving; it is the historical record of how the milestone was built, kept for the Wave 1 verify phase and for whoever designs the region the sibling to this one adds next.
+
+<details>
+<summary>Original entry point, as the tasks phase and Phase 0 left it (historical)</summary>
+
 **Nothing is implemented.** No Go file has been touched; every leaf box below is unchecked.
 
 **§ Phase 0 is partly done.** It ran on 2026-08-01 against finished Wave 1 head `1c4171e`. **Rows 1–6 of `design.md` § 13 are resolved** — read them there, not here, and do **not** re-derive them. **Rows 7 and 8 remain open** because AI-11 is still being implemented in `../ai-11`; both carry a decided branch and a two-step mechanical decision procedure (`design.md` § 13.2). **Task 0.4 — the pre-edit baseline — has not run and is yours.**
@@ -23,6 +28,8 @@ Then work **§ Phase AI-12.1 → AI-12.2 → AI-12.3 → AI-12.4**, in that orde
 Every decision the phases need is already made in `design.md` §§ 4–8 and marked `[provisional]`. **A `[provisional]` decision may be changed only by recording the reason in `design.md` before writing the test**; absent a recorded reason, implement what is written.
 
 The first thing AI-12.1 does is the § 2.2 extraction — moving `NewRequest`'s rule list to `draft.rules()`. That is the one place this milestone touches lines AI-10.3 is writing. **Rebase onto the advancing Wave 1 head; never merge, never push, never `git stash`** (the stash stack is shared across worktrees — Engram #2292).
+
+</details>
 
 ## Node types and what they close on
 
