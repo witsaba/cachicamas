@@ -244,7 +244,7 @@ The reason the table is strict rather than permissive: an adapter maps **from** 
 - **S-AMR-043** — Given a reasoning part in a user message, when the request is constructed, then it fails with `ErrMisplaced` at that part's composed position.
 - **S-AMR-044** — Given a tool-result part in an assistant message, when the request is constructed, then it fails with `ErrMisplaced`.
 - **S-AMR-045** — Given a text part in a tool message, when the request is constructed, then it fails with `ErrMisplaced`.
-- **S-AMR-046** — Given each of the four permitted cells in turn, when a request is built holding it, then construction succeeds — so the table is proven in both directions, twelve cells total.
+- **S-AMR-046** — Given each of the five permitted cells in turn, when a request is built holding it, then construction succeeds — so the table is proven in both directions, twelve cells total.
 
 ---
 
