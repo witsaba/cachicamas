@@ -122,7 +122,7 @@ whose `prefix` parameter exists for exactly one caller that does not exist yet. 
 
 | Risk | Mitigation |
 | --- | --- |
-| **Removing `Content` breaks AI-05's tests.** | It is the intended disposition of `R-AMR-009`'s second scenario, which AI-05 wrote as a placeholder. The migration is mechanical, in this diff, and the tests keep asserting the same properties |
+| **Removing `Content` breaks AI-05's tests.** | It is the intended disposition of `R-AMSG-009`'s second scenario, which AI-05 wrote as a placeholder. The migration is mechanical, in this diff, and the tests keep asserting the same properties |
 | **Concurrent milestones touch the same package.** AI-08 (tool declarations) and AI-13 (finish reasons, usage) are in flight | Disjoint file sets by construction: this change adds `content_part*.go` and `text_content.go` and modifies only `message.go` and AI-05's two test files. It reads `validation.go` and `role.go` and edits neither |
 | **One Go type for every kind removes type-level narrowing.** | Conceded openly — `decision.md` § 10, the largest concession. Layer 1's consumers loop over heterogeneous content, so a narrowed signature is one the loop cannot call |
 | **The compile-time proof shells out to the Go toolchain.** | Precedented: AI-00's import guard already runs `go list -deps -test`. The scratch programs live under `testdata/`, which the go tool and golangci-lint both exclude from `./...` |

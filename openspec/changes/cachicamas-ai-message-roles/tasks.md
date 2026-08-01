@@ -75,7 +75,7 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.483s
 - [x] **GREEN** — `Message` stores the role; `NewMessage` sets it; `Role()` returns it. All three subtests `--- PASS`.
 - [x] **REFACTOR** — none needed; the implementation is three lines.
 
-**Proves:** `R-AMR-002`, `S-AMR-004`, `S-AMR-005`.
+**Proves:** `R-AMSG-002`, `S-AMSG-004`, `S-AMSG-005`.
 
 **This is the milestone's walking skeleton**, and its cost is worth recording: it forced the `Content` seam into existence at item 1 rather than at AI-05.2, because a message with no content is not a message. The external test package cannot implement an interface whose only method is unexported, so the test's content helper satisfies it by **embedding**:
 
@@ -110,7 +110,7 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.276s
 - [x] **GREEN** — the `roleNames` table lands, indexed by the constant, with `roleName` as its bounds-checked lookup; `NewMessage` composes one rule through `FirstFailure`, reporting `ErrNotInVocabulary` at `At("role")`. All four subtests `--- PASS`.
 - [x] **REFACTOR** — none. The table is deliberately introduced *here*, driven by validity, and only widened by item 3 to serve rendering and parsing as well.
 
-**Proves:** `R-AMR-003`, `S-AMR-006` … `S-AMR-009`. The test also asserts that a *different* sentinel does **not** match, so a fail-everything implementation fails; that the position is `role`; and that the returned message is the zero value.
+**Proves:** `R-AMSG-003`, `S-AMSG-006` … `S-AMSG-009`. The test also asserts that a *different* sentinel does **not** match, so a fail-everything implementation fails; that the position is `role`; and that the returned message is the zero value.
 
 **The zero role is a case, not a courtesy.** `iota + 1` is what makes `Role(0)` — a struct field nobody set — indistinguishable from a wild value at the boundary. A vocabulary starting at `iota` would have made the first subtest pass for the wrong reason.
 
@@ -146,7 +146,7 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.481s
 - [x] **GREEN** — `String` renders the table entry or `role(N)`; `ParseRole` scans the ordered table and composes two rules through `FirstFailure` — `ErrEmpty` first, `ErrNotInVocabulary` second. All five subtests `--- PASS`.
 - [x] **REFACTOR** — none in this step; the file's contract documentation was written at the end of the phase.
 
-**Proves:** `R-AMR-004`, `S-AMR-010` … `S-AMR-014`.
+**Proves:** `R-AMSG-004`, `S-AMSG-010` … `S-AMSG-014`.
 
 **Sixteen rejected forms, and each class is deliberate.** Case variants and padded forms, because a parser that folds case is a vocabulary that is advisory. Provider spellings — `system`, `developer`, `human`, `model` — because `V-REQ-01`'s last clause puts that mapping in an adapter. And `role(4)`, because a diagnostic rendering that round-tripped would be a second, undeclared way into the vocabulary.
 
@@ -172,7 +172,7 @@ The scratch violation was two lines — `RoleScratch` appended to the constant b
 
 **The bite was strengthened during this step.** The first attempt used `continue` after the missing-entry check, so the scratch member produced **one** failure. It was removed so the parse and construction assertions also run, and the bite now reports all three symptoms — the tabulation gap, the broken round trip, and the member its own constructor rejects. A pin that reports one of three is a weaker claim than the pin makes.
 
-**Proves:** `R-AMR-005`, `S-AMR-015`, `S-AMR-016`.
+**Proves:** `R-AMSG-005`, `S-AMSG-015`, `S-AMSG-016`.
 
 **Why it can bite at all** is `design.md` § 3 rule 3, and it is the part worth copying: `Roles()` enumerates the **constant space**, not the name table. An enumeration derived from `roleNames` would have listed exactly the members that have an entry, so the omission would have been invisible and the pin decorative. AI-07, AI-08 and AI-13 each land a closed vocabulary; the rule is stated in `role.go`'s own file comment so it travels with the code rather than with this document.
 
@@ -199,12 +199,12 @@ The scratch violation was two lines — `RoleScratch` appended to the constant b
 FAIL	github.com/cachicamas/backend/agent/src/ai	0.288s
 ```
 
-Note which subtest is **absent** from that list: *an unconstructed message has no identity* passed against the zero-returning stub, as it must — it is the assertion pinning `S-AMR-009` and `S-AMR-019`, and a stub that minted eagerly would have failed it.
+Note which subtest is **absent** from that list: *an unconstructed message has no identity* passed against the zero-returning stub, as it must — it is the assertion pinning `S-AMSG-009` and `S-AMSG-019`, and a stub that minted eagerly would have failed it.
 
 - [x] **GREEN** — `lastMessageID atomic.Uint64`, `mintMessageID` on the success path of `NewMessage` only, `String` rendering `msg-N` and `msg-unset`. All five subtests `--- PASS`, with the concurrent one under `-race`.
 - [x] **REFACTOR** — none in this step.
 
-**Proves:** `R-AMR-006`, `S-AMR-017` … `S-AMR-021`.
+**Proves:** `R-AMSG-006`, `S-AMSG-017` … `S-AMSG-021`.
 
 **The C3 question, answered in the code rather than only here.** A package-level counter is what defect **C3** was, so `lastMessageID`'s GoDoc carries the distinction: C3's contract was a statement about the counter's *value* — "every stream's first event carries 1, every stream is independently contiguous" — which a process-global cannot satisfy for the second stream in a process. `V-REQ-03` states no property of the value at all. The observable contract is that two messages differ, and nothing would change if the counter were replaced by random bytes tomorrow.
 
@@ -230,7 +230,7 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.317s
 - [x] **GREEN** — `Message` gains a `content []Content` field, stored and returned. All four subtests `--- PASS`.
 - [x] **REFACTOR** — none, and one thing was deliberately **not** done: the sequence is stored by reference and returned by reference. Nothing yet demands a copy, and AI-05.3 is the leaf that drives both copies in. Introducing them here would have cost AI-05.3 its red.
 
-**Proves:** `R-AMR-007`, `S-AMR-022` … `S-AMR-024`.
+**Proves:** `R-AMSG-007`, `S-AMSG-022` … `S-AMSG-024`.
 
 **The repeated-element case is the one that carries the item.** Three distinct elements round-trip through a set, a map keyed by the element, or anything that deduplicates. `[a, a, a]` and `[a, b, a, a, c, b]` do not, and the failure would otherwise be a repeated tool call or two identical text parts silently disappearing from a request.
 
@@ -254,7 +254,7 @@ The second subtest — *both rules violated reports the first in the documented 
 - [x] **GREEN** — a second rule in `FirstFailure`, reporting `ErrEmpty` at `At("content")`. Both subtests `--- PASS`.
 - [x] **REFACTOR** — none.
 
-**Proves:** `R-AMR-008`, `S-AMR-025` … `S-AMR-027`. The order subtest runs 256 times and asserts an identical rendered failure on every run.
+**Proves:** `R-AMSG-008`, `S-AMSG-025` … `S-AMSG-027`. The order subtest runs 256 times and asserts an identical rendered failure on every run.
 
 ---
 
@@ -282,7 +282,7 @@ FAIL	github.com/cachicamas/backend/agent/src/ai	0.311s
 - [x] **GREEN** — `slices.Clone(content)` in `NewMessage`. Both subtests `--- PASS`.
 - [x] **REFACTOR** — none.
 
-**Proves:** `R-AMR-010`, `S-AMR-031`, `S-AMR-032`.
+**Proves:** `R-AMSG-010`, `S-AMSG-031`, `S-AMSG-032`.
 
 **Neither mutation shape reallocates**, on purpose. An append beyond capacity moves the caller's slice to a new array and the defect hides itself; in-place replacement and backing-array reuse are the two shapes that expose it.
 
@@ -310,13 +310,13 @@ The fourth subtest — *the role vocabulary cannot be rewritten* — passed agai
 - [x] **GREEN** — `slices.Clone(m.content)` in `Content()`. All four subtests `--- PASS`.
 - [x] **REFACTOR** — the contract GoDoc for `message.go` written: the seam's open door, the copy contract as two mechanisms, the C3 distinction, and the rule order on `NewMessage`. Each file's banner comment was also separated from its `package` clause by a blank line — revive reads an attached banner as a second package comment, and `validation.go` already uses the separated shape.
 
-**Proves:** `R-AMR-010`, `S-AMR-002`, `S-AMR-033` … `S-AMR-035`.
+**Proves:** `R-AMSG-010`, `S-AMSG-002`, `S-AMSG-033` … `S-AMSG-035`.
 
 ---
 
 ### T-AMR-10 — Item 3 *(appended, pin)*: no input causes a panic
 
-Appended to AI-05.3's test list during this change, per doc 0002's rule that a newly discovered *test case* is appended to the owning leaf's list rather than chased ad hoc. It was written into `spec.md` as `R-AMR-011` during the spec phase, so it is recorded as an append rather than presented as if doc 0002 had listed it.
+Appended to AI-05.3's test list during this change, per doc 0002's rule that a newly discovered *test case* is appended to the owning leaf's list rather than chased ad hoc. It was written into `spec.md` as `R-AMSG-011` during the spec phase, so it is recorded as an append rather than presented as if doc 0002 had listed it.
 
 - [x] **PIN** — `TestMessage_ExtremeInputs_NeverPanics`, green from birth. Six shapes: a nil content element; nil and constructed elements mixed; ten thousand elements; every one of the 256 values of the role's underlying type rendered, parsed and constructed with; the zero message read every way; and an empty and a 40,000-byte name parsed as a role. All `--- PASS`.
 
@@ -324,7 +324,7 @@ Appended to AI-05.3's test list during this change, per doc 0002's rule that a n
 
 **Its value is forward-looking and specific.** AI-06.3 adds a rule that rejects an unconstructed content part and AI-10 adds rules at request scope; both touch this constructor, and both are written against inputs — a nil element, a very large sequence, a role at the end of its range — that a rule is easy to write without considering. It is the same standing AI-04's totality item has, one milestone earlier in the chain that will exercise it.
 
-**Proves:** `R-AMR-011`, `S-AMR-036` … `S-AMR-038`.
+**Proves:** `R-AMSG-011`, `S-AMSG-036` … `S-AMSG-038`.
 
 ---
 
@@ -333,11 +333,11 @@ Appended to AI-05.3's test list during this change, per doc 0002's rule that a n
 Ordered by cost of a missed defect. The first three run; the rest are inspection.
 
 - [x] **V-1** — `make test` in `backend/agent/` green under `-race`, both packages. `ok github.com/cachicamas/backend/agent/src/agenttest 1.281s` · `ok github.com/cachicamas/backend/agent/src/ai 1.534s`. 92 passing cases in total, **45 of them this milestone's**.
-- [x] **V-2** — Both AI-00 import guards pass (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`), and `go.mod` still carries zero `require` directives (`NFR-AMR-A`). The two new files import `slices`, `strconv` and `sync/atomic` — standard library only.
+- [x] **V-2** — Both AI-00 import guards pass (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`), and `go.mod` still carries zero `require` directives (`NFR-AMSG-A`). The two new files import `slices`, `strconv` and `sync/atomic` — standard library only.
 - [x] **V-3** — `make lint` (`go vet ./...` then `golangci-lint run` with govet, errcheck, staticcheck, unused and revive): **0 issues**.
-- [x] **V-4** — Every test function follows `Test<Subject>_<Behavior>_<Expectation>` and carries a banner citing its leaf ID (`NFR-AMR-D`).
-- [x] **V-5** — This change declares **no error variable, no error type and no sentinel** (`NFR-AMR-B`). Every failure is `Invalid(ErrNotInVocabulary | ErrEmpty, At(…))` composed through `FirstFailure` — exactly what AI-04's `tasks.md` § Next predicted AI-05 would need, and nothing more.
-- [x] **V-6** — The content seam exposes one unexported method and nothing else: no payload, no kind, no accessor, no constructor, no rendering, and no validation of an element (`R-AMR-009`, `S-AMR-028` … `S-AMR-030`). Both of AI-06.1's properties are untouched, and the embedding bypass is documented in the seam's own GoDoc rather than left to be discovered.
+- [x] **V-4** — Every test function follows `Test<Subject>_<Behavior>_<Expectation>` and carries a banner citing its leaf ID (`NFR-AMSG-D`).
+- [x] **V-5** — This change declares **no error variable, no error type and no sentinel** (`NFR-AMSG-B`). Every failure is `Invalid(ErrNotInVocabulary | ErrEmpty, At(…))` composed through `FirstFailure` — exactly what AI-04's `tasks.md` § Next predicted AI-05 would need, and nothing more.
+- [x] **V-6** — The content seam exposes one unexported method and nothing else: no payload, no kind, no accessor, no constructor, no rendering, and no validation of an element (`R-AMSG-009`, `S-AMSG-028` … `S-AMSG-030`). Both of AI-06.1's properties are untouched, and the embedding bypass is documented in the seam's own GoDoc rather than left to be discovered.
 - [x] **V-7** — Each vocabulary member carries its citable case in `role.go`'s file comment: doc 0001 § 3.3 row 5 for `RoleUser` and `RoleAssistant`, doc 0002 AI-10.3 item 3 for `RoleTool`. The absence of `RoleSystem` carries its reason and its append path.
 - [x] **V-8** — Nothing in the two new files decides anything by unordered iteration. Neither contains a map; `roleNames` is an indexed slice and its GoDoc says why, following AI-04's `ruleClasses`.
 - [x] **V-9** — No exported declaration names a content-part kind, a payload, a request, a tool, a stream or a provider concept. The exported surface is `Role`, `RoleUser`, `RoleAssistant`, `RoleTool`, `Roles`, `String`, `ParseRole`, `Content`, `MessageID`, `IsZero`, `String`, `Message`, `NewMessage`, `ID`, `Role`, `Content`.
@@ -365,7 +365,7 @@ For the reviewer, in priority order — the first two are where a defect is expe
 1. Every test-list item of AI-05.1, AI-05.2 and AI-05.3 closed with recorded red and green output, in order. **Met** — nine reds across nine items, one of which needed the state-before-red recorded first.
 2. The exhaustiveness pin is shown to bite and the scratch violation removed. **Met** — three recorded failures, then `--- PASS`.
 3. The verification pass V-1 … V-12 recorded complete. **Met.**
-4. `spec.md`'s `R-AMR-001` … `R-AMR-011` hold. **Met.**
+4. `spec.md`'s `R-AMSG-001` … `R-AMSG-011` hold. **Met.**
 5. **doc 0002's own acceptance criterion:** a message is constructible only through the rules, its content order round-trips, and a caller cannot mutate a constructed message from outside. **Met**, by T-AMR-2/T-AMR-7, T-AMR-6, and T-AMR-8/T-AMR-9 respectively.
 
 ## Next

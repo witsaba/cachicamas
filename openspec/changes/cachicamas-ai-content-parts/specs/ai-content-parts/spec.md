@@ -17,7 +17,7 @@ Constrain the runtime behavior of Layer 1's content part: what it is, how a cons
 
 ## Relationship to AI-05's spec
 
-`R-AMR-009` — *"the content seam decides nothing about a content part"* — was written by AI-05 as a deliberate placeholder, and its second scenario pinned that `NewMessage` rejects no content element so that AI-06.3 item 1 could fail before it passed. **This spec supersedes that scenario.** `R-ACP-006` is its replacement, and AI-05's requirement is otherwise unaffected: the seam still names the position a part occupies, it is simply no longer an interface. AI-05's own artifacts are not edited; the supersession is recorded here and in `design.md` § 3.
+`R-AMSG-009` — *"the content seam decides nothing about a content part"* — was written by AI-05 as a deliberate placeholder, and its second scenario pinned that `NewMessage` rejects no content element so that AI-06.3 item 1 could fail before it passed. **This spec supersedes that scenario.** `R-ACP-006` is its replacement, and AI-05's requirement is otherwise unaffected: the seam still names the position a part occupies, it is simply no longer an interface. AI-05's own artifacts are not edited; the supersession is recorded here and in `design.md` § 3.
 
 ## Definitions used by this spec
 

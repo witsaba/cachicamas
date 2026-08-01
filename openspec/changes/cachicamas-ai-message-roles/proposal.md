@@ -41,7 +41,7 @@ Listed so a reviewer can tell the inherited from the decided.
 | --- | --- |
 | `explore.md` | What exists, the three terms, the four tensions, the prior-art scan, the vocabulary check |
 | `proposal.md` | This file |
-| `specs/ai-message-roles/spec.md` | `R-AMR-001` … `R-AMR-011`, requirements over runtime behavior with WHEN/THEN scenarios |
+| `specs/ai-message-roles/spec.md` | `R-AMSG-001` … `R-AMSG-011`, requirements over runtime behavior with WHEN/THEN scenarios |
 | `design.md` | The Go shapes — every type, function and constant name, the seam, and the reusable closed-vocabulary pattern |
 | `tasks.md` | AI-05.1/.2/.3 as phases, one task per test-list item, with the red→green record and the budget reassessment |
 | `backend/agent/src/ai/role.go` | **AI-05.1's deliverable.** The closed role vocabulary, its rendering, its parser and its enumeration |
@@ -121,7 +121,7 @@ Post-merge reversal has the shape worth stating. The role vocabulary is cheap to
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| The seam decides AI-06.1 by accident | Medium | **High** — it is the keystone of wave 1, and C1/C2 both came from deciding these properties separately | `R-AMR-009` makes it checkable: the seam exposes no payload, kind, accessor, constructor or rendering. The three claims in § "The content-part seam" are each a review step |
+| The seam decides AI-06.1 by accident | Medium | **High** — it is the keystone of wave 1, and C1/C2 both came from deciding these properties separately | `R-AMSG-009` makes it checkable: the seam exposes no payload, kind, accessor, constructor or rendering. The three claims in § "The content-part seam" are each a review step |
 | The role vocabulary is wrong — `system` is needed | Medium | Low | Additive. The pin forces the table update in the same commit as the constant, so a half-added role cannot merge |
 | Copy semantics proven in one direction only | Medium | **High** — doc 0002 names it the most confusing class of failure in a streaming package | Two separate test-list items, two separate mechanisms, and the red test reproduces the variadic aliasing hazard specifically |
 | Minted identity is read as defect **C3** returning | Medium | Low | `design.md` § 5.2 argues the distinction: C3's contract was about the counter's *value* per stream; `V-REQ-03` says nothing about the value, only that two messages differ |
@@ -154,6 +154,6 @@ Post-merge reversal has the shape worth stating. The role vocabulary is cheap to
 
 ## Notes for the following phases
 
-- **`spec.md`** — requirement IDs `R-AMR-0NN`, scenarios `S-AMR-0NN`. The system under test is runtime behavior, as in AI-04; every scenario is independently verifiable by a test.
+- **`spec.md`** — requirement IDs `R-AMSG-0NN`, scenarios `S-AMSG-0NN`. The system under test is runtime behavior, as in AI-04; every scenario is independently verifiable by a test.
 - **`design.md`** — owns every Go spelling, the seam's exact shape and its GoDoc, and the four-rule closed-vocabulary pattern AI-07, AI-08 and AI-13 reuse. It also restates AI-04's red-step convention.
 - **`tasks.md`** — three phases, one per node; one task per test-list item; red and green evidence per item; the pin's bite proof; the budget reassessment; the verification pass last.

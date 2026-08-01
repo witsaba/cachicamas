@@ -66,12 +66,12 @@ Three constants, four types, eight functions and methods. A consumer builds a me
 | Name | Chosen because | Rejected alternative, and why |
 | --- | --- | --- |
 | `Role`, `RoleUser`, … | `Role` is `V-REQ-01`'s own noun. The `Role` prefix on each constant is the standard-library shape (`http.StateNew`, `time.January` by package) and it keeps the constants readable at a call site in another package: `ai.RoleAssistant` says what it is without an import alias | A nested `role.User` package. It would put a domain noun in its own package before the domain has three of them, and ADR 0005 § D2 fixes `src/ai` as the Layer 1 package |
-| `Roles()` | A function, not a variable, because a package-level `var Roles []Role` is mutable by any consumer — the exact defect `R-AMR-001`'s second scenario tests for. The plural reads as the set | `AllRoles()`, `RoleValues()`. Both are longer and neither says more. A `var` is rejected on mutability, not on style |
+| `Roles()` | A function, not a variable, because a package-level `var Roles []Role` is mutable by any consumer — the exact defect `R-AMSG-001`'s second scenario tests for. The plural reads as the set | `AllRoles()`, `RoleValues()`. Both are longer and neither says more. A `var` is rejected on mutability, not on style |
 | `ParseRole` | `Parse<Type>` is the standard library's own convention for the string→value direction (`time.ParseDuration`, `netip.ParseAddr`, `strconv.ParseInt`), and pairing it with `String()` makes the round-trip obvious | `RoleFromString`, `NewRole`. `NewRole` reads like a constructor for a *new* role, which is exactly what a closed vocabulary does not have |
 | `Content` | It is the word `V-REQ-02` uses — "one role plus ordered **content**" — and it is deliberately **not** `ContentPart`. `V-REQ-04` **content part** is AI-06's term, and naming the seam after it would claim the thing AI-06 defines | `Part`, `ContentPart`, `Element`. `ContentPart` claims `V-REQ-04`; `Part` is the name AI-06 may well want for the real thing and a collision inside package `ai` is a rename across four milestones; `Element` says nothing |
 | `MessageID` | The register's term is "message identity"; `MessageIdentity` is the literal spelling and nobody writes it twice. `ID` is Go's initialism and `revive` requires the capitalisation | `MessageIdentity` (long), `MsgID` (abbreviated for no gain), a bare `uint64` or `string` alias — rejected in § 5.2, because a caller can forge, reuse or compute any of them |
 | `Message`, `NewMessage` | The register's noun, and the one constructor. `New<Type>` is the convention AI-04's `Invalid` deliberately broke for a call site written hundreds of times; a message is constructed once per message and reads better spelled out | `Msg`, `NewMsg`. Abbreviating the single most-cited noun in Layer 1 saves four characters and costs a lookup |
-| `ID()`, `Role()`, `Content()` | Accessors named for what they return, which is the shape AI-10's request will mirror when it walks a message | Exported fields. An exported `Content []Content` field is mutable from outside and would make `R-AMR-010` unimplementable — the whole of AI-05.3 |
+| `ID()`, `Role()`, `Content()` | Accessors named for what they return, which is the shape AI-10's request will mirror when it walks a message | Exported fields. An exported `Content []Content` field is mutable from outside and would make `R-AMSG-010` unimplementable — the whole of AI-05.3 |
 | `IsZero()` | `time.Time.IsZero`'s exact shape, and the only way a consumer can tell a constructed message from a zero-value one | `Valid()`, `Set()`. `Valid` invites the reading that an identity can be invalid for some other reason; there is only one |
 
 ### 2.2 What is deliberately not on the surface
@@ -106,7 +106,7 @@ const (
 )
 ```
 
-`iota + 1` is the whole of `S-AMR-008`: a struct field of type `Role` that nobody set holds `Role(0)`, and `Role(0)` must be rejected exactly like `Role(99)`. A vocabulary starting at `iota` makes "never set" indistinguishable from its first member, which is the defect that makes a zero value look valid — `V-REQ-04`'s constitutive complaint, one contract over.
+`iota + 1` is the whole of `S-AMSG-008`: a struct field of type `Role` that nobody set holds `Role(0)`, and `Role(0)` must be rejected exactly like `Role(99)`. A vocabulary starting at `iota` makes "never set" indistinguishable from its first member, which is the defect that makes a zero value look valid — `V-REQ-04`'s constitutive complaint, one contract over.
 
 **Rule 2 — the table is an indexed slice, and it is the single source of rendering, parsing and validity.**
 
@@ -157,7 +157,7 @@ func (r Role) String() string {
 }
 ```
 
-`time.Month` renders an out-of-range value as `%!Month(42)` — deliberately ugly, so nothing downstream mistakes it for a name. `role(42)` is the same idea in this package's register: it identifies the value for a diagnostic reader and it does not parse back, which is `S-AMR-013`. It is not caller data — a `Role` is an integer, and the only string in the failure path is the one `ParseRole` was given, which never reaches a message.
+`time.Month` renders an out-of-range value as `%!Month(42)` — deliberately ugly, so nothing downstream mistakes it for a name. `role(42)` is the same idea in this package's register: it identifies the value for a diagnostic reader and it does not parse back, which is `S-AMSG-013`. It is not caller data — a `Role` is an integer, and the only string in the failure path is the one `ParseRole` was given, which never reaches a message.
 
 `ParseRole` is **exact**: no case folding, no trimming, no aliases, no provider strings. `V-REQ-01`'s last clause is "Not a provider's own role string — an adapter maps between them", so an adapter that receives `"Assistant"` from a vendor maps it; this package does not guess. Two rules, in AI-04's documented order:
 
@@ -200,7 +200,7 @@ AI-06.1's closing checklist has four items. The seam must touch none of them.
 | AI-06.1 item | Left open by |
 | --- | --- |
 | 1(a) — an adapter in another package can read a part's payload | The seam exposes nothing readable. Accessors may land on the interface, on concrete variants, or on neither with a walk; all three remain available |
-| 1(b) — no value that skipped the constructor can validate | The seam validates nothing, and this milestone rejects no content element. `R-AMR-009`'s second scenario pins that deliberately: AI-06.3 item 1 must be able to fail before it passes |
+| 1(b) — no value that skipped the constructor can validate | The seam validates nothing, and this milestone rejects no content element. `R-AMSG-009`'s second scenario pins that deliberately: AI-06.3 item 1 must be able to fail before it passes |
 | 2 — the kind is derived from the payload | Neither exists here |
 | 3 — the procedure for adding a kind, and its guard | Nothing is registered here, so AI-06.4 registers against an empty table |
 | 4 — the accessor shape for kind and payload | No accessor exists |
@@ -259,11 +259,11 @@ func NewMessage(role Role, content ...Content) (Message, error) {
 Four properties, each answering a scenario:
 
 - **A value, not a pointer.** A `Message` is data. Returning `*Message` would make a nil message a thing that exists, and it would put the aliasing hazard AI-05.3 exists to close back at every call site that copies one.
-- **The zero `Message` on failure** (`S-AMR-009`). A caller that ignores the error gets a message whose identity reports unset, rather than one that looks constructed.
+- **The zero `Message` on failure** (`S-AMSG-009`). A caller that ignores the error gets a message whose identity reports unset, rather than one that looks constructed.
 - **Variadic content**, so `NewMessage(ai.RoleUser, part)` is the common case and `NewMessage(role, parts...)` is the general one. The second form is exactly the aliasing hazard § 6 covers.
-- **The rule order is `role` then `content`**, documented on `NewMessage` and asserted by `S-AMR-027`. It matches the declaration order of the parameters, which is the only ordering a reader will guess.
+- **The rule order is `role` then `content`**, documented on `NewMessage` and asserted by `S-AMSG-027`. It matches the declaration order of the parameters, which is the only ordering a reader will guess.
 
-Nil content **elements** are accepted. That is not an oversight: AI-06.3 item 1 is the assertion that rejects an unconstructed part, and it needs AI-06.1's strategy to know what one is. `R-AMR-009`'s second scenario pins the acceptance so it cannot be quietly tightened here.
+Nil content **elements** are accepted. That is not an oversight: AI-06.3 item 1 is the assertion that rejects an unconstructed part, and it needs AI-06.1's strategy to know what one is. `R-AMSG-009`'s second scenario pins the acceptance so it cannot be quietly tightened here.
 
 ### 5.2 Identity: minted, opaque, comparable
 
@@ -275,15 +275,15 @@ var lastMessageID atomic.Uint64
 func mintMessageID() MessageID { return MessageID{n: lastMessageID.Add(1)} }
 ```
 
-**Minted, not supplied.** `V-REQ-03` calls identity "the stable handle by which one message is **distinguished from** another". Distinctness is not a property a caller-supplied handle has: two messages built from the same string are indistinguishable and the type cannot notice. Minting makes it structural. It also makes `S-AMR-017` a real assertion — an identity computed on read, from the content say, would satisfy "comparable" and fail "does not change across reads".
+**Minted, not supplied.** `V-REQ-03` calls identity "the stable handle by which one message is **distinguished from** another". Distinctness is not a property a caller-supplied handle has: two messages built from the same string are indistinguishable and the type cannot notice. Minting makes it structural. It also makes `S-AMSG-017` a real assertion — an identity computed on read, from the content say, would satisfy "comparable" and fail "does not change across reads".
 
 **Opaque and comparable.** A struct with one unexported field. A `uint64` or `string` alias would be comparable too, and would also be forgeable, reusable and arithmetic — a caller could write `id + 1` and get another message's identity. `netip.Addr` and `time.Time` take the same shape for the same reason.
 
-**Not defect C3, and the argument matters.** A package-level atomic counter is what **C3** was, and `V-STR-13` records the lesson: "the fix is not a smaller counter; it is putting the counter where the stream is." C3's contract was a statement about the counter's *value* — "every stream's first event carries 1, every stream is independently contiguous" — which a process-global counter cannot satisfy for the second stream in a process. `V-REQ-03` states no property of the value at all. It asks that two messages be distinguishable, and a monotonic process-wide counter satisfies that for every message in the process, not merely the first request's. The observable contract is `S-AMR-018` (two messages differ) and `S-AMR-021` (the rendering is diagnostic only), and neither would change if the counter were replaced by random bytes tomorrow.
+**Not defect C3, and the argument matters.** A package-level atomic counter is what **C3** was, and `V-STR-13` records the lesson: "the fix is not a smaller counter; it is putting the counter where the stream is." C3's contract was a statement about the counter's *value* — "every stream's first event carries 1, every stream is independently contiguous" — which a process-global counter cannot satisfy for the second stream in a process. `V-REQ-03` states no property of the value at all. It asks that two messages be distinguishable, and a monotonic process-wide counter satisfies that for every message in the process, not merely the first request's. The observable contract is `S-AMSG-018` (two messages differ) and `S-AMSG-021` (the rendering is diagnostic only), and neither would change if the counter were replaced by random bytes tomorrow.
 
-The one thing the counter must be is **race-free**, because messages are constructed concurrently the moment Layer 2 exists. `atomic.Uint64` rather than a mutex, and `S-AMR-020` proves it under `-race` rather than by inspection.
+The one thing the counter must be is **race-free**, because messages are constructed concurrently the moment Layer 2 exists. `atomic.Uint64` rather than a mutex, and `S-AMSG-020` proves it under `-race` rather than by inspection.
 
-`MessageID.String()` renders `msg-7`, and `msg-unset` for the zero value. There is deliberately **no** `ParseMessageID`: an identity a consumer can reconstruct from text is a supplied identity wearing a rendering, and `S-AMR-021` pins the absence.
+`MessageID.String()` renders `msg-7`, and `msg-unset` for the zero value. There is deliberately **no** `ParseMessageID`: an identity a consumer can reconstruct from text is a supplied identity wearing a rendering, and `S-AMSG-021` pins the absence.
 
 ---
 
@@ -305,12 +305,12 @@ Two mechanisms close it, and they are genuinely two:
 
 | Direction | Mechanism | Scenario |
 | --- | --- | --- |
-| In | `slices.Clone(content)` in `NewMessage` | `S-AMR-031`, `S-AMR-032` |
-| Out | `slices.Clone(m.content)` in `Content()` | `S-AMR-033`, `S-AMR-034`, `S-AMR-035` |
+| In | `slices.Clone(content)` in `NewMessage` | `S-AMSG-031`, `S-AMSG-032` |
+| Out | `slices.Clone(m.content)` in `Content()` | `S-AMSG-033`, `S-AMSG-034`, `S-AMSG-035` |
 
 A design with only the first passes every construction test and fails the moment two consumers read the same message. A design with only the second passes every read test and fails on the spread above. The test list has two items because the design has two mechanisms, and each red step reproduces its own hazard rather than asserting immutability in the abstract.
 
-`Roles()` allocates for the same reason (`S-AMR-002`), which is why it is a function.
+`Roles()` allocates for the same reason (`S-AMSG-002`), which is why it is a function.
 
 **What copy semantics does not promise, and must not be read as promising:** this milestone copies the *sequence*. Whether a content part's own payload can be mutated after construction is a property of the part, and the part is AI-06's. Saying otherwise here would be `V-REQ-07` sealing decided from outside AI-06.1 — the shortest route to the exact defect the seam exists to avoid.
 
@@ -374,7 +374,7 @@ Nine functions, in the order they are written. Each carries a banner comment cit
 
 - **No `MarshalText`, `MarshalJSON` or any encoding on `Role` or `Message`.** Layer 1 returns values; wire shapes are confined to adapters (`V-PRV-15`), and a marshaller here would be a second rendering path with a second set of rules.
 - **No `ParseMessageID`.** § 5.2.
-- **No validation of content elements.** § 4.2, and `R-AMR-009`'s second scenario pins it.
+- **No validation of content elements.** § 4.2, and `R-AMSG-009`'s second scenario pins it.
 - **No message equality, no `Message.Equal`.** AI-10.6 item 3 owns it.
 - **No role-versus-content-kind rule.** AI-05.1's own out-of-scope clause; AI-10.3 owns it, and it needs kinds.
-- **No exported sentinel, error type or error variable.** `NFR-AMR-B`. Everything reports through AI-04's five landed classes.
+- **No exported sentinel, error type or error variable.** `NFR-AMSG-B`. Everything reports through AI-04's five landed classes.

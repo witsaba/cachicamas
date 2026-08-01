@@ -135,7 +135,7 @@ func newPart(label string) ai.Part {
 }
 ```
 
-`message_test.go` changes `[]ai.Content` to `[]ai.Part` in seven places and replaces its two `nil` content elements — which AI-05 accepted deliberately — with `ai.Part{}`, whose expectation flips from *accepted* to *rejected*. That flip **is** `R-AMR-009`'s supersession, made visible in the test that pinned it.
+`message_test.go` changes `[]ai.Content` to `[]ai.Part` in seven places and replaces its two `nil` content elements — which AI-05 accepted deliberately — with `ai.Part{}`, whose expectation flips from *accepted* to *rejected*. That flip **is** `R-AMSG-009`'s supersession, made visible in the test that pinned it.
 
 ---
 

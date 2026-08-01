@@ -43,9 +43,9 @@ type part struct {
 }
 ```
 
-AI-05's external tests use exactly that, and `R-AMR-009`'s second scenario **pins** that `NewMessage` rejects no content element — deliberately, so that AI-06.3 item 1 can fail before it passes. Two consequences for this milestone:
+AI-05's external tests use exactly that, and `R-AMSG-009`'s second scenario **pins** that `NewMessage` rejects no content element — deliberately, so that AI-06.3 item 1 can fail before it passes. Two consequences for this milestone:
 
-1. AI-06 **supersedes** `R-AMR-009`'s second scenario. That is the intended disposition, not a regression, and this change records it rather than editing AI-05's artifacts.
+1. AI-06 **supersedes** `R-AMSG-009`'s second scenario. That is the intended disposition, not a regression, and this change records it rather than editing AI-05's artifacts.
 2. AI-05's tests build every message from that embedded helper. Closing the seam changes their content helper. Migrating them is part of AI-06's diff and is not optional.
 
 ### 2.3 The vocabulary — five terms AI-06 implements rather than invents

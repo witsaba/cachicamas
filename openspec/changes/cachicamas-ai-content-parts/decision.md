@@ -347,7 +347,7 @@ The strategy is not free, and a reviewer should see the bill before the code.
 | **`Part` accumulates accessors** | After AI-09 it carries `Kind` plus four accessors, and after any image/audio producer, more | They are one-line methods with one GoDoc paragraph each, grouped in the file of the kind they read. The alternative is one exported type per kind, each with a zero value that is C1 |
 | **An interface dispatch per `Kind()`** | Instead of a struct field read | Immeasurable at Layer 1's call rates, and it is what buys § 5's "cannot disagree" |
 | **Three edits per new kind** | Constant, payload, constructor, accessor, registry line, GoDoc line | The guard makes the coupling mechanical rather than remembered, which is the only reason a five-step procedure is safe to hand to a later milestone |
-| **AI-05's tests must migrate** | Their content helper is the embedding bypass this decision closes | It is the intended disposition of `R-AMR-009`'s second scenario, which AI-05 wrote as a deliberate placeholder. The migration is ~40 lines and is in this change's diff |
+| **AI-05's tests must migrate** | Their content helper is the embedding bypass this decision closes | It is the intended disposition of `R-AMSG-009`'s second scenario, which AI-05 wrote as a deliberate placeholder. The migration is ~40 lines and is in this change's diff |
 | **`Content` is removed from the exported surface** | A name AI-05 exported one milestone ago disappears | Nothing outside the module imports it; ADR 0005's v1 freeze is AI-38, and doc 0002 explicitly permits a milestone to refine later names. Leaving it as an alias would leave the embedding bypass alive, which is the defect |
 
 ---
