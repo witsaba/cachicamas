@@ -44,7 +44,56 @@ make test                  # unit tests with race detector
 INTEGRATION=1 make test    # also run the pgx integration tests
 make test/integration      # boot compose Postgres, run integration tests, stop Postgres
 make lint                  # golangci-lint + go vet (requires `make tools` first)
+make vuln-check            # govulncheck SCA — auto-installs + scans ./... (requires network egress to vuln.go.dev)
 ```
+
+## Vulnerability scanning
+
+This module ships with a `make vuln-check` target that wraps
+[`govulncheck`](https://go.dev/doc/security/vuln/), the official scanner
+backed by the [Go Vulnerability Database](https://vuln.go.dev/). It runs
+against `./...` and exits non-zero when a reachable vulnerability is
+detected, so it can act as a CI gate without conflating dependency risk
+with source lint noise.
+
+`govulncheck` is **reachability-aware**: it does static call-graph
+analysis and only reports advisories whose vulnerable symbols are
+actually reachable from this module's code paths. Imported-but-uncalled
+packages and unreachable transitive modules are filtered out, which keeps
+the signal-to-noise ratio tight (the full unfiltered CVE list against a
+module's go.sum would dwarf the real attack surface).
+
+### Current baseline
+
+Scanned against `govulncheck@v1.1.4` (Go Vulnerability Database snapshot
+2026-07-31). **Zero reachable findings** as of 2026-07-31. The five
+findings originally surfaced when this target landed have been
+remediated (see Remediation history below).
+
+| # | ID | Package | Found in | Fixed in | Status |
+|---|----|---------|----------|----------|--------|
+| 1 | [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) | `google.golang.org/grpc` | v1.81.1 | v1.82.1 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 2 | [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) | `golang.org/x/text` | v0.38.0 | v0.39.0 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 3 | [GO-2026-5856](https://pkg.go.dev/vuln/GO-2026-5856) | stdlib `crypto/tls` | go1.26.3 | go1.26.5 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 4 | [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) | stdlib `net/textproto` | go1.26.3 | go1.26.4 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+| 5 | [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) | stdlib `crypto/x509` | go1.26.3 | go1.26.4 | Cleared (remediation branch `chore/2026-07-31-cachicamas-go-vuln-remediation`) |
+
+The target is wired to FAIL on any reachable finding so the baseline is
+enforced rather than silently carried.
+
+### Remediation history
+
+**2026-07-31** — All five findings above were remediated in branch
+`chore/2026-07-31-cachicamas-go-vuln-remediation`. The change bumped
+the `go` directive to `1.26.5`, promoted `google.golang.org/grpc` from
+indirect to direct at `v1.82.1`, promoted `golang.org/x/text` from
+indirect to direct at `v0.39.0`, and bumped the Dockerfile builder
+image to `golang:1.26.5-alpine3.24` in lockstep with `go.mod`. The
+workspace `go.work` was also bumped to `go 1.26.5`. Verification:
+`go build ./...`, `make test`, and `make vuln-check` all exit 0.
+Out of scope (follow-up): adding unit tests for `src/otel/` (the
+silent-regression gap on the grpc bump) and remediating the same
+stdlib vulns in the sibling `backend/workspace_syncer/` module.
 
 ## API
 
