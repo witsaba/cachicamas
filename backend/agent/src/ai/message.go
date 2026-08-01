@@ -110,9 +110,10 @@ func mintMessageID() MessageID { return MessageID{n: lastMessageID.Add(1)} }
 // It is not a turn, not a transcript and not a history — V-OUT-01 and V-OUT-02
 // place all three above this layer.
 type Message struct {
-	id      MessageID
-	role    Role
-	content []Part
+	id            MessageID
+	role          Role
+	content       []Part
+	cacheBoundary bool // AI-11.1
 }
 
 // NewMessage constructs a message from a role and its ordered content.
@@ -176,8 +177,34 @@ func (m Message) Content() []Part { return slices.Clone(m.content) }
 // Role returns the role the message is attributed to.
 func (m Message) Role() Role { return m.role }
 
-// Equal reports whether m and other carry the same role and the same
-// content, in the same order.
+// MarkCacheBoundary returns a copy of m carrying a cache-boundary marker
+// (V-REQ-23), indicating a point at which a provider may cache the prefix
+// preceding it.
+//
+// It is a no-op when m never passed [NewMessage]: its zero-value detector is
+// [MessageID.IsZero], and a marked zero value must not start reporting
+// itself a cache boundary (R-ACB-002).
+//
+// m is a value receiver, so the marker is set on a local copy and returned;
+// the value m was called on is left observably unmarked (R-ACB-001). The
+// copy carries the same identity, because a copy is the same message — the
+// same rule this file states for every other copy of m.
+func (m Message) MarkCacheBoundary() Message {
+	if m.ID().IsZero() {
+		return m
+	}
+	m.cacheBoundary = true
+	return m
+}
+
+// IsCacheBoundary reports whether m carries a cache-boundary marker.
+//
+// A message that was never marked reports false, and marking an
+// already-marked message again is idempotent (R-ACB-001).
+func (m Message) IsCacheBoundary() bool { return m.cacheBoundary }
+
+// Equal reports whether m and other carry the same role, the same marker
+// state and the same content, in the same order.
 //
 // Identity is excluded on purpose: this is AI-10.6's addition, landed here
 // because design.md § 11.2 needs it to compose [Request.Equal]. V-REQ-03
@@ -188,10 +215,19 @@ func (m Message) Role() Role { return m.role }
 // report false for any two independently constructed messages at all, which
 // is not what request-level equality needs from it.
 //
+// The marker comparison is AI-11.1's addition (R-ACB-004): two messages
+// otherwise identical but differing in cache-boundary state describe
+// different requests, because a marker expresses a request for different
+// provider behavior. Unlike [Segment], Message stays non-comparable — its
+// content is a slice — so this method names its fields explicitly rather
+// than composing ==, and a field added here has to be named or it is
+// invisible to every comparison built on this method, request equality
+// included.
+//
 // Content is compared with slices.Equal, which compares [Part] values by ==
 // — content_part.go documents that as comparing payloads, which is what
 // makes every registered kind reach this method for free, without a
 // kind-by-kind switch.
 func (m Message) Equal(other Message) bool {
-	return m.role == other.role && slices.Equal(m.content, other.content)
+	return m.role == other.role && m.cacheBoundary == other.cacheBoundary && slices.Equal(m.content, other.content)
 }

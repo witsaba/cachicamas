@@ -177,6 +177,7 @@ func buildFullRequest(t *testing.T) ai.Request {
 	if err != nil {
 		t.Fatalf("ai.NewMessage(RoleTool) returned %v, want no failure", err)
 	}
+	toolMessage = toolMessage.MarkCacheBoundary() // AI-11.1 — see the comment on segmentTwo above.
 
 	segmentOne, err := ai.NewSegment("You are a travel planning assistant.")
 	if err != nil {
@@ -186,6 +187,11 @@ func buildFullRequest(t *testing.T) ai.Request {
 	if err != nil {
 		t.Fatalf("ai.NewSegment returned %v, want no failure", err)
 	}
+	// AI-11.1 — one marked carrier per region exercises the round trip's
+	// marker leg (R-ACB-004): a marker that survived every other assertion
+	// here but vanished on rebuild would be the ten-times-the-bill defect
+	// design.md warns about, with no error and no wrong answer.
+	segmentTwo = segmentTwo.MarkCacheBoundary()
 	system, err := ai.NewSystemInstruction(segmentOne, segmentTwo)
 	if err != nil {
 		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
@@ -199,6 +205,7 @@ func buildFullRequest(t *testing.T) ai.Request {
 	if err != nil {
 		t.Fatalf("ai.NewTool returned %v, want no failure", err)
 	}
+	bookTool = bookTool.MarkCacheBoundary() // AI-11.1 — see the comment on segmentTwo above.
 	tools, err := ai.NewToolSet(searchTool, bookTool)
 	if err != nil {
 		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
@@ -249,6 +256,13 @@ func rebuildFromReadback(t *testing.T, request ai.Request) ai.Request {
 		if err != nil {
 			t.Fatalf("ai.NewMessage returned %v rebuilding a message, want no failure", err)
 		}
+		// AI-11.1 — carry the message's cache-boundary marker across the
+		// rebuild (R-ACB-004). Message.Role and Message.Content say nothing
+		// about it, so a walk that read only those two would silently drop
+		// every marker on a message.
+		if message.IsCacheBoundary() {
+			rebuiltMessage = rebuiltMessage.MarkCacheBoundary()
+		}
 		messages = append(messages, rebuiltMessage)
 	}
 
@@ -260,6 +274,14 @@ func rebuildFromReadback(t *testing.T, request ai.Request) ai.Request {
 			rebuiltSegment, err := ai.NewSegment(segment.Text())
 			if err != nil {
 				t.Fatalf("ai.NewSegment returned %v rebuilding a segment, want no failure", err)
+			}
+			// AI-11.1 — carry the segment's cache-boundary marker across the
+			// rebuild (R-ACB-004). Segment stays comparable, so
+			// requireRequestsEqual's slices.Equal catches a dropped marker
+			// "for free"; carrying it across here is what makes the round
+			// trip actually preserve it rather than merely be caught losing it.
+			if segment.IsCacheBoundary() {
+				rebuiltSegment = rebuiltSegment.MarkCacheBoundary()
 			}
 			segments = append(segments, rebuiltSegment)
 		}
@@ -277,6 +299,13 @@ func rebuildFromReadback(t *testing.T, request ai.Request) ai.Request {
 			rebuiltTool, err := ai.NewTool(tool.Name(), tool.Description(), tool.Schema())
 			if err != nil {
 				t.Fatalf("ai.NewTool returned %v rebuilding a tool, want no failure", err)
+			}
+			// AI-11.1 — carry the tool's cache-boundary marker across the
+			// rebuild (R-ACB-004). Name, Description and Schema say nothing
+			// about it, so a walk that read only those three would silently
+			// drop every marker on a declaration.
+			if tool.IsCacheBoundary() {
+				rebuiltTool = rebuiltTool.MarkCacheBoundary()
 			}
 			rebuiltTools = append(rebuiltTools, rebuiltTool)
 		}
@@ -407,6 +436,12 @@ func requireMessagesEqual(t *testing.T, a, b []ai.Message) {
 		if a[i].Role() != b[i].Role() {
 			t.Errorf("messages[%d].Role() = %v, want %v", i, b[i].Role(), a[i].Role())
 		}
+		// AI-11.1 — a message's cache-boundary marker (R-ACB-004) is not part
+		// of Role() or Content(); without this check a rebuild that dropped
+		// the marker would satisfy every other assertion in this file.
+		if a[i].IsCacheBoundary() != b[i].IsCacheBoundary() {
+			t.Errorf("messages[%d].IsCacheBoundary() = %t, want %t", i, b[i].IsCacheBoundary(), a[i].IsCacheBoundary())
+		}
 		requirePartsEqual(t, i, a[i].Content(), b[i].Content())
 	}
 }
@@ -481,6 +516,13 @@ func requireToolsEqual(t *testing.T, a, b []ai.Tool) {
 		}
 		if !bytes.Equal(a[i].Schema(), b[i].Schema()) {
 			t.Errorf("tools[%d].Schema() = %q, want %q", i, b[i].Schema(), a[i].Schema())
+		}
+		// AI-11.1 — a tool declaration's cache-boundary marker (R-ACB-004) is
+		// not part of Name(), Description() or Schema(); without this check a
+		// rebuild that dropped the marker would satisfy every other
+		// assertion in this file.
+		if a[i].IsCacheBoundary() != b[i].IsCacheBoundary() {
+			t.Errorf("tools[%d].IsCacheBoundary() = %t, want %t", i, b[i].IsCacheBoundary(), a[i].IsCacheBoundary())
 		}
 	}
 }

@@ -18,9 +18,10 @@ const MaxToolNameLen = 64
 // executable, not a resolution target and not a permission subject — the
 // register's first trap, which doc.go states for the package as a whole.
 type Tool struct {
-	name        string
-	description string
-	schema      []byte
+	name          string
+	description   string
+	schema        []byte
+	cacheBoundary bool // AI-11.1
 }
 
 // NewTool constructs a tool declaration from a name, a description and the
@@ -169,3 +170,27 @@ func (t Tool) Description() string { return t.description }
 //
 // The result is a fresh slice on every call, for the reason [NewTool] gives.
 func (t Tool) Schema() []byte { return slices.Clone(t.schema) }
+
+// MarkCacheBoundary returns a copy of t carrying a cache-boundary marker
+// (V-REQ-23), indicating a point at which a provider may cache the prefix
+// preceding it.
+//
+// It is a no-op when t never passed [NewTool]: its zero-value detector is
+// [Tool.Name] reporting empty, and a marked zero value must not start
+// reporting itself a cache boundary (R-ACB-002).
+//
+// t is a value receiver, so the marker is set on a local copy and returned;
+// the value t was called on is left observably unmarked (R-ACB-001).
+func (t Tool) MarkCacheBoundary() Tool {
+	if t.Name() == "" {
+		return t
+	}
+	t.cacheBoundary = true
+	return t
+}
+
+// IsCacheBoundary reports whether t carries a cache-boundary marker.
+//
+// A declaration that was never marked reports false, and marking an
+// already-marked declaration again is idempotent (R-ACB-001).
+func (t Tool) IsCacheBoundary() bool { return t.cacheBoundary }

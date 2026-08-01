@@ -490,14 +490,23 @@ func (r Request) Equal(other Request) bool {
 }
 
 // toolsEqual reports whether two tool declarations carry the same name,
-// description and schema bytes.
+// description, schema bytes and marker state.
 //
 // A free function rather than a [Tool] method: design.md § 11.2 asks for
 // tools to be compared "by their own accessors", not by a new exported
 // method on a type AI-08 owns, and [Tool] cannot use == because its schema
 // field is a slice.
+//
+// The marker comparison is AI-11.1's addition (R-ACB-004): two tool
+// declarations otherwise identical but differing in cache-boundary state
+// describe different requests. Unlike [Segment], which stays comparable and
+// is therefore compared by == inside [SystemInstruction.Equal] for free, a
+// field added to the non-comparable [Tool] is invisible here unless it is
+// named — cache_boundary_test.go's TestRequest_MarkersDifferByOneMarker...
+// proves the omission bites.
 func toolsEqual(a, b Tool) bool {
-	return a.Name() == b.Name() && a.Description() == b.Description() && bytes.Equal(a.Schema(), b.Schema())
+	return a.Name() == b.Name() && a.Description() == b.Description() &&
+		a.IsCacheBoundary() == b.IsCacheBoundary() && bytes.Equal(a.Schema(), b.Schema())
 }
 
 // boundsRule checks the bounds of the applied generation options that are

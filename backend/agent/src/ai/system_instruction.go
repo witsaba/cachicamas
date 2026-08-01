@@ -10,7 +10,10 @@ import (
 
 // Segment is one ordered, individually markable piece of the system
 // instruction (V-REQ-19).
-type Segment struct{ text string }
+type Segment struct {
+	text          string
+	cacheBoundary bool // AI-11.1
+}
 
 // NewSegment constructs one piece of the system instruction.
 //
@@ -49,6 +52,30 @@ func (s Segment) Text() string { return s.text }
 // A constructed segment always carries non-empty text, so emptiness is a sound
 // detector and no separate flag is needed.
 func (s Segment) IsZero() bool { return s.text == "" }
+
+// MarkCacheBoundary returns a copy of s carrying a cache-boundary marker
+// (V-REQ-23), indicating a point at which a provider may cache the prefix
+// preceding it.
+//
+// It is a no-op on the zero Segment: a value that never passed [NewSegment]
+// stays detectable as unconstructed by [Segment.IsZero], and it must not
+// start reporting itself a cache boundary (R-ACB-002).
+//
+// s is a value receiver, so the marker is set on a local copy and returned;
+// the value s was called on is left observably unmarked (R-ACB-001).
+func (s Segment) MarkCacheBoundary() Segment {
+	if s.IsZero() {
+		return s
+	}
+	s.cacheBoundary = true
+	return s
+}
+
+// IsCacheBoundary reports whether s carries a cache-boundary marker.
+//
+// A segment that was never marked reports false, and marking an
+// already-marked segment again is idempotent (R-ACB-001).
+func (s Segment) IsCacheBoundary() bool { return s.cacheBoundary }
 
 // SystemInstruction is the request's ordered system-instruction segments.
 type SystemInstruction struct{ segments []Segment }
@@ -155,11 +182,15 @@ func NewSystemText(text string) (SystemInstruction, error) {
 // a secret is still a secret. [Part] renders on the same rule, and the system
 // instruction is the region most likely to carry a proprietary prompt.
 //
-// AI-11 may extend this to name a cache marker, because a marker is structural
-// rather than payload.
+// AI-11.1's extension: a marked segment renders "segment(cache boundary)".
+// The unmarked and zero renderings are unchanged, so no existing assertion
+// over them changes meaning (R-ACB-010).
 func (s Segment) String() string {
 	if s.IsZero() {
 		return "segment(unset)"
+	}
+	if s.cacheBoundary {
+		return "segment(cache boundary)"
 	}
 	return "segment"
 }
