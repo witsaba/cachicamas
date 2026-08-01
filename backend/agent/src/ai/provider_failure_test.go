@@ -398,6 +398,175 @@ func TestNewFailure_OutOfRangeStatusClass_FailsWithErrOutOfRangeAtStatusClass(t 
 	}
 }
 
+// R-AIP-010 — two perpendicular discriminating inputs, both readable from
+// the failure value alone: the partial-output bool and a separate delivery
+// accessor. The three constructible shapes are distinguishable from the
+// value alone; the fourth (pre-stream, output-preceded) is unconstructible.
+func TestFailure_PartialOutputAndDelivery_AreTwoPerpendicularAxes(t *testing.T) {
+	t.Parallel()
+
+	// The three constructible shapes of R-AIP-010's table, consolidated into
+	// one table-driven check (task 5.5's refactor) rather than three
+	// near-identical subtests: the shape itself — which constructor, which
+	// output-flag — is data, and the two expectations it produces follow
+	// from it, which is the property under test.
+	shapes := []struct {
+		name         string
+		build        func(t *testing.T) *ai.Failure
+		wantPartial  bool
+		wantDelivery ai.DeliveryPath
+		scenario     string
+	}{
+		{
+			name:         "pre-stream",
+			build:        func(t *testing.T) *ai.Failure { return mustPreStreamFailure(t, ai.FailureCategoryTimeout) },
+			wantPartial:  false,
+			wantDelivery: ai.DeliveryPreStream,
+			scenario:     "S-AIP-032",
+		},
+		{
+			name:         "mid-stream, no output preceded",
+			build:        func(t *testing.T) *ai.Failure { return mustMidStreamFailure(t, ai.FailureCategoryUnavailable, false) },
+			wantPartial:  false,
+			wantDelivery: ai.DeliveryMidStream,
+			scenario:     "S-AIP-033",
+		},
+		{
+			name:         "mid-stream, output preceded",
+			build:        func(t *testing.T) *ai.Failure { return mustMidStreamFailure(t, ai.FailureCategoryUnavailable, true) },
+			wantPartial:  true,
+			wantDelivery: ai.DeliveryMidStream,
+			scenario:     "S-AIP-034",
+		},
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name+" ("+shape.scenario+")", func(t *testing.T) {
+			t.Parallel()
+
+			f := shape.build(t)
+			if got := f.PartialOutput(); got != shape.wantPartial {
+				t.Errorf("f.PartialOutput() = %v, want %v", got, shape.wantPartial)
+			}
+			if got := f.Delivery(); got != shape.wantDelivery {
+				t.Errorf("f.Delivery() = %v, want %v", got, shape.wantDelivery)
+			}
+		})
+	}
+
+	t.Run("delivery path alone cannot distinguish the two mid-stream shapes — PartialOutput is a second, independent axis (S-AIP-035)", func(t *testing.T) {
+		t.Parallel()
+
+		noOutput := mustMidStreamFailure(t, ai.FailureCategoryUnavailable, false)
+		withOutput := mustMidStreamFailure(t, ai.FailureCategoryUnavailable, true)
+		if noOutput.Delivery() != withOutput.Delivery() {
+			t.Fatal("the two mid-stream failures report different Delivery() values, want them equal — the axes must be perpendicular")
+		}
+		if noOutput.PartialOutput() == withOutput.PartialOutput() {
+			t.Error("the two mid-stream failures report the same PartialOutput(), want them distinguishable by that axis alone")
+		}
+	})
+
+	t.Run("the fourth cell — pre-stream with output preceding — is unconstructible: PreStreamFailure's signature takes no output-flag parameter (S-AIP-032, structural)", func(t *testing.T) {
+		t.Parallel()
+
+		// A compile-time property, not a runtime one. This line fails to
+		// compile the moment PreStreamFailure grows a second (bool)
+		// parameter — the fourth cell would then be reachable.
+		var _ func(ai.FailureReport) (*ai.Failure, error) = ai.PreStreamFailure
+	})
+}
+
+// R-AIP-011 — "is a naive retry safe?" is answerable from PartialOutput()
+// alone, regardless of category, retryability or delivery path — the
+// never-retry-after-partial-output clause (V-FAIL-15); Retryable()=true
+// never overrides it.
+func TestFailure_NaiveRetrySafety_AnsweredFromPartialOutputAlone(t *testing.T) {
+	t.Parallel()
+
+	// naiveRetrySafe is written the way a Layer 2 consumer would write it —
+	// finish_reason_test.go's consumerResponse precedent: the property under
+	// test is that this predicate needs nothing but PartialOutput().
+	naiveRetrySafe := func(f *ai.Failure) bool { return !f.PartialOutput() }
+
+	t.Run("output preceded the failure: never safe, even when Retryable()=true (S-AIP-036/038)", func(t *testing.T) {
+		t.Parallel()
+
+		f, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable, Retryable: true}, true)
+		if err != nil {
+			t.Fatalf("ai.MidStreamFailure returned %v, want no failure", err)
+		}
+		if naiveRetrySafe(f) {
+			t.Error("naiveRetrySafe(f) = true, want false — output preceded this failure; Retryable=true must not override V-FAIL-15")
+		}
+	})
+
+	t.Run("no output preceded the failure: safe from the discriminator alone, for pre-stream and mid-stream alike (S-AIP-037)", func(t *testing.T) {
+		t.Parallel()
+
+		pre := mustPreStreamFailure(t, ai.FailureCategoryTimeout)
+		mid := mustMidStreamFailure(t, ai.FailureCategoryTimeout, false)
+		if !naiveRetrySafe(pre) {
+			t.Error("naiveRetrySafe(pre) = false, want true — no output preceded it")
+		}
+		if !naiveRetrySafe(mid) {
+			t.Error("naiveRetrySafe(mid) = false, want true — no output preceded it, even though delivery is mid-stream")
+		}
+	})
+
+	t.Run("unsafety is independent of category (S-AIP-038)", func(t *testing.T) {
+		t.Parallel()
+
+		for _, category := range theFailureCategoryVocabulary {
+			f, err := ai.MidStreamFailure(ai.FailureReport{Category: category}, true)
+			if err != nil {
+				t.Fatalf("ai.MidStreamFailure(category=%v) returned %v, want no failure", category, err)
+			}
+			if naiveRetrySafe(f) {
+				t.Errorf("category %v: naiveRetrySafe(f) = true, want false — output preceded this failure regardless of category", category)
+			}
+		}
+	})
+}
+
+// R-AIP-012 — no accessor or predicate on Failure re-conflates the two axes
+// into one field; a 3-member shape enum is explicitly prohibited (G8
+// verbatim), proven the same way S-AIP-023 proved no scheduling identifier:
+// an exhaustive exported-surface scan.
+func TestFailure_NoAccessorCombinesPartialOutputAndDelivery(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no combining/shape identifier is exported (S-AIP-039)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "provider_failure.go", nil, 0)
+		if err != nil {
+			t.Fatalf("parsing provider_failure.go: %v", err)
+		}
+		forbidden := []string{"Shape", "DeliveryState", "PartialDelivery", "OutputDelivery"}
+		for _, name := range exportedTopLevelNames(file) {
+			for _, bad := range forbidden {
+				if strings.Contains(name, bad) {
+					t.Errorf("provider_failure.go exports %q — R-AIP-012 prohibits a combining accessor or a "+
+						"3-member shape enum re-conflating PartialOutput and Delivery (G8 verbatim)", name)
+				}
+			}
+		}
+	})
+
+	t.Run("reading one axis never changes what the other reports (S-AIP-040)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustMidStreamFailure(t, ai.FailureCategoryTimeout, true)
+		before := f.Delivery()
+		_ = f.PartialOutput()
+		_ = f.PartialOutput()
+		if after := f.Delivery(); after != before {
+			t.Errorf("f.Delivery() changed from %v to %v after reading PartialOutput(), want the axes independent", before, after)
+		}
+	})
+}
+
 // R-AIP-006 — an unmodelled failure becomes unknown with the raw provider
 // label preserved, bounded and sanitized; no cross-vendor normalizer ships
 // in this package.

@@ -62,11 +62,11 @@ Chain strategy: size-exception
 
 ## Phase 5: AI-19.4 — Partial-output discriminator (R-AIP-010..012)
 
-- [ ] 5.1 RED S-AIP-032..035: three shapes (`pre-stream/false`, `mid-stream/false`, `mid-stream/true`) distinguishable from the failure value alone; `PreStreamFailure` takes no output-flag parameter; delivery path alone cannot distinguish the two mid-stream shapes.
-- [ ] 5.2 GREEN: `PartialOutput()`, `Delivery() DeliveryPath` wired from `PreStreamFailure`/`MidStreamFailure(_, outputPreceded bool)` (D8).
-- [ ] 5.3 RED S-AIP-036..040: naive-retry-safe answerable from the discriminator alone regardless of category/retryability/delivery path; no accessor/predicate combines the two axes.
-- [ ] 5.4 GREEN: confirm no combining accessor exists — structural, no new code.
-- [ ] 5.5 REFACTOR: consolidate the three-shape table test; record red/green.
+- [x] 5.1 RED S-AIP-032..035: three shapes (`pre-stream/false`, `mid-stream/false`, `mid-stream/true`) distinguishable from the failure value alone; `PreStreamFailure` takes no output-flag parameter (proven by a compile-time function-value assignment, not a runtime check); delivery path alone cannot distinguish the two mid-stream shapes.
+- [x] 5.2 GREEN: `PartialOutput()`, `Delivery() DeliveryPath` wired from `PreStreamFailure`/`MidStreamFailure(_, outputPreceded bool)` (D8).
+- [x] 5.3 RED S-AIP-036..040: naive-retry-safe answerable from the discriminator alone regardless of category/retryability/delivery path (swept across all 9 categories); no accessor/predicate combines the two axes (AST scan) — batched into the same RED/GREEN cycle as 5.1/5.2 since both resolve to the same two accessors.
+- [x] 5.4 GREEN: confirmed no combining accessor exists — structural, no new code (satisfied by the same AST scan).
+- [x] 5.5 REFACTOR: consolidated the three-shape checks into one table-driven subtest (`shapes := []struct{...}`). `go test -race ./src/ai/...` green; gofmt/vet clean.
 
 ## Phase 6: AI-19.5 — One vocabulary, two delivery paths (R-AIP-013..015)
 

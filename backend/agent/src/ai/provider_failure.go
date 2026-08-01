@@ -396,6 +396,35 @@ func (f *Failure) RequestID() string {
 	return f.requestID
 }
 
+// PartialOutput answers R-AIP-010's first discriminating question alone: did
+// a normalized output event precede this failure? (V-FAIL-09).
+//
+// It carries no delivery information by name or by value — [Failure.Delivery]
+// is the separate, perpendicular axis — so "is a naive retry safe?" is
+// answerable from this bool alone, never true for a [PreStreamFailure]
+// value, since that constructor takes no output-flag parameter at all
+// (R-AIP-011, design.md D8). A nil *Failure reports false rather than
+// panicking (NFR-AIP-B).
+func (f *Failure) PartialOutput() bool {
+	if f == nil {
+		return false
+	}
+	return f.partialOutput
+}
+
+// Delivery reports which carrier handed this failure over (V-FAIL-11,
+// V-FAIL-12) — [PreStreamFailure] always [DeliveryPreStream],
+// [MidStreamFailure] always [DeliveryMidStream]. Independent of
+// [Failure.PartialOutput]: delivery alone cannot distinguish the two
+// mid-stream shapes (R-AIP-010). A nil *Failure reports the zero
+// [DeliveryPath] rather than panicking (NFR-AIP-B).
+func (f *Failure) Delivery() DeliveryPath {
+	if f == nil {
+		return 0
+	}
+	return f.delivery
+}
+
 // validate reports the payload's first broken rule at the given position, or
 // nil, in the order written (V-FAIL-04): the category is a member of the
 // closed vocabulary (R-AIP-004/005), then the status class — when reported
