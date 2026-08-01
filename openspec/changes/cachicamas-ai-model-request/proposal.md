@@ -47,22 +47,25 @@ Listed so a reviewer can tell the inherited from the decided.
 | --- | --- | --- |
 | `explore.md` | What exists, the two cashed seams, the four tensions, prior art, the vocabulary check | landed |
 | `proposal.md` | This file | landed |
-| `specs/ai-model-request/spec.md` | `R-AMR-001` … `R-AMR-016` over runtime behavior, with scenarios | landed |
+| `specs/ai-model-request/spec.md` | `R-AMR-001` … `R-AMR-017` over runtime behavior, with scenarios | landed |
 | `design.md` | Every Go shape; the documented rule order; the three AI-10.3 dispositions with their reasoning; the option admission table; the seams left for AI-11 and AI-12 | landed |
-| `tasks.md` | Six phases, one per leaf, one task per test-list item, with red/green evidence and the budget reassessment | landed, evidence through AI-10.3 |
+| `tasks.md` | Six phases, one per leaf, one task per test-list item, with red/green evidence and the budget reassessment | landed, evidence through AI-10.2 |
 | `src/ai/system_instruction.go` | **AI-10.2's deliverable.** `Segment`, `NewSegment`, `SystemInstruction`, `NewSystemInstruction`, `NewSystemText`, accessors, redaction | **implemented** |
 | `src/ai/system_instruction_test.go` | AI-10.2's items, in `ai_test` | **implemented** |
-| `src/ai/request.go` | **AI-10.1 and AI-10.3's deliverable.** `Request`, `NewRequest`, `RequestOption` and its seven constructors, the accessors, the validation order, the cross-region rules, redaction | **implemented through AI-10.3** |
-| `src/ai/request_test.go` | AI-10.1's and AI-10.3's items, in `ai_test` | **implemented** |
-| `src/ai/validation.go` | `ErrMisplaced` appended to the closed class set and to `ruleClasses` | **implemented** |
-| `src/ai/validation_registry_internal_test.go`, `validation_test.go` | The two mirrors the internal guard requires, updated in the same commit | **implemented** |
+| `src/ai/request.go` | **AI-10.1's and AI-10.3's deliverable.** `Request`, `NewRequest`, `RequestOption` and its constructors, the accessors, the validation order, the cross-region rules, redaction | **implemented through AI-10.2** |
+| `src/ai/request_test.go` | AI-10.1's items, in `ai_test`; AI-10.3's are planned | **implemented through AI-10.2** |
+| `src/ai/validation.go` | `ErrMisplaced` appended to the closed class set and to `ruleClasses` | **AI-10.3's first task — not implemented** |
+| `src/ai/validation_registry_internal_test.go`, `validation_test.go` | The two mirrors the internal guard requires, updated in the same commit | **not implemented** |
 
 ### Deliberately **not yet** implemented — the second half of the milestone
 
-This milestone is worked as two chained halves on the leaf boundary, because it is the largest composition in Layer 1 and two prior attempts died on transcript size. **AI-10.4, AI-10.5 and AI-10.6 are planned in full below and in `design.md`, and are not implemented.** The resuming agent's entry point is `tasks.md` § "Phase AI-10.4"; everything it depends on is landed and green.
+This milestone is worked as two chained halves on the leaf boundary, because it is the largest composition in Layer 1 and two prior attempts died on transcript size. **AI-10.3, AI-10.4, AI-10.5 and AI-10.6 are planned in full below and in `design.md`, and are not implemented.** The resuming agent's entry point is `tasks.md` § "Phase AI-10.3"; everything it depends on is landed and green.
+
+> **Corrected during execution.** This section originally placed the split at the .3/.4 line. It was moved one leaf earlier, to **.2/.3**, because AI-10.3 alone carries three cross-region dispositions plus a rule class appended to AI-04's closed set with two registry mirrors, and the two agents that died on this milestone died on transcript size. The boundary moved to protect the evidence, not to cut scope: AI-10.3's plan is unchanged and complete in `design.md` §§ 5–7. `tasks.md` records the same correction in its budget reassessment.
 
 | Node | What remains | Where the plan is |
 | --- | --- | --- |
+| AI-10.3 | The three cross-region dispositions, the `ErrMisplaced` append with both mirrors, message and content order, tool set and tool choice at the request boundary | `design.md` §§ 5–7, `tasks.md` phase AI-10.3 |
 | AI-10.4 | First-failure determinism at request scope; totality over the regions; the no-I/O dependency-closure guard in the AI-00.3 style | `design.md` § 9, `tasks.md` phase AI-10.4 |
 | AI-10.5 | The whole-request round trip from `src/agenttest/`, plus the exhaustive-kind pin over `PartKinds()` | `design.md` § 10, `tasks.md` phase AI-10.5 |
 | AI-10.6 | Mutation of what a reader returned; mutation of what the constructor was passed; documented equality of two requests built from identical inputs | `design.md` § 11, `tasks.md` phase AI-10.6 |
