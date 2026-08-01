@@ -59,6 +59,8 @@ import (
 // # Registered kinds
 //
 //   - text — model-visible natural-language text (V-REQ-08).
+//   - reasoning — a model's intermediate reasoning: a state, optional text, and
+//     an opaque round-trip token this package never interprets (V-REQ-09).
 //   - tool_call — a model's intent to invoke a tool (V-REQ-16).
 //   - tool_result — the answer to a tool call (V-REQ-18).
 //
@@ -77,6 +79,11 @@ const (
 	// PartKindText is the kind carrying model-visible natural-language text
 	// (V-REQ-08). It is the first subject the part contract is proven against.
 	PartKindText PartKind = iota + 1
+
+	// PartKindReasoning is the kind carrying a model's intermediate reasoning
+	// (V-REQ-09): a state, optional text, and the opaque round-trip token doc
+	// 0001 § 6 makes seam 11. See reasoning_content.go.
+	PartKindReasoning
 
 	// PartKindToolCall is the kind carrying a model's request to invoke a tool
 	// (V-REQ-16): its identity, the tool's name, and exact argument bytes. It is
@@ -104,6 +111,7 @@ const (
 // anything, and a registry is where that temptation is strongest.
 var partKindNames = []string{
 	PartKindText:       "text",
+	PartKindReasoning:  "reasoning",
 	PartKindToolCall:   "tool_call",
 	PartKindToolResult: "tool_result",
 }
