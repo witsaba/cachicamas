@@ -89,11 +89,15 @@ func TestCompletion_FinishReasonAndUsage_EmbedAI13Unchanged(t *testing.T) {
 			t.Fatal("event.Completion() reported no payload on an event of its own kind")
 		}
 
-		var gotReason ai.FinishReason = c.FinishReason() // same AI-13 type, not a parallel one
+		// gotReason/gotUsage are the same AI-13 types by construction: this
+		// line would not compile against a parallel FinishReason or Usage
+		// type, since FinishReason()/Usage() are statically typed to
+		// return AI-13's own ai.FinishReason / ai.Usage.
+		gotReason := c.FinishReason()
 		if gotReason != reason {
 			t.Errorf("c.FinishReason() = %v, want %v", gotReason, reason)
 		}
-		var gotUsage ai.Usage = c.Usage() // same AI-13 type, not a parallel one
+		gotUsage := c.Usage()
 		if gotUsage != usage {
 			t.Errorf("c.Usage() = %+v, want %+v", gotUsage, usage)
 		}
@@ -466,5 +470,75 @@ func TestCompletion_StringAndGoString_NameTheTypeAndCarryNoField(t *testing.T) {
 		if strings.Contains(rendered, "999999") || strings.Contains(rendered, "content_filter") {
 			t.Errorf("fmt.Sprintf(%q, c) = %q, which reproduces a field value", verb, rendered)
 		}
+	}
+}
+
+// NFR-ARP-B, S-ARP-039 (task 5.1) — totality: no exported entry point of
+// either AI-15 kind panics for extreme inputs, mirroring event_test.go's
+// TestEvent_ExtremeInputs_NeverPanics and message_test.go's
+// TestMessage_ExtremeInputs_NeverPanics shape: each case recovers its own
+// panic, so one panicking case does not hide the rest.
+func TestResponseEvents_ExtremeInputs_NeverPanic(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		act  func()
+	}{
+		{"the zero ResponseStart, read every way", func() {
+			var zero ai.ResponseStart
+			_ = zero.ResponseID()
+			_ = zero.ServedModel()
+			_ = zero.String()
+			_ = zero.GoString()
+		}},
+		{"NewResponseStart with both fields empty", func() {
+			_, _ = ai.NewResponseStart("", "")
+		}},
+		{"the zero Completion, read every way", func() {
+			var zero ai.Completion
+			_ = zero.FinishReason()
+			_ = zero.Usage()
+			_ = zero.String()
+			_ = zero.GoString()
+		}},
+		{"NewCompletion with the zero-value (invalid) finish reason and a fully absent usage", func() {
+			var zero ai.FinishReason
+			_, _ = ai.NewCompletion(zero, ai.Usage{})
+		}},
+		{"NewCompletion with a negative token count in every usage field", func() {
+			usage := ai.Usage{
+				Input: ai.Tokens(-1), Output: ai.Tokens(-1), CacheRead: ai.Tokens(-1),
+				CacheWrite: ai.Tokens(-1), Reasoning: ai.Tokens(-1),
+			}
+			_, _ = ai.NewCompletion(ai.FinishReasonStop, usage)
+		}},
+		{"a wrong-kind accessor on the zero Event", func() {
+			_, _ = ai.Event{}.ResponseStart()
+			_, _ = ai.Event{}.Completion()
+		}},
+		{"CheckEmit on the zero (unconstructed) Event", func() {
+			_ = ai.CheckEmit(ai.Event{})
+		}},
+		{"CheckStream over a stream mixing both new kinds, unstamped", func() {
+			start, _ := ai.NewResponseStart("", "")   // deliberately invalid/zero on failure
+			done, _ := ai.NewCompletion(ai.FinishReason(0), ai.Usage{})
+			report := ai.CheckStream([]ai.Event{start, done})
+			_ = report.Violation()
+			_ = report.Terminated()
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("panicked: %v", recovered)
+				}
+			}()
+			tc.act()
+		})
 	}
 }
