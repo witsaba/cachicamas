@@ -106,6 +106,17 @@ func (i SystemInstruction) Segments() []Segment { return slices.Clone(i.segments
 // Len returns the number of segments the instruction holds.
 func (i SystemInstruction) Len() int { return len(i.segments) }
 
+// Equal reports whether i and other hold the same segments, in the same
+// order.
+//
+// AI-10.6's addition, landed here because design.md § 11.2 needs it to
+// compose [Request.Equal]. Go defines no == for SystemInstruction: it holds a
+// slice. [Segment] is itself comparable (§ 3.4), so slices.Equal is the whole
+// of this method.
+func (i SystemInstruction) Equal(other SystemInstruction) bool {
+	return slices.Equal(i.segments, other.segments)
+}
+
 // WithSystemInstruction attaches a system instruction to a request.
 func WithSystemInstruction(system SystemInstruction) RequestOption {
 	return func(d *requestDraft) { d.system, d.hasSystem = system, true }

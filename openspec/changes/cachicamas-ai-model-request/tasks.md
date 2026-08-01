@@ -15,11 +15,13 @@
 
 ## Entry point for the resuming agent
 
-**AI-10.1 … AI-10.5 are implemented and green.** AI-10.6 is not implemented — the milestone's last leaf.
+**AI-10 is complete.** All six leaves — AI-10.1 … AI-10.6 — are implemented and green. There is nothing left to resume in this milestone.
 
-The resuming agent starts at **§ Phase AI-10.6**, below. Every box in that phase is unchecked, and every decision it needs is already made in `design.md` § 11 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written. Item 3's decision — whether to export `Equal` — defaults to **yes**; `design.md` § 11.2 states the reason and what exporting it obliges (`Message` and `SystemInstruction` need matching `Equal` methods).
+If this change is reopened, start by re-running the evidence gate below to confirm the tree is still exactly as this file records, then consult `openspec/AGENTS.md`/the orchestrator for the next milestone (AI-11 or AI-12 per the dependency graph — both are unblocked by AI-10's completion; AI-20 and AI-26 also depend on AI-10 and are now unblocked).
 
-**AI-10.5's round trip compares requests without a production `Equal` method**, because AI-10.6 (which lands it) depends on AI-10.5, not the reverse. `backend/agent/src/agenttest/request_test.go` carries its own local `requireRequestsEqual`. If AI-10.6 exports `Request.Equal`, consider (not required) refactoring that test to call it — an approval-testing opportunity, not a new behavior — but AI-10.5 does not need this and is already closed either way.
+**`Request.Equal` is exported** (`request.go`), with matching `Message.Equal` (`message.go`) and `SystemInstruction.Equal` (`system_instruction.go`). `backend/agent/src/agenttest/request_test.go`'s round trip (AI-10.5) still carries its own local `requireRequestsEqual` rather than calling `Request.Equal` — that refactor was noted as optional when AI-10.5 landed and remains optional now; nothing depends on it.
+
+**One cross-cutting fix landed inside this milestone, in a file AI-10 does not own:** `backend/agent/src/ai/tool_call.go` (AI-09.1) no longer imports `encoding/json`; its JSON-syntax rule now calls `isWellFormedJSON` (`backend/agent/src/ai/json_syntax.go`, new, AI-10.4's addition). Full account under "AI-10.4 item 3" above. Any later milestone needing JSON-syntax checking should reuse `json_syntax.go`, not reintroduce `encoding/json` anywhere reachable from `src/ai`'s production path.
 
 AI-10.3's rule insertion order matters for what follows: `NewRequest`'s `FirstFailure` list is, in order, model, messages, messages-constructed, content (AI-06's), system, role-vs-kind (`ErrMisplaced`), duplicate-tool-call (`ErrDuplicate`), unresolved-tool-result (`ErrUnresolvedReference`), tool-choice-vs-tool-set (AI-08.3's three), bounds — exactly `design.md` § 4's documented order, rules 1–10. AI-10.4 item 1 proved this order deterministic across runs, by construction, with a bite proof.
 
@@ -1000,13 +1002,132 @@ bin/golangci-lint run --config=.golangci.yml ./...
 
 ---
 
-## Phase AI-10.6 — immutability `[leaf]` — **NOT IMPLEMENTED**
+## Phase AI-10.6 — immutability `[leaf]` — **IMPLEMENTED**
 
 **Spec:** `R-AMR-016`. **Design:** § 11.
 
-- [ ] **Item 1** — Mutating anything a reader returned leaves the request observably unchanged.
-- [ ] **Item 2** — Mutating the values passed to the constructor leaves the request observably unchanged.
-- [ ] **Item 3** — Two requests built from identical inputs compare equal by `design.md` § 11.2's documented equality, and neither is affected by operations on the other. Decide there whether to export `Equal`; the recorded default is yes.
+- [x] ~~**Item 1** — Mutating anything a reader returned leaves the request observably unchanged.~~
+- [x] ~~**Item 2** — Mutating the values passed to the constructor leaves the request observably unchanged.~~
+- [x] ~~**Item 3** — Two requests built from identical inputs compare equal by `design.md` § 11.2's documented equality, and neither is affected by operations on the other. Decide there whether to export `Equal`; the recorded default is yes.~~
+
+This closes AI-10, the milestone's last leaf.
+
+### AI-10.6 item 1 — mutating a readback, shown to bite
+
+**Deliverable:** `request_test.go` gains one test, three sub-cases (messages, stop sequences, system-instruction segments). No production change: `Messages()`, `StopSequences()` and `Segments()` already clone.
+
+**Green from birth:**
+
+```
+--- PASS: TestRequest_ReadbackMutation_LeavesTheRequestUnchanged (0.00s)
+    --- PASS: .../messages (0.00s)
+    --- PASS: .../stop_sequences (0.00s)
+    --- PASS: .../system_instruction_segments (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.401s
+```
+
+**Closed by showing it bite, all three sub-cases at once.** Scratch violation: the three clone points removed together — `Messages()` returns `r.messages` directly, `StopSequences()` returns `r.options.stopSequences` directly, `SystemInstruction.Segments()` returns `i.segments` directly:
+
+```
+=== NAME  TestRequest_ReadbackMutation_LeavesTheRequestUnchanged/system_instruction_segments
+    request_test.go:1135: after the reader reversed the segment slice it received, the request's first segment changed — the request handed out its own storage
+=== NAME  TestRequest_ReadbackMutation_LeavesTheRequestUnchanged/messages
+    request_test.go:1078: after the reader reversed the slice it received, request.Messages()[0] changed — the request handed out its own storage
+=== NAME  TestRequest_ReadbackMutation_LeavesTheRequestUnchanged/stop_sequences
+    request_test.go:1099: after the reader mutated the slice it received, request.StopSequences()[0] = "SCRATCH-MUTATED", want "</a>" — the request handed out its own storage
+--- FAIL: TestRequest_ReadbackMutation_LeavesTheRequestUnchanged (0.00s)
+    --- FAIL: .../system_instruction_segments (0.00s)
+    --- FAIL: .../messages (0.00s)
+    --- FAIL: .../stop_sequences (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.324s
+FAIL
+```
+
+`request.go` and `system_instruction.go` restored (diffed byte-identical against the pre-scratch files); re-ran green, shown above.
+
+### AI-10.6 item 2 — mutating a constructor input, shown to bite
+
+**Deliverable:** `request_test.go` gains one test, two sub-cases (the message sequence, the stop-sequence slice). No production change: `NewRequest` already clones `messages` on the way in, and `WithStopSequences` already clones via `slices.Clone`. **This closes a real, previously-untested gap** — neither S-AMR-058-shaped scenario (mutate what was *passed to* the constructor, as opposed to what a reader *received back*) had a dedicated test before this leaf, despite the underlying clone already being landed by AI-10.1.
+
+**Green from birth:**
+
+```
+--- PASS: TestNewRequest_ConstructorInputMutatedAfterConstruction_LeavesTheRequestUnchanged (0.00s)
+    --- PASS: .../the_message_sequence (0.00s)
+    --- PASS: .../the_stop_sequence_slice (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.313s
+```
+
+**Closed by showing it bite, both sub-cases at once.** Scratch violation: `NewRequest`'s `messages: slices.Clone(messages)` changed to `messages: messages`, and `WithStopSequences`'s `slices.Clone(sequences)` changed to `sequences`:
+
+```
+=== NAME  TestNewRequest_ConstructorInputMutatedAfterConstruction_LeavesTheRequestUnchanged/the_message_sequence
+    request_test.go:1169: after the caller reversed the slice it passed to ai.NewRequest, request.Messages()[0] changed — NewRequest aliased the caller's storage instead of cloning it
+=== NAME  TestNewRequest_ConstructorInputMutatedAfterConstruction_LeavesTheRequestUnchanged/the_stop_sequence_slice
+    request_test.go:1188: after the caller mutated the slice it passed to ai.WithStopSequences, request.StopSequences()[0] = "SCRATCH-MUTATED", want "</a>" — WithStopSequences aliased the caller's storage instead of cloning it
+--- FAIL: TestNewRequest_ConstructorInputMutatedAfterConstruction_LeavesTheRequestUnchanged (0.00s)
+    --- FAIL: .../the_message_sequence (0.00s)
+    --- FAIL: .../the_stop_sequence_slice (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.315s
+FAIL
+```
+
+`request.go` restored (diffed byte-identical against the pre-scratch file); re-ran green together with item 1, shown above.
+
+### AI-10.6 item 3 — `Equal`, exported
+
+**Deliverable:** `request.go` gains `Request.Equal` and `toolsEqual`; `message.go` gains `Message.Equal`; `system_instruction.go` gains `SystemInstruction.Equal`. `request_test.go` gains `buildEquatableRequest` and one test.
+
+**The decision.** `design.md` § 11.2 records the default as **yes** and states the reason: AI-10.5's round trip needs it, AI-26 needs it, and a comparison every consumer re-derives is a comparison every consumer gets subtly wrong. No reason was found or recorded to change it, so it is implemented exactly as written — `Message` and `SystemInstruction` gain matching `Equal` methods so `Request.Equal` composes them rather than being one large function, per § 11.2's own instruction. `ToolSet`/`Tool`/`ToolChoice` do **not** gain new `Equal` methods: § 11.2 says tools and tool choice are compared "by their own accessors", and `Tool` cannot use `==` in any case — its `schema` field is a slice.
+
+**Before red** — the compile failure, which is the state before red per `design.md` § 13:
+
+```
+$ go vet ./...
+vet: src/ai/request_test.go:1245:12: first.Equal undefined (type ai.Request has no field or method Equal)
+```
+
+**Green**, directly — `Message.Equal` (role + `slices.Equal` over comparable `Part`s, per `content_part.go`'s documented `==`), `SystemInstruction.Equal` (`slices.Equal` over comparable `Segment`s), `Request.Equal` (every region via its own accessor, message identity excluded), and `toolsEqual` (a free function, name + description + `bytes.Equal` schema) landed together:
+
+```
+--- PASS: TestRequest_Equal_IdenticalInputsCompareEqualAndOperationsDoNotLeak (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.513s
+```
+
+**Triangulation, in the same test rather than a second one.** `first.Equal(second)` (identical inputs, independently minted message identities, proven different before the equality check) is the positive case; `first.Equal(third)` (a request carrying none of the optional regions) is the negative case, and both directions of both are asserted — `Equal` must be symmetric. Without the negative case, an `Equal` that always returned `true` would have passed.
+
+**`bytes` was checked against the AI-10.4 no-I/O guard before landing**, since `request.go` is exactly the package that guard scopes:
+
+```
+$ go list -deps -f '{{.ImportPath}}' bytes | grep -x -E 'os|io/fs|net|net/http' || echo "(none - clean)"
+(none - clean)
+
+$ go test -race -run 'TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage' -v ./src/ai/...
+--- PASS: TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage (0.03s)
+PASS
+```
+
+**Refactor.** None.
+
+### AI-10.6 evidence gate
+
+```
+$ go test -race ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.307s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.408s
+
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+```
+
+`go.mod` carries zero `require` lines; both AI-00 import guards and the AI-10.4 no-I/O guard pass.
 
 ---
 

@@ -1042,3 +1042,233 @@ func TestNewRequest_DuplicateToolName_CannotReachARequestBecauseNewToolSetRefuse
 		t.Errorf("ai.NewToolSet's failure = %v, want errors.Is(err, ai.ErrDuplicate)", err)
 	}
 }
+
+// --- AI-10.6 — immutability ----------------------------------------------
+
+// AI-10.6 item 1 — mutating anything a reader returned leaves the request
+// observably unchanged (R-AMR-016, design.md § 11.1).
+//
+// Three regions, three sub-tests, because each returns a different element
+// type and a generic table would hide more than it would save. "messages"
+// restates AI-10.1 item 5's property under this milestone's own requirement
+// (S-AMR-057) rather than skipping it: that scenario belongs here formally,
+// even though the property was already proven when it landed.
+// "stop_sequences" and "system_instruction_segments" close a real gap —
+// S-AMR-021 and S-AMR-023 were part of R-AMR-004 and R-AMR-005's scenario
+// lists when AI-10.1 and AI-10.2 landed, but neither had a dedicated test
+// until this leaf.
+func TestRequest_ReadbackMutation_LeavesTheRequestUnchanged(t *testing.T) {
+	t.Parallel()
+
+	t.Run("messages", func(t *testing.T) {
+		t.Parallel()
+
+		messages := []ai.Message{userTextMessage(t, "one"), userTextMessage(t, "two")}
+		request, err := ai.NewRequest("m", messages)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		read := request.Messages()
+		originalFirstID := read[0].ID()
+		slices.Reverse(read) // the reader rewrites what it received
+
+		reread := request.Messages()
+		if reread[0].ID() != originalFirstID {
+			t.Errorf("after the reader reversed the slice it received, request.Messages()[0] changed — the request handed out its own storage")
+		}
+	})
+
+	t.Run("stop_sequences", func(t *testing.T) {
+		t.Parallel()
+
+		stops := []string{"</a>", "</b>"}
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithStopSequences(stops...))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		read, ok := request.StopSequences()
+		if !ok {
+			t.Fatalf("request.StopSequences() reported unset, want set")
+		}
+		read[0] = "SCRATCH-MUTATED" // the reader rewrites what it received
+
+		reread, _ := request.StopSequences()
+		if reread[0] != stops[0] {
+			t.Errorf("after the reader mutated the slice it received, request.StopSequences()[0] = %q, want %q — "+
+				"the request handed out its own storage", reread[0], stops[0])
+		}
+	})
+
+	t.Run("system_instruction_segments", func(t *testing.T) {
+		t.Parallel()
+
+		segmentOne, err := ai.NewSegment("first")
+		if err != nil {
+			t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+		}
+		segmentTwo, err := ai.NewSegment("second")
+		if err != nil {
+			t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+		}
+		system, err := ai.NewSystemInstruction(segmentOne, segmentTwo)
+		if err != nil {
+			t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+		}
+
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithSystemInstruction(system))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		readSystem, hasSystem := request.SystemInstruction()
+		if !hasSystem {
+			t.Fatalf("request.SystemInstruction() reported absent, want present")
+		}
+		read := readSystem.Segments()
+		slices.Reverse(read) // the reader rewrites what it received
+
+		rereadSystem, _ := request.SystemInstruction()
+		reread := rereadSystem.Segments()
+		if reread[0] != segmentOne {
+			t.Errorf("after the reader reversed the segment slice it received, the request's first segment changed — " +
+				"the request handed out its own storage")
+		}
+	})
+}
+
+// AI-10.6 item 2 — mutating the values passed to the constructor leaves the
+// constructed request observably unchanged (R-AMR-016, S-AMR-058,
+// design.md § 11.1).
+//
+// This is AI-05.3's property at request scope, and it is the one Go hides:
+// message.go documents the variadic-spread trap — a call spread with "..."
+// does not copy a slice, so a constructor that did not clone would alias the
+// caller's own backing array. Two sub-cases: the message sequence NewRequest
+// takes as a parameter, and the stop-sequence slice WithStopSequences takes
+// variadic.
+func TestNewRequest_ConstructorInputMutatedAfterConstruction_LeavesTheRequestUnchanged(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the_message_sequence", func(t *testing.T) {
+		t.Parallel()
+
+		messages := []ai.Message{userTextMessage(t, "one"), userTextMessage(t, "two")}
+		originalFirstID := messages[0].ID()
+
+		request, err := ai.NewRequest("m", messages)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		slices.Reverse(messages) // the caller mutates the slice it passed in
+
+		read := request.Messages()
+		if read[0].ID() != originalFirstID {
+			t.Errorf("after the caller reversed the slice it passed to ai.NewRequest, request.Messages()[0] changed — " +
+				"NewRequest aliased the caller's storage instead of cloning it")
+		}
+	})
+
+	t.Run("the_stop_sequence_slice", func(t *testing.T) {
+		t.Parallel()
+
+		stops := []string{"</a>", "</b>"}
+
+		request, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithStopSequences(stops...))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		stops[0] = "SCRATCH-MUTATED" // the caller mutates the slice it passed in
+
+		read, _ := request.StopSequences()
+		if read[0] != "</a>" {
+			t.Errorf("after the caller mutated the slice it passed to ai.WithStopSequences, request.StopSequences()[0] = %q, want %q — "+
+				"WithStopSequences aliased the caller's storage instead of cloning it", read[0], "</a>")
+		}
+	})
+}
+
+// buildEquatableRequest constructs a request exercising every region, so
+// TestRequest_Equal can build two independently and compare them.
+func buildEquatableRequest(t *testing.T) ai.Request {
+	t.Helper()
+
+	segment, err := ai.NewSegment("be terse")
+	if err != nil {
+		t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+	}
+	system, err := ai.NewSystemInstruction(segment)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	tools := requireToolSet(t, "search", "fetch")
+	choice := requireNamedToolChoice(t, "fetch")
+
+	request, err := ai.NewRequest(
+		"m", []ai.Message{userTextMessage(t, "plan a trip")},
+		ai.WithSystemInstruction(system),
+		ai.WithTools(tools),
+		ai.WithToolChoice(choice),
+		ai.WithTemperature(0.5),
+		ai.WithStopSequences("</done>"),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+	return request
+}
+
+// AI-10.6 item 3 — two requests constructed from identical inputs compare
+// equal by the documented equality, and neither is affected by operations on
+// the other (R-AMR-016, S-AMR-059, S-AMR-060, design.md § 11.2).
+//
+// Equal is exported: design.md § 11.2 records the default as yes, and this is
+// the reason cashed — AI-10.5's round trip needs it, AI-26 needs it, and a
+// comparison every consumer re-derives is a comparison every consumer gets
+// subtly wrong.
+func TestRequest_Equal_IdenticalInputsCompareEqualAndOperationsDoNotLeak(t *testing.T) {
+	t.Parallel()
+
+	first := buildEquatableRequest(t)
+	second := buildEquatableRequest(t)
+
+	// S-AMR-059 — equal despite independently minted message identities. The
+	// identity check below is what proves the fixture actually exercises the
+	// exclusion design.md § 11.2 states, rather than passing by coincidence.
+	if first.Messages()[0].ID() == second.Messages()[0].ID() {
+		t.Fatalf("the two requests' first message shares one MessageID — the fixture failed to produce " +
+			"independently constructed messages, so this test cannot prove identity is excluded")
+	}
+	if !first.Equal(second) {
+		t.Fatalf("first.Equal(second) = false, want true — two requests built from identical inputs " +
+			"must compare equal under the documented equality, message identity excluded")
+	}
+	if !second.Equal(first) {
+		t.Errorf("second.Equal(first) = false, want true — Equal must be symmetric")
+	}
+
+	// S-AMR-060 — reading and mutating what a reader received from one must
+	// not affect the other.
+	read := first.Messages()
+	slices.Reverse(read)
+	if !first.Equal(second) {
+		t.Errorf("first.Equal(second) = false after a reader mutated what it received from first, want true — " +
+			"the two requests must remain independent")
+	}
+
+	// Triangulation: a request differing in exactly one region is unequal —
+	// otherwise Equal could be a function that always returns true.
+	third, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "plan a trip")})
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+	if first.Equal(third) {
+		t.Errorf("first.Equal(third) = true, want false — third carries none of first's optional regions")
+	}
+	if third.Equal(first) {
+		t.Errorf("third.Equal(first) = true, want false — Equal must be symmetric about inequality too")
+	}
+}

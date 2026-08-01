@@ -175,3 +175,23 @@ func (m Message) Content() []Part { return slices.Clone(m.content) }
 
 // Role returns the role the message is attributed to.
 func (m Message) Role() Role { return m.role }
+
+// Equal reports whether m and other carry the same role and the same
+// content, in the same order.
+//
+// Identity is excluded on purpose: this is AI-10.6's addition, landed here
+// because design.md § 11.2 needs it to compose [Request.Equal]. V-REQ-03
+// makes [MessageID] deliberately unforgeable and minted per construction, so
+// two messages built from identical inputs are two distinct messages — but
+// they are still the same *value*, and that is the question this method
+// answers. Including identity here would make it unanswerable: it would
+// report false for any two independently constructed messages at all, which
+// is not what request-level equality needs from it.
+//
+// Content is compared with slices.Equal, which compares [Part] values by ==
+// — content_part.go documents that as comparing payloads, which is what
+// makes every registered kind reach this method for free, without a
+// kind-by-kind switch.
+func (m Message) Equal(other Message) bool {
+	return m.role == other.role && slices.Equal(m.content, other.content)
+}

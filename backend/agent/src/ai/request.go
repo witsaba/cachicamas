@@ -3,6 +3,7 @@
 package ai
 
 import (
+	"bytes"
 	"slices"
 	"strconv"
 	"strings"
@@ -395,6 +396,108 @@ func (r Request) StopSequences() ([]string, bool) {
 		return nil, false
 	}
 	return slices.Clone(r.options.stopSequences), true
+}
+
+// Equal reports whether r and other are equal under region-wise readback
+// equality (design.md § 11.2, R-AMR-016): every region compared by the
+// values its own accessors return, plus, for an optional region, its
+// presence flag.
+//
+// Message identity is excluded. [Message.Equal] already excludes it, for the
+// same reason restated here at request scope: V-REQ-03 makes [MessageID]
+// deliberately unforgeable and minted per construction, precisely so two
+// messages built from identical inputs are distinguishable — and including
+// identity would make this method false for any two independently
+// constructed requests at all, which is not what "equal" means for a
+// request. Two requests are equal when a provider would receive the
+// identical call.
+//
+// Go defines no == for Request: it holds slices, and neither region compared
+// through a nested value — messages, the tool set — has one either. This is
+// the method a consumer writes instead. AI-10.5's round trip needs it, AI-26
+// needs it, and a comparison every consumer re-derives is a comparison every
+// consumer gets subtly wrong.
+//
+// Every comparison reads through the exported surface — Messages(),
+// SystemInstruction(), Tools(), ToolChoice(), each generation option — rather
+// than the unexported fields it happens to share a package with, so this
+// method proves the documented equality is reachable from outside, not only
+// from here.
+func (r Request) Equal(other Request) bool {
+	if r.model != other.model {
+		return false
+	}
+	if !slices.EqualFunc(r.Messages(), other.Messages(), Message.Equal) {
+		return false
+	}
+
+	rSystem, rHasSystem := r.SystemInstruction()
+	oSystem, oHasSystem := other.SystemInstruction()
+	if rHasSystem != oHasSystem {
+		return false
+	}
+	if rHasSystem && !rSystem.Equal(oSystem) {
+		return false
+	}
+
+	rTools, rHasTools := r.Tools()
+	oTools, oHasTools := other.Tools()
+	if rHasTools != oHasTools {
+		return false
+	}
+	if rHasTools && !slices.EqualFunc(rTools.Tools(), oTools.Tools(), toolsEqual) {
+		return false
+	}
+
+	rChoice, rHasChoice := r.ToolChoice()
+	oChoice, oHasChoice := other.ToolChoice()
+	if rHasChoice != oHasChoice {
+		return false
+	}
+	if rHasChoice {
+		rName, rNamesOne := rChoice.Name()
+		oName, oNamesOne := oChoice.Name()
+		if rChoice.Mode() != oChoice.Mode() || rNamesOne != oNamesOne || rName != oName {
+			return false
+		}
+	}
+
+	rMax, rHasMax := r.MaxOutputTokens()
+	oMax, oHasMax := other.MaxOutputTokens()
+	if rHasMax != oHasMax || rMax != oMax {
+		return false
+	}
+
+	rTemperature, rHasTemperature := r.Temperature()
+	oTemperature, oHasTemperature := other.Temperature()
+	if rHasTemperature != oHasTemperature || rTemperature != oTemperature {
+		return false
+	}
+
+	rTopP, rHasTopP := r.TopP()
+	oTopP, oHasTopP := other.TopP()
+	if rHasTopP != oHasTopP || rTopP != oTopP {
+		return false
+	}
+
+	rStopSequences, rHasStopSequences := r.StopSequences()
+	oStopSequences, oHasStopSequences := other.StopSequences()
+	if rHasStopSequences != oHasStopSequences || !slices.Equal(rStopSequences, oStopSequences) {
+		return false
+	}
+
+	return true
+}
+
+// toolsEqual reports whether two tool declarations carry the same name,
+// description and schema bytes.
+//
+// A free function rather than a [Tool] method: design.md § 11.2 asks for
+// tools to be compared "by their own accessors", not by a new exported
+// method on a type AI-08 owns, and [Tool] cannot use == because its schema
+// field is a slice.
+func toolsEqual(a, b Tool) bool {
+	return a.Name() == b.Name() && a.Description() == b.Description() && bytes.Equal(a.Schema(), b.Schema())
 }
 
 // boundsRule checks the bounds of the applied generation options that are
