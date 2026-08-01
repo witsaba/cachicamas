@@ -170,14 +170,26 @@ func (r ReasoningDelta) blockIndex() BlockIndex { return r.block }
 
 // validate reports the payload's first broken rule at the given position, or
 // nil, in order (V-FAIL-04): the block index is at least 1, else
-// [ErrOutOfRange] at "block_index" (R-ARE-003); then the fragment is at most
-// [MaxTextLen] bytes, else [ErrOutOfRange] at "fragment" (R-ARE-006). No
+// [ErrOutOfRange] at "block_index" (R-ARE-003); then a redacted block's delta
+// carries no non-empty fragment, else [ErrMisplaced] at "fragment"
+// (R-ARE-013, S-ARE-036) — a withheld plaintext and a text fragment beside it
+// are two contradictory signals, and the redaction bit copied from start at
+// construction is what lets this door decide it; then the fragment is at
+// most [MaxTextLen] bytes, else [ErrOutOfRange] at "fragment" (R-ARE-006). No
 // emptiness rule applies to the fragment: a zero-length or whitespace-only
 // fragment is legal (R-ARE-007) — Reasoning.validate's complete-part rules do
-// not apply to a fragment, which is never a complete part on its own.
+// not apply to a fragment, which is never a complete part on its own; a
+// redacted block's own zero-length fragment stays legal too, since the
+// misplaced rule above rejects only a non-empty one.
 func (r ReasoningDelta) validate(at Path) *Violation {
 	return firstViolation(
 		blockIndexRule(at, r.block),
+		func() *Violation {
+			if r.redacted && len(r.fragment) > 0 {
+				return Invalid(ErrMisplaced, under(at, At("fragment"))...)
+			}
+			return nil
+		},
 		func() *Violation {
 			if len(r.fragment) > MaxTextLen {
 				return Invalid(ErrOutOfRange, under(at, At("fragment"))...)
@@ -188,22 +200,23 @@ func (r ReasoningDelta) validate(at Path) *Violation {
 }
 
 // NewReasoningDelta constructs one fragment of new reasoning text for the
-// block start opened (R-ARE-005, R-ARE-006, R-ARE-007).
+// block start opened (R-ARE-005, R-ARE-006, R-ARE-007, R-ARE-013).
 //
 // start is the event returned by [NewReasoningBlockStart] or
 // [NewRedactedReasoningBlockStart] — its block index is inherited so the
 // four events of one block structurally cannot disagree about it (S-ARE-007),
 // and its redaction bit travels with it for the rule
-// [ReasoningDelta.validate] applies once AI-17.3 lands. The rules are
-// [ReasoningDelta.validate]'s, run from here and again at [CheckEmit]
-// (R-AEE-010). On failure the zero [Event] is returned. The returned event is
-// unstamped (sequence 0); stamping is a [Stamper]'s job, per-stream, at the
-// producer boundary.
+// [ReasoningDelta.validate] applies: a non-empty fragment on a redacted
+// block is rejected (S-ARE-036). The rules are [ReasoningDelta.validate]'s,
+// run from here and again at [CheckEmit] (R-AEE-010). On failure the zero
+// [Event] is returned. The returned event is unstamped (sequence 0);
+// stamping is a [Stamper]'s job, per-stream, at the producer boundary.
 //
 // fragment is stored byte for byte: nothing here validates its encoding,
 // trims it, or rejects it for being empty or whitespace-only. An individual
 // fragment may not be well-formed UTF-8 on its own when a multi-byte rune
-// splits across a delta boundary (R-ARE-006).
+// splits across a delta boundary (R-ARE-006). A zero-length fragment stays
+// legal on a redacted block; only a non-empty one is rejected.
 func NewReasoningDelta(start ReasoningBlockStart, fragment []byte) (Event, error) {
 	payload := ReasoningDelta{block: start.block, fragment: string(fragment), redacted: start.redacted}
 	if violation := payload.validate(nil); violation != nil {
@@ -271,13 +284,23 @@ func (r ReasoningBlockEnd) blockIndex() BlockIndex { return r.block }
 
 // validate reports the payload's first broken rule at the given position, or
 // nil, in order (V-FAIL-04): the block index is at least 1, else
-// [ErrOutOfRange] at "block_index" (R-ARE-003); then the token, when present,
-// is at most [MaxReasoningTokenLen] bytes, else [ErrOutOfRange] at "token" —
-// [Reasoning.validate]'s only rule on the token, restated verbatim
+// [ErrOutOfRange] at "block_index" (R-ARE-003); then a redacted block's end
+// carries a token, else [ErrEmpty] at "token" (R-ARE-013, S-ARE-035) —
+// [Reasoning.validate] rule 3, restated on the wire side: a redacted block
+// with nothing to replay carries nothing at all, and a present, zero-length
+// token still satisfies the rule; then the token, when present, is at most
+// [MaxReasoningTokenLen] bytes, else [ErrOutOfRange] at "token" —
+// [Reasoning.validate]'s only bound rule on the token, restated verbatim
 // (R-ARE-010).
 func (r ReasoningBlockEnd) validate(at Path) *Violation {
 	return firstViolation(
 		blockIndexRule(at, r.block),
+		func() *Violation {
+			if r.redacted && !r.hasToken {
+				return Invalid(ErrEmpty, under(at, At("token"))...)
+			}
+			return nil
+		},
 		func() *Violation {
 			if r.hasToken && len(r.token) > MaxReasoningTokenLen {
 				return Invalid(ErrOutOfRange, under(at, At("token"))...)
@@ -288,11 +311,13 @@ func (r ReasoningBlockEnd) validate(at Path) *Violation {
 }
 
 // NewReasoningBlockEnd constructs the end of the reasoning block start
-// opened, carrying its round-trip token (R-ARE-009..011).
+// opened, carrying its round-trip token (R-ARE-009..011, R-ARE-013).
 //
 // start is the event returned by [NewReasoningBlockStart] or
 // [NewRedactedReasoningBlockStart] — see [NewReasoningDelta] for why the
-// typed start, not a bare index, is the parameter. The rules are
+// typed start, not a bare index, is the parameter; its redaction bit travels
+// with it for the rule [ReasoningBlockEnd.validate] applies: a redacted
+// block's end with no token at all is rejected (S-ARE-035). The rules are
 // [ReasoningBlockEnd.validate]'s, run from here and again at [CheckEmit]
 // (R-AEE-010). On failure the zero [Event] is returned. The returned event is
 // unstamped (sequence 0); stamping is a [Stamper]'s job, per-stream, at the
@@ -300,7 +325,8 @@ func (r ReasoningBlockEnd) validate(at Path) *Violation {
 //
 // A nil token means the provider attached none. Any non-nil slice, including
 // one of length zero, is a token that is present — [Reasoning.Token]'s
-// distinction, kept verbatim on the wire side (R-ARE-011).
+// distinction, kept verbatim on the wire side (R-ARE-011); a present,
+// zero-length token satisfies the redacted-block rule above.
 func NewReasoningBlockEnd(start ReasoningBlockStart, token []byte) (Event, error) {
 	payload := ReasoningBlockEnd{block: start.block, token: string(token), hasToken: token != nil, redacted: start.redacted}
 	if violation := payload.validate(nil); violation != nil {

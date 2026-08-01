@@ -972,6 +972,285 @@ func TestReasoningBlock_NoTokenAtAll_ReconstructsToReasoningStateText(t *testing
 	}
 }
 
+// ---- R-ARE-012 — redaction is signalled once, on the block-start event ---
+
+// S-ARE-031 — the redacted signal appears on the block-start kind only, and
+// no kind exposes a ReasoningState field or accessor.
+func TestReasoningEventKinds_ExposeRedactedOnlyOnStart_AndNoReasoningStateAnywhere(t *testing.T) {
+	t.Parallel()
+
+	stateType := reflect.TypeOf(ai.ReasoningStateText)
+	types := []reflect.Type{
+		reflect.TypeOf(ai.ReasoningBlockStart{}),
+		reflect.TypeOf(ai.ReasoningDelta{}),
+		reflect.TypeOf(ai.ReasoningBlockEnd{}),
+	}
+	for _, typ := range types {
+		hasRedacted := false
+		for i := 0; i < typ.NumMethod(); i++ {
+			m := typ.Method(i)
+			if m.Name == "Redacted" {
+				hasRedacted = true
+			}
+			for r := 0; r < m.Type.NumOut(); r++ {
+				if m.Type.Out(r) == stateType {
+					t.Errorf("%v.%s returns %v; R-ARE-012 forbids any event of this family exposing a ReasoningState", typ, m.Name, stateType)
+				}
+			}
+		}
+		wantRedacted := typ == reflect.TypeOf(ai.ReasoningBlockStart{})
+		if hasRedacted != wantRedacted {
+			t.Errorf("%v exports Redacted() = %v, want %v (R-ARE-012: only the block-start kind)", typ, hasRedacted, wantRedacted)
+		}
+	}
+}
+
+// S-ARE-032 — a redacted block's start event, read before any further event
+// arrives, reports that the block is redacted.
+func TestRedactedReasoningBlockStart_ReportsRedaction_BeforeAnyFurtherEvent(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewRedactedReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewRedactedReasoningBlockStart(1) returned %v, want no failure", err)
+	}
+	payload, ok := start.ReasoningBlockStart()
+	if !ok {
+		t.Fatal("start.ReasoningBlockStart() reported no payload")
+	}
+	if !payload.Redacted() {
+		t.Error("payload.Redacted() = false, want true — readable from the start event alone, before any delta")
+	}
+}
+
+// S-ARE-033 — a reconstructed block's state derivation consults the start
+// event's redacted signal, the concatenated fragments and the end event's
+// token, and returns the same state Reasoning.State() returns for the
+// equivalent constructed part.
+func TestReconstructedReasoningBlock_StateDerivation_MatchesTheEquivalentConstructedPart(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+	delta, err := ai.NewReasoningDelta(startPayload, []byte("visible reasoning"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want no failure", err)
+	}
+	end, err := ai.NewReasoningBlockEnd(startPayload, []byte("sig"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	got := reconstructReasoningState(t, []ai.Event{start, delta, end}, 1)
+
+	wantPart, err := ai.NewReasoning("visible reasoning", []byte("sig"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+	}
+	wantReasoning, ok := wantPart.Reasoning()
+	if !ok {
+		t.Fatal("wantPart.Reasoning() reported no payload")
+	}
+	if got != wantReasoning.State() {
+		t.Errorf("reconstructed state = %v, want %v (the equivalent constructed part's own derivation)", got, wantReasoning.State())
+	}
+}
+
+// ---- R-ARE-013 — a redacted block streams its payload verbatim -----------
+
+// S-ARE-034 — a redacted block whose end event carries an opaque payload
+// from opaqueTokens() reconstructs to ReasoningStateRedacted, byte-identical.
+func TestRedactedReasoningBlock_OpaquePayload_ReconstructsToRedactedStateByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range opaqueTokens() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			start, err := ai.NewRedactedReasoningBlockStart(1)
+			if err != nil {
+				t.Fatalf("ai.NewRedactedReasoningBlockStart(1) returned %v, want no failure", err)
+			}
+			startPayload, _ := start.ReasoningBlockStart()
+			end, err := ai.NewReasoningBlockEnd(startPayload, tc.token)
+			if err != nil {
+				t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+			}
+
+			endPayload, _ := end.ReasoningBlockEnd()
+			got, present := endPayload.Token()
+			if !present || !bytes.Equal(got, tc.token) {
+				t.Fatalf("endPayload.Token() = (%x, %v), want (%x, true)", got, present, tc.token)
+			}
+
+			state := reconstructReasoningState(t, []ai.Event{start, end}, 1)
+			if state != ai.ReasoningStateRedacted {
+				t.Errorf("reconstructed state = %v, want %v", state, ai.ReasoningStateRedacted)
+			}
+		})
+	}
+}
+
+// S-ARE-035 — a redacted block whose end event carries no token fails with
+// ErrEmpty naming the token field.
+func TestReasoningBlockEnd_RedactedWithNoToken_IsRejected(t *testing.T) {
+	t.Parallel()
+
+	start, _ := ai.NewRedactedReasoningBlockStart(1)
+	startPayload, _ := start.ReasoningBlockStart()
+
+	_, err := ai.NewReasoningBlockEnd(startPayload, nil)
+	if err == nil || !errors.Is(err, ai.ErrEmpty) {
+		t.Fatalf("ai.NewReasoningBlockEnd(redacted start, nil token) = %v, want ErrEmpty", err)
+	}
+	if !strings.Contains(err.Error(), "token") {
+		t.Errorf("err.Error() = %q, want it to name the token field", err.Error())
+	}
+
+	// A present, zero-length token satisfies the rule (mirrors
+	// Reasoning.validate rule 3): only a nil (absent) token is rejected.
+	if _, err := ai.NewReasoningBlockEnd(startPayload, []byte{}); err != nil {
+		t.Errorf("ai.NewReasoningBlockEnd(redacted start, zero-length token) returned %v, want no failure", err)
+	}
+}
+
+// S-ARE-036 — a delta carrying a non-empty fragment, constructed for a block
+// whose start signalled redaction, is rejected and the failure names the
+// offending field. A zero-length fragment on the same block is still legal.
+func TestReasoningDelta_NonEmptyFragmentOnARedactedBlock_IsRejected(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewRedactedReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewRedactedReasoningBlockStart(1) returned %v, want no failure", err)
+	}
+	startPayload, _ := start.ReasoningBlockStart()
+	if !startPayload.Redacted() {
+		t.Fatal("startPayload.Redacted() = false, want true")
+	}
+
+	_, err = ai.NewReasoningDelta(startPayload, []byte("leaked plaintext"))
+	if err == nil || !errors.Is(err, ai.ErrMisplaced) {
+		t.Fatalf("ai.NewReasoningDelta(redacted start, non-empty fragment) = %v, want ErrMisplaced", err)
+	}
+	if !strings.Contains(err.Error(), "fragment") {
+		t.Errorf("err.Error() = %q, want it to name the fragment field", err.Error())
+	}
+
+	if _, err := ai.NewReasoningDelta(startPayload, nil); err != nil {
+		t.Errorf("ai.NewReasoningDelta(redacted start, nil fragment) returned %v, want no failure — only a non-empty fragment is rejected", err)
+	}
+	if _, err := ai.NewReasoningDelta(startPayload, []byte{}); err != nil {
+		t.Errorf("ai.NewReasoningDelta(redacted start, zero-length fragment) returned %v, want no failure", err)
+	}
+}
+
+// ---- R-ARE-014 — a token-and-no-text block is valid signature-only -------
+
+// S-ARE-037 — a reasoning block start with no redacted signal, no deltas,
+// and a block end carrying a token is valid, reconstructs to empty text, and
+// derives ReasoningStateTokenOnly.
+func TestReasoningBlock_TokenAndNoText_ReconstructsToReasoningStateTokenOnly(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(1) returned %v, want no failure", err)
+	}
+	startPayload, _ := start.ReasoningBlockStart()
+	end, err := ai.NewReasoningBlockEnd(startPayload, []byte("signature-only-token"))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	if got := reconstructFragments([]ai.Event{start, end}, 1); got != "" {
+		t.Errorf("reconstructed text = %q, want empty", got)
+	}
+	state := reconstructReasoningState(t, []ai.Event{start, end}, 1)
+	if state != ai.ReasoningStateTokenOnly {
+		t.Errorf("reconstructed state = %v, want %v", state, ai.ReasoningStateTokenOnly)
+	}
+}
+
+// S-ARE-038 — a token-only block and a redacted block carrying
+// byte-identical token bytes reconstruct to different, non-equal states.
+func TestTokenOnlyBlock_AndRedactedBlock_WithIdenticalTokenBytes_AreDistinguishable(t *testing.T) {
+	t.Parallel()
+
+	const token = "shared-token-bytes"
+
+	tokenOnlyStart, _ := ai.NewReasoningBlockStart(1)
+	tokenOnlyStartPayload, _ := tokenOnlyStart.ReasoningBlockStart()
+	tokenOnlyEnd, err := ai.NewReasoningBlockEnd(tokenOnlyStartPayload, []byte(token))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	redactedStart, _ := ai.NewRedactedReasoningBlockStart(2)
+	redactedStartPayload, _ := redactedStart.ReasoningBlockStart()
+	redactedEnd, err := ai.NewReasoningBlockEnd(redactedStartPayload, []byte(token))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want no failure", err)
+	}
+
+	tokenOnlyPayload, _ := tokenOnlyEnd.ReasoningBlockEnd()
+	redactedPayload, _ := redactedEnd.ReasoningBlockEnd()
+	tokenOnlyBytes, _ := tokenOnlyPayload.Token()
+	redactedBytes, _ := redactedPayload.Token()
+	if !bytes.Equal(tokenOnlyBytes, redactedBytes) {
+		t.Fatalf("test fixture assumption broken: token bytes differ (%x vs %x)", tokenOnlyBytes, redactedBytes)
+	}
+
+	tokenOnlyState := reconstructReasoningState(t, []ai.Event{tokenOnlyStart, tokenOnlyEnd}, 1)
+	redactedState := reconstructReasoningState(t, []ai.Event{redactedStart, redactedEnd}, 2)
+
+	if tokenOnlyState != ai.ReasoningStateTokenOnly {
+		t.Errorf("token-only block's state = %v, want %v", tokenOnlyState, ai.ReasoningStateTokenOnly)
+	}
+	if redactedState != ai.ReasoningStateRedacted {
+		t.Errorf("redacted block's state = %v, want %v", redactedState, ai.ReasoningStateRedacted)
+	}
+	if tokenOnlyState == redactedState {
+		t.Error("the token-only and redacted states compare equal despite identical token bytes; they must be distinguishable")
+	}
+}
+
+// S-ARE-039 — a reasoning block with neither text, nor a token, nor a
+// redacted signal is legal at the event level (R-ARE-007's zero-delta
+// block), and its start reports no redaction. Reconstructing it into AI-07's
+// content-part shape fails with the same rule Reasoning.validate applies to
+// the equivalent constructed part ("a part with neither text nor token
+// carries nothing at all") — it is never silently reported as redacted or
+// signature-only.
+func TestReasoningBlock_NeitherTextNorTokenNorRedacted_IsLegalAtTheEventLevelButNotAReconstructibleState(t *testing.T) {
+	t.Parallel()
+
+	start, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart(1) returned %v, want no failure — R-ARE-007's zero-delta block is legal", err)
+	}
+	startPayload, ok := start.ReasoningBlockStart()
+	if !ok {
+		t.Fatal("start.ReasoningBlockStart() reported no payload")
+	}
+	if startPayload.Redacted() {
+		t.Fatal("startPayload.Redacted() = true, want false")
+	}
+	end, err := ai.NewReasoningBlockEnd(startPayload, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd(start, nil) returned %v, want no failure", err)
+	}
+	endPayload, _ := end.ReasoningBlockEnd()
+	if _, present := endPayload.Token(); present {
+		t.Error("endPayload.Token() reported present=true, want false")
+	}
+
+	_, err = ai.NewReasoning("", nil)
+	if err == nil || !errors.Is(err, ai.ErrEmpty) {
+		t.Fatalf(`ai.NewReasoning("", nil) = %v, want ErrEmpty — the equivalent AI-07 rule this block's reconstruction must respect`, err)
+	}
+}
+
 // containsEventKind and sort are used by other _test.go files in this
 // package too; sort is imported here so gofmt/goimports does not churn this
 // file if a future edit adds a sorted-output assertion.
