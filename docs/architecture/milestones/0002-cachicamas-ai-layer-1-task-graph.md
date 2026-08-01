@@ -1,6 +1,6 @@
 # Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Not started — **0 of 41** milestones shipped. **AI-00 is the first milestone.** Neither the `backend/agent` module nor a single line of Layer 1 exists on disk; this document is written before the first file so that every contract is built correct at birth rather than corrected afterwards.
+> **Status:** Wave 0 + Wave 1 complete — **14 of 41** milestones shipped. **AI-00 through AI-13 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 19 production files and 27 test files.
 > **Single source.** This document owns milestone identity, scope and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. It supersedes the plan dated 2026-07-30 that assumed seventeen shipped milestones inside `database_administrator`; see [what changed and why](#what-changed-from-the-retired-plan) for the identifier map from that plan to this one.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md) — downstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
@@ -10,7 +10,7 @@
 > **Node identifiers are append-only.** A node is `AI-NN.p` (subtask of milestone AI-NN) or `AI-NN.p.q` (fractal subdivision of `AI-NN.p`). Splitting a node appends children under it; it never renumbers siblings. A node discovered during implementation is appended with the next free ordinal and an edge, exactly like the milestone rule above.
 
 > [!IMPORTANT]
-> **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures — each milestone's SDD cycle owns those. "The request", "the envelope", "the provider interface" are concept names from the architecture reference, not type names. Unlike the retired plan, this document can cite **no shipped code as evidence**, because none exists: every citation points at a contract document, an ADR, or the architecture reference.
+> **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures — each milestone's SDD cycle owns those. "The request", "the envelope", "the provider interface" are concept names from the architecture reference, not type names. From Wave 1 forward, this document cites shipped Layer 1 code as evidence for completed milestones, never for unshipped ones.
 
 ---
 
@@ -2272,11 +2272,11 @@ flowchart LR
 
 Layer 1 is complete when every box holds. The [traceability spine](#completion-checklist--nodes) maps each item, in this order, to the node that proves it.
 
-- [ ] The `backend/agent` module exists at the ADR-defined location, and `database_administrator/src/tools/` is untouched.
-- [ ] **Both** import directions are mechanically guarded, and each guard has been recorded biting.
-- [ ] Neutral request, message, content and tool contracts are documented and tested.
-- [ ] Every content-part variant is readable from another package, and no unconstructed value can reach a request.
-- [ ] Cache breakpoints are expressible; per-request options and a provider escape hatch exist; a request is rebuildable without mutation.
+- [x] The `backend/agent` module exists at the ADR-defined location, and `database_administrator/src/tools/` is untouched.
+- [x] **Both** import directions are mechanically guarded, and each guard has been recorded biting.
+- [x] Neutral request, message, content and tool contracts are documented and tested.
+- [x] Every content-part variant is readable from another package, and no unconstructed value can reach a request.
+- [x] Cache breakpoints are expressible; per-request options and a provider escape hatch exist; a request is rebuildable without mutation.
 - [ ] Provider round-trip tokens survive byte-exact through normalization, rebuild, and the wire.
 - [ ] Event order and stream ownership are explicit, and the sequence is per-stream and provably starts at 1 for every stream.
 - [ ] Every event kind that can be emitted has a payload that can actually be constructed.
@@ -2330,19 +2330,21 @@ Two-way coverage: every defect class, gap and completion-checklist item maps to 
 
 | Finding / gap | Closed by |
 | --- | --- |
-| **C1** — an unconstructed content part passes validation | AI-06.1 (joint strategy) → AI-06.3 → AI-06.4 |
-| **C2** — content unreadable from another package | AI-06.1 → AI-06.2, AI-07.1, AI-09.1, AI-09.3 → AI-10.5 |
+| **C1** — an unconstructed content part passes validation | **Closed.** AI-06.1 (joint strategy) → AI-06.3 → AI-06.4 all landed and guarded. |
+| **C2** — content unreadable from another package | **Closed for Layer 1.** AI-06.2, AI-07.1, AI-09.1, AI-09.3 landed; AI-10.5 landed. |
 | **C3** — process-global sequence counter | AI-14.2 → AI-14.3 |
 | **C4** — unconstructible terminal error | AI-19.1, guarded by AI-14.1 item 3; ordering enforced by AI-19 preceding AI-20 |
-| **G4** — cache breakpoints (Layer 1 half) | AI-10.2 (segments from birth), AI-11.1 … AI-11.3; rendered by AI-26.2 |
-| **G5** — tool-call ordinal survives normalization | AI-09.2, AI-18.3, AI-30.5; suite case AI-23.3 |
+| **G4** — cache breakpoints (Layer 1 half) | **Layer 1 half closed.** AI-10.2 (segments from birth), AI-11.1 … AI-11.3 landed. Remaining: wire rendering by AI-26.2 (Wave 2). |
+| **G5** — tool-call ordinal survives normalization | **Layer 1 half closed.** AI-09.2 landed. Remaining: AI-18.3, AI-30.5 (Wave 2+). |
 | **G8** — partial-output discriminator and typed taxonomy | AI-19.2 … AI-19.5, AI-32.2, AI-32.3, AI-35.1; suite case AI-23.4 |
-| **G9** — per-request options and escape hatch | AI-12.1 … AI-12.4; rendered by AI-26.7 |
+| **G9** — per-request options and escape hatch | **Closed.** AI-12.1 … AI-12.4 landed. Rendering by AI-26.7 (Wave 2). |
 | **G12(a)** — delta-optional tool calls | AI-18.2; exercised by AI-21.2, AI-30.2; suite case AI-23.3 |
-| **G12(b)** — reasoning round-trip token | AI-07.2 … AI-07.4, AI-17.2; wire-proven by AI-29.2 and AI-26.6; suite case AI-23.8 |
-| **G12(c)** — refusal and pause finish reasons | AI-13.1, AI-13.2; mapped by AI-31.1; suite case AI-23.8 |
+| **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild. Wire-proven by AI-29.2 and AI-26.6 (Wave 2+). |
+| **G12(c)** — refusal and pause finish reasons | **Closed.** AI-13.1, AI-13.2 landed with all seven values. Mapped by AI-31.1 (Wave 2). |
 | **G13** — stream carrier | AI-02.1; ergonomics AI-22.5; pinned by AI-20.4 |
-| Leakage register rows 1–9 | row 1 = G12(a) above · row 2 = G12(b) above · row 3 = G12(c) above · row 4 AI-26.5 · row 5 AI-26.3 · row 6 AI-26.7 · row 7 AI-26.5 · row 8 AI-10.2 + AI-26.2 · row 9 AI-11.3 |
+| Leakage register rows 1–9 | row 1 = G12(a) above · row 2 = G12(b) above · row 3 = G12(c) above · row 4 AI-26.5 · row 5 AI-26.3 · row 6 AI-26.7 · row 7 AI-26.5 · row 8 **Layer 1 half closed** by AI-10.2 · row 9 **Layer 1 half closed** by AI-11.3 (wire rendering AI-26.2, Wave 2) |
+| **Wave 2 obligation: Region-exhaustiveness guard one-directional.** | `request_test.go:1745` asserts `len(regions) != 11`, catching a **deleted table row** but not a **field added to `requestDraft`** — which is the failure mode that recurred three times (AI-10.6, AI-11.1, AI-12.3). Record this limitation in the first Wave 2 milestone that adds a `Request` region, with a plan to add a per-field heuristic or switched architecture when value/flag pairs are no longer tenable. |
+| **Wave 2 obligation: JSON scanner depth cap.** | `isWellFormedJSON` in `json_syntax.go:55` recurses without a nesting-depth cap and is reachable from caller input through `tool_call.go:91`. Measured: it **agrees** with `encoding/json.Valid` at depth 5 000, **disagrees** at depth 10 001, and produces `fatal error: stack overflow` at depth 20 000 000 — an unrecoverable crash, not a returned error. Its differential generator caps generated nesting at ~5 (`json_syntax_differential_internal_test.go:76`), so the differential test cannot reach the divergence. **The same test's doc comment at `json_syntax_differential_internal_test.go:28` claims coverage of "deeply nested structures", which is not true as written** — the false coverage claim is part of this obligation and must be corrected in the same change, not separately. Owned by AI-24 (first transport) or the first Wave 2 milestone feeding provider bytes into `NewToolCall`. Fix: cap nesting at 10 000, add a corpus case at 10 001, raise the generator's nesting bound above the cap, and correct the doc comment to state the depth the generator actually reaches. |
 | Required conformance case "redaction" | AI-23.7 (suite); AI-36 (adapter hardening) |
 | ADR 0005 Guards A / B / C | AI-00.3 · AI-00.4 (both halves) · AI-00.2 + AI-20.4 |
 | ADR 0005 § D3 observability boundary | AI-37.1 … AI-37.4 |
