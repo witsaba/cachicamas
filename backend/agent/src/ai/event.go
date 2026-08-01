@@ -59,6 +59,11 @@ import "strconv"
 //     tool name before any argument byte, fragment-only deltas, and
 //     byte-exact, never re-marshalled, never-validated argument bytes at
 //     the end (R-ATC-001). See tool_call_event.go.
+//   - error — the terminal error event: one closed failure-category
+//     vocabulary reachable on both delivery paths, the partial-output
+//     discriminator kept perpendicular to delivery, at most one per
+//     stream, no block role (R-AIP-001 … R-AIP-015). See
+//     provider_failure.go.
 //
 // AI-15 is the first milestone to register a production kind. AI-19 appends
 // further members the same way, following event_descriptor.go's six-step
@@ -123,10 +128,17 @@ const (
 	// tool_call_event.go.
 	EventKindToolCallEnd
 
+	// EventKindError is the kind carrying the terminal error event
+	// (R-AIP-001 … R-AIP-003): the same [Failure] value returned directly
+	// pre-stream, carried unchanged as this event's payload mid-stream —
+	// one vocabulary, two delivery paths (R-AIP-013). Terminal. See
+	// provider_failure.go.
+	EventKindError
+
 	// eventKindFirst and eventKindEnd bound the declared production constant
 	// space, mirroring content_part.go's partKindFirst/partKindEnd.
 	eventKindFirst = EventKindResponseStart
-	eventKindEnd   = EventKindToolCallEnd + 1
+	eventKindEnd   = EventKindError + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -191,6 +203,10 @@ var eventRegistry = []eventRegistration{
 	EventKindToolCallEnd: {
 		name:       "tool_call_end",
 		descriptor: EventDescriptor{Role: BlockRoleEnd, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindError: {
+		name:       "error",
+		descriptor: EventDescriptor{Role: BlockRoleNone, Cardinality: CardinalityAtMostOne, Terminal: true},
 	},
 }
 

@@ -132,6 +132,17 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 		construct:      func() (ai.Event, error) { return ai.NewToolCallEnd(1, []byte(`{"registry":"witness"}`)) },
 		read:           func(e ai.Event) (any, bool) { return e.ToolCallEnd() },
 	},
+	ai.EventKindError: {
+		registeredName: "error",
+		construct: func() (ai.Event, error) {
+			f, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout})
+			if err != nil {
+				return ai.Event{}, err
+			}
+			return ai.ErrorEvent(f)
+		},
+		read: func(e ai.Event) (any, bool) { return e.ErrorPayload() },
+	},
 }
 
 // TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor is
@@ -222,6 +233,7 @@ var productionEventKinds = []ai.EventKind{
 	ai.EventKindToolCallStart,
 	ai.EventKindToolCallDelta,
 	ai.EventKindToolCallEnd,
+	ai.EventKindError,
 }
 
 // R-AEE-004, R-AEE-006 — the production event-kind vocabulary is exactly the
