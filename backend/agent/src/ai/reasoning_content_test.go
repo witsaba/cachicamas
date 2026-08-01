@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
@@ -627,6 +628,294 @@ func TestNewReasoning_RuleViolations_FailWithTheDocumentedSentinels(t *testing.T
 		}
 		if strings.Contains(err.Error(), secret) {
 			t.Errorf("the rendered failure reproduces the reasoning text: %q", err.Error())
+		}
+	})
+}
+
+// AI-07.3 item 1 — the token round-trips byte-identically through a message.
+//
+// *(pin)* — green from birth, and recorded as such. The property is a
+// consequence of AI-07.2's storage, and doc 0002's leaf anatomy allows a
+// green-from-birth item precisely for this case: a regression assertion over a
+// property an earlier leaf established. What it protects is the failure doc
+// 0001 § 3.2 describes — a signature not returned exactly fails multi-turn
+// extended thinking with tool use, on the second turn, silently — which no
+// later refactor may reintroduce.
+//
+// The trip is deliberately two hops. One hop would pass for an implementation
+// that returned the caller's own slice; two hops, with the part read out of one
+// message and placed into another, is the shape a rebuilt request has.
+func TestReasoning_TokenThroughAMessage_RoundTripsByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	const thought = "Two hops, so that a single pass-through cannot pass by accident."
+
+	cases := opaqueTokens()
+	cases = append(cases,
+		struct {
+			name  string
+			token []byte
+		}{"high Unicode encoded as bytes", []byte("héllo · 世界 · 🜁 · \U0001F9EA")},
+		struct {
+			name  string
+			token []byte
+		}{"longer than any plausible buffer boundary", bytes.Repeat([]byte("\x00\xff\xfe signature "), 8192)},
+	)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			want := bytes.Clone(tc.token)
+
+			part, err := ai.NewReasoning(thought, tc.token)
+			if err != nil {
+				t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+			}
+
+			first, err := ai.NewMessage(ai.RoleAssistant, part)
+			if err != nil {
+				t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+			}
+
+			// Read the part back out and re-attach it, which is what a rebuilt
+			// request does with a transcript it was handed.
+			readBack := first.Content()[0]
+			second, err := ai.NewMessage(ai.RoleAssistant, readBack)
+			if err != nil {
+				t.Fatalf("ai.NewMessage returned %v on the second hop, want no failure", err)
+			}
+
+			for _, hop := range []struct {
+				what string
+				part ai.Part
+			}{
+				{"as constructed", part},
+				{"out of the first message", readBack},
+				{"out of the second message", second.Content()[0]},
+			} {
+				reasoning, ok := hop.part.Reasoning()
+				if !ok {
+					t.Fatalf("%s: part.Reasoning() reported no reasoning", hop.what)
+				}
+
+				got, present := reasoning.Token()
+				if !present {
+					t.Fatalf("%s: reasoning.Token() reported no token, want one", hop.what)
+				}
+				if len(got) != len(want) {
+					t.Fatalf("%s: the token is %d bytes, want %d", hop.what, len(got), len(want))
+				}
+				if !bytes.Equal(got, want) {
+					t.Errorf("%s: the token changed on the trip", hop.what)
+				}
+				if reasoning.Text() != thought {
+					t.Errorf("%s: reasoning.Text() = %q, want %q — the round trip is a property of the payload, not of the token alone",
+						hop.what, reasoning.Text(), thought)
+				}
+			}
+		})
+	}
+}
+
+// AI-07.3 item 2 — the token survives AI-05.3's copy semantics.
+//
+// A part that keeps the caller's slice shares its backing array with whatever
+// the caller does next, and the symptom is content that changed with nobody
+// writing to the message — doc 0002 calls its absence "the most confusing class
+// of test failure in a streaming package", and AI-08 hit exactly this on schema
+// bytes. There are two halves and a fix for one is not a fix for the other: the
+// construction path takes the caller's slice, and the read path hands one out.
+func TestReasoning_TokenAcrossCopies_IsUnaffectedByTheCallersSlice(t *testing.T) {
+	t.Parallel()
+
+	const thought = "A signature is only a signature if it is the same bytes."
+
+	original := []byte("\x00\xffthe provider's signature\xfe\x01")
+	want := bytes.Clone(original)
+
+	t.Run("mutating the slice the caller supplied does not change the token", func(t *testing.T) {
+		t.Parallel()
+
+		supplied := bytes.Clone(want)
+
+		part, err := ai.NewReasoning(thought, supplied)
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+
+		// The caller reuses its decode buffer, which is the ordinary thing for
+		// a caller to do and the reason this is a hazard rather than a curio.
+		for i := range supplied {
+			supplied[i] = 0x2a
+		}
+
+		reasoning, _ := part.Reasoning()
+		got, present := reasoning.Token()
+		if !present {
+			t.Fatalf("reasoning.Token() reported no token, want one")
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("the token became %x after the caller overwrote its own slice, want %x", got, want)
+		}
+	})
+
+	t.Run("mutating the bytes an accessor returned does not change the token", func(t *testing.T) {
+		t.Parallel()
+
+		part, err := ai.NewReasoning(thought, bytes.Clone(want))
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+		reasoning, _ := part.Reasoning()
+
+		handedOut, _ := reasoning.Token()
+		for i := range handedOut {
+			handedOut[i] = 0x2a
+		}
+
+		again, _ := reasoning.Token()
+		if !bytes.Equal(again, want) {
+			t.Errorf("the token became %x after a consumer overwrote the bytes it received, want %x", again, want)
+		}
+	})
+
+	t.Run("copying a message copies the token exactly", func(t *testing.T) {
+		t.Parallel()
+
+		part, err := ai.NewReasoning(thought, bytes.Clone(want))
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+		msg, err := ai.NewMessage(ai.RoleAssistant, part)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+
+		copied := msg
+
+		// One consumer rewrites what it received; the other must not see it.
+		first, _ := copied.Content()[0].Reasoning()
+		mine, _ := first.Token()
+		for i := range mine {
+			mine[i] = 0x2a
+		}
+
+		second, _ := msg.Content()[0].Reasoning()
+		theirs, _ := second.Token()
+		if !bytes.Equal(theirs, want) {
+			t.Errorf("the copy's token is %x, want %x — two holders of a copy observed each other", theirs, want)
+		}
+	})
+
+	t.Run("two consumers reading in parallel observe the same bytes", func(t *testing.T) {
+		t.Parallel()
+
+		part, err := ai.NewReasoning(thought, bytes.Clone(want))
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+		msg, err := ai.NewMessage(ai.RoleAssistant, part)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				reasoning, _ := msg.Content()[0].Reasoning()
+				token, _ := reasoning.Token()
+				if !bytes.Equal(token, want) {
+					t.Errorf("a parallel reader observed %x, want %x", token, want)
+				}
+				for i := range token {
+					token[i] = 0x2a
+				}
+			}()
+		}
+		wg.Wait()
+	})
+}
+
+// AI-07.3 — appended. A reasoning part compares with == like every other part.
+//
+// Discovered while fixing item 2's aliasing bug. content_part.go states the
+// property as landed contract: "Part is a value... Equality with == is defined
+// and compares payloads." A payload containing a slice makes == panic at
+// runtime for that kind, so a second kind arriving would have silently removed
+// a property of the first — the sort of regression that is invisible until a
+// consumer writes the comparison the documentation invited.
+func TestReasoningPart_Equality_ComparesPayloadsWithoutPanicking(t *testing.T) {
+	t.Parallel()
+
+	const thought = "Equality is part of what a value type promises."
+
+	build := func(text string, token []byte) ai.Part {
+		t.Helper()
+
+		part, err := ai.NewReasoning(text, token)
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+		return part
+	}
+
+	signature := []byte("\x00\xffsignature\xfe")
+
+	t.Run("two parts built from the same payload are equal", func(t *testing.T) {
+		t.Parallel()
+
+		if first, second := build(thought, signature), build(thought, signature); first != second {
+			t.Errorf("two reasoning parts built from the same payload are not equal")
+		}
+	})
+
+	t.Run("a copy is equal to its original", func(t *testing.T) {
+		t.Parallel()
+
+		part := build(thought, signature)
+		if copied := part; copied != part {
+			t.Errorf("a copied reasoning part is not equal to its original")
+		}
+	})
+
+	t.Run("parts differing in payload, kind or presence are not equal", func(t *testing.T) {
+		t.Parallel()
+
+		textPart, err := ai.NewText(thought)
+		if err != nil {
+			t.Fatalf("ai.NewText returned %v, want no failure", err)
+		}
+		redacted, err := ai.NewRedactedReasoning(signature)
+		if err != nil {
+			t.Fatalf("ai.NewRedactedReasoning returned %v, want no failure", err)
+		}
+
+		reference := build(thought, signature)
+		for _, tc := range []struct {
+			what  string
+			other ai.Part
+		}{
+			{"a different token", build(thought, []byte("another signature"))},
+			{"a different reasoning text", build("a different thought entirely", signature)},
+			{"no token rather than an empty one", build(thought, nil)},
+			{"an empty token rather than none", build(thought, []byte{})},
+			{"a redacted part", redacted},
+			{"a text part", textPart},
+			{"the part that was never constructed", ai.Part{}},
+		} {
+			if reference == tc.other {
+				t.Errorf("a reasoning part equals %s, want them distinguished", tc.what)
+			}
+		}
+
+		// The absent/empty distinction is preserved by equality too, which is
+		// the same fact AI-07.2 item 1 asserts through the accessor.
+		if build(thought, nil) == build(thought, []byte{}) {
+			t.Errorf("a part with no token equals one with an empty token — equality collapsed the distinction")
 		}
 	})
 }

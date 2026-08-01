@@ -167,9 +167,30 @@ func reasoningStateName(s ReasoningState) string {
 // It is an opaque value type with unexported fields, built only by a
 // constructor of this package — decision.md § 6.3's rule for a payload that
 // carries structure rather than a bare string.
+// # Why the token is held as a string
+//
+// It is bytes, and a []byte field would be the obvious shape. It is the wrong
+// one for two reasons that only appear later, and both were found by a test
+// rather than by inspection:
+//
+//   - Aliasing. A stored slice shares its backing array with the caller's
+//     buffer, so the token changes with nobody writing to the part; and because
+//     Reasoning is handed *out* by value, the same hazard exists on the read
+//     path, where two consumers of one message can overwrite each other. A
+//     defensive clone in the constructor fixes exactly half of that. A string
+//     is immutable, so the type closes both halves instead of two remembered
+//     clones. The conversions at the boundary each copy.
+//   - Comparability. Part documents that it is "a value, and safe to copy…
+//     Equality with == is defined and compares payloads". A payload containing
+//     a slice makes == panic at runtime for that kind, which would have removed
+//     a landed property of Part because a second kind arrived.
+//
+// A Go string is a byte container and not a text type — text_content.go already
+// relies on that, storing bytes that are not well-formed UTF-8 — so nothing
+// here treats the token as text.
 type Reasoning struct {
 	text     string
-	token    []byte
+	token    string
 	hasToken bool
 	redacted bool
 }
@@ -260,7 +281,7 @@ func (r Reasoning) State() ReasoningState {
 // construction path or the read path parses, verifies, decrypts, normalizes,
 // trims or re-encodes them. Called on reasoning that carries no token, it
 // returns nil and false.
-func (r Reasoning) Token() ([]byte, bool) { return r.token, r.hasToken }
+func (r Reasoning) Token() ([]byte, bool) { return []byte(r.token), r.hasToken }
 
 // Text returns the model's reasoning text, byte for byte as it was supplied.
 //
@@ -312,7 +333,7 @@ func NewReasoning(text string, token []byte) (Part, error) {
 // with two entry points and not two implementations that have to be kept in
 // agreement — decision.md § 7.2.
 func newReasoning(payload Reasoning, token []byte) (Part, error) {
-	payload.token, payload.hasToken = token, token != nil
+	payload.token, payload.hasToken = string(token), token != nil
 	if violation := payload.validate(nil); violation != nil {
 		return Part{}, violation
 	}
