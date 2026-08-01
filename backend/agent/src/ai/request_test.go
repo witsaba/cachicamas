@@ -900,3 +900,145 @@ func TestNewRequest_ToolCallAndResultCorrelation_ChecksAcrossTheRequest(t *testi
 		}
 	})
 }
+
+// --- AI-10.4 — validation happens once, before I/O ---------------------------
+
+// AI-10.4 item 1 — the first failure in the documented order is reported,
+// identically across many runs (R-AMR-014, design.md § 9.1).
+//
+// design.md § 4 already makes the order data — a []Rule handed to
+// FirstFailure, evaluated in slice order, with no map iteration anywhere in
+// the path — so this test asserts the property rather than building it. It is
+// green from birth, and closed the way every green-from-birth check in this
+// package is: by showing it bite a scratch violation (recorded in tasks.md).
+func TestNewRequest_MultipleViolations_ReportsTheDocumentedOrderFirstAcrossManyRuns(t *testing.T) {
+	t.Parallel()
+
+	const runs = 100
+
+	t.Run("model_and_messages_both_violated_reports_the_model_failure", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-053 — rule 1 (model) precedes rule 2 (messages); both empty at
+		// once must always report the model failure, never the messages one.
+		for range runs {
+			_, err := ai.NewRequest("", nil)
+			requireViolation(t, err, ai.ErrEmpty, "model")
+		}
+	})
+
+	t.Run("four_regions_violated_at_once_reports_the_earliest_rule", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-054 — one rule violated from each of four regions: system
+		// (rule 5, an applied-but-unconstructed instruction), an orphan tool
+		// result (rule 8), a tool choice against an undeclared tool set
+		// (rule 9), and an out-of-range temperature (rule 10). Rule 5 is the
+		// earliest of the four, so it must win on every run.
+		for range runs {
+			_, err := ai.NewRequest(
+				"m",
+				[]ai.Message{requireMessage(t, ai.RoleTool, toolResultPart(t, "no-such-call", "42"))},
+				ai.WithSystemInstruction(ai.SystemInstruction{}),
+				ai.WithToolChoice(requireNamedToolChoice(t, "fetch")),
+				ai.WithTemperature(-1),
+			)
+			requireViolation(t, err, ai.ErrEmpty, "system")
+		}
+	})
+}
+
+// requireTool builds a tool declaration, failing the test on AI-08's errors
+// rather than reporting them as this milestone's.
+func requireTool(t *testing.T, name string) ai.Tool {
+	t.Helper()
+
+	tool, err := ai.NewTool(name, "a declared tool", []byte(`{"type":"object"}`))
+	if err != nil {
+		t.Fatalf("ai.NewTool(%q) returned %v, want no failure", name, err)
+	}
+	return tool
+}
+
+// AI-10.4 item 2, first clause — a request that constructed successfully
+// re-examines clean, region by region, against each region's own contract
+// (R-AMR-013, design.md § 9.2, S-AMR-052).
+//
+// Content is re-examined by rebuilding a message from what was read back:
+// [ai.Part]'s own validate method is unexported, so reconstruction through
+// [ai.NewMessage] — which calls it — is the honest external-package proxy.
+// Tool choice is re-examined by calling [ai.ToolChoice.ValidateAgainst] again
+// on the read-back tool set, the same method NewRequest's rule 9 calls.
+//
+// This sub-test is green from birth for the same reason design.md § 9.2
+// gives: it asserts that the call happened, not the rule itself, and the rule
+// is proven elsewhere (AI-10.1's content tests, AI-10.3 item 2's
+// cross-validation table). It is closed by showing it bite in tasks.md,
+// against a scratch request.go with rule 9 temporarily removed.
+func TestNewRequest_ThatConstructed_ReExaminesCleanUnderEveryRegionsOwnContract(t *testing.T) {
+	t.Parallel()
+
+	tools := requireToolSet(t, "search", "fetch")
+	choice := requireNamedToolChoice(t, "fetch")
+	system, err := ai.NewSystemText("be terse")
+	if err != nil {
+		t.Fatalf("ai.NewSystemText returned %v, want no failure", err)
+	}
+
+	messages := []ai.Message{
+		userTextMessage(t, "hello"),
+		requireMessage(t, ai.RoleAssistant, toolCallPart(t, "call-1", "search")),
+		requireMessage(t, ai.RoleTool, toolResultPart(t, "call-1", "42")),
+	}
+
+	request, err := ai.NewRequest("m", messages,
+		ai.WithSystemInstruction(system),
+		ai.WithTools(tools),
+		ai.WithToolChoice(choice),
+		ai.WithTemperature(0.5),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	for i, message := range request.Messages() {
+		if _, err := ai.NewMessage(message.Role(), message.Content()...); err != nil {
+			t.Errorf("re-validating messages[%d]'s content returned %v, want no failure — "+
+				"a request cannot hand out content its own message contract would reject", i, err)
+		}
+	}
+
+	readTools, hasTools := request.Tools()
+	readChoice, hasChoice := request.ToolChoice()
+	if !hasTools || !hasChoice {
+		t.Fatalf("request.Tools() = (_, %t), request.ToolChoice() = (_, %t), want both true", hasTools, hasChoice)
+	}
+	if err := readChoice.ValidateAgainst(readTools); err != nil {
+		t.Errorf("readChoice.ValidateAgainst(readTools) returned %v, want no failure — "+
+			"a tool choice this package attached to a request must still validate against that request's own tool set", err)
+	}
+}
+
+// AI-10.4 item 2, second clause — a duplicate tool name cannot reach a
+// request, because [ai.NewToolSet] already refuses to construct a set that
+// holds one (R-AMR-013, design.md § 9.2).
+//
+// This is the asymmetric case design.md names explicitly: there is no
+// separate duplicate-name rule at the request boundary to test, because
+// [ai.WithTools] can never be handed a [ai.ToolSet] that holds one. The bite
+// proof for the underlying rule already lives in tool_set_test.go (AI-08's
+// own suite); this test's role is only the integration fact — that the
+// unreachability is what makes R-AMR-013's second clause true at the request
+// level, not a duplicate of AI-08's coverage.
+func TestNewRequest_DuplicateToolName_CannotReachARequestBecauseNewToolSetRefusesIt(t *testing.T) {
+	t.Parallel()
+
+	_, err := ai.NewToolSet(requireTool(t, "search"), requireTool(t, "search"))
+	if err == nil {
+		t.Fatalf(`ai.NewToolSet(search, search) constructed, want ErrDuplicate — ` +
+			`a request cannot hold what NewToolSet already refuses to build`)
+	}
+	if !errors.Is(err, ai.ErrDuplicate) {
+		t.Errorf("ai.NewToolSet's failure = %v, want errors.Is(err, ai.ErrDuplicate)", err)
+	}
+}
