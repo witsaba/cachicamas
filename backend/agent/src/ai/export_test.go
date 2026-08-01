@@ -135,3 +135,16 @@ func AllTestEventKinds() []EventKind {
 	}
 	return out
 }
+
+// DescriptorOf reports k's registered [EventDescriptor], and whether k is
+// registered at all — R-AEE-014's own bridge, additive to design.md D6's
+// named surface: AI-14.1..AI-14.3 never needed to inspect a descriptor's
+// fields directly, only its effects through CheckEmit; AI-14.4's checker
+// tests do.
+func DescriptorOf(k EventKind) (EventDescriptor, bool) {
+	entry, ok := eventRegistryEntry(k)
+	if !ok {
+		return EventDescriptor{}, false
+	}
+	return entry.descriptor, true
+}

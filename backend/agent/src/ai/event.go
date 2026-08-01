@@ -176,11 +176,12 @@ func (e Event) Sequence() Sequence { return e.seq }
 //     is not a member of the closed vocabulary (R-AEE-002);
 //  2. the sequence is not the unstamped sentinel 0, else [ErrOutOfRange] at
 //     "event", "sequence" — an event offered here must already have passed
-//     through a [Stamper] (R-AEE-010).
-//
-// A later step of this same milestone adds rule 3, a block-scoped kind
-// carries a valid block index (R-AEE-014), and rule 4, the payload satisfies
-// its own rules.
+//     through a [Stamper] (R-AEE-010);
+//  3. a block-scoped kind (its descriptor's Role is not [BlockRoleNone])
+//     carries a block index of at least 1, else [ErrOutOfRange] at "event",
+//     "block" — 0 is the unset sentinel, consistent with AI-16's R-ATE-003
+//     (R-AEE-014);
+//  4. the payload satisfies its own construction rules.
 func CheckEmit(e Event) error {
 	return FirstFailure(
 		func() *Violation {
@@ -194,6 +195,20 @@ func CheckEmit(e Event) error {
 				return Invalid(ErrOutOfRange, At("event"), At("sequence"))
 			}
 			return nil
+		},
+		func() *Violation {
+			entry, _ := eventRegistryEntry(e.Kind())
+			if entry.descriptor.Role == BlockRoleNone {
+				return nil
+			}
+			bp, ok := e.payload.(blockPayload)
+			if !ok || bp.blockIndex() == 0 {
+				return Invalid(ErrOutOfRange, At("event"), At("block"))
+			}
+			return nil
+		},
+		func() *Violation {
+			return e.payload.validate(Path{At("event")})
 		},
 	)
 }

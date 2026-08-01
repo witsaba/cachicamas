@@ -73,21 +73,21 @@ Chain strategy: size-exception
 
 ## Phase 5: AI-14.4 — Ordering invariants
 
-- [ ] 5.1 RED `event_registry_test.go` R-AEE-014 (S-AEE-043..045): every registered kind has a descriptor from stated domains; block-role kinds expose a readable block index.
-- [ ] 5.2 GREEN: wire `EventDescriptor` into `eventRegistration`; `event.go` `CheckEmit` rule 3 (block index vs `Role`, `Role≠None` requires index ≥1) → `ErrOutOfRange` at `At("event"), At("block")`.
-- [ ] 5.3 RED `stream_check_test.go` R-AEE-015 (S-AEE-046..048): checker reads only `(kind, descriptor, block index, sequence)`, no concrete payload type referenced.
-- [ ] 5.4 GREEN `stream_check.go`: `CheckStream(events []Event) StreamReport`, `StreamReport{err error; terminated bool}`, `(StreamReport) Violation() error`, `(StreamReport) Terminated() bool`.
-- [ ] 5.5 RED R-AEE-016 (S-AEE-049..053): block ordering start≺delta≺end per index; interleaving legal; unterminated block distinguishable from ordering violation.
-- [ ] 5.6 GREEN: block-ordering pass in `CheckStream` per D7 verdict map (`ErrMisplaced` for out-of-order/after-terminal, `ErrMalformed` for unterminated), positions `AtIndex("event", seq)` + `AtIndex("block", idx)`.
-- [ ] 5.7 RED R-AEE-017 (S-AEE-054..056): `at-most-one` cardinality via witness kind → `ErrDuplicate` naming kind + second event's sequence.
-- [ ] 5.8 GREEN: cardinality pass in `CheckStream`.
-- [ ] 5.9 RED R-AEE-018 (S-AEE-057..060): `terminal` primitive; event-after-terminal and second-terminal → `ErrDuplicate`/`ErrMisplaced`; "no terminal event" reported as distinct informational outcome via `Terminated() == false`.
-- [ ] 5.10 GREEN: terminal pass in `CheckStream`; `StreamReport.Terminated()`.
-- [ ] 5.11 RED R-AEE-019 (S-AEE-061..063): first violation in stream order; slice input never mutated; no channel; idempotent re-run.
-- [ ] 5.12 GREEN: finalize `CheckStream` first-violation ordering and non-mutation contract.
-- [ ] 5.13 RED R-AEE-020 (S-AEE-064..065): no exported accumulator/transcript-rebuilder/reducer of deltas; add-a-delta-kind doc states fragment-only, forbids snapshot.
-- [ ] 5.14 GREEN `event_descriptor.go`: 6-step kind-adding doc comment (constant+move end, payload, constructor, accessor, registry line w/ descriptor, doc list).
-- [ ] 5.15 REFACTOR: consolidate `CheckStream` verdict-mapping switch; `make test` for AI-14.4 slice; record red/green output.
+- [x] 5.1 RED `event_registry_test.go` R-AEE-014 (S-AEE-043..045): every registered kind has a descriptor from stated domains; block-role kinds expose a readable block index.
+- [x] 5.2 GREEN: wire `EventDescriptor` into `eventRegistration`; `event.go` `CheckEmit` rule 3 (block index vs `Role`, `Role≠None` requires index ≥1) → `ErrOutOfRange` at `At("event"), At("block")`. *(`eventRegistration.descriptor` was already wired in Phase 1/2. Additionally implemented design.md D5's rule 4 (`payload.validate`), which tasks.md does not separately enumerate but design.md requires — see Evidence Log for the honest gap note on its test coverage.)*
+- [x] 5.3 RED `stream_check_test.go` R-AEE-015 (S-AEE-046..048): checker reads only `(kind, descriptor, block index, sequence)`, no concrete payload type referenced.
+- [x] 5.4 GREEN `stream_check.go`: `CheckStream(events []Event) StreamReport`, `StreamReport{err error; terminated bool}`, `(StreamReport) Violation() error`, `(StreamReport) Terminated() bool`.
+- [x] 5.5 RED R-AEE-016 (S-AEE-049..053): block ordering start≺delta≺end per index; interleaving legal; unterminated block distinguishable from ordering violation.
+- [x] 5.6 GREEN: block-ordering pass in `CheckStream` per D7 verdict map (`ErrMisplaced` for out-of-order/after-terminal, `ErrMalformed` for unterminated), positions `AtIndex("event", seq)` + `AtIndex("block", idx)`.
+- [x] 5.7 RED R-AEE-017 (S-AEE-054..056): `at-most-one` cardinality via witness kind → `ErrDuplicate` naming kind + second event's sequence.
+- [x] 5.8 GREEN: cardinality pass in `CheckStream`.
+- [x] 5.9 RED R-AEE-018 (S-AEE-057..060): `terminal` primitive; event-after-terminal and second-terminal → `ErrDuplicate`/`ErrMisplaced`; "no terminal event" reported as distinct informational outcome via `Terminated() == false`.
+- [x] 5.10 GREEN: terminal pass in `CheckStream`; `StreamReport.Terminated()`.
+- [x] 5.11 RED R-AEE-019 (S-AEE-061..063): first violation in stream order; slice input never mutated; no channel; idempotent re-run.
+- [x] 5.12 GREEN: finalize `CheckStream` first-violation ordering and non-mutation contract.
+- [x] 5.13 RED R-AEE-020 (S-AEE-064..065): no exported accumulator/transcript-rebuilder/reducer of deltas; add-a-delta-kind doc states fragment-only, forbids snapshot.
+- [x] 5.14 GREEN `event_descriptor.go`: 6-step kind-adding doc comment (constant+move end, payload, constructor, accessor, registry line w/ descriptor, doc list). *(The 6-step list itself landed in Phase 1; this step added the "fragment-only, forbid snapshot" paragraph the same file comment needed for S-AEE-065.)*
+- [x] 5.15 REFACTOR: consolidate `CheckStream` verdict-mapping switch; `make test` for AI-14.4 slice; record red/green output.
 
 ## Phase 6: Cross-cutting NFRs and closeout
 
@@ -120,3 +120,12 @@ Apply ran across two sessions: an initial run landed Phases 1–3 (commits `297f
 - 4.4 GREEN: added staleness + empty-rationale checks to `scanSequenceStateGuard` → all of the above PASS (S-AEE-036..039).
 - 4.5 RED+GREEN: added `TestSequenceGuardGoFile_PackageDoc_NamesC3AndTheFix` and `TestSequenceGuard_FailureMessage_NamesFileIdentifierAndPointsAtRationale` → both PASS against the doc comment and `guardViolation.String()`/reason text already written (S-AEE-041..042).
 - 4.6 REFACTOR: `git diff --stat -- backend/agent/src/ai/message.go` → empty (S-AEE-040, confirmed). `gofmt -l src/ai/sequence_guard_test.go` → empty. `go vet ./src/ai/...` → clean. Focused command `go test -run 'TestSequenceGuard|TestSequenceStateAllowlist' -race -v ./src/ai/...` → 9 top-level tests (12 including subtests) PASS. Full `make test` → PASS, `ok github.com/cachicamas/backend/agent/src/ai`.
+
+**Phase 5 (AI-14.4 ordering invariants)** — implemented this session:
+- 5.1/5.3 RED: `go vet ./src/ai/...` → build failure, `vet: src/ai/stream_check_test.go:78:16: undefined: ai.CheckStream` (stream_check.go, `DescriptorOf`, and the new registry/descriptor tests were all written before any of `stream_check.go` existed).
+- 5.2/5.4/5.6/5.8/5.10/5.12 GREEN: added `stream_check.go` (`CheckStream`, `StreamReport`, `checkBlockOrdering`, `blockIndexOf`), `event.go` `CheckEmit` rules 3 and 4, `export_test.go`'s `DescriptorOf` bridge, and new tests in `event_registry_test.go`, `event_test.go`, `event_descriptor_test.go`, `stream_check_test.go` (new file). `go test -race -v -run 'TestCheckStream|TestEventRegistration|TestExportedSurface|TestEventDescriptorGoFile|TestCheckEmit_BlockScoped' ./src/ai/...` → every test (18 top-level, including subtests) PASS on the first implementation attempt — no iteration needed for correctness, only one `gofmt -w` pass for formatting. Full `make test` → PASS.
+- 5.15 REFACTOR: extracted `verdict(rule error, terminated bool, at ...Step) StreamReport` in `stream_check.go`, consolidating five near-identical `StreamReport{err: Invalid(...), ...}` composite literals into one constructor (design.md D7's verdict mapping, now in one place). Re-ran `make test` → still PASS.
+- **Task-sequencing note (5.2)**: `eventRegistration.descriptor` was already wired to `EventDescriptor` in Phase 1/2 (predates this task by design) — 5.2's genuinely new work was `CheckEmit` rules 3 and 4.
+- **Deviation/gap note (5.2, honest disclosure per "note design gaps, don't silently deviate")**: design.md D5 specifies four `CheckEmit` rules; tasks.md's Phase 5 only names rule 3 as a task. Rule 4 (`e.payload.validate(...)`) is implemented (matches D5, and every existing CheckEmit-success test continues to pass, proving it correctly no-ops today) but has no dedicated failure-path unit test at this milestone: the only payload type AI-14 can construct, `WitnessPayload`, has a `validate()` hardcoded to return `nil` per export_test.go's own documented rationale ("a rule is added once a test needs one to fail"). Extending `WitnessPayload`'s exported construction surface to force a controllable failure would exceed design.md D6's binding, named shape for AI-15…AI-20. AI-15+ (whose real payloads carry non-trivial `validate()` rules) will be the first to exercise this path.
+- **Deviation note (5.2, honest disclosure)**: R-AEE-014's own requirement text ("1-based with 0 rejected") is not enumerated as its own S-AEE scenario for the `CheckEmit`-boundary rejection specifically (S-AEE-043/044/045 cover the descriptor table, not this rejection). Tested directly against the requirement's prose instead (`TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange`, event_test.go).
+- **Concurrency note**: every test that calls `RegisterTestKind` (directly or via `stream_check_test.go`'s `streamKind` helper) does NOT call `t.Parallel()` anywhere in its scope, matching export_test.go's own documented constraint (`eventRegistry` is one shared package-level slice; a concurrent truncation from another parallel test would corrupt it, and `-race` would catch the underlying data race regardless of whether the resulting assertion happened to still be correct). Verified clean under `go test -race`.

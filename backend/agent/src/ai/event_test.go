@@ -174,6 +174,40 @@ func TestEvent_ReadableExternally_NoTypeSwitchOverUnexportedTypes(t *testing.T) 
 	})
 }
 
+// R-AEE-014 — CheckEmit's own rule 3 (design.md D5): a block-scoped kind
+// (Role != BlockRoleNone) must carry a block index >= 1; index 0 is rejected
+// with ErrOutOfRange at "event", "block". Not independently enumerated as
+// its own S-AEE scenario, but stated as a MUST in R-AEE-014's own
+// requirement text ("1-based with 0 rejected") and in design.md's D5 rule
+// order — tested directly against that text.
+//
+// No t.Parallel(): registers a test kind (see export_test.go's comment on
+// why a test holding a registration must not run in parallel).
+func TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange(t *testing.T) {
+	k, cleanup := ai.RegisterTestKind("checkemit_block_scoped", ai.EventDescriptor{Role: ai.BlockRoleStart})
+	t.Cleanup(cleanup)
+
+	var s ai.Stamper
+
+	t.Run("block index 0 is rejected", func(t *testing.T) {
+		event := s.Stamp(ai.NewTestEvent(k, 0))
+		err := ai.CheckEmit(event)
+		if !errors.Is(err, ai.ErrOutOfRange) {
+			t.Errorf("ai.CheckEmit(event) = %v, want errors.Is to match ErrOutOfRange", err)
+		}
+		if got := err.Error(); !strings.Contains(got, "block") {
+			t.Errorf("ai.CheckEmit(event).Error() = %q, want it to name the offending position (\"block\")", got)
+		}
+	})
+
+	t.Run("block index 1 is accepted at this rule", func(t *testing.T) {
+		event := s.Stamp(ai.NewTestEvent(k, 1))
+		if err := ai.CheckEmit(event); err != nil {
+			t.Errorf("ai.CheckEmit(event) = %v, want no failure — a block-scoped event with index >= 1 must pass this rule", err)
+		}
+	})
+}
+
 // findInterfaceType returns the *ast.InterfaceType declared under the given
 // name in file, or nil if no such type declaration exists. Shared by every
 // sealing/registry guard in this test package that needs to read a package

@@ -13,6 +13,9 @@
 package ai_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -125,4 +128,143 @@ func containsEventKind(haystack []ai.EventKind, want ai.EventKind) bool {
 		}
 	}
 	return false
+}
+
+// R-AEE-014, S-AEE-043 — every registered kind has a descriptor with values
+// from the stated domains: Role is one of the four declared BlockRole
+// constants, Cardinality is one of the two declared Cardinality constants.
+func TestEventRegistration_EveryRegisteredKind_HasADescriptorFromStatedDomains(t *testing.T) {
+	t.Parallel()
+
+	validRoles := map[ai.BlockRole]bool{
+		ai.BlockRoleNone: true, ai.BlockRoleStart: true, ai.BlockRoleDelta: true, ai.BlockRoleEnd: true,
+	}
+	validCardinalities := map[ai.Cardinality]bool{
+		ai.CardinalityAny: true, ai.CardinalityAtMostOne: true,
+	}
+
+	kinds := ai.AllTestEventKinds()
+	if len(kinds) == 0 {
+		t.Fatal("ai.AllTestEventKinds() is empty; the assertion would pass vacuously")
+	}
+	for _, k := range kinds {
+		d, ok := ai.DescriptorOf(k)
+		if !ok {
+			t.Errorf("ai.DescriptorOf(%v) reported not registered, but %v is carried by ai.AllTestEventKinds()", k, k)
+			continue
+		}
+		if !validRoles[d.Role] {
+			t.Errorf("%v's descriptor.Role = %v, want one of the four declared BlockRole constants", k, d.Role)
+		}
+		if !validCardinalities[d.Cardinality] {
+			t.Errorf("%v's descriptor.Cardinality = %v, want one of the two declared Cardinality constants", k, d.Cardinality)
+		}
+	}
+}
+
+// R-AEE-014, S-AEE-044 — a kind structurally cannot register without a
+// descriptor: eventRegistration's descriptor field is a concrete
+// EventDescriptor value, never a pointer or an interface, so there is no Go
+// literal that omits it and produces "no descriptor" rather than the zero
+// EventDescriptor — exactly as event_descriptor.go's own file comment states.
+// Proven by AST inspection of event.go's declaration, mirroring
+// TestEventPayload_Contract_IsSealed's approach (event_test.go).
+func TestEventRegistration_DescriptorField_IsAConcreteRequiredType(t *testing.T) {
+	t.Parallel()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "event.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parsing event.go: %v", err)
+	}
+
+	field := structFieldType(file, "eventRegistration", "descriptor")
+	if field == nil {
+		t.Fatal(`event.go's "eventRegistration" struct declares no "descriptor" field; the guard would pass vacuously`)
+	}
+	ident, ok := field.(*ast.Ident)
+	if !ok || ident.Name != "EventDescriptor" {
+		t.Errorf("eventRegistration.descriptor's type = %T, want the concrete named type EventDescriptor "+
+			"(never a pointer or an interface, either of which could be nil/absent)", field)
+	}
+}
+
+// R-AEE-014, S-AEE-045 — a start|delta|end descriptor's payload exposes a
+// readable block index; a none descriptor does not require one.
+//
+// No t.Parallel() anywhere in this test, including its subtests: it calls
+// ai.RegisterTestKind, which export_test.go's own file comment forbids
+// running in parallel — eventRegistry is one shared package-level slice, and
+// a concurrent truncation from another test would corrupt it.
+func TestEventRegistration_BlockScopedDescriptor_ExposesAReadableBlockIndex(t *testing.T) {
+	blockRoles := []struct {
+		name string
+		role ai.BlockRole
+	}{
+		{"BlockRoleStart", ai.BlockRoleStart},
+		{"BlockRoleDelta", ai.BlockRoleDelta},
+		{"BlockRoleEnd", ai.BlockRoleEnd},
+	}
+	for _, tc := range blockRoles {
+		t.Run(tc.name, func(t *testing.T) {
+			k, cleanup := ai.RegisterTestKind("block_scoped_"+tc.name, ai.EventDescriptor{Role: tc.role})
+			t.Cleanup(cleanup)
+
+			event := ai.NewTestEvent(k, 7)
+			payload, ok := event.WitnessPayload()
+			if !ok {
+				t.Fatal("event.WitnessPayload() reported no payload on an event of its own kind")
+			}
+			if got := payload.BlockIndex(); got != 7 {
+				t.Errorf("payload.BlockIndex() = %v, want 7 (the value the constructor was given)", got)
+			}
+		})
+	}
+
+	t.Run("BlockRoleNone does not require one", func(t *testing.T) {
+		// KindTestWitness's own descriptor is BlockRoleNone; its events still
+		// carry a readable block index (WitnessPayload always exposes one),
+		// which is permitted — R-AEE-014 says one is not REQUIRED for a
+		// BlockRoleNone kind, not that one is forbidden.
+		d, ok := ai.DescriptorOf(ai.KindTestWitness)
+		if !ok {
+			t.Fatal("ai.DescriptorOf(ai.KindTestWitness) reported not registered")
+		}
+		if d.Role != ai.BlockRoleNone {
+			t.Fatalf("ai.KindTestWitness's descriptor.Role = %v, want BlockRoleNone (test assumption)", d.Role)
+		}
+		event := ai.NewWitnessEvent(0)
+		if _, ok := event.WitnessPayload(); !ok {
+			t.Fatal("event.WitnessPayload() reported no payload on an event of its own kind")
+		}
+	})
+}
+
+// structFieldType returns the type expression of a named field within a
+// named struct type declared in file, or nil if either does not exist.
+func structFieldType(file *ast.File, structName, fieldName string) ast.Expr {
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typed, ok := spec.(*ast.TypeSpec)
+			if !ok || typed.Name.Name != structName {
+				continue
+			}
+			st, ok := typed.Type.(*ast.StructType)
+			if !ok {
+				return nil
+			}
+			for _, f := range st.Fields.List {
+				for _, name := range f.Names {
+					if name.Name == fieldName {
+						return f.Type
+					}
+				}
+			}
+		}
+	}
+	return nil
 }

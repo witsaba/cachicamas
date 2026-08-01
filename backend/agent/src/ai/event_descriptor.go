@@ -30,6 +30,18 @@
 // assertion (R-AEE-014's own scenario, event_registry_test.go) exactly as a
 // missing witness leg does — the registry is one table, so a kind structurally
 // cannot register without one.
+//
+// # Registering a delta kind: fragment-only, never a snapshot
+//
+// A kind whose descriptor Role is [BlockRoleDelta] carries a block index and
+// only the new fragment of that block's content (V-STR-16, R-AEE-020) — step
+// 2's payload holds a fragment, not an accumulated transcript, and step 3's
+// constructor takes a fragment, not the block's content so far. This
+// capability exports no accumulator, transcript rebuilder or reducer of a
+// block's deltas: doc 0001 § 4.3 invariant 1 reserves reconstructing a block
+// from its fragments for the consumer, never this package. A registered
+// delta kind whose payload instead carries or exposes a running snapshot
+// violates this the moment it lands, regardless of how its descriptor reads.
 package ai
 
 // BlockRole is a registered kind's position in a block's lifecycle (V-STR-14).
