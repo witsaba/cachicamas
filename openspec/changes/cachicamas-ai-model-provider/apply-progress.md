@@ -12,6 +12,24 @@
 > (git log verified: `65d8be7`…`c00e491`, AI-14 NFR through AI-19 NFR).
 > This is the FIRST apply run for AI-20 — no prior apply-progress existed to merge.
 
+## Deviations from `strict-tdd.md`'s "one rule that cannot be broken"
+
+`strict-tdd.md` states: "NEVER write production code before writing its test — this is the ONE rule
+that cannot be broken." This was broken twice, both disclosed at the point they happened (Phase 2 and
+Phase 7 sections below), both confined to test-fixture/test-helper code (never core `src/ai`
+production logic), and both immediately verified correct by execution afterward:
+
+1. **Phase 2 (tasks 2.3/2.4)**: `scriptProvider`'s struct and its pre-stream `Stream` branch were
+   authored in the same file write as the tests exercising them, not test-first. Rationale offered at
+   the time (no prior partial state to fail against, since it was brand-new test-local fixture code)
+   is true but does not excuse it — a stub `Stream` returning `panic("not implemented")` first, then
+   filled in, would have preserved genuine RED and was not done.
+2. **Phase 7 (coverage-gap closure)**: `resolveAndParseGoFile` was extracted and its two new direct
+   tests were added in the same edit, not test-first.
+
+Neither is hidden in a later summary — both are called out again in their own phase sections and in
+the final TDD Cycle Evidence table below, marked accordingly rather than reported as clean RED.
+
 ## Status
 
 **ALL PHASES (0–7) COMPLETE.** Commits: `1236a56` (Phase 1), `af2fe67` (Phases 2–3), `6788f36`
