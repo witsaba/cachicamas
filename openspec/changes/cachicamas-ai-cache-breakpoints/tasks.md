@@ -87,6 +87,19 @@ doc 0002's rule is *"prefer less than 250 changed lines; stop and reassess befor
 - **The wave-level PR budget is 5 000+ lines and was accepted up front as `exception-ok`.** A forecast over budget is stated, not obeyed.
 - **Nothing is cut to fit.**
 
+### Actual vs. forecast, recorded at milestone close
+
+`git diff --numstat 1cbecc9` (the branch head before apply, i.e. this milestone's own diff, planning docs excluded) against the finished working tree:
+
+| Category | Forecast (`explore.md` § 7) | Actual | Delta |
+| --- | --- | --- | --- |
+| Production Go | ~330 | **308** (`cache_boundary.go` 170 new; `message.go` +42/-6; `request.go` +20/-2; `system_instruction.go` +34/-3; `tool.go` +28/-3) | −7%, under forecast |
+| Test Go | ~670 | **1 514** (`src/ai/cache_boundary_test.go` 1 136 new; `src/agenttest/cache_boundary_test.go` 336 new; `src/agenttest/request_test.go` +42) | **+126%, more than double forecast** |
+| Total Go | ~1 000 | **1 822** | +82% |
+| `tasks.md` (this file, evidence recorded during apply) | not separately forecast | +94/−64 (158 changed lines) | SDD-artifact churn, not code |
+
+**Why the test-line overrun, stated rather than hidden:** the forecast under-weighted three things. (1) This package's own documentation density — every test and every production method here carries a multi-line rationale comment in the established house style (see any AI-04…AI-10 file), and that style was matched rather than trimmed. (2) Item 6 of AI-11.1 — the `agenttest/request_test.go` round-trip-pin extension — was genuinely discovered during apply (the orchestrator's mid-task finding that AI-10.5's pin never calls `Request.Equal`) and is real, appended test weight the forecast could not have priced in. (3) The `go/parser`-based exhaustiveness pin for `S-ACB-037` is more machinery than a hand-checked file list would have cost, traded deliberately for a check that survives a future accessor landing anywhere in the package. Production stayed close to forecast (−7%) because the design's own "one walk, two callers" decision kept `cache_boundary.go` small. No case was cut to fit the original estimate; every item in the leaf test lists above is closed with a real transcript.
+
 ### Suggested Work Units
 
 | Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
@@ -190,29 +203,49 @@ Test list — items 1–2 are doc 0002's, verbatim; item 3 was appended during p
 
 Test list — items 1–2 are doc 0002's, verbatim; item 3 was appended during planning.
 
-- [ ] **Item 1** — WHEN a translator ignores every marker THEN the request is still fully translatable and semantically unchanged — an adapter for an auto-caching provider is conformant while ignoring them entirely.
-  - [ ] 1.1 RED → GREEN: write the **marker-blind** translator in `agenttest` — it reads model, system segment text, declaration name/description/schema, message role and content, tool choice and every generation option through the exported surface, and never calls `IsCacheBoundary` or `CacheBoundaries`. Assert `render(marked) == render(unmarked)`. `S-ACB-033`.
-  - [ ] 1.2 RED → GREEN: the blind rendering of the marked request is complete relative to the unmarked twin — no region silently dropped from both. `S-ACB-035`.
+- [x] **Item 1** — WHEN a translator ignores every marker THEN the request is still fully translatable and semantically unchanged — an adapter for an auto-caching provider is conformant while ignoring them entirely.
+  - [x] 1.1 RED → GREEN: write the **marker-blind** translator in `agenttest` — it reads model, system segment text, declaration name/description/schema, message role and content, tool choice and every generation option through the exported surface, and never calls `IsCacheBoundary` or `CacheBoundaries`. Assert `render(marked) == render(unmarked)`. `S-ACB-033`. `TestTranslateBlind_MarkedRequestAndUnmarkedTwin_RenderIdentically`, green on first run (correct implementation landed directly, per this leaf's own risk: a broken/empty translator would also pass — closed by item 3's control and 1.2's completeness check, not by this test alone).
+  - [x] 1.2 RED → GREEN: the blind rendering of the marked request is complete relative to the unmarked twin — no region silently dropped from both. `S-ACB-035`. `TestTranslateBlind_Rendering_IsCompleteAcrossEveryAppliedRegion`, asserts the rendering contains recognisable content from every applied region (model, system text, tool name, tool choice, message text, temperature, stop sequence); green on first run.
 
-- [ ] **Item 2** *(pin)* — The usage-side surface is untouched by this milestone — the cache token fields exist from AI-13.3 and this milestone adds request-side expression only.
-  - [ ] 2.1 GREEN-from-birth pin: `Usage`'s cache-read and cache-write counts read and validate exactly as before, at the same positions. `S-ACB-036`.
-  - [ ] 2.2 GREEN-from-birth pin: this layer exports no hit-rate, cache-efficiency or cache-statistics accessor. `S-ACB-037`.
+- [x] **Item 2** *(pin)* — The usage-side surface is untouched by this milestone — the cache token fields exist from AI-13.3 and this milestone adds request-side expression only.
+  - [x] 2.1 GREEN-from-birth pin: `Usage`'s cache-read and cache-write counts read and validate exactly as before, at the same positions. `S-ACB-036`. `TestUsage_CacheReadAndCacheWrite_ReadAndValidateExactlyAsBeforeThisMilestone` — reads, a passing `Validate()`, and a negative-count failure asserted at `errors.Is(ErrOutOfRange)` and position `"cache_read"`; green on first run, no production change (AI-13.3 landed, untouched).
+  - [x] 2.2 GREEN-from-birth pin: this layer exports no hit-rate, cache-efficiency or cache-statistics accessor. `S-ACB-037`. `TestExportedSurface_CarriesNoHitRateOrCacheStatisticsAccessor` — parses every non-test `.go` file's top-level declarations under `src/ai` with `go/parser` (not a hand-checked file list, so a future accessor anywhere in the package still fails this pin) and asserts no exported func/method name contains "hitrate", "hitratio", "cacheefficiency" or "cachestatistics". Closed by showing it bite: scratch file `zz_scratch_bite.go` (`package ai; func CacheHitRate() float64 { return 0 }`) added → `found exported declaration "CacheHitRate" ...` → removed → green again.
 
-- [ ] **Item 3** *(appended)* — The control that proves item 1 is not vacuous.
-  - [ ] 3.1 RED → GREEN: the **marker-aware** control — the same walk plus one marker read — renders the marked request and its unmarked twin **differently**. Without it, a blind translator that rendered nothing would satisfy item 1 perfectly. `S-ACB-034`. This is AI-06's `testdata/handrolled` + `testdata/constructed` lesson applied to a rendering.
+- [x] **Item 3** *(appended)* — The control that proves item 1 is not vacuous.
+  - [x] 3.1 RED → GREEN: the **marker-aware** control — the same walk plus one marker read — renders the marked request and its unmarked twin **differently**. Without it, a blind translator that rendered nothing would satisfy item 1 perfectly. `S-ACB-034`. This is AI-06's `testdata/handrolled` + `testdata/constructed` lesson applied to a rendering. **Genuine RED**: `undefined: translateAware` (the test was written and run before the function existed, deliberately sequenced apart from landing them together) → implemented `translateAware` (`translateBlind` + `len(request.CacheBoundaries())`) → `--- PASS: TestTranslateAware_MarkedRequestAndUnmarkedTwin_RenderDifferently`.
 
-- [ ] **AI-11.3 close:** record green `make test` and clean `make lint`; commit `test(ai): prove cache-boundary markers are advisory (AI-11.3)`.
+- [x] **AI-11.3 close:** record green `make test` and clean `make lint`; commit `test(ai): prove cache-boundary markers are advisory (AI-11.3)`.
+  - `make test` (`go test -race -v ./...`): full transcript green, both AI-00 import guards (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`) pass within the run; concise summary `go test -race ./...` → `ok  	.../agenttest	1.294s` / `ok  	.../ai	2.373s`.
+  - `make lint`: `0 issues.`
+  - No production code changed in this leaf — `agenttest/cache_boundary_test.go` is the whole deliverable, exactly as `design.md` § 5 forecast.
 
 ---
 
 ## Milestone close
 
-- [ ] `make test` green in `backend/agent/` — paste the transcript.
-- [ ] `make lint` clean in `backend/agent/` — paste the transcript. **Run it before every commit**, not only at the end.
-- [ ] `go.mod` still at **zero requires**.
-- [ ] Both AI-00 import guards pass.
-- [ ] `openspec/specs/ai-contract-vocabulary/spec.md` unmodified — confirm with `git diff --stat`.
-- [ ] `validation.go`'s `ruleClasses` and both registry mirrors unmodified — confirm with `git diff --stat`.
-- [ ] Record the **actual** changed-line count against `explore.md` § 7's forecast in the Review Workload Forecast table above.
-- [ ] Record any `explore.md` § 8 row that failed re-verification, and what was done instead.
-- [ ] Never push, never merge, never open a PR, never `git stash`.
+- [x] `make test` green in `backend/agent/` — paste the transcript.
+  ```
+  $ make test   # go test -race -v ./...
+  ... (full verbose transcript; every subtest PASS)
+  PASS
+  ok  	github.com/cachicamas/backend/agent/src/ai	2.409s
+
+  $ go test -race ./...
+  ok  	github.com/cachicamas/backend/agent/src/agenttest	1.294s
+  ok  	github.com/cachicamas/backend/agent/src/ai	2.373s
+  ```
+- [x] `make lint` clean in `backend/agent/` — paste the transcript. **Run it before every commit**, not only at the end.
+  ```
+  $ make lint
+  go vet ./...
+  bin/golangci-lint run --config=.golangci.yml ./...
+  0 issues.
+  ```
+  Run and recorded before every one of the three commits (AI-11.1 caught and fixed one `staticcheck ST1023` finding before that commit; AI-11.2 and AI-11.3 were clean on first run).
+- [x] `go.mod` still at **zero requires**. Confirmed: `module github.com/cachicamas/backend/agent` / `go 1.26.3`, no `require` block. `TestLayer1_ModuleHasNoDependencies_ZeroRequires` also passes.
+- [x] Both AI-00 import guards pass. `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` and `TestLayer1_ModuleHasNoDependencies_ZeroRequires` — both green throughout, including inside the full `make test` run above.
+- [x] `openspec/specs/ai-contract-vocabulary/spec.md` unmodified — confirm with `git diff --stat`. `git diff --stat 1c4171e -- openspec/specs/ai-contract-vocabulary/spec.md` → empty. Untouched, as planned: `V-REQ-23`/`V-REQ-24`/`V-REQ-25` were already written and owned by AI-11.
+- [x] `validation.go`'s `ruleClasses` and both registry mirrors unmodified — confirm with `git diff --stat`. `git diff 1c4171e -- validation.go validation_registry_internal_test.go validation_test.go` → empty. `ErrOutOfRange`'s existing GoDoc already cited `V-REQ-24` by name, so AI-04's append rule never fired.
+- [x] Record the **actual** changed-line count against `explore.md` § 7's forecast in the Review Workload Forecast table above. Done — see "Actual vs. forecast, recorded at milestone close": 308 production (−7%), 1 514 test (+126%), 1 822 total Go (+82%), with the overrun's cause stated rather than absorbed silently.
+- [x] Record any `explore.md` § 8 row that failed re-verification, and what was done instead. Done — see "`explore.md` § 8 re-verification register — resolved" near the top of this file: row 5 needed correction (equality "for free" only for `Segment`; `Message.Equal` and `toolsEqual` needed explicit edits) plus one finding not in the original 8 rows at all (AI-10.5's round-trip pin never calls `Request.Equal`), both closed in-scope with genuine RED evidence rather than escalated or worked around silently.
+- [x] Never push, never merge, never open a PR, never `git stash`. Respected throughout — three local commits only, no remote operation, no stash (shared stash stack across worktrees was never touched).
