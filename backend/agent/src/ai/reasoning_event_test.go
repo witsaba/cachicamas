@@ -1251,6 +1251,221 @@ func TestReasoningBlock_NeitherTextNorTokenNorRedacted_IsLegalAtTheEventLevelBut
 	}
 }
 
+// ---- NFR-ARE-B — totality: nothing in this file panics -------------------
+
+// S-ARE-041 — every exported entry point in this file, driven with a
+// zero-value payload, a zero-value (never-constructed) start, block index 0,
+// an oversized block index, an invalid-UTF-8 or over-long fragment, and a
+// nil, zero-length or over-long token, returns rather than panics —
+// text_events_test.go's TestTextEvents_ExtremeInputs_NeverPanic and
+// tool_call_event_test.go's TestToolCallEvents_Totality_NoExportedEntryPointPanics,
+// restated for this file's own constructors and accessors.
+func TestReasoningEvents_Totality_NoExportedEntryPointPanics(t *testing.T) {
+	t.Parallel()
+
+	// An overlong two-byte encoding of NUL: invalid UTF-8 on its own, with no
+	// dependency on where a legal rune boundary happens to fall.
+	invalidUTF8Alone := []byte{0xC0, 0xAF}
+	overLongFragment := bytes.Repeat([]byte("a"), ai.MaxTextLen+1)
+	overLongToken := bytes.Repeat([]byte("a"), ai.MaxReasoningTokenLen+1)
+
+	validStart, _ := ai.NewReasoningBlockStart(1)
+	validStartPayload, _ := validStart.ReasoningBlockStart()
+	redactedStart, _ := ai.NewRedactedReasoningBlockStart(1)
+	redactedStartPayload, _ := redactedStart.ReasoningBlockStart()
+	var zeroStart ai.ReasoningBlockStart // never passed through a constructor
+
+	run := func(t *testing.T, name string, fn func()) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("%s panicked: %v", name, r)
+			}
+		}()
+		fn()
+	}
+
+	t.Run("zero-value payloads read through every exported accessor", func(t *testing.T) {
+		t.Parallel()
+		run(t, "zero-value ReasoningBlockStart", func() {
+			var s ai.ReasoningBlockStart
+			_ = s.BlockIndex()
+			_ = s.Redacted()
+			_ = s.String()
+			_ = s.GoString()
+		})
+		run(t, "zero-value ReasoningDelta", func() {
+			var d ai.ReasoningDelta
+			_ = d.BlockIndex()
+			_ = d.Fragment()
+			_ = d.String()
+			_ = d.GoString()
+		})
+		run(t, "zero-value ReasoningBlockEnd", func() {
+			var e ai.ReasoningBlockEnd
+			_ = e.BlockIndex()
+			_, _ = e.Token()
+			_ = e.String()
+			_ = e.GoString()
+		})
+		run(t, "typed accessors on the zero Event", func() {
+			var e ai.Event
+			if _, ok := e.ReasoningBlockStart(); ok {
+				t.Error("the zero Event reported a ReasoningBlockStart payload")
+			}
+			if _, ok := e.ReasoningDelta(); ok {
+				t.Error("the zero Event reported a ReasoningDelta payload")
+			}
+			if _, ok := e.ReasoningBlockEnd(); ok {
+				t.Error("the zero Event reported a ReasoningBlockEnd payload")
+			}
+		})
+		run(t, "CheckEmit over an unstamped, unconstructed zero Event", func() {
+			_ = ai.CheckEmit(ai.Event{})
+		})
+	})
+
+	t.Run("NewReasoningBlockStart and NewRedactedReasoningBlockStart", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			what        string
+			blockIndex  uint64
+			constructor func(uint64) (ai.Event, error)
+		}{
+			{"NewReasoningBlockStart, index 0", 0, ai.NewReasoningBlockStart},
+			{"NewReasoningBlockStart, very large index", 1<<63 - 1, ai.NewReasoningBlockStart},
+			{"NewRedactedReasoningBlockStart, index 0", 0, ai.NewRedactedReasoningBlockStart},
+			{"NewRedactedReasoningBlockStart, very large index", 1<<63 - 1, ai.NewRedactedReasoningBlockStart},
+		} {
+			run(t, tc.what, func() {
+				event, err := tc.constructor(tc.blockIndex)
+				_ = err
+				_ = event.Kind()
+				_ = event.String()
+				_ = event.GoString()
+				_ = ai.CheckEmit(event)
+				payload, _ := event.ReasoningBlockStart()
+				_ = payload.BlockIndex()
+				_ = payload.Redacted()
+			})
+		}
+	})
+
+	t.Run("NewReasoningDelta", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			what     string
+			start    ai.ReasoningBlockStart
+			fragment []byte
+		}{
+			{"zero-value start, nil fragment", zeroStart, nil},
+			{"valid start, nil fragment", validStartPayload, nil},
+			{"valid start, empty fragment", validStartPayload, []byte{}},
+			{"valid start, invalid-UTF-8 fragment", validStartPayload, invalidUTF8Alone},
+			{"valid start, over-long fragment", validStartPayload, overLongFragment},
+			{"redacted start, non-empty fragment", redactedStartPayload, []byte("x")},
+			{"redacted start, zero-length fragment", redactedStartPayload, []byte{}},
+		} {
+			run(t, "NewReasoningDelta/"+tc.what, func() {
+				event, err := ai.NewReasoningDelta(tc.start, tc.fragment)
+				_ = err
+				_ = event.Kind()
+				_ = ai.CheckEmit(event)
+				delta, _ := event.ReasoningDelta()
+				_ = delta.BlockIndex()
+				fragment := delta.Fragment()
+				if len(fragment) > 0 {
+					fragment[0] = 0 // mutate the returned copy; must never panic or affect the payload
+				}
+				_ = delta.Fragment()
+				_ = delta.String()
+				_ = delta.GoString()
+			})
+		}
+	})
+
+	t.Run("NewReasoningBlockEnd", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			what  string
+			start ai.ReasoningBlockStart
+			token []byte
+		}{
+			{"zero-value start, nil token", zeroStart, nil},
+			{"valid start, nil token", validStartPayload, nil},
+			{"valid start, empty token", validStartPayload, []byte{}},
+			{"valid start, over-long token", validStartPayload, overLongToken},
+			{"redacted start, nil token", redactedStartPayload, nil},
+			{"redacted start, empty token", redactedStartPayload, []byte{}},
+			{"redacted start, over-long token", redactedStartPayload, overLongToken},
+		} {
+			run(t, "NewReasoningBlockEnd/"+tc.what, func() {
+				event, err := ai.NewReasoningBlockEnd(tc.start, tc.token)
+				_ = err
+				_ = event.Kind()
+				_ = ai.CheckEmit(event)
+				end, _ := event.ReasoningBlockEnd()
+				_ = end.BlockIndex()
+				token, _ := end.Token()
+				if len(token) > 0 {
+					token[0] = 0 // mutate the returned copy; must never panic or affect the payload
+				}
+				_, _ = end.Token()
+				_ = end.String()
+				_ = end.GoString()
+			})
+		}
+	})
+}
+
+// ---- NFR-ARE-C — every rejection reports through AI-04's failure value ---
+
+// S-ARE-042 — every rejecting scenario across the three constructors reports
+// through AI-04's *ai.Violation, matches exactly the sentinel it documents
+// via errors.Is, and names the offending field. assertViolation
+// (tool_call_test.go) already performs this three-part check for the whole
+// ai_test package; it is reused here rather than redefined, the way AI-18's
+// own consolidated sweep (TestToolCallEvents_EveryRejection_ReportsAIsFourViolationWithALandedSentinel)
+// already reuses it for tool-call events.
+func TestReasoningEvents_EveryRejection_ReportsAIsFourViolationWithALandedSentinel(t *testing.T) {
+	t.Parallel()
+
+	validStart, _ := ai.NewReasoningBlockStart(1)
+	validStartPayload, _ := validStart.ReasoningBlockStart()
+	redactedStart, _ := ai.NewRedactedReasoningBlockStart(1)
+	redactedStartPayload, _ := redactedStart.ReasoningBlockStart()
+	var zeroStart ai.ReasoningBlockStart // never passed through a constructor
+
+	cases := []struct {
+		what      string
+		construct func() (ai.Event, error)
+		rule      error
+		at        string
+	}{
+		{"start: index 0", func() (ai.Event, error) { return ai.NewReasoningBlockStart(0) }, ai.ErrOutOfRange, "block_index"},
+		{"redacted start: index 0", func() (ai.Event, error) { return ai.NewRedactedReasoningBlockStart(0) }, ai.ErrOutOfRange, "block_index"},
+		{"delta: zero-value (never-constructed) start", func() (ai.Event, error) { return ai.NewReasoningDelta(zeroStart, []byte("x")) }, ai.ErrOutOfRange, "block_index"},
+		{"delta: fragment one byte over MaxTextLen", func() (ai.Event, error) {
+			return ai.NewReasoningDelta(validStartPayload, bytes.Repeat([]byte("a"), ai.MaxTextLen+1))
+		}, ai.ErrOutOfRange, "fragment"},
+		{"delta: non-empty fragment on a redacted block", func() (ai.Event, error) {
+			return ai.NewReasoningDelta(redactedStartPayload, []byte("leaked plaintext"))
+		}, ai.ErrMisplaced, "fragment"},
+		{"end: zero-value (never-constructed) start", func() (ai.Event, error) { return ai.NewReasoningBlockEnd(zeroStart, []byte("tok")) }, ai.ErrOutOfRange, "block_index"},
+		{"end: token one byte over MaxReasoningTokenLen", func() (ai.Event, error) {
+			return ai.NewReasoningBlockEnd(validStartPayload, bytes.Repeat([]byte("a"), ai.MaxReasoningTokenLen+1))
+		}, ai.ErrOutOfRange, "token"},
+		{"end: redacted block with no token at all", func() (ai.Event, error) { return ai.NewReasoningBlockEnd(redactedStartPayload, nil) }, ai.ErrEmpty, "token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.what, func(t *testing.T) {
+			t.Parallel()
+			_, err := tc.construct()
+			assertViolation(t, err, tc.rule, tc.at)
+		})
+	}
+}
+
 // containsEventKind and sort are used by other _test.go files in this
 // package too; sort is imported here so gofmt/goimports does not churn this
 // file if a future edit adds a sorted-output assertion.

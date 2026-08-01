@@ -33,6 +33,7 @@
 // state: doc 0001 § 4.3 invariant 1 reserves that for the consumer
 // (R-ARE-008). This milestone's own tests prove byte-exact reconstruction
 // with a test-local concatenator instead.
+
 package ai
 
 // blockIndexRule returns a [Rule] rejecting a zero block index at
