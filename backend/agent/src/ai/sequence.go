@@ -26,6 +26,7 @@
 // meaning: two streams' sequences overlap by construction (both start at 1),
 // and a consumer that orders a merged multi-stream log by [Sequence] is
 // contradicting this written rule, not an unwritten assumption (R-AEE-009).
+
 package ai
 
 // Sequence is the per-stream position AI-14.2 assigns to an event (V-STR-13).

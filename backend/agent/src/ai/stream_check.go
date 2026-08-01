@@ -7,6 +7,7 @@
 // milestone that registers a kind with a descriptor extends every rule
 // below with no change to this file's source; that is the whole reason the
 // descriptor exists (design.md D1).
+
 package ai
 
 // StreamReport is CheckStream's verdict: the first violation found, or nil,

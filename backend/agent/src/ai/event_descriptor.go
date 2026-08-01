@@ -42,6 +42,7 @@
 // from its fragments for the consumer, never this package. A registered
 // delta kind whose payload instead carries or exposes a running snapshot
 // violates this the moment it lands, regardless of how its descriptor reads.
+
 package ai
 
 // BlockRole is a registered kind's position in a block's lifecycle (V-STR-14).

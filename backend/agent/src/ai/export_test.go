@@ -63,8 +63,9 @@ func (w WitnessPayload) BlockIndex() BlockIndex { return w.block }
 // validate reports the payload's first broken rule, or nil. The witness
 // carries no rule of its own at this milestone's envelope-skeleton stage; a
 // rule is added once a test needs one to fail (see sequence_test.go's
-// R-AEE-010 coverage).
-func (w WitnessPayload) validate(at Path) *Violation { return nil }
+// R-AEE-010 coverage). The position parameter is unused for that reason —
+// named _ rather than removed, since eventPayload's signature requires it.
+func (w WitnessPayload) validate(_ Path) *Violation { return nil }
 
 // init registers KindTestWitness once, at package-test-load time, before any
 // test can observe an incomplete registry. It is the only writer of this

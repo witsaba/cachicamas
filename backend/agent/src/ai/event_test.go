@@ -9,6 +9,7 @@ package ai_test
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -204,6 +205,115 @@ func TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange(
 		event := s.Stamp(ai.NewTestEvent(k, 1))
 		if err := ai.CheckEmit(event); err != nil {
 			t.Errorf("ai.CheckEmit(event) = %v, want no failure — a block-scoped event with index >= 1 must pass this rule", err)
+		}
+	})
+}
+
+// NFR-AEE-B, S-AEE-067 — totality: no exported function or method panics for
+// the zero Event, the zero Sequence, a nil/empty recorded stream, an
+// all-unstamped stream, or a wrong-kind accessor. Mirrors
+// message_test.go's TestMessage_ExtremeInputs_NeverPanics table shape: each
+// case recovers its own panic, so one panicking case does not hide the rest.
+func TestEvent_ExtremeInputs_NeverPanics(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		act  func()
+	}{
+		{"the zero Event, read every way", func() {
+			var zero ai.Event
+			_ = zero.Kind()
+			_ = zero.Kind().String()
+			_ = zero.Sequence()
+			_ = zero.String()
+			_ = zero.GoString()
+			_, _ = zero.WitnessPayload()
+			_ = ai.CheckEmit(zero)
+		}},
+		{"the zero Sequence, used directly", func() {
+			var zero ai.Sequence
+			_ = zero
+			var s ai.Stamper
+			_ = s.Stamp(ai.Event{}).Sequence()
+		}},
+		{"a nil recorded stream", func() {
+			report := ai.CheckStream(nil)
+			_ = report.Violation()
+			_ = report.Terminated()
+		}},
+		{"an empty recorded stream", func() {
+			report := ai.CheckStream([]ai.Event{})
+			_ = report.Violation()
+			_ = report.Terminated()
+		}},
+		{"an all-unstamped stream", func() {
+			events := []ai.Event{
+				ai.NewWitnessEvent(1),
+				ai.NewWitnessEvent(2),
+				ai.NewWitnessEvent(3),
+			}
+			report := ai.CheckStream(events)
+			_ = report.Violation()
+			_ = report.Terminated()
+		}},
+		{"a wrong-kind accessor", func() {
+			_, ok := ai.Event{}.WitnessPayload()
+			if ok {
+				t.Error("ai.Event{}.WitnessPayload() reported success on an event that carries no witness payload")
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("panicked: %v", recovered)
+				}
+			}()
+			tc.act()
+		})
+	}
+}
+
+// NFR-AEE-D, S-AEE-069 — redaction: Event's String()/GoString() render
+// "event(<kind> seq=N)" only, never payload bytes or a derived length.
+// Mirrors content_part_test.go's TestPart_String_CarriesNoPayload.
+func TestEvent_StringAndGoString_RenderOnlyKindAndSequence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the zero Event", func(t *testing.T) {
+		t.Parallel()
+
+		var zero ai.Event
+		if got := fmt.Sprintf("%v", zero); got != "event(unset seq=0)" {
+			t.Errorf("fmt.Sprintf(\"%%v\", the zero Event) = %q, want %q", got, "event(unset seq=0)")
+		}
+		if got := zero.GoString(); got != zero.String() {
+			t.Errorf("zero.GoString() = %q, want it to equal zero.String() = %q", got, zero.String())
+		}
+	})
+
+	t.Run("a stamped witness event renders its kind and sequence, never the block index", func(t *testing.T) {
+		t.Parallel()
+
+		const canaryBlockIndex = ai.BlockIndex(424242)
+
+		var s ai.Stamper
+		event := s.Stamp(ai.NewWitnessEvent(canaryBlockIndex))
+
+		want := fmt.Sprintf("event(%s seq=%d)", ai.KindTestWitness, event.Sequence())
+		for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+			rendered := fmt.Sprintf(verb, event)
+			if rendered != want {
+				t.Errorf("fmt.Sprintf(%q, event) = %q, want %q", verb, rendered, want)
+			}
+			if strings.Contains(rendered, "424242") {
+				t.Errorf("fmt.Sprintf(%q, event) = %q, which reproduces the block index", verb, rendered)
+			}
 		}
 	})
 }

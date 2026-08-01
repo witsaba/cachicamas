@@ -134,6 +134,13 @@ func TestSequence_CrossStreamComparison_IsPermittedAndMeaningless(t *testing.T) 
 // This mirrors content_part_registry_test.go's documentedPartKindNames
 // idiom: read what a reader would read, with go/doc-adjacent source parsing,
 // rather than trust that the prose exists.
+//
+// It reads file.Comments[0] rather than file.Doc: revive's package-comments
+// rule (make lint) requires exactly one file per package — doc.go — to carry
+// the comment attached to the package clause, so sequence.go's own header
+// comment is deliberately separated from "package ai" by a blank line and is
+// no longer file.Doc. It is still this file's leading comment group, which
+// go/parser still captures in file.Comments regardless of that separation.
 func TestSequenceGoFile_PackageDoc_StatesTheCrossStreamRule(t *testing.T) {
 	t.Parallel()
 
@@ -142,14 +149,14 @@ func TestSequenceGoFile_PackageDoc_StatesTheCrossStreamRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing sequence.go: %v", err)
 	}
-	if file.Doc == nil {
-		t.Fatal("sequence.go carries no package doc comment; the guard would pass vacuously")
+	if len(file.Comments) == 0 {
+		t.Fatal("sequence.go carries no leading comment; the guard would pass vacuously")
 	}
 	// GoDoc line-wraps prose at the source's own line breaks, which are a
 	// formatting artifact rather than a semantic one — collapse them before
 	// matching, so a rewrap that moves "no" and "meaning" onto different
 	// source lines does not make an honest doc comment fail this guard.
-	doc := strings.Join(strings.Fields(file.Doc.Text()), " ")
+	doc := strings.Join(strings.Fields(file.Comments[0].Text()), " ")
 
 	if !strings.Contains(doc, "overlap") {
 		t.Errorf("sequence.go's package doc does not state that streams' sequences overlap:\n%s", doc)

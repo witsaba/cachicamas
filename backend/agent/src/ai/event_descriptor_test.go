@@ -132,6 +132,12 @@ func exportedTopLevelIdents(decl ast.Decl) []string {
 
 // R-AEE-020, S-AEE-065 — the documented steps for registering a delta kind
 // state fragment-only and forbid a snapshot.
+//
+// Reads file.Comments[0] rather than file.Doc: revive's package-comments
+// rule (make lint) requires exactly one file per package — doc.go — to
+// carry the comment attached to the package clause, so this file's own
+// header comment is deliberately separated from "package ai" by a blank
+// line and is no longer file.Doc, though it is still file.Comments[0].
 func TestEventDescriptorGoFile_Doc_StatesDeltaIsFragmentOnlyAndForbidsSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -140,10 +146,10 @@ func TestEventDescriptorGoFile_Doc_StatesDeltaIsFragmentOnlyAndForbidsSnapshot(t
 	if err != nil {
 		t.Fatalf("parsing event_descriptor.go: %v", err)
 	}
-	if file.Doc == nil {
-		t.Fatal("event_descriptor.go carries no package doc comment; the guard would pass vacuously")
+	if len(file.Comments) == 0 {
+		t.Fatal("event_descriptor.go carries no leading comment; the guard would pass vacuously")
 	}
-	doc := strings.Join(strings.Fields(file.Doc.Text()), " ")
+	doc := strings.Join(strings.Fields(file.Comments[0].Text()), " ")
 
 	if !strings.Contains(doc, "fragment") {
 		t.Errorf("event_descriptor.go's doc does not state \"fragment\":\n%s", doc)

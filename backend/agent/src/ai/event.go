@@ -23,6 +23,7 @@
 // against a test-only witness payload instead, bridged into package ai_test
 // through export_test.go. See event_descriptor.go's file comment for the
 // six-step procedure a later milestone follows to add a real one.
+
 package ai
 
 import "strconv"
@@ -163,6 +164,23 @@ func (e Event) Kind() EventKind {
 // [Sequence] — the documented "never stamped" sentinel — if it never was
 // (R-AEE-010).
 func (e Event) Sequence() Sequence { return e.seq }
+
+// String renders the event for a diagnostic reader (NFR-AEE-D): "event(<kind>
+// seq=N)", and nothing else. It never renders a payload's bytes or a length
+// derived from them — content_part.go's [Part.String] states the same
+// posture for the same reason: a rendering that leaks part of a secret is
+// still a leak, and the only way to guarantee that is to never read the
+// payload for anything but its kind.
+func (e Event) String() string {
+	return "event(" + e.Kind().String() + " seq=" + strconv.FormatUint(uint64(e.seq), 10) + ")"
+}
+
+// GoString renders the event for the %#v verb.
+//
+// Without it, %#v falls back to reflection and prints every field, which
+// would make the redaction posture a property of which verb someone reached
+// for rather than a property of the type.
+func (e Event) GoString() string { return e.String() }
 
 // CheckEmit is the producer's emission boundary (R-AEE-010, design.md D4):
 // the point every event is offered to before it may be treated as part of a
