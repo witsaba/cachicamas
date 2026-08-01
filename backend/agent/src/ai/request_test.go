@@ -8,6 +8,7 @@
 package ai_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -1271,4 +1272,660 @@ func TestRequest_Equal_IdenticalInputsCompareEqualAndOperationsDoNotLeak(t *test
 	if third.Equal(first) {
 		t.Errorf("third.Equal(first) = true, want false — Equal must be symmetric about inequality too")
 	}
+}
+
+// --- AI-12.1 — copy-on-write rebuild ----------------------------------------
+
+// requestSnapshot captures every region of a request through its own
+// accessors, so a test can assert "every region unchanged" or "one region
+// changed" without repeating nine accessor calls inline (S-REX-002).
+//
+// It is this file's own snapshot rather than a reuse of agenttest_test's
+// requireRequestsEqual: the two packages cannot share a _test.go helper, and
+// AI-06's reason for external-package tests — the consumer this contract
+// exists for reads from outside — applies to ai_test independently of
+// agenttest_test.
+type requestSnapshot struct {
+	model          string
+	messageIDs     []ai.MessageID
+	hasSystem      bool
+	system         ai.SystemInstruction
+	hasTools       bool
+	toolNames      []string
+	hasChoice      bool
+	choiceMode     ai.ToolChoiceMode
+	choiceName     string
+	choiceNamesOne bool
+	maxTokens      int
+	hasMaxTokens   bool
+	temperature    float64
+	hasTemperature bool
+	topP           float64
+	hasTopP        bool
+	stopSequences  []string
+	hasStopSeq     bool
+}
+
+// snapshotRequest reads every region of r through its exported accessors
+// alone, matching the discipline agenttest_test's rebuildFromReadback
+// documents: nothing here touches a field directly.
+func snapshotRequest(r ai.Request) requestSnapshot {
+	s := requestSnapshot{model: r.Model()}
+	for _, message := range r.Messages() {
+		s.messageIDs = append(s.messageIDs, message.ID())
+	}
+	s.system, s.hasSystem = r.SystemInstruction()
+	if tools, hasTools := r.Tools(); hasTools {
+		s.hasTools = true
+		for _, tool := range tools.Tools() {
+			s.toolNames = append(s.toolNames, tool.Name())
+		}
+	}
+	if choice, hasChoice := r.ToolChoice(); hasChoice {
+		s.hasChoice = true
+		s.choiceMode = choice.Mode()
+		s.choiceName, s.choiceNamesOne = choice.Name()
+	}
+	s.maxTokens, s.hasMaxTokens = r.MaxOutputTokens()
+	s.temperature, s.hasTemperature = r.Temperature()
+	s.topP, s.hasTopP = r.TopP()
+	s.stopSequences, s.hasStopSeq = r.StopSequences()
+	return s
+}
+
+// requireSnapshotEqual asserts got and want capture the same regions,
+// reporting every mismatch rather than stopping at the first — a derivation
+// bug that touches two regions should not hide the second behind the first.
+func requireSnapshotEqual(t *testing.T, what string, got, want requestSnapshot) {
+	t.Helper()
+
+	if got.model != want.model {
+		t.Errorf("%s: Model() = %q, want %q", what, got.model, want.model)
+	}
+	if !slices.Equal(got.messageIDs, want.messageIDs) {
+		t.Errorf("%s: message identities = %v, want %v", what, got.messageIDs, want.messageIDs)
+	}
+	if got.hasSystem != want.hasSystem || (got.hasSystem && !got.system.Equal(want.system)) {
+		t.Errorf("%s: SystemInstruction() = (%v, %t), want (%v, %t)", what, got.system, got.hasSystem, want.system, want.hasSystem)
+	}
+	if got.hasTools != want.hasTools || !slices.Equal(got.toolNames, want.toolNames) {
+		t.Errorf("%s: Tools() names = %v (present %t), want %v (present %t)", what, got.toolNames, got.hasTools, want.toolNames, want.hasTools)
+	}
+	if got.hasChoice != want.hasChoice || got.choiceMode != want.choiceMode || got.choiceName != want.choiceName || got.choiceNamesOne != want.choiceNamesOne {
+		t.Errorf("%s: ToolChoice() = (%v, %q, %t, present %t), want (%v, %q, %t, present %t)",
+			what, got.choiceMode, got.choiceName, got.choiceNamesOne, got.hasChoice,
+			want.choiceMode, want.choiceName, want.choiceNamesOne, want.hasChoice)
+	}
+	if got.hasMaxTokens != want.hasMaxTokens || got.maxTokens != want.maxTokens {
+		t.Errorf("%s: MaxOutputTokens() = (%d, %t), want (%d, %t)", what, got.maxTokens, got.hasMaxTokens, want.maxTokens, want.hasMaxTokens)
+	}
+	if got.hasTemperature != want.hasTemperature || got.temperature != want.temperature {
+		t.Errorf("%s: Temperature() = (%v, %t), want (%v, %t)", what, got.temperature, got.hasTemperature, want.temperature, want.hasTemperature)
+	}
+	if got.hasTopP != want.hasTopP || got.topP != want.topP {
+		t.Errorf("%s: TopP() = (%v, %t), want (%v, %t)", what, got.topP, got.hasTopP, want.topP, want.hasTopP)
+	}
+	if got.hasStopSeq != want.hasStopSeq || !slices.Equal(got.stopSequences, want.stopSequences) {
+		t.Errorf("%s: StopSequences() = (%q, %t), want (%q, %t)", what, got.stopSequences, got.hasStopSeq, want.stopSequences, want.hasStopSeq)
+	}
+}
+
+// buildDerivableRequest constructs a request exercising every region AI-12.1
+// must prove reachable by the rebuild path (design.md § 8.1: model, system,
+// tools, tool choice, and all four generation options), so every AI-12.1 and
+// AI-12.2 test derives from one well-known baseline rather than restating a
+// nine-option construction call each time.
+func buildDerivableRequest(t *testing.T) ai.Request {
+	t.Helper()
+
+	segment, err := ai.NewSegment("be terse")
+	if err != nil {
+		t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+	}
+	system, err := ai.NewSystemInstruction(segment)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	tools := requireToolSet(t, "search", "fetch")
+	choice := requireNamedToolChoice(t, "fetch")
+
+	request, err := ai.NewRequest(
+		"m-source", []ai.Message{userTextMessage(t, "plan a trip")},
+		ai.WithSystemInstruction(system),
+		ai.WithTools(tools),
+		ai.WithToolChoice(choice),
+		ai.WithMaxOutputTokens(256),
+		ai.WithTemperature(0.5),
+		ai.WithTopP(0.8),
+		ai.WithStopSequences("</done>"),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+	return request
+}
+
+// AI-12.1 item 1 — deriving a request that changes one option leaves the
+// source observably unmodified, and the derived request carries the change
+// (R-REX-001, S-REX-001, S-REX-002).
+//
+// Two sub-cases triangulate across the two shapes an option's value takes: a
+// scalar (temperature) and a slice (stop sequences). A rebuild that merely
+// copied r's top-level scalar fields but aliased a slice-typed region would
+// pass the first and fail the second.
+func TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a_scalar_option", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		before := snapshotRequest(source)
+
+		derived, err := source.With(ai.WithTemperature(0.99))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithTemperature(0.99)) returned %v, want no failure", err)
+		}
+
+		// S-REX-001 — the derived request reports the new value.
+		if got, set := derived.Temperature(); got != 0.99 || !set {
+			t.Errorf("derived.Temperature() = (%v, %t), want (0.99, true)", got, set)
+		}
+
+		// S-REX-001 — the source reports its original value, unaffected.
+		if got, set := source.Temperature(); got != 0.5 || !set {
+			t.Errorf("source.Temperature() = (%v, %t), want (0.5, true) — deriving must not affect the source", got, set)
+		}
+
+		// S-REX-002 — every region of the source, captured before the
+		// derivation, still compares equal to its value after.
+		requireSnapshotEqual(t, "source after deriving", snapshotRequest(source), before)
+	})
+
+	t.Run("a_slice_typed_option", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		before := snapshotRequest(source)
+
+		derived, err := source.With(ai.WithStopSequences("</changed>"))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithStopSequences(...)) returned %v, want no failure", err)
+		}
+
+		if got, set := derived.StopSequences(); !set || !slices.Equal(got, []string{"</changed>"}) {
+			t.Errorf("derived.StopSequences() = (%q, %t), want ([\"</changed>\"], true)", got, set)
+		}
+		if got, set := source.StopSequences(); !set || !slices.Equal(got, []string{"</done>"}) {
+			t.Errorf("source.StopSequences() = (%q, %t), want ([\"</done>\"], true) — deriving must not affect the source", got, set)
+		}
+
+		requireSnapshotEqual(t, "source after deriving", snapshotRequest(source), before)
+	})
+}
+
+// AI-12.1 item 4 (appended) — WithModel is last-wins over NewRequest's own
+// model parameter, exactly as re-applying any other option is: a deliberate
+// disposition, pinned rather than left to inference so the next reader does
+// not close it by reflex (design.md § 4, S-REX-007).
+func TestNewRequest_WithModelBesideTheParameter_LastApplicationWins(t *testing.T) {
+	t.Parallel()
+
+	request, err := ai.NewRequest("a", []ai.Message{userTextMessage(t, "hello")}, ai.WithModel("b"))
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+	if got := request.Model(); got != "b" {
+		t.Errorf(`request.Model() = %q, want "b" — ai.WithModel must win over the constructor's own "a" parameter`, got)
+	}
+}
+
+// AI-12.1 item 4 (appended) — the model identity and the messages, the two
+// regions NewRequest takes only as parameters, are reachable by the rebuild
+// path like every other region (design.md § 4, S-REX-007, S-REX-008).
+func TestRequest_DeriveReplacingModelOrMessages_TheDerivedRequestCarriesTheReplacement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("model", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		derived, err := source.With(ai.WithModel("m-derived"))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithModel(...)) returned %v, want no failure", err)
+		}
+		if got := derived.Model(); got != "m-derived" {
+			t.Errorf("derived.Model() = %q, want %q", got, "m-derived")
+		}
+		if got := source.Model(); got != "m-source" {
+			t.Errorf("source.Model() = %q, want %q — deriving must not affect the source", got, "m-source")
+		}
+	})
+
+	t.Run("messages_in_supplied_order", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		first := userTextMessage(t, "first replacement")
+		second := userTextMessage(t, "second replacement")
+
+		derived, err := source.With(ai.WithMessages(first, second))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithMessages(...)) returned %v, want no failure", err)
+		}
+
+		got := derived.Messages()
+		if len(got) != 2 || got[0].ID() != first.ID() || got[1].ID() != second.ID() {
+			t.Fatalf("derived.Messages() carries %d messages in the wrong order, want [first, second] as supplied", len(got))
+		}
+
+		sourceMessages := source.Messages()
+		if len(sourceMessages) != 1 || sourceMessages[0].ID() == first.ID() {
+			t.Errorf("source.Messages() changed after deriving — want the source's own single message, unaffected")
+		}
+	})
+}
+
+// AI-12.1 item 2 (+ item 2's markers row, task 1.7) — the rebuild path is
+// total over every region landed today: each has a derive step (through
+// [ai.Request.With]) and a changed observer, so a region added without a
+// rebuild path fails this table rather than passing unnoticed (R-REX-002,
+// S-REX-007 … S-REX-011, design.md § 8).
+//
+// The markers row asserts design.md § 13.2 row 7's resolved branch A:
+// cache-boundary markers ride on Segment/Tool/Message and are reached
+// TRANSITIVELY through WithMessages here — no marker-specific RequestOption
+// exists or is added by AI-12.
+//
+// The table length is asserted against design.md § 8.1's documented count so
+// a region silently dropped from the table — not merely a region whose
+// production path breaks — also fails this test, the same idiom
+// TestNewRequest_RoleVersusContentKind_EnforcesTheDocumentedTable uses for
+// its twelve role/kind cells.
+func TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable(t *testing.T) {
+	t.Parallel()
+
+	type regionCase struct {
+		name    string
+		derive  func(t *testing.T, r ai.Request) ai.Request
+		changed func(r ai.Request) bool
+	}
+
+	regions := []regionCase{
+		{
+			name: "model",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithModel("m-changed"))
+				if err != nil {
+					t.Fatalf("With(WithModel) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool { return r.Model() == "m-changed" },
+		},
+		{
+			name: "messages",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithMessages(userTextMessage(t, "changed message")))
+				if err != nil {
+					t.Fatalf("With(WithMessages) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				msgs := r.Messages()
+				if len(msgs) != 1 {
+					return false
+				}
+				text, ok := msgs[0].Content()[0].Text()
+				return ok && text == "changed message"
+			},
+		},
+		{
+			name: "system_instruction",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				segment, err := ai.NewSegment("changed instruction")
+				if err != nil {
+					t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+				}
+				system, err := ai.NewSystemInstruction(segment)
+				if err != nil {
+					t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+				}
+				derived, err := r.With(ai.WithSystemInstruction(system))
+				if err != nil {
+					t.Fatalf("With(WithSystemInstruction) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			// S-REX-053 — observed through the accessor on the DERIVED
+			// request: the region is stored twice on Request, and a rebuild
+			// that refreshed only the copy inside options would revert the
+			// top-level pair SystemInstruction() reads (design.md § 2.2.1).
+			changed: func(r ai.Request) bool {
+				system, ok := r.SystemInstruction()
+				return ok && system.Len() == 1 && system.Segments()[0].Text() == "changed instruction"
+			},
+		},
+		{
+			name: "tools",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				// "fetch" stays declared so the source's own tool choice —
+				// naming "fetch" — remains valid on the derived request too;
+				// only the tool set's membership is what this row proves.
+				set := requireToolSet(t, "changed_tool", "fetch")
+				derived, err := r.With(ai.WithTools(set))
+				if err != nil {
+					t.Fatalf("With(WithTools) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				tools, ok := r.Tools()
+				return ok && tools.Declares("changed_tool")
+			},
+		},
+		{
+			name: "tool_choice",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				// "search" is already declared by the source's tool set, so
+				// changing only the choice keeps the derived request valid.
+				derived, err := r.With(ai.WithToolChoice(requireNamedToolChoice(t, "search")))
+				if err != nil {
+					t.Fatalf("With(WithToolChoice) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				choice, ok := r.ToolChoice()
+				if !ok {
+					return false
+				}
+				name, namesOne := choice.Name()
+				return namesOne && name == "search"
+			},
+		},
+		{
+			name: "max_output_tokens",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithMaxOutputTokens(999))
+				if err != nil {
+					t.Fatalf("With(WithMaxOutputTokens) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				got, ok := r.MaxOutputTokens()
+				return ok && got == 999
+			},
+		},
+		{
+			name: "temperature",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithTemperature(0.11))
+				if err != nil {
+					t.Fatalf("With(WithTemperature) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				got, ok := r.Temperature()
+				return ok && got == 0.11
+			},
+		},
+		{
+			name: "top_p",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithTopP(0.33))
+				if err != nil {
+					t.Fatalf("With(WithTopP) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				got, ok := r.TopP()
+				return ok && got == 0.33
+			},
+		},
+		{
+			name: "stop_sequences",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithStopSequences("</changed>"))
+				if err != nil {
+					t.Fatalf("With(WithStopSequences) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				got, ok := r.StopSequences()
+				return ok && slices.Equal(got, []string{"</changed>"})
+			},
+		},
+		{
+			// design.md § 13.2 row 7, branch A: markers ride on the values
+			// and are reached TRANSITIVELY. No WithCacheBoundary-shaped
+			// option exists; the derive step below is WithMessages, exactly
+			// as the messages row above, and what differs is the observer.
+			name: "cache_boundary_markers",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				marked := userTextMessage(t, "marked").MarkCacheBoundary()
+				derived, err := r.With(ai.WithMessages(marked))
+				if err != nil {
+					t.Fatalf("With(WithMessages) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				msgs := r.Messages()
+				return len(msgs) == 1 && msgs[0].IsCacheBoundary()
+			},
+		},
+	}
+
+	if len(regions) != 10 {
+		t.Fatalf("the table has %d regions, want 10 — one per region design.md § 8.1 lists as landed today "+
+			"(cache-boundary markers included; provider extensions are AI-12.3's 11th and not yet part of this leaf)", len(regions))
+	}
+
+	for _, region := range regions {
+		t.Run(region.name, func(t *testing.T) {
+			t.Parallel()
+
+			source := buildDerivableRequest(t)
+			derived := region.derive(t, source)
+
+			if !region.changed(derived) {
+				t.Errorf("region %q: the rebuild path did not reach it — the derived request does not observe the supplied change", region.name)
+			}
+			if region.changed(source) {
+				t.Errorf("region %q: deriving changed the SOURCE too — the rebuild path is not copy-on-write for this region", region.name)
+			}
+		})
+	}
+}
+
+// AI-12.1 item 3 (pin) — opaque payloads survive a rebuild byte-identically:
+// reasoning round-trip tokens and tool-call argument bytes (R-REX-003,
+// S-REX-012, S-REX-013). Extends AI-07.3's property across the rebuild path.
+// The provider-extension-value sibling (S-REX-014) is deferred to AI-12.3
+// (task 3.10), because the region does not exist until then.
+func TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reasoning_round_trip_token", func(t *testing.T) {
+		t.Parallel()
+
+		token := []byte{0xff, 0xfe, 0x00, 0x80, 'o', 'k'} // deliberately not valid UTF-8
+		reasoning, err := ai.NewReasoning("thinking about it", token)
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+		message, err := ai.NewMessage(ai.RoleAssistant, reasoning)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+		source, err := ai.NewRequest("m", []ai.Message{message})
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		derived, err := source.With(ai.WithTemperature(0.4)) // unrelated change
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+
+		got, ok := derived.Messages()[0].Content()[0].Reasoning()
+		if !ok {
+			t.Fatalf("derived message's content[0].Reasoning() reported false, want the reasoning part")
+		}
+		gotToken, hasToken := got.Token()
+		if !hasToken || !bytes.Equal(gotToken, token) {
+			t.Errorf("derived reasoning token = (%q, %t), want (%q, true) — byte-identical to the source's", gotToken, hasToken, token)
+		}
+	})
+
+	t.Run("tool_call_argument_bytes", func(t *testing.T) {
+		t.Parallel()
+
+		args := []byte(`{"b":  2,   "a":1}`) // non-canonical whitespace and key order, deliberately
+		call, err := ai.NewToolCall("call-1", "search", args)
+		if err != nil {
+			t.Fatalf("ai.NewToolCall returned %v, want no failure", err)
+		}
+		message, err := ai.NewMessage(ai.RoleAssistant, call)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+		source, err := ai.NewRequest("m", []ai.Message{message})
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		derived, err := source.With(ai.WithTemperature(0.4)) // unrelated change
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+
+		got, ok := derived.Messages()[0].Content()[0].ToolCall()
+		if !ok {
+			t.Fatalf("derived message's content[0].ToolCall() reported false, want the tool call")
+		}
+		if !bytes.Equal(got.Arguments(), args) {
+			t.Errorf("derived tool-call arguments = %q, want %q — byte-identical to the source's", got.Arguments(), args)
+		}
+	})
+}
+
+// AI-12.1 item 5 (appended) — deriving with no options succeeds and equals
+// the source; a failed derivation returns the zero request and leaves the
+// source unmodified (S-REX-003, S-REX-004).
+func TestRequest_DeriveEdgeCases_NoOptionsSucceedsAndAFailedDeriveLeavesTheSourceUnmodified(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no_options_succeeds_and_equals_the_source", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+
+		derived, err := source.With()
+		if err != nil {
+			t.Fatalf("source.With() returned %v, want no failure", err)
+		}
+		if !derived.Equal(source) {
+			t.Errorf("source.With() = %v, want a request equal to the source", derived)
+		}
+	})
+
+	t.Run("a_failed_derivation_returns_the_zero_request_and_leaves_the_source_unmodified", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		before := snapshotRequest(source)
+
+		derived, err := source.With(ai.WithTemperature(-1)) // violates boundsRule
+		if err == nil {
+			t.Fatalf("source.With(ai.WithTemperature(-1)) returned no failure, want ErrOutOfRange")
+		}
+		requireViolation(t, err, ai.ErrOutOfRange, "temperature")
+
+		if !derived.Equal(ai.Request{}) || derived.Model() != "" {
+			t.Errorf("a failed derivation returned a non-zero request, want the zero Request so a caller that ignored the error cannot mistake it for a derived one")
+		}
+
+		requireSnapshotEqual(t, "source after a failed derivation", snapshotRequest(source), before)
+	})
+}
+
+// AI-12.1 item 6 (appended) — the rebuild copies on the way in: mutating a
+// slice passed to a slice-typed option after deriving leaves the derived
+// request unchanged, matching NewRequest's own discipline (S-REX-005).
+func TestRequest_DeriveOptionInputMutatedAfterDeriving_LeavesTheDerivedRequestUnchanged(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the_message_sequence_passed_to_WithMessages", func(t *testing.T) {
+		t.Parallel()
+
+		first := userTextMessage(t, "first")
+		second := userTextMessage(t, "second")
+		messages := []ai.Message{first, second}
+
+		source := buildDerivableRequest(t)
+		derived, err := source.With(ai.WithMessages(messages...))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithMessages(...)) returned %v, want no failure", err)
+		}
+
+		slices.Reverse(messages) // the caller mutates the slice it passed in
+
+		read := derived.Messages()
+		if read[0].ID() != first.ID() {
+			t.Errorf("after the caller reversed the slice passed to ai.WithMessages, derived.Messages()[0] changed — " +
+				"WithMessages aliased the caller's storage instead of cloning it")
+		}
+	})
+
+	t.Run("the_stop_sequence_slice_passed_to_WithStopSequences", func(t *testing.T) {
+		t.Parallel()
+
+		stops := []string{"</a>", "</b>"}
+
+		source := buildDerivableRequest(t)
+		derived, err := source.With(ai.WithStopSequences(stops...))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithStopSequences(...)) returned %v, want no failure", err)
+		}
+
+		stops[0] = "SCRATCH-MUTATED" // the caller mutates the slice it passed in
+
+		read, _ := derived.StopSequences()
+		if read[0] != "</a>" {
+			t.Errorf("after the caller mutated the slice passed to ai.WithStopSequences, derived.StopSequences()[0] = %q, want %q — "+
+				"WithStopSequences aliased the caller's storage instead of cloning it", read[0], "</a>")
+		}
+	})
+
+	// S-REX-006, the reader-side sibling: mutating a slice a reader received
+	// FROM the derived request must not change it on re-read. The same
+	// mechanism NewRequest's readers already prove (TestRequest_Messages_...,
+	// TestRequest_ReadbackMutation_...), restated here so the property is
+	// pinned for a DERIVED request specifically and not only a constructed
+	// one.
+	t.Run("a_slice_a_reader_received_from_the_derived_request", func(t *testing.T) {
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		derived, err := source.With(ai.WithStopSequences("</a>", "</b>"))
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+
+		read, _ := derived.StopSequences()
+		read[0] = "SCRATCH-MUTATED" // the reader rewrites what it received
+
+		reread, _ := derived.StopSequences()
+		if reread[0] != "</a>" {
+			t.Errorf("after a reader mutated the slice it received from derived.StopSequences(), reread[0] = %q, want %q — "+
+				"the derived request handed out its own storage", reread[0], "</a>")
+		}
+	})
 }

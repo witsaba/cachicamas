@@ -96,8 +96,15 @@ Full gate before every commit, in `backend/agent/`: `make lint && make test`.
 
 - [x] 0.1 Rebased onto the finished Wave 1 head **`1c4171e`** (AI-04 … AI-10 complete and green). AI-10 is landed; there is no `../ai-wave-1` work left to wait for.
 - [x] 0.2 Walked all eight rows of `design.md` § 13. **Rows 1–6 resolved**; outcomes recorded in the table below and, with the signatures read, in `design.md` § 13.1 and `explore.md` § 6.1.
-- [ ] 0.3 **Open — yours.** Rows 7 and 8 depend on AI-11, still being implemented in `../ai-11` and unreadable from here. Run `design.md` § 13.2's two-step decision procedure against AI-11's landed surface and record the branch taken for each row. The branches are already decided; you execute, you do not re-analyse.
-- [ ] 0.4 **Open — yours.** Record the baseline: `make lint` clean and `make test` green on the rebased tree **before** any AI-12 edit, so the first red is unambiguous. This gate did not run tests.
+- [x] 0.3 **Resolved 2026-08-01, apply agent.** This worktree is rebased onto Wave 1 head `66e960d`, which carries AI-11 complete and green. Ran `design.md` § 13.2's two-step decision procedure against the landed surface:
+  1. Read `system_instruction.go`, `tool.go`, `message.go` for a marker field: each carries an unexported `cacheBoundary bool` field plus `MarkCacheBoundary()`/`IsCacheBoundary()` methods (`system_instruction.go:15,66–78`; `tool.go:24,174–196`; `message.go:116,180–204`). **Row 7 → branch A.** Markers ride on the values and are reachable transitively through `WithSystemInstruction`, `WithTools` and `WithMessages`. AI-12 adds no option and no production line for markers; task 1.7 records "transitive" against the § 8 totality table.
+  2. Read `NewRequest`'s `FirstFailure` argument list (`request.go:180–234`) for a cap rule: it now holds **eleven** positional rules, with `draft.cacheBoundaryCapRule(messages)` at position **10** and `draft.boundsRule()` at position **11** — `cache_boundary.go:156–158` documents `cacheBoundaryCapRule` itself as "rule 10 of NewRequest's documented order". **Row 8 → branch A.** The cap is a `Rule` in the list; the rebuild re-runs it for free. AI-12.2 appends one derive-path assertion (item 5 / task 2.5) and adds no rule for `V-REQ-24`, which stays AI-11's.
+  3. The two rows are independent, as § 13.2 predicted, and both took branch A. Neither branch removed a planned item.
+  - **Ordinal correction, made here and in `design.md` § 3**: because the cap already occupies row 10 and `boundsRule` occupies row 11, AI-12.3's own extension rule appends as row **12** — not "11 or 12" as `design.md` § 3 read before this update, and not row 11 as this file's own task 1.1 annotation assumed before AI-11 landed. `design.md` § 3's table and its "Correction 2" note are corrected accordingly; task 3.2 below already anticipated row 12 and needed no change.
+- [x] 0.4 **Baseline recorded 2026-08-01, apply agent**, on the rebased tree, before any AI-12 edit:
+  - `make test` (from `backend/agent/`, `go test -race -v ./...`): `ok  	github.com/cachicamas/backend/agent/src/agenttest` and `ok  	github.com/cachicamas/backend/agent/src/ai` — full suite green.
+  - `make lint` (from `backend/agent/`): `go vet ./...` clean; `golangci-lint run --config=.golangci.yml ./...` → `0 issues.`
+  - This is the safety net every leaf below is measured against, so the first RED in AI-12.1 is unambiguous.
 
 ### 0.2 outcome table
 
@@ -109,8 +116,8 @@ Full gate before every commit, in `backend/agent/`: `make lint && make test`.
 | 4 | `Request.Equal` is exported | **Matches** (`request.go:426`). The "compare in `ai_test`, export nothing" branch is **closed, not taken** — task 3.6 keeps its wording |
 | 5 | extend `Equal` to the extension region | **Confirmed, and insufficient.** The exact block is `design.md` § 7.1. The recorded rationale was wrong: AI-10.5's round-trip pin never calls `Equal`. `design.md` § 7.2 adds the `agenttest` obligation → new task 3.6a |
 | 6 | `Reasoning.Token()` is `([]byte, bool)`, byte-exact | **Matches** (`reasoning_content.go:306`). No AI-12 work |
-| 7 | where markers live | **Unresolved** — AI-11 landing concurrently. Both branches in `design.md` § 13.2 |
-| 8 | breakpoint cap is a `Rule` in the list | **Unresolved** — no cap rule exists at `1c4171e`. Both branches in `design.md` § 13.2 |
+| 7 | where markers live | **Resolved 2026-08-01 by task 0.3 — branch A.** Markers ride on `Segment`/`Tool`/`Message`, reached transitively. No AI-12 work |
+| 8 | breakpoint cap is a `Rule` in the list | **Resolved 2026-08-01 by task 0.3 — branch A.** `cacheBoundaryCapRule` is row 10; the rebuild re-runs it for free. AI-12.2 item 5 / task 2.5 asserts it |
 
 **Three facts verified outside the eight rows:**
 
@@ -132,26 +139,85 @@ Full gate before every commit, in `backend/agent/`: `make lint && make test`.
 **Spec:** `R-REX-001`, `R-REX-002`, `R-REX-003`. **Design:** §§ 1, 2.1, 2.2, 4, 8.
 **Depends on:** AI-11 (doc 0002) — via the marker row of item 2.
 
-- [ ] **Item 1** — WHEN a caller derives a modified request from an existing one THEN the original is observably unmodified (deep comparison before and after) and the derived request validates independently.
-- [ ] **Item 2** — Deriving is **total**: every region — system segments, messages, tools, tool choice, options, markers — is reachable by the rebuild path. A region the hook cannot reach is a region a cache breakpoint or injected context can never be applied to.
-- [ ] **Item 3** *(pin)* — A request carrying reasoning round-trip tokens rebuilds with every token byte-identical (AI-07.3's property, extended across the path session persistence will later travel).
-- [ ] **Item 4** *(appended)* — The **model identity** is reachable by the rebuild path too, and `WithModel` inside `NewRequest` is last-wins over the parameter — the disposition pinned rather than left to inference (`design.md` § 4).
-- [ ] **Item 5** *(appended)* — A failed derivation returns the zero request and leaves the source observably unmodified; a derivation with no options succeeds and equals the source.
-- [ ] **Item 6** *(appended)* — The rebuild copies on the way **in**: mutating the slice passed to `WithMessages` or `WithStopSequences` after the derivation leaves the derived request unchanged, matching `NewRequest`'s landed discipline.
+- [x] **Item 1** — WHEN a caller derives a modified request from an existing one THEN the original is observably unmodified (deep comparison before and after) and the derived request validates independently. `TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified`.
+- [x] **Item 2** — Deriving is **total**: every region — system segments, messages, tools, tool choice, options, markers — is reachable by the rebuild path. `TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable`.
+- [x] **Item 3** *(pin)* — A request carrying reasoning round-trip tokens rebuilds with every token byte-identical. `TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically` (extension-value sibling deferred to AI-12.3, task 3.10).
+- [x] **Item 4** *(appended)* — The model identity is reachable by the rebuild path, and `WithModel` is last-wins over the parameter. `TestNewRequest_WithModelBesideTheParameter_LastApplicationWins`, `TestRequest_DeriveReplacingModelOrMessages_TheDerivedRequestCarriesTheReplacement`.
+- [x] **Item 5** *(appended)* — A failed derivation returns the zero request and leaves the source unmodified; no-option derive equals the source. `TestRequest_DeriveEdgeCases_NoOptionsSucceedsAndAFailedDeriveLeavesTheSourceUnmodified`.
+- [x] **Item 6** *(appended)* — Copies on the way in. `TestRequest_DeriveOptionInputMutatedAfterDeriving_LeavesTheDerivedRequestUnchanged`.
 
 ### Ordered work
 
-- [ ] 1.1 **Extraction first.** Move `NewRequest`'s `FirstFailure` argument list to `func (d requestDraft) rules() []Rule`, with the order preserved exactly; `NewRequest` calls `FirstFailure(d.rules()...)`. Behaviour-preserving — the existing suite must stay green with no test edited. Record the green run. *(Verified: the landed list is a **variadic argument list**, nine inline closures plus `draft.boundsRule()`; `FirstFailure(rules ...Rule)` makes `d.rules()...` a drop-in. `design.md` § 3 carries the real order — note that **duplicate identities precede orphan results**, the reverse of what this plan first recorded.)*
-- [ ] 1.1a **Extract the freeze too** *(added by Phase 0)*. Add `func (d requestDraft) freeze() Request`, and make `NewRequest` and `With` both end `return d.freeze(), nil`. **Not cosmetic**: `Request` stores the system region twice — `Request.system`/`hasSystem` *and* `requestDraft.system`/`hasSystem` — and `SystemInstruction()` reads the top-level pair, so a `With` that freezes without re-deriving it silently reverts the region (`design.md` § 2.2.1). One draft, one rule slice, one freeze, two seeds. Behaviour-preserving on its own; record the green run.
-- [ ] 1.2 **Widen the draft.** Add `model string` and `messages []Message` to `requestDraft`; `NewRequest` seeds them from its parameters before applying options; every rule that read a parameter now reads draft state (`design.md` § 2.2). *(Verified: **seven of ten** rules read a parameter — rule 1 reads `model`, rules 2, 3, 4, 6 iterate `messages`, rules 7 and 8 pass `messages` to a free function. The three free functions `duplicateToolCallRule` / `unresolvedToolResultRule` / `anyToolCallHasID` take `[]Message` as a parameter and need **no edit** — only their two call sites move to `d.messages`. The whole diff stays inside `NewRequest`'s body.)*
-- [ ] 1.3 RED → GREEN **item 1**: `TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified` — capture every region of the source before, derive, compare after (`S-REX-001`, `S-REX-002`).
-- [ ] 1.4 RED → GREEN `Request.With(opts ...RequestOption) (Request, error)` — copy the draft, apply, `FirstFailure(d.rules()...)`, freeze.
-- [ ] 1.5 RED → GREEN **item 4**: `WithModel`, `WithMessages`, and the last-wins pin `TestNewRequest_WithModelBesideTheParameter_LastApplicationWins` (`S-REX-007`).
-- [ ] 1.6 RED → GREEN **item 2**: the region-enumeration table of `design.md` § 8 — one row per region, each with a `derive` and a `changed` observer; the failure message names the missing region (`S-REX-007` … `S-REX-011`). **The complete list is `design.md` § 8.1: nine landed regions plus markers plus extensions.** The four generation options get **four rows, not one** — `spec.md` `R-REX-002` now requires it, because a single "generation options" row is a row a fifth option can be added past. The system-instruction row must observe through `SystemInstruction()` on the derived request, which is what catches a broken freeze (`S-REX-053`).
-- [ ] 1.7 Write the **markers** row against whatever Phase 0.3 recorded, using `design.md` § 13.2 row 7's decision procedure. Transitive → assert reachability through the region-level option, add nothing. Request-level → append one option and one row, and note the appended case here.
-- [ ] 1.8 **Item 3** *(pin)*: `TestRequest_RebuildWithReasoningToken_PreservesEveryTokenByte`, plus the tool-call argument-bytes and extension-value siblings (`S-REX-012` … `S-REX-014`). Extension row lands after AI-12.3; note the dependency and revisit.
-- [ ] 1.9 RED → GREEN **item 5** (`S-REX-003`, `S-REX-004`) and **item 6** (`S-REX-005`, `S-REX-006`).
-- [ ] 1.10 `make lint && make test`, record both, commit `feat(ai): derive a request by copy-on-write rebuild (AI-12.1)`.
+- [x] 1.1 **Extraction first.** *(Combined with 1.1a and 1.2 into one behaviour-preserving refactor — see the note below the table.)* Moved `NewRequest`'s `FirstFailure` argument list to `func (d requestDraft) rules() []Rule`, order preserved exactly. **Correction to this line's own annotation**: the landed list at the rebased head is **eleven** rule expressions, not "nine inline closures plus `draft.boundsRule()`" — AI-11 had already inserted `draft.cacheBoundaryCapRule(messages)` as row 10 (task 0.3). `FirstFailure(d.rules()...)` is still a drop-in.
+- [x] 1.1a **Extract the freeze too.** Added `func (d requestDraft) freeze() Request`; `NewRequest` and `With` both end `FirstFailure(draft.rules()...); return draft.freeze(), nil`.
+- [x] 1.2 **Widen the draft.** Added `model string` and `messages []Message` to `requestDraft`; `NewRequest` seeds them from its parameters; every rule that read a parameter now reads `d.model`/`d.messages`. The three free functions needed no edit, only their two call sites moved.
+- [x] 1.3 RED → GREEN **item 1**: `TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified`, two sub-cases (scalar option, slice-typed option) — capture every region before, derive, compare after (`S-REX-001`, `S-REX-002`).
+- [x] 1.4 RED → GREEN `Request.With(opts ...RequestOption) (Request, error)` — copy `r.options`, apply, `FirstFailure(d.rules()...)`, freeze.
+- [x] 1.5 RED → GREEN **item 4**: `WithModel`, `WithMessages`, and the last-wins pin `TestNewRequest_WithModelBesideTheParameter_LastApplicationWins` (`S-REX-007`), plus `TestRequest_DeriveReplacingModelOrMessages_TheDerivedRequestCarriesTheReplacement` (`S-REX-007`, `S-REX-008`).
+- [x] 1.6 RED → GREEN **item 2**: `TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable`, 10 rows (`design.md` § 8.1's landed set: model, messages, system, tools, tool choice, and the four generation options as separate rows, plus markers). Table length asserted against the documented count, matching `TestNewRequest_RoleVersusContentKind...`'s `if len(cases) != 12` idiom.
+- [x] 1.7 Wrote the **markers** row per task 0.3's resolved branch A: `derive` is `WithMessages` with a marked message, `changed` reads `IsCacheBoundary()` off the derived message. No option added, no production line beyond what 1.1–1.5 already landed.
+- [x] 1.8 **Item 3** *(pin)*: `TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically`, two sub-cases: reasoning round-trip token with non-UTF-8 bytes (`S-REX-012`), tool-call argument bytes with non-canonical whitespace/key order (`S-REX-013`). Extension-value sibling (`S-REX-014`) deferred to AI-12.3 task 3.10, noted there.
+- [x] 1.9 RED → GREEN **item 5** (`S-REX-003`, `S-REX-004`, `TestRequest_DeriveEdgeCases_...`) and **item 6** (`S-REX-005`, `S-REX-006`, `TestRequest_DeriveOptionInputMutatedAfterDeriving_...`).
+- [x] 1.10 `make lint && make test` — both green, recorded below. Commit `feat(ai): derive a request by copy-on-write rebuild (AI-12.1)`.
+
+### AI-12.1 evidence
+
+**Note on 1.1/1.1a/1.2 sequencing.** Go's static typing makes `func (d requestDraft) rules() []Rule` (zero args, per `design.md` § 2.2) impossible to compile until the draft already carries `model`/`messages` (task 1.2's widening) — so 1.1, 1.1a and 1.2 were implemented as **one** atomic, behaviour-preserving edit and verified together, rather than as three independently-compiling increments. This is a sequencing note, not a design deviation: the end state matches `design.md` § 2.2/§ 2.2.1 exactly. The pre-existing test suite is the approval-test safety net (strict-tdd.md's "Approval Testing" pattern): zero test files were edited for this step.
+
+```
+$ go build ./... 
+(no output — clean)
+$ make test 2>&1 | grep -E "^(ok|FAIL)"
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.552s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.451s
+$ git diff --stat -- backend/agent/src/ai/
+ backend/agent/src/ai/request.go | 155 ++++++++++++++++++++++++++++++++++------
+ 1 file changed, 133 insertions(+), 22 deletions(-)
+```
+Only `request.go` changed; no `_test.go` file touched; full suite green.
+
+**RED transcripts** (`With` landed as a compiling stub returning `Request{}, nil` first, per `design.md` § 11's "narrowest thing that compiles and fails"; `WithModel`/`WithMessages` landed as compiling no-ops first):
+```
+$ go test -race -run 'TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified' -v ./src/ai/...
+    request_test.go:1423: derived.Temperature() = (0, false), want (0.99, true)
+--- FAIL: TestRequest_DeriveWithChangedOption_LeavesTheOriginalUnmodified (0.00s)
+
+$ go test -race -run 'TestNewRequest_WithModelBesideTheParameter_LastApplicationWins|TestRequest_DeriveReplacingModelOrMessages...' -v ./src/ai/...
+    request_test.go:1478: request.Model() = "a", want "b" — ai.WithModel must win over the constructor's own "a" parameter
+    request_test.go:1497: derived.Model() = "m-source", want "m-derived"
+    request_test.go:1518: derived.Messages() carries 1 messages in the wrong order, want [first, second] as supplied
+--- FAIL (both)
+```
+
+**GREEN, after implementing `With`/`WithModel`/`WithMessages` for real:** all of the above pass; full package `go test -race -count=1 ./src/ai/...` green.
+
+**Bite proof 1 — item 2's totality table, § 2.2.1's exact trap.** Scratch-reverted `freeze()` to omit `system`/`hasSystem`:
+```
+--- FAIL: TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable (0.00s)
+    request_test.go:1737: region "system_instruction": the rebuild path did not reach it — the derived request does not observe the supplied change
+    --- PASS: .../tool_choice, .../model, .../messages, .../tools, .../temperature, .../top_p, .../max_output_tokens, .../stop_sequences, .../cache_boundary_markers  (all nine other rows unaffected)
+```
+Reverted; re-ran `-count=1`: full table green again.
+
+**Bite proof 2 — item 3's pin.** Scratch-inserted a lossy reasoning-token strip inside `With`:
+```
+--- FAIL: TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically (0.00s)
+    request_test.go:1783: derived reasoning token = ("", false), want ("\xff\xfe\x00\x80ok", true) — byte-identical to the source's
+    --- PASS: .../tool_call_argument_bytes (unaffected — proves the scratch bug is surgical to reasoning content)
+```
+Reverted; re-ran: both sub-tests green again.
+
+**Full gate:**
+```
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+
+$ make test 2>&1 | grep -E "^(ok|FAIL)"
+ok  	github.com/cachicamas/backend/agent/src/agenttest
+ok  	github.com/cachicamas/backend/agent/src/ai
+```
 
 ---
 
@@ -242,3 +308,4 @@ Full gate before every commit, in `backend/agent/`: `make lint && make test`.
 - [ ] If row 8 took branch B, the "breakpoint cap is not re-run on the derive path" gap is recorded here for Wave 1 verify.
 - [ ] Any discovered prerequisite appended to doc 0002 under the revert-and-record clause, **in the same PR**; any discovered *test case* appended to its owning leaf's list here.
 - [ ] Actuals filled into the per-slice forecast table.
+- [ ] **Region-level exhaustiveness guard — considered, deferred to Wave 2.** Three milestones in a row (AI-10.5's `agenttest` round trip, AI-11's `Message.Equal`/`toolsEqual`, now AI-12.3's `Request.Equal` and the same two `agenttest` helpers) each had a hand-rolled region walk that did not see a new region "for free". A `go/parser` AST guard over `Request`/`requestDraft`'s own field declarations, in AI-06.4's idiom, was considered and judged **out of scope for AI-12**: `design.md` § 8 already provides the enumeration-based totality proof for today's regions and explicitly calls itself "the cheap half of AI-06.4's guard idea without adding a `[guard]` node the charter does not carry"; a struct's fields are not a closed constant-space vocabulary the way `PartKind` is, so a faithful guard needs a field-pairing heuristic (value field vs. `hasX` presence flag) that is a real design decision in its own right, not a mechanical extension of the landed pattern — and this milestone is already `High` risk with `size-exception` delivery. Recorded here as a **Wave 2 proposal**: a `[guard]` node, charter-authorised, that AST-scans `requestDraft`'s field declarations against the totality-table regions and against `agenttest`'s two walks and `Request.Equal`'s region list, so a future field added without a matching entry in all three fails a test rather than a re-verification gate. See `design.md` § 14 for the same note.

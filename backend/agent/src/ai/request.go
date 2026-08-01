@@ -170,28 +170,52 @@ func anyToolCallHasID(messages []Message, id string) bool {
 // cannot mistake the result for a constructed request.
 //
 // The message sequence is copied, so a caller may reuse the slice it passed.
+//
+// The rule list itself is [requestDraft.rules] (§ 2.2 of the design):
+// NewRequest seeds a draft from its two parameters, applies opts, then calls
+// FirstFailure(draft.rules()...) and freezes — the same three steps
+// [Request.With] performs after seeding from an existing request instead.
 func NewRequest(model string, messages []Message, opts ...RequestOption) (Request, error) {
-	draft := requestDraft{}
+	draft := requestDraft{model: model, messages: slices.Clone(messages)}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&draft)
 		}
 	}
-	if err := FirstFailure(
+	if err := FirstFailure(draft.rules()...); err != nil {
+		return Request{}, err
+	}
+	return draft.freeze(), nil
+}
+
+// rules returns the request's rule list, in the documented order (V-FAIL-04,
+// design.md § 3). [NewRequest] and [Request.With] both call
+// FirstFailure(d.rules()...), so the two doors share one rule set in one
+// order — R-REX-005's "derive-time validation is construction's validation"
+// made structural rather than a discipline to re-check on every future rule.
+//
+// AI-12.1 (design.md § 2.2) is the extraction that makes this a method: every
+// rule reads draft state, including the two — model and messages — that
+// [NewRequest] previously closed over as parameters. The three cross-region
+// free functions [duplicateToolCallRule], [unresolvedToolResultRule] and
+// [anyToolCallHasID] still take []Message as a parameter; only their call
+// sites here changed, from the parameter to d.messages.
+func (d requestDraft) rules() []Rule {
+	return []Rule{
 		func() *Violation {
-			if strings.TrimSpace(model) == "" {
+			if strings.TrimSpace(d.model) == "" {
 				return Invalid(ErrEmpty, At("model"))
 			}
 			return nil
 		},
 		func() *Violation {
-			if len(messages) == 0 {
+			if len(d.messages) == 0 {
 				return Invalid(ErrEmpty, At("messages"))
 			}
 			return nil
 		},
 		func() *Violation {
-			for i, message := range messages {
+			for i, message := range d.messages {
 				if message.ID().IsZero() {
 					return Invalid(ErrEmpty, AtIndex("messages", i))
 				}
@@ -199,7 +223,7 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			return nil
 		},
 		func() *Violation {
-			for i, message := range messages {
+			for i, message := range d.messages {
 				if violation := validateContent(Path{AtIndex("messages", i)}, message.Content()); violation != nil {
 					return violation
 				}
@@ -207,13 +231,13 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			return nil
 		},
 		func() *Violation {
-			if draft.hasSystem && draft.system.IsZero() {
+			if d.hasSystem && d.system.IsZero() {
 				return Invalid(ErrEmpty, At("system"))
 			}
 			return nil
 		},
 		func() *Violation {
-			for i, message := range messages {
+			for i, message := range d.messages {
 				for j, part := range message.Content() {
 					if !roleAllowsKind(message.Role(), part.Kind()) {
 						return Invalid(ErrMisplaced, AtIndex("messages", i), AtIndex("content", j))
@@ -222,26 +246,104 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			}
 			return nil
 		},
-		func() *Violation { return duplicateToolCallRule(messages) },
-		func() *Violation { return unresolvedToolResultRule(messages) },
+		func() *Violation { return duplicateToolCallRule(d.messages) },
+		func() *Violation { return unresolvedToolResultRule(d.messages) },
 		func() *Violation {
-			if !draft.hasToolChoice {
+			if !d.hasToolChoice {
 				return nil
 			}
-			return violationOf(draft.toolChoice.ValidateAgainst(draft.tools))
+			return violationOf(d.toolChoice.ValidateAgainst(d.tools))
 		},
-		draft.cacheBoundaryCapRule(messages),
-		draft.boundsRule(),
-	); err != nil {
+		d.cacheBoundaryCapRule(d.messages),
+		d.boundsRule(),
+	}
+}
+
+// freeze builds the immutable [Request] a validated draft describes.
+//
+// It is the ONE place a non-zero Request is built (design.md § 2.2.1): both
+// [NewRequest] and [Request.With] end "FirstFailure(draft.rules()...);
+// return draft.freeze(), nil", and nothing else in this package constructs a
+// non-zero Request. That symmetry is what closes a trap the two-copy layout
+// below would otherwise open on the very first derivation.
+//
+// [Request] stores the system region twice: the top-level
+// Request.system/hasSystem pair, which [Request.SystemInstruction] reads, and
+// requestDraft.system/hasSystem inside Request.options. A With that applied
+// options and returned Request{options: draft} without also re-deriving the
+// top-level pair would silently revert whatever WithSystemInstruction had
+// just set — a bug no test could catch before this milestone, because no
+// earlier test derived a request at all. Model and messages get the same
+// two-copy layout for the identical reason RequestOption needs them
+// reachable at all (design.md § 4), and freeze is what keeps every copy in
+// sync: because it is the only constructor, the top-level fields and the
+// options field can never disagree.
+func (d requestDraft) freeze() Request {
+	return Request{
+		model:     d.model,
+		messages:  d.messages,
+		system:    d.system,
+		hasSystem: d.hasSystem,
+		options:   d,
+	}
+}
+
+// With derives a new request from r by applying opts to a copy of r's draft
+// (V-REQ-29).
+//
+// The three steps are [NewRequest]'s own, with one seed swapped: copy the
+// draft — here from r.options rather than from two parameters — apply opts
+// in order (last-wins, per [RequestOption]'s contract), then
+// FirstFailure(draft.rules()...) and freeze. Deriving therefore runs the
+// identical rule set, in the identical order, that constructing does
+// (R-REX-005): there is no second, weaker validation path, because there is
+// no second implementation of validation to begin with.
+//
+// r is a value receiver and is never written to, so r is left observably
+// unmodified by any derivation, successful or not (R-REX-001). On failure the
+// zero Request is returned, matching [NewRequest].
+//
+// Every region unsupplied by opts carries r's own value forward unchanged,
+// because the seed is r.options itself — copying a struct of scalars, one
+// string, and slice headers whose backing arrays are never mutated in place
+// anywhere in this package. Every region that IS supplied copies on the way
+// in, through the same options that build a constructed request
+// ([WithMessages], [WithStopSequences], …), so mutating a slice passed to an
+// option after deriving cannot reach the derived request (S-REX-005).
+func (r Request) With(opts ...RequestOption) (Request, error) {
+	draft := r.options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&draft)
+		}
+	}
+	if err := FirstFailure(draft.rules()...); err != nil {
 		return Request{}, err
 	}
-	return Request{
-		model:     model,
-		messages:  slices.Clone(messages),
-		system:    draft.system,
-		hasSystem: draft.hasSystem,
-		options:   draft,
-	}, nil
+	return draft.freeze(), nil
+}
+
+// WithModel sets the request's model identity, reachable through
+// [RequestOption] so [Request.With] can replace it (design.md § 4).
+//
+// Applied inside [NewRequest], it is last-wins over the constructor's own
+// model parameter, exactly as re-applying any other option is: this is not a
+// second rule, it is [RequestOption]'s documented last-wins contract read at
+// the one region a caller might not expect it to reach
+// (TestNewRequest_WithModelBesideTheParameter_LastApplicationWins).
+func WithModel(model string) RequestOption {
+	return func(d *requestDraft) { d.model = model }
+}
+
+// WithMessages sets the request's ordered messages, reachable through
+// [RequestOption] so [Request.With] can replace them (design.md § 4).
+//
+// Applied inside [NewRequest], it is last-wins over the constructor's own
+// messages parameter, matching [WithModel]. The sequence is copied on the way
+// in, matching [NewRequest]'s own parameter: a caller that mutates the slice
+// after deriving must not be able to reach the derived request (S-REX-005).
+func WithMessages(messages ...Message) RequestOption {
+	return func(d *requestDraft) { d.messages = slices.Clone(messages) }
 }
 
 // Model returns the neutral name of the model the request targets (V-REQ-21).
@@ -284,7 +386,16 @@ type RequestOption func(*requestDraft)
 // It is unexported so nothing settable reaches the exported surface. Each
 // optional value is paired with a flag rather than carrying a sentinel, so
 // absence is structural and "set to zero" is a different fact from "not set".
+//
+// AI-12.1 widens it with model and messages (§ 2.2), the two regions
+// [NewRequest] previously took only as parameters. Widening is what makes
+// [requestDraft.rules] a zero-argument method and [Request.With] possible at
+// all: both doors seed one draft — [NewRequest] from its parameters, [With]
+// from r.options — apply options, then share one rule slice and one freeze.
 type requestDraft struct {
+	model    string
+	messages []Message
+
 	maxOutputTokens    int
 	hasMaxOutputTokens bool
 
