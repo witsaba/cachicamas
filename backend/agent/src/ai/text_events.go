@@ -114,14 +114,24 @@ type TextDelta struct {
 func (TextDelta) kind() EventKind { return EventKindTextDelta }
 
 // validate reports the payload's first broken rule at the given position, or
-// nil: the block index is at least 1, else [ErrOutOfRange] at "block"
-// (R-ATE-003). No emptiness rule applies to the fragment: a zero-length or
+// nil. The rules are checked in the order written, per V-FAIL-04: the block
+// index is at least 1, else [ErrOutOfRange] at "block" (R-ATE-003); then the
+// fragment is at most [MaxTextLen] bytes, else [ErrOutOfRange] at "delta"
+// (R-ATE-009) — the fragment cap is the only bound; the block's reconstructed
+// total is never bounded here (R-ATE-011 forbids accumulating it at Layer 1).
+// No emptiness rule applies to the fragment at any position: a zero-length or
 // whitespace-only fragment is legal (R-ATE-008).
 func (d TextDelta) validate(at Path) *Violation {
 	return firstViolation(
 		func() *Violation {
 			if d.block == 0 {
 				return Invalid(ErrOutOfRange, under(at, At("block"))...)
+			}
+			return nil
+		},
+		func() *Violation {
+			if len(d.delta) > MaxTextLen {
+				return Invalid(ErrOutOfRange, under(at, At("delta"))...)
 			}
 			return nil
 		},
@@ -139,7 +149,9 @@ func (d TextDelta) validate(at Path) *Violation {
 //
 // delta is stored byte for byte: nothing here validates its encoding, trims
 // it, or rejects it for being empty or whitespace-only (R-ATE-007,
-// R-ATE-008).
+// R-ATE-008). It is rejected only for exceeding [MaxTextLen] (R-ATE-009) —
+// the same documented ceiling [NewText] applies to a complete text part, so a
+// fragment of a legal complete text is never rejected here.
 func NewTextDelta(block BlockIndex, delta string) (Event, error) {
 	payload := TextDelta{block: block, delta: delta}
 	if violation := payload.validate(nil); violation != nil {

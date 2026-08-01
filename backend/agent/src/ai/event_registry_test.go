@@ -61,8 +61,10 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 	},
 	ai.EventKindResponseStart: {
 		registeredName: "responsestart",
-		construct:      func() (ai.Event, error) { return ai.NewResponseStart("resp_registry_witness", "model_registry_witness") },
-		read:           func(e ai.Event) (any, bool) { return e.ResponseStart() },
+		construct: func() (ai.Event, error) {
+			return ai.NewResponseStart("resp_registry_witness", "model_registry_witness")
+		},
+		read: func(e ai.Event) (any, bool) { return e.ResponseStart() },
 	},
 	ai.EventKindCompletion: {
 		registeredName: "completion",
@@ -115,8 +117,10 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 	},
 	ai.EventKindToolCallStart: {
 		registeredName: "tool_call_start",
-		construct:      func() (ai.Event, error) { return ai.NewToolCallStart(1, "call_registry_witness", "tool_registry_witness") },
-		read:           func(e ai.Event) (any, bool) { return e.ToolCallStart() },
+		construct: func() (ai.Event, error) {
+			return ai.NewToolCallStart(1, "call_registry_witness", "tool_registry_witness")
+		},
+		read: func(e ai.Event) (any, bool) { return e.ToolCallStart() },
 	},
 	ai.EventKindToolCallDelta: {
 		registeredName: "tool_call_delta",

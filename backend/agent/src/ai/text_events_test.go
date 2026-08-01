@@ -9,8 +9,12 @@ package ai_test
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -396,4 +400,259 @@ func mustTextBlockEnd(t *testing.T, block ai.BlockIndex) ai.Event {
 		t.Fatalf("ai.NewTextBlockEnd(%v) returned %v, want no failure", block, err)
 	}
 	return event
+}
+
+// R-ATE-006 — concatenated deltas reconstruct a text block byte-exactly, with
+// no normalization, trimming or re-encoding.
+func TestTextDelta_ConcatenatedFragments_ReconstructByteExactly(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an arbitrary split reassembles to the original text (S-ATE-014)", func(t *testing.T) {
+		t.Parallel()
+
+		const original = "The quick brown fox jumps over the lazy dog."
+		fragments := []string{"The quick ", "brown fox ", "jumps over ", "the lazy dog."}
+
+		var events []ai.Event
+		for _, f := range fragments {
+			events = append(events, mustTextDelta(t, 1, f))
+		}
+		if got := concatenateTextDeltas(events); got != original {
+			t.Errorf("concatenateTextDeltas(events) = %q, want %q", got, original)
+		}
+	})
+
+	t.Run("leading whitespace, trailing whitespace and interior newlines survive with no trimming (S-ATE-015)", func(t *testing.T) {
+		t.Parallel()
+
+		const original = "  leading and trailing  \nwith\ninterior\nnewlines\n  "
+		fragments := []string{"  leading and trailing  \n", "with\ninterior\n", "newlines\n  "}
+
+		var events []ai.Event
+		for _, f := range fragments {
+			events = append(events, mustTextDelta(t, 1, f))
+		}
+		if got := concatenateTextDeltas(events); got != original {
+			t.Errorf("concatenateTextDeltas(events) = %q, want %q — no trimming of any whitespace byte", got, original)
+		}
+	})
+}
+
+// R-ATE-007 — a fragment is raw bytes, not validated text: an individual
+// fragment may be invalid UTF-8 on its own, and construction never repairs,
+// replaces or re-encodes a byte of it.
+func TestTextDelta_MultiByteRuneSplitAcrossADeltaBoundary_PreservesEveryByte(t *testing.T) {
+	t.Parallel()
+
+	// "€" (U+20AC) encodes to the three bytes 0xE2 0x82 0xAC. Split after the
+	// first byte, so the first fragment ends mid-rune and the second begins
+	// mid-rune.
+	const euro = "€"
+	if len(euro) != 3 {
+		t.Fatalf("test fixture error: %q must encode to 3 bytes, got %d", euro, len(euro))
+	}
+	first := euro[:1]
+	second := euro[1:]
+
+	t.Run("both deltas construct, and neither fragment's bytes are altered (S-ATE-016)", func(t *testing.T) {
+		t.Parallel()
+
+		firstEvent, err := ai.NewTextDelta(1, first)
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta(1, %q) returned %v, want no failure", first, err)
+		}
+		secondEvent, err := ai.NewTextDelta(1, second)
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta(1, %q) returned %v, want no failure", second, err)
+		}
+
+		d1, _ := firstEvent.TextDelta()
+		d2, _ := secondEvent.TextDelta()
+		if d1.Delta() != first {
+			t.Errorf("d1.Delta() = %q (% x), want %q (% x) unaltered", d1.Delta(), d1.Delta(), first, first)
+		}
+		if d2.Delta() != second {
+			t.Errorf("d2.Delta() = %q (% x), want %q (% x) unaltered", d2.Delta(), d2.Delta(), second, second)
+		}
+	})
+
+	t.Run("concatenating the pair decodes to the original rune, with no replacement character (S-ATE-017)", func(t *testing.T) {
+		t.Parallel()
+
+		events := []ai.Event{mustTextDelta(t, 1, first), mustTextDelta(t, 1, second)}
+		got := concatenateTextDeltas(events)
+		if got != euro {
+			t.Errorf("concatenateTextDeltas(events) = %q, want %q", got, euro)
+		}
+		if strings.ContainsRune(got, '�') {
+			t.Errorf("concatenateTextDeltas(events) = %q contains the replacement character, want none", got)
+		}
+	})
+
+	t.Run("the fragment's declaration uses the word byte and states a single fragment may not be well-formed UTF-8 (S-ATE-018)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "text_events.go", nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parsing text_events.go: %v", err)
+		}
+
+		doc := fieldDoc(file, "TextDelta", "delta")
+		if doc == "" {
+			t.Fatal(`text_events.go's "TextDelta" struct declares no doc comment on its "delta" field`)
+		}
+		if !strings.Contains(strings.ToLower(doc), "byte") {
+			t.Errorf("TextDelta.delta's doc comment = %q, want it to use the word \"byte\"", doc)
+		}
+		if !strings.Contains(strings.ToLower(doc), "utf-8") {
+			t.Errorf("TextDelta.delta's doc comment = %q, want it to record that a fragment may not be well-formed UTF-8 alone", doc)
+		}
+	})
+}
+
+// R-ATE-008 — no text-content emptiness rule applies to a fragment: a
+// whitespace-only or zero-length fragment is legal, and construction never
+// returns ErrEmpty for either.
+func TestTextDelta_WhitespaceOnlyAndZeroLengthFragments_AreLegal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a single-space fragment succeeds and reads back exactly one space (S-ATE-019)", func(t *testing.T) {
+		t.Parallel()
+
+		event, err := ai.NewTextDelta(1, " ")
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta(1, \" \") returned %v, want no failure", err)
+		}
+		d, ok := event.TextDelta()
+		if !ok {
+			t.Fatal("event.TextDelta() reported no payload on an event of its own kind")
+		}
+		if got := d.Delta(); got != " " {
+			t.Errorf("d.Delta() = %q, want a single space", got)
+		}
+	})
+
+	t.Run("a zero-length fragment succeeds with no emptiness sentinel (S-ATE-020)", func(t *testing.T) {
+		t.Parallel()
+
+		event, err := ai.NewTextDelta(1, "")
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta(1, \"\") returned %v, want no failure", err)
+		}
+		if errors.Is(err, ai.ErrEmpty) {
+			t.Error("errors.Is(err, ai.ErrEmpty) = true, want false — a zero-length fragment is legal")
+		}
+		d, ok := event.TextDelta()
+		if !ok {
+			t.Fatal("event.TextDelta() reported no payload on an event of its own kind")
+		}
+		if got := d.Delta(); got != "" {
+			t.Errorf("d.Delta() = %q, want empty", got)
+		}
+	})
+
+	t.Run("a whitespace-only fragment among non-empty ones lands at its original position on reconstruction (S-ATE-021)", func(t *testing.T) {
+		t.Parallel()
+
+		events := []ai.Event{
+			mustTextDelta(t, 1, "before"),
+			mustTextDelta(t, 1, "   "),
+			mustTextDelta(t, 1, "after"),
+		}
+		want := "before   after"
+		if got := concatenateTextDeltas(events); got != want {
+			t.Errorf("concatenateTextDeltas(events) = %q, want %q", got, want)
+		}
+	})
+}
+
+// R-ATE-009 — a fragment is bounded by the existing MaxTextLen ceiling: a
+// fragment exceeding it is rejected at construction, and a fragment of
+// exactly the bound succeeds.
+func TestTextDelta_FragmentBoundByMaxTextLen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a fragment exceeding MaxTextLen fails with ErrOutOfRange at delta (S-ATE-022)", func(t *testing.T) {
+		t.Parallel()
+
+		oversized := strings.Repeat("a", ai.MaxTextLen+1)
+		_, err := ai.NewTextDelta(1, oversized)
+		if err == nil {
+			t.Fatal("ai.NewTextDelta with an over-long fragment = nil, want a rejection")
+		}
+		if !errors.Is(err, ai.ErrOutOfRange) {
+			t.Errorf("errors.Is(err, ai.ErrOutOfRange) = false, want true; err = %v", err)
+		}
+		var violation *ai.Violation
+		if !errors.As(err, &violation) {
+			t.Fatalf("errors.As(err, &violation) = false, want true; err = %v", err)
+		}
+		if got, want := violation.Path().String(), "delta"; got != want {
+			t.Errorf("violation position = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a fragment of exactly MaxTextLen bytes succeeds (S-ATE-023)", func(t *testing.T) {
+		t.Parallel()
+
+		exact := strings.Repeat("a", ai.MaxTextLen)
+		event, err := ai.NewTextDelta(1, exact)
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta with a %d-byte fragment returned %v, want no failure", ai.MaxTextLen, err)
+		}
+		d, ok := event.TextDelta()
+		if !ok {
+			t.Fatal("event.TextDelta() reported no payload on an event of its own kind")
+		}
+		if got := len(d.Delta()); got != ai.MaxTextLen {
+			t.Errorf("len(d.Delta()) = %d, want %d", got, ai.MaxTextLen)
+		}
+	})
+}
+
+// concatenateTextDeltas is a test-local reconstructor proving R-ATE-006's and
+// R-ATE-010's byte-exactness. It is not exported: R-ATE-011 forbids Layer 1
+// from shipping one, and this is this milestone's own proof that a consumer
+// can write one in a few lines without Layer 1's help (S-ATE-028). An empty
+// slice — the zero-delta case — returns the empty string with no error
+// (R-ATE-010).
+func concatenateTextDeltas(events []ai.Event) string {
+	var b strings.Builder
+	for _, e := range events {
+		if d, ok := e.TextDelta(); ok {
+			b.WriteString(d.Delta())
+		}
+	}
+	return b.String()
+}
+
+// fieldDoc returns the doc comment text of a named field within a named
+// struct type declared in file, or "" if either does not exist or the field
+// has no doc comment.
+func fieldDoc(file *ast.File, structName, fieldName string) string {
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typed, ok := spec.(*ast.TypeSpec)
+			if !ok || typed.Name.Name != structName {
+				continue
+			}
+			st, ok := typed.Type.(*ast.StructType)
+			if !ok {
+				return ""
+			}
+			for _, f := range st.Fields.List {
+				for _, name := range f.Names {
+					if name.Name == fieldName && f.Doc != nil {
+						return f.Doc.Text()
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
