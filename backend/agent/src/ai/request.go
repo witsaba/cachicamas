@@ -256,6 +256,7 @@ func (d requestDraft) rules() []Rule {
 		},
 		d.cacheBoundaryCapRule(d.messages),
 		d.boundsRule(),
+		d.extensionsRule(),
 	}
 }
 
@@ -416,6 +417,11 @@ type requestDraft struct {
 
 	toolChoice    ToolChoice
 	hasToolChoice bool
+
+	// extensions is AI-12.3's region (V-REQ-28): a slice, never a map — this
+	// package's own rule for a Layer 1 registry, restated in
+	// request_extension.go, applies here too.
+	extensions []ProviderExtension
 }
 
 // WithMaxOutputTokens sets the maximum number of tokens the model may generate.
@@ -598,6 +604,14 @@ func (r Request) Equal(other Request) bool {
 		return false
 	}
 
+	// AI-12.3 — the region carries no presence flag of its own (it is a
+	// slice, so absent and empty are one fact) and is already in
+	// first-application order, so slices.EqualFunc is the whole comparison
+	// (design.md § 7.1).
+	if !slices.EqualFunc(r.ProviderExtensions(), other.ProviderExtensions(), providerExtensionsEqual) {
+		return false
+	}
+
 	return true
 }
 
@@ -731,6 +745,13 @@ func (r Request) String() string {
 		b.WriteString(", ")
 		b.WriteString(strconv.Itoa(count))
 		b.WriteString(" cache boundaries")
+	}
+	// AI-12.3's extension: name the extension count, never a namespace or a
+	// value — the identical admission test (R-REX-010).
+	if count := len(r.options.extensions); count > 0 {
+		b.WriteString(", ")
+		b.WriteString(strconv.Itoa(count))
+		b.WriteString(" extensions")
 	}
 	for _, name := range r.options.appliedNames() {
 		b.WriteString(", ")

@@ -1720,11 +1720,31 @@ func TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable(t *testing.T) {
 				return len(msgs) == 1 && msgs[0].IsCacheBoundary()
 			},
 		},
+		{
+			// Discovered by re-reading R-REX-002 while implementing AI-12.3
+			// (design.md § 8.1's row 11): the region set enumerated for
+			// totality is eleven, provider extensions included, not the ten
+			// this table started with. Appended here rather than pruning or
+			// substituting anything — AI-12.3 owns it because the region
+			// does not exist before that leaf.
+			name: "provider_extensions",
+			derive: func(t *testing.T, r ai.Request) ai.Request {
+				derived, err := r.With(ai.WithProviderExtension("alpha", []byte("changed-value")))
+				if err != nil {
+					t.Fatalf("With(WithProviderExtension) returned %v, want no failure", err)
+				}
+				return derived
+			},
+			changed: func(r ai.Request) bool {
+				ext, ok := r.ProviderExtension("alpha")
+				return ok && bytes.Equal(ext.Value(), []byte("changed-value"))
+			},
+		},
 	}
 
-	if len(regions) != 10 {
-		t.Fatalf("the table has %d regions, want 10 — one per region design.md § 8.1 lists as landed today "+
-			"(cache-boundary markers included; provider extensions are AI-12.3's 11th and not yet part of this leaf)", len(regions))
+	if len(regions) != 11 {
+		t.Fatalf("the table has %d regions, want 11 — one per region design.md § 8.1 lists as the complete set "+
+			"(nine landed at AI-10, cache-boundary markers from AI-11, provider extensions from AI-12.3)", len(regions))
 	}
 
 	for _, region := range regions {
@@ -1745,10 +1765,9 @@ func TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable(t *testing.T) {
 }
 
 // AI-12.1 item 3 (pin) — opaque payloads survive a rebuild byte-identically:
-// reasoning round-trip tokens and tool-call argument bytes (R-REX-003,
-// S-REX-012, S-REX-013). Extends AI-07.3's property across the rebuild path.
-// The provider-extension-value sibling (S-REX-014) is deferred to AI-12.3
-// (task 3.10), because the region does not exist until then.
+// reasoning round-trip tokens, tool-call argument bytes, and (closed by
+// AI-12.3 task 3.10) provider-extension values (R-REX-003, S-REX-012,
+// S-REX-013, S-REX-014). Extends AI-07.3's property across the rebuild path.
 func TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically(t *testing.T) {
 	t.Parallel()
 
@@ -1812,6 +1831,27 @@ func TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdenticall
 		}
 		if !bytes.Equal(got.Arguments(), args) {
 			t.Errorf("derived tool-call arguments = %q, want %q — byte-identical to the source's", got.Arguments(), args)
+		}
+	})
+
+	// S-REX-014, closed by AI-12.3 task 3.10 now that the region exists.
+	t.Run("provider_extension_value", func(t *testing.T) {
+		t.Parallel()
+
+		value := []byte{0xff, 0xfe, 'e', 'x', 't', 0x00, 0x80} // deliberately not valid UTF-8
+		source, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithProviderExtension("alpha", value))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		derived, err := source.With(ai.WithTemperature(0.4)) // unrelated change
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+
+		ext, ok := derived.ProviderExtension("alpha")
+		if !ok || !bytes.Equal(ext.Value(), value) {
+			t.Errorf("derived.ProviderExtension(\"alpha\") = (%v, %t), want a value byte-identical to the source's %q", ext, ok, value)
 		}
 	})
 }

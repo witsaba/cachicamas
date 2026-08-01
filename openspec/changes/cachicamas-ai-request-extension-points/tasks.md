@@ -288,28 +288,96 @@ ok  	github.com/cachicamas/backend/agent/src/ai
 
 **Hard constraint from AI-10.4, verified in Phase 0** (`design.md` § 5.1): the `ai` package's production dependency closure contains no `os`, `net`, `net/http` or `io/fs`, enforced by `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage`. `encoding/json` is banned from non-test files as a consequence — it imports `fmt`, which imports `os`. **`request_extension.go` must use `strings.Builder` and `strconv` and never `fmt.Sprintf`; a single `fmt` call in it turns a landed guard red.** Everything the region needs (`bytes`, `slices`, `strings`, `strconv`) is already in the closure, so this leaf adds no import and `go.mod` stays at zero requires.
 
-- [ ] **Item 1** — WHEN a caller attaches a provider-namespaced opaque value THEN it survives to the adapter that claims the namespace, byte-exact.
-- [ ] **Item 2** — WHEN an adapter for a *different* provider reads the same request THEN the foreign value is invisible to it and its translation is unaffected.
-- [ ] **Item 3** — The pass-through is inert in validation and equality: two requests differing only in a third provider's namespace validate identically.
-- [ ] **Item 4** *(appended)* — The region's own rules: an empty or whitespace-only namespace and an empty value each fail with `ErrEmpty` at `extensions[i].namespace` / `extensions[i].value`; a whitespace-only **value** is legal, because bytes are opaque (`design.md` § 6).
-- [ ] **Item 5** *(appended)* — Re-applying a namespace is last-wins and keeps its **first** read-back ordinal; the region is a slice and never a map.
-- [ ] **Item 6** *(appended)* — Neither a namespace nor a value renders through any of the four fmt verbs, and the rendering still names the region and its count (`R-REX-010`).
-- [ ] **Item 7** *(appended by Phase 0)* — The region survives the **readback-rebuild** walk that `R-AMR-015`'s round-trip pin uses, which does **not** route through `Request.Equal` (`S-REX-054`). Extending the documented equality is necessary and not sufficient: `agenttest`'s `rebuildFromReadback` and `requireRequestsEqual` each walk a fixed nine-region list, so the pin would go green on a request that lost every extension. Both walks gain the region.
+- [x] **Item 1** — WHEN a caller attaches a provider-namespaced opaque value THEN it survives to the adapter that claims the namespace, byte-exact. `TestProviderExtension_ClaimedByItsNamespace_SurvivesByteExact`.
+- [x] **Item 2** — WHEN an adapter for a *different* provider reads the same request THEN the foreign value is invisible to it and its translation is unaffected. `TestProviderExtension_ForeignNamespace_IsInvisibleAndDoesNotAffectTranslation`.
+- [x] **Item 3** — The pass-through is inert in validation and equality. `TestProviderExtension_InThirdNamespace_IsInertInValidation` + `TestRequest_Equal_ComparesProviderExtensions`.
+- [x] **Item 4** *(appended)* — The region's own rules. `TestNewRequest_ProviderExtensionRuleViolations_FailWithTheDocumentedSentinels` + `TestNewRequest_ProviderExtension_LegalEdgesAndOrdinalPositioning`.
+- [x] **Item 5** *(appended)* — Last-wins, keeps first ordinal, slice never map. `TestProviderExtension_ReapplyingANamespace_IsLastWinsAndKeepsItsFirstOrdinal`.
+- [x] **Item 6** *(appended)* — No fmt-verb leak, count still renders. `TestProviderExtension_Formatting_RendersNoPayloadThroughAnyVerbButNamesTheCount`.
+- [x] **Item 7** *(appended by Phase 0)* — Survives the readback-rebuild walk, independent of `Request.Equal`. `TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest` in `agenttest`, both helpers extended.
 
 ### Ordered work
 
-- [ ] 3.1 Create `request_extension.go` with the banner `// AI-12.3 — the provider escape hatch: typed, namespaced, opaque.` and a blank line before `package ai` (revive `package-comments`).
-- [ ] 3.2 RED → GREEN `ProviderExtension` (sealed, no exported constructor), `WithProviderExtension`, `Request.ProviderExtension(ns)`, `Request.ProviderExtensions()`; `requestDraft` gains `extensions []ProviderExtension`; rule row 12 appended **last** in `draft.rules()`.
-- [ ] 3.3 RED → GREEN **item 1**: a fake translator claiming namespace `alpha` reproduces the value byte-exactly, including bytes that are not valid UTF-8 (`S-REX-026`, `S-REX-027`, `S-REX-034`).
-- [ ] 3.4 RED → GREEN **item 2**: a second fake translator claiming `beta` finds no `alpha` extension, and its output for the request **with** the `alpha` extension is byte-identical to its output for the request **without** it (`S-REX-032`, `S-REX-033`). This pair is the milestone's acceptance clause.
-- [ ] 3.5 RED → GREEN **item 3**: two requests differing only in a third namespace construct identically; and when both violate the same rule elsewhere, both fail with the same class at the same position (`S-REX-035`, `S-REX-036`).
-- [ ] 3.6 RED → GREEN the equality half of item 3, per `design.md` § 7: two requests differing only in an extension **value** are **not** equal; a rebuild preserves the region (`S-REX-037`, `S-REX-038`). **Phase 0 resolved § 13 row 4: `Request.Equal` *is* exported (`request.go:426`), so extend it** — the alternative branch (compare region-by-region in `ai_test`, export no second equality) is **closed, not taken**, and is kept in this line so the choice stays visible. The exact block is `design.md` § 7.1: one `slices.EqualFunc(r.ProviderExtensions(), other.ProviderExtensions(), providerExtensionsEqual)` before `return true`, with a **free** comparator on `toolsEqual`'s precedent, no presence flag, read through the exported accessor.
-- [ ] 3.6a RED → GREEN **item 7** *(added by Phase 0 — `design.md` § 7.2)*: in `backend/agent/src/agenttest/request_test.go`, add the extension region to `rebuildFromReadback` (re-apply through `WithProviderExtension` in read-back order, as the tool set and each option are re-applied) and to `requireRequestsEqual` (namespace by string equality, value by `bytes.Equal`, as tool schemas are compared). Red first: a request carrying an extension must fail `TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest` **before** the helpers are extended — that red is the proof the blind spot was real (`S-REX-054`).
-- [ ] 3.7 RED → GREEN **item 4** (`S-REX-039` … `S-REX-045`), including the positional ordinal check on the second extension and the no-format-rule case.
-- [ ] 3.8 RED → GREEN **item 5** (`S-REX-028` … `S-REX-031`), including copy-out on `Value()`.
-- [ ] 3.9 RED → GREEN **item 6**: four verbs × two secret-bearing fields, one table (`S-REX-050` … `S-REX-052`); extend `Request.String`'s `appliedNames` with the extension region, count only. Build every rendering with `strings.Builder`/`strconv`, matching `Request.String` (`request.go:584`) — **no `fmt`**, per the leaf's hard constraint above.
-- [ ] 3.10 Close AI-12.1 item 3's deferred extension row (task 1.8) now that the region exists.
-- [ ] 3.11 `make lint && make test`, record both, commit `feat(ai): carry a namespaced opaque provider value (AI-12.3)`.
+- [x] 3.1 Created `request_extension.go` with the banner and a blank line before `package ai`.
+- [x] 3.2 Landed `ProviderExtension`, `WithProviderExtension`, `Request.ProviderExtension(ns)`, `Request.ProviderExtensions()`, `requestDraft.extensions`, and `extensionsRule()` as compiling stubs (narrowest declarations, all wrong/no-op) so tasks 3.3–3.9's tests could compile and fail for the right reason; rule row 12 appended **last** in `draft.rules()` from the start.
+- [x] 3.3 RED → GREEN **item 1**: `TestProviderExtension_ClaimedByItsNamespace_SurvivesByteExact`, two triangulated sub-cases (printable ASCII, not-valid-UTF-8) (`S-REX-026`, `S-REX-027`, `S-REX-034`). This RED/GREEN cycle landed the real `WithProviderExtension` and `Request.ProviderExtension`.
+- [x] 3.4 RED → GREEN **item 2**: `TestProviderExtension_ForeignNamespace_IsInvisibleAndDoesNotAffectTranslation` — green from birth (item 1's real implementation already does exact namespace matching); the fake `betaRender` translator proves a WHOLE rendering, not only a lookup, is unaffected (`S-REX-032`, `S-REX-033`).
+- [x] 3.5 RED → GREEN **item 3**, validation half: `TestProviderExtension_InThirdNamespace_IsInertInValidation` — green from birth, since nothing in `rules()` other than `extensionsRule` (still a no-op stub at this point) reads `d.extensions` (`S-REX-035`, `S-REX-036`).
+- [x] 3.6 RED → GREEN the equality half: `TestRequest_Equal_ComparesProviderExtensions`. Genuine RED — `Equal` did not check extensions, so two requests differing only in an extension value wrongly compared equal. Extended `Equal` per `design.md` § 7.1: `providerExtensionsEqual` free function + one `slices.EqualFunc(...)` block before `return true` (`S-REX-037`, `S-REX-038`).
+- [x] 3.6a RED → GREEN **item 7**: two-step, per the design's own "necessary and not sufficient" claim. Step 1 — added an extension to `buildFullRequest` and extended `requireRequestsEqual` ONLY (not `rebuildFromReadback`); ran the pin → **RED**, `len(ProviderExtensions()) = 0, want 1`, the exact blind spot `design.md` § 7.2 predicted. Step 2 — extended `rebuildFromReadback` to re-apply the region in read-back order → **GREEN** (`S-REX-054`).
+- [x] 3.7 RED → GREEN **item 4**: `TestNewRequest_ProviderExtensionRuleViolations_FailWithTheDocumentedSentinels` + `TestNewRequest_ProviderExtension_LegalEdgesAndOrdinalPositioning`. Genuine RED on every rule-violation case; positive/legal cases passed already. Implemented `extensionsRule()` for real.
+- [x] 3.8 RED → GREEN **item 5**: `TestProviderExtension_ReapplyingANamespace_IsLastWinsAndKeepsItsFirstOrdinal` — green from birth (task 3.3's real `WithProviderExtension` already replaces at the existing index) (`S-REX-028` … `S-REX-031`), copy-out on `Value()` included.
+- [x] 3.9 RED → GREEN **item 6**: `TestProviderExtension_Formatting_RendersNoPayloadThroughAnyVerbButNamesTheCount`. Genuine RED on the count assertion (nothing rendered it yet); no-leak assertions passed vacuously until the count clause existed to leak from. Implemented `ProviderExtension.String()` (`"extension"`, a literal — no `strings.Builder`/`strconv` needed, so no new import) and extended `Request.String()` with a `", N extensions"` clause (`strconv`, already imported) (`S-REX-050` … `S-REX-052`).
+- [x] 3.10 Closed AI-12.1 item 3's deferred extension row: third sub-case `provider_extension_value` appended to `TestRequest_DeriveWithUnrelatedChange_PreservesOpaquePayloadsByteIdentically` — green from birth, same copy-on-write mechanism as messages.
+- [x] 3.10a *(discovered, appended)* — `R-REX-002`'s full 11-region enumeration was not yet reflected in AI-12.1's totality table (task 1.6), which stopped at 10. Appended an 11th `provider_extensions` row to `TestRequest_TotalityOfTheRebuildPath_EveryRegionIsReachable` and corrected its `len(regions) != 11` assertion. Green from birth; nothing pruned or substituted.
+- [x] 3.11 `make lint && make test` — both green, recorded below. Commit `feat(ai): carry a namespaced opaque provider value (AI-12.3)`.
+
+### AI-12.3 evidence
+
+**RED — task 3.3, item 1 against the stub:**
+```
+$ go test -race -count=1 -run TestProviderExtension_ClaimedByItsNamespace_SurvivesByteExact -v ./src/ai/...
+    request_extension_test.go:51: alphaTranslator found no alpha extension, want the one supplied
+--- FAIL
+```
+GREEN after implementing `WithProviderExtension`/`ProviderExtension(ns)` for real; both sub-cases (printable, not-valid-UTF-8) pass.
+
+**RED — task 3.6, `Request.Equal`'s missing block:**
+```
+$ go test -race -count=1 -run TestRequest_Equal_ComparesProviderExtensions -v ./src/ai/...
+    request_extension_test.go:177: first.Equal(second) = true, want false — the extension values differ
+    request_extension_test.go:180: second.Equal(first) = true, want false — Equal must be symmetric about inequality too
+--- FAIL
+```
+GREEN after adding `providerExtensionsEqual` and the `slices.EqualFunc(...)` block to `Equal`.
+
+**RED — task 3.6a, the two-step blind-spot proof (the most important transcript in this leaf).** Step 1: added a provider extension to `buildFullRequest` and extended ONLY `requireRequestsEqual` (not `rebuildFromReadback`):
+```
+$ go test -race -count=1 -run TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest -v ./src/agenttest/...
+    request_test.go:143: len(ProviderExtensions()) = 0, want 1
+--- FAIL: TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest
+```
+This is design.md § 7.2's predicted blind spot, observed directly: the rebuild silently dropped the extension, and only the newly-extended comparator noticed. Step 2: extended `rebuildFromReadback` to re-apply the region in read-back order:
+```
+$ go test -race -count=1 -run TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest -v ./src/agenttest/...
+--- PASS: TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest
+```
+
+**RED — task 3.7, the region's own rules against the `extensionsRule` stub:**
+```
+$ go test -race -count=1 -run 'TestNewRequest_ProviderExtensionRuleViolations...|TestNewRequest_ProviderExtension_LegalEdgesAndOrdinalPositioning' -v ./src/ai/...
+    request_extension_test.go:233: got no failure, want required value is empty at "extensions[0].namespace"  (×3 more: whitespace namespace, nil value, empty-but-non-nil value)
+    request_extension_test.go:269: got no failure, want required value is empty at "extensions[1].namespace"
+    request_extension_test.go:287: got no failure, want required value is empty at "extensions[0].namespace"
+--- FAIL (6 sub-cases); legal/positive sub-cases already PASS
+```
+GREEN after implementing `extensionsRule()` for real.
+
+**RED — task 3.9, no rendering of the extension count:**
+```
+$ go test -race -count=1 -run TestProviderExtension_Formatting_RendersNoPayloadThroughAnyVerbButNamesTheCount -v ./src/ai/...
+    request_extension_test.go:418: request.String() = "request(model, 1 messages)", want it to contain "1 extensions"
+--- FAIL (count assertion only; no-leak assertions passed vacuously — nothing rendered the region at all yet)
+```
+GREEN after implementing `ProviderExtension.String()` and extending `Request.String()`.
+
+**Items 2, 3 (validation half), 5, and tasks 3.10/3.10a were green from birth**, each run and its real PASS output recorded, because the underlying mechanism (exact namespace matching, last-wins-keep-first-ordinal, copy-on-write via the AI-12.1 draft) was already correctly built by task 3.3's genuine RED/GREEN cycle. No production code was written for these without a test driving it; they confirm properties the earlier cycle already established from a different angle.
+
+**AI-10.4 guard, re-verified with the new production file in place:**
+```
+$ go test -race -count=1 -run 'TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage|TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault|TestLayer1_ModuleHasNoDependencies_ZeroRequires' -v ./src/ai/...
+--- PASS (all three)
+```
+`request_extension.go` imports only `bytes`, `slices`, `strings` — all already in the closure. `ProviderExtension.String()` is a literal (`"extension"`), needing no `strings.Builder`; the count rendering lives in `Request.String()` and reuses its already-imported `strconv`. Zero new imports; `go.mod` stays at zero requires.
+
+**Full gate:**
+```
+$ make lint
+0 issues.
+$ make test 2>&1 | grep -E "^(ok|FAIL)"
+ok  	github.com/cachicamas/backend/agent/src/agenttest
+ok  	github.com/cachicamas/backend/agent/src/ai
+```
 
 ---
 

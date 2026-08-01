@@ -226,6 +226,10 @@ func buildFullRequest(t *testing.T) ai.Request {
 		ai.WithTemperature(0.7),
 		ai.WithTopP(0.9),
 		ai.WithStopSequences("</plan>", "\n\nUser:"),
+		// AI-12.3 — a provider extension, deliberately holding bytes that
+		// are not valid UTF-8: the region this milestone's tests found had
+		// no representation in this walk at all before task 3.6a.
+		ai.WithProviderExtension("acme-vendor", []byte{0xff, 0xfe, 'p', 'a', 'y', 'l', 'o', 'a', 'd', 0x00}),
 	)
 	if err != nil {
 		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
@@ -345,6 +349,15 @@ func rebuildFromReadback(t *testing.T, request ai.Request) ai.Request {
 		opts = append(opts, ai.WithStopSequences(stopSequences...))
 	}
 
+	// AI-12.3 (design.md § 7.2) — re-apply every provider extension, in
+	// read-back order, exactly as the tool set and each generation option
+	// are re-applied above. Before this line existed, the walk above built
+	// rebuilt without ever knowing the region existed — the exact blind spot
+	// task 3.6a's red (recorded in tasks.md) proved was real.
+	for _, extension := range request.ProviderExtensions() {
+		opts = append(opts, ai.WithProviderExtension(extension.Namespace(), extension.Value()))
+	}
+
 	rebuilt, err := ai.NewRequest(request.Model(), messages, opts...)
 	if err != nil {
 		t.Fatalf("ai.NewRequest returned %v rebuilding the request, want no failure", err)
@@ -420,6 +433,32 @@ func requireRequestsEqual(t *testing.T, a, b ai.Request) {
 	bStop, bHasStop := b.StopSequences()
 	if aHasStop != bHasStop || !slices.Equal(aStop, bStop) {
 		t.Errorf("StopSequences() = (%q, %t), want (%q, %t)", bStop, bHasStop, aStop, aHasStop)
+	}
+
+	// AI-12.3 (design.md § 7.2) — the extension region, compared
+	// namespace-by-namespace with bytes.Equal on values, exactly as tool
+	// schemas are compared above (requireToolsEqual). This walk never called
+	// ai.Request.Equal, so extending THAT method (task 3.6) was necessary
+	// and not sufficient: this comparator is the second, independent walk
+	// that also has to know about the region.
+	requireExtensionsEqual(t, a.ProviderExtensions(), b.ProviderExtensions())
+}
+
+// requireExtensionsEqual compares two provider-extension sequences in
+// first-application order.
+func requireExtensionsEqual(t *testing.T, a, b []ai.ProviderExtension) {
+	t.Helper()
+
+	if len(a) != len(b) {
+		t.Fatalf("len(ProviderExtensions()) = %d, want %d", len(b), len(a))
+	}
+	for i := range a {
+		if a[i].Namespace() != b[i].Namespace() {
+			t.Errorf("extensions[%d].Namespace() = %q, want %q", i, b[i].Namespace(), a[i].Namespace())
+		}
+		if !bytes.Equal(a[i].Value(), b[i].Value()) {
+			t.Errorf("extensions[%d].Value() = %q, want %q", i, b[i].Value(), a[i].Value())
+		}
 	}
 }
 
