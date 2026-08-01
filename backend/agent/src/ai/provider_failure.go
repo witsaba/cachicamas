@@ -30,6 +30,7 @@
 // takes no output-flag parameter at all, which is what makes the fourth
 // combination — a pre-stream failure that claims output preceded it —
 // unconstructible rather than merely undocumented.
+
 package ai
 
 import (
@@ -203,13 +204,15 @@ var failureCategorySentinels = [failureCategoryLimit]error{
 	FailureCategoryUnknown:               ErrUnknownFailure,
 }
 
-// failureCategorySentinel reports c's own sentinel, and whether c is a
-// member with one — eventRegistryEntry's bound-check idiom, restated.
-func failureCategorySentinel(c FailureCategory) (error, bool) {
+// failureCategorySentinel reports whether c is a member with its own
+// sentinel, and that sentinel — eventRegistryEntry's bound-check idiom,
+// restated, with the error-typed result last (revive's error-return rule):
+// this is a data lookup, not an operation that itself fails.
+func failureCategorySentinel(c FailureCategory) (bool, error) {
 	if c == 0 || c >= failureCategoryLimit {
-		return nil, false
+		return false, nil
 	}
-	return failureCategorySentinels[c], true
+	return true, failureCategorySentinels[c]
 }
 
 // DeliveryPath is which carrier handed a [Failure] over (V-FAIL-11,
@@ -373,7 +376,7 @@ func (f *Failure) Is(target error) bool {
 	if f == nil {
 		return false
 	}
-	sentinel, ok := failureCategorySentinel(f.category)
+	ok, sentinel := failureCategorySentinel(f.category)
 	return ok && target == sentinel
 }
 

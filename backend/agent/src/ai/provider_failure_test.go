@@ -471,8 +471,11 @@ func TestFailure_PartialOutputAndDelivery_AreTwoPerpendicularAxes(t *testing.T) 
 
 		// A compile-time property, not a runtime one. This line fails to
 		// compile the moment PreStreamFailure grows a second (bool)
-		// parameter — the fourth cell would then be reachable.
-		var _ func(ai.FailureReport) (*ai.Failure, error) = ai.PreStreamFailure
+		// parameter — the fourth cell would then be reachable. The
+		// explicit type is deliberate, not redundant: it pins the exact
+		// signature as a regression guard, so it stays even though
+		// staticcheck's QF1011 would otherwise infer it away.
+		var _ func(ai.FailureReport) (*ai.Failure, error) = ai.PreStreamFailure //nolint:staticcheck // explicit type is the point: pins the exact signature (S-AIP-032)
 	})
 }
 
@@ -800,6 +803,153 @@ func TestFailure_BothDeliveryPaths_ClassifyEveryCategoryWithIdenticalAccessors(t
 				_ = f.RequestID()
 				_ = f.Error()
 				_ = f.Unwrap()
+			}
+		})
+	}
+}
+
+// NFR-AIP-B, S-AIP-052 — totality: no exported entry point of this
+// milestone panics for a zero, nil or out-of-range input. Mirrors
+// completion_test.go's TestResponseEvents_ExtremeInputs_NeverPanic and
+// event_test.go's TestEvent_ExtremeInputs_NeverPanics shape: each case
+// recovers its own panic, so one panicking case does not hide the rest.
+func TestFailure_ExtremeInputs_NeverPanic(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		act  func()
+	}{
+		{"the nil *Failure, read every exported way", func() {
+			var f *ai.Failure
+			_ = f.Error()
+			_ = f.Unwrap()
+			_ = f.Is(ai.ErrTimeout)
+			_ = f.Category()
+			_ = f.Retryable()
+			_, _ = f.RetryAfter()
+			_ = f.PartialOutput()
+			_ = f.Delivery()
+			_ = f.RawLabel()
+			_, _ = f.StatusClass()
+			_ = f.RequestID()
+		}},
+		{"the zero FailureCategory, read every way", func() {
+			var c ai.FailureCategory
+			_ = c.String()
+			_ = c.Validate()
+		}},
+		{"an out-of-range FailureCategory", func() {
+			c := ai.FailureCategory(255)
+			_ = c.String()
+			_ = c.Validate()
+		}},
+		{"PreStreamFailure with the entirely zero-value FailureReport", func() {
+			_, _ = ai.PreStreamFailure(ai.FailureReport{})
+		}},
+		{"MidStreamFailure with an out-of-range category and a nil cause", func() {
+			_, _ = ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategory(200), Cause: nil}, true)
+		}},
+		{"a report with an over-long raw label and request ID", func() {
+			over := strings.Repeat("z", 1000)
+			_, _ = ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: over, RequestID: over})
+		}},
+		{"a report with an out-of-range negative and positive status class", func() {
+			_, _ = ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable, StatusClass: -999})
+			_, _ = ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable, StatusClass: 999})
+		}},
+		{"ErrorEvent(nil) — the nil payload case", func() {
+			_, _ = ai.ErrorEvent(nil)
+		}},
+		{"a wrong-kind accessor on the zero Event", func() {
+			_, _ = ai.Event{}.ErrorPayload()
+		}},
+		{"CheckEmit on the zero (unconstructed) Event", func() {
+			_ = ai.CheckEmit(ai.Event{})
+		}},
+		{"FailureCategories called repeatedly stays internally consistent", func() {
+			_ = ai.FailureCategories()
+			_ = ai.FailureCategories()
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("panicked: %v", recovered)
+				}
+			}()
+			tc.act()
+		})
+	}
+}
+
+// NFR-AIP-C, S-AIP-053 — every rejecting scenario in this milestone resolves
+// through AI-04's one failure value (*ai.Violation, errors.As-reachable)
+// and a landed sentinel, positioned to name the offending field. Each row
+// is proven at its own point of origin already (S-AIP-005,
+// TestNewFailure_InvalidCategory…, TestNewFailure_OutOfRangeStatusClass…);
+// this closing table confirms the rejection set is exactly these four
+// paths — not more, not fewer — gathered in one place rather than scattered.
+func TestProviderFailure_EveryRejectionPath_RoutesThroughAI04(t *testing.T) {
+	t.Parallel()
+
+	rejections := []struct {
+		name     string
+		act      func() error
+		sentinel error
+		position string
+	}{
+		{
+			name:     "FailureCategory.Validate on the zero value",
+			act:      func() error { var c ai.FailureCategory; return c.Validate(ai.At("category")) },
+			sentinel: ai.ErrNotInVocabulary,
+			position: "category",
+		},
+		{
+			name:     "PreStreamFailure with an invalid (zero-value) category",
+			act:      func() error { _, err := ai.PreStreamFailure(ai.FailureReport{}); return err },
+			sentinel: ai.ErrNotInVocabulary,
+			position: "category",
+		},
+		{
+			name: "PreStreamFailure with an out-of-range status class",
+			act: func() error {
+				_, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout, StatusClass: 9})
+				return err
+			},
+			sentinel: ai.ErrOutOfRange,
+			position: "status_class",
+		},
+		{
+			name:     "ErrorEvent(nil)",
+			act:      func() error { _, err := ai.ErrorEvent(nil); return err },
+			sentinel: ai.ErrEmpty,
+			position: "payload",
+		},
+	}
+
+	for _, row := range rejections {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := row.act()
+			if err == nil {
+				t.Fatal("act() returned nil, want a rejection")
+			}
+			if !errors.Is(err, row.sentinel) {
+				t.Errorf("errors.Is(err, the expected sentinel) = false, want true; err = %v", err)
+			}
+			var violation *ai.Violation
+			if !errors.As(err, &violation) {
+				t.Fatalf("errors.As(err, &violation) = false, want true — every rejection must route "+
+					"through AI-04's one failure value; err = %v", err)
+			}
+			if got := violation.Path().String(); got != row.position {
+				t.Errorf("violation position = %q, want %q", got, row.position)
 			}
 		})
 	}

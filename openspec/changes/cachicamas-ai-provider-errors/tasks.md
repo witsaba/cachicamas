@@ -1,5 +1,7 @@
 # Tasks: The provider error taxonomy and the terminal error event (AI-19)
 
+> **APPLY STATUS: 38/38 tasks complete.** `make test` and `make lint` both green/clean from `backend/agent/`. Ready for `sdd-verify`. See `apply-progress.md` (this directory) / Engram `sdd/cachicamas-ai-provider-errors/apply-progress` for the full TDD Cycle Evidence table, all deviations, and per-commit file changes.
+>
 > Nodes: AI-19.1 terminal error event · AI-19.2 category vocabulary · AI-19.3 retry hints + safe metadata · AI-19.4 partial-output discriminator · AI-19.5 one vocabulary, two paths.
 > Package `backend/agent/src/ai`. Strict TDD: every item RED → GREEN → REFACTOR, in spec order. Runner: `make test` (`go test -race -v ./...`) from `backend/agent/`.
 > **Reconciliation done at task time**: AI-14's `design.md` (landed) re-verified — `eventPayload{ kind() EventKind; validate(at Path) *Violation }` is sealed, matching `R-AEE-003`; `event.go`'s `eventRegistry []eventRegistration{name, descriptor}` and `event_descriptor.go`'s 6-step kind-adding recipe are the pinned integration surface. `design.md`'s "provisional" caveat is resolved and removed. AI-19.6 split trigger re-checked: category count stays 9, no category-specific metadata field added — not appended (spec open item 1).
@@ -79,12 +81,12 @@ Chain strategy: size-exception
 
 ## Phase 7: Cross-cutting NFRs and closeout
 
-- [ ] 7.1 RED totality table (S-AIP-052, NFR-AIP-B): zero category, zero `Failure`, nil `*Failure`, out-of-range category, over-long raw label, nil cause, nil payload — none panics.
-- [ ] 7.2 GREEN: totality guards across `provider_failure.go` accessors and constructors.
-- [ ] 7.3 Verify NFR-AIP-A (S-AIP-051): `go.mod` still zero requires; both AI-00 import guards pass.
-- [ ] 7.4 Verify NFR-AIP-C (S-AIP-053): every rejecting scenario in this spec resolves through AI-04's failure value and a landed sentinel, position names the offending field.
-- [ ] 7.5 Verify NFR-AIP-E (S-AIP-055): re-confirm AI-14/AI-15 landed surfaces match this file's Phase-1 reconciliation note.
-- [ ] 7.6 Record NFR-AIP-D evidence (S-AIP-054): red/green output + refactor note per test-list item, per node, in this file.
-- [ ] 7.7 Run `make test` (`go test -race -v ./...`) and `make lint` from `backend/agent/`; confirm green/clean before archive.
+- [x] 7.1 RED totality table (S-AIP-052, NFR-AIP-B): zero category, zero `Failure`, nil `*Failure`, out-of-range category, over-long raw label, nil cause, nil payload — none panics. In practice this passed immediately (totality guards were built into every accessor from Phase 1 onward, not bolted on at the end); the table exists as the confirming sweep `TestFailure_ExtremeInputs_NeverPanic` (11 cases), mirroring `completion_test.go`'s `TestResponseEvents_ExtremeInputs_NeverPanic` shape.
+- [x] 7.2 GREEN: totality guards already present across every `provider_failure.go` accessor and constructor (nil-receiver checks throughout since Phase 1); confirmed, not newly added.
+- [x] 7.3 Verify NFR-AIP-A (S-AIP-051): `go.mod` unchanged, zero requires; both AI-00 import guards (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`) pass with `provider_failure.go`'s `errors`/`time` stdlib imports included in the scan.
+- [x] 7.4 Verify NFR-AIP-C (S-AIP-053): closing table `TestProviderFailure_EveryRejectionPath_RoutesThroughAI04` confirms all four rejection paths in this milestone (category-Validate, PreStreamFailure/invalid-category, PreStreamFailure/out-of-range-status-class, ErrorEvent-nil) route through `*ai.Violation` (errors.As-reachable) with the correct position.
+- [x] 7.5 Verify NFR-AIP-E (S-AIP-055): re-confirmed AI-14/AI-15 landed surfaces against the Phase-1 reconciliation note by direct source read at apply time (`event.go`, `event_descriptor.go`, `doc.go`, `stream_check.go`) before writing any code; the full suite (incl. `event_registry_test.go`'s shared exhaustiveness guard, `stream_check_test.go`) still passes with `EventKindError` integrated, confirming no drift.
+- [x] 7.6 Record NFR-AIP-D evidence (S-AIP-054): the full TDD Cycle Evidence table is in this apply run's return summary and in `apply-progress.md`; per-phase red/green output recorded at each phase's own task rows above.
+- [x] 7.7 Ran `make test` (`go test -race -v ./...`) and `make lint` from `backend/agent/`: **both green/clean.** `make lint` initially found 3 issues in the new files (package-comment blank-line convention, `error`-not-last return order, a staticcheck redundant-type false positive on a deliberate compile-time signature pin) — all fixed; final `make lint` = "0 issues", final `make test` = both packages `ok`, 0 failures.
 
 > **Deviation note**: exceeds the sdd-tasks 530-word budget. `NFR-AIP-D` requires every one of 15 requirements' test-list items tracked red→green→refactor with recorded output across 5 nodes and 55 scenarios; the spec and design artifacts for this same change, and AI-14's `tasks.md` (this same wave), recorded the identical deviation for the same reason; house convention wins.
