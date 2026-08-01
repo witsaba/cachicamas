@@ -5,8 +5,9 @@
 > **Nodes**: AI-12.1 `[leaf]` · AI-12.2 `[leaf]` · AI-12.3 `[leaf]` · AI-12.4 `[leaf]`
 > **Status**: proposed · **Phase**: proposal
 > **Project**: cachicamas (witsaba) · **Date**: 2026-08-01 · **Driver**: braejan
-> **Branch**: `feat/ai-12-request-extension-points` (worktree `cachicamas-worktrees/ai-12`, based on `07d2027`)
-> **Scope**: `openspec/changes/cachicamas-ai-request-extension-points/`, **one new production file plus one new test file** under `backend/agent/src/ai/`, and edits to `request.go` and `request_test.go`. No `go.mod` change, **no new dependency, no register amendment, no appended rule class**
+> **Branch**: `feat/ai-12-request-extension-points` (worktree `cachicamas-worktrees/ai-12`, planned against `07d2027`, **rebased onto finished Wave 1 head `1c4171e`**)
+> **Scope**: `openspec/changes/cachicamas-ai-request-extension-points/`, **one new production file plus one new test file** under `backend/agent/src/ai/`, edits to `request.go` and `request_test.go`, and — **added by the Phase 0 re-verification gate** — edits to `backend/agent/src/agenttest/request_test.go`, whose round-trip walk must learn the new region or silently stop covering it (`design.md` § 7.2). No `go.mod` change, **no new dependency, no register amendment, no appended rule class**
+> **Re-verified 2026-08-01**: all five commitments below survived verification against the landed AI-10 surface. `design.md` § 13 carries the resolved register.
 > **Predecessor artifact**: `explore.md` (this change)
 > **Depends on**: AI-10, AI-11 · **Blocks**: AI-24, AI-26.7, Layer 2's pre-request hook
 

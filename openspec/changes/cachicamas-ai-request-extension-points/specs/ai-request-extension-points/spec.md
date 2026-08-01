@@ -19,6 +19,8 @@ This spec **adds** a capability. It restates no `R-AMR-*` requirement; where it 
 
 Requirement count: **10**.
 
+> **Re-verified 2026-08-01** against finished Wave 1 head `1c4171e`. No requirement was removed or weakened. Three edits, all additive: `R-REX-002`'s region set is now enumerated one region per entry rather than collapsing four generation options into one; `R-REX-007` states that participation in the documented equality is necessary and not sufficient; and two scenarios are **appended** — `S-REX-053` and `S-REX-054`. `design.md` § 13 carries the resolved register and `explore.md` § 6 the evidence.
+
 ## Requirement ownership by leaf
 
 | Leaf | Requirements |
@@ -66,7 +68,21 @@ Deriving with **no** options MUST succeed and MUST produce a request equal to th
 
 ## R-REX-002 — The rebuild path is total over every region *(AI-12.1)*
 
-Every region a request can carry MUST be reachable by the rebuild path. The region set is: **model identity, system instruction segments, messages, tool set, tool choice, generation options, cache-boundary markers, and provider extensions.**
+Every region a request can carry MUST be reachable by the rebuild path. The region set, enumerated one region per entry against the landed request surface, is:
+
+1. **model identity** — `Model()`
+2. **messages** — `Messages()`
+3. **system instruction segments** — `SystemInstruction()`
+4. **tool set** — `Tools()`
+5. **tool choice** — `ToolChoice()`
+6. **maximum output tokens** — `MaxOutputTokens()`
+7. **temperature** — `Temperature()`
+8. **top-p** — `TopP()`
+9. **stop sequences** — `StopSequences()`
+10. **cache-boundary markers** (`V-REQ-23`) — AI-11's surface
+11. **provider extensions** — this change's
+
+The four generation options are enumerated **individually** and MUST NOT be collapsed into a single "generation options" entry. A totality check that treats them as one entry is a check a fifth generation option can be added past without failing, which defeats the purpose of the requirement.
 
 A region reachable only at construction MUST NOT exist. The reason is recorded rather than assumed: a region the pre-request hook cannot reach is a region a cache breakpoint or an injected context can never be applied to (doc 0001 § 6 seam 1).
 
@@ -81,6 +97,7 @@ Totality MUST be asserted by **enumerating the region set**, so that a region ad
 - **S-REX-009** — Given a constructed request, when a caller derives a request replacing the system instruction, the tool set, the tool choice and each generation option in turn, then each replacement is observable on the derived request and absent from the source.
 - **S-REX-010** — Given a request whose system instruction, tool set or messages carry cache-boundary markers, when a caller derives a request through the region-level path, then the markers on the derived request are those the caller supplied and the source's markers are unchanged.
 - **S-REX-011** — Given the enumerated region set, when the rebuild path is checked against it, then every region has a reachable path, and a region without one fails this scenario.
+- **S-REX-053** *(appended by Phase 0 re-verification)* — Given a request whose system instruction is replaced through the rebuild path, when the derived request's system instruction is read back through its accessor, then it is the supplied one. This is asserted through the **accessor** and not through internal state, because the region is stored in two places on a constructed request and a rebuild that refreshed only one of them would revert it silently (`design.md` § 2.2.1).
 
 ---
 
@@ -130,6 +147,8 @@ WHEN a rebuild replaces a region in a way that invalidates a **cross-region** ru
 
 Bounds and rules that arrive in later milestones MUST apply to the derive path with no edit at the derive site. This is a structural requirement on the implementation: one rule set, two callers.
 
+Equivalence is asserted **between the two doors** — the same regions, constructed versus derived, yield the same class at the same rendered position. It MUST NOT be asserted against an absolute ordinal in the rule order, because the order is shared with milestones that append to it and an absolute ordinal would make this requirement fail on an append that changed nothing about its behavior.
+
 ### Scenarios
 
 - **S-REX-020** — Given a valid request, when a caller derives a request supplying a maximum output tokens value of `0`, then it fails, `errors.Is` reports `ErrOutOfRange`, and the position renders `maxOutputTokens` — the same class and position construction reports.
@@ -172,7 +191,9 @@ WHEN a consumer reads a request scoped to the namespace it claims, THEN a value 
 
 The pass-through MUST be **inert in validation**: no rule other than the extension region's own construction rules may consult an extension, and no rule may behave differently because a namespace is present. Two requests differing only in a **third** provider's namespace MUST validate identically — same outcome, and on failure the same class at the same position.
 
-The pass-through MUST **participate in equality**, compared structurally — namespace by string equality, value by byte equality, in read-back order — and MUST NOT be interpreted or special-cased per namespace when compared. "Inert" constrains interpretation, not participation: an equality that ignored extensions would let a rebuild drop every extension and still satisfy `R-AMR-015`'s round trip.
+The pass-through MUST **participate in equality**, compared structurally — namespace by string equality, value by byte equality, in read-back order — and MUST NOT be interpreted or special-cased per namespace when compared. "Inert" constrains interpretation, not participation: an equality that ignored extensions would let a rebuild drop every extension and still be reported equal.
+
+**Every walk over the request's regions MUST account for this one.** Participation in the documented equality is necessary and **not sufficient**: `R-AMR-015`'s round-trip pin is realised by a rebuild-from-readback and a region-by-region comparison that do **not** route through the documented equality, so a region absent from *those* walks is dropped and unnoticed there too (`design.md` § 7.2). Any walk that reconstructs a request from its readable surface MUST re-apply this region, and any walk that compares two requests region by region MUST compare it.
 
 ### Scenarios
 
@@ -183,6 +204,7 @@ The pass-through MUST **participate in equality**, compared structurally — nam
 - **S-REX-036** — Given two requests differing only in a third provider's namespace and both violating the same rule in another region, when both are constructed, then both fail with the same class at the same position.
 - **S-REX-037** — Given two requests identical except for one extension value, when they are compared under the documented equality, then they are **not** equal.
 - **S-REX-038** — Given a request carrying extensions, when it is rebuilt with an unrelated change and the result is compared to the source under the documented equality, then the extension region is present on the derived request and the two differ only where the change was made.
+- **S-REX-054** *(appended by Phase 0 re-verification)* — Given a request carrying extensions, when it is reconstructed from its readable surface alone — the round-trip walk `R-AMR-015` pins, which does not use the documented equality — and the reconstruction is compared region by region against the source, then the extension region survives with byte-equal values, and a reconstruction that omitted it fails this scenario.
 
 ---
 

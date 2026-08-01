@@ -6,7 +6,8 @@
 > **Phase**: explore
 > **Project**: cachicamas (witsaba)
 > **Date**: 2026-08-01
-> **Worktree**: `cachicamas-worktrees/ai-12` · **Branch**: `feat/ai-12-request-extension-points` (based on Wave 1 head `07d2027`)
+> **Worktree**: `cachicamas-worktrees/ai-12` · **Branch**: `feat/ai-12-request-extension-points` (planned against Wave 1 head `07d2027`; **rebased onto finished Wave 1 head `1c4171e`**, which carries AI-04 … AI-10 complete and green)
+> **Re-verified**: 2026-08-01 — § 6 resolved against the landed AI-10 surface; see § 6's status banner
 > **Depends on**: AI-10, AI-11 · **Blocks**: AI-24, AI-26.7, Layer 2's pre-request hook (doc 0001 § 6 seam 1)
 > **Closes**: gap **G9**; supplies the mechanism **G11** stands on
 
@@ -74,6 +75,8 @@ AI-12.1 item 2 is the load-bearing item of the whole milestone:
 
 `RequestOption` today reaches five regions: `maxOutputTokens`, `temperature`, `topP`, `stopSequences`, `system`. AI-10.3 adds `tools` and `toolChoice`. That leaves **two regions that are `NewRequest` parameters and therefore unreachable by any option**: the model identity and the messages.
 
+> **Verified at `1c4171e`.** Nine regions exist on a landed `Request`, seven reachable by an option and two not. § 6.1.5 carries the proof; the complete enumeration the rebuild must be total over is `design.md` § 8.1. AI-10.3 landed `tools` and `toolChoice` as options exactly as expected, so this paragraph's arithmetic is unchanged and shape **C** stands.
+
 A rebuild that cannot replace the messages is not a rebuild. Injected repository context — the second use doc 0001 § 6 seam 1 names for the pre-request hook — *is* a message-region edit. So totality is not satisfiable without moving the required regions into the option mechanism too.
 
 Three shapes were considered.
@@ -130,44 +133,134 @@ Claim 2 is the acceptance clause. It needs no adapter, no network and no vendor 
 
 ## 6. Concurrency: two siblings this plan sits downstream of
 
-**Both are running right now, in other worktrees, and neither has landed.** Every dependency on them is stated below as an assumption with the exact file and symbol to re-check. Nothing in this plan invents either surface.
+> **Status — resolved 2026-08-01 (Phase 0 re-verification gate).** This section was written while AI-10's second half and AI-11 were both unlanded. **AI-10 is now finished** and this worktree is rebased onto Wave 1 head `1c4171e`, which carries AI-04 … AI-10 complete and green. Every AI-10 row below is now a **read fact** with the exact signature that was read. **AI-11 is still being implemented** in `../ai-11`; its two rows stay explicitly unresolved, with both branches and the exact edit each implies, so the apply agent executes a decision rather than repeating this analysis.
 
-### 6.1 AI-10 is being finished in `../ai-wave-1`
+### 6.1 AI-10 — landed; all six rows resolved
 
-The Wave 1 head this worktree is based on (`07d2027`) carries **AI-10.1 and AI-10.2 only**. Remaining there: AI-10.3 items 2–4, AI-10.4, AI-10.5, AI-10.6.
+Read at Wave 1 head `1c4171e`, in `backend/agent/src/ai/`.
 
-| Assumption | File · symbol | Why AI-12 depends on it | If it lands differently |
+| # | Assumption as recorded | Verdict | The fact that was read |
 | --- | --- | --- | --- |
-| The regions `tools` and `toolChoice` reach the request through **`RequestOption`** constructors (expected `WithTools`, `WithToolChoice`) rather than as new `NewRequest` parameters | `backend/agent/src/ai/request.go` · `WithTools`, `WithToolChoice`, `requestDraft` fields | AI-12.1 item 2's totality is satisfied for those two regions *for free* if they are options | If they become parameters, AI-12.1 must add `WithTools`/`WithToolChoice` itself — one more option each, same pattern as `WithModel` |
-| AI-10.3's cross-region rules (role/kind table, orphan results, duplicate call identities) are expressed as `Rule` values inside `NewRequest`'s `FirstFailure(...)` call | `backend/agent/src/ai/request.go` · `NewRequest` | AI-12.1 **extracts that rule slice** into a draft-scoped method so `With` re-runs it unchanged | If a rule closes over the `messages` **parameter** rather than over draft state, the extraction must move that read to `draft.messages` — mechanical, but it is a diff in AI-10.3's code and must be called out in the PR |
-| The documented rule **order** is a slice, and appending a row is one line | `backend/agent/src/ai/request.go` · the `FirstFailure` argument list; AI-10 `design.md` § 4 | AI-12.3 appends the extension rule as the **last** row; AI-12.2 item 2 asserts derive-time order equals construction-time order | If the order becomes anything other than a literal slice, AI-12.2's position-equality assertions need a different anchor |
-| Equality semantics are **region-wise readback equality with message identity excluded**, and `func (r Request) Equal(other Request) bool` **is exported** (AI-10.6; recorded default: *yes*) | `backend/agent/src/ai/request.go` · `Request.Equal`; AI-10 `design.md` § 11.2 | AI-12.1 item 1 ("the original is observably unmodified, deep comparison before and after") and AI-12.3 item 3 (equality inertness) both name it | If `Equal` is **not** exported, AI-12's tests compare region-by-region locally in `ai_test` and the milestone must not export one of its own — that would be a second equality, which AI-10.6 owns |
-| If `Equal` **is** exported, AI-12.3 **extends it** to cover the extension region | `backend/agent/src/ai/request.go` · `Request.Equal` | An `Equal` that ignored extensions would let a rebuild silently drop them and still pass AI-10.5's round trip | Stated as a requirement in `spec.md`, not left to the implementer |
-| `Reasoning.Token()` keeps `([]byte, bool)` and its byte-exactness | `backend/agent/src/ai/reasoning_content.go` · `Reasoning.Token` | AI-12.1 item 3 is a **pin** over exactly that property, extended across the rebuild path | Landed and stable at `07d2027`; low risk |
+| 1 | `tools` / `toolChoice` arrive as `RequestOption`s, not parameters | **Matches** | `func WithTools(tools ToolSet) RequestOption` (`request.go:334`) and `func WithToolChoice(choice ToolChoice) RequestOption` (`request.go:344`). `requestDraft` carries `tools ToolSet / hasTools bool` and `toolChoice ToolChoice / hasToolChoice bool` (`request.go:302–306`). Both regions are reachable by an option **for free**; AI-12 adds no constructor for them |
+| 2 | AI-10.3's cross-region rules read **draft state** | **Differs — branch taken** | They close over the **`messages` parameter**. Of the ten landed rules, **seven** read a parameter: rule 1 reads `model`; rules 2, 3, 4, 6 iterate `messages`; rules 7 and 8 pass `messages` to `duplicateToolCallRule(messages)` / `unresolvedToolResultRule(messages)`. Only rules 5, 9 and 10 read `draft`. See § 6.1.1 — the extraction moves more than "mechanical" suggested, but **less than feared** |
+| 3 | The rule order is a **literal slice**; appending is one line | **Differs in form, holds in substance** | It is a **variadic argument list**, not a `[]Rule` literal: nine inline `func() *Violation` literals plus one method call `draft.boundsRule()`, passed to `FirstFailure(rules ...Rule) error` (`validation.go:381`). Appending is still one line, and `FirstFailure(d.rules()...)` is a drop-in for the § 2.2 extraction. The **real order is § 6.1.2**, and it corrects the design's table |
+| 4 | `func (r Request) Equal(other Request) bool` **is exported** | **Matches — recorded default confirmed** | `func (r Request) Equal(other Request) bool` at `request.go:426`. The conditional branch ("compare region-by-region in `ai_test`, export no second equality") is **closed, not taken**. It is retained in `design.md` § 7 as a closed branch rather than deleted |
+| 5 | If exported, AI-12.3 **must extend it** | **Confirmed, and the stated reason is wrong** | `Equal` walks nine regions (§ 6.1.3) and AI-12.3 must append a tenth block. But the *rationale* — "or a rebuild silently drops extensions and still passes AI-10.5's round-trip pin" — **does not hold**: AI-10.5's pin never calls `Equal`. § 6.1.4 records the real hole, which is larger |
+| 6 | `Reasoning.Token()` is `([]byte, bool)` and byte-exact | **Matches** | `func (r Reasoning) Token() ([]byte, bool) { return []byte(r.token), r.hasToken }` (`reasoning_content.go:306`). The field is `token string`, converted per call, so every read is a fresh slice and byte-identical to what was supplied. `MaxReasoningTokenLen = 1 << 20` (`reasoning_content.go:67`). `R-REX-003`'s pin re-anchors on exactly this signature, unchanged |
 
-**Rebase discipline**: this worktree branches from `07d2027`. The apply agent re-verifies every row above against the *then-current* `../ai-wave-1` head before writing its first test, and rebases rather than merging.
+#### 6.1.1 Row 2 in detail — what `draft.rules()` actually moves
 
-### 6.2 AI-11 is being planned in `../ai-11`
+The extraction is bigger than the assumption priced and smaller than the risk row feared, and the difference matters to the merge surface:
 
-`cachicamas-ai-cache-breakpoints` defines `V-REQ-23` **cache-boundary marker**, `V-REQ-24` **breakpoint cap** and `V-REQ-25` **invalidation cascade**. Its surface does not exist yet, in any form.
+- **Bigger**: seven of ten rules change the expression they read, from `model` / `messages` to `d.model` / `d.messages`. The design called this "the same edit `WithModel`/`WithMessages` require anyway" — that remains true, and it is now measured rather than assumed.
+- **Smaller**: the three free functions that carry the cross-region logic — `duplicateToolCallRule(messages []Message)`, `unresolvedToolResultRule(messages []Message)`, `anyToolCallHasID(messages []Message, id string)` (`request.go:71`, `:100`, `:117`) — take `[]Message` as a **parameter** and need **no edit at all**. Only their two call sites inside `NewRequest` move to `d.messages`.
 
-AI-12.1 item 2 names **markers** in its region list. This plan therefore states the requirement and *not* the spelling:
+So the diff against lines AI-10.3 wrote is confined to `NewRequest`'s body. The risk row's "the conflict is in one function" was correct, and it is now moot: AI-10 has landed, so there is no concurrent writer of `request.go` left.
 
-> **Markers are one more region reachable by the rebuild.** Whatever value carries a marker must be replaceable through the rebuild path without a new mechanism invented after the fact.
+#### 6.1.2 Row 3 in detail — the real landed rule order
 
-The likely resolution — and the reason the requirement is satisfiable without knowing AI-11's answer — is AI-10 `design.md` § 12.1, which already records where markers will attach:
+Read directly from `NewRequest`'s `FirstFailure(...)` argument list (`request.go:180–234`):
 
-> A marker attaches to the things that are already ordered and individually addressable: `Segment`, `Tool` and `Message`. […] `Segment` is a struct with one unexported field, not a string alias. Adding `marked bool` is a field, not a type change, and no signature moves.
+| # | Rule | Class · position | Reads |
+| --- | --- | --- | --- |
+| 1 | model identity present (whitespace folded) | `ErrEmpty` at `model` | `model` **param** |
+| 2 | at least one message | `ErrEmpty` at `messages` | `messages` **param** |
+| 3 | every message constructed (`ID().IsZero()`) | `ErrEmpty` at `messages[i]` | `messages` **param** |
+| 4 | content valid at request depth (`validateContent`) | AI-06's classes at `messages[i].content[j]` | `messages` **param** |
+| 5 | applied system instruction is constructed | `ErrEmpty` at `system` | `draft` |
+| 6 | role/kind table (`roleAllowsKind`) | `ErrMisplaced` at `messages[i].content[j]` | `messages` **param** |
+| 7 | **duplicate tool-call identities** | `ErrDuplicate` | `messages` **param** |
+| 8 | **orphan tool results** | `ErrUnresolvedReference` | `messages` **param** |
+| 9 | tool choice cross-validated (`violationOf(draft.toolChoice.ValidateAgainst(draft.tools))`) | AI-08.3's three rules | `draft` |
+| 10 | `draft.boundsRule()` | `ErrOutOfRange`, `ErrEmpty` | `draft` |
 
-If markers are **fields on `Segment`, `Tool` and `Message`**, they are reachable transitively the moment `WithSystemInstruction`, `WithTools` and `WithMessages` exist — AI-12 adds nothing. If AI-11 instead models markers as a **request-level region** (for example an ordinal-keyed list, which the breakpoint cap `V-REQ-24` might argue for), AI-12.1 owes one more `RequestOption` for it.
+**Two corrections fall out.**
 
-| Assumption | File · symbol to re-check | Branch |
-| --- | --- | --- |
-| Markers are carried **on** `Segment`, `Tool` and `Message`, not as a request-level region | `backend/agent/src/ai/system_instruction.go` · `Segment`; `tool.go` · `Tool`; `message.go` · `Message`; AI-11's `design.md` | **Reachable transitively** — AI-12.1 asserts it, adds no option |
-| Otherwise: markers are a request-level region | AI-11's `design.md`; whatever `With…` constructor it names | AI-12.1 appends one option and one totality assertion; this is a *discovered case appended* to AI-12.1's test list, never a substitution |
-| The breakpoint cap `V-REQ-24` is a `Rule` in the request's rule slice | `backend/agent/src/ai/request.go` · the `FirstFailure` argument list | The rebuild re-runs it automatically — a derived request that exceeds the cap must fail at derive time exactly as at construction |
+1. `design.md` § 3's table listed rows 6…8 as "role/kind table · **orphan tool results · duplicate call identities**". The landed order is the **reverse** for 7 and 8, and deliberately so: `duplicateToolCallRule`'s GoDoc (`request.go:62–63`) states that uniqueness is a *precondition* of `unresolvedToolResultRule`, "a rule that resolves by a non-unique key is not a rule — and that is why this rule is checked first". `design.md` § 3 is corrected.
+2. There is **no row 11**. AI-11's breakpoint cap does not exist in the list. AI-12's extension rule therefore appends as row **11** today, and becomes row **12** only if AI-11 lands its cap first. Both orderings satisfy AI-12's only requirement, which is that its own row is *appended* and moves no landed row.
 
-**Neither sibling's surface is invented here.** Where this plan must name a symbol that does not exist, it names it as an assumption in this section and nowhere else.
+#### 6.1.3 Row 5 in detail — how `Request.Equal` walks regions today
+
+`request.go:426–490`, in order, returning `false` at the first difference:
+
+1. `r.model != other.model` — the unexported field, not `Model()`;
+2. `slices.EqualFunc(r.Messages(), other.Messages(), Message.Equal)`;
+3. system — presence flags compared first, then `SystemInstruction.Equal` (`system_instruction.go:116`);
+4. tools — presence flags, then `slices.EqualFunc(rTools.Tools(), oTools.Tools(), toolsEqual)`, where `toolsEqual` is a **free function** (`request.go:499`) comparing name, description and `bytes.Equal` on the schema;
+5. tool choice — presence flags, then `Mode()`, `namesOne` and `Name()`;
+6–9. `MaxOutputTokens()`, `Temperature()`, `TopP()`, `StopSequences()` — each presence flag plus value, the last via `slices.Equal`;
+then `return true`.
+
+**Exactly what AI-12.3 must add**: one more block immediately before `return true`, comparing the extension region through the exported accessor —
+
+```go
+if !slices.EqualFunc(r.ProviderExtensions(), other.ProviderExtensions(), providerExtensionsEqual) {
+    return false
+}
+```
+
+— with `providerExtensionsEqual(a, b ProviderExtension) bool` a **free function** on `toolsEqual`'s precedent (`a.Namespace() == b.Namespace() && bytes.Equal(a.Value(), b.Value())`), not a new exported method on `ProviderExtension`. The region carries **no presence flag** (it is a slice; empty and absent are one fact), so the comparison is one line and needs no flag branch. Reading through `ProviderExtensions()` rather than `r.options.extensions` is required by `Equal`'s own GoDoc, which states that every comparison reads the exported surface so the method proves the documented equality is reachable from outside.
+
+#### 6.1.4 The hole row 5's rationale pointed at, and where it actually is
+
+`design.md` § 7 argued that an `Equal` ignoring extensions would let a rebuild drop them "and still pass AI-10.5's round-trip pin". **That is false as stated, and the true situation is worse.**
+
+`backend/agent/src/agenttest/request_test.go` never calls `Request.Equal`. `TestRequest_WholeRequestRoundTrip_ReconstructsAnEqualRequest` (`:137`) rebuilds through its own `rebuildFromReadback` (`:235`) and compares through its own `requireRequestsEqual` (`:329`) — two hand-written region walks. So the round-trip pin has a **two-sided** blind spot the moment a new region exists:
+
+- `rebuildFromReadback` reads nine regions and re-applies them; it will not re-apply an extension it does not know about, so the rebuilt request silently loses the region;
+- `requireRequestsEqual` compares those same nine regions; it will not notice the loss.
+
+The pin then passes on a request that lost its extensions — which is precisely the failure the design named, reached by a different route. Extending `Request.Equal` alone **does not close it**.
+
+`agenttest` guards its *kind* set (`TestPartKindReaders_EveryRegisteredKind_HasAReader`, `:111`) but has **no equivalent region-level guard**, which is exactly why a new region slips through.
+
+**Consequence for AI-12.3**: it must extend `rebuildFromReadback` and `requireRequestsEqual` in `backend/agent/src/agenttest/request_test.go` as well. This adds one file to `design.md` § 10's table and one item to AI-12.3's list. It is an **appended** obligation, not a substitution.
+
+#### 6.1.5 The central decision survives — verified
+
+`func NewRequest(model string, messages []Message, opts ...RequestOption) (Request, error)` (`request.go:173`). `requestDraft` (`request.go:286–307`) carries seven optional regions and **neither a `model` nor a `messages` field**. Since `RequestOption` is `func(*requestDraft)` (`request.go:279`), an option provably cannot reach either region. § 4's shape **C** — widen `RequestOption` with `WithModel` and `WithMessages` — stands unchanged, and the totality argument that motivates it is now a compiler-checkable fact rather than an expectation.
+
+#### 6.1.6 One landed hazard the plan did not price: the system region is stored twice
+
+`Request` carries `system SystemInstruction` and `hasSystem bool` **at the top level** (`request.go:17–18`) *and* inside `options requestDraft` (`request.go:299–300`). `NewRequest` sets both from the same draft on the way out (`request.go:237–243`), and `Request.SystemInstruction()` (`system_instruction.go:127`) reads the **top-level** pair.
+
+`With`'s second seed is `r.options`. A `With` that copies the draft, applies options and freezes **without re-deriving the top-level pair** would silently revert the system region to whatever the composite literal defaults to. The mitigation is symmetry, not vigilance: extract the freeze as well, so both seeds share one expression —
+
+```go
+func (d requestDraft) freeze() Request
+```
+
+— and `NewRequest` and `With` each become `if err := FirstFailure(d.rules()...); err != nil { return Request{}, err }; return d.freeze(), nil`. One draft, one rule slice, **one freeze**, two seeds. This is an addition to AI-12.1's ordered work, recorded in `design.md` § 2.2.
+
+#### 6.1.7 The AI-10.4 constraint AI-12 must design under
+
+AI-10.4 landed `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` (`import_boundary_test.go:278`), which runs `go list -deps` — deliberately **without** `-test` — over `github.com/cachicamas/backend/agent/src/ai` and fails if the closure contains `net`, `net/http`, `os` or `io/fs`.
+
+The measured closure today is `errors`, `sync`, `sync/atomic`, `io`, `iter`, `unicode`, `unicode/utf8`, `bytes`, `cmp`, `slices`, `strconv`, `strings`, `math/bits`, plus `runtime` internals. **No `fmt`. No `encoding/json`.**
+
+`encoding/json` is banned from non-test files in this package as a **consequence** of that guard rather than by a named rule: `encoding/json` imports `fmt`, which imports `os`, so importing it turns the guard red. `json_syntax.go:5–6` records the measurement and is why the package hand-wrote `isWellFormedJSON` instead of calling `encoding/json.Valid`.
+
+**AI-12 needs nothing new.** `ProviderExtension` requires `bytes` (byte equality), `slices` (clone), `strings` (`Builder`, `TrimSpace`) and `strconv` (`Itoa`) — all four already in the closure. Two concrete obligations follow, recorded in `design.md` § 5: the extension region's renderings must be built with `strings.Builder`/`strconv` exactly as `Request.String()` is, **never** `fmt.Sprintf`; and the "typed but opaque" payload was already chosen so that no encoder is ever needed to carry it, which is now confirmed as a hard constraint rather than a preference.
+
+### 6.2 AI-11 — still unlanded; both rows remain open, both branches decided
+
+`cachicamas-ai-cache-breakpoints` defines `V-REQ-23` **cache-boundary marker**, `V-REQ-24` **breakpoint cap** and `V-REQ-25` **invalidation cascade**. It is being implemented **right now** in `../ai-11` and its result cannot be read from here.
+
+**What was verified**: no marker surface exists at `1c4171e`. `Segment` is `struct{ text string }` (`system_instruction.go:13`) with no marker field; `Tool` carries name, description and schema (`tool.go:20`); `Message` carries id, role and content (`message.go:112`). The `FirstFailure` list holds no cap rule.
+
+**The only two forward references in landed code**, both weak but both pointing the same way:
+
+- `Segment.String()`'s GoDoc (`system_instruction.go:158`): *"AI-11 may extend this to name a cache marker, because a marker is structural rather than payload."* A `String()` that can *name* a marker implies the marker is a field of the value it renders.
+- `ErrOutOfRange`'s GoDoc (`validation.go:82`) already names `V-REQ-24` as its motivating case, so the **class the cap needs already exists**. AI-11 appends no rule class, and neither does AI-12.
+
+| # | Row | Status | Branch **A** — and its exact edit | Branch **B** — and its exact edit |
+| --- | --- | --- | --- | --- |
+| 7 | Where markers live | **Unresolved** | **Markers on `Segment` / `Tool` / `Message`** (the landed hint favours this). They are reachable **transitively** the moment `WithSystemInstruction`, `WithTools` and `WithMessages` exist. **AI-12 adds no option.** The § 8 totality table's markers row gets `derive` = the three region-level options and `changed` = a read of the marker on the derived value. `S-REX-010` is satisfied as written | **A request-level marker region.** AI-12.1 **appends one `RequestOption`** wrapping whatever constructor AI-11 names, **one row** to the § 8 totality table, and **one item** to AI-12.1's test list, marked *(appended)*. `R-REX-002`'s marker clause already admits both, so the delta spec needs no edit |
+| 8 | The breakpoint cap `V-REQ-24` | **Unresolved** | **The cap is a `Rule` in the request's rule list.** The rebuild re-runs it **for free** — no AI-12 production code at all. AI-12.2 appends one derive-path assertion: a derivation that pushes the request past the cap fails with `ErrOutOfRange` at the same position construction reports. Ordinal: AI-11's row lands before AI-12's, so AI-12's extension rule becomes row 12 | **The cap is enforced elsewhere** (e.g. inside a marker constructor, or at a boundary the request never re-runs). Then the rebuild does **not** re-run it, and AI-12 must **record that as a gap** in `tasks.md` for the Wave 1 verify phase rather than assert a property that does not hold. AI-12 must not add the rule itself — `V-REQ-24` is AI-11's |
+
+**Decision rule for the apply agent**: read `../ai-11`'s landed `system_instruction.go` / `tool.go` / `message.go` for a marker field, and `request.go`'s `FirstFailure` list for a cap rule. A marker field present ⇒ branch A on row 7. A cap rule present in the list ⇒ branch A on row 8. The two rows are **independent**; A on one does not imply A on the other. Neither branch is a substitution: in every case the test list only grows.
+
+**Neither sibling's surface is invented here.** Where this plan names a symbol that does not exist, it names it in this section and nowhere else.
 
 ## 7. Prior art inside the package
 
@@ -196,6 +289,20 @@ No class describes something the seven landed ones do not, so AI-04's append rul
 
 **If apply discovers a genuinely new class, it stops and reports it upward.** This change never edits `openspec/specs/ai-contract-vocabulary/spec.md`.
 
+### 8.1 Re-verified at `1c4171e`
+
+The seven landed classes are `ErrEmpty`, `ErrNotInVocabulary`, `ErrOutOfRange`, `ErrMalformed`, `ErrUnresolvedReference`, `ErrDuplicate` and `ErrMisplaced` (`validation.go:70–131`, mirrored in `ruleClasses`). Both of AI-12's rules are `ErrEmpty`. **No class is appended, and no registry mirror is touched.** `ErrOutOfRange`'s GoDoc already names `V-REQ-24`, so AI-11 will not need one either.
+
+### 8.2 A finding in AI-10's own spec — recorded, not fixed
+
+While reading the landed role/kind table this exploration found a discrepancy in **AI-10's** delta spec, `openspec/changes/cachicamas-ai-model-request/specs/ai-model-request/spec.md`:
+
+> **`S-AMR-046`** — *"Given each of the **four** permitted cells in turn, when a request is built holding it, then construction succeeds — so the table is proven in both directions, **twelve cells total**."*
+
+`R-AMR-011`'s own table is 4 kinds × 3 roles = 12 cells, of which **five** are permitted: `text`/user, `text`/assistant, `reasoning`/assistant, `tool_call`/assistant, `tool_result`/tool. The landed implementation agrees — `rolePermittedKinds` (`request.go:30–34`) holds `{Text}`, `{Text, Reasoning, ToolCall}`, `{ToolResult}` = 1 + 3 + 1 = **five** entries.
+
+**The prose is wrong; the table, the "twelve cells total" count and the code are right.** The discrepancy is **real**, cosmetic, and confined to one word of scenario prose. It is recorded here as a **finding for the Wave 1 verify phase**. AI-12 does **not** edit AI-10's artifacts: they belong to `cachicamas-ai-model-request`, which this change is forbidden to touch, and correcting another change's spec from here would put the fix outside the review that owns it.
+
 ## 9. Budget, node shapes, and what is deliberately not built
 
 **Split trigger 4 fires**, and it is forecast here before a line of Go exists, per doc 0002's rule. `tasks.md` carries the table; the estimate is ~950–1050 changed lines, against a "prefer < 250, reassess before 400" milestone rule. The wave-level PR budget is 5000+ lines and was accepted up front (`exception-ok`), so the forecast is a statement, not a stop.
@@ -222,15 +329,20 @@ Four leaves, four commits, in charter order. AI-12.2 and AI-12.3 may swap.
 
 ## 11. Risks
 
+Re-scored at `1c4171e`, after § 6's resolution.
+
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| AI-10.3/AI-10.6 land a shape this plan assumed differently | **High** — they are being written concurrently | Medium | § 6.1 states every assumption with its file and symbol; the apply agent re-verifies before its first test and rebases |
-| AI-11's marker surface forces a request-level region | Medium | Low | § 6.2 states both branches; the extra option is one constructor and one assertion, appended not substituted |
+| ~~AI-10.3/AI-10.6 land a shape this plan assumed differently~~ | **Closed** | — | AI-10 is landed and all six rows are resolved in § 6.1. Four matched, two differed with their branch taken; none invalidated a decision |
+| ~~Extraction of AI-10.3's rule slice produces a merge conflict in `request.go`~~ | **Closed** | — | AI-10 has landed; there is no concurrent writer of `request.go` left. § 6.1.1 measures the extraction: seven of ten rules change one expression each, and the three cross-region free functions need no edit |
+| ~~Equality drifts if AI-10.6 does not export `Equal`~~ | **Closed** | — | `Request.Equal` **is** exported (`request.go:426`). AI-12 extends it and exports no second equality |
+| **The AI-10.5 round-trip pin silently narrows when the extension region lands** | **Certain if unaddressed** | **High** | **Newly discovered — § 6.1.4.** `agenttest`'s round trip uses its own `rebuildFromReadback` and `requireRequestsEqual`, not `Request.Equal`, and both walk a fixed nine-region list. AI-12.3 must extend both, or the pin passes on a request that lost its extensions |
+| **`With` silently reverts the system region** | Medium | **High** | **Newly discovered — § 6.1.6.** The system region is stored twice on `Request`. Mitigated structurally by extracting `draft.freeze()` so both seeds share one freeze expression, rather than by remembering to set two fields |
+| AI-11's marker surface forces a request-level region | Medium | Low | § 6.2 row 7 states both branches with the exact edit each implies; the extra option is one constructor and one assertion, appended not substituted |
+| AI-11 enforces the breakpoint cap outside the request's rule list | Low-Medium | Low | § 6.2 row 8 branch B: AI-12 records the gap for Wave 1 verify rather than asserting a property that does not hold, and never adds `V-REQ-24`'s rule itself |
 | The escape hatch becomes a dumping ground for things that should be neutral | Medium | **High** | `V-REQ-26`'s admission test is the gate, and AI-10 `design.md` § 8.2 already lists which candidates are the hatch's. The reverse direction — promoting a namespace to a neutral option — needs the admission test passed and is a new milestone |
 | `WithModel` inside `NewRequest` surprises a reader | Medium | Low | § 4.1 — pinned by test, documented on the constructor |
-| Extraction of AI-10.3's rule slice produces a merge conflict in `request.go` | **High** | Medium | Expected and cheap: the conflict is in one function. Rebase, do not merge. Engram #2292's rule holds — read siblings' files, write only this milestone's concern, and `request.go` is jointly owned this once |
-| Equality drifts if AI-10.6 does not export `Equal` | Medium | Medium | AI-12 must not export a second equality. `spec.md` states the obligation as conditional on AI-10.6's choice |
-| The milestone busts the review budget | **Certain** | Medium | Forecast in § 9 and in `tasks.md`; `exception-ok` accepted up front; leaf boundaries are commit boundaries |
+| The milestone busts the review budget | **Certain** | Medium | Forecast in § 9 and in `tasks.md`; `exception-ok` accepted up front; leaf boundaries are commit boundaries. Re-verification moved the forecast up by ~55 lines and one file — `tasks.md` carries the revision |
 
 ## 12. Ready for proposal
 
