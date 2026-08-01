@@ -17,6 +17,7 @@
 // this signature, directly or nested inside a named type reachable from it.
 // src/agenttest's signature guard resolves and parses this file to hold that
 // pin as a build-time failure rather than a review convention (R-AMP-014).
+
 package ai
 
 import "context"

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -55,17 +56,11 @@ func TestModelProviderInterface_SignatureGuard(t *testing.T) {
 	t.Parallel()
 
 	path := providerGoPath(t)
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("provider.go is not resolvable at %q — src/agenttest must stay a direct sibling of "+
-			"src/ai (ADR 0005 § D2, Guard C); this guard fails loudly rather than skipping (R-AMP-015): %v",
-			path, err)
-	}
-
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	file, err := resolveAndParseGoFile(path)
 	if err != nil {
-		t.Fatalf("provider.go at %q is not parseable — this guard fails loudly rather than skipping "+
-			"(R-AMP-015): %v", path, err)
+		// R-AMP-015: fails loudly, never skips, never passes vacuously.
+		// resolveAndParseGoFile's own error already names the path.
+		t.Fatal(err)
 	}
 
 	assertImportAllowlist(t, file)
@@ -75,6 +70,60 @@ func TestModelProviderInterface_SignatureGuard(t *testing.T) {
 		t.Fatalf("provider.go at %q declares no interface named ModelProvider", path)
 	}
 	assertExactlyOneStreamMethod(t, iface)
+}
+
+// resolveAndParseGoFile resolves and parses one Go source file, returning a
+// single, path-naming error on either failure (R-AMP-015: "fails loudly,
+// never skips, never passes vacuously"). It is a plain function rather than
+// a *testing.T-bound helper so the two failure branches below are directly
+// testable without engineering a real missing or corrupt provider.go.
+func resolveAndParseGoFile(path string) (*ast.File, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("target is not resolvable at %q — src/agenttest must stay a direct "+
+			"sibling of src/ai (ADR 0005 § D2, Guard C): %w", path, err)
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("target at %q is not parseable: %w", path, err)
+	}
+	return file, nil
+}
+
+// AI-20.4 (R-AMP-015, S-AMP-040/041) — an unresolvable target is reported
+// as an error naming the path, never silently skipped.
+func TestResolveAndParseGoFile_UnresolvableTarget_ReportsAnErrorNamingThePath(t *testing.T) {
+	t.Parallel()
+
+	const missing = "/nonexistent/path/does-not-exist/provider.go"
+	_, err := resolveAndParseGoFile(missing)
+	if err == nil {
+		t.Fatal("resolveAndParseGoFile returned no error for a path that does not exist, want a loud failure (R-AMP-015)")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the unresolvable path %q", err.Error(), missing)
+	}
+}
+
+// AI-20.4 (R-AMP-015, S-AMP-040/041) — an unparseable target is reported as
+// an error naming the path, never silently skipped.
+func TestResolveAndParseGoFile_UnparseableTarget_ReportsAnErrorNamingThePath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not_valid_go.go")
+	if err := os.WriteFile(path, []byte("this is not valid Go source {{{"), 0o600); err != nil {
+		t.Fatalf("os.WriteFile returned %v, want no failure", err)
+	}
+
+	_, err := resolveAndParseGoFile(path)
+	if err == nil {
+		t.Fatal("resolveAndParseGoFile returned no error for unparseable source, want a loud failure (R-AMP-015)")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q does not name the unparseable path %q", err.Error(), path)
+	}
 }
 
 // assertImportAllowlist is R-AMP-002/R-AMP-014's mechanical form: every

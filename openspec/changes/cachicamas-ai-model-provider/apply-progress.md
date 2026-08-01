@@ -1,5 +1,10 @@
 # Apply progress: `cachicamas-ai-model-provider` (AI-20 — the provider interface)
 
+> **APPLY PHASE — CLOSED IN SUCCESS.** All 30 tasks across 7 phases (0–7) complete. `make test`:
+> both packages `ok`, 1271 passing subtests, 0 FAIL, 0 SKIP. `make lint`: `0 issues`. 11/11
+> acceptance criteria PASS. This is Wave 2's join-point milestone and its final leaf — this run also
+> verifies the whole wave's integration (AI-03/AI-10/AI-12/AI-14/AI-19 all consumed correctly).
+
 > Predecessors: tasks (`tasks.md`, this folder) · spec (`specs/ai-model-provider/spec.md`, `R-AMP-001…021`)
 > · design (`design.md`, reconciled 2026-08-01 against landed AI-14/AI-19 symbols).
 > Mode: **Strict TDD** (`make test` = `go test -race -v ./...` from `backend/agent/`).
@@ -9,9 +14,10 @@
 
 ## Status
 
-Phases 0–3 complete. Phase 1 committed (`1236a56`); Phases 2–3 committed together (share the
-`scriptProvider` fixture) — see below. Phases 4–7 pending. This file is checkpointed after every
-phase.
+**ALL PHASES (0–7) COMPLETE.** Commits: `1236a56` (Phase 1), `af2fe67` (Phases 2–3), `6788f36`
+(Phase 4), `82bb192` (Phase 5), `5b5c389` (Phase 6, wiring), and one final commit closing Phase 7
+(lint fixes + resolve/parse coverage + this record — see bottom of this file for its hash once
+created). 30/30 tasks `[x]` in `tasks.md`.
 
 ## TDD Cycle Evidence
 
@@ -161,9 +167,52 @@ and attributing concrete adapters to AI-24 onward. Confirmed `go.mod` still carr
 `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` — all 3 PASS), which also
 confirms Phase 4's transient `encoding/json` bite-mutation import left no trace.
 
-## Phase 7
+## Phase 7 — Verification & closeout — COMPLETE
 
-Pending — see `tasks.md` for the authoritative checklist; this file is updated when it closes.
+- **Apply gate re-confirmed**: all six sibling NFR/leaf closeout commits present (`c00e491` AI-19 NFR,
+  `4ceb77c` AI-17 NFR, `20a483d` AI-18, `5cd0b91` AI-16 NFR, `2657d9b` AI-15 NFR, `65d8be7` AI-14 NFR).
+- **`make test`** (`go test -race -v ./...`, fresh/uncached `-count=1`): both packages `ok`, **1271
+  passing subtests, 0 FAIL, 0 SKIP**. Additionally stress-ran every AI-20 concurrency/guard test
+  10× under `-race` with zero flakes.
+- **`make lint`**: found and fixed 2 real issues before reaching `0 issues`:
+  1. `provider.go`'s milestone header comment had no blank line before `package ai`, so revive's
+     `package-comments` rule flagged it as a malformed package doc (every sibling file has that
+     blank line; this was a genuine, if cosmetic, deviation from house convention). Fixed.
+  2. Two `for range ch {}` empty-block drains in `provider_test.go` tripped revive's `empty-block`
+     rule. Replaced both with the existing `requireClosedWithin` helper — a strict improvement
+     (bounded-time assertion instead of an unbounded drain), not just a lint silencer.
+- **Coverage gap found and closed while walking acceptance criterion 8**: the guard's
+  "unresolvable/unparseable target fails loudly" branches (R-AMP-015, S-AMP-040/041) were
+  implemented but never directly exercised by a test — only indirectly plausible from reading the
+  code. Refactored the resolve+parse logic out of the `*testing.T`-bound guard into a pure
+  `resolveAndParseGoFile(path string) (*ast.File, error)` function, and added two new tests that
+  call it directly with a nonexistent path and with syntactically invalid Go source, asserting the
+  returned error names the path in each case. The main guard test now just does
+  `if err != nil { t.Fatal(err) }` around the same call.
+- **Acceptance criteria**: 11/11 PASS — full table with evidence recorded in `tasks.md` Phase 7.
+
+### Work Unit Evidence (Phase 7)
+
+| Unit | Focused test command and result | Runtime harness | Rollback boundary |
+|---|---|---|---|
+| Whole-wave verification | `make test` → 1271/1271 PASS; `make lint` → 0 issues | Real `go test -race`, real `golangci-lint`, no simulation | revert the final Phase 7 commit; each prior phase's own commit remains independently revertible |
+
+## Final TDD Cycle Evidence (Phases 4–7)
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| 4.1–4.4 signature guard + 2 bites | Guard itself green-from-birth (target already conformant); genuine RED = 2 bite mutations, both isolated from `stubProvider`'s conformance-pin cascade via a temporary `mv` of `provider_test.go`, verbatim transcripts in `tasks.md` | Both mutations reverted, guard green again, `git diff --stat` empty | Failure messages reviewed, kept as written |
+| 5.1–5.4 `TokenCounter` + pin | `undefined: ai.TokenCounter` compile failure; pin mutation (fold into `ModelProvider`) failed guard naming both methods | `TokenCounter` landed, 2/2 discovery tests PASS; pin reverted, guard green | Confirmed exactly one optional contract |
+| 7.3/7.4 lint + coverage gap | `make lint` found 2 real issues; acceptance-criterion walk found 1 coverage gap (S-AMP-040/041 untested) | All 3 fixed; `make lint` → `0 issues`; 2 new tests added and passing | N/A — closeout phase |
+
+## Session
+
+Session: SDD apply run for AI-20, worktree `cachicamas-worktrees/ai-wave-2`, branch
+`feat/2026-08-01-cachicamas-ai-layer1-wave-2`.
+Artifact store: hybrid (this file + `tasks.md` on disk, mirrored to Engram topic
+`sdd/cachicamas-ai-model-provider/apply-progress`).
+This is Wave 2's join-point and final milestone (AI-20) — `make test`/`make lint` here also close
+out the whole wave's integration.
 
 ## Session
 

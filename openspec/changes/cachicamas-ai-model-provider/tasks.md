@@ -190,12 +190,44 @@ Chain strategy: size-exception
       (S-AMP-060). Confirms the transient `encoding/json` import used during Phase 4's bite mutation 1
       never persisted.
 
-## Phase 7 — Verification & closeout
+## Phase 7 — Verification & closeout — COMPLETE
 
-- [ ] 7.1 Confirm apply gate: AI-14…AI-19 merged/landed in `ai-wave-2` before this phase starts.
-- [ ] 7.2 Run `make test` (`go test -race -v ./...`) in `backend/agent/`; record green output.
-- [ ] 7.3 Run `make lint`; record clean output.
-- [ ] 7.4 Walk acceptance criteria 1–11 against landed code; record pass/fail per item.
+- [x] 7.1 Confirmed apply gate: `git log --oneline --grep` shows all six sibling NFR/leaf closeout
+      commits present in `ai-wave-2` — `c00e491` (AI-19 NFR), `4ceb77c` (AI-17 NFR), `20a483d`
+      (AI-18), `5cd0b91` (AI-16 NFR), `2657d9b` (AI-15 NFR), `65d8be7` (AI-14 NFR). Gate was already
+      open at session start (also verified then) and remained open throughout.
+- [x] 7.2 Ran `make test` (`go test -race -v ./...`) fresh/uncached (`-count=1`) in `backend/agent/`:
+      **both packages `ok`, 1271 passing subtests, 0 FAIL, 0 SKIP.** (`src/agenttest` 1.35s,
+      `src/ai` 3.40s.) Also stress-ran every AI-20 concurrency/guard test 10× under `-race`
+      (`-run "PreStream|MidStream|SignatureGuard|TokenCounter|MethodSet" -count=10`) with zero
+      flakes, beyond this required single run.
+- [x] 7.3 Ran `make lint`: **`go vet ./...` clean, `golangci-lint run` → `0 issues`.** Found and fixed
+      two real issues surfaced by this run before it went clean: (a) `provider.go`'s milestone header
+      comment was immediately above `package ai` with no blank line, so revive's `package-comments`
+      rule treated it as a malformed package doc — fixed by adding the blank line, matching every
+      sibling file's (`event.go`, `provider_failure.go`, `request.go`, `sequence.go`) established
+      convention; (b) two `for range ch {}` empty-block drains in `src/ai/provider_test.go` tripped
+      revive's `empty-block` rule — replaced both with the existing `requireClosedWithin` helper,
+      which also strengthens them (bounded-time assertion instead of an unbounded drain).
+- [x] 7.4 Walked all 11 acceptance criteria against landed code:
+
+      | # | Criterion | Result | Evidence |
+      |---|---|---|---|
+      | 1 | One streaming method, decided shapes, no vendor/wire type, no second method | **PASS** | `ModelProvider` in `provider.go`; `TestModelProviderInterface_MethodSet_ExactlyOneStreamMethod`; `TestModelProviderInterface_SignatureGuard` |
+      | 2 | A non-`ai` package implements, compiles, is exercised | **PASS** | `stubProvider` in `agenttest/provider_test.go`; `TestModelProviderInterface_MethodSet_ExternalStubImplementsCompilesAndIsExercised` |
+      | 3 | Eight ownership statements + enumerability clause in documentation | **PASS** | `provider.go`'s `ModelProvider` GoDoc, verified verbatim against `ai-stream-lifecycle` §9 and `ai-minimum-capabilities` §9 during Phase 1 |
+      | 4 | Invalid/zero-value request → typed AI-04 failure, no carrier/goroutine | **PASS** | `TestScriptProvider_PreStream_ZeroRequest_FailsWithATypedFailureNoCarrier` |
+      | 5 | Already-cancelled context → AI-19 cancellation category, pre-stream, after validation, order documented | **PASS** | `TestScriptProvider_PreStream_ValidRequestAlreadyCancelledContext_FailsWithCancellationCategory`, `TestScriptProvider_PreStream_ValidationRunsBeforeTheAlreadyCancelledContextCase` |
+      | 6 | Exactly-once close on all 3 paths; every send waits on cancellation; bounded close under `-race`; no send-after-close | **PASS** | `TestScriptProvider_MidStream_OneClosingSite_AcrossCompletionErrorAndCancellation` (3 subtests), `TestScriptProvider_MidStream_EverySendSelectsOnCancellation_IncludingTheTerminal`, `TestScriptProvider_MidStream_CancellationClosesWithinBoundedTime_NoSendAfterClose` (20 iterations); `-count=15`/`-count=10` stress-clean |
+      | 7 | Saturated-buffer cancellation closes bare (sanctioned); consumer named as party in error; no second loss path | **PASS** | `TestScriptProvider_MidStream_SanctionedLossPath_...` + converse `TestScriptProvider_MidStream_NeverCancelled_BackpressureWaitsAndDropsNothing`; rule 7 documented in `provider.go` |
+      | 8 | Guard passes automatically, resolves relative to its own source, fails loudly, both bite mutations fail it, recorded and reverted | **PASS** | `TestModelProviderInterface_SignatureGuard`; 2 bite mutations (Phase 4) + method-set pin mutation (Phase 5) all recorded verbatim in this file and reverted; unresolvable/unparseable branches additionally proven directly by `TestResolveAndParseGoFile_UnresolvableTarget_...` / `_UnparseableTarget_...` (added during this phase to close an S-AMP-040/041 coverage gap found while walking this criterion) |
+      | 9 | Token counting is the only askable optional capability; clean absence otherwise; no Layer 1 substitute | **PASS** | `TokenCounter` in `provider.go`; `TestModelProviderInterface_TokenCounter_DiscoveredWhenTheProviderValueSatisfiesIt` / `_CleanAbsenceWhenTheProviderDoesNotAdvertiseIt` |
+      | 10 | Required-surface-only provider fully conformant; method-set pin fails on a folded-in capability | **PASS** | `stubProvider` (Stream-only) fully conformant throughout; Phase 5's fold-in mutation tripped the guard, reverted |
+      | 11 | `make test` green under `-race`, `make lint` clean, import guards passing, `go.mod` zero requires | **PASS** | This phase's 7.2/7.3 records above; `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`, `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` all PASS (Phase 6) |
+
+      **11/11 PASS. No deviations from spec/design found that were not already disclosed in this
+      file's phase notes (Phase 2's fixture-authored-together deviation; Phase 3's self-inflicted
+      test-race discovery and fix; Phase 7's added resolve/parse coverage and 2 lint fixes).**
 
 > **Deviation note**: exceeds the 530-word tasks budget — house convention for this change
 > (`spec.md`, `design.md`) already carries deviation notes at this density for the same reason:

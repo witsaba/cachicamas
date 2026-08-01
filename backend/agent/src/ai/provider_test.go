@@ -198,8 +198,7 @@ func TestScriptProvider_PreStream_NilContext_TreatedAsBackgroundNotAPanic(t *tes
 	if ch == nil {
 		t.Fatal("Stream(nil, ...) returned a nil channel with a nil error")
 	}
-	for range ch {
-	}
+	requireClosedWithin(t, ch, boundedTimeout)
 }
 
 // AI-20.2 item 4 (R-AMP-008, S-AMP-022/023) — nothing observable survives a
@@ -225,8 +224,7 @@ func TestScriptProvider_PreStream_AFailedCallLeavesTheProviderValueUsableForALat
 	if ch == nil {
 		t.Fatal("second call returned a nil channel with a nil error")
 	}
-	for range ch {
-	}
+	requireClosedWithin(t, ch, boundedTimeout)
 }
 
 // --- AI-20.3 — the mid-stream contract (R-AMP-009…013) -------------------
