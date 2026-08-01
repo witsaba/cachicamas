@@ -340,6 +340,31 @@ func structuralName(name string) string {
 // success path and would be aggregation wearing a first-failure hat.
 type Rule func() *Violation
 
+// violationOf is FirstFailure's inverse: it converts a failure another
+// contract already reported back into the form a [Rule] returns.
+//
+// It exists because a rule is sometimes not a check this file writes but a call
+// to a contract that validates itself — AI-08.3's ToolChoice.ValidateAgainst is
+// the first such rule, run at its own boundary and again at the request's. Its
+// result is an error because FirstFailure converted it once already, and
+// converting back here keeps the request's rule list one uniform slice of
+// [Rule] rather than one slice with an exception in it.
+//
+// A non-nil error that is not a [Violation] cannot be dropped: it is wrapped at
+// no position, so it still stops construction and renders as an unregistered
+// rule rather than disappearing. No Layer 1 contract produces one today, and
+// this is what keeps that from becoming a silent success if one ever does.
+func violationOf(err error) *Violation {
+	if err == nil {
+		return nil
+	}
+	var violation *Violation
+	if errors.As(err, &violation) {
+		return violation
+	}
+	return Invalid(err)
+}
+
 // FirstFailure evaluates rules in order and reports the first violation, or a
 // nil error when every rule passes. A nil rule is skipped.
 //

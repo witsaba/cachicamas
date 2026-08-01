@@ -582,3 +582,181 @@ func TestRequest_MessageAndContentOrder_ArePreservedThroughConstructionAndReadba
 		}
 	}
 }
+
+// requireToolSet builds a tool set from names, failing the test on AI-08's
+// errors rather than reporting them as this milestone's.
+func requireToolSet(t *testing.T, names ...string) ai.ToolSet {
+	t.Helper()
+
+	tools := make([]ai.Tool, 0, len(names))
+	for _, name := range names {
+		tool, err := ai.NewTool(name, "a declared tool", []byte(`{"type":"object"}`))
+		if err != nil {
+			t.Fatalf("ai.NewTool(%q) returned %v, want no failure", name, err)
+		}
+		tools = append(tools, tool)
+	}
+	set, err := ai.NewToolSet(tools...)
+	if err != nil {
+		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+	}
+	return set
+}
+
+// requireNamedToolChoice builds a specific tool choice, failing the test on
+// AI-08's errors.
+func requireNamedToolChoice(t *testing.T, name string) ai.ToolChoice {
+	t.Helper()
+
+	choice, err := ai.NewNamedToolChoice(name)
+	if err != nil {
+		t.Fatalf("ai.NewNamedToolChoice(%q) returned %v, want no failure", name, err)
+	}
+	return choice
+}
+
+// AI-10.3 item 2 — the tool set and the tool choice attach to the request, and
+// both read back from another package (R-AMR-010, S-AMR-038).
+//
+// They are two independently optional regions, so each carries its own applied
+// flag. S-AMR-042 is the reason: a request with tools and no choice is legal,
+// and it is a different request from one that chose [ai.ToolChoiceNone].
+// Collapsing the two would delete a distinction a provider acts on.
+func TestRequest_ToolSetAndToolChoice_AttachAndReadBack(t *testing.T) {
+	t.Parallel()
+
+	tools := requireToolSet(t, "search", "fetch", "write")
+	choice := requireNamedToolChoice(t, "fetch")
+
+	request, err := ai.NewRequest(
+		"m", []ai.Message{userTextMessage(t, "go")},
+		ai.WithTools(tools), ai.WithToolChoice(choice),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	readTools, hasTools := request.Tools()
+	if !hasTools {
+		t.Fatalf("request.Tools() reported no tool set, want the one applied")
+	}
+	gotNames := make([]string, 0, readTools.Len())
+	for _, tool := range readTools.Tools() {
+		gotNames = append(gotNames, tool.Name())
+	}
+	if want := []string{"search", "fetch", "write"}; !slices.Equal(gotNames, want) {
+		t.Errorf("the request's tool declarations = %v, want %v in the order supplied", gotNames, want)
+	}
+
+	readChoice, hasChoice := request.ToolChoice()
+	if !hasChoice {
+		t.Fatalf("request.ToolChoice() reported no choice, want the one applied")
+	}
+	if got := readChoice.Mode(); got != ai.ToolChoiceSpecific {
+		t.Errorf("the request's tool-choice mode = %v, want %v", got, ai.ToolChoiceSpecific)
+	}
+	if name, ok := readChoice.Name(); !ok || name != "fetch" {
+		t.Errorf("the request's tool-choice name = (%q, %t), want (%q, true)", name, ok, "fetch")
+	}
+
+	// S-AMR-042 — omitting the choice is not choosing none.
+	withoutChoice, err := ai.NewRequest(
+		"m", []ai.Message{userTextMessage(t, "go")}, ai.WithTools(tools),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest with tools and no choice returned %v, want no failure", err)
+	}
+	if _, hasChoice := withoutChoice.ToolChoice(); hasChoice {
+		t.Errorf("a request built without ai.WithToolChoice reports a choice, want none — " +
+			"omitting the choice and choosing ToolChoiceNone are different requests")
+	}
+}
+
+// AI-10.3 item 2 — AI-08.3's cross-validation runs at the request boundary,
+// with its three rules and its positions unchanged (R-AMR-010).
+//
+// The positions are asserted and not only the classes, because the position is
+// the observable proof that [ai.ToolChoice.ValidateAgainst] was *called* rather
+// than reimplemented here. A reimplementation would report at a request-shaped
+// position — "toolChoice" beneath something — and pass a class-only assertion.
+// tool_choice.go names this caller by name: "AI-10.3 re-runs them at the request
+// boundary, which is why they live on a method a request can call".
+func TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions(t *testing.T) {
+	t.Parallel()
+
+	messages := []ai.Message{userTextMessage(t, "go")}
+
+	cases := []struct {
+		name     string
+		options  []ai.RequestOption
+		wantRule error
+		wantPath string
+	}{{
+		// S-AMR-041 — AI-08.3 rule 1. A choice that skipped its constructor.
+		name:     "a tool choice that was never constructed",
+		options:  []ai.RequestOption{ai.WithToolChoice(ai.ToolChoice{})},
+		wantRule: ai.ErrNotInVocabulary,
+		wantPath: "toolChoice",
+	}, {
+		// S-AMR-039 — AI-08.3 rule 2, reported instead of rule 3 although a
+		// specific choice against an empty set violates both. Against no tools
+		// at all, "you declared no tools" is the more fundamental fact.
+		name:     "a specific tool choice and no tool set at all",
+		options:  []ai.RequestOption{ai.WithToolChoice(requireNamedToolChoice(t, "fetch"))},
+		wantRule: ai.ErrEmpty,
+		wantPath: "tools",
+	}, {
+		// S-AMR-040 — AI-08.3 rule 3.
+		name: "a specific tool choice naming an undeclared tool",
+		options: []ai.RequestOption{
+			ai.WithTools(requireToolSet(t, "search")),
+			ai.WithToolChoice(requireNamedToolChoice(t, "fetch")),
+		},
+		wantRule: ai.ErrUnresolvedReference,
+		wantPath: "toolChoice.name",
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ai.NewRequest("m", messages, tc.options...)
+			requireViolation(t, err, tc.wantRule, tc.wantPath)
+		})
+	}
+}
+
+// AI-10.3 item 2 *(refactor)* — the two new regions render as shape and never
+// as payload (R-AMR-017).
+//
+// AI-10.1's leak table could not cover these regions because they did not exist
+// yet, and both carry caller data: a tool's name is the caller's vocabulary, and
+// a specific choice names one of them. What renders is the count and the mode —
+// a count is shape, and a mode is this package's own closed vocabulary rather
+// than anything the caller wrote.
+func TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool(t *testing.T) {
+	t.Parallel()
+
+	const chosen = "secret_tool_name"
+
+	request, err := ai.NewRequest(
+		"m", []ai.Message{userTextMessage(t, "go")},
+		ai.WithTools(requireToolSet(t, "secret_other_tool", chosen)),
+		ai.WithToolChoice(requireNamedToolChoice(t, chosen)),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	rendered := request.String()
+	for _, want := range []string{"2 tools", "toolChoice(specific)"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("request.String() = %q, want it to contain %q", rendered, want)
+		}
+	}
+	for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+		if got := fmt.Sprintf(verb, request); strings.Contains(got, "secret") {
+			t.Errorf("fmt.Sprintf(%q, request) leaked a tool name: %q", verb, got)
+		}
+	}
+}

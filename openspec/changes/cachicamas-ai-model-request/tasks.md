@@ -477,7 +477,7 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 
 - [x] ~~**Item 0** *(prerequisite, do this first)* — Append `ErrMisplaced`~~ to `validation.go`'s class set **and** to `ruleClasses`, **and** update `validation_registry_internal_test.go` and `validation_test.go` in the **same commit**. The internal guard fails and says so if only one mirror moves. `design.md` § 5.3 carries the doc comment to write.
 - [x] ~~**Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.~~
-- [ ] **Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**
+- [x] ~~**Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**~~
 - [ ] **Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.
 - [ ] **Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.
 
@@ -564,6 +564,70 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.141s
 ```
 
 **Refactor.** The mixed-kind message is built with `RoleAssistant`, which `design.md` § 5.1 makes the only role permitted to carry text, reasoning and a tool call at once. Using a forbidden cell here would have made an order test start failing on item 3 for a reason that had nothing to do with order. No production code changed in this item.
+
+### AI-10.3 item 2 — the tool set and tool choice attach, cross-validation reused
+
+**Deliverable:** `request.go` gains `WithTools`, `WithToolChoice`, `Tools()`, `ToolChoice()`, `requestDraft.tools`/`hasTools`/`toolChoice`/`hasToolChoice`, rule 9 of `design.md` § 4's table, and the two regions' line in `String()`. `validation.go` gains `violationOf`, the converter named in `design.md` § 4.2 and `decision.md` § 7.2's "one rule set, two callers" applied to a rule that is itself a method call rather than a check written in this file. `request_test.go` gains three tests.
+**Spec:** `R-AMR-010`. **Design:** § 4 row 9, § 4.2.
+
+**Before red.** `request_test.go`'s three new tests written first, against `request.go` unchanged from the AI-10.3 item 1 commit:
+
+```
+# github.com/cachicamas/backend/agent/src/ai_test [github.com/cachicamas/backend/agent/src/ai.test]
+src/ai/request_test.go:633:6: undefined: ai.WithTools
+src/ai/request_test.go:633:27: undefined: ai.WithToolChoice
+src/ai/request_test.go:639:33: request.Tools undefined (type ai.Request has no field or method Tools)
+src/ai/request_test.go:651:35: request.ToolChoice undefined (type ai.Request has no field or method ToolChoice)
+src/ai/request_test.go:664:51: undefined: ai.WithTools
+src/ai/request_test.go:669:35: withoutChoice.ToolChoice undefined (type ai.Request has no field or method ToolChoice)
+src/ai/request_test.go:697:35: undefined: ai.WithToolChoice
+src/ai/request_test.go:705:35: undefined: ai.WithToolChoice
+src/ai/request_test.go:712:7: undefined: ai.WithTools
+src/ai/request_test.go:713:7: undefined: ai.WithToolChoice
+src/ai/request_test.go:713:7: too many errors
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+FAIL
+```
+
+**Red.** `requestDraft`'s two field pairs, `WithTools` and `WithToolChoice` landed — the option constructors are total per § 2.2, so there is nothing to stub in them — but `Tools()` and `ToolChoice()` deliberately stubbed to report absence unconditionally, and rule 9 not yet inserted into `NewRequest`'s `FirstFailure` list:
+
+```
+=== NAME  TestRequest_ToolSetAndToolChoice_AttachAndReadBack
+    request_test.go:641: request.Tools() reported no tool set, want the one applied
+--- FAIL: TestRequest_ToolSetAndToolChoice_AttachAndReadBack (0.00s)
+=== NAME  TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool
+    request_test.go:754: request.String() = "request(model, 1 messages)", want it to contain "2 tools"
+    request_test.go:754: request.String() = "request(model, 1 messages)", want it to contain "toolChoice(specific)"
+--- FAIL: TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool (0.00s)
+=== NAME  TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_specific_tool_choice_and_no_tool_set_at_all
+    request_test.go:724: got no failure, want required value is empty at "tools"
+=== NAME  TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_tool_choice_that_was_never_constructed
+    request_test.go:724: got no failure, want value is outside a closed vocabulary at "toolChoice"
+=== NAME  TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_specific_tool_choice_naming_an_undeclared_tool
+    request_test.go:724: got no failure, want value names something the request does not declare at "toolChoice.name"
+--- FAIL: TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions (0.00s)
+    --- FAIL: TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_specific_tool_choice_and_no_tool_set_at_all (0.00s)
+    --- FAIL: TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_tool_choice_that_was_never_constructed (0.00s)
+    --- FAIL: TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions/a_specific_tool_choice_naming_an_undeclared_tool (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.501s
+FAIL
+```
+
+**Green.** `Tools()` and `ToolChoice()` wired to `r.options`; rule 9 inserted at its documented position — `func() *Violation { if !draft.hasToolChoice { return nil }; return violationOf(draft.toolChoice.ValidateAgainst(draft.tools)) }` — calling AI-08.3's own method rather than reimplementing its three rules; `String()` gains the two regions' rendering.
+
+```
+--- PASS: TestRequest_ToolSetAndToolChoice_AttachAndReadBack (0.00s)
+--- PASS: TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool (0.00s)
+--- PASS: TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions (0.00s)
+    --- PASS: .../a_specific_tool_choice_and_no_tool_set_at_all (0.00s)
+    --- PASS: .../a_specific_tool_choice_naming_an_undeclared_tool (0.00s)
+    --- PASS: .../a_tool_choice_that_was_never_constructed (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	(cached)
+```
+
+**Refactor — folded into the same commit as an appended case, not a separate item.** `TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool` extends AI-10.1 item 7's leak table to the two new regions, which could not exist when that table was written. The assertion is on the position, not only the class: `TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions` checks `"toolChoice"`, `"tools"` and `"toolChoice.name"` — AI-08.3's own positions — rather than a request-shaped prefix a reimplementation would have produced, which is the observable proof that `ValidateAgainst` was *called* and not rewritten.
 
 ---
 

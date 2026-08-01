@@ -105,6 +105,12 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			}
 			return nil
 		},
+		func() *Violation {
+			if !draft.hasToolChoice {
+				return nil
+			}
+			return violationOf(draft.toolChoice.ValidateAgainst(draft.tools))
+		},
 		draft.boundsRule(),
 	); err != nil {
 		return Request{}, err
@@ -173,6 +179,12 @@ type requestDraft struct {
 
 	system    SystemInstruction
 	hasSystem bool
+
+	tools    ToolSet
+	hasTools bool
+
+	toolChoice    ToolChoice
+	hasToolChoice bool
 }
 
 // WithMaxOutputTokens sets the maximum number of tokens the model may generate.
@@ -193,6 +205,46 @@ func WithTopP(topP float64) RequestOption {
 // WithStopSequences sets the sequences whose generation stops the response.
 func WithStopSequences(sequences ...string) RequestOption {
 	return func(d *requestDraft) { d.stopSequences, d.hasStopSequences = slices.Clone(sequences), true }
+}
+
+// WithTools attaches a declared tool set to a request (V-REQ-14).
+//
+// It is independent of [WithToolChoice]. A request may declare tools without
+// choosing one — that is the ordinary case, where the model decides — and the
+// two flags are separate so that the difference is representable.
+func WithTools(tools ToolSet) RequestOption {
+	return func(d *requestDraft) { d.tools, d.hasTools = tools, true }
+}
+
+// WithToolChoice attaches a tool choice to a request (V-REQ-15).
+//
+// The choice is cross-validated against the request's tool set by AI-08.3's own
+// method, in NewRequest, at rule 9 of the documented order. This option does not
+// validate: an option is total, and a rule that ran here would be the second
+// validation site AI-06's decision record names as the failure mode.
+func WithToolChoice(choice ToolChoice) RequestOption {
+	return func(d *requestDraft) { d.toolChoice, d.hasToolChoice = choice, true }
+}
+
+// Tools returns the request's declared tool set and whether one was applied.
+//
+// The second result is what keeps "declared no tools" distinct from "declared
+// an empty set". They are different requests: AI-08.3's rule 2 rejects a
+// non-none choice against an empty set, and a caller who applied an empty set
+// deliberately is making a statement a caller who applied nothing is not.
+//
+// The set is returned by value and [ToolSet.Tools] copies on the way out, so a
+// consumer that rewrites what it received cannot rewrite the request.
+func (r Request) Tools() (ToolSet, bool) { return r.options.tools, r.options.hasTools }
+
+// ToolChoice returns the request's tool choice and whether one was applied.
+//
+// Omitting the choice is not choosing [ToolChoiceNone]: the first leaves the
+// decision to the model, the second forbids a call. An adapter reads the second
+// result to tell them apart, which is why absence is structural here as it is
+// for every other optional region.
+func (r Request) ToolChoice() (ToolChoice, bool) {
+	return r.options.toolChoice, r.options.hasToolChoice
 }
 
 // MaxOutputTokens returns the maximum number of tokens the model may generate,
@@ -319,6 +371,16 @@ func (r Request) String() string {
 	if r.hasSystem {
 		b.WriteString(", ")
 		b.WriteString(r.system.String())
+	}
+	if r.options.hasTools {
+		b.WriteString(", ")
+		b.WriteString(strconv.Itoa(r.options.tools.Len()))
+		b.WriteString(" tools")
+	}
+	if r.options.hasToolChoice {
+		b.WriteString(", toolChoice(")
+		b.WriteString(r.options.toolChoice.Mode().String())
+		b.WriteByte(')')
 	}
 	for _, name := range r.options.appliedNames() {
 		b.WriteString(", ")
