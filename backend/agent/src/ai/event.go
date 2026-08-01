@@ -44,6 +44,8 @@ import "strconv"
 //   - responsestart — the event announcing that a provider has begun
 //     responding: the provider response identity and the served model
 //     (V-STR-19).
+//   - completion — the terminal event of a stream that finished normally:
+//     AI-13's finish reason and usage, unchanged (V-STR-20).
 //
 // AI-15 is the first milestone to register a production kind. AI-16 … AI-19
 // append further members the same way, following event_descriptor.go's
@@ -57,10 +59,15 @@ const (
 	// that actually served the response (V-STR-25). See response_start.go.
 	EventKindResponseStart EventKind = iota + 1
 
+	// EventKindCompletion is the kind carrying V-STR-20's completion event:
+	// AI-13's finish reason and usage, unchanged. Terminal. See
+	// completion.go.
+	EventKindCompletion
+
 	// eventKindFirst and eventKindEnd bound the declared production constant
 	// space, mirroring content_part.go's partKindFirst/partKindEnd.
 	eventKindFirst = EventKindResponseStart
-	eventKindEnd   = EventKindResponseStart + 1
+	eventKindEnd   = EventKindCompletion + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -85,6 +92,10 @@ var eventRegistry = []eventRegistration{
 	EventKindResponseStart: {
 		name:       "responsestart",
 		descriptor: EventDescriptor{Role: BlockRoleNone, Cardinality: CardinalityAtMostOne, Terminal: false},
+	},
+	EventKindCompletion: {
+		name:       "completion",
+		descriptor: EventDescriptor{Role: BlockRoleNone, Cardinality: CardinalityAtMostOne, Terminal: true},
 	},
 }
 

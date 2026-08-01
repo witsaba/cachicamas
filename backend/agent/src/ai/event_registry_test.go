@@ -64,6 +64,11 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 		construct:      func() (ai.Event, error) { return ai.NewResponseStart("resp_registry_witness", "model_registry_witness") },
 		read:           func(e ai.Event) (any, bool) { return e.ResponseStart() },
 	},
+	ai.EventKindCompletion: {
+		registeredName: "completion",
+		construct:      func() (ai.Event, error) { return ai.NewCompletion(ai.FinishReasonStop, ai.Usage{}) },
+		read:           func(e ai.Event) (any, bool) { return e.Completion() },
+	},
 }
 
 // TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor is
@@ -144,6 +149,7 @@ func TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor(t
 // extend it the same way, each in the same commit that registers its kind.
 var productionEventKinds = []ai.EventKind{
 	ai.EventKindResponseStart,
+	ai.EventKindCompletion,
 }
 
 // R-AEE-004, R-AEE-006 — the production event-kind vocabulary is exactly the
