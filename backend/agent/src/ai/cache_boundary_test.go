@@ -7,6 +7,7 @@
 package ai_test
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -710,4 +711,426 @@ func TestSegment_UnmarkedRendering_IsUnchangedFromBeforeThisMilestone(t *testing
 	if got, want := segment(t, "a").String(), "segment"; got != want {
 		t.Errorf("segment.String() = %q, want %q — unchanged by AI-11.1", got, want)
 	}
+}
+
+// markedSegments builds n marked, individually distinct system-instruction
+// segments — the fixture AI-11.2's cap tests build over-cap and at-cap
+// requests from.
+func markedSegments(t *testing.T, n int) []ai.Segment {
+	t.Helper()
+
+	segments := make([]ai.Segment, 0, n)
+	for i := range n {
+		seg := segment(t, "segment "+strings.Repeat("x", i+1)).MarkCacheBoundary()
+		segments = append(segments, seg)
+	}
+	return segments
+}
+
+// AI-11.2 item 1, S-ACB-020 — a request whose marker count is one above
+// ai.MaxCacheBoundaries fails construction with ErrOutOfRange, positioned at
+// "cacheBoundaries".
+func TestRequest_CacheBoundariesOverCap_FailsWithOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	system, err := ai.NewSystemInstruction(markedSegments(t, ai.MaxCacheBoundaries+1)...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+
+	_, err = ai.NewRequest(
+		"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+		ai.WithSystemInstruction(system),
+	)
+	requireViolation(t, err, ai.ErrOutOfRange, "cacheBoundaries")
+}
+
+// AI-11.2 item 1, S-ACB-021 and S-ACB-022 — a request carrying exactly
+// ai.MaxCacheBoundaries markers is valid; a request carrying no markers at
+// all is valid and reports an empty marker sequence.
+func TestRequest_CacheBoundariesAtCapOrAbsent_IsValid(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exactly the cap", func(t *testing.T) {
+		t.Parallel()
+
+		system, err := ai.NewSystemInstruction(markedSegments(t, ai.MaxCacheBoundaries)...)
+		if err != nil {
+			t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+		}
+		request, err := ai.NewRequest(
+			"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+			ai.WithSystemInstruction(system),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		if got := len(request.CacheBoundaries()); got != ai.MaxCacheBoundaries {
+			t.Errorf("len(request.CacheBoundaries()) = %d, want %d", got, ai.MaxCacheBoundaries)
+		}
+	})
+
+	t.Run("no markers at all", func(t *testing.T) {
+		t.Parallel()
+
+		request, err := ai.NewRequest("m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))})
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		if got := request.CacheBoundaries(); len(got) != 0 {
+			t.Errorf("request.CacheBoundaries() = %v, want an empty sequence", got)
+		}
+	})
+}
+
+// AI-11.2 item 1, S-ACB-023 — the cap is a total across all three regions,
+// not a per-region budget: exceeding it with markers drawn from tools,
+// system and messages together fails identically to exceeding it within one
+// region.
+func TestRequest_CacheBoundariesOverCapAcrossRegions_FailsIdentically(t *testing.T) {
+	t.Parallel()
+
+	// Two marked segments, two marked tools, one marked message: five
+	// markers total, one above the cap, none of the three regions alone at
+	// or over the cap.
+	system, err := ai.NewSystemInstruction(markedSegments(t, 2)...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	toolSet, err := ai.NewToolSet(
+		requireTool(t, "search_flights").MarkCacheBoundary(),
+		requireTool(t, "book_flight").MarkCacheBoundary(),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+	}
+	msg := requireMessage(t, ai.RoleUser, textPart(t, "hello")).MarkCacheBoundary()
+
+	_, err = ai.NewRequest(
+		"m", []ai.Message{msg},
+		ai.WithSystemInstruction(system),
+		ai.WithTools(toolSet),
+	)
+	requireViolation(t, err, ai.ErrOutOfRange, "cacheBoundaries")
+}
+
+// AI-11.2 item 1, S-ACB-024 — a request that both breaks an earlier
+// structural rule (an empty model identity, rule 1) and exceeds the cap
+// (rule 10) reports the earlier rule, because FirstFailure short-circuits
+// (V-FAIL-04).
+func TestRequest_EarlierStructuralViolationAndOverCap_ReportsTheEarlierRule(t *testing.T) {
+	t.Parallel()
+
+	system, err := ai.NewSystemInstruction(markedSegments(t, ai.MaxCacheBoundaries+1)...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+
+	_, err = ai.NewRequest(
+		"", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+		ai.WithSystemInstruction(system),
+	)
+	requireViolation(t, err, ai.ErrEmpty, "model")
+	if errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("errors.Is(err, ErrOutOfRange) = true, want false — the earlier rule (model) must win")
+	}
+}
+
+// AI-11.2 item 1, S-ACB-025 — MaxCacheBoundaries is readable as a constant
+// without constructing anything, so a caller that generates breakpoints can
+// consult the ceiling before constructing rather than after failing.
+func TestMaxCacheBoundaries_IsReadableAsAConstant(t *testing.T) {
+	t.Parallel()
+
+	if ai.MaxCacheBoundaries != 4 {
+		t.Errorf("ai.MaxCacheBoundaries = %d, want 4", ai.MaxCacheBoundaries)
+	}
+}
+
+// AI-11.2 item 2, S-ACB-027 — an adapter reads a request's markers in
+// tools → system → messages order (V-REQ-25) regardless of the order in
+// which they were set. The marker on the message is placed first in this
+// test's own code, then the system marker, then the tool marker — the
+// opposite of cascade order — to prove the reported sequence does not track
+// placement order.
+func TestRequest_CacheBoundaries_YieldCascadeOrderRegardlessOfPlacementOrder(t *testing.T) {
+	t.Parallel()
+
+	msg := requireMessage(t, ai.RoleUser, textPart(t, "hello")).MarkCacheBoundary()
+	seg := segment(t, "be terse").MarkCacheBoundary()
+	tool := requireTool(t, "search_flights").MarkCacheBoundary()
+
+	system, err := ai.NewSystemInstruction(seg)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	toolSet, err := ai.NewToolSet(tool)
+	if err != nil {
+		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+	}
+
+	request, err := ai.NewRequest(
+		"m", []ai.Message{msg},
+		ai.WithSystemInstruction(system),
+		ai.WithTools(toolSet),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	boundaries := request.CacheBoundaries()
+	wantRegions := []ai.CacheRegion{ai.CacheRegionTools, ai.CacheRegionSystem, ai.CacheRegionMessages}
+	if len(boundaries) != len(wantRegions) {
+		t.Fatalf("len(request.CacheBoundaries()) = %d, want %d", len(boundaries), len(wantRegions))
+	}
+	for i, want := range wantRegions {
+		if got := boundaries[i].Region(); got != want {
+			t.Errorf("request.CacheBoundaries()[%d].Region() = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// AI-11.2 item 2, S-ACB-028 — two markers in one region appear in ascending
+// ordinal order.
+func TestRequest_TwoMarkersInOneRegion_AppearInAscendingOrdinalOrder(t *testing.T) {
+	t.Parallel()
+
+	segments := []ai.Segment{
+		segment(t, "first"),
+		segment(t, "second").MarkCacheBoundary(),
+		segment(t, "third"),
+		segment(t, "fourth").MarkCacheBoundary(),
+	}
+	system, err := ai.NewSystemInstruction(segments...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+
+	request, err := ai.NewRequest(
+		"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+		ai.WithSystemInstruction(system),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	boundaries := request.CacheBoundaries()
+	if len(boundaries) != 2 {
+		t.Fatalf("len(request.CacheBoundaries()) = %d, want 2", len(boundaries))
+	}
+	if boundaries[0].Index() != 1 || boundaries[1].Index() != 3 {
+		t.Errorf("request.CacheBoundaries() indices = [%d, %d], want [1, 3] — ascending ordinal order",
+			boundaries[0].Index(), boundaries[1].Index())
+	}
+}
+
+// AI-11.2 item 2, S-ACB-029 — indexing a boundary's region accessor at its
+// ordinal yields a carrier that reports it is a cache boundary, so a
+// consumer can resolve a CacheBoundary back to the carrier it marks in one
+// step.
+func TestRequest_CacheBoundary_ResolvesBackToTheCarrierItMarks(t *testing.T) {
+	t.Parallel()
+
+	system, err := ai.NewSystemInstruction(segment(t, "first"), segment(t, "second").MarkCacheBoundary())
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	toolSet, err := ai.NewToolSet(requireTool(t, "search_flights"), requireTool(t, "book_flight").MarkCacheBoundary())
+	if err != nil {
+		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+	}
+	messages := []ai.Message{
+		requireMessage(t, ai.RoleUser, textPart(t, "one")),
+		requireMessage(t, ai.RoleUser, textPart(t, "two")).MarkCacheBoundary(),
+	}
+
+	request, err := ai.NewRequest(
+		"m", messages,
+		ai.WithSystemInstruction(system),
+		ai.WithTools(toolSet),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	for _, boundary := range request.CacheBoundaries() {
+		var isBoundary bool
+		switch boundary.Region() {
+		case ai.CacheRegionTools:
+			readTools, _ := request.Tools()
+			isBoundary = readTools.Tools()[boundary.Index()].IsCacheBoundary()
+		case ai.CacheRegionSystem:
+			readSystem, _ := request.SystemInstruction()
+			isBoundary = readSystem.Segments()[boundary.Index()].IsCacheBoundary()
+		case ai.CacheRegionMessages:
+			isBoundary = request.Messages()[boundary.Index()].IsCacheBoundary()
+		default:
+			t.Fatalf("unexpected region %v", boundary.Region())
+		}
+		if !isBoundary {
+			t.Errorf("resolving %v back to its carrier reports IsCacheBoundary() = false, want true", boundary)
+		}
+	}
+}
+
+// AI-11.2 item 2, S-ACB-030 — the same request built many times in one
+// process yields an identical marker sequence every time — no map decides
+// anything (AI-04's own rule about registries, applied to the cascade).
+func TestRequest_CacheBoundaries_AreDeterministicAcrossManyConstructions(t *testing.T) {
+	t.Parallel()
+
+	build := func() ai.Request {
+		system, err := ai.NewSystemInstruction(segment(t, "a"), segment(t, "b").MarkCacheBoundary())
+		if err != nil {
+			t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+		}
+		toolSet, err := ai.NewToolSet(requireTool(t, "search_flights").MarkCacheBoundary())
+		if err != nil {
+			t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+		}
+		request, err := ai.NewRequest(
+			"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello")).MarkCacheBoundary()},
+			ai.WithSystemInstruction(system),
+			ai.WithTools(toolSet),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		return request
+	}
+
+	first := build().CacheBoundaries()
+	for run := range 100 {
+		if again := build().CacheBoundaries(); !slices.Equal(first, again) {
+			t.Fatalf("run %d: request.CacheBoundaries() = %v, want %v on every run", run, again, first)
+		}
+	}
+}
+
+// AI-11.2 item 3, S-ACB-031 *(pin)* — the cache-region vocabulary holds
+// exactly three members whose numeric order is tools, then system, then
+// messages, and a member declared without an entry in the enumeration fails
+// this pin.
+//
+// Copied from role_test.go's TestRole_DeclaredVocabulary_IsExhaustivelyTabulated:
+// CacheRegions walks the *constant space*, not the name table, which is what
+// makes a member declared without a table entry visible to this assertion
+// rather than invisible to it.
+func TestCacheRegions_DeclaredVocabulary_IsExhaustivelyTabulatedInCascadeOrder(t *testing.T) {
+	t.Parallel()
+
+	regions := ai.CacheRegions()
+	want := []ai.CacheRegion{ai.CacheRegionTools, ai.CacheRegionSystem, ai.CacheRegionMessages}
+	if !slices.Equal(regions, want) {
+		t.Fatalf("ai.CacheRegions() = %v, want %v — tools, then system, then messages", regions, want)
+	}
+
+	if again := ai.CacheRegions(); !slices.Equal(regions, again) {
+		t.Errorf("ai.CacheRegions() = %v then %v, want a stable declaration order", regions, again)
+	}
+
+	for _, r := range regions {
+		name := r.String()
+		if name == "" || strings.HasPrefix(name, "cacheregion(") {
+			t.Errorf("CacheRegion(%d) has no table entry: String() = %q", uint8(r), name)
+		}
+		if name != strings.ToLower(name) {
+			t.Errorf("CacheRegion(%d).String() = %q, want it to be lowercase", uint8(r), name)
+		}
+	}
+}
+
+// AI-11.2 item 3, S-ACB-032 — for a request at the cap, the reported marker
+// sequence's length equals the count the cap rule enforced. True by
+// construction: Request.CacheBoundaries and the cap rule both call the same
+// requestDraft.cacheBoundaries walk (design.md § 3.2), so this is the
+// property that makes S-ACB-032 hold for every request rather than only the
+// ones this test happens to build.
+func TestRequest_AtTheCap_ReportedSequenceLengthEqualsTheEnforcedCount(t *testing.T) {
+	t.Parallel()
+
+	system, err := ai.NewSystemInstruction(markedSegments(t, ai.MaxCacheBoundaries)...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	request, err := ai.NewRequest(
+		"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+		ai.WithSystemInstruction(system),
+	)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	if got := len(request.CacheBoundaries()); got != ai.MaxCacheBoundaries {
+		t.Errorf("len(request.CacheBoundaries()) = %d, want the enforced cap %d", got, ai.MaxCacheBoundaries)
+	}
+
+	// One more marker pushes the same shape over the cap, proving the
+	// enforced count and the reported count are reading the same walk.
+	overCap, err := ai.NewSystemInstruction(markedSegments(t, ai.MaxCacheBoundaries+1)...)
+	if err != nil {
+		t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+	}
+	_, err = ai.NewRequest(
+		"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello"))},
+		ai.WithSystemInstruction(overCap),
+	)
+	requireViolation(t, err, ai.ErrOutOfRange, "cacheBoundaries")
+}
+
+// AI-11.2 item 3, S-ACB-040 — a request carrying markers renders its
+// cache-boundary count and no payload through all four verbs; a request
+// with no markers renders as before this milestone (R-ACB-010).
+func TestRequest_Formatting_NamesTheCacheBoundaryCountAndReproducesNoSecret(t *testing.T) {
+	t.Parallel()
+
+	const secret = "SECRET-SYSTEM-PROMPT"
+
+	t.Run("a request with markers names the count", func(t *testing.T) {
+		t.Parallel()
+
+		system, err := ai.NewSystemInstruction(segment(t, secret).MarkCacheBoundary(), segment(t, "b"))
+		if err != nil {
+			t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+		}
+		request, err := ai.NewRequest(
+			"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "hello")).MarkCacheBoundary()},
+			ai.WithSystemInstruction(system),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+			rendered := fmt.Sprintf(verb, request)
+			if strings.Contains(rendered, secret) {
+				t.Errorf("fmt.Sprintf(%q, request) leaked the segment text: %q", verb, rendered)
+			}
+			if !strings.Contains(rendered, "2 cache boundaries") {
+				t.Errorf("fmt.Sprintf(%q, request) = %q, want it to contain %q", verb, rendered, "2 cache boundaries")
+			}
+		}
+	})
+
+	t.Run("a request with no markers renders as before this milestone", func(t *testing.T) {
+		t.Parallel()
+
+		request, err := ai.NewRequest(
+			"m", []ai.Message{requireMessage(t, ai.RoleUser, textPart(t, "a")), requireMessage(t, ai.RoleUser, textPart(t, "b"))},
+			ai.WithTemperature(0.5),
+		)
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+
+		rendered := request.String()
+		for _, want := range []string{"request(", "model", "2 messages", "temperature"} {
+			if !strings.Contains(rendered, want) {
+				t.Errorf("request.String() = %q, want it to contain %q", rendered, want)
+			}
+		}
+		if strings.Contains(rendered, "cache boundaries") {
+			t.Errorf("request.String() = %q, want it to omit cache boundaries when none are present", rendered)
+		}
+	})
 }

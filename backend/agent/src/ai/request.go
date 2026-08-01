@@ -230,6 +230,7 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			}
 			return violationOf(draft.toolChoice.ValidateAgainst(draft.tools))
 		},
+		draft.cacheBoundaryCapRule(messages),
 		draft.boundsRule(),
 	); err != nil {
 		return Request{}, err
@@ -611,6 +612,14 @@ func (r Request) String() string {
 		b.WriteString(", toolChoice(")
 		b.WriteString(r.options.toolChoice.Mode().String())
 		b.WriteByte(')')
+	}
+	// AI-11.2's extension: name the boundary count, never a marked carrier's
+	// payload — a count is a fact about the request's shape, the same
+	// admission test every other clause here applies (R-ACB-010).
+	if count := len(r.CacheBoundaries()); count > 0 {
+		b.WriteString(", ")
+		b.WriteString(strconv.Itoa(count))
+		b.WriteString(" cache boundaries")
 	}
 	for _, name := range r.options.appliedNames() {
 		b.WriteString(", ")
