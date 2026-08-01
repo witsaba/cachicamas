@@ -46,11 +46,11 @@ Chain strategy: size-exception
 
 ## Phase 3: AI-19.2 — Category vocabulary (R-AIP-004..006)
 
-- [ ] 3.1 RED: S-AIP-010..012 nine categories construct and are mutually distinct; S-AIP-015..016 enumeration stable order from external package; internal S-AIP-013..014 zero-value/out-of-range → `ErrNotInVocabulary`, no panic.
-- [ ] 3.2 GREEN `provider_failure.go`: `String()` (`[failureCategoryLimit]string` array), `Validate(at ...Step) error`, `FailureCategories() []FailureCategory`.
-- [ ] 3.3 RED S-AIP-017..021: unknown-category raw label preserved across one wrap; over-long/control-char label dropped whole (D6); no cross-vendor mapping function exists; empty label on a modelled category still constructs.
-- [ ] 3.4 GREEN: `RawLabel()` field + accessor with 64-byte drop-whole bound.
-- [ ] 3.5 REFACTOR `provider_failure_internal_test.go`: exhaustiveness pins — name array length matches `failureCategoryLimit`, every category has a sentinel; record red/green.
+- [x] 3.1 RED: S-AIP-010..012 nine categories construct and are mutually distinct; S-AIP-015..016 enumeration stable order from external package; internal S-AIP-013..014 zero-value/out-of-range → `ErrNotInVocabulary`, no panic.
+- [x] 3.2 GREEN `provider_failure.go`: `String()` (`[failureCategoryLimit]string` array), `Validate(at ...Step) error`, `FailureCategories() []FailureCategory`; also wired the category rule into `Failure.validate` (`newFailure`/`PreStreamFailure`/`MidStreamFailure` now reject an invalid category with `ErrNotInVocabulary` at `category` — proven with an added test, not silently added).
+- [x] 3.3 RED S-AIP-017..021: unknown-category raw label preserved across one wrap; over-long/control-char label dropped whole (D6); no cross-vendor mapping function exists (proven by an AST scan for any top-level `func(string) FailureCategory`, mirroring `NormalizeFinishReason`'s shape); empty label on a modelled category still constructs.
+- [x] 3.4 GREEN: `RawLabel()` field + accessor with 64-byte drop-whole bound (`sanitizeOpaqueField`, shared with `RequestID` in Phase 4).
+- [x] 3.5 REFACTOR `provider_failure_internal_test.go`: exhaustiveness pin for the name array (length matches `failureCategoryLimit`, every member non-empty) — done. The "every category has a sentinel" half is deferred to Phase 6 task 6.4 (sentinels don't exist until then; same Go-compile-order reasoning as the Phase 2/3 `validate()` staging, see apply-progress.md deviation 3). `go test -race ./src/ai/...` green; gofmt/vet clean.
 
 ## Phase 4: AI-19.3 — Retry hints and safe metadata (R-AIP-007..009)
 

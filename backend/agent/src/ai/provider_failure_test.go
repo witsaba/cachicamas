@@ -13,7 +13,12 @@ package ai_test
 
 import (
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -212,6 +217,267 @@ func TestErrorEvent_TerminalExclusivity_NeverBothCompletionAndError(t *testing.T
 			t.Fatal("an error event and a completion event report the same Kind(), want them distinct")
 		}
 	})
+}
+
+// theFailureCategoryVocabulary is the nine members of R-AIP-004, named by
+// hand — finish_reason_test.go's theVocabulary precedent: a list the
+// package supplied would agree with itself no matter what was added to it.
+var theFailureCategoryVocabulary = []ai.FailureCategory{
+	ai.FailureCategoryAuthentication,
+	ai.FailureCategoryAuthorization,
+	ai.FailureCategoryRateLimit,
+	ai.FailureCategoryUnavailable,
+	ai.FailureCategoryTimeout,
+	ai.FailureCategoryCancellation,
+	ai.FailureCategoryMalformedResponse,
+	ai.FailureCategoryUnsupportedCapability,
+	ai.FailureCategoryUnknown,
+}
+
+// R-AIP-004 — the vocabulary is closed and each of the nine charter members
+// is constructible and mutually distinct.
+func TestFailureCategory_TheVocabulary_IsClosedAndEachValueIsConstructible(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every member validates and has a non-empty stable string form (S-AIP-010)", func(t *testing.T) {
+		t.Parallel()
+
+		for _, c := range theFailureCategoryVocabulary {
+			if err := c.Validate(ai.At("category")); err != nil {
+				t.Errorf("FailureCategory(%d).Validate() = %v, want <nil>", c, err)
+			}
+			if c.String() == "" {
+				t.Errorf("FailureCategory(%d).String() = %q, want a non-empty stable string form", c, "")
+			}
+		}
+	})
+
+	t.Run("cancellation is a member — required, not optional (S-AIP-011)", func(t *testing.T) {
+		t.Parallel()
+
+		if err := ai.FailureCategoryCancellation.Validate(); err != nil {
+			t.Errorf("ai.FailureCategoryCancellation.Validate() = %v, want <nil> — R-AIP-004 requires cancellation, not as an optional extra", err)
+		}
+	})
+
+	t.Run("the nine values and their string forms are pairwise distinct (S-AIP-012)", func(t *testing.T) {
+		t.Parallel()
+
+		seenValue := make(map[ai.FailureCategory]bool, len(theFailureCategoryVocabulary))
+		seenName := make(map[string]bool, len(theFailureCategoryVocabulary))
+		for _, c := range theFailureCategoryVocabulary {
+			if seenValue[c] {
+				t.Errorf("FailureCategory(%d) appears twice in the vocabulary", c)
+			}
+			seenValue[c] = true
+
+			name := c.String()
+			if seenName[name] {
+				t.Errorf("string form %q is shared by two categories", name)
+			}
+			seenName[name] = true
+		}
+		if len(seenValue) != 9 {
+			t.Errorf("the vocabulary holds %d distinct values, want 9 (the charter minimum, R-AIP-004)", len(seenValue))
+		}
+	})
+}
+
+// R-AIP-005 — the vocabulary is closed and enumerable in stable order from
+// another package (groundwork for AI-23.4).
+func TestFailureCategories_Enumeration_IsStableOrderFromAnotherPackage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("FailureCategories lists exactly the nine charter members, in declaration order (S-AIP-015)", func(t *testing.T) {
+		t.Parallel()
+
+		got := ai.FailureCategories()
+		if len(got) != len(theFailureCategoryVocabulary) {
+			t.Fatalf("ai.FailureCategories() = %v (%d categories), want %v (%d categories)",
+				got, len(got), theFailureCategoryVocabulary, len(theFailureCategoryVocabulary))
+		}
+		for i, want := range theFailureCategoryVocabulary {
+			if got[i] != want {
+				t.Errorf("ai.FailureCategories()[%d] = %v, want %v", i, got[i], want)
+			}
+		}
+	})
+
+	t.Run("mutating a returned slice does not corrupt a later call (S-AIP-016)", func(t *testing.T) {
+		t.Parallel()
+
+		first := ai.FailureCategories()
+		if len(first) == 0 {
+			t.Fatal("ai.FailureCategories() returned empty, want the nine charter members")
+		}
+		original := first[0]
+		first[0] = ai.FailureCategoryUnknown
+
+		second := ai.FailureCategories()
+		if second[0] != original {
+			t.Errorf("mutating one call's result changed a later call's result: second[0] = %v, want %v — "+
+				"ai.FailureCategories must return a fresh slice each call, never a shared package vocabulary a caller can rewrite",
+				second[0], original)
+		}
+	})
+}
+
+// R-AIP-004/005 — construction itself enforces the category vocabulary
+// (design.md's Go-spellings section: "Construction validates via
+// FirstFailure: category Validate(At(\"category\"))"), so a caller cannot
+// build a *Failure that PreStreamFailure/MidStreamFailure themselves would
+// reject.
+func TestNewFailure_InvalidCategory_FailsWithErrNotInVocabularyAtCategory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("PreStreamFailure with the zero-value category is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := ai.PreStreamFailure(ai.FailureReport{})
+		if err == nil {
+			t.Fatal("ai.PreStreamFailure(zero-value category) = nil error, want a rejection")
+		}
+		if !errors.Is(err, ai.ErrNotInVocabulary) {
+			t.Errorf("errors.Is(err, ai.ErrNotInVocabulary) = false, want true; err = %v", err)
+		}
+		var violation *ai.Violation
+		if !errors.As(err, &violation) {
+			t.Fatalf("errors.As(err, &violation) = false, want true; err = %v", err)
+		}
+		if got, want := violation.Path().String(), "category"; got != want {
+			t.Errorf("violation position = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("MidStreamFailure with an out-of-range category is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategory(200)}, false)
+		if err == nil {
+			t.Fatal("ai.MidStreamFailure(out-of-range category) = nil error, want a rejection")
+		}
+		if !errors.Is(err, ai.ErrNotInVocabulary) {
+			t.Errorf("errors.Is(err, ai.ErrNotInVocabulary) = false, want true; err = %v", err)
+		}
+	})
+}
+
+// R-AIP-006 — an unmodelled failure becomes unknown with the raw provider
+// label preserved, bounded and sanitized; no cross-vendor normalizer ships
+// in this package.
+func TestFailure_RawLabel_UnknownCategoryPreservesTheProviderLabel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the raw label survives construction and reads back byte-exact (S-AIP-017)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{
+			Category: ai.FailureCategoryUnknown,
+			RawLabel: "vendor_weird_code_123",
+		})
+		if got, want := f.RawLabel(), "vendor_weird_code_123"; got != want {
+			t.Errorf("f.RawLabel() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("the raw label survives at least one wrap (S-AIP-017)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{
+			Category: ai.FailureCategoryUnknown,
+			RawLabel: "provider_specific_snowflake",
+		})
+		wrapped := fmt.Errorf("adapter: %w", f)
+
+		var got *ai.Failure
+		if !errors.As(wrapped, &got) {
+			t.Fatalf("errors.As(wrapped, &got) = false, want true; wrapped = %v", wrapped)
+		}
+		if got.RawLabel() != "provider_specific_snowflake" {
+			t.Errorf("got.RawLabel() = %q, want %q, after one wrap", got.RawLabel(), "provider_specific_snowflake")
+		}
+	})
+
+	t.Run("an over-long raw label is dropped whole, not truncated, and construction still succeeds (S-AIP-018/019)", func(t *testing.T) {
+		t.Parallel()
+
+		over := strings.Repeat("x", 65) // one byte over the 64-byte bound
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: over})
+		if got := f.RawLabel(); got != "" {
+			t.Errorf("f.RawLabel() = %q, want empty — an over-long label is dropped whole, never truncated (design.md D6)", got)
+		}
+	})
+
+	t.Run("a 64-byte raw label (exactly at the bound) survives (S-AIP-018/019)", func(t *testing.T) {
+		t.Parallel()
+
+		exact := strings.Repeat("y", 64)
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: exact})
+		if got := f.RawLabel(); got != exact {
+			t.Errorf("f.RawLabel() = %q, want the 64-byte label unchanged — the bound is inclusive", got)
+		}
+	})
+
+	t.Run("a control-character-bearing raw label is dropped whole, and construction still succeeds (S-AIP-018/019)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: "bad\x00label"})
+		if got := f.RawLabel(); got != "" {
+			t.Errorf("f.RawLabel() = %q, want empty — a control-character-bearing label is dropped whole", got)
+		}
+	})
+
+	t.Run("an empty label on a modelled, non-unknown category still constructs (S-AIP-021)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryTimeout})
+		if got := f.RawLabel(); got != "" {
+			t.Errorf("f.RawLabel() = %q, want empty", got)
+		}
+	})
+
+	t.Run("no cross-vendor label-to-category normalizer exists — unlike NormalizeFinishReason, this milestone ships none (S-AIP-020)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "provider_failure.go", nil, 0)
+		if err != nil {
+			t.Fatalf("parsing provider_failure.go: %v", err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			fn, ok := n.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil { // methods are not normalizer candidates
+				return true
+			}
+			if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 ||
+				fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+				return true
+			}
+			if identNamed(fn.Type.Params.List[0].Type, "string") && identNamed(fn.Type.Results.List[0].Type, "FailureCategory") {
+				t.Errorf("provider_failure.go declares %s(string) FailureCategory — R-AIP-006 forbids a "+
+					"cross-vendor label-to-category normalizer in this package; category assignment for a "+
+					"real vendor is AI-32's, not Layer 1's", fn.Name.Name)
+			}
+			return true
+		})
+	})
+}
+
+// identNamed reports whether expr is a bare identifier spelled name.
+func identNamed(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+// mustPreStreamFailureReport constructs a pre-stream failure from a full
+// report or fails the test.
+func mustPreStreamFailureReport(t *testing.T, report ai.FailureReport) *ai.Failure {
+	t.Helper()
+	f, err := ai.PreStreamFailure(report)
+	if err != nil {
+		t.Fatalf("ai.PreStreamFailure(%+v) returned %v, want no failure", report, err)
+	}
+	return f
 }
 
 // mustPreStreamFailure constructs a pre-stream failure of the given category

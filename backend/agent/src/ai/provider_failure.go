@@ -98,6 +98,70 @@ const (
 	failureCategoryLimit
 )
 
+// failureCategoryNames is the stable string form of each category.
+//
+// An array sized by the bound, not a map — finish_reason.go's
+// finishReasonNames idiom: the size follows the vocabulary automatically, so
+// an appended constant gets an empty entry and renders as the placeholder
+// instead of silently inheriting a neighbour's name.
+var failureCategoryNames = [failureCategoryLimit]string{
+	FailureCategoryAuthentication:        "authentication",
+	FailureCategoryAuthorization:         "authorization",
+	FailureCategoryRateLimit:             "rate_limit",
+	FailureCategoryUnavailable:           "unavailable",
+	FailureCategoryTimeout:               "timeout",
+	FailureCategoryCancellation:          "cancellation",
+	FailureCategoryMalformedResponse:     "malformed_response",
+	FailureCategoryUnsupportedCapability: "unsupported_capability",
+	FailureCategoryUnknown:               "unknown",
+}
+
+// unnamedFailureCategory renders a value that is not in the vocabulary —
+// finish_reason.go's unnamedFinishReason posture: a placeholder, and
+// deliberately not "unknown", since "unknown" (FailureCategoryUnknown) is
+// itself a recorded, valid member.
+const unnamedFailureCategory = "invalid"
+
+// String returns the stable string form of the category.
+//
+// A member renders as its registered name; a value outside the vocabulary —
+// including the zero value — renders as the fixed placeholder and never
+// panics.
+func (c FailureCategory) String() string {
+	if c == 0 || c >= failureCategoryLimit || failureCategoryNames[c] == "" {
+		return unnamedFailureCategory
+	}
+	return failureCategoryNames[c]
+}
+
+// Validate reports whether the category is a member of the closed
+// vocabulary, positioned at the given path (R-AIP-005).
+//
+// A value outside the vocabulary — including the zero value — is a
+// caller-contract failure of class [ErrNotInVocabulary].
+func (c FailureCategory) Validate(at ...Step) error {
+	return FirstFailure(func() *Violation {
+		if c == 0 || c >= failureCategoryLimit {
+			return Invalid(ErrNotInVocabulary, at...)
+		}
+		return nil
+	})
+}
+
+// FailureCategories returns the nine-member category vocabulary, in
+// declaration order (R-AIP-005, groundwork for AI-23.4's enumeration).
+//
+// The result is a fresh slice on every call — event.go's EventKinds idiom:
+// a package-level variable would be a closed vocabulary any consumer could
+// rewrite.
+func FailureCategories() []FailureCategory {
+	out := make([]FailureCategory, 0, int(failureCategoryLimit)-1)
+	for c := FailureCategory(1); c < failureCategoryLimit; c++ {
+		out = append(out, c)
+	}
+	return out
+}
+
 // DeliveryPath is which carrier handed a [Failure] over (V-FAIL-11,
 // V-FAIL-12): the boundary is carrier handover per AI-02.1, not the first
 // event.
@@ -260,16 +324,53 @@ func (f *Failure) Category() FailureCategory {
 	return f.category
 }
 
+// RawLabel returns the provider's own, unmodelled failure label (R-AIP-006),
+// or empty when none was reported or it was dropped whole by
+// [sanitizeOpaqueField]'s bound. A nil *Failure reports empty rather than
+// panicking (NFR-AIP-B).
+func (f *Failure) RawLabel() string {
+	if f == nil {
+		return ""
+	}
+	return f.rawLabel
+}
+
 // validate reports the payload's first broken rule at the given position, or
-// nil.
+// nil (R-AIP-004/005: category is a member of the closed vocabulary).
 //
-// It carries no rule of its own at this milestone's envelope stage
-// (R-AIP-001 … R-AIP-003) — export_test.go's WitnessPayload precedent: "a
-// rule is added once a test needs one to fail". Phase 3 adds the
-// category-vocabulary rule (R-AIP-004/005); Phase 4 adds the status-class
-// bound (R-AIP-009's bounded safe metadata); NFR-AIP-C is re-verified once
-// every rule this method will ever carry has landed.
-func (f *Failure) validate(_ Path) *Violation { return nil }
+// Phase 4 adds the status-class bound (R-AIP-009's bounded safe metadata);
+// NFR-AIP-C is re-verified once every rule this method will ever carry has
+// landed.
+func (f *Failure) validate(at Path) *Violation {
+	return firstViolation(
+		func() *Violation { return violationOf(f.category.Validate(under(at, At("category"))...)) },
+	)
+}
+
+// maxOpaqueFieldLen bounds an opaque, provider-supplied field ([RawLabel],
+// [RequestID]): 64 bytes (design.md resolution 2).
+const maxOpaqueFieldLen = 64
+
+// sanitizeOpaqueField applies the drop-whole bound to an opaque,
+// provider-supplied field.
+//
+// A value over [maxOpaqueFieldLen] bytes, or carrying an ASCII control
+// character, is dropped whole — the accessor reports empty — rather than
+// truncated: validation.go's structuralName states the same reasoning for
+// the same shape of choice, "a prefix of a secret is still a secret".
+// Construction never fails because of this filter; only the accessor's
+// answer changes (design.md resolution 2, S-AIP-018/019/021).
+func sanitizeOpaqueField(s string) string {
+	if s == "" || len(s) > maxOpaqueFieldLen {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return ""
+		}
+	}
+	return s
+}
 
 // newFailure builds a *Failure from a report, a delivery path and a
 // partial-output fact — the one place both [PreStreamFailure] and
@@ -281,9 +382,9 @@ func newFailure(r FailureReport, delivery DeliveryPath, partialOutput bool) (*Fa
 		category:      r.Category,
 		retryable:     r.Retryable,
 		retryAfter:    r.RetryAfter,
-		rawLabel:      r.RawLabel,
+		rawLabel:      sanitizeOpaqueField(r.RawLabel),
 		statusClass:   r.StatusClass,
-		requestID:     r.RequestID,
+		requestID:     sanitizeOpaqueField(r.RequestID),
 		cause:         r.Cause,
 		delivery:      delivery,
 		partialOutput: partialOutput,
