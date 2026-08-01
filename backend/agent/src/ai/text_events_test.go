@@ -656,3 +656,151 @@ func fieldDoc(file *ast.File, structName, fieldName string) string {
 	}
 	return ""
 }
+
+// R-ATE-010 — a text block with zero deltas is legal and reconstructs to
+// empty; it is not confused with an unterminated block.
+func TestTextBlock_ZeroDeltas_IsLegalAndReconstructsToEmpty(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a start immediately followed by its end validates with no violation (S-ATE-024)", func(t *testing.T) {
+		t.Parallel()
+
+		start := mustTextBlockStart(t, 1)
+		end := mustTextBlockEnd(t, 1)
+
+		var s ai.Stamper
+		report := ai.CheckStream([]ai.Event{s.Stamp(start), s.Stamp(end)})
+		if got := report.Violation(); got != nil {
+			t.Errorf("report.Violation() = %v, want nil — a zero-delta block is legal", got)
+		}
+	})
+
+	t.Run("a test-local concatenator reconstructs it as empty, with no error from the empty join (S-ATE-025)", func(t *testing.T) {
+		t.Parallel()
+
+		if got := concatenateTextDeltas(nil); got != "" {
+			t.Errorf("concatenateTextDeltas(nil) = %q, want empty", got)
+		}
+		// Also from a real (empty) delta slice extracted between a start and
+		// an end carrying no delta in between.
+		start := mustTextBlockStart(t, 1)
+		end := mustTextBlockEnd(t, 1)
+		if got := concatenateTextDeltas([]ai.Event{start, end}); got != "" {
+			t.Errorf("concatenateTextDeltas([start, end]) = %q, want empty — neither event is a delta", got)
+		}
+	})
+
+	t.Run("a zero-delta block and a multi-delta block both close normally, and the zero-delta block is not mistaken for unterminated (S-ATE-026)", func(t *testing.T) {
+		t.Parallel()
+
+		zeroDeltaStart := mustTextBlockStart(t, 1)
+		zeroDeltaEnd := mustTextBlockEnd(t, 1)
+		multiStart := mustTextBlockStart(t, 2)
+		multiDelta := mustTextDelta(t, 2, "content")
+		multiEnd := mustTextBlockEnd(t, 2)
+
+		var s ai.Stamper
+		events := []ai.Event{
+			s.Stamp(zeroDeltaStart), s.Stamp(multiStart), s.Stamp(multiDelta),
+			s.Stamp(zeroDeltaEnd), s.Stamp(multiEnd),
+		}
+		report := ai.CheckStream(events)
+		if got := report.Violation(); got != nil {
+			t.Errorf("report.Violation() = %v, want nil — neither block is unterminated", got)
+		}
+	})
+}
+
+// R-ATE-011 — Layer 1 ships no public accumulator, transcript rebuilder or
+// reducer of a block's deltas; byte-exactness is proven by a test-local
+// concatenator instead.
+func TestTextEvents_ExportedSurface_ShipsNoAccumulatorOrReconstructor(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the exported declarations of text_events.go are exactly the constructors, accessors and getters design.md documents (S-ATE-027)", func(t *testing.T) {
+		t.Parallel()
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "text_events.go", nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parsing text_events.go: %v", err)
+		}
+
+		got := exportedTopLevelNames(file)
+		sort.Strings(got)
+
+		want := []string{
+			// constructors
+			"NewTextBlockEnd", "NewTextBlockStart", "NewTextDelta",
+			// types
+			"TextBlockEnd", "TextBlockStart", "TextDelta",
+			// Event accessors
+			"Event.TextBlockEnd", "Event.TextBlockStart", "Event.TextDelta",
+			// field getters and diagnostic rendering
+			"TextBlockEnd.Block", "TextBlockEnd.GoString", "TextBlockEnd.String",
+			"TextBlockStart.Block", "TextBlockStart.GoString", "TextBlockStart.String",
+			"TextDelta.Block", "TextDelta.Delta", "TextDelta.GoString", "TextDelta.String",
+		}
+		sort.Strings(want)
+
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("text_events.go's exported declarations = %v, want exactly %v — none of them accumulates, joins or reconstructs a block's deltas", got, want)
+		}
+	})
+
+	t.Run("the concatenator used to prove byte-exactness is a package-level unexported func in the test package, not exported from the contract (S-ATE-028)", func(t *testing.T) {
+		t.Parallel()
+
+		// concatenateTextDeltas is declared in this ai_test package file, and
+		// the preceding subtest's exact-surface assertion over text_events.go
+		// structurally proves no exported counterpart exists there. This
+		// assertion documents where it does live: an unexported func, only
+		// reachable from within ai_test.
+		if got := reflect.TypeOf(concatenateTextDeltas).Kind(); got != reflect.Func {
+			t.Fatalf("concatenateTextDeltas is a %v, want a func", got)
+		}
+	})
+}
+
+// exportedTopLevelNames returns every exported top-level function, method and
+// type declared in file, methods qualified as "Receiver.Method" — the
+// complete exported surface a reviewer would enumerate to look for an
+// accumulator (S-ATE-027).
+func exportedTopLevelNames(file *ast.File) []string {
+	var names []string
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if !d.Name.IsExported() {
+				continue
+			}
+			if d.Recv == nil || len(d.Recv.List) == 0 {
+				names = append(names, d.Name.Name)
+				continue
+			}
+			names = append(names, receiverTypeName(d.Recv.List[0].Type)+"."+d.Name.Name)
+		case *ast.GenDecl:
+			if d.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range d.Specs {
+				if typed, ok := spec.(*ast.TypeSpec); ok && typed.Name.IsExported() {
+					names = append(names, typed.Name.Name)
+				}
+			}
+		}
+	}
+	return names
+}
+
+// receiverTypeName returns the bare type name of a method receiver
+// expression, stripping a pointer star when present.
+func receiverTypeName(expr ast.Expr) string {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return "?"
+}

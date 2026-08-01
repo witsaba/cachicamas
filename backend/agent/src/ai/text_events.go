@@ -23,7 +23,19 @@
 // (R-ATE-005). This file exports no accumulator, transcript rebuilder or
 // reducer of a block's deltas — doc 0001 § 4.3 invariant 1 reserves that for
 // the consumer (R-ATE-011); text_events_test.go proves byte-exactness with a
-// test-local concatenator instead.
+// test-local concatenator instead, and separately proves this file's entire
+// exported surface is exactly its constructors, typed accessors and field
+// getters — nothing that reduces a block's deltas to its complete text.
+//
+// # A block with no deltas is not a special case
+//
+// Nothing here requires a delta between a text block's start and its end
+// (R-ATE-010): AI-14's CheckStream already accepts a start immediately
+// followed by its matching end, and a consumer reconstructs it to the empty
+// byte sequence by the same rule that reconstructs any other block — joining
+// zero fragments. No constructor, validator or accessor in this file treats
+// that shape as an error, a truncation, or as distinguishable from a block
+// that happened to carry content.
 
 package ai
 
