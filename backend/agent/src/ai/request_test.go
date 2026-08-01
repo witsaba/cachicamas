@@ -446,3 +446,139 @@ func TestRequest_Formatting_NamesThePresentRegionsAndTheirElementCounts(t *testi
 		t.Errorf("fmt.Sprintf(\"%%#v\", request) = %q, want it to match String() = %q", got, rendered)
 	}
 }
+
+// --- AI-10.3 — messages, tools and tool choice on the request ----------------
+
+// requireMessage builds a message of a given role, failing the test rather than
+// the request when a dependency of this milestone misbehaves.
+//
+// Every AI-10.3 test needs messages of all three roles carrying parts of all
+// four kinds, and a builder that reported a dependency's failure as this
+// milestone's would hide the one thing these tests are about.
+func requireMessage(t *testing.T, role ai.Role, parts ...ai.Part) ai.Message {
+	t.Helper()
+
+	message, err := ai.NewMessage(role, parts...)
+	if err != nil {
+		t.Fatalf("ai.NewMessage(%v) returned %v, want no failure", role, err)
+	}
+	return message
+}
+
+// The four part builders these tests compose messages from.
+//
+// One per kind rather than one generic unwrapper, because Go will not forward a
+// two-result call into a helper that also takes *testing.T, and because a
+// builder named for its kind is what makes a role/kind table row readable as
+// one line.
+func textPart(t *testing.T, text string) ai.Part {
+	t.Helper()
+
+	part, err := ai.NewText(text)
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want no failure", err)
+	}
+	return part
+}
+
+func reasoningPart(t *testing.T, text string) ai.Part {
+	t.Helper()
+
+	part, err := ai.NewReasoning(text, nil)
+	if err != nil {
+		t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+	}
+	return part
+}
+
+func toolCallPart(t *testing.T, id, name string) ai.Part {
+	t.Helper()
+
+	part, err := ai.NewToolCall(id, name, []byte(`{"q":"go"}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCall returned %v, want no failure", err)
+	}
+	return part
+}
+
+// partKinds projects a message's content onto the kinds it carries, in order,
+// which is the form an order assertion is readable in.
+func partKinds(content []ai.Part) []ai.PartKind {
+	kinds := make([]ai.PartKind, 0, len(content))
+	for _, part := range content {
+		kinds = append(kinds, part.Kind())
+	}
+	return kinds
+}
+
+// AI-10.3 item 1 *(pin)* — message order and intra-message content order are
+// preserved exactly through construction and readback (R-AMR-008).
+//
+// S-AMR-033, S-AMR-034 and S-AMR-035 in one test, because they are three
+// statements about one property and splitting them would let two pass while the
+// property was broken.
+//
+// Green from birth: AI-10.1 copied the message sequence and AI-05 copies a
+// message's content, so the property is already there. It is pinned rather than
+// assumed because *every* cross-region rule AI-10.3 lands reads content by
+// index — the duplicate rule reports "the second occurrence", the correlation
+// rule scans "the whole request in order" — and a position by index is
+// meaningless the moment order is not preserved. Both scratch violations are
+// recorded biting in tasks.md.
+func TestRequest_MessageAndContentOrder_ArePreservedThroughConstructionAndReadback(t *testing.T) {
+	t.Parallel()
+
+	// S-AMR-034 — one assistant message carrying three kinds in a known order.
+	// Assistant, because design.md § 5.1 is the only role that may carry all
+	// three, and a test that used a forbidden cell here would start failing on
+	// item 3 for a reason that had nothing to do with order.
+	mixed := requireMessage(t, ai.RoleAssistant,
+		textPart(t, "first"),
+		reasoningPart(t, "second"),
+		toolCallPart(t, "call-1", "search"),
+	)
+
+	// S-AMR-033 — five messages in a known order, distinguishable by their text.
+	messages := []ai.Message{
+		userTextMessage(t, "one"),
+		mixed,
+		userTextMessage(t, "three"),
+		userTextMessage(t, "four"),
+		userTextMessage(t, "five"),
+	}
+
+	request, err := ai.NewRequest("m", messages)
+	if err != nil {
+		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+	}
+
+	read := request.Messages()
+	if len(read) != len(messages) {
+		t.Fatalf("request.Messages() returned %d messages, want %d", len(read), len(messages))
+	}
+	for i := range messages {
+		if read[i].ID() != messages[i].ID() {
+			t.Errorf("request.Messages()[%d] is not the message built at position %d — "+
+				"the sequence was reordered between construction and readback", i, i)
+		}
+	}
+
+	wantKinds := []ai.PartKind{ai.PartKindText, ai.PartKindReasoning, ai.PartKindToolCall}
+	if got := partKinds(read[1].Content()); !slices.Equal(got, wantKinds) {
+		t.Errorf("the second message's content kinds = %v, want %v", got, wantKinds)
+	}
+	if text, ok := read[1].Content()[0].Text(); !ok || text != "first" {
+		t.Errorf("the second message's first part = (%q, %t), want (%q, true)", text, ok, "first")
+	}
+
+	// S-AMR-035 — the reader holds a copy. Reordering what it received must not
+	// reorder the request, and the second reader must not observe the first.
+	slices.Reverse(read)
+	reread := request.Messages()
+	for i := range messages {
+		if reread[i].ID() != messages[i].ID() {
+			t.Errorf("after the reader reversed the slice it was handed, request.Messages()[%d] "+
+				"is not the message built at position %d — the request handed out its own storage", i, i)
+		}
+	}
+}

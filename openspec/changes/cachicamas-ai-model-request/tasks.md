@@ -476,7 +476,7 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 **Spec:** `R-AMR-008` … `R-AMR-012`. **Design:** §§ 5, 6, 7, and § 4 rows 6–9.
 
 - [x] ~~**Item 0** *(prerequisite, do this first)* — Append `ErrMisplaced`~~ to `validation.go`'s class set **and** to `ruleClasses`, **and** update `validation_registry_internal_test.go` and `validation_test.go` in the **same commit**. The internal guard fails and says so if only one mirror moves. `design.md` § 5.3 carries the doc comment to write.
-- [ ] **Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.
+- [x] ~~**Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.~~
 - [ ] **Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**
 - [ ] **Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.
 - [ ] **Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.
@@ -519,6 +519,51 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.223s
 ```
 
 **Refactor.** None. The GoDoc follows AI-04's `ErrDuplicate` precedent — a citable case plus the difference from the nearest neighbour — and the neighbour named is `ErrNotInVocabulary`: a value outside a vocabulary is not a member and must be *renamed*; a misplaced value **is** a member, valid against every rule its own type carries, and must be *moved or dropped*.
+
+### AI-10.3 item 1 *(pin)* — message and content order
+
+**Green from birth.** AI-10.1 copies the message sequence and AI-05 copies a message's content, so `S-AMR-033`, `S-AMR-034` and `S-AMR-035` all held before the test was written. Recorded as a pin rather than a red, in `validation_test.go`'s established idiom.
+
+It is pinned rather than assumed because **every cross-region rule this leaf lands reports by index** — item 4's duplicate rule reports "the second occurrence", its correlation rule scans "the whole request in order" — and a position by index says nothing the moment order is not preserved. The pin is the precondition of the three items after it.
+
+**Closed by showing it bite**, doc 0002's rule for a check that is green on arrival. Scratch violation A, `Messages()` returning `r.messages` instead of a clone:
+
+```
+--- FAIL: TestRequest_MessageAndContentOrder_ArePreservedThroughConstructionAndReadback (0.00s)
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[0] is not the message built at position 0 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[1] is not the message built at position 1 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[3] is not the message built at position 3 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[4] is not the message built at position 4 — the request handed out its own storage
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.352s
+FAIL
+```
+
+Scratch violation B, `Messages()` returning a reversed clone — order, content order and the copy pin all bite:
+
+```
+--- FAIL: TestRequest_MessageAndContentOrder_ArePreservedThroughConstructionAndReadback (0.00s)
+    request_test.go:571: request.Messages()[0] is not the message built at position 0 — the sequence was reordered between construction and readback
+    request_test.go:571: request.Messages()[1] is not the message built at position 1 — the sequence was reordered between construction and readback
+    request_test.go:571: request.Messages()[3] is not the message built at position 3 — the sequence was reordered between construction and readback
+    request_test.go:571: request.Messages()[4] is not the message built at position 4 — the sequence was reordered between construction and readback
+    request_test.go:578: the second message's content kinds = [text], want [text reasoning tool_call]
+    request_test.go:581: the second message's first part = ("four", true), want ("first", true)
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[0] is not the message built at position 0 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[1] is not the message built at position 1 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[3] is not the message built at position 3 — the request handed out its own storage
+    request_test.go:590: after the reader reversed the slice it was handed, request.Messages()[4] is not the message built at position 4 — the request handed out its own storage
+FAIL
+```
+
+**Green**, with `request.go` restored:
+
+```
+ok  	github.com/cachicamas/backend/agent/src/agenttest	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai	2.141s
+```
+
+**Refactor.** The mixed-kind message is built with `RoleAssistant`, which `design.md` § 5.1 makes the only role permitted to carry text, reasoning and a tool call at once. Using a forbidden cell here would have made an order test start failing on item 3 for a reason that had nothing to do with order. No production code changed in this item.
 
 ---
 
