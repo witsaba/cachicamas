@@ -12,6 +12,7 @@ package ai_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -918,6 +919,289 @@ func TestReasoningPart_Equality_ComparesPayloadsWithoutPanicking(t *testing.T) {
 			t.Errorf("a part with no token equals one with an empty token — equality collapsed the distinction")
 		}
 	})
+}
+
+// AI-07.4 item 1 — a redacted reasoning part replays its payload verbatim, and
+// is distinguishable from a part that merely has no text.
+//
+// At least one provider ships encrypted redacted blocks that must be returned
+// exactly as they arrived. "Redacted" and "this provider emitted no reasoning
+// text" are two facts, not one: the first says a plaintext exists and was
+// withheld, the second says none was produced. Collapsing them loses the only
+// information an adapter has about what it is holding.
+func TestReasoning_RedactedVariant_ReplaysItsPayloadVerbatim(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the opaque payload survives a message trip byte for byte", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range opaqueTokens() {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				want := bytes.Clone(tc.token)
+
+				part, err := ai.NewRedactedReasoning(tc.token)
+				if err != nil {
+					t.Fatalf("ai.NewRedactedReasoning returned %v, want no failure", err)
+				}
+				msg, err := ai.NewMessage(ai.RoleAssistant, part)
+				if err != nil {
+					t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+				}
+
+				reasoning, ok := msg.Content()[0].Reasoning()
+				if !ok {
+					t.Fatalf("part.Reasoning() reported no reasoning")
+				}
+				if got := reasoning.State(); got != ai.ReasoningStateRedacted {
+					t.Errorf("reasoning.State() = %v, want %v", got, ai.ReasoningStateRedacted)
+				}
+				if reasoning.Text() != "" {
+					t.Errorf("reasoning.Text() = %q on a redacted part, want the empty string", reasoning.Text())
+				}
+
+				got, present := reasoning.Token()
+				if !present {
+					t.Fatalf("reasoning.Token() reported no payload on a redacted part")
+				}
+				if !bytes.Equal(got, want) {
+					t.Errorf("the redacted payload came back %x, want %x — an encrypted block must replay verbatim", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("redacted is distinguishable from a part that merely has no text", func(t *testing.T) {
+		t.Parallel()
+
+		payload := []byte("\x00the same bytes, two different facts\xff")
+
+		redacted, err := ai.NewRedactedReasoning(payload)
+		if err != nil {
+			t.Fatalf("ai.NewRedactedReasoning returned %v, want no failure", err)
+		}
+		tokenOnly, err := ai.NewReasoning("", payload)
+		if err != nil {
+			t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+		}
+
+		redactedReasoning, _ := redacted.Reasoning()
+		tokenOnlyReasoning, _ := tokenOnly.Reasoning()
+
+		if redactedReasoning.State() == tokenOnlyReasoning.State() {
+			t.Fatalf("both parts report state %v — \"the provider withheld the plaintext\" and \"the provider emitted no reasoning text\" collapsed into one",
+				redactedReasoning.State())
+		}
+		if redactedReasoning.State() != ai.ReasoningStateRedacted {
+			t.Errorf("the redacted part reports state %v, want %v", redactedReasoning.State(), ai.ReasoningStateRedacted)
+		}
+		if tokenOnlyReasoning.State() != ai.ReasoningStateTokenOnly {
+			t.Errorf("the token-only part reports state %v, want %v", tokenOnlyReasoning.State(), ai.ReasoningStateTokenOnly)
+		}
+
+		// Both carry the identical bytes, so nothing above passed because the
+		// payloads happened to differ.
+		redactedToken, _ := redactedReasoning.Token()
+		tokenOnlyToken, _ := tokenOnlyReasoning.Token()
+		if !bytes.Equal(redactedToken, tokenOnlyToken) {
+			t.Errorf("the two parts carry different bytes, so the state comparison above proves less than it claims")
+		}
+	})
+}
+
+// AI-07.4 item 2 — the signature-only shape is constructible and valid.
+//
+// *(pin)* — green from birth over AI-07.1 item 3 and AI-07.2 item 1, and
+// recorded as such. What it adds is the word **valid**: a part with a token and
+// no text must be accepted by message construction rather than merely
+// constructible, because doc 0001 § 3.3 row 2 needs "a state that can say 'this
+// provider emitted no reasoning text'" to survive into a request rather than
+// being filtered at the boundary as a degenerate part.
+func TestReasoning_SignatureOnlyVariant_IsConstructibleAndValid(t *testing.T) {
+	t.Parallel()
+
+	signature := []byte("\x00\xfea cryptographic signature over content this part does not carry\xff")
+
+	part, err := ai.NewReasoning("", signature)
+	if err != nil {
+		t.Fatalf("ai.NewReasoning returned %v, want no failure — the signature-only shape is valid", err)
+	}
+
+	msg, err := ai.NewMessage(ai.RoleAssistant, part)
+	if err != nil {
+		t.Fatalf("ai.NewMessage rejected a signature-only reasoning part with %v, want no failure", err)
+	}
+
+	reasoning, ok := msg.Content()[0].Reasoning()
+	if !ok {
+		t.Fatalf("part.Reasoning() reported no reasoning")
+	}
+	if got := reasoning.State(); got != ai.ReasoningStateTokenOnly {
+		t.Errorf("reasoning.State() = %v, want %v — \"no reasoning text\" is a recorded state, not an empty string", got, ai.ReasoningStateTokenOnly)
+	}
+	if reasoning.Text() != "" {
+		t.Errorf("reasoning.Text() = %q, want the empty string", reasoning.Text())
+	}
+
+	token, present := reasoning.Token()
+	if !present {
+		t.Fatalf("reasoning.Token() reported no token on a signature-only part")
+	}
+	if !bytes.Equal(token, signature) {
+		t.Errorf("the signature came back %x, want %x", token, signature)
+	}
+
+	// A signature-only part alongside text content in one message is the shape
+	// an assistant turn actually takes, and the two must not interfere.
+	text, err := ai.NewText("The answer is 4.")
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want no failure", err)
+	}
+	mixed, err := ai.NewMessage(ai.RoleAssistant, part, text)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v for reasoning beside text, want no failure", err)
+	}
+	if got := len(mixed.Content()); got != 2 {
+		t.Fatalf("the message holds %d parts, want 2", got)
+	}
+	if kind := mixed.Content()[0].Kind(); kind != ai.PartKindReasoning {
+		t.Errorf("the first part reports kind %v, want %v", kind, ai.PartKindReasoning)
+	}
+	if kind := mixed.Content()[1].Kind(); kind != ai.PartKindText {
+		t.Errorf("the second part reports kind %v, want %v", kind, ai.PartKindText)
+	}
+}
+
+// AI-07.4 item 3 — neither variant is confusable with a text part or with a
+// part that was never constructed.
+//
+// *(pin)* over AI-07.1 item 2 and AI-06's seal, extended to the two shapes that
+// carry no text: those are precisely the ones an accessor could plausibly
+// answer for, since "no text" and "no payload" look alike from the outside and
+// are not alike at all.
+func TestReasoning_RedactedAndSignatureOnly_AreConfusableWithNothing(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte("\x00opaque\xff")
+
+	redacted, err := ai.NewRedactedReasoning(payload)
+	if err != nil {
+		t.Fatalf("ai.NewRedactedReasoning returned %v, want no failure", err)
+	}
+	signatureOnly, err := ai.NewReasoning("", payload)
+	if err != nil {
+		t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		part ai.Part
+	}{{"redacted", redacted}, {"signature-only", signatureOnly}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if text, ok := tc.part.Text(); ok || text != "" {
+				t.Errorf("part.Text() = (%q, %t), want (%q, false) — a part with no reasoning text is not a text part", text, ok, "")
+			}
+			if tc.part == (ai.Part{}) {
+				t.Errorf("the part equals the zero Part, want a constructed part")
+			}
+			if !containsPartKind(ai.PartKinds(), tc.part.Kind()) {
+				t.Errorf("part.Kind() = %v, which is not a member of the kind vocabulary", tc.part.Kind())
+			}
+			if _, err := ai.NewMessage(ai.RoleAssistant, tc.part); err != nil {
+				t.Errorf("ai.NewMessage rejected the part with %v, want no failure — it is valid content, not an absent part", err)
+			}
+
+			// And the zero part is not confusable with it in the other
+			// direction: the accessor that answers for this part must not
+			// answer for a part that was never constructed.
+			var unconstructed ai.Part
+			if _, ok := unconstructed.Reasoning(); ok {
+				t.Errorf("the zero Part reported reasoning")
+			}
+			if reasoning, ok := tc.part.Reasoning(); !ok {
+				t.Errorf("part.Reasoning() reported no reasoning on a constructed reasoning part")
+			} else if reasoning.State() == 0 {
+				t.Errorf("reasoning.State() = %v, want a member of the vocabulary", reasoning.State())
+			}
+		})
+	}
+}
+
+// AI-07.4 — appended. The reasoning payload renders without its payload.
+//
+// Discovered while writing item 3. content_part.go records why [ai.Part] has a
+// String method: "fmt prints the unexported fields of a struct it has no String
+// method for, so %v on a part would print the prompt". [ai.Reasoning] is the
+// first exported payload *struct* in the package, so it is the first value the
+// same sentence applies to, and it carries the two most sensitive things Layer
+// 1 holds — a model's private deliberation, and a blob that may be
+// credential-shaped. V-FAIL-13 puts the posture on the type rather than on
+// which verb someone reached for, so every verb is asserted rather than the
+// three a reader thinks of.
+func TestReasoning_DiagnosticRendering_CarriesNoPayload(t *testing.T) {
+	t.Parallel()
+
+	const deliberation = "SENSITIVE-DELIBERATION"
+	signature := []byte("SENSITIVE-SIGNATURE-BYTES")
+
+	withText, err := ai.NewReasoning(deliberation, signature)
+	if err != nil {
+		t.Fatalf("ai.NewReasoning returned %v, want no failure", err)
+	}
+	redacted, err := ai.NewRedactedReasoning(signature)
+	if err != nil {
+		t.Fatalf("ai.NewRedactedReasoning returned %v, want no failure", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		part  ai.Part
+		state ai.ReasoningState
+	}{
+		{"reasoning with text and a token", withText, ai.ReasoningStateText},
+		{"a redacted part", redacted, ai.ReasoningStateRedacted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			reasoning, ok := tc.part.Reasoning()
+			if !ok {
+				t.Fatalf("part.Reasoning() reported no reasoning")
+			}
+
+			for _, verb := range []string{"%v", "%s", "%+v", "%#v", "%q"} {
+				for what, rendered := range map[string]string{
+					"the payload": fmt.Sprintf(verb, reasoning),
+					"the part":    fmt.Sprintf(verb, tc.part),
+				} {
+					if strings.Contains(rendered, deliberation) {
+						t.Errorf("%s rendered with %s reproduces the reasoning text: %s", what, verb, rendered)
+					}
+					if strings.Contains(rendered, string(signature)) {
+						t.Errorf("%s rendered with %s reproduces the token: %s", what, verb, rendered)
+					}
+				}
+			}
+
+			// It still says something useful: the state, which is structural
+			// and carries no caller data.
+			if got, want := reasoning.String(), "reasoning("+tc.state.String()+")"; got != want {
+				t.Errorf("reasoning.String() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func containsPartKind(haystack []ai.PartKind, want ai.PartKind) bool {
+	for _, got := range haystack {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
 
 func containsReasoningState(haystack []ai.ReasoningState, want ai.ReasoningState) bool {

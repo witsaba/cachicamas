@@ -248,6 +248,28 @@ func (r Reasoning) validate(at Path) *Violation {
 	)
 }
 
+// String renders the reasoning for a diagnostic reader, naming its state and
+// never its payload.
+//
+// It exists for content_part.go's reason, applied to the first exported payload
+// struct in this package: fmt prints the unexported fields of a struct it has
+// no String method for, so "%v" on a reasoning payload would print the model's
+// private deliberation and a blob that may be credential-shaped. This is the
+// most sensitive pair of values Layer 1 holds, and V-FAIL-13 puts the posture
+// on the type rather than on anyone's discipline.
+//
+// The rendering names the state alone. Not the text, not the token, and not
+// their lengths: a length is caller-derived, and a prefix of a secret is still
+// a secret. A consumer that wants either calls the accessor for it, which is
+// what an accessor is for.
+func (r Reasoning) String() string { return "reasoning(" + r.State().String() + ")" }
+
+// GoString renders the reasoning for the %#v verb.
+//
+// Without it, %#v falls back to reflection and prints every field, which makes
+// the redaction posture a property of which verb someone reached for.
+func (r Reasoning) GoString() string { return r.String() }
+
 // State reports which shape this reasoning takes (V-REQ-10).
 //
 // It is derived from the payload on every call and is never stored, so the
