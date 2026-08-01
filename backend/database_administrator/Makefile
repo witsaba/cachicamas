@@ -79,6 +79,7 @@ tools:  ## Install golangci-lint + goimports into ./bin
 vuln-check:  ## Scan this module for known vulnerabilities (govulncheck, auto-installs if missing)
 	@command -v $(GOVULNCHECK) >/dev/null 2>&1 || { \
 		echo ">> installing govulncheck $(GOVULNCHECK_VERSION)"; \
+		mkdir -p $(LOCALBIN); \
 		$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
 		mv $$($(GO) env GOPATH)/bin/govulncheck $(LOCALBIN)/govulncheck 2>/dev/null || true; \
 	}

@@ -15,6 +15,7 @@ MAIN_PKG      := ./src/cmd/server
 # Pinned for reproducibility. Bump deliberately, not on a whim.
 GOLANGCI_LINT_VERSION := v2.9.0
 GOIMPORTS_VERSION     := latest
+GOVULNCHECK_VERSION   := v1.1.4
 
 # Use the project's local tool dir first so installed binaries always win.
 export PATH := $(abspath $(LOCALBIN)):$(PATH)
@@ -26,6 +27,7 @@ LDFLAGS     ?= -s -w
 # Prefer local tool installations over anything on PATH.
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 GOIMPORTS     := $(LOCALBIN)/goimports
+GOVULNCHECK   := $(LOCALBIN)/govulncheck
 
 # ---------- Helpers -----------------------------------------------------------
 
@@ -59,6 +61,22 @@ tools:  ## Install golangci-lint + goimports into ./bin
 	@echo ">> installing goimports"
 	@$(GO) install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 	@mv $$($(GO) env GOPATH)/bin/goimports $(LOCALBIN)/goimports 2>/dev/null || true
+
+## vuln-check: install govulncheck and run a reachability-aware vulnerability scan
+.PHONY: vuln-check
+vuln-check:  ## Scan this module for known vulnerabilities (govulncheck, auto-installs if missing)
+	@command -v $(GOVULNCHECK) >/dev/null 2>&1 || { \
+		echo ">> installing govulncheck $(GOVULNCHECK_VERSION)"; \
+		mkdir -p $(LOCALBIN); \
+		$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
+		mv $$($(GO) env GOPATH)/bin/govulncheck $(LOCALBIN)/govulncheck 2>/dev/null || true; \
+	}
+	@echo ">> running govulncheck $(GOVULNCHECK_VERSION) against ./..."
+	@$(GOVULNCHECK) ./...
+
+## vuln-check/ci: alias of vuln-check for explicit CI workflow wiring
+.PHONY: vuln-check/ci
+vuln-check/ci: vuln-check  ## Same as vuln-check; alias kept explicit for future CI workflow wiring
 
 # ---------- Build & Run -------------------------------------------------------
 
