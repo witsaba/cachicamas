@@ -46,4 +46,14 @@
 // The module carries zero dependencies today. Two milestones may change that,
 // and each needs its own ADR: one selects a transport, one adds the
 // OpenTelemetry API.
+//
+// # What comes back
+//
+// AI-14 adds the first contract for what a stream carries the other way: an
+// [Event], its kind derived from a sealed payload the same way [Part] derives
+// its own, and a per-stream [Sequence] with no process-global state — see
+// sequence.go for the rule governing what a sequence means, and does not
+// mean, across two different streams. This milestone registers no concrete
+// event kind; AI-15 … AI-20 add those without editing this package's
+// AI-14-owned contracts.
 package ai

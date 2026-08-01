@@ -173,16 +173,25 @@ func (e Event) Sequence() Sequence { return e.seq }
 //  1. the event carries a payload registered in the kind table, else
 //     [ErrNotInVocabulary] at "event" — a value that skipped construction, or
 //     one whose payload type this package never registered, has no kind and
-//     is not a member of the closed vocabulary (R-AEE-002).
+//     is not a member of the closed vocabulary (R-AEE-002);
+//  2. the sequence is not the unstamped sentinel 0, else [ErrOutOfRange] at
+//     "event", "sequence" — an event offered here must already have passed
+//     through a [Stamper] (R-AEE-010).
 //
-// Later steps of this same milestone add: rule 2, the sequence is not the
-// unstamped sentinel (R-AEE-010); rule 3, a block-scoped kind carries a valid
-// block index (R-AEE-014); rule 4, the payload satisfies its own rules.
+// A later step of this same milestone adds rule 3, a block-scoped kind
+// carries a valid block index (R-AEE-014), and rule 4, the payload satisfies
+// its own rules.
 func CheckEmit(e Event) error {
 	return FirstFailure(
 		func() *Violation {
 			if _, ok := eventRegistryEntry(e.Kind()); !ok {
 				return Invalid(ErrNotInVocabulary, At("event"))
+			}
+			return nil
+		},
+		func() *Violation {
+			if e.Sequence() == 0 {
+				return Invalid(ErrOutOfRange, At("event"), At("sequence"))
 			}
 			return nil
 		},
