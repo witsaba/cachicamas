@@ -122,3 +122,72 @@ func TestModelProviderInterface_MethodSet_ExternalStubImplementsCompilesAndIsExe
 		t.Errorf("drained %d events from stubProvider, want 0 (it advertises none)", count)
 	}
 }
+
+// --- AI-20.5 — optional capabilities: TokenCounter (R-AMP-017…021) --------
+
+// stubProviderWithTokenCounter advertises the one v1 optional capability by
+// satisfying its contract, and by no other means (ai-minimum-capabilities
+// §9): no field, no flag, no registration call. Embedding stubProvider
+// keeps this file's one Stream implementation the single source of the
+// required surface.
+type stubProviderWithTokenCounter struct {
+	stubProvider
+}
+
+func (stubProviderWithTokenCounter) CountTokens(_ context.Context, _ ai.Request) (ai.TokenCount, error) {
+	return ai.Tokens(42), nil
+}
+
+var _ ai.ModelProvider = stubProviderWithTokenCounter{}
+var _ ai.TokenCounter = stubProviderWithTokenCounter{}
+
+// AI-20.5 item 1 (R-AMP-017/018, S-AMP-046…049) — discovery is asked of the
+// provider value, through a plain type assertion, and nothing else: a
+// provider that satisfies TokenCounter is found this way, usable
+// immediately.
+func TestModelProviderInterface_TokenCounter_DiscoveredWhenTheProviderValueSatisfiesIt(t *testing.T) {
+	t.Parallel()
+
+	var provider ai.ModelProvider = stubProviderWithTokenCounter{}
+
+	counter, ok := provider.(ai.TokenCounter)
+	if !ok {
+		t.Fatal("type assertion to ai.TokenCounter reported false on a provider that implements it")
+	}
+	count, err := counter.CountTokens(context.Background(), mustSimpleRequest(t))
+	if err != nil {
+		t.Fatalf("CountTokens returned %v, want no failure", err)
+	}
+	if n, present := count.Count(); !present || n != 42 {
+		t.Errorf("CountTokens() = (%d, present=%v), want (42, true)", n, present)
+	}
+}
+
+// AI-20.5 item 1's converse, and items 2/3 (R-AMP-018/020, S-AMP-050/051/
+// 055/056) — a provider that does not implement TokenCounter reports a
+// clean absence through the same type assertion: not an error, not a zero
+// value standing in for one. The same provider value — stubProvider, Phase
+// 1's required-only stub — is otherwise fully conformant, already proven by
+// TestModelProviderInterface_MethodSet_ExternalStubImplementsCompilesAndIsExercised.
+func TestModelProviderInterface_TokenCounter_CleanAbsenceWhenTheProviderDoesNotAdvertiseIt(t *testing.T) {
+	t.Parallel()
+
+	var provider ai.ModelProvider = stubProvider{}
+
+	counter, ok := provider.(ai.TokenCounter)
+	if ok {
+		t.Fatal("type assertion to ai.TokenCounter reported true on stubProvider, want false — it advertises nothing optional")
+	}
+	if counter != nil {
+		t.Errorf("a false type assertion returned %#v, want nil (a clean absence, not a zero value standing in for one)", counter)
+	}
+
+	// S-AMP-052 — this test method IS the whole discovery mechanism: there
+	// is no second, catalog- or configuration-driven way to ask. Nothing in
+	// this file names a model identity, reads a configuration entry, or
+	// consults a capability table anywhere; the type assertion on the
+	// provider value, above, is the only door
+	// (ai-minimum-capabilities/spec.md §9). That absence is structural — a
+	// symbol that does not exist cannot be called — rather than provable by
+	// a further runtime assertion here.
+}

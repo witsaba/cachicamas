@@ -142,17 +142,40 @@ Chain strategy: size-exception
 - [x] 4.5 REFACTOR — reviewed guard assertions and failure messages once more; kept as written (each
       names the exact requirement and the exact mismatch); no behavior change.
 
-## Phase 5 — AI-20.5 optional capabilities (R-AMP-017…021)
+## Phase 5 — AI-20.5 optional capabilities (R-AMP-017…021) — COMPLETE
 
-- [ ] 5.1 RED — `src/agenttest/provider_test.go`: discovery via `provider.(ai.TokenCounter)`
+- [x] 5.1 RED — `src/agenttest/provider_test.go`: discovery via `provider.(ai.TokenCounter)`
       (S-AMP-049); non-advertising stub → clean absence, no error/zero/fallback (S-AMP-050/051); no
-      catalog/config lookup exists (S-AMP-052); required-only stub fully conformant (S-AMP-055/056).
-- [ ] 5.2 GREEN — `src/ai/provider.go`: add `TokenCounter` interface,
-      `CountTokens(ctx context.Context, req Request) (TokenCount, error)`.
-- [ ] 5.3 RED — method-set pin test: scratch-mutate `CountTokens` into `ModelProvider` itself; guard
-      fails and names the added method (S-AMP-057/058); revert.
-- [ ] 5.4 GREEN — confirm pin passes unmodified (R-AMP-021); record revert.
-- [ ] 5.5 REFACTOR — confirm exactly one optional contract, no aggregate (S-AMP-046…048).
+      catalog/config lookup exists (S-AMP-052, proven structurally — the type assertion is the only
+      door, documented in the test's own comment rather than by a further runtime assertion); required-
+      only stub fully conformant (S-AMP-055/056, cross-referenced to the existing Phase 1 stub test).
+      Confirmed genuine RED: `go test ./src/agenttest/... -run TokenCounter -v` → 3 compile errors
+      (`undefined: ai.TokenCounter`).
+- [x] 5.2 GREEN — `src/ai/provider.go`: added `TokenCounter` interface,
+      `CountTokens(ctx context.Context, req Request) (TokenCount, error)`. Same command green
+      (2/2 tests PASS); full module regression green.
+- [x] 5.3 RED — method-set pin: temporarily folded `CountTokens` into `ModelProvider` itself in
+      `src/ai/provider.go` (isolated from `provider_test.go`'s stub-conformance pins the same way as
+      Phase 4's bite mutations — moved aside during the mutation, restored after). Ran
+      `go test ./src/agenttest/... -run TestModelProviderInterface_SignatureGuard -v`. **Red output,
+      verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:77: ModelProvider declares 2 method(s) [Stream CountTokens], want exactly 1 (R-AMP-001; mechanizes half of R-AMP-021's widening pin)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.280s
+      FAIL
+      ```
+      Names the exact added method (S-AMP-057/058), matching the R-AMP-021 pin's intent precisely.
+- [x] 5.4 GREEN — reverted the fold-in; re-ran the guard → PASS. `git diff --stat` against the last
+      commit shows only the intended, permanent `TokenCounter` addition (+34 lines), no residue of the
+      temporary mutation (confirmed via `grep CountTokens` — exactly one occurrence, in `TokenCounter`).
+      Full module `go build && go vet && go test -race ./...` green.
+- [x] 5.5 REFACTOR — confirmed exactly one optional contract (`TokenCounter`), no aggregate
+      capabilities type, no `Capabilities()` query method anywhere in `src/ai` (S-AMP-046…048).
 
 ## Phase 6 — Wiring & docs
 

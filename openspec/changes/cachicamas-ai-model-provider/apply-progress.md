@@ -127,7 +127,31 @@ without isolating it, the observed "red" would be an unrelated Go compiler type-
 |---|---|---|---|
 | 4 — AI-20.4 signature guard | `go test ./src/agenttest/... -run SignatureGuard -v` → PASS at rest; 2/2 bite mutations produced genuine, guard-specific RED, both reverted and re-confirmed green | Real `go/parser` over the real on-disk `provider.go` (no mocked filesystem, no subprocess) | revert `provider_signature_guard_test.go`; no production code changed by this phase |
 
-## Phases 5–7
+## Phase 5 — AI-20.5 optional capabilities (R-AMP-017…021) — COMPLETE
+
+Added `TokenCounter` (`CountTokens(ctx, req) (TokenCount, error)`) to `src/ai/provider.go` as the
+sole v1 optional capability. Discovery proven from `src/agenttest/provider_test.go` via
+`provider.(ai.TokenCounter)` on two fixtures: `stubProviderWithTokenCounter` (embeds Phase 1's
+`stubProvider` for the required surface, adds `CountTokens`) and Phase 1's plain `stubProvider`
+(clean-absence case, `ok == false`, no error/zero substitute).
+
+RED: `go test ./src/agenttest/... -run TokenCounter` failed to compile (`undefined: ai.TokenCounter`,
+3 sites). GREEN: same command → 2/2 PASS after `TokenCounter` landed.
+
+Method-set pin (R-AMP-021): temporarily folded `CountTokens` into `ModelProvider` itself (same
+isolation technique as Phase 4 — moved `provider_test.go` aside during the mutation). Guard failed
+naming both methods (`[Stream CountTokens]`), confirming the guard also functions as the widening pin
+— verbatim transcript in `tasks.md`. Reverted; confirmed via `grep CountTokens src/ai/provider.go`
+that exactly one occurrence remains (the permanent `TokenCounter` interface), and full module
+regression green.
+
+### Work Unit Evidence (Phase 5)
+
+| Unit | Focused test command and result | Runtime harness | Rollback boundary |
+|---|---|---|---|
+| 5 — AI-20.5 `TokenCounter` | `go test ./src/agenttest/... -run TokenCounter -v` → 2/2 PASS; method-set pin mutation produced the expected guard failure, reverted clean | Real type assertions on real stub values, no mocking framework | revert `TokenCounter` in `provider.go` + its tests in `agenttest/provider_test.go` |
+
+## Phases 6–7
 
 Pending — see `tasks.md` for the authoritative checklist; this file is updated after each phase closes.
 

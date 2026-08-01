@@ -97,3 +97,37 @@ type ModelProvider interface {
 	// answers with, honoring every rule stated above.
 	Stream(ctx context.Context, req Request) (<-chan Event, error)
 }
+
+// TokenCounter is the one askable optional capability this package declares
+// in v1 (CAP-O-02, V-PRV-17): whether a provider can report how many tokens
+// a [Request] would consume, without sending it.
+//
+// # Advertised only by satisfying it
+//
+// A provider advertises TokenCounter by implementing it, and by no other
+// means: no field, no flag, no registration call, no catalog entry
+// (ai-minimum-capabilities §9). A consumer asks the provider VALUE, never a
+// model identity or a configuration entry:
+//
+//	counter, ok := provider.(TokenCounter)
+//
+// ok == false is a clean absence (R-AMP-018): not an error, not a zero
+// value standing in for one, and this package supplies no substitute,
+// estimate or default. A provider that satisfies this contract and then
+// declines to answer is non-conformant, not absent (R-AMP-019) —
+// advertising binds.
+//
+// # One contract, never widened into the core interface
+//
+// This is the only optional contract this package declares in v1
+// (R-AMP-017): one contract per capability, never an aggregate covering
+// several. A provider implementing only [ModelProvider] and advertising
+// nothing optional is fully conformant (R-AMP-020). Folding this method
+// into [ModelProvider] itself is the exact widening R-AMP-021 pins the
+// signature guard against — src/agenttest's guard fails the moment
+// ModelProvider declares a second method.
+type TokenCounter interface {
+	// CountTokens reports how many tokens req would consume, without
+	// sending req to the provider.
+	CountTokens(ctx context.Context, req Request) (TokenCount, error)
+}
