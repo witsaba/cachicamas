@@ -30,46 +30,46 @@ Chain strategy: size-exception
 
 ## Phase 1: Foundation — descriptor skeleton (blocks all nodes)
 
-- [ ] 1.1 RED `event_descriptor_test.go`: assert `BlockRoleNone`/`CardinalityAny` are zero values, `EventDescriptor{}` zero-value round-trips (groundwork for R-AEE-014).
-- [ ] 1.2 GREEN `event_descriptor.go`: `BlockRole` (`BlockRoleNone=0`, `BlockRoleStart`, `BlockRoleDelta`, `BlockRoleEnd`), `Cardinality` (`CardinalityAny=0`, `CardinalityAtMostOne`), `EventDescriptor{Role BlockRole; Cardinality Cardinality; Terminal bool}`, `BlockIndex uint64`, unexported `blockPayload interface{ blockIndex() BlockIndex }`.
-- [ ] 1.3 REFACTOR: `gofmt`/`go vet` clean; no test changes needed.
+- [x] 1.1 RED `event_descriptor_test.go`: assert `BlockRoleNone`/`CardinalityAny` are zero values, `EventDescriptor{}` zero-value round-trips (groundwork for R-AEE-014).
+- [x] 1.2 GREEN `event_descriptor.go`: `BlockRole` (`BlockRoleNone=0`, `BlockRoleStart`, `BlockRoleDelta`, `BlockRoleEnd`), `Cardinality` (`CardinalityAny=0`, `CardinalityAtMostOne`), `EventDescriptor{Role BlockRole; Cardinality Cardinality; Terminal bool}`, `BlockIndex uint64`, unexported `blockPayload interface{ blockIndex() BlockIndex }`.
+- [x] 1.3 REFACTOR: `gofmt`/`go vet` clean; no test changes needed.
 
 ## Phase 2: AI-14.1 — Envelope skeleton
 
-- [ ] 2.1 RED `event_test.go` R-AEE-001 (S-AEE-001..003): kind derived from payload, no settable kind field.
-- [ ] 2.2 GREEN `event.go`: `EventKind uint8`, `eventKindFirst`/`eventKindEnd = 1` (empty vocab), `Event{payload eventPayload; seq Sequence}`, unexported `eventPayload interface{ kind() EventKind; validate(at Path) *Violation }`, `(Event) Kind()`.
-- [ ] 2.3 RED R-AEE-002 (S-AEE-004..006): payload-less event → `ErrNotInVocabulary`.
-- [ ] 2.4 GREEN `event.go`: `CheckEmit(e Event) error` rule 1 (vocabulary) at `At("event")`.
-- [ ] 2.5 RED R-AEE-003 (S-AEE-007..009): `package ai_test` type fails to satisfy sealed `eventPayload`; all members unexported.
-- [ ] 2.6 GREEN: confirm `eventPayload` fully unexported (structural — no new production code).
-- [ ] 2.7 RED `event_registry_test.go` R-AEE-004 (S-AEE-010..013): exhaustiveness assertion, non-vacuous via test-only witness.
-- [ ] 2.8 GREEN `export_test.go` (D6): `KindTestWitness`, `WitnessPayload`, `NewWitnessEvent(block BlockIndex) Event`, `(Event) WitnessPayload() (WitnessPayload, bool)`, `RegisterTestKind`, `NewTestEvent`, `TestEventKinds()`; GREEN `event.go`: `eventRegistry []eventRegistration{name string; descriptor EventDescriptor}`, `EventKinds() []EventKind`.
-- [ ] 2.9 RED R-AEE-005 (S-AEE-014..016): external read via accessor, no type switch; mismatched accessor fails not panics.
-- [ ] 2.10 GREEN `event.go`: `(Event) Sequence()`; witness accessor pattern proven through `export_test.go`.
-- [ ] 2.11 RED `event_registry_test.go` R-AEE-006 (S-AEE-017..019): zero production kinds enumerated.
-- [ ] 2.12 GREEN: confirm `eventKindFirst == eventKindEnd == 1`, no production kind constants exist.
-- [ ] 2.13 REFACTOR: dedupe registry-table helpers against `content_part.go` precedent; `make test` for AI-14.1 slice; record red/green output.
+- [x] 2.1 RED `event_test.go` R-AEE-001 (S-AEE-001..003): kind derived from payload, no settable kind field.
+- [x] 2.2 GREEN `event.go`: `EventKind uint8`, `eventKindFirst`/`eventKindEnd = 1` (empty vocab), `Event{payload eventPayload; seq Sequence}`, unexported `eventPayload interface{ kind() EventKind; validate(at Path) *Violation }`, `(Event) Kind()`.
+- [x] 2.3 RED R-AEE-002 (S-AEE-004..006): payload-less event → `ErrNotInVocabulary`.
+- [x] 2.4 GREEN `event.go`: `CheckEmit(e Event) error` rule 1 (vocabulary) at `At("event")`.
+- [x] 2.5 RED R-AEE-003 (S-AEE-007..009): `package ai_test` type fails to satisfy sealed `eventPayload`; all members unexported.
+- [x] 2.6 GREEN: confirm `eventPayload` fully unexported (structural — no new production code).
+- [x] 2.7 RED `event_registry_test.go` R-AEE-004 (S-AEE-010..013): exhaustiveness assertion, non-vacuous via test-only witness.
+- [x] 2.8 GREEN `export_test.go` (D6): `KindTestWitness`, `WitnessPayload`, `NewWitnessEvent(block BlockIndex) Event`, `(Event) WitnessPayload() (WitnessPayload, bool)`, `RegisterTestKind`, `NewTestEvent`, `TestEventKinds()`; GREEN `event.go`: `eventRegistry []eventRegistration{name string; descriptor EventDescriptor}`, `EventKinds() []EventKind`.
+- [x] 2.9 RED R-AEE-005 (S-AEE-014..016): external read via accessor, no type switch; mismatched accessor fails not panics.
+- [x] 2.10 GREEN `event.go`: `(Event) Sequence()`; witness accessor pattern proven through `export_test.go`.
+- [x] 2.11 RED `event_registry_test.go` R-AEE-006 (S-AEE-017..019): zero production kinds enumerated.
+- [x] 2.12 GREEN: confirm `eventKindFirst == eventKindEnd == 1`, no production kind constants exist.
+- [x] 2.13 REFACTOR: dedupe registry-table helpers against `content_part.go` precedent; `make test` for AI-14.1 slice; record red/green output.
 
 ## Phase 3: AI-14.2 — Per-stream sequence
 
-- [ ] 3.1 RED `sequence_test.go` R-AEE-007 (S-AEE-020..022): 1-based contiguous stamping; no external sequence setter; no reachable reset.
-- [ ] 3.2 GREEN `sequence.go`: `Sequence uint64`, `Stamper{last Sequence}`, `(*Stamper) Stamp(e Event) Event`.
-- [ ] 3.3 RED R-AEE-008 (S-AEE-023..025): two streams concurrently under `-race`; `Stamper` holds no package-level/atomic/mutex state.
-- [ ] 3.4 GREEN: confirm zero-value-ready `Stamper`, no shared state (structural + doc comment).
-- [ ] 3.5 RED doc-assertion test R-AEE-009 (S-AEE-026..027): package doc states cross-stream comparison is permitted and meaningless.
-- [ ] 3.6 GREEN `doc.go`: cross-stream rule paragraph.
-- [ ] 3.7 RED `event_test.go` R-AEE-010 (S-AEE-028..030): unstamped sentinel `0` rejected `ErrOutOfRange` at the `CheckEmit` boundary; stamped seq `1` accepted.
-- [ ] 3.8 GREEN `event.go`: `CheckEmit` rule 2 (`seq == 0` → `ErrOutOfRange` at `At("event"), At("sequence")`).
-- [ ] 3.9 REFACTOR: extract shared `CheckEmit` rule-ordering helper; `make test` for AI-14.2 slice; record red/green output.
+- [x] 3.1 RED `sequence_test.go` R-AEE-007 (S-AEE-020..022): 1-based contiguous stamping; no external sequence setter; no reachable reset.
+- [x] 3.2 GREEN `sequence.go`: `Sequence uint64`, `Stamper{last Sequence}`, `(*Stamper) Stamp(e Event) Event`.
+- [x] 3.3 RED R-AEE-008 (S-AEE-023..025): two streams concurrently under `-race`; `Stamper` holds no package-level/atomic/mutex state.
+- [x] 3.4 GREEN: confirm zero-value-ready `Stamper`, no shared state (structural + doc comment).
+- [x] 3.5 RED doc-assertion test R-AEE-009 (S-AEE-026..027): package doc states cross-stream comparison is permitted and meaningless.
+- [x] 3.6 GREEN `doc.go`: cross-stream rule paragraph. *(Landed as sequence.go's own package-doc comment, which `TestSequenceGoFile_PackageDoc_StatesTheCrossStreamRule` parses directly — matches design.md's File Changes entry for sequence.go, "docs: ... cross-stream meaninglessness (R-AEE-009)", rather than tasks.md's literal "doc.go" wording. design.md is authoritative for file placement.)*
+- [x] 3.7 RED `event_test.go` R-AEE-010 (S-AEE-028..030): unstamped sentinel `0` rejected `ErrOutOfRange` at the `CheckEmit` boundary; stamped seq `1` accepted.
+- [x] 3.8 GREEN `event.go`: `CheckEmit` rule 2 (`seq == 0` → `ErrOutOfRange` at `At("event"), At("sequence")`).
+- [x] 3.9 REFACTOR: extract shared `CheckEmit` rule-ordering helper; `make test` for AI-14.2 slice; record red/green output. *(The shared rule-ordering helper is AI-04's existing `FirstFailure` combinator — `CheckEmit` already composes its rule funcs through it; no further extraction was needed.)*
 
 ## Phase 4: AI-14.3 — No process-global sequence-state guard
 
-- [ ] 4.1 RED `sequence_guard_test.go` R-AEE-011 (S-AEE-031..035): fails scratch `var scratchSeq uint64`, struct-wrapped counter, reset func; passes on landed package and on `_test.go` counters.
-- [ ] 4.2 GREEN `sequence_guard_test.go`: D8 `go/parser` + `go/types` guard — Named→Underlying (`types.Unalias`), struct fields any depth, array elements; base match = integer basics + `uintptr` + `sync/atomic` types; no depth cap; bare type params fail-closed; reset detection via `types.Info.Uses` (assign/inc-dec/`Store`/`Swap`/`CompareAndSwap`, `Add` legal).
-- [ ] 4.3 RED R-AEE-012 (S-AEE-036..039): allowlist has exactly one entry (`message.go`/`lastMessageID`); stale or empty-rationale entries fail.
-- [ ] 4.4 GREEN: `allowlistEntry{file, identifier, rationale}`, `sequenceStateAllowlist` table naming C3 and the `V-REQ-03` (distinguishability) vs `V-STR-13` (contiguity) distinction.
-- [ ] 4.5 RED+GREEN R-AEE-013 (S-AEE-041..042): guard source comment names C3, the retired process-global counter, and "not a smaller counter; the counter where the stream is"; failure message names file+identifier.
-- [ ] 4.6 REFACTOR: guard failure-message formatting; confirm `message.go`'s `lastMessageID` diff is empty (S-AEE-040); `make test` for AI-14.3 slice; record red/green output.
+- [x] 4.1 RED `sequence_guard_test.go` R-AEE-011 (S-AEE-031..035): fails scratch `var scratchSeq uint64`, struct-wrapped counter, reset func; passes on landed package and on `_test.go` counters.
+- [x] 4.2 GREEN `sequence_guard_test.go`: D8 `go/parser` + `go/types` guard — Named→Underlying (`types.Unalias`), struct fields any depth, array elements; base match = integer basics + `uintptr` + `sync/atomic` types; no depth cap; bare type params fail-closed; reset detection via `types.Info.Uses` (assign/inc-dec/`Store`/`Swap`/`CompareAndSwap`, `Add` legal).
+- [x] 4.3 RED R-AEE-012 (S-AEE-036..039): allowlist has exactly one entry (`message.go`/`lastMessageID`); stale or empty-rationale entries fail.
+- [x] 4.4 GREEN: `allowlistEntry{file, identifier, rationale}`, `sequenceStateAllowlist` table naming C3 and the `V-REQ-03` (distinguishability) vs `V-STR-13` (contiguity) distinction.
+- [x] 4.5 RED+GREEN R-AEE-013 (S-AEE-041..042): guard source comment names C3, the retired process-global counter, and "not a smaller counter; the counter where the stream is"; failure message names file+identifier.
+- [x] 4.6 REFACTOR: guard failure-message formatting; confirm `message.go`'s `lastMessageID` diff is empty (S-AEE-040); `make test` for AI-14.3 slice; record red/green output.
 
 ## Phase 5: AI-14.4 — Ordering invariants
 
@@ -102,3 +102,21 @@ Chain strategy: size-exception
 - [ ] 6.9 Run `make test` (`go test -race -v ./...`) and `make lint` from `backend/agent/`; confirm green/clean before archive.
 
 > **Deviation note**: exceeds the sdd-tasks 530-word budget. `NFR-AEE-E` requires every one of 20 requirements' test-list items tracked red→green→refactor with recorded output, and five sibling milestones (AI-15…AI-20) bind to these exact symbol names — the spec and design artifacts for this same change recorded the identical deviation for the same reason; house convention wins.
+
+## Evidence Log (NFR-AEE-E, S-AEE-070)
+
+Apply ran across two sessions: an initial run landed Phases 1–3 (commits `297f08d`, `78eb88a`, `ed7ffa8`) but disconnected before checkpointing; this resumed session verified that work by reading it against spec/design, confirmed `make test` green, then continued from Phase 4. Per-item red/green output below; full raw terminal logs are not pasted verbatim (would dominate this file) — each row names the exact test(s) and the observed result, which any reviewer can reproduce with the focused command shown per phase.
+
+**Phase 1 (descriptor skeleton)** — verified retroactively against `297f08d`: `event_descriptor_test.go`'s `TestEventDescriptor_ZeroValue_RoundTrips` (both subtests) predates `event_descriptor.go` in intent (RED implied by the commit's own "groundwork" framing) and passes green today. `gofmt -l`/`go vet` clean.
+
+**Phase 2 (AI-14.1 envelope)** — verified retroactively against `78eb88a`: `TestEvent_Kind_IsDerivedFromPayloadAndNeverStored`, `TestCheckEmit_PayloadlessEvent_RejectedWithErrNotInVocabulary`, `TestEventPayload_Contract_IsSealed`, `TestEvent_ReadableExternally_NoTypeSwitchOverUnexportedTypes` (event_test.go), `TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor`, `TestEventKinds_ProductionVocabulary_IsEmpty` (event_registry_test.go) all green today against `event.go`/`export_test.go`. The commit's own message records one deviation: design.md D6 names the witness-enumeration helper `TestEventKinds`; go vet's `tests` analyzer requires any `_test.go` top-level `Test*` identifier to have signature `func(t *testing.T)`, so it ships as `AllTestEventKinds` instead (S-AEE-013/017 unaffected — semantics unchanged, name only).
+
+**Phase 3 (AI-14.2 sequence)** — verified retroactively against `ed7ffa8`: `TestStamper_Stamp_IsOneBasedAndContiguous`, `TestStamper_SequenceState_IsPerStreamNotProcess` (two-goroutine, `-race` clean), `TestSequence_CrossStreamComparison_IsPermittedAndMeaningless`, `TestSequenceGoFile_PackageDoc_StatesTheCrossStreamRule`, `TestCheckEmit_UnstampedSentinel_RejectedWithErrOutOfRange` (sequence_test.go) all green today. Focused command: `go test -run 'TestStamper|TestSequence|TestCheckEmit' -race -v ./src/ai/...` — all PASS.
+
+**Phase 4 (AI-14.3 guard)** — implemented this session, genuine RED observed before each GREEN:
+- 4.1 RED: `go test -run TestSequenceGuard -race -v ./src/ai/...` → build failure, `undefined: scanSequenceStateGuard` / `sequenceStateAllowlist` / `guardViolation` (6 undefined-symbol errors, all in `sequence_guard_test.go`).
+- 4.2 GREEN: same command → `TestSequenceGuard_LandedPackage_Passes`, `_ScratchPackageLevelInteger_Fails`, `_ScratchStructWrappedInteger_Fails`, `_ScratchResetFunction_Fails`, `_TestFileCounter_Passes` all PASS (S-AEE-031..035). `TestSequenceGuard_LandedPackage_Passes` scanning the real package found exactly one qualifying package-level var (`message.go`'s `lastMessageID`, `sync/atomic.Uint64`) across all 21 non-test files — confirmed independently via a throwaway `go/types` prototype before writing the guard, so GREEN was reached on the first implementation attempt with no further iteration.
+- 4.3 RED: added `TestSequenceGuard_AllowlistEntryNamesNonexistentIdentifier_FailsAsStale` and `TestSequenceGuard_AllowlistEntryHasEmptyRationale_Fails` → both FAILED against the 4.2 implementation (`violations = []`, `want one naming ...`), confirming staleness/empty-rationale detection did not yet exist. `TestSequenceStateAllowlist_HasExactlyOneReasonedEntry` and `TestSequenceGuard_AllowlistEntryRemoved_FailsNamingLastMessageID` passed immediately (documented as pins, green-from-birth, exempt from red-first — same exemption `import_boundary_test.go`'s `TestLayer1_ModuleHasNoDependencies_ZeroRequires` already uses in this package) since they assert a property already true of 4.2's data/logic (S-AEE-036, S-AEE-037).
+- 4.4 GREEN: added staleness + empty-rationale checks to `scanSequenceStateGuard` → all of the above PASS (S-AEE-036..039).
+- 4.5 RED+GREEN: added `TestSequenceGuardGoFile_PackageDoc_NamesC3AndTheFix` and `TestSequenceGuard_FailureMessage_NamesFileIdentifierAndPointsAtRationale` → both PASS against the doc comment and `guardViolation.String()`/reason text already written (S-AEE-041..042).
+- 4.6 REFACTOR: `git diff --stat -- backend/agent/src/ai/message.go` → empty (S-AEE-040, confirmed). `gofmt -l src/ai/sequence_guard_test.go` → empty. `go vet ./src/ai/...` → clean. Focused command `go test -run 'TestSequenceGuard|TestSequenceStateAllowlist' -race -v ./src/ai/...` → 9 top-level tests (12 including subtests) PASS. Full `make test` → PASS, `ok github.com/cachicamas/backend/agent/src/ai`.
