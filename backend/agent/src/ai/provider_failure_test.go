@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -362,6 +363,41 @@ func TestNewFailure_InvalidCategory_FailsWithErrNotInVocabularyAtCategory(t *tes
 	})
 }
 
+// R-AIP-009's bounded safe metadata — an out-of-range status class is
+// rejected at construction, positioned at "status_class". Written after the
+// implementation landed (apply-progress.md records this ordering slip
+// honestly rather than silently); it is a real, currently-passing assertion
+// that would fail if the bound were removed or the position renamed —
+// verified by temporarily reverting the bound locally and re-running before
+// this commit.
+func TestNewFailure_OutOfRangeStatusClass_FailsWithErrOutOfRangeAtStatusClass(t *testing.T) {
+	t.Parallel()
+
+	for _, statusClass := range []int{-1, 6, 999} {
+		_, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable, StatusClass: statusClass})
+		if err == nil {
+			t.Fatalf("ai.PreStreamFailure(StatusClass=%d) = nil error, want a rejection", statusClass)
+		}
+		if !errors.Is(err, ai.ErrOutOfRange) {
+			t.Errorf("StatusClass=%d: errors.Is(err, ai.ErrOutOfRange) = false, want true; err = %v", statusClass, err)
+		}
+		var violation *ai.Violation
+		if !errors.As(err, &violation) {
+			t.Fatalf("StatusClass=%d: errors.As(err, &violation) = false, want true; err = %v", statusClass, err)
+		}
+		if got, want := violation.Path().String(), "status_class"; got != want {
+			t.Errorf("StatusClass=%d: violation position = %q, want %q", statusClass, got, want)
+		}
+	}
+
+	for _, statusClass := range []int{0, 1, 2, 3, 4, 5} {
+		_, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable, StatusClass: statusClass})
+		if err != nil {
+			t.Errorf("ai.PreStreamFailure(StatusClass=%d) returned %v, want no failure — 0..5 are all in bound", statusClass, err)
+		}
+	}
+}
+
 // R-AIP-006 — an unmodelled failure becomes unknown with the raw provider
 // label preserved, bounded and sanitized; no cross-vendor normalizer ships
 // in this package.
@@ -467,6 +503,183 @@ func TestFailure_RawLabel_UnknownCategoryPreservesTheProviderLabel(t *testing.T)
 func identNamed(expr ast.Expr, name string) bool {
 	ident, ok := expr.(*ast.Ident)
 	return ok && ident.Name == name
+}
+
+// R-AIP-007 — retryability is a machine-readable classification, readable
+// for every category; this package exports no scheduling decision.
+func TestFailure_Retryable_ReadableForEveryCategory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Retryable reflects what was reported, for every charter category (S-AIP-022)", func(t *testing.T) {
+		t.Parallel()
+
+		for _, category := range theFailureCategoryVocabulary {
+			for _, retryable := range []bool{true, false} {
+				f, err := ai.PreStreamFailure(ai.FailureReport{Category: category, Retryable: retryable})
+				if err != nil {
+					t.Fatalf("ai.PreStreamFailure(category=%v, retryable=%v) returned %v, want no failure", category, retryable, err)
+				}
+				if got := f.Retryable(); got != retryable {
+					t.Errorf("category %v: f.Retryable() = %v, want %v", category, got, retryable)
+				}
+			}
+		}
+	})
+
+	t.Run("no scheduling/backoff/attempt-counting/failover identifier is exported (S-AIP-023)", func(t *testing.T) {
+		t.Parallel()
+
+		forbidden := []string{"Backoff", "Attempt", "Failover", "Schedul"}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "provider_failure.go", nil, 0)
+		if err != nil {
+			t.Fatalf("parsing provider_failure.go: %v", err)
+		}
+		for _, name := range exportedTopLevelNames(file) {
+			for _, bad := range forbidden {
+				if strings.Contains(name, bad) {
+					t.Errorf("provider_failure.go exports %q, which contains %q — R-AIP-007 reserves "+
+						"scheduling/backoff/attempt-counting/failover for Layer 2 (V-OUT-11), never a "+
+						"type property here", name, bad)
+				}
+			}
+		}
+	})
+}
+
+// R-AIP-008 — a typed retry-after hint with presence separate from value:
+// absent, zero and non-zero are three distinguishable readings.
+func TestFailure_RetryAfter_PresenceSeparateFromValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an absent RetryDelay reports not present (S-AIP-024)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryRateLimit})
+		if _, present := f.RetryAfter(); present {
+			t.Error("f.RetryAfter() reports present, want absent — RetryAfter was never supplied")
+		}
+	})
+
+	t.Run("Delay(0) is a reported, present zero — distinguishable from absent (S-AIP-025)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryRateLimit, RetryAfter: ai.Delay(0)})
+		duration, present := f.RetryAfter()
+		if !present {
+			t.Fatal("f.RetryAfter() reports absent, want present — ai.Delay(0) was supplied")
+		}
+		if duration != 0 {
+			t.Errorf("f.RetryAfter() duration = %v, want 0", duration)
+		}
+	})
+
+	t.Run("a non-zero Delay reads back exactly (S-AIP-026)", func(t *testing.T) {
+		t.Parallel()
+
+		want := 30 * time.Second
+		f := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryRateLimit, RetryAfter: ai.Delay(want)})
+		duration, present := f.RetryAfter()
+		if !present {
+			t.Fatal("f.RetryAfter() reports absent, want present")
+		}
+		if duration != want {
+			t.Errorf("f.RetryAfter() duration = %v, want %v", duration, want)
+		}
+	})
+
+	t.Run("retryability and retry-after are read independently — neither derived from the other (S-AIP-027)", func(t *testing.T) {
+		t.Parallel()
+
+		f := mustPreStreamFailureReport(t, ai.FailureReport{
+			Category:   ai.FailureCategoryRateLimit,
+			Retryable:  false,
+			RetryAfter: ai.Delay(10 * time.Second),
+		})
+		if f.Retryable() {
+			t.Error("f.Retryable() = true, want false (as reported) — RetryAfter must not force it true")
+		}
+		duration, present := f.RetryAfter()
+		if !present || duration != 10*time.Second {
+			t.Errorf("f.RetryAfter() = (%v, %v), want (10s, true) — Retryable=false must not suppress it", duration, present)
+		}
+	})
+}
+
+// R-AIP-009 — Error() renders only the category's registered text (a fixed
+// prefix + category name), never the wrapped cause's text; Unwrap() still
+// exposes the cause; StatusClass and RequestID are dedicated accessors,
+// never substrings of Error()'s rendered text. Proven with a planted
+// credential/body sentinel — completion_test.go's canary-value posture,
+// restated for a wrapped cause rather than a field.
+func TestFailure_Error_ExcludesTheCauseAndBoundedMetadata_UnwrapStillExposesThem(t *testing.T) {
+	t.Parallel()
+
+	const plantedSecret = "credential=sk-PLANTED-9f8e7d6c5b4a"
+	cause := errors.New("upstream body: " + plantedSecret)
+
+	f := mustPreStreamFailureReport(t, ai.FailureReport{
+		Category:    ai.FailureCategoryAuthentication,
+		Cause:       cause,
+		StatusClass: 4,
+		RequestID:   "req_canary_plant_77",
+		RawLabel:    "raw_canary_plant_88",
+	})
+
+	t.Run("Error() never contains the planted cause text (S-AIP-028)", func(t *testing.T) {
+		t.Parallel()
+
+		if got := f.Error(); strings.Contains(got, plantedSecret) {
+			t.Errorf("f.Error() = %q, contains the planted cause text, want it excluded", got)
+		}
+	})
+
+	t.Run("Unwrap() still exposes the cause, planted text intact, reachable through errors.Is (S-AIP-029)", func(t *testing.T) {
+		t.Parallel()
+
+		unwrapped := f.Unwrap()
+		if unwrapped == nil {
+			t.Fatal("f.Unwrap() = nil, want the cause")
+		}
+		if !strings.Contains(unwrapped.Error(), plantedSecret) {
+			t.Errorf("f.Unwrap().Error() = %q, want it to contain the planted cause text", unwrapped.Error())
+		}
+		if !errors.Is(f, cause) {
+			t.Error("errors.Is(f, cause) = false, want true — errors.Is must reach the cause through Unwrap")
+		}
+	})
+
+	t.Run("StatusClass and RequestID are dedicated accessors, and Error() does not substring-include either (S-AIP-030/031)", func(t *testing.T) {
+		t.Parallel()
+
+		statusClass, present := f.StatusClass()
+		if !present || statusClass != 4 {
+			t.Errorf("f.StatusClass() = (%d, %v), want (4, true)", statusClass, present)
+		}
+		if got := f.RequestID(); got != "req_canary_plant_77" {
+			t.Errorf("f.RequestID() = %q, want %q", got, "req_canary_plant_77")
+		}
+
+		rendered := f.Error()
+		if strings.Contains(rendered, "req_canary_plant_77") {
+			t.Errorf("f.Error() = %q, contains the request ID, want it excluded — RequestID is a dedicated accessor, not part of the rendered text", rendered)
+		}
+		if strings.Contains(rendered, "raw_canary_plant_88") {
+			t.Errorf("f.Error() = %q, contains the raw label, want it excluded", rendered)
+		}
+	})
+
+	t.Run("an absent StatusClass reports not present (companion case)", func(t *testing.T) {
+		t.Parallel()
+
+		bare := mustPreStreamFailureReport(t, ai.FailureReport{Category: ai.FailureCategoryTimeout})
+		if _, present := bare.StatusClass(); present {
+			t.Error("bare.StatusClass() reports present, want absent — StatusClass was never supplied")
+		}
+		if got := bare.RequestID(); got != "" {
+			t.Errorf("bare.RequestID() = %q, want empty", got)
+		}
+	})
 }
 
 // mustPreStreamFailureReport constructs a pre-stream failure from a full

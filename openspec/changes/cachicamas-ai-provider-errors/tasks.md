@@ -54,11 +54,11 @@ Chain strategy: size-exception
 
 ## Phase 4: AI-19.3 — Retry hints and safe metadata (R-AIP-007..009)
 
-- [ ] 4.1 RED S-AIP-022..023: retryability boolean readable for every category; no retry-scheduling/backoff/attempt-counter/failover identifier exported. S-AIP-024..027: `RetryDelay` presence-vs-value distinguishability, incl. explicit zero.
-- [ ] 4.2 GREEN: `Retryable()`, `RetryAfter() (time.Duration, bool)`.
-- [ ] 4.3 RED S-AIP-028..031: planted-sentinel test — `Error()` excludes cause text, `Unwrap()` still exposes it; `StatusClass()`/`RequestID()` are dedicated accessors, not substrings.
-- [ ] 4.4 GREEN: `Error()` fixed prefix + category text only (D5); `StatusClass()`/`RequestID()` accessors.
-- [ ] 4.5 REFACTOR: doc comment recording the redaction guarantee as a type property; confirm `Error()` never calls the cause's `Error()`; record red/green.
+- [x] 4.1 RED S-AIP-022..023: retryability boolean readable for every category (all 9); no retry-scheduling/backoff/attempt-counter/failover identifier exported (AST scan reusing `text_events_test.go`'s shared `exportedTopLevelNames` helper rather than duplicating it). S-AIP-024..027: `RetryDelay` presence-vs-value distinguishability, incl. explicit zero.
+- [x] 4.2 GREEN: `Retryable()`, `RetryAfter() (time.Duration, bool)`.
+- [x] 4.3 RED S-AIP-028..031: planted-sentinel test (embedded credential string in the wrapped cause) — `Error()` excludes cause text, `Unwrap()` still exposes it (and is errors.Is-reachable); `StatusClass()`/`RequestID()` are dedicated accessors, not substrings.
+- [x] 4.4 GREEN: `Error()` fixed prefix + category text only (D5); `StatusClass()`/`RequestID()` accessors; status-class 0..5 bound wired into `validate()`. Process note: the status-class bound was written before its own dedicated test (a real strict-TDD ordering slip on that one sub-rule, recorded honestly — see apply-progress.md deviation 6) — a test was added immediately after and the bound was verified genuinely load-bearing by temporarily removing it, confirming the test fails, then restoring it.
+- [x] 4.5 REFACTOR: `Error()`'s doc comment records the redaction guarantee as a type property; confirmed structurally that `Error()` never references `f.cause`. `go test -race ./src/ai/...` green; gofmt/vet clean (pre-existing `completion_test.go` nit excluded, not mine).
 
 ## Phase 5: AI-19.4 — Partial-output discriminator (R-AIP-010..012)
 

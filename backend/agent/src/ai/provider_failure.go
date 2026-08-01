@@ -283,16 +283,21 @@ const noProviderFailure = "no provider failure"
 
 // Error renders the failure for a diagnostic reader (R-AIP-009).
 //
-// This is a stub at this milestone's foundation stage: the fixed-prefix,
-// category-only rendering design.md pins is Phase 4's (task 4.4). It is
-// already total — nil-safe — because NFR-AIP-B's totality guarantee is a
-// property of the type from its first commit, not an afterthought bolted on
-// once every field exists.
+// The rendering is built only from a fixed prefix and the category's own
+// registered text — validation.go's Violation.Error() precedent, restated:
+// it never reproduces the wrapped cause's text, and never includes
+// [Failure.RawLabel], [Failure.StatusClass] or [Failure.RequestID], proven
+// with a planted credential/body sentinel (S-AIP-028…031). [Unwrap] still
+// exposes the cause, so causes stay inspectable while a response body or
+// credential cannot reach a log line through the default string —
+// redaction becomes a property of the type. A nil *Failure renders as
+// [noProviderFailure]; the zero Failure{} renders with the "invalid"
+// category placeholder — both total, never panicking (NFR-AIP-B).
 func (f *Failure) Error() string {
 	if f == nil {
 		return noProviderFailure
 	}
-	return "provider failure"
+	return "provider failure: " + f.category.String()
 }
 
 // Unwrap returns the wrapped cause, reachable by errors.Is/errors.As through
@@ -335,15 +340,77 @@ func (f *Failure) RawLabel() string {
 	return f.rawLabel
 }
 
-// validate reports the payload's first broken rule at the given position, or
-// nil (R-AIP-004/005: category is a member of the closed vocabulary).
+// Retryable reports the machine-readable retry signal (R-AIP-007).
 //
-// Phase 4 adds the status-class bound (R-AIP-009's bounded safe metadata);
-// NFR-AIP-C is re-verified once every rule this method will ever carry has
-// landed.
+// It is a classification only — doc 0001 § 3.1 reserves the decision to
+// retry for Layer 2 (V-OUT-11); this package exports no backoff, attempt
+// counter or failover identifier. A nil *Failure reports false rather than
+// panicking (NFR-AIP-B).
+func (f *Failure) Retryable() bool {
+	if f == nil {
+		return false
+	}
+	return f.retryable
+}
+
+// RetryAfter returns the provider's retry-after hint and whether one was
+// reported (R-AIP-008).
+//
+// The two-result shape is usage.go's [TokenCount.Count] idiom, restated:
+// absent, a reported zero and a reported non-zero duration are three
+// distinguishable readings, read independently of [Failure.Retryable] —
+// neither is derived from the other. A nil *Failure reports (0, false)
+// rather than panicking (NFR-AIP-B).
+func (f *Failure) RetryAfter() (time.Duration, bool) {
+	if f == nil {
+		return 0, false
+	}
+	return f.retryAfter.delay, f.retryAfter.present
+}
+
+// StatusClass returns the transport status class (1 = informational, 2 =
+// success, 3 = redirection, 4 = client error, 5 = server error) and whether
+// one was reported. The zero value (0) means "nothing reported" — the same
+// presence-typed shape [Failure.RetryAfter] uses, dedicated accessors
+// rather than a substring of [Error]'s rendered text (R-AIP-009). A nil
+// *Failure reports (0, false) rather than panicking (NFR-AIP-B).
+func (f *Failure) StatusClass() (int, bool) {
+	if f == nil {
+		return 0, false
+	}
+	if f.statusClass == 0 {
+		return 0, false
+	}
+	return f.statusClass, true
+}
+
+// RequestID returns the provider's own opaque request identifier, or empty
+// when none was reported or it was dropped whole by [sanitizeOpaqueField]'s
+// bound — the same drop-whole posture as [Failure.RawLabel]. A dedicated
+// accessor, never a substring of [Error]'s rendered text (R-AIP-009). A nil
+// *Failure reports empty rather than panicking (NFR-AIP-B).
+func (f *Failure) RequestID() string {
+	if f == nil {
+		return ""
+	}
+	return f.requestID
+}
+
+// validate reports the payload's first broken rule at the given position, or
+// nil, in the order written (V-FAIL-04): the category is a member of the
+// closed vocabulary (R-AIP-004/005), then the status class — when reported
+// at all — is one of the five documented classes (R-AIP-009's bounded safe
+// metadata). NFR-AIP-C: every rule below routes through an AI-04 sentinel,
+// never a new failure type.
 func (f *Failure) validate(at Path) *Violation {
 	return firstViolation(
 		func() *Violation { return violationOf(f.category.Validate(under(at, At("category"))...)) },
+		func() *Violation {
+			if f.statusClass < 0 || f.statusClass > 5 {
+				return Invalid(ErrOutOfRange, under(at, At("status_class"))...)
+			}
+			return nil
+		},
 	)
 }
 
