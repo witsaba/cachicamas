@@ -112,3 +112,16 @@ The installation runs `pnpm add @auth/qwik@0.9.2` (or the equivalent
 
 If Auth.js v1 changes the JWE envelope, the Go verifier must be
 re-tested first (and ADR 0002 amended).
+
+## Addendum (2026-08-01, `frontend-vuln-check`)
+
+`@auth/core` — the peer dependency `@auth/qwik@0.9.2` pins as a regular
+(non-peer) dependency — was overridden from `0.41.2` to exact `0.41.3`
+via `overrides` in `frontend/pnpm-workspace.yaml`, closing
+GHSA-7rqj-j65f-68wh (a homoglyph email-normalization auth bypass) on
+the login path. This addendum does **not** change the decision above:
+the `@auth/qwik@0.9.2` pin itself is untouched, `0.41.2 → 0.41.3` is a
+patch-only security fix, and `pnpm why @auth/core` confirms a single
+tree-wide resolution (no second, vulnerable copy remains under
+`@auth/qwik`). See `frontend/README.md` § "Vulnerability scanning" →
+"Remediation history" for verification detail.

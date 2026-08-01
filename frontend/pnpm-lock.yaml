@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@auth/core': 0.41.3
+
 importers:
 
   .:
     dependencies:
       '@auth/core':
-        specifier: 0.41.2
-        version: 0.41.2
+        specifier: 0.41.3
+        version: 0.41.3
       '@auth/qwik':
         specifier: 0.9.2
         version: 0.9.2
@@ -96,12 +99,12 @@ packages:
   '@adobe/css-tools@4.3.3':
     resolution: {integrity: sha512-rE0Pygv0sEZ4vBWHlAgJLGDU7Pm8xoO6p3wsEceb7GYAjScrOHpEo8KK/eVkAcnSM+slAEtXjA2JpdjLp4fJQQ==}
 
-  '@auth/core@0.41.2':
-    resolution: {integrity: sha512-Hx5MNBxN2fJTbJKGUKAA0wca43D0Akl3TvufY54Gn8lop7F+34vU1zA1pn0vQfIoVuLIrpfc2nkyjwIaPJMW7w==}
+  '@auth/core@0.41.3':
+    resolution: {integrity: sha512-sJ3JMHHkXMD3aOjopv7mOBTO1Ocw4b0fAEXJBz6k7YHLpYQI6C40jCUPc5fNvUKxXRXNE1/sRISA15UrwWJBTw==}
     peerDependencies:
       '@simplewebauthn/browser': ^9.0.1
       '@simplewebauthn/server': ^9.0.2
-      nodemailer: ^7.0.7
+      nodemailer: ^7.0.7 || ^8.0.5
     peerDependenciesMeta:
       '@simplewebauthn/browser':
         optional: true
@@ -3073,7 +3076,7 @@ snapshots:
   '@adobe/css-tools@4.3.3':
     optional: true
 
-  '@auth/core@0.41.2':
+  '@auth/core@0.41.3':
     dependencies:
       '@panva/hkdf': 1.2.1
       jose: 6.2.3
@@ -3083,7 +3086,7 @@ snapshots:
 
   '@auth/qwik@0.9.2':
     dependencies:
-      '@auth/core': 0.41.2
+      '@auth/core': 0.41.3
       set-cookie-parser: 2.7.2
     transitivePeerDependencies:
       - '@simplewebauthn/browser'

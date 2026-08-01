@@ -8,3 +8,14 @@ allowBuilds:
   "@parcel/watcher": true
   esbuild: true
   sharp: true
+
+# GHSA-7rqj-j65f-68wh (@auth/core homoglyph email-normalization auth bypass,
+# frontend-vuln-check): @auth/qwik@0.9.2 hard-pins @auth/core@0.41.2 as a
+# regular (non-peer) dependency, so bumping the direct dependency alone
+# leaves a second, vulnerable 0.41.2 copy resolved under @auth/qwik — the
+# exact one the login path imports. This override forces a single
+# tree-wide 0.41.3 resolution. 0.41.2 -> 0.41.3 is the patch containing
+# only the security fix; the @auth/qwik@0.9.2 pin (docs/adr/0001-accept-authjs-qwik.md)
+# is untouched.
+overrides:
+  "@auth/core": "0.41.3"
