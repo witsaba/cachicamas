@@ -107,6 +107,20 @@ var (
 	// accordingly — "remove one of them", not "spell it differently" — and
 	// errors.Is is the only place a consumer can read that difference.
 	ErrDuplicate = errors.New("value repeats another the collection already carries")
+
+	// ErrMisplaced is the class for a value that is valid in itself and is not
+	// permitted where it appears. AI-10.3 item 3: a reasoning content part in a
+	// user message is decidable from the request alone, because the request
+	// holds both the role and the kind and nothing below it does.
+	//
+	// Its nearest neighbour is [ErrNotInVocabulary], and the difference is what
+	// the caller is being told. A value outside a vocabulary is not a member of
+	// the set at all — the fix is to name a member. A misplaced value *is* a
+	// member, constructed by its own constructor and valid against every rule
+	// its own type carries; what fails is the position it was put in. The fix is
+	// therefore "move it, or drop it", never "spell it differently", and
+	// errors.Is is the only place a consumer can read that difference.
+	ErrMisplaced = errors.New("value is not permitted where it appears")
 )
 
 // ruleClasses is the closed, ordered registry of rule classes.
@@ -121,6 +135,7 @@ var ruleClasses = []error{
 	ErrMalformed,
 	ErrUnresolvedReference,
 	ErrDuplicate,
+	ErrMisplaced,
 }
 
 // Step is one segment of a position: a named field of a Layer 1 contract, and

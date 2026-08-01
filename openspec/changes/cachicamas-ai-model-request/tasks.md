@@ -475,11 +475,50 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 **Deliverable:** `request.go` extended; `validation.go` plus **both** registry mirrors; `request_test.go` extended.
 **Spec:** `R-AMR-008` … `R-AMR-012`. **Design:** §§ 5, 6, 7, and § 4 rows 6–9.
 
-- [ ] **Item 0** *(prerequisite, do this first)* — Append `ErrMisplaced` to `validation.go`'s class set **and** to `ruleClasses`, **and** update `validation_registry_internal_test.go` and `validation_test.go` in the **same commit**. The internal guard fails and says so if only one mirror moves. `design.md` § 5.3 carries the doc comment to write.
+- [x] ~~**Item 0** *(prerequisite, do this first)* — Append `ErrMisplaced`~~ to `validation.go`'s class set **and** to `ruleClasses`, **and** update `validation_registry_internal_test.go` and `validation_test.go` in the **same commit**. The internal guard fails and says so if only one mirror moves. `design.md` § 5.3 carries the doc comment to write.
 - [ ] **Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.
 - [ ] **Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**
 - [ ] **Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.
 - [ ] **Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.
+
+### AI-10.3 item 0 — `ErrMisplaced` appended, three files or none
+
+**Red (a).** The append was driven from the mirror first, so the first failure is the one a consumer would hit:
+
+```
+# github.com/cachicamas/backend/agent/src/ai_test [github.com/cachicamas/backend/agent/src/ai.test]
+src/ai/validation_test.go:104:5: undefined: ai.ErrMisplaced
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+FAIL
+```
+
+**Red (b).** With the sentinel declared in `validation.go` but not yet registered, AI-04's guard bit in **both** directions — the declared-but-unregistered hole and the mirror-drift hole — which is the guard working as doc 0002 defines a guard leaf:
+
+```
+--- FAIL: TestRuleClasses_EverySentinelDeclaredInTheSource_IsInTheRegistry (0.00s)
+    validation_registry_internal_test.go:116: validation.go declares the sentinel ErrMisplaced, which ruleClasses does not list.
+          rule: the rule-class set is closed, and a class is appended in the pull request that needs it (design.md § 3.1) — declaring the sentinel is half of that append.
+          A sentinel outside ruleClasses renders as "value violates an unregistered rule", and no test of this package covers it.
+--- FAIL: TestRuleClasses_TheExternalTestMirror_MatchesTheRegistryExactly (0.01s)
+    validation_registry_internal_test.go:184: the mirror in validation_test.go lists ErrMisplaced, which validation.go does not register.
+          rule: the mirror names the closed set, and a name outside it is either a sentinel that was never appended to ruleClasses or one that was removed from it.
+    validation_registry_internal_test.go:192: the mirror is not the registry.
+          validation.go: ErrEmpty, ErrNotInVocabulary, ErrOutOfRange, ErrMalformed, ErrUnresolvedReference, ErrDuplicate
+          validation_test.go: ErrEmpty, ErrNotInVocabulary, ErrOutOfRange, ErrMalformed, ErrUnresolvedReference, ErrDuplicate, ErrMisplaced
+          rule: same members, same order. ruleClasses is ordered on purpose, and a mirror free to reorder it is a second answer to which class comes first.
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.524s
+FAIL
+```
+
+**Green.** `ErrMisplaced` appended to `ruleClasses`. All three files moved in one commit, which is what the guard was demanding.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.276s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.223s
+```
+
+**Refactor.** None. The GoDoc follows AI-04's `ErrDuplicate` precedent — a citable case plus the difference from the nearest neighbour — and the neighbour named is `ErrNotInVocabulary`: a value outside a vocabulary is not a member and must be *renamed*; a misplaced value **is** a member, valid against every rule its own type carries, and must be *moved or dropped*.
 
 ---
 

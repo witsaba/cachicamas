@@ -101,6 +101,7 @@ var ruleClasses = []error{
 	ai.ErrMalformed,
 	ai.ErrUnresolvedReference,
 	ai.ErrDuplicate,
+	ai.ErrMisplaced,
 }
 
 // AI-04.2 — a failure carrying positional context is extracted by errors.As,
