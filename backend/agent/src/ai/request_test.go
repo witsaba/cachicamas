@@ -838,3 +838,65 @@ func TestNewRequest_RoleVersusContentKind_EnforcesTheDocumentedTable(t *testing.
 		})
 	}
 }
+
+// AI-10.3 item 4 — tool-call and tool-result correlation is checked across
+// the request (R-AMR-012, design.md §§ 6, 7): an orphan result is rejected,
+// an orphan call is legal, a duplicate call identity is rejected at its
+// second occurrence, and a result preceding its call is legal — the
+// deliberate non-decision about ordering, pinned rather than assumed.
+func TestNewRequest_ToolCallAndResultCorrelation_ChecksAcrossTheRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an_orphan_tool_result_is_rejected", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-047 — a result naming a call identity the request never
+		// declares.
+		messages := []ai.Message{
+			requireMessage(t, ai.RoleTool, toolResultPart(t, "no-such-call", "42")),
+		}
+		_, err := ai.NewRequest("m", messages)
+		requireViolation(t, err, ai.ErrUnresolvedReference, "messages[0].content[0]")
+	})
+
+	t.Run("an_orphan_tool_call_is_legal", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-048 — a call awaiting its result is the ordinary mid-turn
+		// state; repairing it is V-OUT-02's, one layer up.
+		messages := []ai.Message{
+			requireMessage(t, ai.RoleAssistant, toolCallPart(t, "call-1", "search")),
+		}
+		if _, err := ai.NewRequest("m", messages); err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure — an unanswered call is legal", err)
+		}
+	})
+
+	t.Run("a_duplicate_call_identity_fails_at_the_second_occurrence", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-049 — two tool calls sharing one identity, in two messages so
+		// the reported position also proves the scan crosses message
+		// boundaries and not only content within one message.
+		messages := []ai.Message{
+			requireMessage(t, ai.RoleAssistant, toolCallPart(t, "dup", "search")),
+			requireMessage(t, ai.RoleAssistant, toolCallPart(t, "dup", "fetch")),
+		}
+		_, err := ai.NewRequest("m", messages)
+		requireViolation(t, err, ai.ErrDuplicate, "messages[1].content[0]")
+	})
+
+	t.Run("a_result_before_its_call_is_legal", func(t *testing.T) {
+		t.Parallel()
+
+		// S-AMR-050 — the deliberate non-decision about ordering, pinned: a
+		// call must exist "anywhere in the request", not necessarily earlier.
+		messages := []ai.Message{
+			requireMessage(t, ai.RoleTool, toolResultPart(t, "call-1", "42")),
+			requireMessage(t, ai.RoleAssistant, toolCallPart(t, "call-1", "search")),
+		}
+		if _, err := ai.NewRequest("m", messages); err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure — ordering repair is V-OUT-02's, not this layer's", err)
+		}
+	})
+}

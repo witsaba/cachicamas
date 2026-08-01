@@ -47,6 +47,83 @@ func roleAllowsKind(role Role, kind PartKind) bool {
 	return slices.Contains(rolePermittedKinds[role], kind)
 }
 
+// toolCallLocation is one tool call's identity and its position in the
+// request's ordered messages and content.
+type toolCallLocation struct {
+	id                      string
+	messageIndex, partIndex int
+}
+
+// duplicateToolCallRule reports the first tool-call identity that repeats an
+// earlier one, positioned at the second occurrence (design.md § 7,
+// R-AMR-012).
+//
+// Uniqueness is a precondition of [unresolvedToolResultRule] below, which
+// resolves a result to a call by identity — a rule that resolves by a
+// non-unique key is not a rule — and that is why this rule is checked first.
+//
+// Calls are collected into one ordered slice first, and the duplicate scan
+// then walks it exactly as [NewToolSet] walks a tool set: linear and nested,
+// for AI-04's reason. Nothing in this package may let an unordered iteration
+// decide anything, and the reported duplicate is always the lowest index
+// whose identity repeats an earlier one.
+func duplicateToolCallRule(messages []Message) *Violation {
+	var calls []toolCallLocation
+	for i, message := range messages {
+		for j, part := range message.Content() {
+			if call, ok := part.ToolCall(); ok {
+				calls = append(calls, toolCallLocation{id: call.ID(), messageIndex: i, partIndex: j})
+			}
+		}
+	}
+	for i, call := range calls {
+		for _, earlier := range calls[:i] {
+			if earlier.id == call.id {
+				return Invalid(ErrDuplicate, AtIndex("messages", call.messageIndex), AtIndex("content", call.partIndex))
+			}
+		}
+	}
+	return nil
+}
+
+// unresolvedToolResultRule reports the first tool result whose call identity
+// correlates to no tool call anywhere in the request (design.md § 6,
+// R-AMR-012).
+//
+// "Anywhere in the request" is deliberate and not "earlier in the request":
+// whether a call must precede the result that correlates to it is
+// unlanded — design.md § 6.3 pins the non-decision by test rather than
+// deciding it here. A tool call with no matching result is not checked by
+// this rule at all: it is the ordinary mid-turn state, and repairing it is
+// V-OUT-02's, one layer up.
+func unresolvedToolResultRule(messages []Message) *Violation {
+	for i, message := range messages {
+		for j, part := range message.Content() {
+			result, ok := part.ToolResult()
+			if !ok {
+				continue
+			}
+			if !anyToolCallHasID(messages, result.CallID()) {
+				return Invalid(ErrUnresolvedReference, AtIndex("messages", i), AtIndex("content", j))
+			}
+		}
+	}
+	return nil
+}
+
+// anyToolCallHasID reports whether some tool call anywhere in the ordered
+// messages carries the given identity.
+func anyToolCallHasID(messages []Message, id string) bool {
+	for _, message := range messages {
+		for _, part := range message.Content() {
+			if call, ok := part.ToolCall(); ok && call.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NewRequest constructs a normalized request.
 //
 // The rules are checked in the order written, per V-FAIL-04, and the order is
@@ -144,6 +221,8 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			}
 			return nil
 		},
+		func() *Violation { return duplicateToolCallRule(messages) },
+		func() *Violation { return unresolvedToolResultRule(messages) },
 		func() *Violation {
 			if !draft.hasToolChoice {
 				return nil

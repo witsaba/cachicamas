@@ -15,11 +15,11 @@
 
 ## Entry point for the resuming agent
 
-This half of the milestone implements **AI-10.1 and AI-10.2 only**, and both are implemented and green. **AI-10.3, AI-10.4, AI-10.5 and AI-10.6 are not implemented.**
+**AI-10.1, AI-10.2 and AI-10.3 are implemented and green.** AI-10.4, AI-10.5 and AI-10.6 are not implemented.
 
-The resuming agent starts at **§ Phase AI-10.3**, below. Every box in phases AI-10.3 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 5–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
+The resuming agent starts at **§ Phase AI-10.4**, below. Every box in phases AI-10.4 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 9–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
 
-The first thing AI-10.3 does is append `ErrMisplaced` to `validation.go` **and both of its registry mirrors in the same commit**. `validation_registry_internal_test.go` fails and says so if only one mirror moves.
+AI-10.3's rule insertion order matters for what follows: `NewRequest`'s `FirstFailure` list is, in order, model, messages, messages-constructed, content (AI-06's), system, role-vs-kind (`ErrMisplaced`), duplicate-tool-call (`ErrDuplicate`), unresolved-tool-result (`ErrUnresolvedReference`), tool-choice-vs-tool-set (AI-08.3's three), bounds — exactly `design.md` § 4's documented order, rules 1–10. AI-10.4 item 1's determinism test may assume this order is already correct; it is proving it, not building it.
 
 ## Node types and what they close on
 
@@ -470,7 +470,7 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 
 ---
 
-## Phase AI-10.3 — messages, tools and tool choice on the request `[leaf]` — **NOT IMPLEMENTED**
+## Phase AI-10.3 — messages, tools and tool choice on the request `[leaf]` — **IMPLEMENTED**
 
 **Deliverable:** `request.go` extended; `validation.go` plus **both** registry mirrors; `request_test.go` extended.
 **Spec:** `R-AMR-008` … `R-AMR-012`. **Design:** §§ 5, 6, 7, and § 4 rows 6–9.
@@ -479,7 +479,7 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 - [x] ~~**Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.~~
 - [x] ~~**Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**~~
 - [x] ~~**Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.~~
-- [ ] **Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.
+- [x] ~~**Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.~~
 
 ### AI-10.3 item 0 — `ErrMisplaced` appended, three files or none
 
@@ -685,6 +685,55 @@ ok  	github.com/cachicamas/backend/agent/src/ai	1.474s
 **Refactor.** None. The table is a slice rather than a map, matching `roleNames`, `partKindNames` and `toolChoiceModes` — AI-04's reason applies verbatim: nothing in this package may let an unordered iteration decide anything, and `slices.Contains` over a three-or-fewer-element slice is a bounded scan whose answer cannot depend on order.
 
 **Note on scenario S-AMR-046's count.** `spec.md` describes this scenario as covering "the four permitted cells", but the table in `design.md` § 5.1 and this spec's own requirement text yield **five**: `text` is permitted under both `user` and `assistant`. The test implements the requirement text and `design.md`'s table — five permitted cells, seven forbidden, twelve total, both directions — rather than the scenario prose's count, which undercounts by one. Not a `[provisional]` decision changed, since the requirement and the table already said five; the prose miscount is left as-is rather than edited, because `spec.md` is this change's own delta and out of scope for the apply phase to rewrite.
+
+### AI-10.3 item 4 — orphan results, orphan calls, duplicate identities, and the ordering non-decision
+
+**Deliverable:** `request.go` gains `toolCallLocation`, `duplicateToolCallRule`, `unresolvedToolResultRule`, `anyToolCallHasID`, and rules 7 and 8 of `design.md` § 4's table, inserted between rule 6 (role-vs-kind) and rule 9 (tool choice against the tool set). `request_test.go` gains one test with four sub-cases.
+**Spec:** `R-AMR-012`. **Design:** §§ 6, 7.
+
+**Red.** Four sub-cases against `NewRequest` holding neither rule. The two rejection cases failed exactly as expected; the two "legal" cases already passed, because nothing yet rejected them — the correct red shape for a rule that does not exist yet:
+
+```
+--- FAIL: TestNewRequest_ToolCallAndResultCorrelation_ChecksAcrossTheRequest (0.00s)
+    --- PASS: .../an_orphan_tool_call_is_legal (0.00s)
+    --- PASS: .../a_result_before_its_call_is_legal (0.00s)
+    --- FAIL: .../an_orphan_tool_result_is_rejected (0.00s)
+        request_test.go:859: got no failure, want value names something the request does not declare at "messages[0].content[0]"
+    --- FAIL: .../a_duplicate_call_identity_fails_at_the_second_occurrence (0.00s)
+        request_test.go:886: got no failure, want value repeats another the collection already carries at "messages[1].content[0]"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.493s
+FAIL
+```
+
+**Green.** `duplicateToolCallRule` collects every tool call into one ordered slice (message index, content index, identity) and scans it exactly as `NewToolSet` scans a tool set — linear and nested, reporting the lowest index whose identity repeats an earlier one. `unresolvedToolResultRule` walks every tool result and asks `anyToolCallHasID`, which scans the whole request rather than a prefix, cashing `design.md` § 6.3's "anywhere in the request" wording literally.
+
+```
+--- PASS: TestNewRequest_ToolCallAndResultCorrelation_ChecksAcrossTheRequest (0.00s)
+    --- PASS: .../a_result_before_its_call_is_legal (0.00s)
+    --- PASS: .../an_orphan_tool_result_is_rejected (0.00s)
+    --- PASS: .../a_duplicate_call_identity_fails_at_the_second_occurrence (0.00s)
+    --- PASS: .../an_orphan_tool_call_is_legal (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.340s
+```
+
+**Refactor.** None. Re-running item 3's `tool_result_under_tool` sub-test alone confirmed the companion-message design anticipated this rule correctly: it still passes now that `unresolvedToolResultRule` is live.
+
+### AI-10.3 evidence gate
+
+```
+$ go test -race ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai	2.160s
+
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+```
+
+`go.mod` carries zero `require` lines; both AI-00 import guards pass. `NewRequest`'s `FirstFailure` list now matches `design.md` § 4's documented order exactly, rules 1–10 — no rule needed relocating, because AI-10.3 item 2 had already landed the tool-choice-vs-tool-set rule as the last content rule before `boundsRule()`, and rules 6–8 slot in ahead of it by construction rather than by a later reorder.
 
 ---
 
