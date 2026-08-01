@@ -15,11 +15,13 @@
 
 ## Entry point for the resuming agent
 
-**AI-10.1, AI-10.2 and AI-10.3 are implemented and green.** AI-10.4, AI-10.5 and AI-10.6 are not implemented.
+**AI-10.1, AI-10.2, AI-10.3 and AI-10.4 are implemented and green.** AI-10.5 and AI-10.6 are not implemented.
 
-The resuming agent starts at **§ Phase AI-10.4**, below. Every box in phases AI-10.4 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 9–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
+The resuming agent starts at **§ Phase AI-10.5**, below. Every box in phases AI-10.5 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 10–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
 
-AI-10.3's rule insertion order matters for what follows: `NewRequest`'s `FirstFailure` list is, in order, model, messages, messages-constructed, content (AI-06's), system, role-vs-kind (`ErrMisplaced`), duplicate-tool-call (`ErrDuplicate`), unresolved-tool-result (`ErrUnresolvedReference`), tool-choice-vs-tool-set (AI-08.3's three), bounds — exactly `design.md` § 4's documented order, rules 1–10. AI-10.4 item 1's determinism test may assume this order is already correct; it is proving it, not building it.
+AI-10.3's rule insertion order matters for what follows: `NewRequest`'s `FirstFailure` list is, in order, model, messages, messages-constructed, content (AI-06's), system, role-vs-kind (`ErrMisplaced`), duplicate-tool-call (`ErrDuplicate`), unresolved-tool-result (`ErrUnresolvedReference`), tool-choice-vs-tool-set (AI-08.3's three), bounds — exactly `design.md` § 4's documented order, rules 1–10. AI-10.4 item 1 proved this order deterministic across runs, by construction, with a bite proof.
+
+**AI-10.4 item 3 found and fixed a real pre-existing defect, not scoped to AI-10.**`tool_call.go` (AI-09.1) used `encoding/json.Valid`, which transitively imports `os`/`io/fs` via `fmt`. AI-10.4's new no-I/O guard caught it correctly. The fix is `json_syntax.go` — a hand-rolled, stdlib-only, differentially-tested (20,000 generated inputs against `encoding/json.Valid` as an oracle, 0 disagreements) JSON syntax scanner — now called from `tool_call.go` in place of `encoding/json.Valid`. `tool_call.go` no longer imports `encoding/json`; the request path's dependency closure is clean. Full detail, including why editing an AI-09 file was in scope, is under "AI-10.4 item 3" below. **If AI-10.5 or AI-10.6 needs JSON-syntax logic again, it already exists in `json_syntax.go` — do not reintroduce `encoding/json`.**
 
 ## Node types and what they close on
 
@@ -737,13 +739,176 @@ bin/golangci-lint run --config=.golangci.yml ./...
 
 ---
 
-## Phase AI-10.4 — validation happens once, before I/O `[leaf]` — **NOT IMPLEMENTED**
+## Phase AI-10.4 — validation happens once, before I/O `[leaf]` — **IMPLEMENTED**
 
 **Spec:** `R-AMR-013`, `R-AMR-014`. **Design:** § 9.
 
-- [ ] **Item 1** — The first failure in the documented order is reported, identically across runs.
-- [ ] **Item 2** — Validation is total over the regions.
-- [ ] **Item 3** — The request path's dependency closure contains no network and no filesystem package, asserted mechanically in the AI-00.3 guard style. Extend `import_boundary_test.go` rather than adding a parallel guard.
+- [x] ~~**Item 1** — The first failure in the documented order is reported, identically across runs.~~
+- [x] ~~**Item 2** — Validation is total over the regions.~~
+- [x] ~~**Item 3** — The request path's dependency closure contains no network and no filesystem package, asserted mechanically in the AI-00.3 guard style. Extend `import_boundary_test.go` rather than adding a parallel guard.~~
+
+### On this phase's evidence shape
+
+All three items assert properties `design.md` § 9 states are **already true** by construction — "AI-10.4's work is to assert it, not to build it" (§ 9.1). Each test is therefore a **pin**: green from birth, in the same category `TestLayer1_ModuleHasNoDependencies_ZeroRequires` already established as legitimate and exempt from red-first. Doc 0002's rule for a check that is green on arrival is to close it by **showing it bite** a scratch violation, recorded below for every pin in this phase — the same idiom AI-10.3 item 1 used.
+
+### AI-10.4 item 1 — determinism, shown to bite
+
+**Deliverable:** `request_test.go` gains one test, two sub-cases (S-AMR-053, S-AMR-054).
+No production change: `design.md` § 4's rule list is already a `[]Rule` in slice order with no map anywhere in the path.
+
+**Green from birth**, against the rule order landed through AI-10.3:
+
+```
+--- PASS: TestNewRequest_MultipleViolations_ReportsTheDocumentedOrderFirstAcrossManyRuns (0.00s)
+    --- PASS: .../model_and_messages_both_violated_reports_the_model_failure (0.00s)
+    --- PASS: .../four_regions_violated_at_once_reports_the_earliest_rule (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.532s
+```
+
+**Closed by showing it bite.** Scratch violation: rules 1 (model) and 2 (messages) swapped in `NewRequest`'s `FirstFailure` list, `request.go` otherwise untouched. Trimmed to the first 20 of 100 identical failures — the test reports every one, and all 100 disagreed the same way:
+
+```
+    request_test.go:926: violation.Path() = "messages", want "model"
+    request_test.go:926: violation.Path() = "messages", want "model"
+    ... (18 more, identical)
+--- FAIL: TestNewRequest_MultipleViolations_ReportsTheDocumentedOrderFirstAcrossManyRuns (0.00s)
+    --- FAIL: .../model_and_messages_both_violated_reports_the_model_failure (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.474s
+```
+
+`request.go` restored from the pre-scratch state; the test above re-ran green afterward, confirming the restore was exact (bytes identical to the pre-scratch file, diffed).
+
+### AI-10.4 item 2 — totality, one clause shown to bite, one shown unreachable
+
+**Deliverable:** `request_test.go` gains two tests and one helper (`requireTool`).
+No production change to `request.go`: this item asserts that AI-10.1–AI-10.3's rules already cover every region, and does not add a new one.
+
+**Green from birth** — the re-examination test (content rebuilt via `NewMessage`, tool choice re-validated via `ValidateAgainst`) and the duplicate-name unreachability test:
+
+```
+--- PASS: TestNewRequest_ThatConstructed_ReExaminesCleanUnderEveryRegionsOwnContract (0.00s)
+--- PASS: TestNewRequest_DuplicateToolName_CannotReachARequestBecauseNewToolSetRefusesIt (0.00s)
+```
+
+**Closed by showing it bite, first clause (content + tool choice).** Scratch violation: rule 9 (tool-choice-vs-tool-set) removed from `request.go`, and the re-examine test's fixture temporarily pointed at an unresolvable choice (`"SCRATCH-BITE-undeclared-tool"` naming no declared tool). Construction wrongly succeeded — proving rule 9 was doing real work — and the re-examine step caught the resulting inconsistency:
+
+```
+--- FAIL: TestNewRequest_ThatConstructed_ReExaminesCleanUnderEveryRegionsOwnContract (0.00s)
+    request_test.go:1017: readChoice.ValidateAgainst(readTools) returned toolChoice.name: value names something the request does not declare, want no failure — a tool choice this package attached to a request must still validate against that request's own tool set
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.338s
+```
+
+Both `request.go` and `request_test.go` restored from the pre-scratch state (diffed byte-identical); the full suite re-ran green afterward.
+
+**Second clause (duplicate tool name), not independently bitten.** `design.md` § 9.2 names this clause's asymmetry explicitly: a request cannot hold a tool set with a repeated name because `NewToolSet` (AI-08.2) already refuses to construct one — there is no separate request-level rule to disable and re-enable. The bite proof for the underlying rule already exists in `tool_set_test.go` (AI-08's own suite, not this milestone's to touch); this test's role is only the integration fact that the unreachability is what makes `R-AMR-013`'s second clause true at the request level.
+
+### AI-10.4 item 3 — the no-I/O guard, and what it found
+
+**Deliverable:** `import_boundary_test.go` extended with `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage`, `requestPackagePath`, `networkOrFilesystemPackages`, `listAllDeps`.
+
+**The guard, written exactly as `design.md` § 9.3 specifies, did not pass on arrival.** `go list -deps` (no `-test`) on `github.com/cachicamas/backend/agent/src/ai` reported `os` and `io/fs` in the closure:
+
+```
+=== CONT  TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage
+    import_boundary_test.go:292: the request path's dependency closure imports "os"
+          rule: V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no filesystem package
+    import_boundary_test.go:292: the request path's dependency closure imports "io/fs"
+          rule: V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no filesystem package
+--- FAIL: TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage (0.04s)
+FAIL
+```
+
+**Root cause, traced mechanically, not guessed:**
+
+```
+$ go list -deps -f '{{.ImportPath}}' encoding/json | grep -x -E 'os|io/fs|fmt'
+io/fs
+os
+fmt
+$ go list -f '{{.Imports}}' fmt | tr ' ' '\n' | grep -x 'os'
+os
+```
+
+`tool_call.go` (AI-09.1) calls `encoding/json.Valid` to check `V-REQ-17`'s "syntactically well-formed JSON" rule on argument bytes. `encoding/json` imports `fmt` for its own error formatting, and `fmt` imports `os` for `Stdout`/`Stderr`, which imports `io/fs`. This chain is real, current (Go 1.26.3, this repository), and pre-dates AI-10 — AI-09 had no guard that would have caught it, because this specific guard is what AI-10.4 item 3 exists to add.
+
+**This is a genuine defect the guard is designed to catch, not a false positive in the new test.** `design.md` § 9.3's own words: "The guard is what makes V-REQ-22's 'validation happening after a socket is open is a different concept and a defect' mechanical rather than aspirational." Weakening the guard to tolerate this one case would be exactly the aspirational-not-mechanical failure it exists to prevent — R-AMR-013/S-AMR-051 state the rule with no carve-out. `tool_call.go` is inside `backend/agent/src/ai/`, which `design.md` § 1 does not forbid editing (its rule is "no file **outside** `backend/agent/src/ai/`"); AI-09 is a merged, upstream dependency of AI-10, not a parallel change, so a self-contained internal fix that preserves AI-09's own tests and its documented contract is in scope.
+
+**The fix: `json_syntax.go`, a hand-rolled RFC 8259 syntax scanner (`isWellFormedJSON`), stdlib-only and free of `os`/`io/fs`.** It decodes nothing — syntax only, matching `ErrMalformed`'s own documented boundary — and is a pure function over `[]byte`. `tool_call.go`'s rule 3 now calls it instead of `json.Valid`; the `encoding/json` import is removed from that file entirely.
+
+**Safety net (approval-testing discipline, `strict-tdd.md`'s pattern for refactoring existing code).** `TestNewToolCall_BrokenConstructionRules_FailWithTheDocumentedSentinels` and `TestNewToolCall_AbsentArguments_NormalizeToOneCanonicalDecodableForm` — AI-09's own tests, thirteen sub-cases — ran unchanged before touching `tool_call.go`, and ran unchanged after, byte-for-byte the same assertions, same expected values:
+
+```
+$ go test -race -v -run 'TestNewToolCall' ./src/ai/...
+--- PASS: TestNewToolCall_AbsentArguments_NormalizeToOneCanonicalDecodableForm (0.00s)
+    (3 sub-tests PASS)
+--- PASS: TestNewToolCall_BrokenConstructionRules_FailWithTheDocumentedSentinels (0.00s)
+    (10 sub-tests PASS, including "well-formed bytes no declared tool would accept still construct"
+     and "argument bytes carrying two values rather than one")
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.349s
+```
+
+**New coverage on the scanner itself**, beyond what any one caller needs, because a syntax checker with a silent gap is worse than the dependency it replaces:
+
+- `json_syntax_internal_test.go` — `TestIsWellFormedJSON_RFC8259Grammar_MatchesEncodingJSONValid`, 55 named sub-cases spanning every RFC 8259 production (objects, arrays, strings with escapes and unicode escapes, numbers with fractions and exponents, the three literals) plus every case `tool_call_test.go` already carries, pinned here too. All 55 passed on the first run.
+- `json_syntax_differential_internal_test.go` — `TestIsWellFormedJSON_AgreesWithEncodingJSONValid_OverManyGeneratedInputs`, a deterministic (fixed-seed) generator producing 20,000 JSON-shaped and mutated near-JSON byte strings, checked against `encoding/json.Valid` as an oracle. `encoding/json` is imported **only in this test file**: safe, because this guard's own `listAllDeps` deliberately omits `-test`, for the reason stated on the guard itself — a test file may need something production code must not. **0 of 20,000 disagreed.**
+
+```
+$ go test -race -run 'TestIsWellFormedJSON' -v ./src/ai/...
+--- PASS: TestIsWellFormedJSON_RFC8259Grammar_MatchesEncodingJSONValid (0.00s)
+    (55 sub-tests PASS)
+--- PASS: TestIsWellFormedJSON_AgreesWithEncodingJSONValid_OverManyGeneratedInputs (0.06s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.535s
+```
+
+**Green, guard included, after the fix:**
+
+```
+$ go test -race -run 'TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage' -v ./src/ai/...
+--- PASS: TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage (0.04s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.367s
+```
+
+**Closed by showing it bite.** Scratch violation: a throwaway file `zz_scratch_bite.go` (`package ai; import _ "os"`) added, guard run, removed:
+
+```
+=== CONT  TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage
+    import_boundary_test.go:292: the request path's dependency closure imports "os"
+          rule: V-REQ-22: ... — no filesystem package
+    import_boundary_test.go:292: the request path's dependency closure imports "io/fs"
+          rule: V-REQ-22: ... — no filesystem package
+--- FAIL: TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage (0.04s)
+FAIL
+```
+
+Removed; the guard passed again immediately afterward (shown above).
+
+**Why not scope the guard away from this instead.** The only way to avoid touching `tool_call.go` would have been to compute a narrower, file-level or call-graph-level dependency closure — but `go list -deps` is package-granular by construction, and `design.md` § 9.3 explicitly specifies "the AI-00.3 guard style", which is package-level `go list`. A narrower mechanism would be a second, heavier guard technology this milestone has no charter to introduce, for a problem the existing style already finds correctly.
+
+### AI-10.4 evidence gate
+
+```
+$ go test -race -v ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.487s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.446s
+
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+
+$ cat go.mod
+module github.com/cachicamas/backend/agent
+
+go 1.26.3
+```
+
+`go.mod` carries zero `require` lines (unchanged — `math/rand/v2` and everything else touched in this phase is standard library); both AI-00 import guards pass; the new AI-10.4 guard passes non-vacuously.
 
 ---
 

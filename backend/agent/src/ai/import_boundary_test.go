@@ -36,6 +36,7 @@ package ai_test
 
 import (
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,12 @@ const modulePath = "github.com/cachicamas/backend/agent"
 // pattern such as ./... would silently narrow the guard to src/ai alone and stop
 // covering src/agenttest.
 const layer1Pattern = modulePath + "/..."
+
+// requestPackagePath scopes AI-10.4 item 3's guard, below. It names the one
+// package request.go lives in rather than layer1Pattern, because the claim
+// under test — "validation performs no I/O" — is about the request path
+// specifically, not about Layer 1 as a whole.
+const requestPackagePath = modulePath + "/src/ai"
 
 // forbiddenPrefixes are checked BEFORE the allowlist, and the order matters.
 // ".../agent/src/agent" begins with the allowed own-module prefix
@@ -244,4 +251,88 @@ func (e *goListError) Error() string {
 		return e.err.Error()
 	}
 	return e.err.Error() + ": " + strings.TrimSpace(e.stderr)
+}
+
+// AI-10.4 item 3 — validation performs no I/O, asserted mechanically in the
+// AI-00.3 style: the request path's dependency closure contains no network
+// and no filesystem package (R-AMR-013, design.md § 9.3).
+//
+// # Why this is not the guard above
+//
+// TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault only screens
+// non-stdlib dependencies — [listNonStdlibDeps] filters the standard library
+// out before the allowlist ever runs. "net", "net/http", "os" and "io/fs" are
+// standard library, so that guard would pass them silently. This is the
+// narrower, complementary claim design.md § 9.3 names: not "nothing foreign",
+// but "nothing that reaches a socket or a filesystem", checked against the
+// standard library too.
+//
+// # Why -deps without -test
+//
+// This is a claim about the production dependency closure that runs when a
+// request is validated, not about what a test file imports to build one. A
+// test elsewhere in this package using t.TempDir (which pulls in "os")
+// would be a false positive under a claim this narrow, and -test would also
+// pull in "testing", which imports "os" itself — a guard that scanned test
+// imports could never pass.
+func TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage(t *testing.T) {
+	t.Parallel()
+
+	deps, err := listAllDeps(requestPackagePath)
+	if err != nil {
+		t.Fatalf("go list failed: %v", err)
+	}
+	if len(deps) == 0 {
+		t.Fatal("go list returned no packages; the guard would pass vacuously. " +
+			"Check that the package pattern still resolves: " + requestPackagePath)
+	}
+
+	for _, forbidden := range networkOrFilesystemPackages {
+		if slices.Contains(deps, forbidden.path) {
+			t.Errorf("the request path's dependency closure imports %q\n  rule: %s", forbidden.path, forbidden.rule)
+		}
+	}
+}
+
+// networkOrFilesystemPackages is S-AMR-051's own list: the four standard-
+// library packages design.md § 9.3 names as the shape "an I/O package" takes
+// for this guard's purpose. Each entry carries the rule it enforces, matching
+// forbiddenPrefixes above.
+var networkOrFilesystemPackages = []struct {
+	path string
+	rule string
+}{
+	{"net", "V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no network package"},
+	{"net/http", "V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no network package"},
+	{"os", "V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no filesystem package"},
+	{"io/fs", "V-REQ-22: validation runs entirely at construction and performs no I/O of its own — no filesystem package"},
+}
+
+// listAllDeps returns every import path in pattern's dependency closure, the
+// standard library included and test imports excluded — the opposite two
+// choices from [listNonStdlibDeps], for the reasons on the test above.
+func listAllDeps(pattern string) ([]string, error) {
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", pattern)
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, &goListError{err: err, stderr: stderr.String()}
+	}
+
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 32)
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		path, ok := normalizeListedPackage(line)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out, nil
 }

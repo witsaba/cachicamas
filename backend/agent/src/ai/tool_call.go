@@ -10,8 +10,6 @@
 
 package ai
 
-import "encoding/json"
-
 // emptyToolArguments is the one canonical form of a call that takes no
 // arguments.
 //
@@ -66,6 +64,11 @@ func (ToolCall) kind() PartKind { return PartKindToolCall }
 // declared tool's schema construct successfully: this package holds no schema to
 // check against and V-REQ-13 states its role as transporting them.
 //
+// The syntax check is [isWellFormedJSON], not encoding/json.Valid — see
+// json_syntax.go's file comment for why: encoding/json transitively imports
+// "os", and AI-10.4's no-I/O guard forbids that for the package this file is
+// in.
+//
 // There is no shape rule on the name. AI-08 lands one on a tool *declaration*;
 // whether a call's name must satisfy it too is a cross-region question, and
 // AI-10.3 owns cross-region validation. Recorded so the absence reads as a
@@ -85,7 +88,7 @@ func (c ToolCall) validate(at Path) *Violation {
 			return nil
 		},
 		func() *Violation {
-			if !json.Valid([]byte(c.arguments)) {
+			if !isWellFormedJSON([]byte(c.arguments)) {
 				return Invalid(ErrMalformed, under(at, At("arguments"))...)
 			}
 			return nil
