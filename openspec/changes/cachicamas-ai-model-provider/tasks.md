@@ -92,20 +92,55 @@ Chain strategy: size-exception
 - [x] 3.3 REFACTOR — confirmed `scriptProvider` stays unexported and `ai_test`-local (S-AMP-036/037):
       one file, lower-case type, package `ai_test`, no exported alternative added.
 
-## Phase 4 — AI-20.4 signature guard (R-AMP-014…016)
+## Phase 4 — AI-20.4 signature guard (R-AMP-014…016) — COMPLETE
 
-- [ ] 4.1 RED — `src/agenttest/provider_signature_guard_test.go`: resolve `provider.go` via
-      `runtime.Caller(0)`; parse with `go/parser`; assert method set, param/result types, import
-      allowlist `{"context"}`; run after Phase 1 lands so the target exists.
-- [ ] 4.2 GREEN — guard passes (S-AMP-038/039); unresolvable/unparseable target → `t.Fatalf` naming
-      the path, never skip (S-AMP-040/041); document sibling-layout dependency (S-AMP-042).
-- [ ] 4.3 Bite mutation 1 (vendor stand-in): `req Request`→`req json.RawMessage` +
-      `import "encoding/json"` on scratch copy; run
-      `go test ./src/agenttest/ -run TestModelProviderInterface_SignatureGuard`; **paste red output
-      here verbatim**; revert; confirm green.
-- [ ] 4.4 Bite mutation 2 (changed carrier): `<-chan Event`→`<-chan string`; same guard test; **paste
-      red output here verbatim**; revert; confirm green (S-AMP-043…045).
-- [ ] 4.5 REFACTOR — tidy guard assertions/failure messages; no behavior change.
+- [x] 4.1/4.2 — `src/agenttest/provider_signature_guard_test.go`: resolves `provider.go` via
+      `runtime.Caller(0)` + `filepath.Join(filepath.Dir(thisFile), "..", "ai", "provider.go")` (ADR
+      0005 § D2, Guard C); parses with `go/parser`; asserts exactly one method `Stream` (S-AMP-038),
+      param/result types (`context.Context`, `Request`, `<-chan Event`, `error`) (S-AMP-039), and the
+      import allowlist `{"context"}`. `os.Stat`/parse failure → `t.Fatalf` naming the path, never skip
+      (S-AMP-040/041); sibling-layout dependency documented in the file's own package-level doc comment
+      AND in `src/agenttest/doc.go` (pre-existing from AI-00, S-AMP-042). Guard is green-from-birth
+      (provider.go already conformed from Phase 1) — the genuine RED evidence for this leaf is the two
+      bite mutations below, run with `provider_test.go` temporarily moved out of the package
+      (`mv provider_test.go provider_test.go.hold`) so the observed failure is the **guard's own**
+      assertion, not an unrelated compiler error from `stubProvider`'s `ai.ModelProvider` conformance
+      pin breaking under the same mutation (design.md's "the observed red is the guard's, not the
+      compiler's" — extended here to also isolate sibling conformance pins, not just import
+      resolution). Restored immediately after each mutation; confirmed byte-identical to the prior
+      commit via `git diff --stat` (empty output) after both reverts.
+- [x] 4.3 Bite mutation 1 (vendor stand-in): `req Request` → `req json.RawMessage` +
+      `import "encoding/json"` in `src/ai/provider.go`. Ran
+      `go test ./src/agenttest/... -run TestModelProviderInterface_SignatureGuard -v`. **Red output,
+      verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:71: provider.go imports "encoding/json"; only "context" is allowed on ModelProvider's declaring file (R-AMP-002)
+          provider_signature_guard_test.go:77: Stream's second parameter is json.RawMessage, want Request (Layer 1's own normalized type, not a vendor type)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.482s
+      FAIL
+      ```
+      Reverted; re-ran same command → PASS.
+- [x] 4.4 Bite mutation 2 (changed carrier): `<-chan Event` → `<-chan string` in `src/ai/provider.go`.
+      **Red output, verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:77: Stream's first result is <-chan string, want <-chan Event (V-STR-04's receive-only carrier)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.314s
+      FAIL
+      ```
+      Reverted (S-AMP-043…045); `provider_test.go` restored; full `go test ./src/agenttest/... -v` →
+      all PASS, confirmed clean via `git diff --stat` against the last commit.
+- [x] 4.5 REFACTOR — reviewed guard assertions and failure messages once more; kept as written (each
+      names the exact requirement and the exact mismatch); no behavior change.
 
 ## Phase 5 — AI-20.5 optional capabilities (R-AMP-017…021)
 

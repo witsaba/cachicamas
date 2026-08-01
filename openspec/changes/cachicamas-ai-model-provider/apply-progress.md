@@ -94,7 +94,40 @@ Commit: `feat(ai): land the AI-20.1 provider interface (AI-20.1)`.
 | 2 — AI-20.2 pre-stream | `go test ./src/ai/... -run PreStream -race -v` → 6/6 PASS (5 scenarios + NFR-D) | `scriptProvider` under `-race`, real goroutines/channels, no mocks | revert pre-stream cases + branch in `provider_test.go`, revert `Request.IsZero` in `request.go` |
 | 3 — AI-20.3 mid-stream | `go test ./src/ai/... -run MidStream -race -v` → 7/7 test funcs PASS (incl. 20 sub-iterations); `-count=15` stress pass clean | `scriptProvider` producer goroutine under `-race`, real cancellation via `context.WithCancel`, real channel backpressure (unbuffered) | revert producer body + mid-stream cases in `provider_test.go` |
 
-## Phases 4–7
+## Phase 4 — AI-20.4 signature guard (R-AMP-014…016) — COMPLETE
+
+`src/agenttest/provider_signature_guard_test.go` resolves `provider.go` via `runtime.Caller(0)` +
+sibling-relative `filepath.Join` (ADR 0005 § D2 Guard C), parses with `go/parser`, and asserts:
+exactly one method `Stream`; params `(context.Context, Request)`; results `(<-chan Event, error)`;
+imports ⊆ `{"context"}`. Unresolvable/unparseable target fails loudly via `t.Fatalf` (S-AMP-040/041),
+never skips.
+
+Guard was green-from-birth (provider.go already conformed from Phase 1) — genuine RED evidence comes
+from two bite mutations, both captured verbatim in `tasks.md`. **Process refinement over design.md's
+plan**: ran each mutation with `src/agenttest/provider_test.go` temporarily moved out of the package
+(`mv` to `.hold` and back), because mutating the shared `ModelProvider` interface also breaks
+`stubProvider`'s `var _ ai.ModelProvider = stubProvider{}` compile-time pin in that sibling file —
+without isolating it, the observed "red" would be an unrelated Go compiler type-check error about
+`stubProvider`, not the guard's own AST-derived assertion message. Isolating restored the intended
+"observed red is the guard's, not the compiler's" property design.md asked for.
+
+- Bite 1 (vendor stand-in, `req Request`→`req json.RawMessage` + `import "encoding/json"`): guard
+  failed with 2 of its own assertion lines (import allowlist + param type) — see `tasks.md` for the
+  verbatim transcript. Reverted; confirmed byte-identical to the last commit via `git diff --stat`
+  (empty output).
+- Bite 2 (changed carrier, `<-chan Event`→`<-chan string`): guard failed with 1 assertion line
+  (result type) — verbatim transcript in `tasks.md`. Reverted; confirmed clean the same way.
+- Post-revert: `go test ./src/agenttest/... -v` → all PASS (including the two tests from Phase 1 that
+  live in the restored `provider_test.go`), full module `go build && go vet && go test -race ./...`
+  green.
+
+### Work Unit Evidence (Phase 4)
+
+| Unit | Focused test command and result | Runtime harness | Rollback boundary |
+|---|---|---|---|
+| 4 — AI-20.4 signature guard | `go test ./src/agenttest/... -run SignatureGuard -v` → PASS at rest; 2/2 bite mutations produced genuine, guard-specific RED, both reverted and re-confirmed green | Real `go/parser` over the real on-disk `provider.go` (no mocked filesystem, no subprocess) | revert `provider_signature_guard_test.go`; no production code changed by this phase |
+
+## Phases 5–7
 
 Pending — see `tasks.md` for the authoritative checklist; this file is updated after each phase closes.
 
