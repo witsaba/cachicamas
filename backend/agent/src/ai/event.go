@@ -46,11 +46,24 @@ import "strconv"
 //     (V-STR-19).
 //   - completion — the terminal event of a stream that finished normally:
 //     AI-13's finish reason and usage, unchanged (V-STR-20).
+//   - reasoningblockstart, reasoningdelta, reasoningblockend — the streamed
+//     reasoning block family (V-STR-14 narrowed to reasoning): open, one
+//     text fragment, close with the opaque round-trip token whole
+//     (R-ARE-001). See reasoning_event.go.
+//   - text_block_start, text_delta, text_block_end — the lifecycle of one
+//     streamed text block: a producer-stamped block index, fragment-only
+//     deltas, byte-exact reconstruction (V-STR-14 narrowed to text,
+//     V-STR-16). See text_events.go.
+//   - tool_call_start, tool_call_delta, tool_call_end — the streamed
+//     tool-call family (V-STR-14 narrowed to a tool call): identity and
+//     tool name before any argument byte, fragment-only deltas, and
+//     byte-exact, never re-marshalled, never-validated argument bytes at
+//     the end (R-ATC-001). See tool_call_event.go.
 //
-// AI-15 is the first milestone to register a production kind. AI-16 … AI-19
-// append further members the same way, following event_descriptor.go's
-// six-step procedure; none of the requirements in this capability's own
-// spec is edited to do it.
+// AI-15 is the first milestone to register a production kind. AI-19 appends
+// further members the same way, following event_descriptor.go's six-step
+// procedure; none of the requirements in this capability's own spec is
+// edited to do it.
 type EventKind uint8
 
 const (
@@ -64,10 +77,56 @@ const (
 	// completion.go.
 	EventKindCompletion
 
+	// EventKindReasoningBlockStart is the kind opening a streamed reasoning
+	// block (R-ARE-001): the block index every delta and the matching end
+	// must carry, and whether the block's plaintext is withheld. See
+	// reasoning_event.go.
+	EventKindReasoningBlockStart
+
+	// EventKindReasoningDelta is the kind carrying one fragment of new
+	// reasoning text for its block, and only the new fragment (R-ARE-005).
+	// See reasoning_event.go.
+	EventKindReasoningDelta
+
+	// EventKindReasoningBlockEnd is the kind closing a streamed reasoning
+	// block, carrying its opaque round-trip token whole (R-ARE-009). See
+	// reasoning_event.go.
+	EventKindReasoningBlockEnd
+
+	// EventKindTextBlockStart opens a text block (V-STR-14 narrowed to
+	// text), carrying the block's producer-stamped index. See
+	// text_events.go.
+	EventKindTextBlockStart
+
+	// EventKindTextDelta carries one text block's new fragment (V-STR-16) —
+	// never accumulated content. See text_events.go.
+	EventKindTextDelta
+
+	// EventKindTextBlockEnd closes a text block opened by a matching
+	// [EventKindTextBlockStart]. See text_events.go.
+	EventKindTextBlockEnd
+
+	// EventKindToolCallStart is the kind opening a streamed tool call: the
+	// call's identity and the tool's name, readable before any argument
+	// byte arrives (R-ATC-002). See tool_call_event.go.
+	EventKindToolCallStart
+
+	// EventKindToolCallDelta is the kind carrying one new argument fragment
+	// of an open tool-call block — never an accumulated snapshot
+	// (R-ATC-005). See tool_call_event.go.
+	EventKindToolCallDelta
+
+	// EventKindToolCallEnd is the kind closing a tool-call block, carrying
+	// its complete argument bytes byte-equal to the concatenated deltas,
+	// never re-marshalled and never validated for JSON well-formedness —
+	// that is AI-30's, at reassembly (R-ATC-006, R-ATC-007). See
+	// tool_call_event.go.
+	EventKindToolCallEnd
+
 	// eventKindFirst and eventKindEnd bound the declared production constant
 	// space, mirroring content_part.go's partKindFirst/partKindEnd.
 	eventKindFirst = EventKindResponseStart
-	eventKindEnd   = EventKindCompletion + 1
+	eventKindEnd   = EventKindToolCallEnd + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -96,6 +155,42 @@ var eventRegistry = []eventRegistration{
 	EventKindCompletion: {
 		name:       "completion",
 		descriptor: EventDescriptor{Role: BlockRoleNone, Cardinality: CardinalityAtMostOne, Terminal: true},
+	},
+	EventKindReasoningBlockStart: {
+		name:       "reasoningblockstart",
+		descriptor: EventDescriptor{Role: BlockRoleStart, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindReasoningDelta: {
+		name:       "reasoningdelta",
+		descriptor: EventDescriptor{Role: BlockRoleDelta, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindReasoningBlockEnd: {
+		name:       "reasoningblockend",
+		descriptor: EventDescriptor{Role: BlockRoleEnd, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindTextBlockStart: {
+		name:       "text_block_start",
+		descriptor: EventDescriptor{Role: BlockRoleStart, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindTextDelta: {
+		name:       "text_delta",
+		descriptor: EventDescriptor{Role: BlockRoleDelta, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindTextBlockEnd: {
+		name:       "text_block_end",
+		descriptor: EventDescriptor{Role: BlockRoleEnd, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindToolCallStart: {
+		name:       "tool_call_start",
+		descriptor: EventDescriptor{Role: BlockRoleStart, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindToolCallDelta: {
+		name:       "tool_call_delta",
+		descriptor: EventDescriptor{Role: BlockRoleDelta, Cardinality: CardinalityAny, Terminal: false},
+	},
+	EventKindToolCallEnd: {
+		name:       "tool_call_end",
+		descriptor: EventDescriptor{Role: BlockRoleEnd, Cardinality: CardinalityAny, Terminal: false},
 	},
 }
 

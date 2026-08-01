@@ -69,6 +69,65 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 		construct:      func() (ai.Event, error) { return ai.NewCompletion(ai.FinishReasonStop, ai.Usage{}) },
 		read:           func(e ai.Event) (any, bool) { return e.Completion() },
 	},
+	ai.EventKindReasoningBlockStart: {
+		registeredName: "reasoningblockstart",
+		construct:      func() (ai.Event, error) { return ai.NewReasoningBlockStart(1) },
+		read:           func(e ai.Event) (any, bool) { return e.ReasoningBlockStart() },
+	},
+	ai.EventKindReasoningDelta: {
+		registeredName: "reasoningdelta",
+		construct: func() (ai.Event, error) {
+			start, err := ai.NewReasoningBlockStart(1)
+			if err != nil {
+				return ai.Event{}, err
+			}
+			startPayload, _ := start.ReasoningBlockStart()
+			return ai.NewReasoningDelta(startPayload, []byte("registry_witness_fragment"))
+		},
+		read: func(e ai.Event) (any, bool) { return e.ReasoningDelta() },
+	},
+	ai.EventKindReasoningBlockEnd: {
+		registeredName: "reasoningblockend",
+		construct: func() (ai.Event, error) {
+			start, err := ai.NewReasoningBlockStart(1)
+			if err != nil {
+				return ai.Event{}, err
+			}
+			startPayload, _ := start.ReasoningBlockStart()
+			return ai.NewReasoningBlockEnd(startPayload, []byte("registry_witness_token"))
+		},
+		read: func(e ai.Event) (any, bool) { return e.ReasoningBlockEnd() },
+	},
+	ai.EventKindTextBlockStart: {
+		registeredName: "text_block_start",
+		construct:      func() (ai.Event, error) { return ai.NewTextBlockStart(1) },
+		read:           func(e ai.Event) (any, bool) { return e.TextBlockStart() },
+	},
+	ai.EventKindTextDelta: {
+		registeredName: "text_delta",
+		construct:      func() (ai.Event, error) { return ai.NewTextDelta(1, "registry_witness_fragment") },
+		read:           func(e ai.Event) (any, bool) { return e.TextDelta() },
+	},
+	ai.EventKindTextBlockEnd: {
+		registeredName: "text_block_end",
+		construct:      func() (ai.Event, error) { return ai.NewTextBlockEnd(1) },
+		read:           func(e ai.Event) (any, bool) { return e.TextBlockEnd() },
+	},
+	ai.EventKindToolCallStart: {
+		registeredName: "tool_call_start",
+		construct:      func() (ai.Event, error) { return ai.NewToolCallStart(1, "call_registry_witness", "tool_registry_witness") },
+		read:           func(e ai.Event) (any, bool) { return e.ToolCallStart() },
+	},
+	ai.EventKindToolCallDelta: {
+		registeredName: "tool_call_delta",
+		construct:      func() (ai.Event, error) { return ai.NewToolCallDelta(1, []byte("registry_witness_fragment")) },
+		read:           func(e ai.Event) (any, bool) { return e.ToolCallDelta() },
+	},
+	ai.EventKindToolCallEnd: {
+		registeredName: "tool_call_end",
+		construct:      func() (ai.Event, error) { return ai.NewToolCallEnd(1, []byte(`{"registry":"witness"}`)) },
+		read:           func(e ai.Event) (any, bool) { return e.ToolCallEnd() },
+	},
 }
 
 // TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor is
@@ -150,6 +209,15 @@ func TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor(t
 var productionEventKinds = []ai.EventKind{
 	ai.EventKindResponseStart,
 	ai.EventKindCompletion,
+	ai.EventKindReasoningBlockStart,
+	ai.EventKindReasoningDelta,
+	ai.EventKindReasoningBlockEnd,
+	ai.EventKindTextBlockStart,
+	ai.EventKindTextDelta,
+	ai.EventKindTextBlockEnd,
+	ai.EventKindToolCallStart,
+	ai.EventKindToolCallDelta,
+	ai.EventKindToolCallEnd,
 }
 
 // R-AEE-004, R-AEE-006 — the production event-kind vocabulary is exactly the
