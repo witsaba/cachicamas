@@ -60,6 +60,45 @@ func TestNewRequest_InvalidContentPart_ReportsAI06sRuleAtTheComposedPosition(t *
 	}
 }
 
+// AI-12.2 item 3 (appended), second clause — the same request-depth content
+// rule (rule 4) that construction runs also runs on the derive path
+// (R-REX-005, S-REX-024).
+//
+// Internal by the same necessity as the test above: a constructed message
+// cannot hold an invalid content part, so a request whose derivation
+// introduces one has to be assembled from inside this package.
+func TestRequestWith_MessagesReplacedWithInvalidContent_ReportsAI06sRuleAtTheComposedPosition(t *testing.T) {
+	t.Parallel()
+
+	text, err := NewText("hello")
+	if err != nil {
+		t.Fatalf("NewText returned %v, want no failure", err)
+	}
+	good := Message{id: mintMessageID(), role: RoleUser, content: []Part{text}}
+	bad := Message{id: mintMessageID(), role: RoleUser, content: []Part{{}}}
+
+	source, err := NewRequest("m", []Message{good})
+	if err != nil {
+		t.Fatalf("NewRequest returned %v, want no failure", err)
+	}
+
+	_, err = source.With(WithMessages(good, bad))
+	if err == nil {
+		t.Fatalf("With(WithMessages(good, bad)) returned no failure, want ErrNotInVocabulary at messages[1].content[0]")
+	}
+	if !errors.Is(err, ErrNotInVocabulary) {
+		t.Errorf("errors.Is(err, ErrNotInVocabulary) = false on %v", err)
+	}
+
+	var violation *Violation
+	if !errors.As(err, &violation) {
+		t.Fatalf("errors.As(err, *Violation) = false on %v", err)
+	}
+	if got, want := violation.Path().String(), "messages[1].content[0]"; got != want {
+		t.Errorf("violation.Path() = %q, want %q", got, want)
+	}
+}
+
 // AI-10.1 item 6 (appended) — the deeper positions compose too.
 //
 // A text part exceeding the documented bound reports at

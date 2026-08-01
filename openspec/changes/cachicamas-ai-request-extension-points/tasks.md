@@ -227,20 +227,56 @@ ok  	github.com/cachicamas/backend/agent/src/ai
 **Spec:** `R-REX-004`, `R-REX-005`. **Design:** §§ 1, 3.
 **Depends on:** AI-12.1.
 
-- [ ] **Item 1** — WHEN a per-request option overrides a construction-time option THEN the effective value is the override, observable via readback; absent overrides fall through to the constructed value.
-- [ ] **Item 2** — Option validation runs at derive time with the same AI-04 sentinels as construction — there is no second, weaker validation path.
-- [ ] **Item 3** *(appended)* — A **cross-region** rule that the source satisfied and the derivation breaks fails at derive time, so no rule is silently construction-only.
-- [ ] **Item 4** *(appended)* — Derive-time first-failure is deterministic and follows the same documented order as construction — same class, same position, on every run. Assert equivalence **between the two doors**, never against an absolute ordinal in the rule order: the order is shared with milestones that append to it, and an absolute ordinal would fail on an append that changed no behavior (`spec.md` `R-REX-005`).
-- [ ] **Item 5** *(appended by Phase 0, conditional on § 13 row 8)* — If AI-11 landed the breakpoint cap `V-REQ-24` as a `Rule` in the request's rule list, then a derivation that pushes the request past the cap fails at derive time with `ErrOutOfRange` at the position construction reports — the rebuild re-runs it for free, with no AI-12 production code. If AI-11 enforced the cap elsewhere, **assert nothing**: record the gap in the closing checklist for the Wave 1 verify phase, and do **not** add the rule here — `V-REQ-24` is AI-11's and a second owner on one register term is worse than a missing assertion.
+- [x] **Item 1** — WHEN a per-request option overrides a construction-time option THEN the effective value is the override, observable via readback; absent overrides fall through to the constructed value. `TestRequest_OverrideGenerationOption_ReplacesTheConstructionTimeValueOrFallsThrough`.
+- [x] **Item 2** — Option validation runs at derive time with the same AI-04 sentinels as construction — there is no second, weaker validation path. `TestRequest_DeriveTimeValidation_MatchesConstructionsClassAndPosition`.
+- [x] **Item 3** *(appended)* — A **cross-region** rule that the source satisfied and the derivation breaks fails at derive time. `TestRequestWith_ToolSetReplacedSoTheChoiceNoLongerResolves_FailsAtDeriveTime` + `TestRequestWith_MessagesReplacedWithInvalidContent_ReportsAI06sRuleAtTheComposedPosition` (internal test).
+- [x] **Item 4** *(appended)* — Derive-time first-failure is deterministic, same class/position as construction, every run. `TestRequestWith_TwoRulesViolatedAtOnce_ReportsTheDocumentedOrderFirstAcrossManyRuns`.
+- [x] **Item 5** *(appended by Phase 0, § 13 row 8 = branch A, task 0.3)* — the cap re-runs on the derive path for free. `TestRequestWith_DerivationPastTheCacheBoundaryCap_FailsAtDeriveTime`. No AI-12 production code; no rule added for `V-REQ-24`.
 
 ### Ordered work
 
-- [ ] 2.1 RED → GREEN **item 1**: override wins; absent override falls through with the source's value **and** its presence flag; a newly supplied option flips absent → present on the derived request only (`S-REX-015` … `S-REX-019`).
-- [ ] 2.2 RED → GREEN **item 2**: for each bounded option, assert the derive-path failure is indistinguishable from the construction failure by `errors.Is` class **and** rendered position (`S-REX-020` … `S-REX-022`). Table-driven, one row per rule.
-- [ ] 2.3 RED → GREEN **item 3**: replace the tool set so a landed tool choice no longer resolves; assert `ErrUnresolvedReference` at the choice's position (`S-REX-023`). Replace the messages with content that violates an AI-06 rule; assert the composed position (`S-REX-024`).
-- [ ] 2.4 RED → GREEN **item 4**: a derivation violating two rules at once, run many times, reports the identical class and position, and it is the one construction reports first (`S-REX-025`). Use two rules whose landed relative order is known — **duplicate tool-call identities (rule 7) precedes orphan tool results (rule 8)**, deliberately, because uniqueness is a precondition of resolution (`design.md` § 3).
-- [ ] 2.5 **Item 5**, per Phase 0.3's row-8 branch: assert the cap on the derive path, or record the gap. One line either way.
-- [ ] 2.6 `make lint && make test`, record both, commit `feat(ai): override generation options per request (AI-12.2)`.
+- [x] 2.1 RED → GREEN **item 1**: override wins; absent override falls through with the source's value **and** its presence flag; a newly supplied option flips absent → present on the derived request only (`S-REX-015` … `S-REX-019`).
+- [x] 2.2 RED → GREEN **item 2**: for each bounded option, assert the derive-path failure is indistinguishable from the construction failure by `errors.Is` class **and** rendered position (`S-REX-020` … `S-REX-022`). Table-driven, one row per rule, six cases (model, messages, and the four `boundsRule` sub-rules).
+- [x] 2.3 RED → GREEN **item 3**: replace the tool set so a landed tool choice no longer resolves; assert `ErrUnresolvedReference` at the choice's position (`S-REX-023`). Replace the messages with content that violates an AI-06 rule (assembled internally, matching `TestNewRequest_InvalidContentPart_...`'s precedent — content cannot be smuggled from `ai_test`); assert the composed position (`S-REX-024`).
+- [x] 2.4 RED → GREEN **item 4**: a derivation violating two rules at once, run 100 times, reports the identical class and position, and it is the one construction reports first (`S-REX-025`). Used duplicate tool-call identities (rule 7) and orphan tool results (rule 8).
+- [x] 2.5 **Item 5**, branch A (task 0.3): asserted the cap on the derive path — a construction anchor plus a `With` call, both reporting `ErrOutOfRange` at `cacheBoundaries`.
+- [x] 2.6 `make lint && make test` — both green, recorded below. Commit `feat(ai): override generation options per request (AI-12.2)`.
+
+### AI-12.2 evidence
+
+**All items green from birth**, structurally: `With` and `NewRequest` already share `draft.rules()` (AI-12.1), so "derive-time validation is construction's validation" (R-REX-005) held the moment the tests were written, with no new production code. Every test was still run and its real output recorded, per strict TDD's evidence requirement.
+
+```
+$ go test -race -count=1 -run 'TestRequest_OverrideGenerationOption...|TestRequest_DeriveTimeValidation...|TestRequestWith_ToolSetReplaced...|TestRequestWith_TwoRulesViolated...|TestRequestWith_DerivationPast...|TestRequestWith_MessagesReplacedWithInvalidContent...' -v ./src/ai/...
+--- PASS: TestRequestWith_MessagesReplacedWithInvalidContent_ReportsAI06sRuleAtTheComposedPosition (0.00s)
+--- PASS: TestRequestWith_ToolSetReplacedSoTheChoiceNoLongerResolves_FailsAtDeriveTime (0.00s)
+--- PASS: TestRequestWith_DerivationPastTheCacheBoundaryCap_FailsAtDeriveTime (0.00s)
+--- PASS: TestRequestWith_TwoRulesViolatedAtOnce_ReportsTheDocumentedOrderFirstAcrossManyRuns (0.00s)
+--- PASS: TestRequest_OverrideGenerationOption_ReplacesTheConstructionTimeValueOrFallsThrough (0.00s)  (5 sub-cases)
+--- PASS: TestRequest_DeriveTimeValidation_MatchesConstructionsClassAndPosition (0.00s)  (6 sub-cases)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.577s
+```
+
+**Bite proof — item 2's central claim, "there is no second, weaker validation path".** Scratch-changed `With` to call `FirstFailure(scratchRules[:len(scratchRules)-1]...)` — a hand-duplicated rule list missing `boundsRule`, simulating exactly the defect R-REX-005 exists to make structurally impossible:
+```
+--- FAIL: TestRequest_DeriveTimeValidation_MatchesConstructionsClassAndPosition (0.00s)
+    request_test.go:2073: got no failure, want required value is empty at "stopSequences[1]"
+    request_test.go:2073: got no failure, want value is outside a documented bound at "maxOutputTokens"
+    request_test.go:2073: got no failure, want value is outside a documented bound at "topP"
+    request_test.go:2073: got no failure, want value is outside a documented bound at "temperature"
+    --- PASS: .../an_empty_model_identity, .../an_empty_message_sequence  (unaffected — proves the scratch is surgical to boundsRule)
+```
+Reverted `With` to `FirstFailure(draft.rules()...)`; re-ran `-count=1`: all 6 sub-cases green again.
+
+**Full gate:**
+```
+$ make lint
+0 issues.
+$ make test 2>&1 | grep -E "^(ok|FAIL)"
+ok  	github.com/cachicamas/backend/agent/src/agenttest
+ok  	github.com/cachicamas/backend/agent/src/ai
+```
 
 ---
 

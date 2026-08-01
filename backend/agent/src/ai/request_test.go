@@ -1929,3 +1929,222 @@ func TestRequest_DeriveOptionInputMutatedAfterDeriving_LeavesTheDerivedRequestUn
 		}
 	})
 }
+
+// --- AI-12.2 — per-request options -------------------------------------
+
+// AI-12.2 item 1 — a per-request option override replaces the
+// construction-time value, observable via readback; an option absent from
+// the derivation falls through with the source's value AND presence flag; a
+// newly supplied option flips absent to present on the derived request only
+// (R-REX-004, S-REX-015 … S-REX-019).
+func TestRequest_OverrideGenerationOption_ReplacesTheConstructionTimeValueOrFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an_override_replaces_the_value_and_the_source_keeps_its_own", func(t *testing.T) {
+		// S-REX-015.
+		t.Parallel()
+
+		source, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithTemperature(0.2))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		derived, err := source.With(ai.WithTemperature(0.9))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithTemperature(0.9)) returned %v, want no failure", err)
+		}
+		if got, set := derived.Temperature(); got != 0.9 || !set {
+			t.Errorf("derived.Temperature() = (%v, %t), want (0.9, true)", got, set)
+		}
+		if got, set := source.Temperature(); got != 0.2 || !set {
+			t.Errorf("source.Temperature() = (%v, %t), want (0.2, true)", got, set)
+		}
+	})
+
+	t.Run("an_unsupplied_option_falls_through_with_the_sources_value_and_presence_flag", func(t *testing.T) {
+		// S-REX-016.
+		t.Parallel()
+
+		source, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithMaxOutputTokens(2048))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		derived, err := source.With(ai.WithTemperature(0.4)) // maxOutputTokens not supplied
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+		if got, set := derived.MaxOutputTokens(); got != 2048 || !set {
+			t.Errorf("derived.MaxOutputTokens() = (%d, %t), want (2048, true) — unsupplied options fall through unchanged", got, set)
+		}
+	})
+
+	t.Run("absent_then_supplied_flips_absent_to_present_on_the_derived_request_only", func(t *testing.T) {
+		// S-REX-017.
+		t.Parallel()
+
+		source, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")})
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		if _, set := source.StopSequences(); set {
+			t.Fatalf("source.StopSequences() reported set before deriving, want unset")
+		}
+
+		derived, err := source.With(ai.WithStopSequences("</a>"))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithStopSequences(...)) returned %v, want no failure", err)
+		}
+		if got, set := derived.StopSequences(); !set || !slices.Equal(got, []string{"</a>"}) {
+			t.Errorf("derived.StopSequences() = (%q, %t), want ([\"</a>\"], true)", got, set)
+		}
+		if _, set := source.StopSequences(); set {
+			t.Errorf("source.StopSequences() reports set after deriving, want it to remain unset")
+		}
+	})
+
+	t.Run("overriding_to_the_zero_value_is_distinguishable_from_unset", func(t *testing.T) {
+		// S-REX-018.
+		t.Parallel()
+
+		source, err := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithTemperature(0.7))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		derived, err := source.With(ai.WithTemperature(0))
+		if err != nil {
+			t.Fatalf("source.With(ai.WithTemperature(0)) returned %v, want no failure", err)
+		}
+		if got, set := derived.Temperature(); got != 0 || !set {
+			t.Errorf("derived.Temperature() = (%v, %t), want (0, true) — set to zero, not unset", got, set)
+		}
+	})
+
+	t.Run("applying_the_same_option_twice_in_one_derivation_is_last_wins", func(t *testing.T) {
+		// S-REX-019.
+		t.Parallel()
+
+		source := buildDerivableRequest(t)
+		derived, err := source.With(ai.WithTemperature(0.11), ai.WithTemperature(0.22))
+		if err != nil {
+			t.Fatalf("source.With(...) returned %v, want no failure", err)
+		}
+		if got, set := derived.Temperature(); got != 0.22 || !set {
+			t.Errorf("derived.Temperature() = (%v, %t), want (0.22, true) — the last application wins", got, set)
+		}
+	})
+}
+
+// AI-12.2 item 2 — derive-time validation runs the SAME rules, in the SAME
+// documented order, reporting the SAME classes at the SAME positions as
+// construction: for each bounded option, the derive-path failure is
+// indistinguishable from the construction failure by errors.Is class AND
+// rendered position (R-REX-005, S-REX-020 … S-REX-022). Table-driven, one
+// row per rule, each row's construction-side failure serving as the anchor
+// its derive-side failure must match.
+func TestRequest_DeriveTimeValidation_MatchesConstructionsClassAndPosition(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		option   ai.RequestOption
+		wantRule error
+		wantPath string
+	}{
+		{"an_empty_model_identity", ai.WithModel(""), ai.ErrEmpty, "model"},
+		{"an_empty_message_sequence", ai.WithMessages(), ai.ErrEmpty, "messages"},
+		{"zero_maximum_output_tokens", ai.WithMaxOutputTokens(0), ai.ErrOutOfRange, "maxOutputTokens"},
+		{"a_negative_temperature", ai.WithTemperature(-1), ai.ErrOutOfRange, "temperature"},
+		{"a_top-p_above_one", ai.WithTopP(1.5), ai.ErrOutOfRange, "topP"},
+		{"an_empty_stop_sequence", ai.WithStopSequences("a", ""), ai.ErrEmpty, "stopSequences[1]"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Anchor: what construction itself reports for this exact
+			// violation.
+			_, constructionErr := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, c.option)
+			requireViolation(t, constructionErr, c.wantRule, c.wantPath)
+
+			// The derive path, from an otherwise fully valid source, must be
+			// indistinguishable.
+			source := buildDerivableRequest(t)
+			_, deriveErr := source.With(c.option)
+			requireViolation(t, deriveErr, c.wantRule, c.wantPath)
+		})
+	}
+}
+
+// AI-12.2 item 3 (appended), first clause — a cross-region rule the source
+// satisfied and the derivation breaks fails at derive time: replacing the
+// tool set so the source's own tool choice no longer resolves
+// (R-REX-005, S-REX-023).
+func TestRequestWith_ToolSetReplacedSoTheChoiceNoLongerResolves_FailsAtDeriveTime(t *testing.T) {
+	t.Parallel()
+
+	source := buildDerivableRequest(t) // tools {search, fetch}, choice names "fetch"
+
+	replacement := requireToolSet(t, "search") // no longer declares "fetch"
+	_, err := source.With(ai.WithTools(replacement))
+	requireViolation(t, err, ai.ErrUnresolvedReference, "toolChoice.name")
+}
+
+// AI-12.2 item 4 (appended) — derive-time first-failure is deterministic and
+// follows the SAME documented order as construction: a derivation violating
+// two rules at once, run many times, reports the identical class at the
+// identical position every time, and it is the one construction reports
+// first for the same regions. Equivalence is asserted BETWEEN THE TWO DOORS,
+// never against an absolute ordinal (R-REX-005, S-REX-025). Uses two rules
+// whose landed relative order is known: duplicate tool-call identities
+// (rule 7) precedes orphan tool results (rule 8) — design.md § 3.
+func TestRequestWith_TwoRulesViolatedAtOnce_ReportsTheDocumentedOrderFirstAcrossManyRuns(t *testing.T) {
+	t.Parallel()
+
+	const runs = 100
+
+	// Violates rule 7 (a duplicate call identity "dup") and rule 8 (an
+	// orphan tool result naming a call that does not exist) at once.
+	violating := []ai.Message{
+		requireMessage(t, ai.RoleAssistant, toolCallPart(t, "dup", "search")),
+		requireMessage(t, ai.RoleAssistant, toolCallPart(t, "dup", "fetch")),
+		requireMessage(t, ai.RoleTool, toolResultPart(t, "no-such-call", "42")),
+	}
+
+	// Anchor: construction reports rule 7 first.
+	_, constructionErr := ai.NewRequest("m", violating)
+	requireViolation(t, constructionErr, ai.ErrDuplicate, "messages[1].content[0]")
+
+	source := buildDerivableRequest(t)
+	for range runs {
+		_, err := source.With(ai.WithMessages(violating...))
+		requireViolation(t, err, ai.ErrDuplicate, "messages[1].content[0]")
+	}
+}
+
+// AI-12.2 item 5 (appended by Phase 0, task 0.3's row 8 — branch A) — the
+// breakpoint cap re-runs on the derive path for free: a derivation that
+// pushes the total marker count past ai.MaxCacheBoundaries fails with
+// ErrOutOfRange at the position construction reports. No AI-12 production
+// code: the cap rule (AI-11's) is already row 10 of requestDraft.rules().
+func TestRequestWith_DerivationPastTheCacheBoundaryCap_FailsAtDeriveTime(t *testing.T) {
+	t.Parallel()
+
+	// MaxCacheBoundaries + 1 marked tools, "fetch" among them so the
+	// source's own tool choice stays resolvable and only the cap fails.
+	tools := []ai.Tool{requireTool(t, "fetch").MarkCacheBoundary()}
+	for i := range ai.MaxCacheBoundaries {
+		tools = append(tools, requireTool(t, fmt.Sprintf("extra_%d", i)).MarkCacheBoundary())
+	}
+	overCap, err := ai.NewToolSet(tools...)
+	if err != nil {
+		t.Fatalf("ai.NewToolSet returned %v, want no failure", err)
+	}
+
+	// Anchor: construction reports the cap failure.
+	_, constructionErr := ai.NewRequest("m", []ai.Message{userTextMessage(t, "go")}, ai.WithTools(overCap))
+	requireViolation(t, constructionErr, ai.ErrOutOfRange, "cacheBoundaries")
+
+	source := buildDerivableRequest(t) // valid, well under the cap
+	_, err = source.With(ai.WithTools(overCap))
+	requireViolation(t, err, ai.ErrOutOfRange, "cacheBoundaries")
+}
