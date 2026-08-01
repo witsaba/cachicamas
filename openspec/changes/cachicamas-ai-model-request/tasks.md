@@ -478,7 +478,7 @@ ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
 - [x] ~~**Item 0** *(prerequisite, do this first)* — Append `ErrMisplaced`~~ to `validation.go`'s class set **and** to `ruleClasses`, **and** update `validation_registry_internal_test.go` and `validation_test.go` in the **same commit**. The internal guard fails and says so if only one mirror moves. `design.md` § 5.3 carries the doc comment to write.
 - [x] ~~**Item 1** — Message order and intra-message content order are preserved exactly through construction and readback.~~
 - [x] ~~**Item 2** — The tool set and tool choice attach to the request, and AI-08.3's cross-validation runs at the request boundary too. **Call `ToolChoice.ValidateAgainst(ToolSet)`; reimplement none of its three rules.**~~
-- [ ] **Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.
+- [x] ~~**Item 3** — Role-versus-content-kind rules are enforced from `design.md` § 5.1's table, all twelve cells, in both directions, reporting `ErrMisplaced`.~~
 - [ ] **Item 4** — An orphan tool result fails with `ErrUnresolvedReference`; an orphan tool **call** succeeds; a duplicate call identity fails with `ErrDuplicate` at the second occurrence; a result appearing before its call **succeeds**, pinning `design.md` § 6.3's deliberate non-decision.
 
 ### AI-10.3 item 0 — `ErrMisplaced` appended, three files or none
@@ -628,6 +628,63 @@ ok  	github.com/cachicamas/backend/agent/src/ai	(cached)
 ```
 
 **Refactor — folded into the same commit as an appended case, not a separate item.** `TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool` extends AI-10.1 item 7's leak table to the two new regions, which could not exist when that table was written. The assertion is on the position, not only the class: `TestNewRequest_ToolChoiceAgainstTheToolSet_ReportsAI08sRulesAtTheirOwnPositions` checks `"toolChoice"`, `"tools"` and `"toolChoice.name"` — AI-08.3's own positions — rather than a request-shaped prefix a reimplementation would have produced, which is the observable proof that `ValidateAgainst` was *called* and not rewritten.
+
+### AI-10.3 item 3 — role versus content kind, all twelve cells
+
+**Deliverable:** `request.go` gains `rolePermittedKinds`, `roleAllowsKind`, and rule 6 of `design.md` § 4's table, inserted between rule 5 (system) and the existing rule 9 (tool choice against the tool set) — no rule needed to move, because that rule was already the last content rule before `boundsRule()` and rules 6–8 slot in ahead of it by construction. `request_test.go` gains `toolResultPart`, the fourth per-kind part builder, and one table-driven test.
+**Spec:** `R-AMR-011`. **Design:** § 5.
+
+**Red.** Twelve sub-cases in one table, against `NewRequest` holding no role/kind rule. Exactly the seven forbidden cells failed; the five permitted cells — including the tool_result cell, which carries a companion tool call so item 4's not-yet-landed orphan rule cannot affect it — passed from the start, which is the expected shape of a red step for a rule that does not exist yet:
+
+```
+--- FAIL: TestNewRequest_RoleVersusContentKind_EnforcesTheDocumentedTable (0.00s)
+    --- PASS: .../tool_call_under_assistant (0.00s)
+    --- PASS: .../text_under_assistant (0.00s)
+    --- FAIL: .../tool_call_under_user (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- FAIL: .../reasoning_under_user (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- PASS: .../reasoning_under_assistant (0.00s)
+    --- FAIL: .../tool_call_under_tool (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- FAIL: .../reasoning_under_tool (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- PASS: .../text_under_user (0.00s)
+    --- PASS: .../tool_result_under_tool (0.00s)
+    --- FAIL: .../tool_result_under_assistant (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- FAIL: .../tool_result_under_user (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+    --- FAIL: .../text_under_tool (0.00s)
+        request_test.go:837: got no failure, want value is not permitted where it appears at "messages[0].content[0]"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.522s
+FAIL
+```
+
+**Green.** `rolePermittedKinds` landed as a slice indexed by `Role`, `roleAllowsKind` reads it with `slices.Contains`, and rule 6 walks every message and every content part in order, reporting `ErrMisplaced` at the first cell the table forbids.
+
+```
+--- PASS: TestNewRequest_RoleVersusContentKind_EnforcesTheDocumentedTable (0.00s)
+    --- PASS: .../reasoning_under_assistant (0.00s)
+    --- PASS: .../reasoning_under_user (0.00s)
+    --- PASS: .../text_under_tool (0.00s)
+    --- PASS: .../tool_result_under_tool (0.00s)
+    --- PASS: .../tool_result_under_user (0.00s)
+    --- PASS: .../text_under_assistant (0.00s)
+    --- PASS: .../tool_result_under_assistant (0.00s)
+    --- PASS: .../tool_call_under_assistant (0.00s)
+    --- PASS: .../tool_call_under_tool (0.00s)
+    --- PASS: .../reasoning_under_tool (0.00s)
+    --- PASS: .../text_under_user (0.00s)
+    --- PASS: .../tool_call_under_user (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai	1.474s
+```
+
+**Refactor.** None. The table is a slice rather than a map, matching `roleNames`, `partKindNames` and `toolChoiceModes` — AI-04's reason applies verbatim: nothing in this package may let an unordered iteration decide anything, and `slices.Contains` over a three-or-fewer-element slice is a bounded scan whose answer cannot depend on order.
+
+**Note on scenario S-AMR-046's count.** `spec.md` describes this scenario as covering "the four permitted cells", but the table in `design.md` § 5.1 and this spec's own requirement text yield **five**: `text` is permitted under both `user` and `assistant`. The test implements the requirement text and `design.md`'s table — five permitted cells, seven forbidden, twelve total, both directions — rather than the scenario prose's count, which undercounts by one. Not a `[provisional]` decision changed, since the requirement and the table already said five; the prose miscount is left as-is rather than edited, because `spec.md` is this change's own delta and out of scope for the apply phase to rewrite.
 
 ---
 

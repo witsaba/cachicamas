@@ -760,3 +760,81 @@ func TestRequest_Formatting_NamesTheToolRegionsWithoutNamingAnyTool(t *testing.T
 		}
 	}
 }
+
+// toolResultPart completes the four part builders textPart, reasoningPart and
+// toolCallPart already define, one per registered kind.
+func toolResultPart(t *testing.T, callID, content string) ai.Part {
+	t.Helper()
+
+	part, err := ai.NewToolResult(callID, content)
+	if err != nil {
+		t.Fatalf("ai.NewToolResult returned %v, want no failure", err)
+	}
+	return part
+}
+
+// AI-10.3 item 3 — role versus content kind is enforced from design.md §
+// 5.1's table, all twelve cells, in both directions, reporting ErrMisplaced
+// (R-AMR-011).
+//
+// One row per cell, mirroring the table's own shape, so a later loosening —
+// design.md § 5.2's stated rollback direction — is one row here too.
+//
+// The permitted tool_result cell carries a companion message: an assistant
+// tool call the result answers. Without it, this cell's request would be an
+// orphan tool result the moment item 4 lands that rule, and an already-decided
+// permission would start failing for a reason that has nothing to do with
+// role versus kind — item 1's test applied the identical discipline to this
+// item in advance.
+func TestNewRequest_RoleVersusContentKind_EnforcesTheDocumentedTable(t *testing.T) {
+	t.Parallel()
+
+	toolResultCompanion := []ai.Message{
+		requireMessage(t, ai.RoleAssistant, toolCallPart(t, "table-call", "search")),
+	}
+
+	cases := []struct {
+		name      string
+		role      ai.Role
+		part      ai.Part
+		companion []ai.Message
+		permitted bool
+	}{
+		// The five permitted cells (S-AMR-046).
+		{"text_under_user", ai.RoleUser, textPart(t, "hi"), nil, true},
+		{"text_under_assistant", ai.RoleAssistant, textPart(t, "hi"), nil, true},
+		{"reasoning_under_assistant", ai.RoleAssistant, reasoningPart(t, "because"), nil, true},
+		{"tool_call_under_assistant", ai.RoleAssistant, toolCallPart(t, "c", "search"), nil, true},
+		{"tool_result_under_tool", ai.RoleTool, toolResultPart(t, "table-call", "42"), toolResultCompanion, true},
+
+		// The seven forbidden cells: S-AMR-043 (reasoning under user), S-AMR-044
+		// (tool_result under assistant), S-AMR-045 (text under tool), and the
+		// rest of the table.
+		{"reasoning_under_user", ai.RoleUser, reasoningPart(t, "because"), nil, false},
+		{"tool_call_under_user", ai.RoleUser, toolCallPart(t, "c", "search"), nil, false},
+		{"tool_result_under_user", ai.RoleUser, toolResultPart(t, "c", "42"), nil, false},
+		{"tool_result_under_assistant", ai.RoleAssistant, toolResultPart(t, "c", "42"), nil, false},
+		{"text_under_tool", ai.RoleTool, textPart(t, "hi"), nil, false},
+		{"reasoning_under_tool", ai.RoleTool, reasoningPart(t, "because"), nil, false},
+		{"tool_call_under_tool", ai.RoleTool, toolCallPart(t, "c", "search"), nil, false},
+	}
+	if len(cases) != 12 {
+		t.Fatalf("the table has %d cases, want 12 — one per (kind, role) cell", len(cases))
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			messages := append([]ai.Message{requireMessage(t, tc.role, tc.part)}, tc.companion...)
+			_, err := ai.NewRequest("m", messages)
+			if tc.permitted {
+				if err != nil {
+					t.Fatalf("ai.NewRequest returned %v, want no failure — %v is permitted under %v", err, tc.part.Kind(), tc.role)
+				}
+				return
+			}
+			requireViolation(t, err, ai.ErrMisplaced, "messages[0].content[0]")
+		})
+	}
+}

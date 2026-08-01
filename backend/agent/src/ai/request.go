@@ -18,6 +18,35 @@ type Request struct {
 	options   requestDraft
 }
 
+// rolePermittedKinds is the table AI-10.3 item 3 lands: which content-part
+// kinds a role may carry (design.md § 5.1, R-AMR-011).
+//
+// Indexed by Role rather than a map, for AI-04's reason: nothing in this
+// package may let an unordered iteration decide anything. A later loosening
+// is one element added to one role's slice; design.md § 5.2 records why the
+// table starts strict rather than permissive — loosening a cell is additive,
+// tightening one breaks a caller who shipped.
+var rolePermittedKinds = [][]PartKind{
+	RoleUser:      {PartKindText},
+	RoleAssistant: {PartKindText, PartKindReasoning, PartKindToolCall},
+	RoleTool:      {PartKindToolResult},
+}
+
+// roleAllowsKind reports whether a role may carry a content part of the given
+// kind.
+//
+// A role with no table entry — including the zero Role, which no constructed
+// message carries — permits nothing. That folds "not a role" into "permits no
+// kind" rather than panicking or special-casing it, and it costs nothing
+// because [Message.Role] can never in fact return one: [NewMessage] rejects a
+// role outside the vocabulary before a message exists to ask this question of.
+func roleAllowsKind(role Role, kind PartKind) bool {
+	if int(role) >= len(rolePermittedKinds) {
+		return false
+	}
+	return slices.Contains(rolePermittedKinds[role], kind)
+}
+
 // NewRequest constructs a normalized request.
 //
 // The rules are checked in the order written, per V-FAIL-04, and the order is
@@ -102,6 +131,16 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 		func() *Violation {
 			if draft.hasSystem && draft.system.IsZero() {
 				return Invalid(ErrEmpty, At("system"))
+			}
+			return nil
+		},
+		func() *Violation {
+			for i, message := range messages {
+				for j, part := range message.Content() {
+					if !roleAllowsKind(message.Role(), part.Kind()) {
+						return Invalid(ErrMisplaced, AtIndex("messages", i), AtIndex("content", j))
+					}
+				}
 			}
 			return nil
 		},
