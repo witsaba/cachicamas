@@ -15,7 +15,7 @@
 
 ## Entry point for the resuming agent
 
-This half of the milestone implements **AI-10.1 and AI-10.2 only**. **AI-10.3, AI-10.4, AI-10.5 and AI-10.6 are not implemented.**
+This half of the milestone implements **AI-10.1 and AI-10.2 only**, and both are implemented and green. **AI-10.3, AI-10.4, AI-10.5 and AI-10.6 are not implemented.**
 
 The resuming agent starts at **§ Phase AI-10.3**, below. Every box in phases AI-10.3 … AI-10.6 is unchecked, and every decision those phases need is already made in `design.md` §§ 5–12 and marked `[provisional]` there. A `[provisional]` decision may be changed only by recording the reason in `design.md` **before** writing the test; absent a recorded reason, implement what is written.
 
@@ -43,9 +43,11 @@ Recorded before the work, with actuals filled in as each phase closed.
 
 | Slice | Files | Forecast | **Actual** | Risk | Reviewer time |
 | --- | --- | --- | --- | --- | --- |
-| SDD planning artifacts | `spec.md`, `design.md`, `tasks.md` (on top of the landed `explore.md`, `proposal.md`) | ~900 prose | _filled at close_ | Low | 35 min |
-| AI-10.1 walking skeleton | `request.go`, `request_test.go` | ~200 Go prod, ~400 Go test | _filled at close_ | **High** — every later request milestone and every adapter inherits the shape | 45 min |
-| AI-10.2 segmented system instruction | `system_instruction.go`, `system_instruction_test.go`, `request.go`, `request_test.go` | ~120 Go prod, ~300 Go test | _filled at close_ | Medium — the shape AI-11.1 attaches markers to | 30 min |
+| SDD planning artifacts | `spec.md`, `design.md`, `tasks.md` (on top of the landed `explore.md`, `proposal.md`) | ~900 prose | **~950 prose** | Low | 35 min |
+| AI-10.1 walking skeleton | `request.go`, `request_test.go`, `request_internal_test.go` | ~200 Go prod, ~400 Go test | **~250 prod / 535 test**, of which 3 files | **High** — every later request milestone and every adapter inherits the shape | 45 min |
+| AI-10.2 segmented system instruction | `system_instruction.go`, `system_instruction_test.go`, `request.go` | ~120 Go prod, ~300 Go test | **~280 prod (both files, cumulative) / 302 test** | Medium — the shape AI-11.1 attaches markers to | 30 min |
+
+Totals across the implemented half: `request.go` 360 lines, `system_instruction.go` 169 — **529 production lines, of which the large majority is contract documentation**; `request_test.go` 448, `request_internal_test.go` 87, `system_instruction_test.go` 302 — **837 test lines**.
 | AI-10.3 … AI-10.6 | not implemented in this half | ~350 Go prod, ~900 Go test | — | Medium-High | ~90 min |
 
 ### Budget reassessment — split trigger 4 fired before the first test was written
@@ -306,10 +308,164 @@ Both AI-00 import guards pass (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_De
 **Deliverable:** `backend/agent/src/ai/system_instruction.go`, `system_instruction_test.go`; one option constructor and one accessor added to `request.go`.
 **Spec:** `R-AMR-005`, `R-AMR-006`, `R-AMR-007`. **Design:** § 3, § 12.1.
 
-- [ ] **Item 1** — WHEN a request carries a system instruction as **ordered segments** THEN segment order and content round-trip exactly.
-- [ ] **Item 2** — The single-segment convenience path produces a request **indistinguishable** from one built segment-by-segment with one segment.
-- [ ] **Item 3** — An absent system instruction is legal and **distinguishable from one empty segment**.
-- [ ] **Item 4** — Segment construction rules fail through AI-04 sentinels (empty segment, whitespace-only segment).
+- [x] **Item 1** — WHEN a request carries a system instruction as **ordered segments** THEN segment order and content round-trip exactly.
+- [x] **Item 2** — The single-segment convenience path produces a request **indistinguishable** from one built segment-by-segment with one segment.
+- [x] **Item 3** — An absent system instruction is legal and **distinguishable from one empty segment**.
+- [x] **Item 4** — Segment construction rules fail through AI-04 sentinels (empty segment, whitespace-only segment).
+- [x] **Item 5** *(appended)* — The system region renders no segment text through any of the four fmt verbs, and still names its segment count.
+
+### AI-10.2 item 1 — ordered segments round-trip
+
+**Before red** — the compile failure, which is the state before red:
+
+```
+src/ai/system_instruction_test.go:19:44: undefined: ai.Segment
+src/ai/system_instruction_test.go:22:15: undefined: ai.NewSegment
+src/ai/system_instruction_test.go:50:25: undefined: ai.NewSystemInstruction
+src/ai/system_instruction_test.go:57:6: undefined: ai.WithSystemInstruction
+src/ai/system_instruction_test.go:63:22: request.SystemInstruction undefined (type ai.Request has no field or method SystemInstruction)
+FAIL	github.com/cachicamas/backend/agent/src/ai [build failed]
+```
+
+**Red**, with the two types, their constructors, the option and the accessor landed as stubs:
+
+```
+--- FAIL: TestRequest_SystemInstruction_RoundTripsSegmentOrderAndContentExactly (0.00s)
+    system_instruction_test.go:62: request.SystemInstruction() reported absent, want present
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.821s
+FAIL
+```
+
+**Green.** The draft carries the instruction and its presence flag; the request freezes both.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.343s
+```
+
+**Refactor.** None. `Segments()` clones on the way out from the start, matching `Message.Content()` and `ToolSet.Tools()`. The test's fixture texts include surrounding whitespace and non-ASCII on purpose, so the byte-exact round trip is asserted rather than assumed.
+
+### AI-10.2 item 2 — the convenience path is indistinguishable
+
+**Before red** — `undefined: ai.NewSystemText`. **Red**, with the declaration landed returning the zero value:
+
+```
+--- FAIL: TestNewSystemText_SingleSegmentPath_IsIndistinguishableFromTheSegmentBySegmentBuild (0.00s)
+    system_instruction_test.go:99: text-built instruction has 0 segments, segment-built has 1
+--- FAIL: TestNewSystemText_TextThatNoSegmentMayCarry_FailsWithTheSegmentsOwnRule (0.00s)
+    system_instruction_test.go:117: ai.NewSystemText("   ") returned <nil>, want ErrEmpty
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.326s
+FAIL
+```
+
+**The second test was written in this step and parked, not deleted.** It asserts a rule item 4 had not landed yet, and driving it green here would have meant implementing item 4's rule during item 2. It was moved to item 4's section unchanged, where it went green with **no further edit to `NewSystemText`** — which is the observable proof that the two construction paths share one rule set.
+
+**Green**, on the first test alone:
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.333s
+```
+
+**Refactor.** `NewSystemText` was rewritten to **call** `NewSegment` and then `NewSystemInstruction` rather than to build the value directly. Building it directly passed the identical test and would have let the two paths diverge on the next rule added to a segment — AI-06's "one rule set, two callers" failure mode, one dimension smaller. Item 4's parked test is what turns that from a comment into an assertion.
+
+### AI-10.2 item 3 — absence is structural
+
+**Red.**
+
+```
+--- FAIL: TestRequest_AbsentSystemInstruction_IsLegalAndUnrepresentableAsAnEmptySegment (0.00s)
+    --- FAIL: .../an_instruction_that_skipped_its_constructor_is_rejected_by_the_request (0.00s)
+        system_instruction_test.go:142: got no failure, want required value is empty at "system"
+    --- FAIL: .../a_zero-segment_instruction_cannot_be_constructed (0.00s)
+        system_instruction_test.go:135: got no failure, want required value is empty at "system"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.329s
+FAIL
+```
+
+**Green.** `NewSystemInstruction` rejects zero segments and unconstructed segments; `NewRequest` gains rule 5, rejecting an applied-but-unconstructed instruction.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.338s
+```
+
+**Refactor.** `SystemInstruction.IsZero` and `Segment.IsZero` were added rather than inlining a length or emptiness check, matching `MessageID.IsZero`, which `message.go` documents as existing for exactly the question "was this constructed?".
+
+The design point this item lands: rule 1 of `NewSystemInstruction` could have been dropped, letting a zero-segment instruction stand for absence. That is the trap it exists to close — it would give the package **two** spellings of absence, the option unapplied and the option applied with an empty value, and every later reader would have to know both.
+
+### AI-10.2 item 4 — segment construction rules
+
+**Red**, five whitespace cases plus item 2's parked test:
+
+```
+--- FAIL: TestNewSystemText_TextThatNoSegmentMayCarry_FailsWithTheSegmentsOwnRule (0.00s)
+    system_instruction_test.go:222: got no failure, want required value is empty at "text"
+--- FAIL: TestNewSegment_EmptyOrWhitespaceOnlyText_FailsWithErrEmpty (0.00s)
+    --- FAIL: .../a_non-breaking_space_only (0.00s)
+        system_instruction_test.go:188: got no failure, want required value is empty at "text"
+    --- FAIL: .../empty_text (0.00s)
+        system_instruction_test.go:188: got no failure, want required value is empty at "text"
+    --- FAIL: .../spaces_only (0.00s)
+        system_instruction_test.go:188: got no failure, want required value is empty at "text"
+    --- FAIL: .../an_ideographic_space_only (0.00s)
+        system_instruction_test.go:188: got no failure, want required value is empty at "text"
+    --- FAIL: .../tabs_and_newlines_only (0.00s)
+        system_instruction_test.go:188: got no failure, want required value is empty at "text"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.337s
+FAIL
+```
+
+**Green.** One rule: `strings.TrimSpace(text) == ""`, reporting `ErrEmpty` at `text`. `TrimSpace` is Unicode-aware, so the non-breaking and ideographic spaces fall under it without a second rule.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.327s
+```
+
+**Refactor.** The companion `TestNewSegment_TextWithSurroundingWhitespace_IsNotTrimmed` pins that whitespace-only is a **rejection criterion and never a normalization**. Without it, a later "helpful" trim would pass every other test in the file and silently rewrite callers' prompts — and prompt text is the one thing in this package that must survive byte-exact.
+
+No upper bound was landed on a segment's length, and the omission is documented on the constructor: a text content part has one because it is model-visible content with a documented encoding, while a system instruction's size limit is a provider's, decidable only by asking, and belongs to AI-19.
+
+### AI-10.2 item 5 *(appended)* — the system region's redaction
+
+AI-10.1's leak table could not cover this region because it did not exist yet, and the system instruction is the region most likely to carry a proprietary prompt.
+
+**Before red** — `instruction.String undefined`, `(ai.Segment{}).String undefined`. **Red**, with both renderings landed returning placeholders:
+
+```
+--- FAIL: TestSystemInstruction_Formatting_NamesTheSegmentCountAndTheRequestsSystemRegion (0.00s)
+    system_instruction_test.go:283: instruction.String() = "system(placeholder)", want "system(2 segments)"
+    system_instruction_test.go:286: ai.Segment{}.String() = "segment(placeholder)", want "segment(unset)"
+    system_instruction_test.go:289: segment.String() = "segment(placeholder)", want "segment"
+    system_instruction_test.go:300: request.String() = "request(model, 1 messages)", want it to contain "system(2 segments)"
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/ai	0.313s
+FAIL
+```
+
+**Green.** `Segment.String` names the segment and never its text or its length — `Part.String` renders on the same rule, and a prefix of a secret is still a secret. `SystemInstruction.String` names the count, which is shape rather than payload. `Request.String` now includes the system region.
+
+```
+ok  	github.com/cachicamas/backend/agent/src/ai	1.333s
+```
+
+**Refactor.** None. `GoString` delegates to `String` on both types, matching every payload-carrying type in the package.
+
+### AI-10.2 evidence gate
+
+```
+$ make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+
+$ go test -race ./...
+ok  	github.com/cachicamas/backend/agent/src/agenttest	1.543s
+ok  	github.com/cachicamas/backend/agent/src/ai	2.146s
+```
+
+`go.mod` carries zero `require` lines; both AI-00 import guards pass.
 
 ---
 

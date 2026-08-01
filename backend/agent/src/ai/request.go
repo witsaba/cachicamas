@@ -11,9 +11,11 @@ import (
 // Request is the complete provider-neutral description of one model call
 // (V-REQ-20).
 type Request struct {
-	model    string
-	messages []Message
-	options  requestDraft
+	model     string
+	messages  []Message
+	system    SystemInstruction
+	hasSystem bool
+	options   requestDraft
 }
 
 // NewRequest constructs a normalized request.
@@ -97,11 +99,23 @@ func NewRequest(model string, messages []Message, opts ...RequestOption) (Reques
 			}
 			return nil
 		},
+		func() *Violation {
+			if draft.hasSystem && draft.system.IsZero() {
+				return Invalid(ErrEmpty, At("system"))
+			}
+			return nil
+		},
 		draft.boundsRule(),
 	); err != nil {
 		return Request{}, err
 	}
-	return Request{model: model, messages: slices.Clone(messages), options: draft}, nil
+	return Request{
+		model:     model,
+		messages:  slices.Clone(messages),
+		system:    draft.system,
+		hasSystem: draft.hasSystem,
+		options:   draft,
+	}, nil
 }
 
 // Model returns the neutral name of the model the request targets (V-REQ-21).
@@ -156,6 +170,9 @@ type requestDraft struct {
 
 	stopSequences    []string
 	hasStopSequences bool
+
+	system    SystemInstruction
+	hasSystem bool
 }
 
 // WithMaxOutputTokens sets the maximum number of tokens the model may generate.
@@ -299,6 +316,10 @@ func (r Request) String() string {
 	}
 	b.WriteString(strconv.Itoa(len(r.messages)))
 	b.WriteString(" messages")
+	if r.hasSystem {
+		b.WriteString(", ")
+		b.WriteString(r.system.String())
+	}
 	for _, name := range r.options.appliedNames() {
 		b.WriteString(", ")
 		b.WriteString(name)
