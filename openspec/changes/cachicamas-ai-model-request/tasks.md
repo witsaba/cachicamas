@@ -47,8 +47,9 @@ Recorded before the work, with actuals filled in as each phase closed.
 | AI-10.1 walking skeleton | `request.go`, `request_test.go`, `request_internal_test.go` | ~200 Go prod, ~400 Go test | **~250 prod / 535 test**, of which 3 files | **High** — every later request milestone and every adapter inherits the shape | 45 min |
 | AI-10.2 segmented system instruction | `system_instruction.go`, `system_instruction_test.go`, `request.go` | ~120 Go prod, ~300 Go test | **~280 prod (both files, cumulative) / 302 test** | Medium — the shape AI-11.1 attaches markers to | 30 min |
 
-Totals across the implemented half: `request.go` 360 lines, `system_instruction.go` 169 — **529 production lines, of which the large majority is contract documentation**; `request_test.go` 448, `request_internal_test.go` 87, `system_instruction_test.go` 302 — **837 test lines**.
 | AI-10.3 … AI-10.6 | not implemented in this half | ~350 Go prod, ~900 Go test | — | Medium-High | ~90 min |
+
+Totals across the implemented half: `request.go` 360 lines, `system_instruction.go` 169 — **529 production lines, of which the large majority is contract documentation**; `request_test.go` 448, `request_internal_test.go` 87, `system_instruction_test.go` 302 — **837 test lines**.
 
 ### Budget reassessment — split trigger 4 fired before the first test was written
 
