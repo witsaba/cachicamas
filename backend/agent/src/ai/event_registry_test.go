@@ -1,15 +1,18 @@
 // Tests for R-AEE-004, R-AEE-006 and R-AEE-014 — the event-kind registry is
-// exhaustive, ships zero production members, and cannot register a kind
-// without a descriptor.
+// exhaustive and cannot register a kind without a descriptor.
 //
-// AI-14 registers zero production event kinds (R-AEE-006), so unlike
-// content_part_registry_test.go's AI-06.4 guard — which scans production
-// source for four declared PartKind constants — this guard's subject is the
-// test-only witness kind bridged through export_test.go (D6) plus whatever a
-// test dynamically registers through RegisterTestKind. The mechanism is the
-// same shape AI-06.4 established: a witness table, cross-checked against the
-// kind vocabulary the package actually reports, so a kind reachable by one
-// path and not the other is caught rather than assumed away.
+// AI-14 registered zero production event kinds itself (R-AEE-006), so at
+// that milestone this guard's only subject was the test-only witness kind
+// bridged through export_test.go (D6). AI-15 (task 2.2/3.2) generalizes the
+// table the same way content_part_registry_test.go's AI-06.4 guard has
+// always worked — construct/read closures keyed by kind, adapted to one
+// signature each, `any` standing in for whichever concrete payload type a
+// kind's own accessor returns — and extends it with an entry for every
+// production kind AI-15 registers, alongside the witness kind and whatever a
+// test dynamically registers through RegisterTestKind. The mechanism stays
+// the same shape: a witness table, cross-checked against the kind
+// vocabulary the package actually reports, so a kind reachable by one path
+// and not the other is caught rather than assumed away.
 package ai_test
 
 import (
@@ -29,24 +32,37 @@ type eventKindWitness struct {
 	// is checked rather than trusted.
 	registeredName string
 
-	// construct is leg 1: a constructor reachable from another package.
-	construct func(ai.BlockIndex) ai.Event
+	// construct is leg 1: a constructor reachable from another package,
+	// adapted to a shared no-argument signature — content_part_registry_test.go's
+	// constructValid shape, restated for the event envelope. Each kind's own
+	// constructor takes its own parameters; the closure supplies fixed valid
+	// arguments so every witness fits the same field.
+	construct func() (ai.Event, error)
 
-	// read is leg 2: the exported accessor for this kind's payload.
-	read func(ai.Event) (ai.WitnessPayload, bool)
+	// read is leg 2: the exported accessor for this kind's payload, adapted
+	// to one signature. `any` stands in for whichever concrete payload type
+	// the kind's own accessor returns — content_part_registry_test.go's read
+	// func(Part) (any, bool) shape, restated here.
+	read func(ai.Event) (any, bool)
 }
 
-// eventKindWitnesses is the guard's table. It carries exactly one entry at
-// this milestone — AI-14 registers zero production kinds (R-AEE-006) — for
-// the test-only witness kind bridged through export_test.go. Leg 3 (a
-// validation path) is exercised once the per-stream stamper exists to give a
-// witness event a real sequence: see sequence_test.go's R-AEE-010 coverage
-// and the leg-3 addition recorded there in tasks.md.
+// eventKindWitnesses is the guard's table, keyed by the registered constant
+// — one entry per production kind plus the test-only witness kind, in the
+// same commit as the kind's own three-step addition (event_descriptor.go's
+// six-step procedure, steps 1, 3 and 4). Leg 3 (a validation path) is
+// exercised once the per-stream stamper exists to give a witness event a
+// real sequence: see sequence_test.go's R-AEE-010 coverage and the leg-3
+// addition recorded there in tasks.md.
 var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 	ai.KindTestWitness: {
 		registeredName: "test_witness",
-		construct:      ai.NewWitnessEvent,
-		read:           func(e ai.Event) (ai.WitnessPayload, bool) { return e.WitnessPayload() },
+		construct:      func() (ai.Event, error) { return ai.NewWitnessEvent(1), nil },
+		read:           func(e ai.Event) (any, bool) { return e.WitnessPayload() },
+	},
+	ai.EventKindResponseStart: {
+		registeredName: "responsestart",
+		construct:      func() (ai.Event, error) { return ai.NewResponseStart("resp_registry_witness", "model_registry_witness") },
+		read:           func(e ai.Event) (any, bool) { return e.ResponseStart() },
 	},
 }
 
@@ -84,7 +100,10 @@ func TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor(t
 			t.Run("leg 1 — a constructor", func(t *testing.T) {
 				t.Parallel()
 
-				event := witness.construct(1)
+				event, err := witness.construct()
+				if err != nil {
+					t.Fatalf("the witness for %v returned %v, want no failure", witness.registeredName, err)
+				}
 				if event.Kind() != k {
 					t.Fatalf("the witness for %v built an event of kind %v, want %v", witness.registeredName, event.Kind(), k)
 				}
@@ -93,7 +112,10 @@ func TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor(t
 			t.Run("leg 2 — a payload accessor", func(t *testing.T) {
 				t.Parallel()
 
-				event := witness.construct(1)
+				event, err := witness.construct()
+				if err != nil {
+					t.Fatalf("the witness for %v returned %v, want no failure", witness.registeredName, err)
+				}
 				payload, ok := witness.read(event)
 				if !ok {
 					t.Errorf("the accessor for %v reported no payload on an event of its own kind", witness.registeredName)
@@ -112,12 +134,33 @@ func TestEventKindRegistration_TheTestKindVocabulary_HasConstructorAndAccessor(t
 	}
 }
 
-// R-AEE-006 — AI-14 registers zero production event kinds.
-func TestEventKinds_ProductionVocabulary_IsEmpty(t *testing.T) {
+// productionEventKinds is the production event-kind vocabulary, named by
+// hand.
+//
+// Written out rather than obtained from the package — finish_reason_test.go's
+// theVocabulary reason: a list the package supplied would agree with itself
+// no matter what was added to it. AI-14 shipped this list empty (R-AEE-006);
+// AI-15 is the first milestone to add to it (task 2.2), and AI-16 … AI-19
+// extend it the same way, each in the same commit that registers its kind.
+var productionEventKinds = []ai.EventKind{
+	ai.EventKindResponseStart,
+}
+
+// R-AEE-004, R-AEE-006 — the production event-kind vocabulary is exactly the
+// hand-written list above, in declaration order. AI-14 pinned this as
+// "empty"; AI-15 restates the same guard as "exactly these kinds", which is
+// what R-AEE-006 always meant once a milestone had something to register.
+func TestEventKinds_ProductionVocabulary_IsExactlyTheRegisteredKinds(t *testing.T) {
 	t.Parallel()
 
-	if got := ai.EventKinds(); len(got) != 0 {
-		t.Errorf("ai.EventKinds() = %v, want empty — AI-14 ships zero production kinds", got)
+	got := ai.EventKinds()
+	if len(got) != len(productionEventKinds) {
+		t.Fatalf("ai.EventKinds() = %v (%d kinds), want %v (%d kinds)", got, len(got), productionEventKinds, len(productionEventKinds))
+	}
+	for i, want := range productionEventKinds {
+		if got[i] != want {
+			t.Errorf("ai.EventKinds()[%d] = %v, want %v", i, got[i], want)
+		}
 	}
 }
 

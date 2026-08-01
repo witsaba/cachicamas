@@ -14,15 +14,17 @@
 // an unconstructed value fail the closed-vocabulary rule rather than needing a
 // rule class of its own (R-AEE-002).
 //
-// # Zero production kinds
+// # Zero production kinds at AI-14
 //
-// This milestone registers none (R-AEE-006): response start/completion
-// (AI-15), text/reasoning/tool-call blocks (AI-16 … AI-18) and the terminal
-// error (AI-19) are none of them declared here. What this file proves —
-// derivation, sealing, external readability, exhaustiveness — is proved
-// against a test-only witness payload instead, bridged into package ai_test
-// through export_test.go. See event_descriptor.go's file comment for the
-// six-step procedure a later milestone follows to add a real one.
+// AI-14 itself registered none (R-AEE-006): what this file proved at that
+// milestone alone — derivation, sealing, external readability,
+// exhaustiveness — was proved against a test-only witness payload instead,
+// bridged into package ai_test through export_test.go. AI-15 is the first
+// milestone to register a real one (response_start.go, completion.go),
+// following event_descriptor.go's six-step procedure; text/reasoning/
+// tool-call blocks (AI-16 … AI-18) and the terminal error (AI-19) append
+// further members the same way, none of it touching this file's own
+// requirements.
 
 package ai
 
@@ -39,20 +41,26 @@ import "strconv"
 //
 // # Registered kinds
 //
-// None. AI-14 registers zero production event kinds (R-AEE-006). A later
-// milestone appends one following event_descriptor.go's six-step procedure;
-// none of the requirements in this capability's spec is edited to do it.
+//   - responsestart — the event announcing that a provider has begun
+//     responding: the provider response identity and the served model
+//     (V-STR-19).
+//
+// AI-15 is the first milestone to register a production kind. AI-16 … AI-19
+// append further members the same way, following event_descriptor.go's
+// six-step procedure; none of the requirements in this capability's own
+// spec is edited to do it.
 type EventKind uint8
 
 const (
+	// EventKindResponseStart is the kind carrying V-STR-19's response-start
+	// event: the provider's own response identity (V-STR-24) and the model
+	// that actually served the response (V-STR-25). See response_start.go.
+	EventKindResponseStart EventKind = iota + 1
+
 	// eventKindFirst and eventKindEnd bound the declared production constant
-	// space, mirroring content_part.go's partKindFirst/partKindEnd. AI-14
-	// declares no production EventKind constant, so both equal 1 — the value
-	// the first real kind will take, and the value the test-only witness
-	// (export_test.go) borrows without moving this bound, so [EventKinds]
-	// stays empty for a non-test build (S-AEE-013, S-AEE-017).
-	eventKindFirst EventKind = 1
-	eventKindEnd   EventKind = eventKindFirst
+	// space, mirroring content_part.go's partKindFirst/partKindEnd.
+	eventKindFirst = EventKindResponseStart
+	eventKindEnd   = EventKindResponseStart + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -69,11 +77,16 @@ type eventRegistration struct {
 // nothing in this package may let an unordered iteration decide anything.
 //
 // Index 0 is the permanent placeholder for the zero (non-member) kind, so a
-// real registration never lands there. It starts as the only entry: AI-14
-// registers zero production kinds, and export_test.go is the only file that
-// grows it further, for exactly one test-only witness plus whatever a test
-// dynamically registers and later unregisters through RegisterTestKind.
-var eventRegistry = []eventRegistration{{}}
+// real registration never lands there. AI-15 is the first milestone to add
+// an entry past it; export_test.go grows the table further at test-load
+// time, for exactly one test-only witness plus whatever a test dynamically
+// registers and later unregisters through RegisterTestKind.
+var eventRegistry = []eventRegistration{
+	EventKindResponseStart: {
+		name:       "responsestart",
+		descriptor: EventDescriptor{Role: BlockRoleNone, Cardinality: CardinalityAtMostOne, Terminal: false},
+	},
+}
 
 // eventRegistration returns a kind's registry entry, and whether it has one.
 // A kind past the end of the table, like one before eventKindFirst, has no
@@ -95,7 +108,8 @@ func eventRegistryEntry(k EventKind) (eventRegistration, bool) {
 // table would list exactly the members that have an entry, making a constant
 // declared without one invisible to the assertion that exists to catch it.
 //
-// It is empty at this milestone (R-AEE-006): eventKindFirst == eventKindEnd.
+// It was empty at AI-14 (R-AEE-006: eventKindFirst == eventKindEnd); AI-15
+// is the first milestone to make it non-empty.
 func EventKinds() []EventKind {
 	out := make([]EventKind, 0, int(eventKindEnd-eventKindFirst))
 	for k := eventKindFirst; k < eventKindEnd; k++ {
