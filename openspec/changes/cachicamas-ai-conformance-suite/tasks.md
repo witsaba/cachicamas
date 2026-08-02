@@ -220,24 +220,33 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-009`, `R-CNF-010`. **Design:** iterates `ai.FailureCategories()`, the shipped enumerator.
 **Depends on:** AI-23.1; AI-19's `FailureCategories()` (read-only).
 
-- [ ] **Item 1** (`R-CNF-009`) — Exactly one terminal; the partial-output discriminator is always answerable.
-  - [ ] 1.1 RED: a normal finish, a pre-stream failure, and a mid-stream failure; confirm each carries exactly one terminal and nothing follows it. `S-CNF-021`.
-  - [ ] 1.2 RED: a failure after two text deltas and a failure before any event; confirm the discriminator reports "content preceded" and "none" respectively. `S-CNF-022`.
-  - [ ] 1.3 RED: a subject emitting a text delta after its terminal; confirm the case fails naming the post-terminal event. `S-CNF-023`.
-  - [ ] 1.4 GREEN: implement the one-terminal assertion and the discriminator read across all three paths. Confirm 1.1–1.3 pass.
-  - [ ] 1.5 REFACTOR: confirm the three paths (normal, pre-stream, mid-stream) share one assertion helper.
+- [x] **Item 1** (`R-CNF-009`) — Exactly one terminal; the partial-output discriminator is always answerable.
+  - [x] 1.1 RED: a normal finish, a pre-stream failure, and a mid-stream failure; confirm each carries exactly one terminal and nothing follows it. `S-CNF-021`.
+  - [x] 1.2 RED: a failure after two text deltas and a failure before any event; confirm the discriminator reports "content preceded" and "none" respectively. `S-CNF-022`.
+    - **Genuine RED caught a real bug**: first run of `content_preceded` panicked — `agenttest: scripted stream violates ordering: event[1].block[1]: value is not well-formed for its documented encoding`. Cause: the script opened a text block (`start`, `delta`) but never closed it (`end`) before the terminal error — `ai.CheckStream`'s unterminated-block rule (R-AEE-016) rejects that regardless of how the stream ends. Fixed by inserting `ai.NewTextBlockEnd(1)` before the terminal — a real-world constraint worth recording: a failure with content preceding it still requires that content's block to be properly closed first.
+  - [x] 1.3 RED: a subject emitting a text delta after its terminal; confirm the case fails naming the post-terminal event. `S-CNF-023`.
+    - AI-21's own `Provider` structurally refuses to script this (its internal `ai.CheckStream` pre-check panics before any goroutine starts), so `postTerminalEventProvider` — a hand-built `ai.ModelProvider` sending an event after its own terminal — was needed, mirroring `reorderedTextProvider`'s (AI-23.2) precedent.
+  - [x] 1.4 GREEN: implement the one-terminal assertion and the discriminator read across all three paths. Confirm 1.1–1.3 pass.
+    - GREEN: `go test -race -v -run TestConformanceTerminal ./src/agenttest/` → all subtests `PASS`, including all 9×2 failure-category combinations.
+  - [x] 1.5 REFACTOR: confirm the three paths (normal, pre-stream, mid-stream) share one assertion helper.
+    - Partial, noted rather than silently deviated: `normal_finish` and `mid_stream_failure` share the identical assertion (`RequireValidStream`, AI-22's kit). `pre_stream_failure` structurally cannot use the same drain-based assertion — there is no carrier to drain at all (V-FAIL-11) — so its "exactly one terminal" proof is instead the caller-visible fact that `ch == nil` and the one `err` is the whole outcome. Forcing one literal function across all three would paper over that structural difference rather than reflect it.
 
-- [ ] **Item 2** (`R-CNF-010`) — All nine failure categories, iterated against the shipped enumerator.
-  - [ ] 2.1 RED: iterate `ai.FailureCategories()` (not a hand-written list) on both delivery paths; confirm each of the nine is exercised and classified. `S-CNF-024`.
-  - [ ] 2.2 RED: a hypothetical tenth category simulated by shrinking the case set below the enumerator's length; confirm the exhaustiveness check fails naming the uncovered category. `S-CNF-025`.
-  - [ ] 2.3 GREEN: implement the loop over `ai.FailureCategories()` with a length/coverage assertion enforcing exhaustiveness mechanically. Confirm 2.1–2.2 pass.
-  - [ ] 2.4 REFACTOR: confirm the coverage assertion, not reviewer vigilance, is what would catch a future upstream addition.
+- [x] **Item 2** (`R-CNF-010`) — All nine failure categories, iterated against the shipped enumerator.
+  - [x] 2.1 RED: iterate `ai.FailureCategories()` (not a hand-written list) on both delivery paths; confirm each of the nine is exercised and classified. `S-CNF-024`.
+  - [x] 2.2 RED: a hypothetical tenth category simulated by shrinking the case set below the enumerator's length; confirm the exhaustiveness check fails naming the uncovered category. `S-CNF-025`.
+    - A real tenth category cannot be constructed (the vocabulary is closed) — proven instead via `requireFailureCategoryCoverage`, a pure function tested directly against an artificially shrunk `exercised` map.
+  - [x] 2.3 GREEN: implement the loop over `ai.FailureCategories()` with a length/coverage assertion enforcing exhaustiveness mechanically. Confirm 2.1–2.2 pass.
+    - GREEN: `TestConformanceTerminal_FailureCategoryExhaustivenessCase_PassesAgainstFakeFactory` (18 subtests: 9 categories × 2 paths) and `TestRequireFailureCategoryCoverage_ShrunkExercisedSet_NamesTheUncoveredCategory` → all `PASS`.
+  - [x] 2.4 REFACTOR: confirm the coverage assertion, not reviewer vigilance, is what would catch a future upstream addition.
+    - Confirmed: `requireFailureCategoryCoverage` iterates `ai.FailureCategories()` itself (never a hand-written count), so a future member automatically participates without a second edit.
 
-- [ ] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 3.1 RED: a failure category value with no attached message; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
-  - [ ] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+- [x] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 3.1 RED: a failure category value with no attached message; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
+  - [x] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+    - GREEN: `TestConformanceTerminal_FailureCategoryWithNoAttachedMessage_NeverPanics` → `PASS` (every category, both construction paths, a bare `FailureReport{Category: c}`).
 
-- [ ] **AI-23.4 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-009`/`R-CNF-010`; commit `feat(agenttest): conformance terminal and exhaustive failure-category cases (AI-23.4)`.
+- [x] **AI-23.4 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-009`/`R-CNF-010`; commit `feat(agenttest): conformance terminal and exhaustive failure-category cases (AI-23.4)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues`. `conformance_terminal.go`'s doc comment cites `R-CNF-009`/`R-CNF-010`. Capability keying note (design decision, not in design.md's own text): "exactly one terminal" registers under `CapNone` (AI-03 §5's closing note: stream-lifecycle exclusivity is `V-PRV-05`, not a capability); the discriminator and exhaustive-category cases register under `CapTypedFailures` (CAP-R-05's own content: "says whether content preceded it", "classifiable through one vocabulary").
 
 ---
 

@@ -738,3 +738,127 @@ func TestConformanceToolCall_EmptyArgumentPayload_FailsAttributablyNeverPanics(t
 		t.Errorf("arguments = %q, want empty", call.arguments)
 	}
 }
+
+// === AI-23.4 — terminal and error cases (R-CNF-009, R-CNF-010) ===
+
+// S-CNF-021 — the normal, pre-stream and mid-stream paths all pass.
+func TestConformanceTerminal_ExactlyOneCase_PassesAgainstFakeFactory(t *testing.T) {
+	terminalExactlyOneCase(t, FakeFactory())
+}
+
+// S-CNF-022 — the partial-output discriminator reports both states
+// correctly.
+func TestConformanceTerminal_DiscriminatorCase_PassesAgainstFakeFactory(t *testing.T) {
+	terminalDiscriminatorCase(t, FakeFactory())
+}
+
+// S-CNF-024 — all nine categories are exercised and classified on both
+// delivery paths.
+func TestConformanceTerminal_FailureCategoryExhaustivenessCase_PassesAgainstFakeFactory(t *testing.T) {
+	terminalFailureCategoryExhaustivenessCase(t, FakeFactory())
+
+	if got := len(ai.FailureCategories()); got != 9 {
+		t.Errorf("len(ai.FailureCategories()) = %d, want 9 — this suite's own exhaustiveness pin (R-CNF-010)", got)
+	}
+}
+
+// S-CNF-025 — the exhaustiveness check itself fails, naming the uncovered
+// category, when the exercised set is artificially shrunk below the
+// enumerator's length. This is the pure, permanent proof that a future
+// upstream addition to ai.FailureCategories() would be caught: a real
+// tenth category cannot be constructed (the vocabulary is closed), so the
+// check's OWN logic is what this test exercises.
+func TestRequireFailureCategoryCoverage_ShrunkExercisedSet_NamesTheUncoveredCategory(t *testing.T) {
+	all := ai.FailureCategories()
+	if len(all) < 2 {
+		t.Fatal("ai.FailureCategories() has fewer than 2 members, this test needs at least one to omit")
+	}
+	missing := all[0]
+	exercised := make(map[ai.FailureCategory]bool, len(all)-1)
+	for _, c := range all[1:] {
+		exercised[c] = true
+	}
+
+	err := requireFailureCategoryCoverage(exercised)
+	if err == nil {
+		t.Fatal("requireFailureCategoryCoverage returned nil against a shrunk set, want an error naming the missing category (S-CNF-025)")
+	}
+	if !contains(err.Error(), missing.String()) {
+		t.Errorf("error %q does not name the missing category %v", err, missing)
+	}
+
+	// The companion case: a fully covered set reports no violation.
+	full := make(map[ai.FailureCategory]bool, len(all))
+	for _, c := range all {
+		full[c] = true
+	}
+	if err := requireFailureCategoryCoverage(full); err != nil {
+		t.Errorf("requireFailureCategoryCoverage(full) = %v, want nil", err)
+	}
+}
+
+// postTerminalEventProvider is a minimal ai.ModelProvider whose Stream
+// sends an event after its own terminal completion — deliberately
+// violating R-CNF-009's exactly-one-terminal rule, a shape AI-21's own
+// Provider structurally refuses to script (S-CNF-023's own reason for
+// needing a hand-built double, matching reorderedTextProvider's precedent).
+type postTerminalEventProvider struct{}
+
+func (postTerminalEventProvider) Stream(_ context.Context, _ ai.Request) (<-chan ai.Event, error) {
+	out := make(chan ai.Event, 2)
+	var stamper ai.Stamper
+
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		return nil, err
+	}
+	start, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		return nil, err
+	}
+
+	out <- stamper.Stamp(completion)
+	out <- stamper.Stamp(start) // AFTER the terminal — the violation
+	close(out)
+	return out, nil
+}
+
+// S-CNF-023 — a subject emitting an event after its terminal:
+// RequireValidStream — the only ordering assertion terminalExactlyOneCase
+// calls, confirmed by inspection — fails, naming the post-terminal event.
+// Proven directly against RequireValidStream with a probeTB, for the same
+// propagation reason recorded throughout this file.
+func TestConformanceTerminal_PostTerminalEvent_RequireValidStreamNamesIt(t *testing.T) {
+	subject := postTerminalEventProvider{}
+	ch, err := subject.Stream(t.Context(), minimalRequest(t))
+	if err != nil {
+		t.Fatalf("postTerminalEventProvider.Stream returned %v, want no failure constructing the scenario", err)
+	}
+
+	probe := &probeTB{}
+	rec := DrainAndRecord(probe, ch, DefaultDrainTimeout)
+	if probe.failed {
+		t.Fatalf("DrainAndRecord itself failed: %v, want the drain to succeed so RequireValidStream can inspect ordering", probe.messages)
+	}
+	RequireValidStream(probe, rec)
+
+	if !probe.failed {
+		t.Fatal("RequireValidStream did not fail against an event following the terminal, want it to (S-CNF-023)")
+	}
+}
+
+// NFR-CNF-E (partial, this leaf's own item 3) — a failure category value
+// with no attached message (a bare FailureReport{Category: c}, every other
+// field at its zero value) never panics on either construction path.
+func TestConformanceTerminal_FailureCategoryWithNoAttachedMessage_NeverPanics(t *testing.T) {
+	defer requireNoPanicHere(t)
+
+	for _, category := range ai.FailureCategories() {
+		if _, err := ai.PreStreamFailure(ai.FailureReport{Category: category}); err != nil {
+			t.Errorf("ai.PreStreamFailure(%v) returned %v, want no failure for a bare report", category, err)
+		}
+		if _, err := ai.MidStreamFailure(ai.FailureReport{Category: category}, false); err != nil {
+			t.Errorf("ai.MidStreamFailure(%v) returned %v, want no failure for a bare report", category, err)
+		}
+	}
+}
