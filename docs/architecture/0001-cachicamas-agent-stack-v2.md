@@ -680,6 +680,18 @@ For anyone reviewing a milestone that touches the agent stack.
 - [ ] Delta events carry an index, never a snapshot of the accumulated message.
 - [ ] Tests assert no goroutine leak on the early-abandon path, and run under the race detector.
 
+> **Amended 2026-08-01 — this block became applicable at Wave 2.** The boxes above stay unticked because this is a **per-milestone reviewer template**, re-run against each change; they are not a project-wide progress bar. What changed is that they can now be answered at all. Wave 1 (AI-04 … AI-13) marked all five **N/A five ways** — it shipped request-side contracts and no stream existed. Wave 2 (AI-14 … AI-20) landed the envelope, three content families, the failure taxonomy and the provider interface, so a reviewer running this block against Layer 1 today gets these answers:
+>
+> | Item | Wave 2 disposition |
+> | --- | --- |
+> | Documented exit path; every send selects on cancellation | **Satisfied.** `R-AMP-009` (one sender, one closing site, running on every exit path — completion, terminal error, cancellation, unwinding exit) and `R-AMP-010` (no send is unconditional, the terminal send included). Proven with AI-20's single-purpose `scriptProvider`, `-count=15` stress-clean. |
+> | Nothing closes a channel it does not own | **Satisfied.** `R-AMP-009` and AI-02.1 § 4: the carrier is receive-only at the boundary, so a consumer has no means to close it, and the producer holds the single closing site. |
+> | Cancellation is a context, not a polled flag; backoff waits on it | **Half satisfied, and the other half is not yet applicable.** The context half is closed: `ModelProvider.Stream` takes `context.Context`, `R-AMP-011` defines "bounded" by exclusion, and `R-AMP-007` makes an already-cancelled context a pre-stream failure carrying AI-19's cancellation category. The backoff half has no subject yet — `R-AIP-007` deliberately forbids a backoff schedule, attempt counter or failover hook on the failure type, because retry is Layer 2's decision (`V-OUT-11`). It becomes answerable at AI-35. |
+> | Delta events carry an index, never a snapshot | **Satisfied, structurally.** `R-ATE-005`, `R-ARE-005` and `R-ATC-005` all require fragment-only deltas, and no accumulator ships anywhere in Layer 1 (`R-ATE-011`, `R-ARE-008`) — so a snapshot is not merely discouraged, it is unrepresentable through the public surface. All three families share one 1-based `BlockIndex` (`R-ATE-004`). |
+> | No goroutine leak on early abandon; run under the race detector | **Half satisfied.** The race detector half is closed: `make test` is `go test -race -v ./...`, 336 tests, 0 races. Goroutine accounting exists on the **pre-stream** path (`S-AMP-014`, `S-AMP-020` count goroutines before and after a failed call). The **early-abandon** path — a consumer that stops reading and then cancels — is AI-33's, and remains open; completion-checklist item 11 in [doc 0002](./milestones/0002-cachicamas-ai-layer-1-task-graph.md#layer-1-completion-checklist) tracks it. |
+>
+> Two items in the **Contracts** block above also became answerable for the first time in the same wave: *every event kind that can be emitted has a payload that can actually be constructed* (twelve kinds, twelve witnesses, a bidirectional exhaustiveness assertion — defect **C4** made mechanically impossible), and *tool-call deltas remain optional* (`R-ATC-009`, `R-ATC-010`). Both were N/A in Wave 1 for the same reason: nothing to check.
+
 **Observability and safety**
 
 - [ ] No span attribute or log field carries prompt, completion, reasoning, tool-argument or

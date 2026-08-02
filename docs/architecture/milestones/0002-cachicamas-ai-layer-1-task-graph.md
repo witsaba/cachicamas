@@ -1,6 +1,6 @@
 # Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Wave 0 + Wave 1 complete — **14 of 41** milestones shipped. **AI-00 through AI-13 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 19 production files and 27 test files.
+> **Status:** Wave 0 + Wave 1 + Wave 2 complete — **21 of 41** milestones shipped. **AI-00 through AI-20 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 33 production files and 44 test files.
 > **Single source.** This document owns milestone identity, scope and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. It supersedes the plan dated 2026-07-30 that assumed seventeen shipped milestones inside `database_administrator`; see [what changed and why](#what-changed-from-the-retired-plan) for the identifier map from that plan to this one.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md) — downstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
@@ -2278,10 +2278,10 @@ Layer 1 is complete when every box holds. The [traceability spine](#completion-c
 - [x] Every content-part variant is readable from another package, and no unconstructed value can reach a request.
 - [x] Cache breakpoints are expressible; per-request options and a provider escape hatch exist; a request is rebuildable without mutation.
 - [ ] Provider round-trip tokens survive byte-exact through normalization, rebuild, and the wire.
-- [ ] Event order and stream ownership are explicit, and the sequence is per-stream and provably starts at 1 for every stream.
-- [ ] Every event kind that can be emitted has a payload that can actually be constructed.
-- [ ] The error taxonomy is typed, safe and inspectable, with a partial-output discriminator.
-- [ ] The provider interface exposes no vendor type, and optional capabilities are discovered rather than required.
+- [x] Event order and stream ownership are explicit, and the sequence is per-stream and provably starts at 1 for every stream.
+- [x] Every event kind that can be emitted has a payload that can actually be constructed.
+- [x] The error taxonomy is typed, safe and inspectable, with a partial-output discriminator.
+- [x] The provider interface exposes no vendor type, and optional capabilities are discovered rather than required.
 - [ ] Cancellation cannot leak goroutines.
 - [ ] Backpressure is bounded and lossless, with exactly one sanctioned loss path.
 - [ ] The fake provider supports deterministic Layer 2 tests.
@@ -2290,6 +2290,17 @@ Layer 1 is complete when every box holds. The [traceability spine](#completion-c
 - [ ] Secrets and sensitive bodies are absent from diagnostics by default.
 - [ ] The live test is optional, bounded, and unreachable from any entry point.
 - [ ] The Layer 2 handoff example compiles without vendor dependencies, and the v1 surface is declared frozen.
+
+> **Amended 2026-08-01 — Wave 2 close.** Four items moved to checked, and the reason for each is stated so a reader can re-derive it rather than trust the box.
+>
+> - **Item 7** (order, ownership, per-stream sequence) — closed by **AI-14.2** (a stamper with no package-level state; two concurrent streams each start at 1 and are independently contiguous under `-race`; a third stream started after both finish also starts at 1), **AI-14.3** (a `go/types` scan of the whole non-test package, allowlist pinned to one reasoned entry), **AI-14.4** (the invariants run as code against a recorded stream) and **AI-20.1** (`R-AMP-004`, ownership stated on the interface). The spine also lists **AI-22.3**, which *packages* these assertions as reusable helpers; it does not add the property, so item 7 is closed on the property and AI-22.3 remains owed as ergonomics.
+> - **Item 8** (every emittable kind has a constructible payload) — closed by **AI-14.1** and **AI-19.1**. Twelve registered kinds, twelve witnesses, an exhaustiveness assertion that fails in both directions against a deliberately hand-written production list. This is defect **C4** made mechanically impossible.
+> - **Item 9** (typed, safe, inspectable taxonomy with the discriminator) — closed by **AI-19** in full: nine closed categories, retryability and retry-after independent and presence-typed, one concrete `*Failure` on both delivery paths, partial output perpendicular to delivery path.
+> - **Item 10** (no vendor type, optional capabilities discovered) — closed by **AI-20.1**, **AI-20.4** and **AI-20.5**. The boundary is pinned by an AST walk with an import allowlist of exactly `{"context"}`, proven to bite twice.
+>
+> **Item 12 (bounded, lossless backpressure) deliberately stays open.** AI-20's `R-AMP-012` states the contract — one sanctioned loss path, on cancellation with a saturated buffer, with the contract naming the consumer as the party in error — but the spine maps this item to **AI-34**, which locks buffer sizing and the behaviour itself. Stating the rule is not the same as locking it; the box moves when AI-34 lands.
+>
+> **Item 6 also stays open**, unchanged: its wire half is AI-26.6 / AI-29.2. AI-17 closed the *stream* half of the reasoning round-trip token (`R-ARE-009`/`R-ARE-010`), and that is recorded on the **G12(b)** spine row rather than here, because item 6's own text names the wire.
 
 ## Explicitly deferred until after Layer 1
 
@@ -2313,11 +2324,11 @@ These are deferred **with a reserved seam**, not merely unscheduled. Each is pla
 | --- | --- | --- | --- |
 | G1 | Permission as a suspendable protocol on the event stream, with allow-once / allow-always / deny / modify-input | L2 protocol, L3 policy | none |
 | G2 | Sandboxed tool execution, applied to the whole spawned process tree | L3 | none |
-| G3 | Context compaction that protects recent turns, never orphans a call/result pair, and is recoverable | L2 | **met** — optional token counting, discovered by assertion (AI-03.1, AI-20.5) |
-| G5 | Parallel tool execution with call-ordered rejoin | L2 | **met** — the call ordinal survives normalization (AI-09.2, AI-18.3, AI-30.5) |
+| G3 | Context compaction that protects recent turns, never orphans a call/result pair, and is recoverable | L2 | **met, and landed** — optional token counting, discovered by asking the provider value whether it also satisfies the token-counting contract; absence is clean, with no Layer 1 substitute (AI-03.1, AI-20.5) |
+| G5 | Parallel tool execution with call-ordered rejoin | L2 | **met** — the call ordinal survives normalization on both the request side (AI-09.2) and the stream side (AI-18.3, landed); wire half is AI-30.5 |
 | G6 | Dynamic, supervised tool sources | L3 | none — tool declarations already exist |
 | G7 | Subagents as a harness invoked from a tool | L2 | none |
-| G10 | Cost as first-class events plus a price table | L2 emits, L3 prices | **met** — cache and reasoning token counts with absent-versus-zero fidelity and a pinned cost formula (AI-13.3, AI-13.4) |
+| G10 | Cost as first-class events plus a price table | L2 emits, L3 prices | **met, and now carried on the stream** — cache and reasoning token counts with absent-versus-zero fidelity and a pinned cost formula (AI-13.3, AI-13.4), delivered by AI-15.2's completion event, which embeds the usage record **by value** so `TokenCount`'s presence bit crosses the event boundary untouched. Layer 1's obligation ends here; the per-turn cost event is Layer 2's and the price table Layer 3's |
 | G11 | Hook taxonomy: pre-request, pre-compact, post-turn, session-start; observers never synchronous on the streaming path | L2 + L3 | **met** — the rebuildable request (AI-12.1) is the pre-request hook's mechanism |
 
 ---
@@ -2332,16 +2343,16 @@ Two-way coverage: every defect class, gap and completion-checklist item maps to 
 | --- | --- |
 | **C1** — an unconstructed content part passes validation | **Closed.** AI-06.1 (joint strategy) → AI-06.3 → AI-06.4 all landed and guarded. |
 | **C2** — content unreadable from another package | **Closed for Layer 1.** AI-06.2, AI-07.1, AI-09.1, AI-09.3 landed; AI-10.5 landed. |
-| **C3** — process-global sequence counter | AI-14.2 → AI-14.3 |
-| **C4** — unconstructible terminal error | AI-19.1, guarded by AI-14.1 item 3; ordering enforced by AI-19 preceding AI-20 |
-| **G4** — cache breakpoints (Layer 1 half) | **Layer 1 half closed.** AI-10.2 (segments from birth), AI-11.1 … AI-11.3 landed. Remaining: wire rendering by AI-26.2 (Wave 2). |
-| **G5** — tool-call ordinal survives normalization | **Layer 1 half closed.** AI-09.2 landed. Remaining: AI-18.3, AI-30.5 (Wave 2+). |
-| **G8** — partial-output discriminator and typed taxonomy | AI-19.2 … AI-19.5, AI-32.2, AI-32.3, AI-35.1; suite case AI-23.4 |
-| **G9** — per-request options and escape hatch | **Closed.** AI-12.1 … AI-12.4 landed. Rendering by AI-26.7 (Wave 2). |
-| **G12(a)** — delta-optional tool calls | AI-18.2; exercised by AI-21.2, AI-30.2; suite case AI-23.3 |
-| **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild. Wire-proven by AI-29.2 and AI-26.6 (Wave 2+). |
-| **G12(c)** — refusal and pause finish reasons | **Closed.** AI-13.1, AI-13.2 landed with all seven values. Mapped by AI-31.1 (Wave 2). |
-| **G13** — stream carrier | AI-02.1; ergonomics AI-22.5; pinned by AI-20.4 |
+| **C3** — process-global sequence counter | **Closed.** AI-14.2 (the sequence is per-stream state) → AI-14.3 (a package-wide `go/types` guard, allowlist pinned to one reasoned `lastMessageID` entry) both landed. |
+| **C4** — unconstructible terminal error | **Closed.** AI-19.1 landed — a package other than `ai` constructs the terminal error event through exported identifiers only — guarded by AI-14.1's exhaustiveness assertion; the ordering obligation held, AI-19 shipped before AI-20. |
+| **G4** — cache breakpoints (Layer 1 half) | **Layer 1 half closed.** AI-10.2 (segments from birth), AI-11.1 … AI-11.3 landed. Remaining: wire rendering by AI-26.2 (Wave 4). |
+| **G5** — tool-call ordinal survives normalization | **Layer 1 half closed.** AI-09.2 (request side) and **AI-18.3** (stream side — the ordinal is derived from stream position and stored on no payload) both landed. Remaining: AI-30.5 (wire, Wave 4). |
+| **G8** — partial-output discriminator and typed taxonomy | **Layer 1 half closed.** AI-19.2 … AI-19.5 landed: the discriminator is a single boolean, perpendicular to the delivery path, with the two-axis collapse prohibited by `R-AIP-012`. Remaining: AI-32.2, AI-32.3, AI-35.1; suite case AI-23.4. |
+| **G9** — per-request options and escape hatch | **Closed.** AI-12.1 … AI-12.4 landed. Rendering by AI-26.7 (Wave 4). |
+| **G12(a)** — delta-optional tool calls | **Layer 1 half closed.** AI-18.2 landed — a zero-delta call is legal and complete, and is indistinguishable after reconstruction from its fragmented equivalent. Exercised later by AI-21.2, AI-30.2; suite case AI-23.3. |
+| **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild; **AI-17.2** carries it across the event boundary byte-exactly, whole on block-end only. Wire-proven by AI-29.2 and AI-26.6 (Wave 4). |
+| **G12(c)** — refusal and pause finish reasons | **Closed.** AI-13.1, AI-13.2 landed with all seven values, and **AI-15.2** delivers them on the stream — the completion event embeds AI-13's `FinishReason` and `Usage` by value, so a refusal or pause reaches a consumer as a terminal event rather than only as a constructible part. Mapped from vendor stop values by AI-31.1 (Wave 4). |
+| **G13** — stream carrier | **Closed.** AI-02.1 decided it; **AI-20.4** pins it mechanically — an AST walk asserting a receive-only channel of `Event`, with the declaring file's imports allowlisted to exactly `{"context"}`, proven to bite on both a vendor stand-in and a changed carrier. Ergonomics remain AI-22.5. |
 | Leakage register rows 1–9 | row 1 = G12(a) above · row 2 = G12(b) above · row 3 = G12(c) above · row 4 AI-26.5 · row 5 AI-26.3 · row 6 AI-26.7 · row 7 AI-26.5 · row 8 **Layer 1 half closed** by AI-10.2 · row 9 **Layer 1 half closed** by AI-11.3 (wire rendering AI-26.2, Wave 2) |
 | **Wave 2 obligation: Region-exhaustiveness guard one-directional.** | `request_test.go:1745` asserts `len(regions) != 11`, catching a **deleted table row** but not a **field added to `requestDraft`** — which is the failure mode that recurred three times (AI-10.6, AI-11.1, AI-12.3). Record this limitation in the first Wave 2 milestone that adds a `Request` region, with a plan to add a per-field heuristic or switched architecture when value/flag pairs are no longer tenable. |
 | **Wave 2 obligation: JSON scanner depth cap.** | `isWellFormedJSON` in `json_syntax.go:55` recurses without a nesting-depth cap and is reachable from caller input through `tool_call.go:91`. Measured: it **agrees** with `encoding/json.Valid` at depth 5 000, **disagrees** at depth 10 001, and produces `fatal error: stack overflow` at depth 20 000 000 — an unrecoverable crash, not a returned error. Its differential generator caps generated nesting at ~5 (`json_syntax_differential_internal_test.go:76`), so the differential test cannot reach the divergence. **The same test's doc comment at `json_syntax_differential_internal_test.go:28` claims coverage of "deeply nested structures", which is not true as written** — the false coverage claim is part of this obligation and must be corrected in the same change, not separately. Owned by AI-24 (first transport) or the first Wave 2 milestone feeding provider bytes into `NewToolCall`. Fix: cap nesting at 10 000, add a corpus case at 10 001, raise the generator's nesting bound above the cap, and correct the doc comment to state the depth the generator actually reaches. |
