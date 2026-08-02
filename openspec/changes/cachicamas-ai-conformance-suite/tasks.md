@@ -439,17 +439,17 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 
 ### Actual vs. forecast (recorded at close)
 
-`git diff --stat d38be27..HEAD` (the AI-22 close commit → this milestone's last commit), split by area:
+`git diff --stat d38be27..HEAD` (the AI-22 close commit → this milestone's last leaf commit, `f88792c`), changed lines = insertions + deletions, split by area:
 
-| Area | Actual | Forecast |
-| --- | --- | --- |
-| Code (`backend/agent/`, 9 new files: 8 production + 1 shared test file) | **3 117** lines (insertions only; this milestone added no deletions to existing files) | ~1 900–2 700 |
-| Openspec (`proposal.md` + `spec.md` + `design.md` + this `tasks.md`) | **~950** lines (`tasks.md` grew substantially through per-item RED/GREEN/REFACTOR evidence, beyond the ~450–550 forecast slice) | ~940–1 040 |
-| **AI-23 total** | **~4 070** | ~2 850–3 700 |
+| Area | Actual (files / +ins / −del) | Changed lines | Forecast |
+| --- | --- | --- | --- |
+| Code (`backend/agent/`, 9 new `conformance_*.go` files + `doc.go` edit) | 10 files / +3 483 / −2 | **3 485** | ~1 900–2 700 |
+| Openspec (`proposal.md` + `spec.md` + `design.md` + this `tasks.md`) | 4 files / +961 / −0 | **961** | ~940–1 040 |
+| **AI-23 total** | 14 files | **4 446** | ~2 850–3 700 |
 
-The code forecast held close (3 117 vs. the ~2 700 upper edge — modest overrun, mostly the shared `conformance_suite_test.go` growing larger than a single "1 test file" line implied, since it accumulated meta-tests for every leaf's propagation-safe regression coverage). The openspec slice landed inside its forecast band.
+The code forecast was exceeded (3 485 vs. the ~2 700 upper edge) — the overrun is concentrated in one file: the shared `conformance_suite_test.go` reached ~1 400 lines on its own, since it accumulated not only each leaf's positive integration tests but every leaf's propagation-safe regression coverage (pure-function tests, `probeTB`-wired tests, hand-built misbehaving-subject doubles) that this milestone's own RED/GREEN discipline required once Go's unconditional subtest-failure propagation was discovered at AI-23.1 (see Key Learning 6). The openspec slice landed inside its forecast band even after this close-time update.
 
-**Running-total flag, final**: AI-21 actual 2 810 + AI-22 actual 2 542 + AI-23 actual ~4 070 = **wave grand total ~9 422**, above the ~7 000–8 000 accepted landing estimate the user's 2026-08-02 session decision anticipated as an upper edge. This is reported, not silently absorbed: the overrun is `tasks.md`'s own evidence density (every one of the milestone's ~40 test-list items carries a recorded RED/GREEN/REFACTOR block, per `NFR-CNF-F`) plus the `conformance_suite_test.go` growth noted above, not scope creep — no requirement, scenario, or NFR was added beyond spec.md's original 18/67/6. Delivery strategy remains `single-pr` with `size:exception`, per this milestone's own re-confirmation earlier in this document; flagged here for the orchestrator/user's own record rather than treated as a new decision this phase can make unilaterally.
+**Running-total flag, final**: AI-21 actual 2 810 + AI-22 actual 2 542 + AI-23 actual 4 446 = **wave grand total 9 798**, above the ~7 000–8 000 accepted landing estimate the user's 2026-08-02 session decision anticipated as an upper edge. This is reported, not silently absorbed: the overrun is test-evidence density (every one of this milestone's ~40 test-list items carries a recorded RED/GREEN/REFACTOR block, per `NFR-CNF-F`, itself inflated by the propagation-safe-regression pattern above) plus `tasks.md`'s own close-time evidence recording, not scope creep — no requirement, scenario, or NFR was added beyond spec.md's original 18/67/6. Delivery strategy remains `single-pr` with `size:exception`, per this milestone's own re-confirmation earlier in this document; flagged here for the orchestrator/user's own record rather than treated as a new decision this phase can make unilaterally.
 
 ## Key Learnings
 
