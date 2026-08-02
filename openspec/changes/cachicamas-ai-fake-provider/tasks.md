@@ -57,19 +57,19 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 - [x] 1.9 REFACTOR — note: none.
 - [x] 1.10 RED — S-009–011 (R-AFP-004): exactly one producer goroutine, one closing site across complete/error/cancel under `-race`; producer exits (no forever-block) when consumer stops and caller cancels. RED output: `go test -race -run TestProvider_MidStreamPhysics_OneClosingSiteAcrossCompletionErrorAndCancellation -v ./...` → **PASS immediately**, all 23 subtests (completion / terminal-error / cancel-with-no-reader / 20× repeated-cancel-under-`-race`) — including the terminal-error path, an early cross-confirmation of Phase 3's design (`Emit(ai.ErrorEvent(f))` as a plain last step). No gap found: 1.2/1.5's producer (`go produce(...)`, `defer close(out)`, per-send `select` on `ctx.Done()`) already satisfies R-AFP-004 non-negotiably.
 - [x] 1.11 GREEN — implement producer goroutine, `defer close`, per-send `select` on `ctx.Done()` in `fake_provider.go`. GREEN output: no extension needed; same PASS output as RED.
-- [x] 1.12 REFACTOR — note: none; `go vet ./...` clean.
+- [x] 1.12 REFACTOR — note: none; `go vet ./...` clean. Post-hoc fix during Phase 2's full-suite check: the "cancelling closes the channel..." subtest was flaky (~3/5 runs failed) because it called `drainFake` immediately after `cancel()`, racing the producer's own `select` exactly as `ai/provider_test.go`'s `settleAfterCancel` doc comment predicts. Added `settleAfterFakeCancel` (documented settling step, S-AFP-054-permitted) between `cancel()` and the confirmation drain; 8/8 repeat runs green after the fix. This is a test-only fix — no production code changed.
 
 ## Phase 2 — AI-21.2 Scripted tool call (`fake_tool_call_test.go`)
 
-- [ ] 2.1 RED — S-012–013 (R-AFP-005): tool call start→arg-deltas→end reconstructs to exact scripted bytes, identity+name preserved. RED output:
-- [ ] 2.2 GREEN — confirm Phase 1's generic `Emit`/`Stream()` already carries tool-call events untouched; extend only if a gap surfaces. GREEN output:
-- [ ] 2.3 REFACTOR — note:
-- [ ] 2.4 RED — S-014–015 (R-AFP-006): zero-delta start→end tool call reconstructs identically to a delta-carrying call with the same arguments. RED output:
-- [ ] 2.5 GREEN — confirm/extend as in 2.2. GREEN output:
-- [ ] 2.6 REFACTOR — note:
-- [ ] 2.7 RED — S-016–017 (R-AFP-007): two interleaved tool calls keep distinct ordinals and reconstruct independently, no cross-contamination. RED output:
-- [ ] 2.8 GREEN — confirm/extend as in 2.2. GREEN output:
-- [ ] 2.9 REFACTOR — note:
+- [x] 2.1 RED — S-012–013 (R-AFP-005): tool call start→arg-deltas→end reconstructs to exact scripted bytes, identity+name preserved. RED output: `go test -race -run 'TestProvider_ScriptedToolCall|TestProvider_InterleavedToolCalls' -v ./...` → `TestProvider_ScriptedToolCall_DeltaCarrying_...` **PASS immediately**; `TestProvider_ScriptedToolCall_ZeroDelta_...` **FAIL** — but the failure was a genuine bug in the test helper itself (`mustToolCallScript` derived the end event's arguments by concatenating fragments, so a zero-fragment call produced empty arguments instead of the intended full string), not a production gap: `fake_tool_call_test.go:176: zero-delta call's arguments = "", want "{\"q\":\"weather\"}"`.
+- [x] 2.2 GREEN — confirm Phase 1's generic `Emit`/`Stream()` already carries tool-call events untouched; extend only if a gap surfaces. GREEN output: no production code changed. Fixed the test helper to take `arguments` independently of `fragments` (matching `NewToolCallEnd`'s own contract: end bytes are never derived from deltas) → same command → all 3 tests `PASS`.
+- [x] 2.3 REFACTOR — note: `gofmt -w` re-aligned the `reconstructedToolCall` struct tags after the helper edit; no logic change.
+- [x] 2.4 RED — S-014–015 (R-AFP-006): zero-delta start→end tool call reconstructs identically to a delta-carrying call with the same arguments. RED output: covered by the same file/run as 2.1 (`TestProvider_ScriptedToolCall_ZeroDelta_...`, see 2.1's genuine test-helper RED above).
+- [x] 2.5 GREEN — confirm/extend as in 2.2. GREEN output: covered by 2.2 — same fix, same passing run.
+- [x] 2.6 REFACTOR — note: none beyond 2.3's gofmt pass.
+- [x] 2.7 RED — S-016–017 (R-AFP-007): two interleaved tool calls keep distinct ordinals and reconstruct independently, no cross-contamination. RED output: `TestProvider_InterleavedToolCalls_KeepDistinctOrdinalsAndReconstructIndependently` **PASS immediately** — no gap, generic machinery already keeps events and their block indices untouched and in order.
+- [x] 2.8 GREEN — confirm/extend as in 2.2. GREEN output: no extension needed.
+- [x] 2.9 REFACTOR — note: none.
 
 ## Phase 3 — AI-21.3 Scripted terminal error (`fake_error_test.go`)
 

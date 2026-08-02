@@ -58,6 +58,15 @@ func drainFake(t *testing.T, ch <-chan ai.Event) []ai.Event {
 	}
 }
 
+// settleAfterFakeCancel gives a producer's goroutine a window to observe an
+// already-cancelled context with no receiver of this file's own in flight —
+// ai/provider_test.go's settleAfterCancel, restated for this package
+// (S-AFP-054 permits a documented settling step; it is not the mechanism
+// that orders scripted events, only what keeps this file's own
+// confirmation read from becoming a second ready select case at exactly
+// the moment the producer evaluates one).
+func settleAfterFakeCancel() { time.Sleep(50 * time.Millisecond) }
+
 // textEventSignature renders an event's kind and, when the kind carries
 // text bytes, those bytes byte-for-byte — enough to prove byte-identical
 // equality between two runs (S-AFP-002) and byte-exact reconstruction
@@ -374,6 +383,7 @@ func TestProvider_MidStreamPhysics_OneClosingSiteAcrossCompletionErrorAndCancell
 			t.Fatalf("Stream returned %v, want no failure", err)
 		}
 		cancel() // the only way the blocked send can ever resolve
+		settleAfterFakeCancel()
 		got := drainFake(t, ch)
 		if len(got) != 0 {
 			t.Errorf("received %d event(s) with no reader ever present, want 0 (the send must select on cancellation)", len(got))
