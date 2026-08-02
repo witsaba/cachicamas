@@ -256,21 +256,30 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-011`, `R-CNF-012`. **Design:** AI-22's `RequireNoGoroutineLeak` (opt-in, serial-only), AI-20.3 saturated-drop physics.
 **Depends on:** AI-23.1; AI-22.4 (leak helper, read-only).
 
-- [ ] **Item 1** (`R-CNF-011`) — Cancellation closes within bounded time, leaks nothing.
-  - [ ] 1.1 RED: a stream cancelled mid-consumption; confirm it closes before a bounded deadline and exactly once. `S-CNF-026`.
-  - [ ] 1.2 RED: the same scenario repeated under `RequireNoGoroutineLeak`; confirm no growth beyond its stated tolerance. `S-CNF-027`.
-  - [ ] 1.3 Inspection *(not automated)*: confirm no test in this file calls `t.Parallel()` (`R-STK-008` non-negotiable). `S-CNF-028`.
-  - [ ] 1.4 GREEN: implement the cancellation case, wrapped in the leak helper, serial-only. Confirm 1.1–1.2 pass; confirm 1.3.
-  - [ ] 1.5 REFACTOR: confirm the bounded-deadline wait is the same pattern AI-22.1's own drain helper uses (no new deadline mechanism invented).
+- [x] **Item 1** (`R-CNF-011`) — Cancellation closes within bounded time, leaks nothing.
+  - [x] 1.1 RED: a stream cancelled mid-consumption; confirm it closes before a bounded deadline and exactly once. `S-CNF-026`.
+  - [x] 1.2 RED: the same scenario repeated under `RequireNoGoroutineLeak`; confirm no growth beyond its stated tolerance. `S-CNF-027`.
+    - RED note: this leaf's case was authored together with its integration test, mirroring `fake_cancellation_test.go`'s own already-proven pattern (synchronous first-event handoff, then cancel, then confirm zero further events) but delegated through `DrainAndRecord`/`RequireNoGoroutineLeak` (AI-22's kit) instead of hand-rolled draining. First real execution passed; recorded honestly per this file's own instruction.
+  - [x] 1.3 Inspection *(not automated)*: confirm no test in this file calls `t.Parallel()` (`R-STK-008` non-negotiable). `S-CNF-028`.
+    - Confirmed: `grep -n "t.Parallel()" conformance_cancellation.go` matches only inside doc-comment prose (describing the rule), never an actual call; the same grep against this leaf's `conformance_suite_test.go` additions likewise finds no real call.
+  - [x] 1.4 GREEN: implement the cancellation case, wrapped in the leak helper, serial-only. Confirm 1.1–1.2 pass; confirm 1.3.
+    - GREEN: `go test -race -v -run TestConformanceCancellation -timeout 60s ./src/agenttest/` → `TestConformanceCancellation_BoundedCloseCase_PassesAgainstFakeFactory` `PASS` (0.05s, 50 repeats + settle).
+  - [x] 1.5 REFACTOR: confirm the bounded-deadline wait is the same pattern AI-22.1's own drain helper uses (no new deadline mechanism invented).
+    - Confirmed: the case calls `DrainAndRecord(t, ch, DefaultDrainTimeout)` directly — no second deadline mechanism.
 
-- [ ] **Item 2** (`R-CNF-012`) — The abandoned-then-cancelled saturated path drops cleanly; abandoned-never-cancelled stays out of scope.
-  - [ ] 2.1 RED: a consumer that stops reading until the buffer saturates, then the caller cancels; confirm the stream closes bare — no invented terminal, delivered events intact. `S-CNF-029`.
-  - [ ] 2.2 RED: the same scenario repeated under the leak helper; confirm no growth beyond tolerance. `S-CNF-030`.
-  - [ ] 2.3 Inspection: confirm this file states the abandoned-never-cancelled path is out of scope, citing `ai-stream-lifecycle` § 5. `S-CNF-031`.
-  - [ ] 2.4 GREEN: implement the saturated-drop case per AI-20.3's physics; add the out-of-scope doc note. Confirm 2.1–2.2 pass; confirm 2.3.
-  - [ ] 2.5 REFACTOR: confirm this case and Item 1's share the leak-helper wrapping pattern.
+- [x] **Item 2** (`R-CNF-012`) — The abandoned-then-cancelled saturated path drops cleanly; abandoned-never-cancelled stays out of scope.
+  - [x] 2.1 RED: a consumer that stops reading until the buffer saturates, then the caller cancels; confirm the stream closes bare — no invented terminal, delivered events intact. `S-CNF-029`.
+    - Design note: an unbuffered (`Buffer: 0`) script with zero reads is saturated from its very first scripted event by construction — Go's own send-blocks-without-a-reader semantics — so no wall-clock wait was needed to reach that state deterministically (`NFR-CNF-E`). The assertion is deliberately the weaker, correct one R-CNF-012 actually states (no invented terminal event) rather than "exactly zero events delivered": `RequireValidStream`/`ai.CheckStream` was deliberately NOT called on this path, because a legitimately cancelled, partially-delivered stream can leave a block open without matching end — CheckStream's unterminated-block rule would incorrectly flag that as malformed rather than as the sanctioned drop it is.
+  - [x] 2.2 RED: the same scenario repeated under the leak helper; confirm no growth beyond tolerance. `S-CNF-030`.
+  - [x] 2.3 Inspection: confirm this file states the abandoned-never-cancelled path is out of scope, citing `ai-stream-lifecycle` § 5. `S-CNF-031`.
+    - Confirmed: `conformance_cancellation.go`'s package doc comment carries a "Scope, restated from ai-stream-lifecycle § 5 (S-CNF-031)" section quoting the untestability ruling verbatim.
+  - [x] 2.4 GREEN: implement the saturated-drop case per AI-20.3's physics; add the out-of-scope doc note. Confirm 2.1–2.2 pass; confirm 2.3.
+    - GREEN: `TestConformanceCancellation_AbandonedThenCancelledCase_PassesAgainstFakeFactory` → `PASS` (0.06s).
+  - [x] 2.5 REFACTOR: confirm this case and Item 1's share the leak-helper wrapping pattern.
+    - Confirmed: both cases call `RequireNoGoroutineLeak(t, scenario)` identically, wrapping a locally-defined `scenario func()`.
 
-- [ ] **AI-23.5 close:** record green `make test` and clean `make lint` (extreme-input coverage for this leaf is subsumed by Items 1–2's own bounded-deadline design — no separate `NFR-CNF-E` item needed here since every path already asserts bounded, non-hanging behaviour); confirm doc comments cite `R-CNF-011`/`R-CNF-012`; commit `feat(agenttest): conformance cancellation and saturated-drop cases (AI-23.5)`.
+- [x] **AI-23.5 close:** record green `make test` and clean `make lint` (extreme-input coverage for this leaf is subsumed by Items 1–2's own bounded-deadline design — no separate `NFR-CNF-E` item needed here since every path already asserts bounded, non-hanging behaviour); confirm doc comments cite `R-CNF-011`/`R-CNF-012`; commit `feat(agenttest): conformance cancellation and saturated-drop cases (AI-23.5)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues`. `conformance_cancellation.go`'s doc comment cites `R-CNF-011`/`R-CNF-012`. Both cases register under `CapCancellation` (CAP-R-04).
 
 ---
 

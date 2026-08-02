@@ -862,3 +862,23 @@ func TestConformanceTerminal_FailureCategoryWithNoAttachedMessage_NeverPanics(t 
 		}
 	}
 }
+
+// === AI-23.5 — cancellation and closure cases (R-CNF-011, R-CNF-012) ===
+//
+// Neither test below calls t.Parallel(), matching conformance_cancellation.go's
+// own R-STK-008 non-negotiable rule — required for RequireNoGoroutineLeak's
+// process-wide goroutine count to mean anything.
+
+// S-CNF-026, S-CNF-027 — cancelling mid-consumption closes within the
+// bounded drain deadline, repeated 50 times (RequireNoGoroutineLeak's own
+// amplitude) with no goroutine growth beyond tolerance.
+func TestConformanceCancellation_BoundedCloseCase_PassesAgainstFakeFactory(t *testing.T) {
+	cancellationBoundedCloseCase(t, FakeFactory())
+}
+
+// S-CNF-029, S-CNF-030 — an abandoned-then-cancelled stream closes bare,
+// no terminal invented, repeated with no goroutine growth beyond
+// tolerance.
+func TestConformanceCancellation_AbandonedThenCancelledCase_PassesAgainstFakeFactory(t *testing.T) {
+	cancellationAbandonedThenCancelledCase(t, FakeFactory())
+}
