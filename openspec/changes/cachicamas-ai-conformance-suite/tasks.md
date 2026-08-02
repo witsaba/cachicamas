@@ -289,18 +289,24 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-013`. **Design:** D4 (sentinel in `FailureReport.Cause`/`RequestID`, not `RawLabel`); reuses `fakeTB` (promoted, precedent `provider_failure_test.go:1172`).
 **Depends on:** AI-23.1; AI-22's `summarize`/diff internals (in-package access).
 
-- [ ] **Item 1** (`R-CNF-013`) — A planted sentinel appears in no event, no error string, no failure output.
-  - [ ] 1.1 RED: a sentinel planted into the subject's failure-report fields; confirm it appears in no emitted event and no error string when the suite scans the recording. `S-CNF-032`.
-  - [ ] 1.2 RED: a deliberately failing case whose recording carries the sentinel in a payload; confirm the suite's own diff and bounded payload summaries never render it. `S-CNF-033`.
-  - [ ] 1.3 RED: a subject that does leak the sentinel into an error string; confirm the redaction case fails and names where the leak was observed, without reprinting the sentinel. `S-CNF-034`.
-  - [ ] 1.4 GREEN: implement the sentinel-plant plumbing on `Factory.Sentinel` (default when `""`), the promoted `fakeTB` message capture, and the scan-for-sentinel assertion across events/errors/failure output. Confirm 1.1–1.3 pass.
-  - [ ] 1.5 REFACTOR: confirm the sentinel channel is `Cause`/`RequestID` only, per D4 — not `RawLabel` (sanctioned rendering).
+- [x] **Item 1** (`R-CNF-013`) — A planted sentinel appears in no event, no error string, no failure output.
+  - [x] 1.1 RED: a sentinel planted into the subject's failure-report fields; confirm it appears in no emitted event and no error string when the suite scans the recording. `S-CNF-032`.
+  - [x] 1.2 RED: a deliberately failing case whose recording carries the sentinel in a payload; confirm the suite's own diff and bounded payload summaries never render it. `S-CNF-033`.
+    - Note: since `summaryTable`'s `EventKindError` entry renders only `Category` and (bounded) `RawLabel` — never `Cause`/`RequestID` — this pair of assertions is a **pin/regression proof**, not a discovery: it locks in that a future change to the summary renderer cannot silently start leaking either field. Detection actually firing (S-CNF-034, below) is what proves the mechanism has teeth.
+  - [x] 1.3 RED: a subject that does leak the sentinel into an error string; confirm the redaction case fails and names where the leak was observed, without reprinting the sentinel. `S-CNF-034`.
+    - Since a real "leaking subject" can't be scripted through AI-21's own vocabulary, this is proven by planting the sentinel in `RawLabel` instead (summaryTable's own *sanctioned* rendering channel — D4) as a stand-in for "content the suite is willing to show", confirming `scanForSentinel` correctly flags it, names `event[0]`, and never reprints the sentinel string itself — tested directly against the pure `scanForSentinel`, zero `testing.T` propagation risk.
+  - [x] 1.4 GREEN: implement the sentinel-plant plumbing on `Factory.Sentinel` (default when `""`), the promoted `fakeTB` message capture, and the scan-for-sentinel assertion across events/errors/failure output. Confirm 1.1–1.3 pass.
+    - GREEN: `go test -race -v -run 'TestConformanceRedaction|TestScanForSentinel' ./src/agenttest/` → all `PASS`. "Promoted `fakeTB`" implemented as `capturingTB`, a new, separately-declared type in this production file (a non-test file cannot import a `_test.go` symbol, so this is design.md's phrase read literally against Go's own build boundary, not a copy — documented as such in the type's own doc comment).
+  - [x] 1.5 REFACTOR: confirm the sentinel channel is `Cause`/`RequestID` only, per D4 — not `RawLabel` (sanctioned rendering).
+    - Confirmed: `grep -n "sentinel"` in `conformance_redaction.go`'s production planting code shows exactly two sites, `Cause: planted` (wrapping the sentinel in an `errors.New`) and `RequestID: sentinel` — no `RawLabel:` planting anywhere in `redactionCase`.
 
-- [ ] **Item 2** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 2.1 RED: an empty-string sentinel (falls back to the suite default) and a sentinel containing characters that could break string matching; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
-  - [ ] 2.2 GREEN: guard as needed. Confirm 2.1 passes.
+- [x] **Item 2** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 2.1 RED: an empty-string sentinel (falls back to the suite default) and a sentinel containing characters that could break string matching; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
+  - [x] 2.2 GREEN: guard as needed. Confirm 2.1 passes.
+    - GREEN: `TestConformanceRedaction_ExtremeSentinels_FailAttributablyNeverPanic` → both subtests `PASS` (empty-string fallback; a sentinel containing format verbs/backslashes/quotes run through the real `redactionCase`, safe because detection uses `strings.Contains`, never `fmt`-interpreted or regex-interpreted).
 
-- [ ] **AI-23.7 close:** record green `make test` and clean `make lint`; confirm doc comment cites `R-CNF-013`; commit `feat(agenttest): conformance redaction cases (AI-23.7)`.
+- [x] **AI-23.7 close:** record green `make test` and clean `make lint`; confirm doc comment cites `R-CNF-013`; commit `feat(agenttest): conformance redaction cases (AI-23.7)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues`. `conformance_redaction.go`'s doc comment cites `R-CNF-013` and D4.
 
 ---
 

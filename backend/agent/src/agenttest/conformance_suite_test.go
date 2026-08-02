@@ -882,3 +882,75 @@ func TestConformanceCancellation_BoundedCloseCase_PassesAgainstFakeFactory(t *te
 func TestConformanceCancellation_AbandonedThenCancelledCase_PassesAgainstFakeFactory(t *testing.T) {
 	cancellationAbandonedThenCancelledCase(t, FakeFactory())
 }
+
+// === AI-23.7 — redaction cases (R-CNF-013) ===
+
+// S-CNF-032, S-CNF-033 — redactionCase passes against FakeFactory: neither
+// the planted sentinel's event rendering nor the suite's own forced-
+// divergence failure text leaks it.
+func TestConformanceRedaction_Case_PassesAgainstFakeFactory(t *testing.T) {
+	redactionCase(t, FakeFactory())
+}
+
+// S-CNF-034 — a leaking rendering is detected, naming where, without
+// reprinting the sentinel itself. RawLabel is summaryTable's own sanctioned
+// rendering (design.md D4), so a sentinel planted there — unlike
+// Cause/RequestID — legitimately surfaces through summarize(), simulating
+// "a subject that does leak" without needing a hand-built ai.ModelProvider.
+// Proven directly against the pure scanForSentinel, with zero testing.T
+// propagation risk.
+func TestScanForSentinel_LeakingRawLabel_DetectsItNamesWhereNeverReprintsIt(t *testing.T) {
+	const sentinel = "LEAK-CANARY-b7e2"
+
+	leaky, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: sentinel}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure returned %v, want no failure", err)
+	}
+	terminal, err := ai.ErrorEvent(leaky)
+	if err != nil {
+		t.Fatalf("ai.ErrorEvent returned %v, want no failure", err)
+	}
+
+	leaked, msg := scanForSentinel([]ai.Event{terminal}, sentinel)
+	if !leaked {
+		t.Fatal("scanForSentinel did not detect a sentinel planted in RawLabel (summaryTable's own sanctioned rendering), want detection (S-CNF-034)")
+	}
+	if msg == "" {
+		t.Error("scanForSentinel reported leaked=true with an empty message, want one naming where")
+	}
+	if contains(msg, sentinel) {
+		t.Errorf("scanForSentinel's message %q reprints the sentinel itself, want it named only by location (S-CNF-034)", msg)
+	}
+	if !contains(msg, "event[0]") {
+		t.Errorf("message %q does not name the offending event's index", msg)
+	}
+
+	// Companion: a genuinely clean event reports no leak.
+	clean, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion returned %v, want no failure", err)
+	}
+	if leaked, _ := scanForSentinel([]ai.Event{clean}, sentinel); leaked {
+		t.Error("scanForSentinel reported a leak against a completion event that never carries the sentinel, want none")
+	}
+}
+
+// NFR-CNF-E (partial, this leaf's own item 2) — an empty-string sentinel
+// falls back to the suite default (S-CNF-066 partial), and a sentinel
+// containing characters that could break naive string matching (format
+// verbs, backslashes, quotes) never panics.
+func TestConformanceRedaction_ExtremeSentinels_FailAttributablyNeverPanic(t *testing.T) {
+	t.Run("empty string falls back to the default", func(t *testing.T) {
+		if got := sentinelOf(Factory{Sentinel: ""}); got != defaultRedactionSentinel {
+			t.Errorf("sentinelOf(empty) = %q, want the suite default %q", got, defaultRedactionSentinel)
+		}
+	})
+
+	t.Run("a sentinel with format verbs, backslashes and quotes never panics", func(t *testing.T) {
+		defer requireNoPanicHere(t)
+
+		f := FakeFactory()
+		f.Sentinel = `%s%d\n<>&"';--CANARY`
+		redactionCase(t, f)
+	})
+}
