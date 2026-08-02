@@ -490,25 +490,38 @@ func main() {
 	// anti-replay pattern but use independent secrets.
 
 	// 2026-07-15-prompt-storage-table PR 4 of 4: wire the prompts
-	// HTTP surface. Admin-only, no extra header (Q-D locked). The
-	// routes mount on the public Echo group; in production they
-	// should sit behind the compose internal network only.
+	// HTTP surface.
+	//
+	// 2026-08-02-security-vulnerability-remediation (H-2): the
+	// prompts + skills routes are mounted on an auth-protected
+	// group (not the root Echo). The previous comment said
+	// "admin-only on internal network only" — that was the
+	// security-gap that H-2 closes. The authChain is the same
+	// one /workspaces uses: IdentityFromCookie → LoadGitHubToken
+	// → handler. The internal/sync-callback route stays on the
+	// root Echo (HMAC + anti-replay is its own auth).
 	promptRepo := promptspg.NewPromptRepo(db)
 	promptRevRepo := promptspg.NewPromptRevisionRepo(db)
 	promptService := application.NewPromptService(promptRepo, promptRevRepo, db, logger)
 	promptHandler := httpiface.NewPromptHandler(promptService, logger)
-	promptHandler.RegisterPromptRoutes(e)
 
 	// 2026-07-17-skills-foundational PR1d of 7: wire the skills
-	// HTTP surface. Admin-only, no extra header (mirrors prompts).
-	// The 7 routes mount on the public Echo group; the SQL JOIN
-	// that emits current_revision (anti-drift gate ADR-SK-008)
-	// lives in SkillRepo.ListWithCurrentRevision / SelectByIDWithCurrentRevision.
+	// HTTP surface. The 7 routes mount on the same auth-protected
+	// group as /prompts (see H-2 above). The SQL JOIN that emits
+	// current_revision (anti-drift gate ADR-SK-008) lives in
+	// SkillRepo.ListWithCurrentRevision / SelectByIDWithCurrentRevision.
 	skillRepo := skillspg.NewSkillRepo(db)
 	skillRevRepo := skillspg.NewSkillRevisionRepo(db)
 	skillService := application.NewSkillService(skillRepo, skillRevRepo, db, logger)
 	skillHandler := httpiface.NewSkillHandler(skillService, logger)
-	skillHandler.RegisterSkillRoutes(e)
+
+	// Single empty-prefix group runs the full auth chain once;
+	// prompt + skill routes share it. The
+	// /api/v1/internal/sync-callback route is mounted on the root
+	// Echo (HMAC + anti-replay, NOT session auth).
+	adminGroup := e.Group("", authChain...)
+	promptHandler.RegisterPromptRoutes(adminGroup)
+	skillHandler.RegisterSkillRoutes(adminGroup)
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port

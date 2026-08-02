@@ -78,7 +78,7 @@ func setupSkillHandler(t *testing.T) (*echo.Echo, *httpiface.SkillHandler, *sql.
 
 	h := httpiface.NewSkillHandler(svc, logger)
 	e := echo.New()
-	h.RegisterSkillRoutes(e)
+	h.RegisterSkillRoutes(e.Group(""))
 	return e, h, dbConn
 }
 
@@ -726,7 +726,7 @@ func TestSkillHandler_NoPIIInLogs(t *testing.T) {
 	svc := application.NewSkillService(skillRepo, revRepo, dbConn, logger)
 	h := httpiface.NewSkillHandler(svc, logger)
 	e := echo.New()
-	h.RegisterSkillRoutes(e)
+	h.RegisterSkillRoutes(e.Group(""))
 
 	defer func() { _ = dbConn.Close() }()
 

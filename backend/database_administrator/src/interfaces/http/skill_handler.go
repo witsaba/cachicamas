@@ -57,14 +57,22 @@ func NewSkillHandler(service *application.SkillService, logger *slog.Logger) *Sk
 // RegisterSkillRoutes wires all 7 routes onto the given Echo router.
 // The caller is responsible for any auth middleware applied to the
 // group (R-SK-007: admin-only on internal network, no extra header).
-func (h *SkillHandler) RegisterSkillRoutes(e *echo.Echo) {
-	e.POST("/skills", h.Create)
-	e.GET("/skills", h.List)
-	e.GET("/skills/:name", h.GetBySlug)
-	e.PATCH("/skills/:name", h.Update)
-	e.DELETE("/skills/:name", h.Delete)
-	e.GET("/skills/:name/revisions", h.ListRevisions)
-	e.POST("/skills/:name/revisions/:n/restore", h.Restore)
+//
+// 2026-08-02-security-vulnerability-remediation (H-2): the route
+// group changed from *echo.Echo to *echo.Group so the production
+// wiring in main.go can mount /skills on an auth-protected group
+// (IdentityFromCookie + LoadGitHubTokenMiddleware). The signature
+// change is load-bearing — production code that calls the old
+// *echo.Echo variant will fail to compile, which is the
+// regression guard.
+func (h *SkillHandler) RegisterSkillRoutes(g *echo.Group) {
+	g.POST("/skills", h.Create)
+	g.GET("/skills", h.List)
+	g.GET("/skills/:name", h.GetBySlug)
+	g.PATCH("/skills/:name", h.Update)
+	g.DELETE("/skills/:name", h.Delete)
+	g.GET("/skills/:name/revisions", h.ListRevisions)
+	g.POST("/skills/:name/revisions/:n/restore", h.Restore)
 }
 
 // ---------------------------------------------------------------------------

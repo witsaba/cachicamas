@@ -334,14 +334,22 @@ func writePromptErrorFromErr(c *echo.Context, logger *slog.Logger, op, slug stri
 // RegisterPromptRoutes wires all 7 routes onto the given Echo group.
 // The caller is responsible for any auth middleware applied to the
 // group (Q-D locked: admin-only, no extra header required for v1).
-func (h *PromptHandler) RegisterPromptRoutes(e *echo.Echo) {
-	e.POST("/prompts", h.Create)
-	e.GET("/prompts", h.List)
-	e.GET("/prompts/:slug", h.GetBySlug)
-	e.PATCH("/prompts/:slug", h.Update)
-	e.DELETE("/prompts/:slug", h.Delete)
-	e.GET("/prompts/:slug/revisions", h.ListRevisions)
-	e.POST("/prompts/:slug/revisions/:n/restore", h.Restore)
+//
+// 2026-08-02-security-vulnerability-remediation (H-2): the route
+// group changed from *echo.Echo to *echo.Group so the production
+// wiring in main.go can mount /prompts on an auth-protected group
+// (IdentityFromCookie + LoadGitHubTokenMiddleware). The signature
+// change is load-bearing — production code that calls the old
+// *echo.Echo variant will fail to compile, which is the
+// regression guard.
+func (h *PromptHandler) RegisterPromptRoutes(g *echo.Group) {
+	g.POST("/prompts", h.Create)
+	g.GET("/prompts", h.List)
+	g.GET("/prompts/:slug", h.GetBySlug)
+	g.PATCH("/prompts/:slug", h.Update)
+	g.DELETE("/prompts/:slug", h.Delete)
+	g.GET("/prompts/:slug/revisions", h.ListRevisions)
+	g.POST("/prompts/:slug/revisions/:n/restore", h.Restore)
 }
 
 // ---------------------------------------------------------------------------
