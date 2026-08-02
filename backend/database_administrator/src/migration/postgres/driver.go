@@ -72,6 +72,13 @@ const (
 	defaultConnMaxLifetime = 30 * time.Minute
 	defaultConnectTimeout  = 5 * time.Second
 	defaultPort            = "5432"
+	// defaultSSLMODE is the fallback sslmode used when POSTGRES_SSLMODE
+	// is unset on the discrete-vars path. "require" encrypts the
+	// connection but does not verify the server certificate — a
+	// documented dev-friendly default that matches the project
+	// convention. DATABASE_URL-pass-through is unchanged (the URL
+	// owns its own sslmode).
+	defaultSSLMODE = "require"
 )
 
 // LoadConfigFromEnv reads Postgres connection parameters from the
@@ -122,12 +129,23 @@ func LoadConfigFromEnv() (Config, error) {
 	// and keyword form interchangeably; URL form is easier to read
 	// and to log. The password is URL-escaped so a special character
 	// in POSTGRES_PASSWORD (e.g. '#', '?') does not break the DSN.
-	cfg.DSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+	//
+	// SSL mode is read from POSTGRES_SSLMODE (security M-2). Default
+	// is "require" — the driver encrypts the connection but does not
+	// verify the certificate. Set POSTGRES_SSLMODE=disable in dev
+	// when the local Postgres doesn't terminate TLS. Operators wanting
+	// full chain-of-trust set POSTGRES_SSLMODE=verify-full.
+	sslmode := os.Getenv("POSTGRES_SSLMODE")
+	if sslmode == "" {
+		sslmode = defaultSSLMODE
+	}
+	cfg.DSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		url.QueryEscape(user),
 		url.QueryEscape(pass),
 		host,
 		port,
 		db,
+		sslmode,
 	)
 	return cfg, nil
 }
