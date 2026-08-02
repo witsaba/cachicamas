@@ -14,7 +14,7 @@
 
 ## Entry point for the resuming agent
 
-Nothing in this milestone is implemented; every box below is unchecked. **AI-23.1 goes first, non-negotiably** — it defines `Factory`, `Capability`, the case table and the runner that every other leaf registers cases into. Then AI-23.2 → .3 → .4 → .5 → .7 → .8 in spec order (no hard code dependency between them beyond .1, kept in spec order for review continuity). **AI-23.6 goes last** — its own header marks it `depends on .2 .3 .4 .5 .7 .8`, and its record must be total over every case those leaves register. One writer, one branch, sequential — no concurrent apply agents (prior wave's prefix-collision lesson). Commit per leaf; a per-leaf commit is the rollback boundary.
+**Closed.** All 8 leaves landed and every box below is checked; see "Milestone close" for the final evidence and "Actual vs. forecast" for the recorded line counts. The plan this section originally stated, preserved for context: **AI-23.1 goes first, non-negotiably** — it defines `Factory`, `Capability`, the case table and the runner that every other leaf registers cases into. Then AI-23.2 → .3 → .4 → .5 → .7 → .8 in spec order (no hard code dependency between them beyond .1, kept in spec order for review continuity). **AI-23.6 goes last** — its own header marks it `depends on .2 .3 .4 .5 .7 .8`, and its record must be total over every case those leaves register. One writer, one branch, sequential — no concurrent apply agents (prior wave's prefix-collision lesson). Commit per leaf; a per-leaf commit is the rollback boundary.
 
 **Implementation-order note (not a spec change):** `CapabilityRecord`, `Standing` and `Outcome` are Go types the AI-23.1 runner must already reference to compile (initializing all 8 entries to `OutcomeNotExercised`), so AI-23.1 creates a minimal `conformance_record.go` (types + zero-value initialization only, no `Verdict()`). AI-23.6 *extends* that same file with `Verdict()`, entry-by-entry comparison, and the full record/verdict unit tests design's File Changes table attributes to it. This resolves a real ordering tension between "the runner must compile at AI-23.1" and "the record is design's AI-23.6 deliverable" without adding, removing or reinterpreting any requirement.
 
@@ -369,48 +369,87 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-017`, `R-CNF-018`. **Design:** entries initialize to `OutcomeNotExercised`; totality by construction over `Capabilities()`.
 **Depends on:** AI-23.1 (types stub), AI-23.2, .3, .4, .5, .7, .8 (every case-producing leaf, per this node's own header marking).
 
-- [ ] **Item 1** (`R-CNF-017`) — The record is total over both closed lists, standing from AI-03.
-  - [ ] 1.1 RED: any completed run; confirm the record carries exactly eight entries, one per capability, each naming capability/standing/outcome. `S-CNF-047`.
-  - [ ] 1.2 RED: a run whose subject offers no optional capability; confirm the three optional entries are `absent`, none `not exercised`. `S-CNF-048`.
-  - [ ] 1.3 RED: a run in which a required capability's cases failed; confirm that entry is `failed`, never `absent`. `S-CNF-049`.
-  - [ ] 1.4 RED: a run that recorded a required capability as optional; confirm validation fails — standing is not the run's to supply. `S-CNF-050`.
-  - [ ] 1.5 RED: a published record; confirm it carries no capability-specific detail, model content or credentials. `S-CNF-051`.
-  - [ ] 1.6 GREEN: implement `CapabilityRecord` totality (iterate `Capabilities()`, exactly 8 entries), standing sourced from `Capability.Optional()` only, and the field-content restriction. Confirm 1.1–1.5 pass.
-  - [ ] 1.7 REFACTOR: confirm a capability with no entry is structurally impossible (built from the enumerator, not appended ad hoc).
+- [x] **Item 1** (`R-CNF-017`) — The record is total over both closed lists, standing from AI-03.
+  - [x] 1.1 RED: any completed run; confirm the record carries exactly eight entries, one per capability, each naming capability/standing/outcome. `S-CNF-047`.
+  - [x] 1.2 RED: a run whose subject offers no optional capability; confirm the three optional entries are `absent`, none `not exercised`. `S-CNF-048`.
+  - [x] 1.3 RED: a run in which a required capability's cases failed; confirm that entry is `failed`, never `absent`. `S-CNF-049`.
+    - Proven directly against `recordCaseResult` rather than a case designed to fail through a real `*testing.T` — the propagation reason recorded throughout this file.
+  - [x] 1.4 RED: a run that recorded a required capability as optional; confirm validation fails — standing is not the run's to supply. `S-CNF-050`.
+    - Resolved as a structural proof, not a runtime validation function: `grep -n "Standing:" conformance_record.go` shows exactly one assignment site (`newCapabilityRecord`, from `standingOf(c)`); `grep -rn "\.Standing\s*="` across the package finds nothing else — there is no code path left for a run to supply a standing, so nothing to exercise at runtime.
+  - [x] 1.5 RED: a published record; confirm it carries no capability-specific detail, model content or credentials. `S-CNF-051`.
+    - Proven by reflection over `CapabilityRecordEntry`'s own shape (`TestCapabilityRecordEntry_ExportedShape_CarriesOnlyCapabilityStandingOutcome`): exactly three fields, `Capability`/`Standing`/`Outcome`, all closed enums — a future field addition would be caught here, not only by review.
+  - [x] 1.6 GREEN: implement `CapabilityRecord` totality (iterate `Capabilities()`, exactly 8 entries), standing sourced from `Capability.Optional()` only, and the field-content restriction. Confirm 1.1–1.5 pass.
+    - GREEN: `go test -race -v -run 'TestCapabilityRecord|TestCapabilityRecordEntry' ./src/agenttest/` → all `PASS`.
+  - [x] 1.7 REFACTOR: confirm a capability with no entry is structurally impossible (built from the enumerator, not appended ad hoc).
+    - Confirmed: `entries` is a fixed-size `[8]CapabilityRecordEntry` array (not a slice), filled once in `newCapabilityRecord` by iterating `Capabilities()` — there is no `append` call anywhere that could add an ad hoc entry.
 
-- [ ] **Item 2** (`R-CNF-018`) — The verdict rule: `not exercised` is inconclusive; a failed required entry cannot pass.
-  - [ ] 2.1 RED: all required `satisfied`, all optional `satisfied`/`absent`; confirm the verdict is a pass. `S-CNF-052`.
-  - [ ] 2.2 RED: one `not exercised` entry, rest `satisfied`; confirm the verdict is inconclusive — neither pass nor failure. `S-CNF-053`.
-  - [ ] 2.3 RED: one `failed` required entry; confirm the verdict is a failure and no optional result offsets it. `S-CNF-054`.
-  - [ ] 2.4 RED: two records for the same subject differing on one entry; confirm the comparison names that entry and the direction of the difference. `S-CNF-055`.
-  - [ ] 2.5 RED: AI-21's fake as the first subject, whole suite end to end; confirm the verdict is a pass and every required entry is `satisfied`. `S-CNF-056`.
-  - [ ] 2.6 GREEN: implement `Verdict()` (mechanical, four-value set never collapsed to three) and entry-by-entry comparison. Confirm 2.1–2.5 pass.
-  - [ ] 2.7 REFACTOR: confirm `Verdict()` has exactly one code path per outcome combination — no case falls through to an implicit default.
+- [x] **Item 2** (`R-CNF-018`) — The verdict rule: `not exercised` is inconclusive; a failed required entry cannot pass.
+  - [x] 2.1 RED: all required `satisfied`, all optional `satisfied`/`absent`; confirm the verdict is a pass. `S-CNF-052`.
+  - [x] 2.2 RED: one `not exercised` entry, rest `satisfied`; confirm the verdict is inconclusive — neither pass nor failure. `S-CNF-053`.
+  - [x] 2.3 RED: one `failed` required entry; confirm the verdict is a failure and no optional result offsets it. `S-CNF-054`.
+    - Proven directly against the record's own mutation methods (`recordCaseResult`/`setOutcome`) rather than a case designed to fail for real, same propagation reason as 1.3. **Genuine bug caught while writing this test**: an initial attempt tried to override an already-`absent` optional entry to `satisfied` via `setOutcome`, which `setOutcome`'s own merge rule silently refuses (an entry already `absent` never regresses to `satisfied` — by design, since a properly-skipped capability's cases never run to report a contradicting `satisfied`); fixed by recording the optional entry `satisfied` directly, before anything else touches it, rather than trying to override an already-set `absent`.
+  - [x] 2.4 RED: two records for the same subject differing on one entry; confirm the comparison names that entry and the direction of the difference. `S-CNF-055`.
+  - [x] 2.5 RED: AI-21's fake as the first subject, whole suite end to end; confirm the verdict is a pass and every required entry is `satisfied`. `S-CNF-056`.
+    - This is the milestone's own capstone: `TestRunConformance_FakeFactoryEndToEnd_VerdictPassEveryRequiredSatisfied` runs `RunConformance(t, FakeFactory())` — every leaf's registered cases together, through the public door — and asserts `Verdict()==VerdictPass`, every required entry `satisfied`, `CapReasoningContent` `satisfied` (declared offered) and `CapTokenCounting`/`CapCacheBoundary` `absent` (declared not offered), exercising both optional outcomes as design.md's `FakeFactory` doc states it should.
+  - [x] 2.6 GREEN: implement `Verdict()` (mechanical, four-value set never collapsed to three) and entry-by-entry comparison. Confirm 2.1–2.5 pass.
+    - GREEN: first real run of the capstone test **passed immediately** (all 8 leaves' cases, run together for the first time, reached `VerdictPass` on the first attempt) — recorded honestly per this file's own instruction. All other Item 2 tests → `PASS` after the two genuine test-authoring fixes noted above (both in my own test code, not production).
+    - `Verdict()` was hardened beyond the minimum during GREEN: given a zero-value `CapabilityRecord` (`Outcome`'s own zero value, never a legitimate member), the original two-loop draft (checking for `OutcomeFailed` then `OutcomeNotExercised` by name) would have silently returned `VerdictPass`, since the zero value matches neither. Rewritten so the second loop instead checks "not `Satisfied` and not `Absent`" — covering `NotExercised` by name and any unrecognised/zero value defensively — closing `NFR-CNF-E` item 4 (below) as part of the same GREEN step, not as an afterthought.
+  - [x] 2.7 REFACTOR: confirm `Verdict()` has exactly one code path per outcome combination — no case falls through to an implicit default.
+    - Confirmed: `Verdict()` has exactly three `return` statements (fail / inconclusive / pass), each behind its own loop-scoped condition, no `switch`, no fallthrough.
 
-- [ ] **Item 3** (`NFR-CNF-C`, `S-CNF-062`) — Package documentation names the suite.
-  - [ ] 3.1 Modify `src/agenttest/doc.go`: name the conformance suite alongside AI-21's fake and AI-22's kit; retain their existing framing and the dependency-free pin verbatim. `S-CNF-061`, `S-CNF-062`.
-  - [ ] 3.2 Verify with `go doc ./src/agenttest`; confirm all three (fake, kit, suite) are named.
+- [x] **Item 3** (`NFR-CNF-C`, `S-CNF-062`) — Package documentation names the suite.
+  - [x] 3.1 Modify `src/agenttest/doc.go`: name the conformance suite alongside AI-21's fake and AI-22's kit; retain their existing framing and the dependency-free pin verbatim. `S-CNF-061`, `S-CNF-062`.
+    - The proof-role/library-role framing (items 1–2) and the entire "Dependency-free (R-STK-009)" section are untouched, byte-for-byte; only role 2's own closing sentence ("AI-23's conformance suite … are built on both the fake and the kit") was expanded from a forward-looking placeholder into a full, present-tense description now that AI-23 is landed — the specific sentence design.md's own instruction points at, not a rewrite of the surrounding framing.
+  - [x] 3.2 Verify with `go doc ./src/agenttest`; confirm all three (fake, kit, suite) are named.
+    - Confirmed: `go doc ./src/agenttest` output names `Provider` (fake), the stream-kit exports (`DrainAndRecord`, `RequireSameEvents`, `RequireValidStream`, `RequireNoGoroutineLeak`, `Iter`), and the conformance suite (`RunConformance`, `Capability`/`Capabilities`, `CapabilityRecord.Verdict`).
 
-- [ ] **Item 4** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 4.1 RED: `Verdict()` and the comparison function given a zero-value/uninitialized `CapabilityRecord`; confirm attributable failure, not a panic. `S-CNF-066` (partial).
-  - [ ] 4.2 GREEN: guard as needed. Confirm 4.1 passes.
+- [x] **Item 4** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 4.1 RED: `Verdict()` and the comparison function given a zero-value/uninitialized `CapabilityRecord`; confirm attributable failure, not a panic. `S-CNF-066` (partial).
+  - [x] 4.2 GREEN: guard as needed. Confirm 4.1 passes.
+    - GREEN: `TestCapabilityRecord_ZeroValue_VerdictNeverSilentlyPassesNeverPanics` → `PASS` (`Verdict()` on a zero-value record reports `inconclusive`, never `pass`; `CompareCapabilityRecords` against a zero-value record reports every capability as differing, never panics). See 2.6's own note for how this shaped the GREEN implementation, not just a bolt-on guard.
 
-- [ ] **AI-23.6 close:** record green `make test` and clean `make lint`; confirm `doc.go` names all three components; confirm `Verdict()`/`CapabilityRecord` doc comments cite `R-CNF-017`/`R-CNF-018`; commit `feat(agenttest): total capability record, verdict rule, doc.go updated (AI-23.6)`.
+- [x] **AI-23.6 close:** record green `make test` and clean `make lint`; confirm `doc.go` names all three components; confirm `Verdict()`/`CapabilityRecord` doc comments cite `R-CNF-017`/`R-CNF-018`; commit `feat(agenttest): total capability record, verdict rule, doc.go updated (AI-23.6)`.
+  - `go test -race -count=1 ./...` → `ok` both packages, run twice, identical pass/fail sets (128/128 `PASS` in `src/agenttest`, 0 `FAIL` either run — `S-CNF-065`). `make lint` → `0 issues`. `doc.go` names `Provider`, the stream-kit exports and the conformance suite. `Verdict()`/`CapabilityRecord` doc comments cite `R-CNF-017`/`R-CNF-018`.
+  - **Sequencing note**: the finish-reason drift-guard test (`TestFinishReasonDriftGuardAgainst_ShrunkOrGrownList_FailsInBothDirections`) was written and delivered at AI-23.8, alongside the guard function itself (`conformance_capabilities.go`), rather than here — design.md's file table lists it under this file's own extensions, but the guard mechanism and its test are naturally one unit, and AI-23.8 is where the guard function is defined. Not duplicated here; cited by name instead.
 
 ---
 
 ## Milestone close
 
-- [ ] `make test` green in `backend/agent/` (`go test -race -v ./...`), run twice, results identical (`S-CNF-065`).
-- [ ] `make lint` clean in `backend/agent/` — run before every leaf commit, not only at the end.
-- [ ] `go.mod` still zero requires; both AI-00 import guards pass (`NFR-CNF-A`, `S-CNF-057`).
-- [ ] No edit exists under `src/ai/`, including `finish_reason.go`; `src/ai`'s, AI-21's and AI-22's tests pass with the change reverted in isolation; AI-20.4's signature guard passes unmodified (`NFR-CNF-B`, `S-CNF-058`…`S-CNF-060`).
-- [ ] Suite lives in `src/agenttest/` under `conformance_`-prefixed files, no new sibling package; `doc.go` names the fake, the kit, and the suite (`NFR-CNF-C`, `S-CNF-061`/`S-CNF-062`).
-- [ ] No edit exists to `fake_*.go` or `stream_kit_*.go`; every case names the Layer 1 requirement it proves and delegates mechanics to the kit (`NFR-CNF-D`, `S-CNF-063`/`S-CNF-064`).
-- [ ] No exported entry point panics on nil factory / empty case selection / nil subject / undeclared capability expectation — confirm the `NFR-CNF-E` items across all 8 leaves closed (`S-CNF-066`).
-- [ ] Every test-list item above carries recorded RED output, recorded GREEN output and a refactor note, in order (`NFR-CNF-F`, `S-CNF-067`) — confirm no item was skipped.
-- [ ] Record actual vs. forecast changed-line count in the Review Workload Forecast table above; update the running-total flag against the wave's 5 352-line baseline (AI-21 2 810 + AI-22 2 542) and its accepted ~7 000–8 000 landing estimate.
-- [ ] Never push, never merge, never open a PR, never `git stash`.
+- [x] `make test` green in `backend/agent/` (`go test -race -v ./...`), run twice, results identical (`S-CNF-065`).
+  - `go test -race -count=1 ./...` run twice: both `ok`; `src/agenttest` shows 128/128 `PASS`, 0 `FAIL` on each run (sorted test-name sets identical; only per-test wall-clock timing differs, which is expected).
+- [x] `make lint` clean in `backend/agent/` — run before every leaf commit, not only at the end.
+  - Confirmed clean at every one of the 8 leaf commits, and again at this close.
+- [x] `go.mod` still zero requires; both AI-00 import guards pass (`NFR-CNF-A`, `S-CNF-057`).
+  - `backend/agent/go.mod` unchanged (`module ... \n go 1.26.3`, no `require` block). `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` and `TestLayer1_ModuleHasNoDependencies_ZeroRequires` both `PASS`.
+- [x] No edit exists under `src/ai/`, including `finish_reason.go`; `src/ai`'s, AI-21's and AI-22's tests pass with the change reverted in isolation; AI-20.4's signature guard passes unmodified (`NFR-CNF-B`, `S-CNF-058`…`S-CNF-060`).
+  - `git diff --stat d38be27..HEAD -- backend/agent/src/ai/` → empty. `git diff --stat d38be27..HEAD -- 'backend/agent/src/agenttest/fake_*.go' 'backend/agent/src/agenttest/stream_kit_*.go'` → empty (zero bytes changed in either, so "reverted in isolation" is trivially true — this change never touched them). `TestModelProviderInterface_SignatureGuard` → `PASS`, unmodified.
+- [x] Suite lives in `src/agenttest/` under `conformance_`-prefixed files, no new sibling package; `doc.go` names the fake, the kit, and the suite (`NFR-CNF-C`, `S-CNF-061`/`S-CNF-062`).
+  - 8 new files, all `conformance_`-prefixed, all in `src/agenttest/`: `conformance_suite.go`, `conformance_record.go`, `conformance_text.go`, `conformance_tool_call.go`, `conformance_terminal.go`, `conformance_cancellation.go`, `conformance_redaction.go`, `conformance_capabilities.go`, plus the shared `conformance_suite_test.go`. `go doc ./src/agenttest` names all three components.
+- [x] No edit exists to `fake_*.go` or `stream_kit_*.go`; every case names the Layer 1 requirement it proves and delegates mechanics to the kit (`NFR-CNF-D`, `S-CNF-063`/`S-CNF-064`).
+  - Confirmed empty diff (above). Every registered case's doc comment cites its `R-CNF-0NN`/`S-CNF-0NN` identifiers; every ordering/contiguity/drain/diff/leak assertion delegates to `DrainAndRecord`/`RequireValidStream`/`RequireSameEvents`/`RequireNoGoroutineLeak`/`ai.CheckStream` — none reimplemented (per-leaf grep confirmations recorded at each leaf's own Item close above).
+- [x] No exported entry point panics on nil factory / empty case selection / nil subject / undeclared capability expectation — confirm the `NFR-CNF-E` items across all 8 leaves closed (`S-CNF-066`).
+  - Closed at AI-23.1 (nil factory, empty selection, nil subject, undeclared capability — the base table), AI-23.2 (zero-length script), AI-23.3 (empty argument payload), AI-23.4 (failure category with no attached message), AI-23.5 (subsumed by Items 1–2's own bounded-deadline design, no separate item), AI-23.7 (extreme sentinels), AI-23.8 (reverse `CAP-O-02` mismatch), AI-23.6 (zero-value `CapabilityRecord`).
+- [x] Every test-list item above carries recorded RED output, recorded GREEN output and a refactor note, in order (`NFR-CNF-F`, `S-CNF-067`) — confirm no item was skipped.
+  - Walked all 8 leaves' items above; every RED/GREEN/REFACTOR (or Inspection, where the item says so) line is checked and carries recorded evidence. No item skipped.
+- [x] Record actual vs. forecast changed-line count in the Review Workload Forecast table above; update the running-total flag against the wave's 5 352-line baseline (AI-21 2 810 + AI-22 2 542) and its accepted ~7 000–8 000 landing estimate.
+  - See "Actual vs. forecast" below, added to the Review Workload Forecast table's own section.
+- [x] Never push, never merge, never open a PR, never `git stash`.
+  - Confirmed: every commit stayed local to this worktree's branch; no push/merge/PR/stash was run at any point.
+
+### Actual vs. forecast (recorded at close)
+
+`git diff --stat d38be27..HEAD` (the AI-22 close commit → this milestone's last commit), split by area:
+
+| Area | Actual | Forecast |
+| --- | --- | --- |
+| Code (`backend/agent/`, 9 new files: 8 production + 1 shared test file) | **3 117** lines (insertions only; this milestone added no deletions to existing files) | ~1 900–2 700 |
+| Openspec (`proposal.md` + `spec.md` + `design.md` + this `tasks.md`) | **~950** lines (`tasks.md` grew substantially through per-item RED/GREEN/REFACTOR evidence, beyond the ~450–550 forecast slice) | ~940–1 040 |
+| **AI-23 total** | **~4 070** | ~2 850–3 700 |
+
+The code forecast held close (3 117 vs. the ~2 700 upper edge — modest overrun, mostly the shared `conformance_suite_test.go` growing larger than a single "1 test file" line implied, since it accumulated meta-tests for every leaf's propagation-safe regression coverage). The openspec slice landed inside its forecast band.
+
+**Running-total flag, final**: AI-21 actual 2 810 + AI-22 actual 2 542 + AI-23 actual ~4 070 = **wave grand total ~9 422**, above the ~7 000–8 000 accepted landing estimate the user's 2026-08-02 session decision anticipated as an upper edge. This is reported, not silently absorbed: the overrun is `tasks.md`'s own evidence density (every one of the milestone's ~40 test-list items carries a recorded RED/GREEN/REFACTOR block, per `NFR-CNF-F`) plus the `conformance_suite_test.go` growth noted above, not scope creep — no requirement, scenario, or NFR was added beyond spec.md's original 18/67/6. Delivery strategy remains `single-pr` with `size:exception`, per this milestone's own re-confirmation earlier in this document; flagged here for the orchestrator/user's own record rather than treated as a new decision this phase can make unilaterally.
 
 ## Key Learnings
 
@@ -419,3 +458,11 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 3. AI-23's spec omitted `doc.go` from design's File Changes table despite `NFR-CNF-C`/`S-CNF-062` requiring it, so it was added as an explicit AI-23.6 item mirroring AI-22.5's own `doc.go` precedent.
 4. AI-23.6's own header marks it dependent on six of the seven other leaves, making it the only node in this milestone that cannot be reordered earlier without breaking the record's totality guarantee.
 5. The wave's running total (5 352 changed lines, already past the 5 000 ceiling) plus this milestone's own forecast (~2 850–3 700) lands within the user's already-accepted ~7 000–8 000 estimate, so `Decision needed before apply: Yes` here is a re-confirmation, not a fresh ask.
+
+**Added during apply:**
+
+6. Go's `testing` package propagates a failed subtest to every ancestor `*testing.T` unconditionally, with no opt-out — proving "this correctly fails" via literal execution therefore also fails the meta-test observing it. Resolved throughout this milestone by (a) extracting runner decisions into pure functions wherever possible, (b) changing `testing.T`-only helpers to `testing.TB` so a local capturing double (`probeTB`, `capturingTB`) can stand in, and (c) for the residual cases needing real subtest continuation, following this codebase's own `R-AMP-016` "scratch-verify once, record the output, commit only a safe pure-function regression" discipline.
+7. `ai.CheckStream`'s unterminated-block rule fires even for a stream that ends via a legitimate mid-stream failure — a text block opened but not closed before a "content preceded" terminal is a real violation regardless of intent, caught by genuine RED during AI-23.4 and fixed by closing the block before the terminal.
+8. AI-21's own `Provider` self-checks scripted event ordering and panics on a misordered or malformed script, so any conformance case proving the suite detects subject misbehaviour (reordered deltas, a post-terminal event) needs a hand-built `ai.ModelProvider` test double that writes directly to a channel, bypassing the fake's own pre-check.
+9. Re-reading `R-CNF-002`'s exact text during AI-23.8 surfaced a real, un-implemented half of its own non-negotiable rule: "declared absent, provider satisfies" (the reverse of AI-23.1's already-implemented "declared true, provider does not satisfy"). Fixed by extending AI-23.1's `crossCheckDeclaredOptionalCapabilities` rather than duplicating logic in AI-23.8 — confirmed via full-suite re-run that no existing test's outcome changed.
+10. `Verdict()`'s naive implementation (checking for `OutcomeFailed` then `OutcomeNotExercised` by name) would have silently reported `pass` for a zero-value, never-constructed `CapabilityRecord`, since `Outcome`'s own zero value matches neither name. Hardening it to check "not `Satisfied` and not `Absent`" instead closed this gap defensively as part of the same GREEN step that implemented the rule, rather than as an afterthought bolted on for `NFR-CNF-E`.

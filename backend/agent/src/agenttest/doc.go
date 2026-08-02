@@ -21,8 +21,17 @@
 //     delegated to [ai.CheckStream], plus new sequence contiguity),
 //     [RequireNoGoroutineLeak] (opt-in, serial-only leak detection), and
 //     [Iter] (a carrier view over a stream the caller already holds).
-//     AI-23's conformance suite and every Layer 2 agent-loop test are built
-//     on both the fake and the kit.
+//     AI-23 builds the provider conformance suite on top of both, in this
+//     package's own conformance_*.go files: [RunConformance] (the one
+//     exported entry point — a caller-supplied [Factory] in, AI-03 §10's
+//     [CapabilityRecord] out, with zero copied assertions), [Capability]
+//     and [Capabilities] (AI-03 §5/§6's closed eight-member list), and
+//     [CapabilityRecord.Verdict] (the pass/fail/inconclusive summary AI-03
+//     §10's rule computes mechanically). Every case delegates its
+//     mechanics to the fake and the kit — none reimplements a drain, a
+//     diff, an ordering check, a contiguity check or a leak detector
+//     (NFR-CNF-D) — and every Layer 2 agent-loop test is built on all
+//     three: the fake, the kit and the suite.
 //
 // # Dependency-free (R-STK-009)
 //

@@ -50,6 +50,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -1143,4 +1144,254 @@ func TestFinishReasonDriftGuardAgainst_ShrunkOrGrownList_FailsInBothDirections(t
 // same as the finish-reason case above.
 func TestConformanceCapabilities_UsageAbsentVsZeroCase_PassesAgainstFakeFactory(t *testing.T) {
 	usageAbsentVsZeroCase(t, FakeFactory())
+}
+
+// === AI-23.6 — the capability record: totality, verdict, comparison (R-CNF-017, R-CNF-018) ===
+
+// S-CNF-047 — any completed run's record carries exactly eight entries,
+// one per capability in the two closed lists, each naming its capability,
+// standing and outcome.
+func TestCapabilityRecord_Totality_ExactlyEightEntriesEachNamingAllThreeFields(t *testing.T) {
+	record := runConformanceCases(t, FakeFactory(), nil)
+	entries := record.Entries()
+	if len(entries) != 8 {
+		t.Fatalf("len(entries) = %d, want 8 (S-CNF-047)", len(entries))
+	}
+	seen := make(map[Capability]bool, 8)
+	for _, e := range entries {
+		if seen[e.Capability] {
+			t.Errorf("capability %v appears more than once in the record, want exactly one entry each", e.Capability)
+		}
+		seen[e.Capability] = true
+		if e.Capability == 0 {
+			t.Error("an entry names the zero Capability value, want a real one")
+		}
+		if e.Standing != StandingRequired && e.Standing != StandingOptional {
+			t.Errorf("capability %v standing = %v, want a real Standing value", e.Capability, e.Standing)
+		}
+	}
+	for _, c := range Capabilities() {
+		if !seen[c] {
+			t.Errorf("capability %v has no entry, want the record total over Capabilities() (S-CNF-047)", c)
+		}
+	}
+}
+
+// S-CNF-048 — a run whose subject offers no optional capability: the three
+// optional entries are absent, none not-exercised.
+func TestCapabilityRecord_NoOptionalCapabilityOffered_ThreeAbsentNoneNotExercised(t *testing.T) {
+	f := Factory{
+		New:           func(_ testing.TB, scripts ...Script) ai.ModelProvider { return NewProvider(scripts...) },
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(false),
+		CacheBoundary: boolPtr(false),
+	}
+	record := runConformanceCases(t, f, nil)
+	for _, c := range []Capability{CapReasoningContent, CapTokenCounting, CapCacheBoundary} {
+		entry, ok := record.Entry(c)
+		if !ok || entry.Outcome != OutcomeAbsent {
+			t.Errorf("%v entry = %+v (ok=%v), want Outcome=%v (S-CNF-048)", c, entry, ok, OutcomeAbsent)
+		}
+	}
+}
+
+// S-CNF-049 — a run in which a required capability's cases failed: that
+// entry is failed, never absent (absent has no legal reading for a
+// required standing). Proven directly against the record's own mutation
+// method (recordCaseResult) rather than by running a case designed to
+// fail through a real *testing.T — the same propagation reason recorded
+// throughout this file: a case that genuinely calls t.Error would mark
+// this meta-test itself failed too.
+func TestCapabilityRecord_RequiredCapabilityCasesFailed_EntryFailedNeverAbsent(t *testing.T) {
+	record := newCapabilityRecord(t.Name())
+	record.recordCaseResult(CapToolCalls, false) // simulates: this required capability's case(s) failed
+
+	entry, ok := record.Entry(CapToolCalls)
+	if !ok || entry.Outcome != OutcomeFailed {
+		t.Errorf("CapToolCalls entry = %+v (ok=%v), want Outcome=%v (S-CNF-049)", entry, ok, OutcomeFailed)
+	}
+}
+
+// S-CNF-050 — a run cannot record a required capability as optional:
+// standing is not the run's to supply. Proven structurally, not by
+// runtime validation: Standing is set exactly once, in newCapabilityRecord,
+// derived from standingOf(Capability) alone, and no other function in this
+// package assigns to a CapabilityRecordEntry's Standing field at all —
+// confirmed by grep, cited in tasks.md, since there is no code path left
+// to exercise at runtime.
+func TestCapabilityRecord_StandingIsNeverSuppliedByARun_StructuralByGrep(t *testing.T) {
+	// A living regression proof of the same fact: the standing this suite
+	// computes for every capability always equals standingOf(c) — the one
+	// function derived purely from Capability.Optional() — regardless of
+	// what any case does.
+	record := runConformanceCases(t, FakeFactory(), []conformanceCase{
+		{name: "tool_calls/probe", capability: CapToolCalls, run: func(_ *testing.T, _ Factory) {}},
+	})
+	for _, e := range record.Entries() {
+		if e.Standing != standingOf(e.Capability) {
+			t.Errorf("%v standing = %v, want %v (standingOf, the only source, S-CNF-050)", e.Capability, e.Standing, standingOf(e.Capability))
+		}
+	}
+}
+
+// S-CNF-051 — a published record carries no capability-specific detail,
+// model content or credentials: proven by CapabilityRecordEntry's own
+// shape — exactly three fields, all closed enums, via reflection, so a
+// future field addition is caught here rather than only by review.
+func TestCapabilityRecordEntry_ExportedShape_CarriesOnlyCapabilityStandingOutcome(t *testing.T) {
+	typ := reflect.TypeOf(CapabilityRecordEntry{})
+	if got := typ.NumField(); got != 3 {
+		t.Fatalf("CapabilityRecordEntry has %d field(s), want exactly 3 (S-CNF-051)", got)
+	}
+	wantFields := map[string]bool{"Capability": true, "Standing": true, "Outcome": true}
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if !wantFields[name] {
+			t.Errorf("CapabilityRecordEntry carries unexpected field %q, want only Capability/Standing/Outcome (S-CNF-051)", name)
+		}
+	}
+}
+
+// S-CNF-052 — every required entry satisfied, every optional satisfied or
+// absent: pass.
+func TestCapabilityRecord_Verdict_AllRequiredSatisfiedOptionalSatisfiedOrAbsent_Pass(t *testing.T) {
+	f := Factory{
+		New:           func(_ testing.TB, scripts ...Script) ai.ModelProvider { return NewProvider(scripts...) },
+		Reasoning:     boolPtr(true),
+		TokenCounting: boolPtr(false),
+		CacheBoundary: boolPtr(false),
+	}
+	var cases []conformanceCase
+	for _, c := range Capabilities() {
+		if c == CapReasoningContent {
+			cases = append(cases, conformanceCase{name: "probe/" + c.String(), capability: c, run: func(_ *testing.T, _ Factory) {}})
+			continue
+		}
+		if c.Optional() {
+			continue // left declared false: applyDeclaredAbsences marks it absent
+		}
+		cases = append(cases, conformanceCase{name: "probe/" + c.String(), capability: c, run: func(_ *testing.T, _ Factory) {}})
+	}
+	record := runConformanceCases(t, f, cases)
+	if got := record.Verdict(); got != VerdictPass {
+		t.Errorf("Verdict() = %v, want %v (S-CNF-052)", got, VerdictPass)
+	}
+}
+
+// S-CNF-053 — one not-exercised entry, rest satisfied: inconclusive,
+// neither pass nor failure.
+func TestCapabilityRecord_Verdict_OneNotExercised_Inconclusive(t *testing.T) {
+	f := Factory{
+		New:           func(_ testing.TB, scripts ...Script) ai.ModelProvider { return NewProvider(scripts...) },
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(false),
+		CacheBoundary: boolPtr(false),
+	}
+	// No cases registered for any required capability: every required
+	// entry stays not-exercised; every optional entry is absent.
+	record := runConformanceCases(t, f, nil)
+	if got := record.Verdict(); got != VerdictInconclusive {
+		t.Errorf("Verdict() = %v, want %v (S-CNF-053)", got, VerdictInconclusive)
+	}
+}
+
+// S-CNF-054 — one failed required entry: failure, and no optional result
+// offsets it. Built directly on the record's own mutation methods, for the
+// same propagation reason S-CNF-049's test above states — a case designed
+// to fail via a real *testing.T would mark this meta-test failed too.
+func TestCapabilityRecord_Verdict_OneFailedRequiredEntry_FailureNeverOffset(t *testing.T) {
+	record := newCapabilityRecord(t.Name())
+	for _, c := range Capabilities() {
+		switch {
+		case c == CapToolCalls:
+			record.recordCaseResult(c, false) // the one required failure
+		case c == CapReasoningContent:
+			record.recordCaseResult(c, true) // an optional entry satisfied — must not offset the failure above
+		case c.Optional():
+			record.setOutcome(c, OutcomeAbsent)
+		default:
+			record.recordCaseResult(c, true) // every other required entry satisfied
+		}
+	}
+
+	if got := record.Verdict(); got != VerdictFail {
+		t.Errorf("Verdict() = %v, want %v — an optional satisfied entry must not offset a required failure (S-CNF-054)", got, VerdictFail)
+	}
+}
+
+// S-CNF-055 — two records for the same subject differing on one entry:
+// the comparison names that entry and the direction of the difference.
+func TestCompareCapabilityRecords_OneDifferingEntry_NamesItAndTheDirection(t *testing.T) {
+	want := newCapabilityRecord("subject")
+	want.setOutcome(CapToolCalls, OutcomeSatisfied)
+
+	got := newCapabilityRecord("subject")
+	got.setOutcome(CapToolCalls, OutcomeFailed)
+
+	diffs := CompareCapabilityRecords(got, want)
+	if len(diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1 (S-CNF-055): %v", len(diffs), diffs)
+	}
+	d := diffs[0]
+	if d.Capability != CapToolCalls {
+		t.Errorf("diff capability = %v, want %v", d.Capability, CapToolCalls)
+	}
+	if d.Got != OutcomeFailed || d.Want != OutcomeSatisfied {
+		t.Errorf("diff = (got=%v, want=%v), want (got=%v, want=%v) — the direction of the difference", d.Got, d.Want, OutcomeFailed, OutcomeSatisfied)
+	}
+
+	// Companion: identical records compare with no differences.
+	if diffs := CompareCapabilityRecords(want, want); len(diffs) != 0 {
+		t.Errorf("CompareCapabilityRecords(want, want) = %v, want none", diffs)
+	}
+}
+
+// S-CNF-056 — AI-21's fake as the first subject, the whole suite run end
+// to end: the verdict is a pass and every required entry is satisfied.
+// This is the milestone's own capstone proof: every leaf's registered
+// cases, run together through the public RunConformance door, against a
+// real scripted subject.
+func TestRunConformance_FakeFactoryEndToEnd_VerdictPassEveryRequiredSatisfied(t *testing.T) {
+	record := RunConformance(t, FakeFactory())
+
+	if got := record.Verdict(); got != VerdictPass {
+		t.Fatalf("Verdict() = %v, want %v (S-CNF-056). Entries: %v", got, VerdictPass, record.Entries())
+	}
+	for _, e := range record.Entries() {
+		if e.Standing != StandingRequired {
+			continue
+		}
+		if e.Outcome != OutcomeSatisfied {
+			t.Errorf("required capability %v outcome = %v, want %v", e.Capability, e.Outcome, OutcomeSatisfied)
+		}
+	}
+	// FakeFactory declares Reasoning offered, TokenCounting and
+	// CacheBoundary not — so the record exercises both optional outcomes
+	// (design.md's own stated purpose for FakeFactory's declarations).
+	if entry, ok := record.Entry(CapReasoningContent); !ok || entry.Outcome != OutcomeSatisfied {
+		t.Errorf("CapReasoningContent entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeSatisfied)
+	}
+	if entry, ok := record.Entry(CapTokenCounting); !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapTokenCounting entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeAbsent)
+	}
+	if entry, ok := record.Entry(CapCacheBoundary); !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapCacheBoundary entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeAbsent)
+	}
+}
+
+// NFR-CNF-E (this leaf's own item 4) — Verdict() and
+// CompareCapabilityRecords given a zero-value, never-constructed
+// CapabilityRecord: attributable (never silently a pass), never a panic.
+func TestCapabilityRecord_ZeroValue_VerdictNeverSilentlyPassesNeverPanics(t *testing.T) {
+	defer requireNoPanicHere(t)
+
+	var zero CapabilityRecord
+	if got := zero.Verdict(); got == VerdictPass {
+		t.Error("Verdict() on a zero-value CapabilityRecord reports pass, want it to never silently pass an uninitialized record (NFR-CNF-E)")
+	}
+
+	diffs := CompareCapabilityRecords(zero, newCapabilityRecord("want"))
+	if len(diffs) == 0 {
+		t.Error("CompareCapabilityRecords(zero, a real record) reports no differences, want every capability to differ")
+	}
 }

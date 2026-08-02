@@ -215,3 +215,107 @@ func (r *CapabilityRecord) recordCaseResult(c Capability, passed bool) {
 		r.setOutcome(c, OutcomeFailed)
 	}
 }
+
+// Verdict is the suite's own three-way reading of AI-03 §10's four-value
+// outcome set — pass, fail or inconclusive — computed mechanically from a
+// CapabilityRecord (R-CNF-018). The four-value outcome set itself is never
+// collapsed to three at the entry level; Verdict only ever summarizes it.
+type Verdict uint8
+
+const (
+	// VerdictPass — every entry is satisfied, or (for an optional entry
+	// only) absent, and no entry is not exercised.
+	VerdictPass Verdict = iota + 1
+
+	// VerdictFail — at least one entry is failed. This is checked first
+	// and wins unconditionally: a failed required entry can never pass,
+	// and no optional result offsets it (AI-03 §10's own rule); a failed
+	// optional entry is equally a real signal — advertising binds
+	// (R-AMP-019) — so it fails the verdict too, not only a required one.
+	VerdictFail
+
+	// VerdictInconclusive — no entry failed, but at least one is not
+	// exercised: the run cannot say whether the subject conforms. Neither
+	// a pass nor a failure, and never silently read as either.
+	VerdictInconclusive
+)
+
+var verdictNames = [...]string{
+	VerdictPass:         "pass",
+	VerdictFail:         "fail",
+	VerdictInconclusive: "inconclusive",
+}
+
+// String renders the verdict, or "verdict(N)" for a value outside this
+// three-member vocabulary.
+func (v Verdict) String() string {
+	if int(v) < len(verdictNames) && verdictNames[v] != "" {
+		return verdictNames[v]
+	}
+	return fmt.Sprintf("verdict(%d)", uint8(v))
+}
+
+// Verdict computes AI-03 §10's verdict rule over r, mechanically, with
+// exactly one code path per outcome combination — no case falls through
+// to an implicit default (R-CNF-018's own REFACTOR confirmation):
+//
+//  1. Any entry Failed → VerdictFail, checked first and unconditionally —
+//     no later, better-looking entry ever offsets it.
+//  2. Otherwise, any entry that is NOT Satisfied and NOT Absent →
+//     VerdictInconclusive. This covers OutcomeNotExercised by name, and —
+//     defensively — any value outside the closed four-member outcome set,
+//     including Outcome's own zero value: a zero-value, never-constructed
+//     CapabilityRecord (NFR-CNF-E's own extreme input) MUST NOT silently
+//     read as a pass just because none of its entries happen to equal
+//     OutcomeFailed.
+//  3. Otherwise → VerdictPass.
+func (r CapabilityRecord) Verdict() Verdict {
+	for _, e := range r.entries {
+		if e.Outcome == OutcomeFailed {
+			return VerdictFail
+		}
+	}
+	for _, e := range r.entries {
+		if e.Outcome != OutcomeSatisfied && e.Outcome != OutcomeAbsent {
+			return VerdictInconclusive
+		}
+	}
+	return VerdictPass
+}
+
+// CapabilityDifference is one capability whose outcome differs between two
+// compared records, naming both sides so the direction of the difference
+// is readable without a second lookup.
+type CapabilityDifference struct {
+	Capability Capability
+	Got, Want  Outcome
+}
+
+// String renders the difference as "<capability>: got <outcome>, want
+// <outcome>".
+func (d CapabilityDifference) String() string {
+	return fmt.Sprintf("%v: got %v, want %v", d.Capability, d.Got, d.Want)
+}
+
+// CompareCapabilityRecords compares got against want entry by entry and
+// returns every capability whose outcome differs, in Capabilities()'
+// order, naming both sides — AI-24.1's "records are comparable entry by
+// entry" requirement (AI-03 §10), read from this suite's side: an
+// unexpected absent is a regression, an unexpected satisfied means the
+// adapter grew a capability nobody reviewed, and either direction is
+// nameable from the result alone. A nil result means the two records agree
+// on every entry.
+func CompareCapabilityRecords(got, want CapabilityRecord) []CapabilityDifference {
+	var diffs []CapabilityDifference
+	for _, wantEntry := range want.entries {
+		gotEntry, ok := got.Entry(wantEntry.Capability)
+		if !ok || gotEntry.Outcome != wantEntry.Outcome {
+			diffs = append(diffs, CapabilityDifference{
+				Capability: wantEntry.Capability,
+				Got:        gotEntry.Outcome,
+				Want:       wantEntry.Outcome,
+			})
+		}
+	}
+	return diffs
+}
