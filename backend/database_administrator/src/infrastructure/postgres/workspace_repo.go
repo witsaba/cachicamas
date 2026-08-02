@@ -118,14 +118,15 @@ func (r *WorkspaceRepo) Insert(ctx context.Context, w *domain.Workspace) (*domai
 }
 
 // SelectByID returns the live (deleted_at IS NULL) row with the
-// given id, or *domain.NotFoundError when no live row matches.
-// The partial unique index + the explicit `WHERE deleted_at IS
-// NULL` clause together ensure soft-deleted rows are invisible.
-func (r *WorkspaceRepo) SelectByID(ctx context.Context, id int64) (*domain.Workspace, error) {
+// given id, scoped to the given organization, or *domain.NotFoundError
+// when no live row matches. The tenant filter is enforced at the SQL
+// layer (security H-1: IDOR); cross-tenant access is indistinguishable
+// from a non-existent row to the caller (no existence disclosure).
+func (r *WorkspaceRepo) SelectByID(ctx context.Context, orgID, id int64) (*domain.Workspace, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT `+workspaceColumnList+` FROM `+workspaceTableName+`
-             WHERE id = $1 AND deleted_at IS NULL`,
-		id,
+             WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+		id, orgID,
 	)
 	w, err := scanWorkspace(row)
 	if err != nil {
@@ -172,19 +173,18 @@ func (r *WorkspaceRepo) SelectAllByOrg(ctx context.Context, orgID int64, limit i
 }
 
 // UpdateName renames a live (deleted_at IS NULL) workspace and
-// bumps updated_at. The unique violation on (organization_id,
-// name) WHERE deleted_at IS NULL is translated to
-// *domain.ConflictError. Returns *NotFoundError if no live row
-// matches (the partial index hides soft-deleted rows; renaming a
-// soft-deleted row is impossible without un-deleting it first,
-// which is out of scope for v1).
-func (r *WorkspaceRepo) UpdateName(ctx context.Context, id int64, name string) (*domain.Workspace, error) {
+// bumps updated_at. The tenant filter is enforced at the SQL layer
+// (security H-1: IDOR): the row must match the given orgID AND
+// ownerID; a non-owner or cross-tenant attempt returns
+// *NotFoundError. The unique violation on (organization_id, name)
+// WHERE deleted_at IS NULL is translated to *domain.ConflictError.
+func (r *WorkspaceRepo) UpdateName(ctx context.Context, orgID, ownerID, id int64, name string) (*domain.Workspace, error) {
 	row := r.db.QueryRowContext(ctx,
 		`UPDATE `+workspaceTableName+`
              SET name = $1, updated_at = now()
-             WHERE id = $2 AND deleted_at IS NULL
+             WHERE id = $2 AND organization_id = $3 AND owner_user_id = $4 AND deleted_at IS NULL
              RETURNING `+workspaceColumnList,
-		name, id,
+		name, id, orgID, ownerID,
 	)
 	w, err := scanWorkspace(row)
 	if err != nil {
@@ -200,8 +200,10 @@ func (r *WorkspaceRepo) UpdateName(ctx context.Context, id int64, name string) (
 	return w, nil
 }
 
-// SoftDelete sets `deleted_at = now()` on the workspace row.
-// Returns *NotFoundError if no live row matches.
+// SoftDelete sets `deleted_at = now()` on the workspace row, scoped
+// to the given orgID + ownerID. Returns *NotFoundError if no live row
+// matches (security H-1: IDOR). Cross-tenant or non-owner DELETE
+// attempts are silently no-op'd from the user's perspective.
 //
 // After SoftDelete, the partial unique index
 // workspace_org_name_live_key allows a new workspace to be
@@ -211,12 +213,12 @@ func (r *WorkspaceRepo) UpdateName(ctx context.Context, id int64, name string) (
 // 2026-07-08-workspaces-simplify: no longer cascades into
 // workspace_repository (the table no longer exists). Single SQL
 // statement; no transaction needed.
-func (r *WorkspaceRepo) SoftDelete(ctx context.Context, id int64) error {
+func (r *WorkspaceRepo) SoftDelete(ctx context.Context, orgID, ownerID, id int64) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE `+workspaceTableName+`
              SET deleted_at = now()
-             WHERE id = $1 AND deleted_at IS NULL`,
-		id,
+             WHERE id = $1 AND organization_id = $2 AND owner_user_id = $3 AND deleted_at IS NULL`,
+		id, orgID, ownerID,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres.WorkspaceRepo.SoftDelete: update: %w", err)
@@ -301,17 +303,21 @@ func scanWorkspace(row rowScanner) (*domain.Workspace, error) {
 // MarkSynced denormalizes the outcome of a successful sync onto the
 // workspace row. Called from SyncService.ProcessSyncCallback inside
 // the same Tx as the sync_job update so the two writes commit
-// together. Returns *domain.NotFoundError if no live row matches the
-// given id.
-func (r *WorkspaceRepo) MarkSynced(ctx context.Context, id int64, commitSHA, defaultBranch string) error {
+// together. Returns *domain.NotFoundError if no live row matches.
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the orgID
+// parameter is REQUIRED on the callback path so the SQL cannot
+// update a workspace in a different tenant than the one that owns
+// the sync_job. Returns *NotFoundError on a cross-tenant attempt.
+func (r *WorkspaceRepo) MarkSynced(ctx context.Context, orgID, id int64, commitSHA, defaultBranch string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE `+workspaceTableName+`
                  SET last_synced_at         = now(),
                      last_synced_commit_sha = $1,
                      default_branch         = $2,
                      updated_at             = now()
-                 WHERE id = $3 AND deleted_at IS NULL`,
-		commitSHA, defaultBranch, id,
+                 WHERE id = $3 AND organization_id = $4 AND deleted_at IS NULL`,
+		commitSHA, defaultBranch, id, orgID,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres.WorkspaceRepo.MarkSynced: %w", err)

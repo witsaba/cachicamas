@@ -66,7 +66,7 @@ func (r *fakeWorkspaceRepo) Insert(ctx context.Context, w *domain.Workspace) (*d
 	return w, nil
 }
 
-func (r *fakeWorkspaceRepo) SelectByID(_ context.Context, id int64) (*domain.Workspace, error) {
+func (r *fakeWorkspaceRepo) SelectByID(_ context.Context, orgID, id int64) (*domain.Workspace, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, list := range r.byOrg {
@@ -95,14 +95,14 @@ func (r *fakeWorkspaceRepo) SelectAllByOrg(_ context.Context, orgID int64, limit
 	return out, nil
 }
 
-func (r *fakeWorkspaceRepo) UpdateName(_ context.Context, id int64, name string) (*domain.Workspace, error) {
+func (r *fakeWorkspaceRepo) UpdateName(_ context.Context, orgID, ownerID, id int64, name string) (*domain.Workspace, error) {
 	return nil, errors.New("fakeWorkspaceRepo.UpdateName: not implemented in auth-chain test")
 }
-func (r *fakeWorkspaceRepo) SoftDelete(_ context.Context, id int64) error {
+func (r *fakeWorkspaceRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) error {
 	return errors.New("fakeWorkspaceRepo.SoftDelete: not implemented in auth-chain test")
 }
 
-func (r *fakeWorkspaceRepo) MarkSynced(_ context.Context, id int64, commitSHA, defaultBranch string) error {
+func (r *fakeWorkspaceRepo) MarkSynced(_ context.Context, orgID, id int64, commitSHA, defaultBranch string) error {
 	return errors.New("fakeWorkspaceRepo.MarkSynced: not implemented in auth-chain test")
 }
 

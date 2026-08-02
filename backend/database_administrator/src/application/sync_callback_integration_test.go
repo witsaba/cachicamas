@@ -84,9 +84,10 @@ func wipeSyncFixtures(t *testing.T, db *sql.DB) {
 	}
 }
 
-// insertWorkspace inserts one workspace row and returns the id.
-// Tests use the row as the parent of a sync_job.
-func insertWorkspace(t *testing.T, db *sql.DB, name string) int64 {
+// insertWorkspace inserts one workspace row and returns the (id,
+// orgID) pair. Tests use the row as the parent of a sync_job and
+// the orgID as the tenant scope for the callback (security H-1).
+func insertWorkspace(t *testing.T, db *sql.DB, name string) (int64, int64) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -106,7 +107,7 @@ func insertWorkspace(t *testing.T, db *sql.DB, name string) int64 {
 	`, orgID, name).Scan(&id); err != nil {
 		t.Fatalf("insert workspace: %v", err)
 	}
-	return id
+	return id, orgID
 }
 
 // insertSyncJob inserts one sync_job row in the given status and
@@ -201,13 +202,13 @@ func readWorkspace(t *testing.T, db *sql.DB, id int64) workspaceRow {
 func TestProcessSyncCallback_PendingRowTransitionsToDone(t *testing.T) {
 	db := integrationTestDB(t)
 	wipeSyncFixtures(t, db)
-	workspaceID := insertWorkspace(t, db, "pending-test")
+	workspaceID, orgID := insertWorkspace(t, db, "pending-test")
 	jobID := insertSyncJob(t, db, workspaceID, "pending", "manual")
 
 	svc := NewSyncService(nil, nil, db, nil)
 	const wantSHA = "ec8fbc8a0d341de02e8b669cb9d628289245e3bf"
 	const wantBranch = "main"
-	updated, err := svc.ProcessSyncCallback(context.Background(), jobID, "done", wantSHA, wantBranch, "", "")
+	updated, err := svc.ProcessSyncCallback(context.Background(), orgID, jobID, "done", wantSHA, wantBranch, "", "")
 	if err != nil {
 		t.Fatalf("ProcessSyncCallback: %v", err)
 	}
@@ -258,12 +259,12 @@ func TestProcessSyncCallback_PendingRowTransitionsToDone(t *testing.T) {
 func TestProcessSyncCallback_RunningRowTransitionsToDone(t *testing.T) {
 	db := integrationTestDB(t)
 	wipeSyncFixtures(t, db)
-	workspaceID := insertWorkspace(t, db, "running-test")
+	workspaceID, orgID := insertWorkspace(t, db, "running-test")
 	jobID := insertSyncJob(t, db, workspaceID, "running", "manual")
 
 	svc := NewSyncService(nil, nil, db, nil)
 	const wantSHA = "111222333444555666777888999000aaabbbcccddd"
-	updated, err := svc.ProcessSyncCallback(context.Background(), jobID, "done", wantSHA, "develop", "", "")
+	updated, err := svc.ProcessSyncCallback(context.Background(), orgID, jobID, "done", wantSHA, "develop", "", "")
 	if err != nil {
 		t.Fatalf("ProcessSyncCallback: %v", err)
 	}
@@ -287,11 +288,11 @@ func TestProcessSyncCallback_RunningRowTransitionsToDone(t *testing.T) {
 func TestProcessSyncCallback_FailedCallbackTransitionsToFailed(t *testing.T) {
 	db := integrationTestDB(t)
 	wipeSyncFixtures(t, db)
-	workspaceID := insertWorkspace(t, db, "failed-test")
+	workspaceID, orgID := insertWorkspace(t, db, "failed-test")
 	jobID := insertSyncJob(t, db, workspaceID, "pending", "manual")
 
 	svc := NewSyncService(nil, nil, db, nil)
-	updated, err := svc.ProcessSyncCallback(context.Background(), jobID, "failed", "", "main", "CLONE_FAILED", "remote: Repository not found")
+	updated, err := svc.ProcessSyncCallback(context.Background(), orgID, jobID, "failed", "", "main", "CLONE_FAILED", "remote: Repository not found")
 	if err != nil {
 		t.Fatalf("ProcessSyncCallback: %v", err)
 	}
@@ -331,11 +332,11 @@ func TestProcessSyncCallback_FailedCallbackTransitionsToFailed(t *testing.T) {
 func TestProcessSyncCallback_DoneWithoutCommitSHA_Rejected(t *testing.T) {
 	db := integrationTestDB(t)
 	wipeSyncFixtures(t, db)
-	workspaceID := insertWorkspace(t, db, "no-sha-test")
+	workspaceID, orgID := insertWorkspace(t, db, "no-sha-test")
 	jobID := insertSyncJob(t, db, workspaceID, "pending", "manual")
 
 	svc := NewSyncService(nil, nil, db, nil)
-	_, err := svc.ProcessSyncCallback(context.Background(), jobID, "done", "", "main", "", "")
+	_, err := svc.ProcessSyncCallback(context.Background(), orgID, jobID, "done", "", "main", "", "")
 	if err == nil {
 		t.Fatalf("ProcessSyncCallback: expected ValidationError, got nil")
 	}

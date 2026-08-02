@@ -140,40 +140,50 @@ type UpdateWorkspaceInput struct {
 //   - Insert(ctx, w) MUST set w.ID, w.CreatedAt, w.UpdatedAt from the
 //     database's own clock (Postgres DEFAULT now()) and return the
 //     populated w. The application layer never sets timestamps itself.
-//   - SelectByID(ctx, id) MUST filter `WHERE deleted_at IS NULL` so
-//     soft-deleted rows return *NotFoundError to the caller. The
-//     handler maps NotFoundError to HTTP 404.
+//   - SelectByID(ctx, orgID, id) MUST filter on `organization_id = $2`
+//     AND `deleted_at IS NULL` so cross-tenant access returns
+//     *NotFoundError. The handler maps NotFoundError to HTTP 404.
 //   - SelectAllByOrg(ctx, orgID, limit) MUST filter `WHERE
-//     deleted_at IS NULL` and order by `created_at DESC, id DESC`
-//     for stable pagination. The limit caps the slice at N (caller
-//     picks N; the repo MUST NOT silently truncate beyond the cap).
-//   - UpdateName(ctx, id, name) MUST filter on live rows only;
-//     returns *NotFoundError if no live row matches. The unique
-//     violation on (organization_id, name) WHERE deleted_at IS NULL
-//     is translated to *ConflictError so the handler can map to
-//     HTTP 409.
-//   - SoftDelete(ctx, id) MUST set `deleted_at = now()`. Returns
-//     *NotFoundError if no live row matches. (No linked-repos
-//     cleanup needed in the 1:1 model — there is no
-//     workspace_repository table.)
+//     organization_id = $1 AND deleted_at IS NULL` and order by
+//     `created_at DESC, id DESC` for stable pagination.
+//   - UpdateName(ctx, orgID, ownerID, id, name) MUST filter on
+//     `organization_id = $2 AND owner_user_id = $3 AND deleted_at IS NULL`.
+//     Cross-tenant or non-owner attempts return *NotFoundError.
+//   - SoftDelete(ctx, orgID, ownerID, id) MUST set `deleted_at = now()`
+//     with the same tenant filter. Returns *NotFoundError on no match.
+//   - MarkSynced(ctx, orgID, id, commitSHA, defaultBranch) MUST filter
+//     on `organization_id = $2 AND deleted_at IS NULL` so sync
+//     callbacks from the wrong tenant are silently no-op'd.
 //   - All methods honour the context.
 //
 // 2026-07-08-workspaces-simplify: dropped AddLinkedRepo /
 // RemoveLinkedRepo / SelectLinkedRepos because the
 // workspace_repository table no longer exists.
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the
+// SelectByID / UpdateName / SoftDelete / MarkSynced signatures now
+// take an orgID (and ownerID for write paths) so the SQL can
+// enforce tenancy at the database layer. The hexagonal rule
+// stays the same: the application layer is the only caller; the
+// handler is the only place that derives orgID/ownerID from the
+// authenticated identity.
 type WorkspaceRepository interface {
 	Insert(ctx context.Context, w *Workspace) (*Workspace, error)
-	SelectByID(ctx context.Context, id int64) (*Workspace, error)
+	SelectByID(ctx context.Context, orgID, id int64) (*Workspace, error)
 	SelectAllByOrg(ctx context.Context, orgID int64, limit int) ([]Workspace, error)
-	UpdateName(ctx context.Context, id int64, name string) (*Workspace, error)
-	SoftDelete(ctx context.Context, id int64) error
+	UpdateName(ctx context.Context, orgID, ownerID, id int64, name string) (*Workspace, error)
+	SoftDelete(ctx context.Context, orgID, ownerID, id int64) error
 
 	// 2026-07-08-workspace-sync-clone (PR-3b): denormalize the
 	// outcome of a successful sync onto the workspace row so the UI
 	// can render the card without a second query. The sync_job row
 	// is updated independently (see SyncService.ProcessSyncCallback).
 	// The two writes happen in the same Tx.
-	MarkSynced(ctx context.Context, id int64, commitSHA, defaultBranch string) error
+	//
+	// 2026-08-02-security-vulnerability-remediation (H-1): the
+	// callback now passes orgID so the SQL cannot update a workspace
+	// in a different tenant than the one that owns the sync_job.
+	MarkSynced(ctx context.Context, orgID, id int64, commitSHA, defaultBranch string) error
 }
 
 // ---------------------------------------------------------------------------

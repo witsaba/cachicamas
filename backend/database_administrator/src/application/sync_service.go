@@ -129,7 +129,15 @@ func (s *SyncService) GetLatestSyncJob(ctx context.Context, workspaceID int64) (
 // The function returns the post-update SyncJob (or the existing
 // row on a no-op idempotent re-call) so the handler can echo it
 // back to the callback caller.
-func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error) {
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the
+// signature has grown an orgID parameter. The handler decodes
+// it from the callback body and passes it downstream; the
+// raw SQL for the workspace update filters on
+// `id = $4 AND organization_id = $5 AND deleted_at IS NULL`
+// so a callback from a wrong-tenant syncer cannot denormalize
+// onto a workspace it does not own.
+func (s *SyncService) ProcessSyncCallback(ctx context.Context, orgID, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error) {
 	if jobID <= 0 {
 		return nil, &domain.ValidationError{Fields: map[string]string{"job_id": "must be > 0"}}
 	}
@@ -138,6 +146,9 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	}
 	if status == domain.SyncJobStatusDone && commitSHA == "" {
 		return nil, &domain.ValidationError{Fields: map[string]string{"commit_sha": "required on done"}}
+	}
+	if orgID <= 0 {
+		return nil, &domain.ValidationError{Fields: map[string]string{"organization_id": "must be > 0"}}
 	}
 
 	// Single-shot path: when db is nil (PR-3a-only test wiring), use
@@ -267,6 +278,11 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 	//    is unused in the production path (kept on the
 	//    service struct for the unit-test path that exercises
 	//    s.repo directly when s.db is nil).
+	//
+	//    2026-08-02-security-vulnerability-remediation (H-1):
+	//    the orgID filter is mandatory; a callback from a
+	//    wrong-tenant syncer is silently no-op'd (the WHERE
+	//    matches 0 rows and the 409 is logged + ignored).
 	if status == domain.SyncJobStatusDone {
 		markRes, err := tx.ExecContext(ctx, `
 			UPDATE workspace
@@ -276,8 +292,9 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 			       last_sync_job_id       = $3,
 			       updated_at             = now()
 			 WHERE id = $4
+			   AND organization_id = $5
 			   AND deleted_at IS NULL
-		`, commitSHA, defaultBranch, jobID, workspaceID)
+		`, commitSHA, defaultBranch, jobID, workspaceID, orgID)
 		if err != nil {
 			return nil, fmt.Errorf("sync.ProcessSyncCallback: mark workspace synced: %w", err)
 		}
@@ -287,15 +304,18 @@ func (s *SyncService) ProcessSyncCallback(ctx context.Context, jobID int64, stat
 		}
 		if markRows == 0 {
 			// The workspace was soft-deleted between enqueue
-			// and the callback. The job is still 'done' (the
-			// clone actually succeeded) but we don't have a
+			// and the callback, OR the callback's supplied
+			// orgID doesn't match the tenant that owns the
+			// job. The job is still 'done' (the clone
+			// actually succeeded) but we don't have a
 			// workspace row to denormalize onto. We commit
 			// the sync_job update and return success; the
 			// workspace_syncer startup sweep will reap the
 			// cloned tree on its next pass.
-			s.logger.WarnContext(ctx, "sync.ProcessSyncCallback: workspace soft-deleted between enqueue and done callback",
+			s.logger.WarnContext(ctx, "sync.ProcessSyncCallback: workspace skipped (soft-deleted or cross-tenant)",
 				slog.Int64("job_id", jobID),
 				slog.Int64("workspace_id", workspaceID),
+				slog.Int64("organization_id", orgID),
 			)
 		}
 	}

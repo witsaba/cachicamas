@@ -308,7 +308,8 @@ func (h *WorkspaceHandler) Get(c *echo.Context) error {
 		})
 	}
 
-	w, err := h.service.Get(c.Request().Context(), id)
+	orgID := singleTenantOrganizationID(c)
+	w, err := h.service.Get(c.Request().Context(), orgID, id)
 	if err != nil {
 		return writeWorkspaceError(c, err)
 	}
@@ -323,7 +324,8 @@ func (h *WorkspaceHandler) Get(c *echo.Context) error {
 
 // Update handles PATCH /workspaces/:id.
 func (h *WorkspaceHandler) Update(c *echo.Context) error {
-	if _, ok := identityFromContext(c); !ok {
+	identity, ok := identityFromContext(c)
+	if !ok {
 		return writeWorkspaceError(c, &domain.ValidationError{
 			Fields: map[string]string{"auth": "Authentication required."},
 		})
@@ -349,7 +351,8 @@ func (h *WorkspaceHandler) Update(c *echo.Context) error {
 	}
 	// repository is silently dropped per locked design decision.
 
-	w, err := h.service.Update(c.Request().Context(), id, in)
+	orgID := singleTenantOrganizationID(c)
+	w, err := h.service.Update(c.Request().Context(), orgID, identity.ID, id, in)
 	if err != nil {
 		return writeWorkspaceError(c, err)
 	}
@@ -358,7 +361,8 @@ func (h *WorkspaceHandler) Update(c *echo.Context) error {
 
 // Delete handles DELETE /workspaces/:id.
 func (h *WorkspaceHandler) Delete(c *echo.Context) error {
-	if _, ok := identityFromContext(c); !ok {
+	identity, ok := identityFromContext(c)
+	if !ok {
 		return writeWorkspaceError(c, &domain.ValidationError{
 			Fields: map[string]string{"auth": "Authentication required."},
 		})
@@ -371,7 +375,8 @@ func (h *WorkspaceHandler) Delete(c *echo.Context) error {
 		})
 	}
 
-	if err := h.service.Delete(c.Request().Context(), id); err != nil {
+	orgID := singleTenantOrganizationID(c)
+	if err := h.service.Delete(c.Request().Context(), orgID, identity.ID, id); err != nil {
 		return writeWorkspaceError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
