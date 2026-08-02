@@ -263,6 +263,10 @@ func main() {
 	e := echo.New()
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimit(1 << 20))
+	// CSRF Origin/Referer validation: protects state-changing
+	// routes against cross-origin requests (security M-2 + design
+	// §3). Empty ORIGIN env disables enforcement (development).
+	e.Use(httpiface.CSRFOriginValidate())
 	e.Use(otel.Middleware(serviceName))
 	httpiface.RegisterHealthRoute(e)
 
