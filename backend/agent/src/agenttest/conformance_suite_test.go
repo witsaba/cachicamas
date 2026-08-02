@@ -558,3 +558,116 @@ func requireNoPanicHere(t *testing.T) {
 		t.Fatalf("panicked: %v, want no panic escaping RunConformance for this input (NFR-CNF-E)", r)
 	}
 }
+
+// === AI-23.2 — text and lifecycle cases (R-CNF-005, R-CNF-006) ===
+
+// S-CNF-012, S-CNF-013 — textOrderingCase passes against FakeFactory's real
+// scripted subject: order, contiguity and the split-rune reconstruction all
+// hold. Safe to run directly (no failure expected).
+func TestConformanceText_OrderingCase_PassesAgainstFakeFactory(t *testing.T) {
+	textOrderingCase(t, FakeFactory())
+}
+
+// S-CNF-015, S-CNF-016 — textEmptyCompletionCase passes: no text content is
+// conformant, not a failure or a contiguity violation.
+func TestConformanceText_EmptyCompletionCase_PassesAgainstFakeFactory(t *testing.T) {
+	textEmptyCompletionCase(t, FakeFactory())
+}
+
+// reorderedTextProvider is a minimal ai.ModelProvider whose Stream sends a
+// text delta before its own block's start — deliberately violating
+// ordering, a shape AI-21's own Provider structurally refuses to script
+// (its internal ai.CheckStream pre-check panics on such a script before any
+// goroutine starts). This file's own hand-built test double is what lets
+// S-CNF-014 exist at all: proving the suite surfaces a real ordering
+// violation, never trusting a subject to misbehave through the fake.
+type reorderedTextProvider struct{}
+
+func (reorderedTextProvider) Stream(_ context.Context, _ ai.Request) (<-chan ai.Event, error) {
+	out := make(chan ai.Event, 4)
+	var stamper ai.Stamper
+
+	delta, err := ai.NewTextDelta(1, "oops")
+	if err != nil {
+		return nil, err
+	}
+	start, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		return nil, err
+	}
+	end, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		return nil, err
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		return nil, err
+	}
+
+	out <- stamper.Stamp(delta) // delta BEFORE its block's own start — the violation
+	out <- stamper.Stamp(start)
+	out <- stamper.Stamp(end)
+	out <- stamper.Stamp(completion)
+	close(out)
+	return out, nil
+}
+
+// S-CNF-014 — a subject whose deltas arrive reordered: RequireValidStream —
+// textOrderingCase's only ordering assertion (confirmed by inspection: it
+// calls nothing else that could report an ordering problem, satisfying this
+// item's own REFACTOR check) — fails, carrying ai.CheckStream's own
+// verdict, unmodified. Proven directly against RequireValidStream with a
+// probeTB rather than through textOrderingCase(t, badFactory) end to end,
+// for the same propagation reason recorded on AI-23.1's Item 1: a genuine
+// failure inside a real *testing.T subtree marks every ancestor failed,
+// which would make this meta-test's own `make test` red by construction.
+// The full, real, end-to-end failure was scratch-verified once (tasks.md
+// records the captured output).
+func TestConformanceText_ReorderedSubject_RequireValidStreamCarriesCheckStreamVerdict(t *testing.T) {
+	subject := reorderedTextProvider{}
+	ch, err := subject.Stream(t.Context(), minimalRequest(t))
+	if err != nil {
+		t.Fatalf("reorderedTextProvider.Stream returned %v, want no failure constructing the scenario itself", err)
+	}
+
+	probe := &probeTB{}
+	rec := DrainAndRecord(probe, ch, DefaultDrainTimeout)
+	if probe.failed {
+		t.Fatalf("DrainAndRecord itself failed: %v, want the drain to succeed so RequireValidStream can inspect the ordering", probe.messages)
+	}
+	RequireValidStream(probe, rec)
+
+	if !probe.failed {
+		t.Fatal("RequireValidStream did not fail against a subject with a delta before its block's start, want it to (S-CNF-014)")
+	}
+	if msg := probe.lastMessage(); !contains(msg, "R-STK-005") {
+		t.Errorf("failure message %q does not cite R-STK-005 (RequireValidStream's own citation of ai.CheckStream's verdict)", msg)
+	}
+}
+
+// NFR-CNF-E (partial, this leaf's own item 3) — the text case's assertion
+// path given a zero-length script: attributable failure, never a panic. A
+// zero-length script means Stream never emits a terminal event, so
+// DrainAndRecord hits its own bounded deadline — proving that path fails
+// attributably rather than hanging or panicking is this leaf's own
+// contribution to totality.
+func TestConformanceText_ZeroLengthScript_FailsAttributablyNeverPanics(t *testing.T) {
+	defer requireNoPanicHere(t)
+
+	script := Script{} // zero steps: Stream returns a channel that only ever closes... actually never closes either, since produce() with zero steps runs straight to the deferred close.
+	f := FakeFactory()
+	subject := f.New(t, script)
+	ch, err := subject.Stream(t.Context(), minimalRequest(t))
+	if err != nil {
+		t.Fatalf("Stream returned %v for a zero-length script, want a usable (if immediately-closing) carrier", err)
+	}
+
+	probe := &probeTB{}
+	rec := DrainAndRecord(probe, ch, DefaultDrainTimeout)
+	if probe.failed {
+		t.Fatalf("DrainAndRecord failed against a zero-length script's stream: %v, want a clean, immediate close", probe.messages)
+	}
+	if got := rec.Len(); got != 0 {
+		t.Errorf("rec.Len() = %d, want 0 (a zero-length script emits nothing and closes bare)", got)
+	}
+}

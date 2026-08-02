@@ -222,8 +222,6 @@ var conformanceRegistry []conformanceCase
 
 // registerConformanceCase appends one case to the suite's case table. It is
 // called only from a conformance_*.go leaf's own init() function.
-//
-//nolint:unused // called starting AI-23.2's conformance_text.go; AI-23.1 alone has no case-producing leaf yet to call it.
 func registerConformanceCase(name string, capability Capability, run func(t *testing.T, f Factory)) {
 	conformanceRegistry = append(conformanceRegistry, conformanceCase{name: name, capability: capability, run: run})
 }
@@ -469,4 +467,43 @@ func runOneCase(t *testing.T, f Factory, c conformanceCase) (ok bool, skipped bo
 		}
 	})
 	return ok, skipped
+}
+
+// --- Shared case-authoring helpers (used by every conformance_*.go leaf) ---
+
+// requireConstructed fails tb, naming the constructor, when err is
+// non-nil — AI-21's own posture restated: a script may only ever carry an
+// event that already came from one of ai's own constructors, so every case
+// in this suite that hand-builds a scripted event guards its construction
+// the same way rather than re-deriving the check per file. Called
+// immediately after each two-result ai.NewXxx call (Go does not allow
+// forwarding a multi-valued call alongside another argument in the same
+// expression, so this is deliberately two statements at each call site
+// rather than a single wrapping call).
+func requireConstructed(tb testing.TB, err error, constructor string) {
+	tb.Helper()
+	if err != nil {
+		tb.Fatalf("agenttest: %s returned %v, want no failure", constructor, err)
+	}
+}
+
+// minimalRequest builds the smallest valid ai.Request a case needs to call
+// Stream with — provider_test.go's own mustSimpleRequest precedent,
+// restated here since that helper lives in the sibling agenttest_test
+// package and is unreachable from this internal-package file.
+func minimalRequest(tb testing.TB) ai.Request {
+	tb.Helper()
+	part, err := ai.NewText("conformance suite probe")
+	if err != nil {
+		tb.Fatalf("agenttest: ai.NewText returned %v, want no failure", err)
+	}
+	message, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		tb.Fatalf("agenttest: ai.NewMessage returned %v, want no failure", err)
+	}
+	request, err := ai.NewRequest("cachicamas-conformance-suite-model", []ai.Message{message})
+	if err != nil {
+		tb.Fatalf("agenttest: ai.NewRequest returned %v, want no failure", err)
+	}
+	return request
 }

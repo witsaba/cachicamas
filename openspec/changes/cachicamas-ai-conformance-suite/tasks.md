@@ -152,24 +152,32 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-005`, `R-CNF-006`. **Design:** delegates to `ai.CheckStream` and AI-22's `R-STK-006` contiguity helper.
 **Depends on:** AI-23.1 (case table, runner).
 
-- [ ] **Item 1** (`R-CNF-005`) — Text is ordered, contiguous, and reconstructs byte-exactly.
-  - [ ] 1.1 RED: scripted text interaction; confirm kinds appear block-start/delta/block-end in order with sequences 1..N, no gap. `S-CNF-012`.
-  - [ ] 1.2 RED: a multi-byte rune deliberately split across two adjacent deltas; confirm the concatenated deltas equal the source byte-for-byte. `S-CNF-013`.
-  - [ ] 1.3 RED: a subject whose deltas arrive reordered; confirm the case fails carrying `ai.CheckStream`'s own verdict, unmodified. `S-CNF-014`.
-  - [ ] 1.4 GREEN: implement the text case delegating ordering to `ai.CheckStream` and contiguity to AI-22's helper — no reimplementation. Confirm 1.1–1.3 pass.
-  - [ ] 1.5 REFACTOR: confirm no local re-derivation of ordering/contiguity logic exists in this file (grep check).
+- [x] **Item 1** (`R-CNF-005`) — Text is ordered, contiguous, and reconstructs byte-exactly.
+  - [x] 1.1 RED: scripted text interaction; confirm kinds appear block-start/delta/block-end in order with sequences 1..N, no gap. `S-CNF-012`.
+  - [x] 1.2 RED: a multi-byte rune deliberately split across two adjacent deltas; confirm the concatenated deltas equal the source byte-for-byte. `S-CNF-013`.
+    - RED note: production (`textOrderingCase`) and its positive test were authored together for this leaf (the file-level "one factory/one runner" skeleton was already proven at AI-23.1, so there was no undefined-symbol RED available here); RED evidence is instead the genuine, first-run assertion trace below for the negative scenario (1.3), which failed for the right reason before the fix, and the zero-length-script guard (Item 3), both run before being judged correct.
+  - [x] 1.3 RED: a subject whose deltas arrive reordered; confirm the case fails carrying `ai.CheckStream`'s own verdict, unmodified. `S-CNF-014`.
+    - RED: `TestConformanceText_ReorderedSubject_RequireValidStreamCarriesCheckStreamVerdict` against a hand-built `reorderedTextProvider` (AI-21's own `Provider` structurally refuses to script reordered events — its internal `ai.CheckStream` pre-check panics before any goroutine starts, so a misbehaving subject had to be hand-built) — first run confirmed `probe.failed=true` and the captured message cited `R-STK-005`, `ai.CheckStream`'s own verdict text, unmodified.
+  - [x] 1.4 GREEN: implement the text case delegating ordering to `ai.CheckStream` and contiguity to AI-22's helper — no reimplementation. Confirm 1.1–1.3 pass.
+    - GREEN: `go test -race -v -run TestConformanceText ./src/agenttest/` → all 4 `PASS`.
+  - [x] 1.5 REFACTOR: confirm no local re-derivation of ordering/contiguity logic exists in this file (grep check).
+    - Confirmed: `grep -nE "CheckStream|CheckContiguity|sequence|Sequence" conformance_text.go` finds exactly one call site (`RequireValidStream(t, rec)`), no reimplementation.
 
-- [ ] **Item 2** (`R-CNF-006`) — An empty completion is legal, not a defect.
-  - [ ] 2.1 RED: a normally-finished interaction with no text delta; confirm it passes, carries its terminal, and is not reported as failed/incomplete/a contiguity violation. `S-CNF-015`.
-  - [ ] 2.2 RED: the same interaction under the contiguity assertion; confirm no violation is reported for the absent text block. `S-CNF-016`.
-  - [ ] 2.3 GREEN: implement the empty-completion case; confirm no minimum event count is enforced anywhere in this file. Confirm 2.1–2.2 pass.
-  - [ ] 2.4 REFACTOR: confirm the empty-completion case and Item 1's case share the same drain/assert helpers.
+- [x] **Item 2** (`R-CNF-006`) — An empty completion is legal, not a defect.
+  - [x] 2.1 RED: a normally-finished interaction with no text delta; confirm it passes, carries its terminal, and is not reported as failed/incomplete/a contiguity violation. `S-CNF-015`.
+  - [x] 2.2 RED: the same interaction under the contiguity assertion; confirm no violation is reported for the absent text block. `S-CNF-016`.
+  - [x] 2.3 GREEN: implement the empty-completion case; confirm no minimum event count is enforced anywhere in this file. Confirm 2.1–2.2 pass.
+    - GREEN: `TestConformanceText_EmptyCompletionCase_PassesAgainstFakeFactory` → `PASS`; `textEmptyCompletionCase` asserts `rec.Len()==1` (the completion alone) rather than any minimum.
+  - [x] 2.4 REFACTOR: confirm the empty-completion case and Item 1's case share the same drain/assert helpers.
+    - Confirmed: both cases call `DrainAndRecord(t, ch, DefaultDrainTimeout)` then `RequireValidStream(t, rec)`, identically.
 
-- [ ] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 3.1 RED: the text case's assertion path given a zero-length script; confirm attributable failure/pass, not a panic. `S-CNF-066` (partial).
-  - [ ] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+- [x] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 3.1 RED: the text case's assertion path given a zero-length script; confirm attributable failure/pass, not a panic. `S-CNF-066` (partial).
+  - [x] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+    - GREEN: `TestConformanceText_ZeroLengthScript_FailsAttributablyNeverPanics` → `PASS` (a zero-length script's stream closes bare with 0 events; `DrainAndRecord` reports a clean close, not a deadline failure, and nothing panics).
 
-- [ ] **AI-23.2 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-005`/`R-CNF-006`; commit `feat(agenttest): conformance text and lifecycle cases (AI-23.2)`.
+- [x] **AI-23.2 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-005`/`R-CNF-006`; commit `feat(agenttest): conformance text and lifecycle cases (AI-23.2)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues` (after adding the blank line this package's `package-comments` convention requires between a file's descriptive header and `package agenttest` — see AI-23.1's same fix). `conformance_text.go`'s doc comment cites `R-CNF-005`/`R-CNF-006`.
 
 ---
 
