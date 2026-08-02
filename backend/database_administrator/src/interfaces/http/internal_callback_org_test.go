@@ -23,17 +23,8 @@ import (
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 )
 
-// syncTestBody is the test-side mirror of the production callback
-// body. The new organization_id field is required.
-type syncTestBody struct {
-	JobID          int64  `json:"job_id"`
-	OrganizationID int64  `json:"organization_id"`
-	Status         string `json:"status"`
-	CommitSHA      string `json:"commit_sha,omitempty"`
-	DefaultBranch  string `json:"default_branch,omitempty"`
-	ErrorCode      string `json:"error_code,omitempty"`
-	ErrorMessage   string `json:"error_message,omitempty"`
-}
+// syncTestBody was an unused type — the tests use raw []byte
+// bodies signed through the existing helper.
 
 func signSyncTestBody(secret, ts string, body []byte) (string, string) {
 	var parsed any

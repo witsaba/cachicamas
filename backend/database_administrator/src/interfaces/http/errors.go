@@ -99,26 +99,6 @@ func ClassifyError(err error) (kind ErrorKind, clientMessage string) {
 	return ErrorKindInternal, "an internal error occurred"
 }
 
-// httpStatusForErrorKind maps the closed vocabulary to the locked
-// HTTP status codes. The mapping is load-bearing: the spec hashes
-// (status, code) pairs to gate the wire contract.
-func httpStatusForErrorKind(kind ErrorKind) int {
-	switch kind {
-	case ErrorKindDecodeFailed:
-		return 422
-	case ErrorKindValidationFailed:
-		return 400
-	case ErrorKindNotFound:
-		return 404
-	case ErrorKindConflict:
-		return 409
-	case ErrorKindInternal:
-		return 500
-	default:
-		return 500
-	}
-}
-
 // LogSanitized emits a slog line that carries the closed-vocabulary
 // error_kind + the fixed sanitized message. The raw err.Error() is
 // logged at DEBUG level only (slog.Warn does not surface it). This
