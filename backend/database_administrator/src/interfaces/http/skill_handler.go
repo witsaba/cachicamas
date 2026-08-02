@@ -364,27 +364,38 @@ func writeSkillError(c *echo.Context, logger *slog.Logger, status int, code, mes
 // writeSkillErrorFromErr maps a domain error to the locked HTTP
 // envelope. Returns 410 only for *SkillGoneError; everything else
 // uses the existing type-based mapping (validation/conflict/not_found).
+//
+// 2026-08-02-security-vulnerability-remediation (M-5, M-6): the
+// log line now carries the closed-vocabulary error_kind and
+// NEVER the raw err.Error() text. The response body message is
+// also fixed-vocabulary (the only exception is the validation
+// fields map, which is operator-curated and safe to echo).
 func writeSkillErrorFromErr(c *echo.Context, logger *slog.Logger, op, name string, err error) error {
 	if err == nil {
 		return nil
 	}
-	// Per S-SK-029 the log line must NOT contain the request body or
-	// the skill body. Name is safe; we log it.
-	if logger != nil {
-		logger.InfoContext(c.Request().Context(), "skill request failed",
-			slog.String("op", op),
-			slog.String("name", name),
-			slog.String("err", err.Error()),
-		)
-	}
 
 	// Special case: *SkillGoneError → 410 with the skill_deleted code.
 	if _, ok := domain.AsSkillDeleted(err); ok {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "skill request failed",
+				slog.String("op", op),
+				slog.String("name", name),
+				slog.String("error_kind", string(ErrorKindNotFound)),
+			)
+		}
 		return writeSkillError(c, nil, http.StatusGone, domain.CodeSkillDeleted, domain.MsgSkillDeleted)
 	}
 
 	var verr *domain.ValidationError
 	if errors.As(err, &verr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "skill request failed",
+				slog.String("op", op),
+				slog.String("name", name),
+				slog.String("error_kind", string(ErrorKindValidationFailed)),
+			)
+		}
 		msg := "One or more fields failed validation."
 		for _, m := range verr.Fields {
 			msg = m
@@ -401,11 +412,25 @@ func writeSkillErrorFromErr(c *echo.Context, logger *slog.Logger, op, name strin
 
 	var cerr *domain.ConflictError
 	if errors.As(err, &cerr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "skill request failed",
+				slog.String("op", op),
+				slog.String("name", name),
+				slog.String("error_kind", string(ErrorKindConflict)),
+			)
+		}
 		return writeSkillError(c, nil, http.StatusConflict, domain.CodeConflict, domain.MsgSkillConflict)
 	}
 
 	var nerr *domain.NotFoundError
 	if errors.As(err, &nerr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "skill request failed",
+				slog.String("op", op),
+				slog.String("name", name),
+				slog.String("error_kind", string(ErrorKindNotFound)),
+			)
+		}
 		msg := domain.MsgSkillNotFound
 		if nerr.Resource == "skill_revision" {
 			msg = domain.MsgSkillRevisionNotFound
@@ -413,7 +438,18 @@ func writeSkillErrorFromErr(c *echo.Context, logger *slog.Logger, op, name strin
 		return writeSkillError(c, nil, http.StatusNotFound, domain.CodeNotFound, msg)
 	}
 
-	// Fallback: internal error.
+	// Fallback: internal error. Log raw err.Error at DEBUG only.
+	if logger != nil {
+		logger.InfoContext(c.Request().Context(), "skill request failed",
+			slog.String("op", op),
+			slog.String("name", name),
+			slog.String("error_kind", string(ErrorKindInternal)),
+		)
+		logger.DebugContext(c.Request().Context(), "skill request failed (raw error)",
+			slog.String("op", op),
+			slog.String("error", err.Error()),
+		)
+	}
 	return writeSkillError(c, nil, http.StatusInternalServerError, domain.CodeServer, "Something went wrong. Please try again.")
 }
 
