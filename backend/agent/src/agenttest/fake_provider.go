@@ -28,6 +28,21 @@ import (
 // for more calls than the fake was scripted with — reported as a typed
 // error rather than a captured testing.TB.Fatal: Layer 2's agent loop calls
 // Stream from its own goroutines, where TB.Fatal is unsafe.
+//
+// # Exhaustion behavior, stated explicitly (NFR-AFP-D)
+//
+// A Stream call made once every scripted Script has been consumed fails
+// loudly and immediately, synchronously within the call — it never blocks,
+// never hangs, and starts no producer goroutine. It returns a nil channel
+// (no usable carrier) and a non-nil error satisfying
+// errors.Is(err, ErrScriptsExhausted), wrapped with fmt.Errorf naming the
+// failed call's 1-based ordinal and the total number of scripts queued
+// ("Stream call %d of %d scripted"). It never replays the last consumed
+// script, and it never returns a channel that simply closes as though the
+// call had succeeded with no events — either outcome would teach a
+// consumer the wrong physics silently. This is the one documented
+// exception to this package's totality guarantee: every other exported
+// entry point, given any input, is panic-free.
 var ErrScriptsExhausted = errors.New("agenttest: script queue exhausted")
 
 // Provider is the scripted fake: an ai.ModelProvider consuming one Script
@@ -53,7 +68,8 @@ func NewProvider(scripts ...Script) *Provider {
 // contract in its documented order — validation, then nil-context
 // normalization, then cancellation — before this milestone's own addition,
 // exhaustion, checked last so validation-before-cancellation fidelity
-// (R-AFP-013) is preserved.
+// (R-AFP-013) is preserved. See [ErrScriptsExhausted] for exhaustion's own
+// documented behavior in full.
 func (p *Provider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
 	if req.IsZero() {
 		return nil, ai.Invalid(ai.ErrEmpty, ai.At("request"))

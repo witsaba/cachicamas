@@ -121,15 +121,15 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 
 ## Phase 8 — AI-21.8 Sequential-call scripting, exhaustion, totality (`fake_queue_test.go`)
 
-- [ ] 8.1 RED — S-045–047 (R-AFP-019): consecutive calls on one fake consume consecutive scripts in enqueue order, each exactly once; queue inspection after N calls shows the correct remainder. RED output:
-- [ ] 8.2 GREEN — implement mutex-guarded queue index advance (pop-once, no reorder, no replay) in `fake_provider.go`. GREEN output:
-- [ ] 8.3 REFACTOR — note:
-- [ ] 8.4 RED — S-048–050 (R-AFP-020): a call against an exhausted queue fails loudly and immediately (bounded deadline never reached), names the fake and the exhaustion, does not replay the last script, does not return a clean-closing empty stream. RED output:
-- [ ] 8.5 GREEN — implement `var ErrScriptsExhausted = errors.New(...)`; `Stream()` returns `nil, fmt.Errorf("...call %d of %d...: %w", ..., ErrScriptsExhausted)`, checked after the three contract checks (validation, ctx, and exhaustion last). GREEN output:
-- [ ] 8.6 REFACTOR — note:
-- [ ] 8.7 RED — S-056–057 (NFR-AFP-D totality): table of extreme inputs (zero-value request, nil ctx, cancelled ctx, empty script, never-populated queue) through every exported entry point → no panic except the documented `ErrScriptsExhausted` path; doc surface states the exhaustion behavior explicitly. RED output:
-- [ ] 8.8 GREEN — close any panic gap found; add exhaustion-behavior doc comment on the fake's exported surface (e.g. `Stream()`/`ErrScriptsExhausted`). GREEN output:
-- [ ] 8.9 REFACTOR — note:
+- [x] 8.1 RED — S-045–047 (R-AFP-019): consecutive calls on one fake consume consecutive scripts in enqueue order, each exactly once; queue inspection after N calls shows the correct remainder. RED output: `go test -race -run 'TestProvider_ConsecutiveCalls|TestProvider_CallAgainstExhaustedQueue|TestProvider_ExtremeInputs' -v ./...` → `TestProvider_ConsecutiveCalls_...` (3 subtests) **PASS immediately** — no gap; the mutex-guarded pop-once index from Phase 1 already satisfies this. "Queue inspection" has no dedicated accessor in design's exported surface, so the 3rd subtest observes remainder through the queue's own behavior: a 3rd call on a 3-script queue succeeds (proving one remained), a 4th fails with `ErrScriptsExhausted` (proving none do).
+- [x] 8.2 GREEN — implement mutex-guarded queue index advance (pop-once, no reorder, no replay) in `fake_provider.go`. GREEN output: no extension needed.
+- [x] 8.3 REFACTOR — note: none.
+- [x] 8.4 RED — S-048–050 (R-AFP-020): a call against an exhausted queue fails loudly and immediately (bounded deadline never reached), names the fake and the exhaustion, does not replay the last script, does not return a clean-closing empty stream. RED output: same command → `TestProvider_CallAgainstExhaustedQueue_...` **PASS immediately** — no gap; `ErrScriptsExhausted`/`fmt.Errorf` path from Phase 1 already satisfies it, proven here via a goroutine + bounded-deadline race (the exhausted call returns before the deadline, `ch2` is nil, `errors.Is(err2, agenttest.ErrScriptsExhausted)`).
+- [x] 8.5 GREEN — implement `var ErrScriptsExhausted = errors.New(...)`; `Stream()` returns `nil, fmt.Errorf("...call %d of %d...: %w", ..., ErrScriptsExhausted)`, checked after the three contract checks (validation, ctx, and exhaustion last). GREEN output: no extension needed.
+- [x] 8.6 REFACTOR — note: none.
+- [x] 8.7 RED — S-056–057 (NFR-AFP-D totality): table of extreme inputs (zero-value request, nil ctx, cancelled ctx, empty script, never-populated queue) through every exported entry point → no panic except the documented `ErrScriptsExhausted` path; doc surface states the exhaustion behavior explicitly. RED output: same command → `TestProvider_ExtremeInputs_...` (6 subtests covering all 5 documented extreme inputs plus a fresh-`Requests()` check) **PASS immediately** for the no-panic behavior — no code gap. The doc-surface half of S-AFP-057 (exhaustion stated explicitly) was genuinely incomplete: `ErrScriptsExhausted`'s doc comment named the mechanism but not the full observable behavior (nil channel, non-replay, non-clean-close, immediacy).
+- [x] 8.8 GREEN — close any panic gap found; add exhaustion-behavior doc comment on the fake's exported surface (e.g. `Stream()`/`ErrScriptsExhausted`). GREEN output: no panic gap to close. Added an "Exhaustion behavior, stated explicitly (NFR-AFP-D)" section to `ErrScriptsExhausted`'s doc comment (nil channel, no goroutine, no replay, no clean empty close, error format) and a cross-reference from `Stream()`'s own doc comment. Verified rendering with `go doc ./src/agenttest ErrScriptsExhausted`.
+- [x] 8.9 REFACTOR — note: none; `gofmt`/`go vet` clean, full suite green.
 
 ## Phase 9 — Non-functional requirements and final gate
 
