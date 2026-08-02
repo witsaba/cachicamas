@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	otelglobal "go.opentelemetry.io/otel"
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
@@ -196,7 +197,21 @@ func main() {
 	// HTTP server with the OTel middleware installed globally so every
 	// route emits a span (and the span is correlated with any slog
 	// record that carries a request context).
+	//
+	// Security middleware (security M-1 + M-4 + design §3):
+	//   - middleware.Recover() — catches any handler panic and returns
+	//     a 500 envelope instead of crashing the process. Production
+	//     stability without this is a single buggy handler away.
+	//   - middleware.BodyLimit(1 << 20) — caps request bodies at 1 MiB
+	//     so a malicious / buggy client can't OOM the process by
+	//     streaming a 10 GiB body. Mirrors the workspace_syncer's
+	//     MaxBytesReader cap (slice B).
+	//
+	// Recover is installed FIRST so the body-limit handler still
+	// benefits from the panic-recovery net.
 	e := echo.New()
+	e.Use(middleware.Recover())
+	e.Use(middleware.BodyLimit(1 << 20))
 	e.Use(otel.Middleware(serviceName))
 	httpiface.RegisterHealthRoute(e)
 
