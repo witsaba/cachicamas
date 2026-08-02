@@ -671,3 +671,70 @@ func TestConformanceText_ZeroLengthScript_FailsAttributablyNeverPanics(t *testin
 		t.Errorf("rec.Len() = %d, want 0 (a zero-length script emits nothing and closes bare)", got)
 	}
 }
+
+// === AI-23.3 — tool-call cases (R-CNF-007, R-CNF-008) ===
+
+// S-CNF-017 — two concurrent tool calls whose argument fragments interleave
+// each reconstruct exactly, with no cross-contamination.
+func TestConformanceToolCall_InterleavedCase_PassesAgainstFakeFactory(t *testing.T) {
+	toolCallInterleavedCase(t, FakeFactory())
+}
+
+// S-CNF-018 — a zero-delta whole tool call is accepted.
+func TestConformanceToolCall_ZeroDeltaCase_PassesAgainstFakeFactory(t *testing.T) {
+	toolCallZeroDeltaCase(t, FakeFactory())
+}
+
+// S-CNF-019 — two calls to the same tool name carry distinct, ordered
+// ordinals.
+func TestConformanceToolCall_OrdinalCase_PassesAgainstFakeFactory(t *testing.T) {
+	toolCallOrdinalCase(t, FakeFactory())
+}
+
+// S-CNF-020 — mixed text and tool-call content survives, terminating on
+// the tool-call finish reason.
+func TestConformanceToolCall_MixedTextAndToolCase_PassesAgainstFakeFactory(t *testing.T) {
+	mixedTextAndToolCallCase(t, FakeFactory())
+}
+
+// NFR-CNF-E (partial, this leaf's own item 3) — a tool call with an empty
+// (non-nil, zero-length) argument-byte payload: attributable pass, never a
+// panic. Empty deltas are unrestricted by tool_call_event.go's own rules
+// (R-ATC-005), so this is a genuine pass, proving reconstructToolCalls
+// handles a zero-length fragment/argument slice without panicking (nil
+// slice append and bytes.Equal against an empty slice are both safe in
+// Go, but this proves it end to end rather than by inspection alone).
+func TestConformanceToolCall_EmptyArgumentPayload_FailsAttributablyNeverPanics(t *testing.T) {
+	defer requireNoPanicHere(t)
+
+	start, err := ai.NewToolCallStart(1, "call-1", "search")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart returned %v, want no failure", err)
+	}
+	delta, err := ai.NewToolCallDelta(1, []byte{}) // empty, non-nil fragment
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta returned %v, want no failure", err)
+	}
+	end, err := ai.NewToolCallEnd(1, []byte{}) // empty, non-nil arguments
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd returned %v, want no failure", err)
+	}
+
+	script := Script{Steps: []Step{Emit(start), Emit(delta), Emit(end)}}
+	subject := FakeFactory().New(t, script)
+	ch, err := subject.Stream(t.Context(), minimalRequest(t))
+	if err != nil {
+		t.Fatalf("Stream returned %v, want no failure", err)
+	}
+	rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
+	RequireValidStream(t, rec)
+
+	calls := reconstructToolCalls(rec.Events())
+	call, ok := calls[1]
+	if !ok || !call.sawStart || !call.sawEnd {
+		t.Fatalf("call = %+v (found=%v), want a complete start+end even with empty payloads", call, ok)
+	}
+	if len(call.arguments) != 0 {
+		t.Errorf("arguments = %q, want empty", call.arguments)
+	}
+}

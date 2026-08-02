@@ -187,23 +187,30 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-007`, `R-CNF-008`. **Design:** `CAP-R-02` ordinal observability.
 **Depends on:** AI-23.1.
 
-- [ ] **Item 1** (`R-CNF-007`) — Reconstructible whole or fragmented, with an observable ordinal.
-  - [ ] 1.1 RED: two concurrent tool calls whose argument fragments interleave; confirm each call's bytes match exactly with no misattribution. `S-CNF-017`.
-  - [ ] 1.2 RED: a tool call delivered whole with zero argument deltas; confirm it is accepted, not rejected for missing incremental delivery. `S-CNF-018`.
-  - [ ] 1.3 RED: two calls to the same tool name; confirm their ordinals differ and order them unambiguously. `S-CNF-019`.
-  - [ ] 1.4 GREEN: implement fragment attribution by call identity and ordinal exposure. Confirm 1.1–1.3 pass.
-  - [ ] 1.5 REFACTOR: confirm the fragment-attribution logic is one function shared by the interleaved and zero-delta paths.
+- [x] **Item 1** (`R-CNF-007`) — Reconstructible whole or fragmented, with an observable ordinal.
+  - [x] 1.1 RED: two concurrent tool calls whose argument fragments interleave; confirm each call's bytes match exactly with no misattribution. `S-CNF-017`.
+  - [x] 1.2 RED: a tool call delivered whole with zero argument deltas; confirm it is accepted, not rejected for missing incremental delivery. `S-CNF-018`.
+  - [x] 1.3 RED: two calls to the same tool name; confirm their ordinals differ and order them unambiguously. `S-CNF-019`.
+    - RED note: this leaf's cases and their integration tests were authored together (the shared drain/assert plumbing was already proven correct at AI-23.2); RED evidence is the genuine first real-execution run below, which passed on the first attempt — recorded honestly per this file's own instruction rather than manufacturing an artificial failure.
+  - [x] 1.4 GREEN: implement fragment attribution by call identity and ordinal exposure. Confirm 1.1–1.3 pass.
+    - GREEN: `go test -race -v -run TestConformanceToolCall ./src/agenttest/` → all 5 subtests `PASS` on first run (`TestConformanceToolCall_InterleavedCase_...`, `_ZeroDeltaCase_...`, `_OrdinalCase_...`, `_MixedTextAndToolCase_...`, `_EmptyArgumentPayload_...`).
+  - [x] 1.5 REFACTOR: confirm the fragment-attribution logic is one function shared by the interleaved and zero-delta paths.
+    - Confirmed: `grep -n "reconstructToolCalls(" conformance_tool_call.go conformance_suite_test.go` shows one definition and 5 call sites — every case (interleaved, zero-delta, ordinal, mixed, and the extreme-input test) reuses it.
 
-- [ ] **Item 2** (`R-CNF-008`) — Mixed text + tool content ends on the tool-call finish reason.
-  - [ ] 2.1 RED: an interaction emitting a text block then a tool call; confirm both survive with ordering intact and the finish reason is the tool-call value from the closed vocabulary. `S-CNF-020`.
-  - [ ] 2.2 GREEN: implement the mixed-content case, reading the finish reason from the closed vocabulary (not free text). Confirm 2.1 passes.
-  - [ ] 2.3 REFACTOR: confirm this case reuses Item 1's tool-call assertions rather than re-asserting tool-call shape independently.
+- [x] **Item 2** (`R-CNF-008`) — Mixed text + tool content ends on the tool-call finish reason.
+  - [x] 2.1 RED: an interaction emitting a text block then a tool call; confirm both survive with ordering intact and the finish reason is the tool-call value from the closed vocabulary. `S-CNF-020`.
+  - [x] 2.2 GREEN: implement the mixed-content case, reading the finish reason from the closed vocabulary (not free text). Confirm 2.1 passes.
+    - GREEN: `TestConformanceToolCall_MixedTextAndToolCase_PassesAgainstFakeFactory` → `PASS`; asserts `comp.FinishReason() == ai.FinishReasonToolCalls`, the typed vocabulary member, never a string comparison.
+  - [x] 2.3 REFACTOR: confirm this case reuses Item 1's tool-call assertions rather than re-asserting tool-call shape independently.
+    - Confirmed: `mixedTextAndToolCallCase` calls `reconstructToolCalls(events)` for its tool-call half, same as every Item 1 case.
 
-- [ ] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 3.1 RED: a tool call with an empty argument-byte payload; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
-  - [ ] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+- [x] **Item 3** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 3.1 RED: a tool call with an empty argument-byte payload; confirm attributable pass/fail, not a panic. `S-CNF-066` (partial).
+  - [x] 3.2 GREEN: guard as needed. Confirm 3.1 passes.
+    - GREEN: `TestConformanceToolCall_EmptyArgumentPayload_FailsAttributablyNeverPanics` → `PASS` (an empty, non-nil delta fragment and empty end arguments are both legal per `tool_call_event.go`'s own rules; `reconstructToolCalls`'s nil-slice append and `bytes.Equal` against an empty slice are safe, proven end to end rather than by inspection alone).
 
-- [ ] **AI-23.3 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-007`/`R-CNF-008`; commit `feat(agenttest): conformance tool-call cases (AI-23.3)`.
+- [x] **AI-23.3 close:** record green `make test` and clean `make lint`; confirm doc comments cite `R-CNF-007`/`R-CNF-008`; commit `feat(agenttest): conformance tool-call cases (AI-23.3)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues`. `conformance_tool_call.go`'s doc comment cites `R-CNF-007`/`R-CNF-008`.
 
 ---
 
