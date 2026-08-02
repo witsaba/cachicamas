@@ -15,9 +15,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -102,6 +104,55 @@ func resolveCORSAllowOrigins() []string {
 		return []string{"http://localhost:5173"}
 	}
 	return nil
+}
+
+// resolveSyncerURL encodes the WORKSPACE_SYNCER_URL_REQUIRE_TLS opt-in
+// policy (security M-3). When the env is set to a truthy value
+// ("1", "true", "yes") an http:// URL is rejected; otherwise the URL
+// is returned verbatim. The default URL flips to https only when an
+// operator actively opts in — the v1 plain-HTTP deployment still works
+// until the workspace_syncer TLS change lands in slice B.
+//
+// Documented values:
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=0  (or unset) → http:// accepted
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=1            → http:// rejected
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=true         → http:// rejected
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=yes          → http:// rejected
+func resolveSyncerURL(rawURL string) (string, error) {
+	requireTLS := false
+	if v := os.Getenv("WORKSPACE_SYNCER_URL_REQUIRE_TLS"); v != "" {
+		parsed, err := parseBoolLoose(v)
+		if err != nil {
+			// Treat malformed values as "off" but log the discrepancy.
+			slog.Warn("WORKSPACE_SYNCER_URL_REQUIRE_TLS: invalid value, treating as false",
+				slog.String("value", v),
+				slog.String("hint", "use 1, true, yes, 0, false, or no"),
+			)
+		} else {
+			requireTLS = parsed
+		}
+	}
+	if requireTLS && strings.HasPrefix(strings.ToLower(rawURL), "http://") {
+		return "", fmt.Errorf(
+			"resolveSyncerURL: WORKSPACE_SYNCER_URL_REQUIRE_TLS=1 but URL is http:// (%s); "+
+				"either unset the env, flip the URL to https://, or set the env to 0",
+			rawURL,
+		)
+	}
+	return rawURL, nil
+}
+
+// parseBoolLoose accepts strconv.ParseBool's documented values plus
+// "yes" / "no" (the common shell idiom). Anything else returns an
+// error so the caller can log + fall back to false.
+func parseBoolLoose(v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "yes":
+		return true, nil
+	case "no":
+		return false, nil
+	}
+	return strconv.ParseBool(v)
 }
 
 func main() {
@@ -344,7 +395,16 @@ func main() {
 	// with the shared INTERNAL_SERVICE_TOKEN; the URL defaults to
 	// http://workspace_syncer:8080 (the docker-compose service
 	// name; overridable for dev).
-	syncerBaseURL := envString("WORKSPACE_SYNCER_URL", "http://workspace_syncer:8080")
+	//
+	// Security M-3: WORKSPACE_SYNCER_URL_REQUIRE_TLS=1 enforces that
+	// the URL is https:// — when the env is set and an http:// URL is
+	// supplied the service refuses to start (fail-fast), so the
+	// cleartext path is impossible to deploy by mistake.
+	syncerBaseURL, err := resolveSyncerURL(envString("WORKSPACE_SYNCER_URL", "http://workspace_syncer:8080"))
+	if err != nil {
+		slog.Error("WORKSPACE_SYNCER_URL rejected; exiting", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	syncerToken := envString("INTERNAL_SERVICE_TOKEN", "")
 	if syncerToken == "" {
 		slog.Error("INTERNAL_SERVICE_TOKEN must be set; exiting (workspace_syncer auth)")

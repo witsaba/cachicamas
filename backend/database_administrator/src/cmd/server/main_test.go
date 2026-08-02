@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -117,4 +118,110 @@ func TestProductionMiddlewareChain_Ordering(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 after panic, got %d", rec.Code)
 	}
+}
+
+// TestResolveSyncerURL covers the WORKSPACE_SYNCER_URL_REQUIRE_TLS
+// opt-in env (security M-3). The decision is encoded in
+// resolveSyncerURL(): when the env is set to a truthy value, an
+// http:// URL is rejected; anything else (https, unset env, env=0)
+// is accepted. The test table covers every documented combination.
+func TestResolveSyncerURL(t *testing.T) {
+	cases := []struct {
+		name        string
+		envValue    string // empty = unset
+		url         string
+		wantErr     bool
+		wantErrHint string
+	}{
+		{
+			name:     "https url is always accepted",
+			envValue: "",
+			url:      "https://workspace_syncer:8443",
+		},
+		{
+			name:     "http url accepted when env unset",
+			envValue: "",
+			url:      "http://workspace_syncer:8080",
+		},
+		{
+			name:     "http url accepted when env=0",
+			envValue: "0",
+			url:      "http://workspace_syncer:8080",
+		},
+		{
+			name:     "http url accepted when env=false",
+			envValue: "false",
+			url:      "http://workspace_syncer:8080",
+		},
+		{
+			name:        "http url rejected when env=1",
+			envValue:    "1",
+			url:         "http://workspace_syncer:8080",
+			wantErr:     true,
+			wantErrHint: "WORKSPACE_SYNCER_URL_REQUIRE_TLS",
+		},
+		{
+			name:        "http url rejected when env=true",
+			envValue:    "true",
+			url:         "http://workspace_syncer:8080",
+			wantErr:     true,
+			wantErrHint: "WORKSPACE_SYNCER_URL_REQUIRE_TLS",
+		},
+		{
+			name:        "http url rejected when env=yes",
+			envValue:    "yes",
+			url:         "http://workspace_syncer:8080",
+			wantErr:     true,
+			wantErrHint: "WORKSPACE_SYNCER_URL_REQUIRE_TLS",
+		},
+		{
+			name:     "https url accepted when env=1",
+			envValue: "1",
+			url:      "https://workspace_syncer:8443",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WORKSPACE_SYNCER_URL_REQUIRE_TLS", tc.envValue)
+			if tc.envValue == "" {
+				clearEnv(t, "WORKSPACE_SYNCER_URL_REQUIRE_TLS")
+			}
+
+			got, err := resolveSyncerURL(tc.url)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (url=%q)", got)
+				}
+				if tc.wantErrHint != "" && !strings.Contains(err.Error(), tc.wantErrHint) {
+					t.Errorf("error %q must contain hint %q", err.Error(), tc.wantErrHint)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.url {
+				t.Errorf("got url %q, want %q", got, tc.url)
+			}
+		})
+	}
+}
+
+// clearEnv unsets a single env var for the duration of the test and
+// restores it on cleanup. t.Setenv with empty value records "" in
+// the post-test snapshot, which is NOT the same as unset for
+// truthiness checks (e.g. strconv.ParseBool on "" returns an error).
+func clearEnv(t *testing.T, key string) {
+	t.Helper()
+	original, present := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unsetenv %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if present {
+			_ = os.Setenv(key, original)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
 }
