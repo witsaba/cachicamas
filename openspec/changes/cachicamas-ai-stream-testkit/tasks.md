@@ -33,8 +33,9 @@ Strict TDD is on. A RED that passes immediately because earlier work already cov
 
 | Field | Value |
 | --- | --- |
-| Estimated changed lines | Production ~300–450; tests ~650–950; `doc.go` ~10–15; openspec (existing proposal/spec/design ~480 + this `tasks.md` ~300–450) ~780–930 → **total ~1 700–2 400** |
-| 400-line budget risk | High |
+| Estimated changed lines (forecast, pre-apply) | Production ~300–450; tests ~650–950; `doc.go` ~10–15; openspec (existing proposal/spec/design ~480 + this `tasks.md` ~300–450) ~780–930 → **total ~1 700–2 400** |
+| **Actual changed lines (post-apply, this leaf `git diff --stat`)** | Production **568** (incl. `doc.go`'s +23/-2); tests **1 223**; code subtotal **1 791**; openspec (`proposal.md`+`design.md`+`spec.md`+`tasks.md`, all newly committed by this apply run) **746** → **actual total 2 537** — within the forecast's upper bound, at the very top of it |
+| 400-line budget risk | High (confirmed by actual: every one of the 5 leaf commits individually exceeds 400 changed lines) |
 | Chained PRs recommended | No |
 | Suggested split | Single PR — the wave PR (AI-21 + AI-22 + AI-23), leaf commits as the reviewable boundary |
 | Delivery strategy | single-pr |
@@ -49,7 +50,9 @@ Chain strategy: size-exception
 
 ### Running-total flag for the orchestrator — read before committing to AI-23
 
-AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave's shared 5 000-line ceiling. This forecast's own estimate for AI-22 is **~1 700–2 400**, already well above the proposal's original ~700–1 100 guess — the same test/doc density overrun AI-11 recorded on this branch. **Running total AI-21 actual + AI-22 forecast = ~4 510–5 210.** The upper end of that range **meets or exceeds the 5 000 ceiling before AI-23 (9 leaves, per the proposal's own risk table) is even planned.** Recommend the orchestrator re-check the actual AI-22 diff against this forecast immediately after apply, and decide AI-23's PR boundary (same wave PR vs. its own size-exception PR) **before** running `sdd-tasks`/`sdd-apply` for AI-23 — do not assume the proposal's "ships with AI-21 and AI-23 in one PR" framing still holds.
+AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave's shared 5 000-line ceiling. AI-22's own actual, computed after this apply run (`git diff --stat` from AI-21's close commit to AI-22's close commit): **1 791** code + **746** openspec = **2 537**.
+
+**Running total, both milestones actual: 2 810 + 2 537 = 5 347 changed lines — already past the wave's 5 000-line ceiling, before AI-23 (9 leaves, per the proposal's own risk table) is even planned.** This is not a forecast anymore; it is the measured state of the wave PR's diff as of AI-22's close. The orchestrator MUST decide AI-23's PR boundary (own size-exception PR vs. a chained/stacked slice off this wave PR) **before** running `sdd-tasks`/`sdd-apply` for AI-23 — the proposal's original "ships with AI-21 and AI-23 in one PR" framing is no longer viable at the actual measured size, and re-affirming `size-exception` again for a THIRD time in the same PR is a materially different ask than the first two.
 
 ### Suggested Work Units
 
@@ -247,17 +250,17 @@ AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave
 
 ## Milestone close
 
-- [ ] `make test` green in `backend/agent/` (`go test -race -v ./...`) — paste the transcript.
-- [ ] `make lint` clean in `backend/agent/` — paste the transcript. Run before every commit, not only at the end.
-- [ ] `go.mod` still zero requires; both AI-00 import guards pass (`NFR-STK-A`, `S-STK-038`).
-- [ ] `src/ai/` diff is empty (`NFR-STK-B`, `S-STK-039`); `src/ai` and AI-21's tests pass identically with the change reverted in isolation (`S-STK-040`).
-- [ ] `ai/provider_test.go` and AI-21's `fake_*_test.go` files diff empty; both local helpers still compile and run unchanged (`NFR-STK-C`, `S-STK-041`).
-- [ ] Every exported helper's doc comment names a Layer 1 requirement identifier (`NFR-STK-D`, `S-STK-042`) — confirm across all five files in one pass.
-- [ ] Full suite run twice under `-race`; results identical (`S-STK-043`). Extreme-input items (3/3/3/5/4 across the five leaves) all green (`S-STK-044`).
-- [ ] `doc.go` names both the fake and the kit, retains the dependency-free pin (`S-STK-045`).
-- [ ] Every test-list item above carries recorded RED output, recorded GREEN output and a refactor note (`NFR-STK-G`, `S-STK-046`) — confirm no item was skipped.
-- [ ] Record actual vs. forecast changed-line count in the Review Workload Forecast table above; update the running-total flag against AI-21's 2 810 and the wave's 5 000 ceiling.
-- [ ] Never push, never merge, never open a PR, never `git stash`.
+- [x] `make test` green in `backend/agent/` (`go test -race -v ./...`) — paste the transcript. Two independent `-count=1` runs: run 1 → `ok github.com/cachicamas/backend/agent/src/agenttest 1.721s`, `ok github.com/cachicamas/backend/agent/src/ai 3.307s`, **393** `--- PASS`, **0** `--- FAIL`; run 2 → `ok github.com/cachicamas/backend/agent/src/agenttest 1.696s`, `ok github.com/cachicamas/backend/agent/src/ai 3.222s`, **393** `--- PASS`, **0** `--- FAIL`.
+- [x] `make lint` clean in `backend/agent/` — paste the transcript. Run before every commit, not only at the end. Final transcript: `go vet ./...` (clean) → `bin/golangci-lint run --config=.golangci.yml ./...` → `0 issues.` (run before every one of the 5 leaf commits above, not only here).
+- [x] `go.mod` still zero requires; both AI-00 import guards pass (`NFR-STK-A`, `S-STK-038`). `git diff --stat -- backend/agent/go.mod` → empty. `go test -race -run 'TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault|TestLayer1_ModuleHasNoDependencies_ZeroRequires' -v ./src/ai/...` → both `--- PASS`.
+- [x] `src/ai/` diff is empty (`NFR-STK-B`, `S-STK-039`); `src/ai` and AI-21's tests pass identically with the change reverted in isolation (`S-STK-040`). `git diff --stat -- backend/agent/src/ai/` → empty (confirmed at every leaf close, not only here). Since `src/ai` was never touched, its current (HEAD) state IS the reverted-in-isolation state by construction; `go test -race -count=1 ./src/ai/...` → `ok`, identical to the pre-AI-22 baseline captured before this apply run began.
+- [x] `ai/provider_test.go` and AI-21's `fake_*_test.go` files diff empty; both local helpers still compile and run unchanged (`NFR-STK-C`, `S-STK-041`). `git diff --stat -- backend/agent/src/ai/provider_test.go 'backend/agent/src/agenttest/fake_*_test.go'` → empty. `requireClosedWithin` and `drainFake` are unmodified and still exercised by their own files' passing tests in the full-suite runs above.
+- [x] Every exported helper's doc comment names a Layer 1 requirement identifier (`NFR-STK-D`, `S-STK-042`) — confirm across all five files in one pass. Swept all five `stream_kit_*.go` files' exported symbols (`DrainAndRecord`, `Recording`/`Events`/`Len`, `RequireSameEvents`, `RequireValidStream`, `CheckContiguity`, `RequireNoGoroutineLeak`, `NewIter`, `Iter`, `(*Iter).Events`, `(*Iter).Err`) — found and fixed two gaps during AI-22.5's own close (`Recording.Len`, `NewIter`; see that leaf's entry above), all 12 now cite at least one `R-STK-0NN`.
+- [x] Full suite run twice under `-race`; results identical (`S-STK-043`). Extreme-input items (3/3/3/5/4 across the five leaves) all green (`S-STK-044`). Confirmed above: 393/393 `--- PASS` both runs, and `diff` of the sorted `--- PASS`/`--- FAIL` name lists between the two run logs was empty (byte-identical result sets). Every leaf's own "Item 3/4/5 (appended, `NFR-STK-E`)" extreme-input group is marked `[x]` above with its own passing run.
+- [x] `doc.go` names both the fake and the kit, retains the dependency-free pin (`S-STK-045`). Verified via `go doc ./src/agenttest` (see AI-22.5's own entry) — names `Provider` (the fake) and all five kit entry points, plus a new "Dependency-free (R-STK-009)" section.
+- [x] Every test-list item above carries recorded RED output, recorded GREEN output and a refactor note (`NFR-STK-G`, `S-STK-046`) — confirm no item was skipped. Confirmed: every `[ ]` in this document is now `[x]`, and every RED/GREEN/inspection/doc-check item above carries its own recorded output or confirmation — no item was left as a bare checkbox.
+- [x] Record actual vs. forecast changed-line count in the Review Workload Forecast table above; update the running-total flag against AI-21's 2 810 and the wave's 5 000 ceiling. Done above: actual **2 537** (1 791 code + 746 openspec) vs. forecast ~1 700–2 400 (within range, near the top); running total with AI-21's actual **2 810** is **5 347**, already past the wave's 5 000-line ceiling before AI-23 is planned — flagged explicitly for the orchestrator in the Running-total section above.
+- [x] Never push, never merge, never open a PR, never `git stash`. Confirmed: only local commits on `feat/2026-08-02-cachicamas-ai-layer1-wave-3` were made; no push, no PR, no stash at any point in this apply run.
 
 ## Key Learnings
 
@@ -265,4 +268,6 @@ AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave
 2. Design's D1→D5 file order matches the code dependency order because AI-22.2, .3 and .5 each consume AI-22.1's `Recording` or raw channel.
 3. Three spec scenarios per leaf are inspection-only pins (code-diff or doc-content checks) rather than automated RED/GREEN Go tests, and were recorded as such rather than forced into fake tests.
 4. NFR-STK-E's extreme-input requirement spans every exported entry point, so it was distributed as one appended test-list item per leaf instead of one late cross-cutting file.
-5. The combined AI-21 actual plus this milestone's own forecast approaches or may exceed the wave's 5 000-line ceiling before AI-23 is planned, which is flagged explicitly for the orchestrator.
+5. Testing `testing.TB`-consuming helpers from outside package `testing` required a `fakeTB` embedding `testing.TB`'s interface to capture `Fatalf` without halting the real test, since `testing.TB` seals itself with an unexported method no external type can implement directly.
+6. A mid-implementation regression was caught by re-running the full test group after each change: AI-22.2's summary-table addition silently dropped the sequence number R-STK-003 already required, and a subsequent fix to that same regression itself broke the exhaustiveness test's detection heuristic — both caught only by actually re-executing prior tests, not by inspection.
+7. AI-22's actual changed-line total (2 537: 1 791 code + 746 openspec) combined with AI-21's verified actual (2 810) reaches 5 347 — already past the wave's 5 000-line ceiling before AI-23 (9 leaves) is even planned, flagged explicitly for the orchestrator's next PR-boundary decision.
