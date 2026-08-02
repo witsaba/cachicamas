@@ -137,25 +137,31 @@ AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave
 **Spec:** `R-STK-005`, `R-STK-006`. **Design:** D3 (honors design D10 from AI-21).
 **Depends on:** AI-22.1 (`Recording`); `ai.CheckStream` (AI-14.4, read-only).
 
-- [ ] **Item 1** (`R-STK-005`) — Ordering is delegated to `ai.CheckStream`, never reimplemented.
-  - [ ] 1.1 RED: a recording carrying a terminal event followed by a text delta; confirm the failure carries `ai.CheckStream`'s own verdict, unmodified. `S-STK-013`.
-  - [ ] 1.2 RED: a well-formed recording; confirm the assertion passes and reports no violation. `S-STK-014`.
-  - [ ] 1.3 GREEN: implement `RequireValidStream(tb testing.TB, rec Recording)` calling `ai.CheckStream` first, per design D3. Confirm 1.1–1.2 pass.
-  - [ ] 1.4 Inspection *(not an automated RED/GREEN, `S-STK-015`)*: confirm at leaf close that no kind/block/terminal ordering rule is reimplemented in this file — grep for any local re-derivation of `ai.CheckStream`'s logic; record the confirmation here.
+- [x] **Item 1** (`R-STK-005`) — Ordering is delegated to `ai.CheckStream`, never reimplemented.
+  - [x] 1.1 RED: a recording carrying a terminal event followed by a text delta; confirm the failure carries `ai.CheckStream`'s own verdict, unmodified. `S-STK-013`.
+  - [x] 1.2 RED: a well-formed recording; confirm the assertion passes and reports no violation. `S-STK-014`.
+    - RED output (1.1–1.2): `go test -race -run 'TestRequireValidStream' -v ./src/agenttest/...` → `src/agenttest/stream_kit_ordering_test.go:58:12: undefined: agenttest.RequireValidStream` (× 2 call sites) → `FAIL [build failed]`.
+  - [x] 1.3 GREEN: implement `RequireValidStream(tb testing.TB, rec Recording)` calling `ai.CheckStream` first, per design D3. Confirm 1.1–1.2 pass. GREEN output: implemented calling only `ai.CheckStream` (not yet `CheckContiguity`, which doesn't exist until item 2 — genuinely separable since 1.2's fixture is also contiguous) → `go test -race -run 'TestRequireValidStream' -v ./src/agenttest/...` → `--- PASS: TestRequireValidStream_TerminalFollowedByDelta_CarriesCheckStreamsOwnVerdictUnmodified`, `--- PASS: TestRequireValidStream_WellFormedRecording_Passes`, `PASS`. S-STK-013's own assertion computes the expected message by calling `ai.CheckStream` directly in the test and checking the Fatalf output contains that exact `.Violation().Error()` string — not a hardcoded golden — so it stays correct across a future descriptor change, per design's own stated reason for delegating.
+  - [x] 1.4 Inspection *(not an automated RED/GREEN, `S-STK-015`)*: confirm at leaf close that no kind/block/terminal ordering rule is reimplemented in this file — grep for any local re-derivation of `ai.CheckStream`'s logic; record the confirmation here. Confirmed: `grep -n "BlockRole\|Terminal\|Cardinality\|checkBlockOrdering" src/agenttest/stream_kit_ordering.go` → no matches. `RequireValidStream` only calls `ai.CheckStream`; it never inspects `BlockRole`/`Cardinality`/terminal flags itself.
 
-- [ ] **Item 2** (`R-STK-006`) — Sequence contiguity is asserted; a gap is named precisely.
-  - [ ] 2.1 RED: a recording sequenced 1, 2, 3, 4; confirm the specific expected failure (`undefined: CheckContiguity`). `S-STK-016`.
-  - [ ] 2.2 RED: a recording sequenced 1, 2, 4; confirm the failure names missing sequence 3 and the two neighbouring events (indices + sequence values 2 and 4). `S-STK-017`.
-  - [ ] 2.3 RED: a recording whose first event carries sequence 2; confirm the failure names the start-at-1 violation, not a mid-stream gap. `S-STK-018`.
-  - [ ] 2.4 RED: a recording sequenced 1, 2, 2; confirm the failure names the repeated sequence and its index. `S-STK-019`.
-  - [ ] 2.5 GREEN: implement `CheckContiguity(events []ai.Event) error` per design D3 (walk encounter order, assert seq 1 then `prev+1`). Confirm 2.1–2.4 pass; confirm `RequireValidStream` runs `CheckContiguity` after `ai.CheckStream`.
-  - [ ] 2.6 REFACTOR: confirm the gap/start/repeat failure messages share one formatting helper.
+- [x] **Item 2** (`R-STK-006`) — Sequence contiguity is asserted; a gap is named precisely.
+  - [x] 2.1 RED: a recording sequenced 1, 2, 3, 4; confirm the specific expected failure (`undefined: CheckContiguity`). `S-STK-016`.
+  - [x] 2.2 RED: a recording sequenced 1, 2, 4; confirm the failure names missing sequence 3 and the two neighbouring events (indices + sequence values 2 and 4). `S-STK-017`.
+  - [x] 2.3 RED: a recording whose first event carries sequence 2; confirm the failure names the start-at-1 violation, not a mid-stream gap. `S-STK-018`.
+  - [x] 2.4 RED: a recording sequenced 1, 2, 2; confirm the failure names the repeated sequence and its index. `S-STK-019`.
+    - RED output (2.1–2.4, written and run together): `go test -race -run 'TestCheckContiguity' -v ./src/agenttest/...` → `src/agenttest/stream_kit_ordering_test.go:123:22: undefined: agenttest.CheckContiguity` (× 4 call sites) → `FAIL [build failed]`. Fixture note: since `CheckContiguity` reads only `.Sequence()`, all four tests reuse one shared `stampSequences(t, seqs []int)` helper — a fresh, independent `ai.Stamper` per requested value (called N times, keeping only the last result) — since a single shared `Stamper` can only ever count upward and cannot produce the deliberately-invalid gap/repeat/decrease sequences these scenarios need.
+  - [x] 2.5 GREEN: implement `CheckContiguity(events []ai.Event) error` per design D3 (walk encounter order, assert seq 1 then `prev+1`). Confirm 2.1–2.4 pass; confirm `RequireValidStream` runs `CheckContiguity` after `ai.CheckStream`. GREEN output: `go test -race -run 'TestCheckContiguity|TestRequireValidStream' -v ./src/agenttest/...` → all 6 tests `--- PASS` (no regression on item 1's `WellFormedRecording` test this time — its fixture's sequences 1,2,3 are contiguous by design, planned ahead after AI-22.2's regression lesson), `PASS`, `ok github.com/cachicamas/backend/agent/src/agenttest 1.335s`. `RequireValidStream` now calls `ai.CheckStream` then `CheckContiguity(events)`, each producing its own `tb.Fatalf` citing its own requirement (`R-STK-005`/`R-STK-006`).
+  - [x] 2.6 REFACTOR: confirm the gap/start/repeat failure messages share one formatting helper. Extracted `contiguityErrorf(format string, args ...any) error` (prefix + `(R-STK-006)` suffix) up front, alongside the GREEN implementation — all three violation branches (start-at-1, repeat/decrease, gap) call it; no near-duplicate formatting exists. Re-ran → still `PASS`.
 
-- [ ] **Item 3** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
-  - [ ] 3.1 RED: `CheckContiguity` and `RequireValidStream` against an empty recording and a one-element recording; confirm no panic and an attributable result (empty = valid; single element must start at 1). `S-STK-044` (partial).
-  - [ ] 3.2 GREEN: guard the empty/len-1 cases explicitly. Confirm 3.1 passes.
+- [x] **Item 3** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
+  - [x] 3.1 RED: `CheckContiguity` and `RequireValidStream` against an empty recording and a one-element recording; confirm no panic and an attributable result (empty = valid; single element must start at 1). `S-STK-044` (partial). RED/GREEN output: `go test -race -run 'TestCheckContiguityAndRequireValidStream_ExtremeInputs' -v ./src/agenttest/...` → **all 4 subtests PASS immediately** (`CheckContiguity` empty/nil valid, single-element seq=1 valid, single-element seq=5 fails attributably naming `event[0]`, `RequireValidStream` empty recording valid) — honestly recorded: the range loop over `events` is a no-op for length 0, and the `i==0` branch never accesses `events[i-1]`, so both were already panic-safe by construction.
+  - [x] 3.2 GREEN: guard the empty/len-1 cases explicitly. Confirm 3.1 passes. Confirmed: no guard needed, matches 3.1's finding.
 
-- [ ] **AI-22.3 close:** record green `make test` and clean `make lint`; confirm both exported functions cite `R-STK-005`/`R-STK-006`; commit `feat(agenttest): delegate ordering, assert new contiguity (AI-22.3)`.
+- [x] **AI-22.3 close:** record green `make test` and clean `make lint`; confirm both exported functions cite `R-STK-005`/`R-STK-006`; commit `feat(agenttest): delegate ordering, assert new contiguity (AI-22.3)`.
+  - `make test`: `ok github.com/cachicamas/backend/agent/src/agenttest 1.427s`, `ok github.com/cachicamas/backend/agent/src/ai (cached)`.
+  - `make lint`: `0 issues.`
+  - Doc comments: `RequireValidStream` cites both `(R-STK-005)`/`(R-STK-006)`; `CheckContiguity` cites `(R-STK-006)`. Confirmed.
+  - Commit: `feat(agenttest): delegate ordering, assert new contiguity (AI-22.3)`.
 
 ---
 
