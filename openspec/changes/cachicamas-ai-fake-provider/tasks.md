@@ -109,15 +109,15 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 
 ## Phase 7 — AI-21.7 Scripted reasoning (`fake_reasoning_test.go`)
 
-- [ ] 7.1 RED — S-038–039 (R-AFP-016): reasoning deltas + terminal round-trip token drain byte-exact, including non-text-valid bytes surviving unchanged. RED output:
-- [ ] 7.2 GREEN — confirm Phase 1's generic `Emit`/`Stream()` carries reasoning events untouched; extend only if a gap surfaces. GREEN output:
-- [ ] 7.3 REFACTOR — note:
-- [ ] 7.4 RED — S-040–042 (R-AFP-017): redacted block (no visible fragment) and signature-only block scriptable and drainable; a visible fragment inside a redacted block fails loudly, naming the violation. RED output:
-- [ ] 7.5 GREEN — confirm/extend as in 7.2; rely on `ai` constructors' own shape validation. GREEN output:
-- [ ] 7.6 REFACTOR — note:
-- [ ] 7.7 RED — S-043–044 (R-AFP-018): a stream mixing reasoning and text deltas — no reasoning fragment/token in collected text events, and no text fragment in collected reasoning events. RED output:
-- [ ] 7.8 GREEN — confirm the type-level wall (distinct `ai` event types) holds; extend only if a gap surfaces. GREEN output:
-- [ ] 7.9 REFACTOR — note:
+- [x] 7.1 RED — S-038–039 (R-AFP-016): reasoning deltas + terminal round-trip token drain byte-exact, including non-text-valid bytes surviving unchanged. RED output: `go test -race -run 'TestProvider_ScriptedReasoning|TestProvider_MixedReasoningAndText' -v ./...` → `TestProvider_ScriptedReasoning_DeltasAndRoundTripToken_ByteExact` **PASS immediately**, including a token of invalid-UTF-8 bytes (`{0xff,0xfe,'a',0x00,'b'}`) surviving byte-exact — no gap.
+- [x] 7.2 GREEN — confirm Phase 1's generic `Emit`/`Stream()` carries reasoning events untouched; extend only if a gap surfaces. GREEN output: no extension needed.
+- [x] 7.3 REFACTOR — note: none.
+- [x] 7.4 RED — S-040–042 (R-AFP-017): redacted block (no visible fragment) and signature-only block scriptable and drainable; a visible fragment inside a redacted block fails loudly, naming the violation. RED output: `TestProvider_ScriptedReasoning_RedactedAndSignatureOnlyShapes` (3 subtests) **PASS immediately** — the misplaced-fragment case is caught by `ai.NewReasoningDelta`'s own construction-time `ErrMisplaced` rule before a test can even build the `Step`, exactly matching design's "events come from ai constructors, already validated" decision; no fake-side check needed or added.
+- [x] 7.5 GREEN — confirm/extend as in 7.2; rely on `ai` constructors' own shape validation. GREEN output: no extension needed.
+- [x] 7.6 REFACTOR — note: none.
+- [x] 7.7 RED — S-043–044 (R-AFP-018): a stream mixing reasoning and text deltas — no reasoning fragment/token in collected text events, and no text fragment in collected reasoning events. RED output: `TestProvider_MixedReasoningAndText_NeverCrossesIntoTheOtherEventKind` **PASS immediately** — no gap; distinct marker strings (`REASONING_ONLY_FRAGMENT`/`TEXT_ONLY_FRAGMENT`) confirmed absent from the wrong-kind event's own accessors.
+- [x] 7.8 GREEN — confirm the type-level wall (distinct `ai` event types) holds; extend only if a gap surfaces. GREEN output: no extension needed — the wall is structural (a payload type assertion cannot succeed across kinds).
+- [x] 7.9 REFACTOR — note: none; `go vet ./...` clean, full suite green.
 
 ## Phase 8 — AI-21.8 Sequential-call scripting, exhaustion, totality (`fake_queue_test.go`)
 
