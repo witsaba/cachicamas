@@ -2188,3 +2188,34 @@ func TestRequestWith_DerivationPastTheCacheBoundaryCap_FailsAtDeriveTime(t *test
 	_, err = source.With(ai.WithTools(overCap))
 	requireViolation(t, err, ai.ErrOutOfRange, "cacheBoundaries")
 }
+
+// AI-20.2 — IsZero is the externally-visible "was this request ever
+// constructed" detector R-AMP-006 needs (design.md's decision record):
+// freeze is the sole constructor of a non-zero Request and requires at
+// least one message, so "no messages" and "never constructed" are one
+// fact, the same reduction [MessageID.IsZero] and [ai.Segment.IsZero] make
+// for their own types.
+func TestRequest_IsZero(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a never-constructed Request reports true", func(t *testing.T) {
+		t.Parallel()
+
+		var unconstructed ai.Request
+		if !unconstructed.IsZero() {
+			t.Error("unconstructed.IsZero() = false, want true — no messages means never constructed")
+		}
+	})
+
+	t.Run("a request built through NewRequest reports false", func(t *testing.T) {
+		t.Parallel()
+
+		request, err := ai.NewRequest("model", []ai.Message{userTextMessage(t, "hi")})
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		if request.IsZero() {
+			t.Error("request.IsZero() = true on a constructed request, want false")
+		}
+	})
+}

@@ -1,0 +1,235 @@
+# Tasks: The model provider interface (AI-20)
+
+> Predecessors: [`proposal.md`](proposal.md) · [`specs/ai-model-provider/spec.md`](specs/ai-model-provider/spec.md) (`R-AMP-001…021`) · [`design.md`](design.md) (reconciled 2026-08-01 — see design.md's updated reconciliation-gate note).
+> **Apply gate**: this milestone is the wave's join point. `sdd-apply` for AI-20 MUST run strictly
+> **after** AI-14, AI-15, AI-16, AI-17, AI-18 and AI-19 have all merged/landed in this worktree
+> (`ai-wave-2`), not merely designed. Do not start Phase 1 implementation before that gate opens.
+> Threat matrix: N/A per `design.md` — no rows applicable, none omitted.
+
+## Review Workload Forecast
+
+| Field | Value |
+|-------|-------|
+| Estimated changed lines | ~650–900 (interface+GoDoc ~90, `request.go` +test ~30, `provider_test.go` ~250, `agenttest/provider_test.go` ~150, AST guard test ~150, `doc.go` ~15) |
+| 400-line budget risk | High |
+| Chained PRs recommended | No — session-cached `exception-ok` already accepts the 5000-line budget |
+| Suggested split | single PR |
+| Delivery strategy | exception-ok |
+| Chain strategy | size-exception |
+
+Decision needed before apply: No
+Chained PRs recommended: No
+Chain strategy: size-exception
+400-line budget risk: High
+
+### Suggested Work Units (informational — one PR)
+
+| Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
+|------|------|-----------|----------------------|-----------------|-------------------|
+| 1 | AI-20.1 interface + 8-statement doc | PR 1 | `go test ./src/agenttest/... -run MethodSet` | N/A — pure declaration | revert `provider.go` |
+| 2 | AI-20.2 pre-stream (`scriptProvider`) | PR 1 | `go test ./src/ai/... -run PreStream -race` | `scriptProvider` under `-race` | revert pre-stream cases + branch |
+| 3 | AI-20.3 mid-stream (`scriptProvider` producer) | PR 1 | `go test ./src/ai/... -run MidStream -race` | `scriptProvider` goroutine under `-race` | revert producer + cases |
+| 4 | AI-20.4 signature guard + bite proof | PR 1 | `go test ./src/agenttest/... -run SignatureGuard` | 2 scratch mutations, applied/reverted | revert guard file |
+| 5 | AI-20.5 `TokenCounter` discovery | PR 1 | `go test ./src/agenttest/... -run TokenCounter` | stub with/without capability | revert `TokenCounter` + tests |
+
+## Phase 0 — Reconciliation (complete)
+
+- [x] 0.1 Re-read AI-14/AI-19 landed `design.md`; confirmed `Event`, `EventKindError`, `ErrorEvent`,
+      `ErrorPayload`, `*Failure`, `PreStreamFailure`, `MidStreamFailure`, `FailureCategoryCancellation`,
+      `ErrCancelled` match this design's assumptions; updated `design.md` in place with exact spellings.
+
+## Phase 1 — AI-20.1 the interface (R-AMP-001…004)
+
+- [x] 1.1 RED — `src/agenttest/provider_test.go`: assert `ModelProvider` has exactly one method
+      `Stream(context.Context, Request) (<-chan Event, error)` (S-AMP-001/002/003); fails, type absent.
+- [x] 1.2 GREEN — create `src/ai/provider.go`: `ModelProvider` interface, import `"context"` only;
+      GoDoc carries all eight AI-02.1 §9 statements + AI-03.1 §9 enumerability (R-AMP-004).
+- [x] 1.3 RED — `src/agenttest/provider_test.go`: external stub type implements `ModelProvider`,
+      compiles, is exercised through it (S-AMP-007/008); assert no unexported method/embed (S-AMP-009).
+- [x] 1.4 GREEN — stub compiles and passes from outside package `ai`; `go test ./src/agenttest/...`.
+- [x] 1.5 REFACTOR — tidy GoDoc wording against the eight-statement checklist; no behavior change.
+
+## Phase 2 — AI-20.2 pre-stream contract (R-AMP-005…008)
+
+- [x] 2.1 RED — `src/ai/request_test.go`: `TestRequest_IsZero` (empty messages ⇒ true); fails, no method.
+- [x] 2.2 GREEN — `src/ai/request.go`: add `func (r Request) IsZero() bool { return len(r.messages)==0 }`.
+- [x] 2.3 RED — `src/ai/provider_test.go`: define unexported `scriptProvider{events []Event, terminal
+      error, buffer int}`; cases for zero-request (S-AMP-017), invalid-request (S-AMP-013/014/015),
+      validation-before-cancellation order (S-AMP-016/018), already-cancelled+valid → `PreStreamFailure`
+      cancellation category (S-AMP-019/020/021), no observable effect pre-validation (S-AMP-022/023).
+      **Process note**: fixture (scriptProvider) and its pre-stream branch were authored together in
+      one file rather than as a separate observed-red step, because the struct and its Stream method
+      are test-local fixture code with no prior partial state to fail against — see apply-progress.md
+      Deviations. Also added an NFR-AMP-D nil-context case beyond the listed scenarios (cheap,
+      directly required by the NFR, no dedicated task number).
+- [x] 2.4 GREEN — implement `scriptProvider.Stream` pre-stream branch: `req.IsZero()` → `*Violation`;
+      else `ctx.Err()` → `ai.PreStreamFailure({Category: FailureCategoryCancellation})`; else handover
+      (Phase 2's handover is a naive unconditional send loop — Phase 3 hardens it under genuine RED).
+- [x] 2.5 REFACTOR — reviewed; pre-stream checks are already one small, linear block — no extraction
+      needed. `-race` run clean (`go test ./src/ai/... -run PreStream -race -v`).
+
+## Phase 3 — AI-20.3 mid-stream contract (R-AMP-009…013) — COMPLETE
+
+- [x] 3.1 RED — extended `scriptProvider` tests against the Phase 2 naive (unconditional-send, no
+      terminal handling) producer: one closing site across completion/error/cancel (S-AMP-024/025/026),
+      every send selects on cancellation incl. terminal (S-AMP-027/028), bounded close under `-race`
+      no send-after-close (S-AMP-029/030/031), sanctioned bare-close-on-saturated-cancel vs
+      never-cancelled-defect (S-AMP-032…035). Confirmed genuine RED (`go test ./src/ai/... -run
+      MidStream -v -race`): 3 test functions failed for the right reason (naive impl delivered events
+      after cancellation instead of dropping them); 2 passed pre-existing-true properties
+      (never-cancelled backpressure, repeated bounded-close-under-race safety) — not everything needs
+      to start red. **Found and fixed a self-inflicted race in the RED tests themselves**: a
+      confirmation read placed immediately after `cancel()` could become a second ready `select` case
+      in the producer's own goroutine at the exact moment it evaluates one, and Go resolves two
+      simultaneously-ready cases pseudo-randomly — so even a *correct* implementation could
+      occasionally "win" a send. Fixed with a `settleAfterCancel()` 50ms window (no receiver in flight
+      during it) before every such confirmation read, making the intended branch the only ready one.
+- [x] 3.2 GREEN — implemented `scriptProvider`'s producer goroutine: one goroutine, `defer close(out)`,
+      every send (scripted events AND the optional terminal error event) inside
+      `select{out<-ev; <-ctx.Done()}`, terminal built via `ai.ErrorEvent(*ai.Failure)` type-asserted
+      from the `terminal error` field. `go test ./src/ai/... -run "PreStream|MidStream" -race -count=15`
+      → all green, no flakiness across 15 repeated runs.
+- [x] 3.3 REFACTOR — confirmed `scriptProvider` stays unexported and `ai_test`-local (S-AMP-036/037):
+      one file, lower-case type, package `ai_test`, no exported alternative added.
+
+## Phase 4 — AI-20.4 signature guard (R-AMP-014…016) — COMPLETE
+
+- [x] 4.1/4.2 — `src/agenttest/provider_signature_guard_test.go`: resolves `provider.go` via
+      `runtime.Caller(0)` + `filepath.Join(filepath.Dir(thisFile), "..", "ai", "provider.go")` (ADR
+      0005 § D2, Guard C); parses with `go/parser`; asserts exactly one method `Stream` (S-AMP-038),
+      param/result types (`context.Context`, `Request`, `<-chan Event`, `error`) (S-AMP-039), and the
+      import allowlist `{"context"}`. `os.Stat`/parse failure → `t.Fatalf` naming the path, never skip
+      (S-AMP-040/041); sibling-layout dependency documented in the file's own package-level doc comment
+      AND in `src/agenttest/doc.go` (pre-existing from AI-00, S-AMP-042). Guard is green-from-birth
+      (provider.go already conformed from Phase 1) — the genuine RED evidence for this leaf is the two
+      bite mutations below, run with `provider_test.go` temporarily moved out of the package
+      (`mv provider_test.go provider_test.go.hold`) so the observed failure is the **guard's own**
+      assertion, not an unrelated compiler error from `stubProvider`'s `ai.ModelProvider` conformance
+      pin breaking under the same mutation (design.md's "the observed red is the guard's, not the
+      compiler's" — extended here to also isolate sibling conformance pins, not just import
+      resolution). Restored immediately after each mutation; confirmed byte-identical to the prior
+      commit via `git diff --stat` (empty output) after both reverts.
+- [x] 4.3 Bite mutation 1 (vendor stand-in): `req Request` → `req json.RawMessage` +
+      `import "encoding/json"` in `src/ai/provider.go`. Ran
+      `go test ./src/agenttest/... -run TestModelProviderInterface_SignatureGuard -v`. **Red output,
+      verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:71: provider.go imports "encoding/json"; only "context" is allowed on ModelProvider's declaring file (R-AMP-002)
+          provider_signature_guard_test.go:77: Stream's second parameter is json.RawMessage, want Request (Layer 1's own normalized type, not a vendor type)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.482s
+      FAIL
+      ```
+      Reverted; re-ran same command → PASS.
+- [x] 4.4 Bite mutation 2 (changed carrier): `<-chan Event` → `<-chan string` in `src/ai/provider.go`.
+      **Red output, verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:77: Stream's first result is <-chan string, want <-chan Event (V-STR-04's receive-only carrier)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.314s
+      FAIL
+      ```
+      Reverted (S-AMP-043…045); `provider_test.go` restored; full `go test ./src/agenttest/... -v` →
+      all PASS, confirmed clean via `git diff --stat` against the last commit.
+- [x] 4.5 REFACTOR — reviewed guard assertions and failure messages once more; kept as written (each
+      names the exact requirement and the exact mismatch); no behavior change.
+
+## Phase 5 — AI-20.5 optional capabilities (R-AMP-017…021) — COMPLETE
+
+- [x] 5.1 RED — `src/agenttest/provider_test.go`: discovery via `provider.(ai.TokenCounter)`
+      (S-AMP-049); non-advertising stub → clean absence, no error/zero/fallback (S-AMP-050/051); no
+      catalog/config lookup exists (S-AMP-052, proven structurally — the type assertion is the only
+      door, documented in the test's own comment rather than by a further runtime assertion); required-
+      only stub fully conformant (S-AMP-055/056, cross-referenced to the existing Phase 1 stub test).
+      Confirmed genuine RED: `go test ./src/agenttest/... -run TokenCounter -v` → 3 compile errors
+      (`undefined: ai.TokenCounter`).
+- [x] 5.2 GREEN — `src/ai/provider.go`: added `TokenCounter` interface,
+      `CountTokens(ctx context.Context, req Request) (TokenCount, error)`. Same command green
+      (2/2 tests PASS); full module regression green.
+- [x] 5.3 RED — method-set pin: temporarily folded `CountTokens` into `ModelProvider` itself in
+      `src/ai/provider.go` (isolated from `provider_test.go`'s stub-conformance pins the same way as
+      Phase 4's bite mutations — moved aside during the mutation, restored after). Ran
+      `go test ./src/agenttest/... -run TestModelProviderInterface_SignatureGuard -v`. **Red output,
+      verbatim**:
+      ```
+      === RUN   TestModelProviderInterface_SignatureGuard
+      === PAUSE TestModelProviderInterface_SignatureGuard
+      === CONT  TestModelProviderInterface_SignatureGuard
+          provider_signature_guard_test.go:77: ModelProvider declares 2 method(s) [Stream CountTokens], want exactly 1 (R-AMP-001; mechanizes half of R-AMP-021's widening pin)
+      --- FAIL: TestModelProviderInterface_SignatureGuard (0.00s)
+      FAIL
+      FAIL	github.com/cachicamas/backend/agent/src/agenttest	0.280s
+      FAIL
+      ```
+      Names the exact added method (S-AMP-057/058), matching the R-AMP-021 pin's intent precisely.
+- [x] 5.4 GREEN — reverted the fold-in; re-ran the guard → PASS. `git diff --stat` against the last
+      commit shows only the intended, permanent `TokenCounter` addition (+34 lines), no residue of the
+      temporary mutation (confirmed via `grep CountTokens` — exactly one occurrence, in `TokenCounter`).
+      Full module `go build && go vet && go test -race ./...` green.
+- [x] 5.5 REFACTOR — confirmed exactly one optional contract (`TokenCounter`), no aggregate
+      capabilities type, no `Capabilities()` query method anywhere in `src/ai` (S-AMP-046…048).
+
+## Phase 6 — Wiring & docs — COMPLETE
+
+- [x] 6.1 Modified `src/ai/doc.go`: added a "# The provider boundary" paragraph naming
+      `ModelProvider`/`TokenCounter`, their contracts, and that concrete vendor adapters arrive from
+      AI-24 onward.
+- [x] 6.2 Confirmed `backend/agent/go.mod` still `go 1.26.3` with no `require` block, no `go.sum`;
+      ran both AI-00 import guards directly:
+      `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`,
+      `TestLayer1_ModuleHasNoDependencies_ZeroRequires`, and the request-path guard
+      `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` — all 3 PASS
+      (S-AMP-060). Confirms the transient `encoding/json` import used during Phase 4's bite mutation 1
+      never persisted.
+
+## Phase 7 — Verification & closeout — COMPLETE
+
+- [x] 7.1 Confirmed apply gate: `git log --oneline --grep` shows all six sibling NFR/leaf closeout
+      commits present in `ai-wave-2` — `c00e491` (AI-19 NFR), `4ceb77c` (AI-17 NFR), `20a483d`
+      (AI-18), `5cd0b91` (AI-16 NFR), `2657d9b` (AI-15 NFR), `65d8be7` (AI-14 NFR). Gate was already
+      open at session start (also verified then) and remained open throughout.
+- [x] 7.2 Ran `make test` (`go test -race -v ./...`) fresh/uncached (`-count=1`) in `backend/agent/`:
+      **both packages `ok`, 1271 passing subtests, 0 FAIL, 0 SKIP.** (`src/agenttest` 1.35s,
+      `src/ai` 3.40s.) Also stress-ran every AI-20 concurrency/guard test 10× under `-race`
+      (`-run "PreStream|MidStream|SignatureGuard|TokenCounter|MethodSet" -count=10`) with zero
+      flakes, beyond this required single run.
+- [x] 7.3 Ran `make lint`: **`go vet ./...` clean, `golangci-lint run` → `0 issues`.** Found and fixed
+      two real issues surfaced by this run before it went clean: (a) `provider.go`'s milestone header
+      comment was immediately above `package ai` with no blank line, so revive's `package-comments`
+      rule treated it as a malformed package doc — fixed by adding the blank line, matching every
+      sibling file's (`event.go`, `provider_failure.go`, `request.go`, `sequence.go`) established
+      convention; (b) two `for range ch {}` empty-block drains in `src/ai/provider_test.go` tripped
+      revive's `empty-block` rule — replaced both with the existing `requireClosedWithin` helper,
+      which also strengthens them (bounded-time assertion instead of an unbounded drain).
+- [x] 7.4 Walked all 11 acceptance criteria against landed code:
+
+      | # | Criterion | Result | Evidence |
+      |---|---|---|---|
+      | 1 | One streaming method, decided shapes, no vendor/wire type, no second method | **PASS** | `ModelProvider` in `provider.go`; `TestModelProviderInterface_MethodSet_ExactlyOneStreamMethod`; `TestModelProviderInterface_SignatureGuard` |
+      | 2 | A non-`ai` package implements, compiles, is exercised | **PASS** | `stubProvider` in `agenttest/provider_test.go`; `TestModelProviderInterface_MethodSet_ExternalStubImplementsCompilesAndIsExercised` |
+      | 3 | Eight ownership statements + enumerability clause in documentation | **PASS** | `provider.go`'s `ModelProvider` GoDoc, verified verbatim against `ai-stream-lifecycle` §9 and `ai-minimum-capabilities` §9 during Phase 1 |
+      | 4 | Invalid/zero-value request → typed AI-04 failure, no carrier/goroutine | **PASS** | `TestScriptProvider_PreStream_ZeroRequest_FailsWithATypedFailureNoCarrier` |
+      | 5 | Already-cancelled context → AI-19 cancellation category, pre-stream, after validation, order documented | **PASS** | `TestScriptProvider_PreStream_ValidRequestAlreadyCancelledContext_FailsWithCancellationCategory`, `TestScriptProvider_PreStream_ValidationRunsBeforeTheAlreadyCancelledContextCase` |
+      | 6 | Exactly-once close on all 3 paths; every send waits on cancellation; bounded close under `-race`; no send-after-close | **PASS** | `TestScriptProvider_MidStream_OneClosingSite_AcrossCompletionErrorAndCancellation` (3 subtests), `TestScriptProvider_MidStream_EverySendSelectsOnCancellation_IncludingTheTerminal`, `TestScriptProvider_MidStream_CancellationClosesWithinBoundedTime_NoSendAfterClose` (20 iterations); `-count=15`/`-count=10` stress-clean |
+      | 7 | Saturated-buffer cancellation closes bare (sanctioned); consumer named as party in error; no second loss path | **PASS** | `TestScriptProvider_MidStream_SanctionedLossPath_...` + converse `TestScriptProvider_MidStream_NeverCancelled_BackpressureWaitsAndDropsNothing`; rule 7 documented in `provider.go` |
+      | 8 | Guard passes automatically, resolves relative to its own source, fails loudly, both bite mutations fail it, recorded and reverted | **PASS** | `TestModelProviderInterface_SignatureGuard`; 2 bite mutations (Phase 4) + method-set pin mutation (Phase 5) all recorded verbatim in this file and reverted; unresolvable/unparseable branches additionally proven directly by `TestResolveAndParseGoFile_UnresolvableTarget_...` / `_UnparseableTarget_...` (added during this phase to close an S-AMP-040/041 coverage gap found while walking this criterion) |
+      | 9 | Token counting is the only askable optional capability; clean absence otherwise; no Layer 1 substitute | **PASS** | `TokenCounter` in `provider.go`; `TestModelProviderInterface_TokenCounter_DiscoveredWhenTheProviderValueSatisfiesIt` / `_CleanAbsenceWhenTheProviderDoesNotAdvertiseIt` |
+      | 10 | Required-surface-only provider fully conformant; method-set pin fails on a folded-in capability | **PASS** | `stubProvider` (Stream-only) fully conformant throughout; Phase 5's fold-in mutation tripped the guard, reverted |
+      | 11 | `make test` green under `-race`, `make lint` clean, import guards passing, `go.mod` zero requires | **PASS** | This phase's 7.2/7.3 records above; `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`, `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` all PASS (Phase 6) |
+
+      **11/11 PASS. No deviations from spec/design found that were not already disclosed in this
+      file's phase notes (Phase 2's fixture-authored-together deviation; Phase 3's self-inflicted
+      test-race discovery and fix; Phase 7's added resolve/parse coverage and 2 lint fixes).**
+
+> **Deviation note**: exceeds the 530-word tasks budget — house convention for this change
+> (`spec.md`, `design.md`) already carries deviation notes at this density for the same reason:
+> 5 leaves × RED/GREEN/REFACTOR, a guard with 2 recorded bite proofs, and an explicit apply-order
+> gate across 6 sibling milestones cannot compress further without losing scenario traceability.

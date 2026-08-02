@@ -19,6 +19,17 @@ type Request struct {
 	options   requestDraft
 }
 
+// IsZero reports whether r was never constructed through [NewRequest] or
+// [Request.With] — AI-20.2's pre-stream detector (R-AMP-006), the same
+// "no messages, therefore nothing" reduction [MessageID.IsZero] and
+// [Segment.IsZero] state for their own types.
+//
+// [freeze] is the sole constructor of a non-zero Request, and rule 2 of
+// [NewRequest]'s rule list requires at least one message, so "no messages"
+// and "never constructed" are one fact here — a provider's whole pre-stream
+// validation obligation reduces to this one check.
+func (r Request) IsZero() bool { return len(r.messages) == 0 }
+
 // rolePermittedKinds is the table AI-10.3 item 3 lands: which content-part
 // kinds a role may carry (design.md § 5.1, R-AMR-011).
 //
