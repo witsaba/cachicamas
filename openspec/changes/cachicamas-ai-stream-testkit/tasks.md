@@ -171,32 +171,37 @@ AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave
 **Spec:** `R-STK-007` … `R-STK-010`. **Design:** D4.
 **Depends on:** none of AI-22.1–.3 at the code level; ordered here per D-sequence.
 
-- [ ] **Item 1** (`R-STK-007`) — Opt-in, amplitude-based, never implicit.
-  - [ ] 1.1 RED: a scenario that leaks one goroutine per call, wrapped at `leakRepeats = 50`; confirm the failure names observed growth against the repeat count. `S-STK-020`.
-  - [ ] 1.2 RED: a scenario that leaks nothing, wrapped at the same repeat count; confirm it passes within tolerance. `S-STK-021`.
-  - [ ] 1.3 GREEN: implement `RequireNoGoroutineLeak(tb testing.TB, scenario func())` per design D4 (50 repeats, 50ms settle, `after <= before + leakRepeats/2`). Confirm 1.1–1.2 pass.
-  - [ ] 1.4 Inspection *(`S-STK-022`)*: confirm an existing stream test that does not call the helper is unchanged in behaviour, runtime and outcome — regression run only, no new test.
+- [x] **Item 1** (`R-STK-007`) — Opt-in, amplitude-based, never implicit.
+  - [x] 1.1 RED: a scenario that leaks one goroutine per call, wrapped at `leakRepeats = 50`; confirm the failure names observed growth against the repeat count. `S-STK-020`.
+  - [x] 1.2 RED: a scenario that leaks nothing, wrapped at the same repeat count; confirm it passes within tolerance. `S-STK-021`.
+    - RED output (1.1–1.2, written together with items 4 and 5's tests since all target the same not-yet-existing function): `go test -race -run 'TestRequireNoGoroutineLeak' -v ./src/agenttest/...` → `src/agenttest/stream_kit_leak_test.go:30:12: undefined: agenttest.RequireNoGoroutineLeak` (× 5 call sites across all of this file's tests) → `FAIL [build failed]`. Fixture note: the leaking scenario spawns a goroutine blocked on `<-done`, where `done` is closed via `t.Cleanup` — deterministic (no timing dependency) and self-releasing, so the deliberately-leaked goroutines never pollute a later test's own count.
+  - [x] 1.3 GREEN: implement `RequireNoGoroutineLeak(tb testing.TB, scenario func())` per design D4 (50 repeats, 50ms settle, `after <= before + leakRepeats/2`). Confirm 1.1–1.2 pass. GREEN output: `go test -race -run 'TestRequireNoGoroutineLeak' -v ./src/agenttest/...` → all 5 tests `--- PASS`, `PASS`, `ok github.com/cachicamas/backend/agent/src/agenttest 1.821s`. Stress-checked for flakiness (goroutine counting is inherently timing-sensitive): 5× repeated `go test -race -count=1 ./src/agenttest/...` full-package runs → all 5 `ok`, no flakes.
+  - [x] 1.4 Inspection *(`S-STK-022`)*: confirm an existing stream test that does not call the helper is unchanged in behaviour, runtime and outcome — regression run only, no new test. Confirmed via this leaf's own `go test -race ./...` full-package run (below): every pre-existing test in `src/agenttest` and `src/ai` still passes, none reference `RequireNoGoroutineLeak`.
 
-- [ ] **Item 2** (`R-STK-008`, non-negotiable) — Serial-only, and says so on its own surface.
-  - [ ] 2.1 GREEN: implement the `tb.Setenv` sentinel pin (mechanical serial-only enforcement) per design D4; write the GoDoc stating the `t.Parallel()` incompatibility and the process-wide-count reason. `S-STK-023`.
-  - [ ] 2.2 Inspection (`S-STK-024`): confirm every test this milestone adds that uses the helper does not call `t.Parallel()`.
-  - [ ] 2.3 Confirm via 1.1's math (`S-STK-025`): `leakRepeats/2 = 25` tolerance still fails a scenario leaking 1/iteration at 50 repeats — record the check, no new test needed.
+- [x] **Item 2** (`R-STK-008`, non-negotiable) — Serial-only, and says so on its own surface.
+  - [x] 2.1 GREEN: implement the `tb.Setenv` sentinel pin (mechanical serial-only enforcement) per design D4; write the GoDoc stating the `t.Parallel()` incompatibility and the process-wide-count reason. `S-STK-023`. Done: `RequireNoGoroutineLeak` calls `tb.Setenv(leakSerialOnlySentinel, "1")` before anything else; its doc comment's "Serial-only, non-negotiably (R-STK-008)" section states both the incompatibility and the process-wide-count reason in full sentences.
+  - [x] 2.2 Inspection (`S-STK-024`): confirm every test this milestone adds that uses the helper does not call `t.Parallel()`. Confirmed: `grep -n "t.Parallel()" src/agenttest/stream_kit_leak_test.go` → zero matches (the two hits are inside comments, not code) — every one of this file's 5 tests, including subtests/closures, is non-parallel.
+  - [x] 2.3 Confirm via 1.1's math (`S-STK-025`): `leakRepeats/2 = 25` tolerance still fails a scenario leaking 1/iteration at 50 repeats — record the check, no new test needed. Confirmed empirically by 1.3's own GREEN run: the leaking scenario (1 goroutine/call × 50 calls ⇒ ~50 growth) correctly exceeded the 25-tolerance band and failed (`TestRequireNoGoroutineLeak_LeakingScenario_FailsNamingObservedGrowth` — PASS means the helper correctly failed against it).
 
-- [ ] **Item 3** (`R-STK-009`, decision deliverable) — The mechanism decision is recorded, including the rejected alternative.
-  - [ ] 3.1 Write the file-header decision record in `stream_kit_leak.go`: `go.uber.org/goleak` rejected for this change (needs its own ADR per `AGENTS.md` rule 5; breaks `doc.go`'s dependency-free pin), rejection scoped and reversible. `S-STK-027`.
-  - [ ] 3.2 Inspection at close (`S-STK-026`): confirm `go.mod` is unchanged and declares no new require.
+- [x] **Item 3** (`R-STK-009`, decision deliverable) — The mechanism decision is recorded, including the rejected alternative.
+  - [x] 3.1 Write the file-header decision record in `stream_kit_leak.go`: `go.uber.org/goleak` rejected for this change (needs its own ADR per `AGENTS.md` rule 5; breaks `doc.go`'s dependency-free pin), rejection scoped and reversible. `S-STK-027`. Done — cites `openspec/AGENTS.md` rule 5 verbatim ("New top-level dependency ⇒ ADR first. Document rationale, alternatives, rollback.") and states the rejection is scoped/reversible.
+  - [x] 3.2 Inspection at close (`S-STK-026`): confirm `go.mod` is unchanged and declares no new require. Confirmed: `git diff --stat -- backend/agent/go.mod` → empty; `go.mod` still reads `module .../agent` / `go 1.26.3`, no `require` block.
 
-- [ ] **Item 4** (`R-STK-010`) — Leak assertions cover cancellation and abandoned-then-cancelled only.
-  - [ ] 4.1 RED: a stream cancelled mid-consumption, repeated under the helper; confirm no growth beyond tolerance. `S-STK-028`.
-  - [ ] 4.2 RED: a consumer that stops reading, then the caller cancels, repeated under the helper; confirm no growth beyond tolerance. `S-STK-029`.
-  - [ ] 4.3 GREEN: confirm 4.1–4.2 pass against AI-21's fake provider scripted for both paths; no new production code beyond Item 1's helper.
-  - [ ] 4.4 Doc-check (`S-STK-030`): confirm the abandoned-never-cancelled path is stated out of scope in `stream_kit_leak.go`'s header, citing `ai-stream-lifecycle` § 5's untestability reason.
+- [x] **Item 4** (`R-STK-010`) — Leak assertions cover cancellation and abandoned-then-cancelled only.
+  - [x] 4.1 RED: a stream cancelled mid-consumption, repeated under the helper; confirm no growth beyond tolerance. `S-STK-028`.
+  - [x] 4.2 RED: a consumer that stops reading, then the caller cancels, repeated under the helper; confirm no growth beyond tolerance. `S-STK-029`. (RED output shared with 1.1/1.2 above — same compile failure, same file.)
+  - [x] 4.3 GREEN: confirm 4.1–4.2 pass against AI-21's fake provider scripted for both paths; no new production code beyond Item 1's helper. Confirmed: both `TestRequireNoGoroutineLeak_CancelledMidConsumption_NoGrowthBeyondTolerance` and `TestRequireNoGoroutineLeak_AbandonedThenCancelled_NoGrowthBeyondTolerance` `--- PASS`, sharing one `abandonedCancelScenario(t, drainAfterCancel bool)` helper against `agenttest.NewProvider` — no code added to `stream_kit_leak.go` beyond item 1's GREEN.
+  - [x] 4.4 Doc-check (`S-STK-030`): confirm the abandoned-never-cancelled path is stated out of scope in `stream_kit_leak.go`'s header, citing `ai-stream-lifecycle` § 5's untestability reason. Added a "Coverage is narrowed to two paths, deliberately (R-STK-010)" header section, quoting § 5 directly ("no test proves a goroutine never exits...", "the abandoned-then-cancelled path is testable and is where the leak assertions go; the abandoned-never-cancelled path is the documented violation and gets no test pretending otherwise") — read from `openspec/specs/ai-stream-lifecycle/spec.md` § 5 directly, not paraphrased from memory.
 
-- [ ] **Item 5** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
-  - [ ] 5.1 RED: `RequireNoGoroutineLeak` given a scenario that is a true no-op closure (zero work); confirm it passes without panic. `S-STK-044` (partial).
-  - [ ] 5.2 GREEN: confirm no special-casing is needed; record the result.
+- [x] **Item 5** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
+  - [x] 5.1 RED: `RequireNoGoroutineLeak` given a scenario that is a true no-op closure (zero work); confirm it passes without panic. `S-STK-044` (partial). (RED output shared with 1.1/1.2/4.1/4.2 above.)
+  - [x] 5.2 GREEN: confirm no special-casing is needed; record the result. Confirmed: `TestRequireNoGoroutineLeak_NoOpScenario_PassesWithoutPanic` `--- PASS` with zero special-casing — `for range leakRepeats { scenario() }` against an empty closure is simply 50 no-op calls.
 
-- [ ] **AI-22.4 close:** record green `make test` and clean `make lint`; confirm the helper's doc comment cites `R-STK-007`; commit `feat(agenttest): opt-in serial-only leak detection, third-party detector rejected (AI-22.4)`.
+- [x] **AI-22.4 close:** record green `make test` and clean `make lint`; confirm the helper's doc comment cites `R-STK-007`; commit `feat(agenttest): opt-in serial-only leak detection, third-party detector rejected (AI-22.4)`.
+  - `make test`: `ok github.com/cachicamas/backend/agent/src/agenttest 1.926s`, `ok github.com/cachicamas/backend/agent/src/ai (cached)`.
+  - `make lint`: `0 issues.`
+  - Doc comment: `RequireNoGoroutineLeak`'s first paragraph cites `(R-STK-007)`. Confirmed.
+  - Commit: `feat(agenttest): opt-in serial-only leak detection, third-party detector rejected (AI-22.4)`.
 
 ---
 
