@@ -100,12 +100,12 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 
 ## Phase 6 — AI-21.6 Request capture (`fake_request_capture_test.go`)
 
-- [ ] 6.1 RED — S-033–035 (R-AFP-014): every request field readable after the call; three ordered calls yield three ordered capture entries; a pre-stream-rejected call (invalid request/cancelled ctx/exhausted queue) is absent and `Requests()[i]` ↔ script `i` correspondence holds. RED output:
-- [ ] 6.2 GREEN — implement capture-on-consumption (mutex-guarded slice, captured only for calls that pass all pre-stream checks) + `Requests()` in `fake_provider.go`. GREEN output:
-- [ ] 6.3 REFACTOR — note:
-- [ ] 6.4 RED — S-036–037 (R-AFP-015): caller mutation of its own request/slices after the call does not alter capture history; two reads of the history are independent. RED output:
-- [ ] 6.5 GREEN — implement clone-on-read for `Requests()` (`slices.Clone` per AI-10.6 accessor pattern). GREEN output:
-- [ ] 6.6 REFACTOR — note:
+- [x] 6.1 RED — S-033–035 (R-AFP-014): every request field readable after the call; three ordered calls yield three ordered capture entries; a pre-stream-rejected call (invalid request/cancelled ctx/exhausted queue) is absent and `Requests()[i]` ↔ script `i` correspondence holds. RED output: `go test -race -run 'TestProvider_Requests_' -v ./...` → all 3 tests **PASS immediately** — no gap; capture-on-consume (mutex-guarded, only for a call that pops a script) was already built in Phase 1 (task 1.2). Reused `request_test.go`'s existing `buildFullRequest`/`requireRequestsEqual` for the every-field proof.
+- [x] 6.2 GREEN — implement capture-on-consumption (mutex-guarded slice, captured only for calls that pass all pre-stream checks) + `Requests()` in `fake_provider.go`. GREEN output: no extension needed.
+- [x] 6.3 REFACTOR — note: none.
+- [x] 6.4 RED — S-036–037 (R-AFP-015): caller mutation of its own request/slices after the call does not alter capture history; two reads of the history are independent. RED output: covered by the same run — `TestProvider_Requests_LaterCallerMutation_DoesNotAlterCaptureHistory` **PASS immediately** — no gap; `Requests()`'s `slices.Clone` on the captured slice, combined with `ai.Request`'s own immutable accessors, already gives both properties for free.
+- [x] 6.5 GREEN — implement clone-on-read for `Requests()` (`slices.Clone` per AI-10.6 accessor pattern). GREEN output: no extension needed.
+- [x] 6.6 REFACTOR — note: none; `go vet ./...` clean, full suite green.
 
 ## Phase 7 — AI-21.7 Scripted reasoning (`fake_reasoning_test.go`)
 
