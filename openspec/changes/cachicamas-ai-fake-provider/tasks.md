@@ -91,12 +91,12 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 
 ## Phase 5 — AI-21.5 Cancellation fidelity (`fake_cancellation_test.go`)
 
-- [ ] 5.1 RED — S-027–029 (R-AFP-012): mid-script cancel closes within bounded time under `-race`; saturated path drops remaining events and closes bare (no terminal); no send after close. RED output:
-- [ ] 5.2 GREEN — confirm/extend Phase 1's per-send `select` on `ctx.Done()` covers the bare-close-on-saturated-cancel path. GREEN output:
-- [ ] 5.3 REFACTOR — note:
-- [ ] 5.4 RED — S-030–032 (R-AFP-013): already-cancelled ctx + valid request → typed pre-stream failure (cancellation category), no carrier, no extra goroutine under `-race`; already-cancelled ctx + zero-value request → validation failure reported, not cancellation. RED output:
-- [ ] 5.5 GREEN — confirm/order pre-stream checks in `Stream()`: `IsZero()` validation before `ctx.Err()` cancellation check (`fake_provider.go`). GREEN output:
-- [ ] 5.6 REFACTOR — note:
+- [x] 5.1 RED — S-027–029 (R-AFP-012): mid-script cancel closes within bounded time under `-race`; saturated path drops remaining events and closes bare (no terminal); no send after close. RED output: `go test -race -run 'TestProvider_MidScriptCancellation|TestProvider_PreStreamCancellation' -v -count=1 ./...` → `TestProvider_MidScriptCancellation_...` **PASS immediately**, all 20 `-race` iterations — no gap, Phase 1's per-send `select` on `ctx.Done()` already covers the bare-close-on-saturated-cancel path.
+- [x] 5.2 GREEN — confirm/extend Phase 1's per-send `select` on `ctx.Done()` covers the bare-close-on-saturated-cancel path. GREEN output: no extension needed.
+- [x] 5.3 REFACTOR — note: none.
+- [x] 5.4 RED — S-030–032 (R-AFP-013): already-cancelled ctx + valid request → typed pre-stream failure (cancellation category), no carrier, no extra goroutine under `-race`; already-cancelled ctx + zero-value request → validation failure reported, not cancellation. RED output: same command → `TestProvider_PreStreamCancellation_...`'s failure/category/delivery/validation-ordering assertions **PASS immediately** (Phase 1's pre-stream check ordering already correct); but the naive S-AFP-031 "goroutines counted immediately before and after" check was genuinely flaky (~3/3 failed) — traced to `runtime.NumGoroutine()` being unreliable in this package's own busy, heavily-`t.Parallel()` binary (sibling tests' goroutines skew a single before/after snapshot), not a fake defect; confirmed the ground-truth `ai/provider_test.go` doesn't attempt this numeric check for its own analogous scenario either.
+- [x] 5.5 GREEN — confirm/order pre-stream checks in `Stream()`: `IsZero()` validation before `ctx.Err()` cancellation check (`fake_provider.go`). GREEN output: no production code changed (ordering already correct from Phase 1). Rewrote the goroutine-count assertion as a repeated-call amplification (50 pre-stream-failing calls; a per-call leak would grow the count by ~50, background jitter does not, so a `before+25` bound catches a real leak without racing sibling tests) → 5/5 repeat full-suite runs green (`go test -race ./...`).
+- [x] 5.6 REFACTOR — note: `gofmt`/`go vet` clean.
 
 ## Phase 6 — AI-21.6 Request capture (`fake_request_capture_test.go`)
 
