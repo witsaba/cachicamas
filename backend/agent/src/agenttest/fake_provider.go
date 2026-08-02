@@ -85,9 +85,28 @@ func (p *Provider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event,
 	}
 
 	steps := stampSteps(script.Steps)
+	if report := ai.CheckStream(stepEvents(steps)); report.Violation() != nil {
+		// A script that misplaces an event — most commonly, one that
+		// follows a terminal error (R-AFP-009) — is a fixture-authoring
+		// mistake, decidable the moment the fake is driven, before any
+		// goroutine starts: this is "the fake", the same posture Emit
+		// takes for an unconstructed event (S-AFP-006, S-AFP-021).
+		panic(fmt.Sprintf("agenttest: scripted stream violates ordering: %v", report.Violation()))
+	}
+
 	out := make(chan ai.Event, script.Buffer)
 	go produce(ctx, out, steps)
 	return out, nil
+}
+
+// stepEvents extracts the ordered events a script's Emit steps carry, for
+// ai.CheckStream to validate before any goroutine starts.
+func stepEvents(steps []Step) []ai.Event {
+	events := make([]ai.Event, len(steps))
+	for i, step := range steps {
+		events[i] = step.event
+	}
+	return events
 }
 
 // consume pops the next unconsumed script under mu, capturing req exactly

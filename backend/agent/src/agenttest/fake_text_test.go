@@ -311,6 +311,21 @@ func mustTextStartEvent(t *testing.T) ai.Event {
 	return ev
 }
 
+// mustPriorOutputEvent builds a single well-formed, non-block event —
+// ai.NewResponseStart, which needs no matching end — for tests across this
+// package that need "some event preceded this one" without opening a text
+// block that ai.CheckStream would then require to be closed
+// (R-AEE-016/checkBlockOrdering's unterminated-block rule).
+func mustPriorOutputEvent(t *testing.T) ai.Event {
+	t.Helper()
+
+	ev, err := ai.NewResponseStart("resp-1", "cachicamas-neutral-model-1")
+	if err != nil {
+		t.Fatalf("ai.NewResponseStart returned %v, want no failure", err)
+	}
+	return ev
+}
+
 // AI-21.1 item 4 (R-AFP-004, S-AFP-009…011) — the fake's mid-stream physics
 // match AI-20's non-negotiably: exactly one producer goroutine and one
 // closing site reached on every exit path (normal completion, the
@@ -350,7 +365,7 @@ func TestProvider_MidStreamPhysics_OneClosingSiteAcrossCompletionErrorAndCancell
 			t.Fatalf("ai.ErrorEvent returned %v, want no failure", err)
 		}
 		script := agenttest.Script{Steps: []agenttest.Step{
-			agenttest.Emit(mustTextStartEvent(t)),
+			agenttest.Emit(mustPriorOutputEvent(t)),
 			agenttest.Emit(terminal),
 		}}
 
