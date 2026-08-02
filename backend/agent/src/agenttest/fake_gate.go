@@ -7,6 +7,7 @@
 // no sleep required to find out. Release is idempotent and unblocks it —
 // both closes are sync.Once-guarded, and one Gate belongs to one Hold step
 // (design.md's Gate decision).
+
 package agenttest
 
 import "sync"

@@ -4,6 +4,7 @@
 // Emit is the door onto a Step that sends an event; Hold is the door onto a
 // Step that blocks the producer at a Gate instead. Together they are the
 // whole vocabulary — a Step cannot express a third shape.
+
 package agenttest
 
 import "github.com/cachicamas/backend/agent/src/ai"
