@@ -357,13 +357,27 @@ func applyTokenCountingCrossCheck(record *CapabilityRecord, satisfiesTokenCounte
 // substitutability reason requireValidFactory takes it.
 func crossCheckDeclaredOptionalCapabilities(tb testing.TB, f Factory, record *CapabilityRecord) {
 	tb.Helper()
-	if f.TokenCounting == nil || !*f.TokenCounting {
+	if f.TokenCounting == nil {
+		return // requireValidFactory already failed construction for this case
+	}
+
+	if *f.TokenCounting {
+		_, satisfies := tokenCounterOf(tb, f)
+		applyTokenCountingCrossCheck(record, satisfies)
+		if !satisfies {
+			tb.Errorf("agenttest: factory declares %v offered (Factory.TokenCounting=true), but the built subject does not satisfy ai.TokenCounter — declaration/discovery contradiction (R-CNF-002, S-CNF-005)", CapTokenCounting)
+		}
 		return
 	}
-	_, satisfies := tokenCounterOf(tb, f)
-	applyTokenCountingCrossCheck(record, satisfies)
-	if !satisfies {
-		tb.Errorf("agenttest: factory declares %v offered (Factory.TokenCounting=true), but the built subject does not satisfy ai.TokenCounter — declaration/discovery contradiction (R-CNF-002, S-CNF-005)", CapTokenCounting)
+
+	// R-CNF-002's own "or the reverse": a factory declaring CAP-O-02 NOT
+	// offered whose subject nonetheless satisfies ai.TokenCounter is the
+	// same contradiction in the other direction (AI-23.8's own
+	// NFR-CNF-E item, S-CNF-066 partial) — never trusted silently into an
+	// absent entry applyDeclaredAbsences already recorded.
+	if _, satisfies := tokenCounterOf(tb, f); satisfies {
+		record.setOutcome(CapTokenCounting, OutcomeFailed)
+		tb.Errorf("agenttest: factory declares %v not offered (Factory.TokenCounting=false), but the built subject DOES satisfy ai.TokenCounter — declaration/discovery contradiction (R-CNF-002)", CapTokenCounting)
 	}
 }
 

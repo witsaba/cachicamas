@@ -48,6 +48,7 @@ package agenttest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -953,4 +954,193 @@ func TestConformanceRedaction_ExtremeSentinels_FailAttributablyNeverPanic(t *tes
 		f.Sentinel = `%s%d\n<>&"';--CANARY`
 		redactionCase(t, f)
 	})
+}
+
+// === AI-23.8 — optional-capability cases (R-CNF-014, R-CNF-015, R-CNF-016) ===
+
+// S-CNF-035, S-CNF-036, S-CNF-037 — reasoningWholeBlocksCase passes against
+// FakeFactory (which declares Reasoning offered).
+func TestConformanceCapabilities_ReasoningCase_PassesAgainstFakeFactory(t *testing.T) {
+	reasoningWholeBlocksCase(t, FakeFactory())
+}
+
+// S-CNF-038 — a factory declaring reasoning not offered records the entry
+// absent and the case's body never runs — the runner's generic
+// declared-absent mechanism (AI-23.1, already proven for CapReasoningContent
+// by TestConformanceSkeleton_NoOptionalCapabilityOffered_...), reconfirmed
+// here against this leaf's own registered case via runConformanceCases.
+func TestConformanceCapabilities_ReasoningDeclaredAbsent_SkippedRecordedAbsent(t *testing.T) {
+	f := FakeFactory()
+	*f.Reasoning = false
+
+	record := runConformanceCases(t, f, []conformanceCase{
+		{name: "reasoning/whole_blocks_never_leak_into_text", capability: CapReasoningContent, run: reasoningWholeBlocksCase},
+	})
+	entry, ok := record.Entry(CapReasoningContent)
+	if !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapReasoningContent entry = %+v (ok=%v), want Outcome=%v (S-CNF-038)", entry, ok, OutcomeAbsent)
+	}
+}
+
+// tokenCountingStubDeclining wraps a Provider, satisfies ai.TokenCounter,
+// and always declines to answer — CAP-O-02's "advertised but non-conformant"
+// shape (S-CNF-041), distinct from tokenCountingStub (AI-23.1), which
+// answers cleanly.
+type tokenCountingStubDeclining struct {
+	*Provider
+}
+
+func (tokenCountingStubDeclining) CountTokens(context.Context, ai.Request) (ai.TokenCount, error) {
+	return ai.TokenCount{}, errors.New("agenttest: token_counting stub deliberately declines to answer (test fixture)")
+}
+
+// S-CNF-039 — a subject satisfying the token-counting contract answers a
+// genuine, present count, and the case asserts it.
+func TestConformanceCapabilities_TokenCountingCase_SatisfyingSubject_PassesAndAssertsTheCount(t *testing.T) {
+	f := Factory{
+		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
+			return tokenCountingStub{Provider: NewProvider(scripts...)}
+		},
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(true),
+		CacheBoundary: boolPtr(false),
+	}
+	tokenCountingCase(t, f)
+}
+
+// S-CNF-040 — a factory declaring token counting not offered records a
+// clean absence: no error, no substituted zero, the entry is absent.
+func TestConformanceCapabilities_TokenCountingDeclaredAbsent_CleanAbsence(t *testing.T) {
+	f := FakeFactory() // TokenCounting: false, and Provider never satisfies ai.TokenCounter
+	record := runConformanceCases(t, f, []conformanceCase{
+		{name: "token_counting/asked_of_the_provider_value", capability: CapTokenCounting, run: tokenCountingCase},
+	})
+	entry, ok := record.Entry(CapTokenCounting)
+	if !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapTokenCounting entry = %+v (ok=%v), want Outcome=%v (S-CNF-040)", entry, ok, OutcomeAbsent)
+	}
+}
+
+// S-CNF-041 — a subject that satisfies the token-counting contract and then
+// declines to answer: the underlying mechanism (tokenCounterOf +
+// CountTokens) reports the error tokenCountingCase would turn into a
+// failure. Proven directly against the ingredients rather than running the
+// case with a real Fatal, for the propagation reason recorded throughout
+// this file.
+func TestConformanceCapabilities_TokenCountingDeclines_ReportsAnErrorNotAbsence(t *testing.T) {
+	f := Factory{
+		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
+			return tokenCountingStubDeclining{Provider: NewProvider(scripts...)}
+		},
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(true),
+		CacheBoundary: boolPtr(false),
+	}
+	counter, ok := tokenCounterOf(t, f)
+	if !ok {
+		t.Fatal("tokenCounterOf reports the declining stub does not satisfy ai.TokenCounter, want it to (it implements CountTokens)")
+	}
+	if _, err := counter.CountTokens(t.Context(), minimalRequest(t)); err == nil {
+		t.Error("CountTokens returned nil error for a deliberately declining stub, want an error (S-CNF-041)")
+	}
+}
+
+// NFR-CNF-E (this leaf's own item 4) — the reverse declaration/discovery
+// mismatch (declared absent, provider satisfies ai.TokenCounter): the
+// cross-check fails the entry rather than trusting the declaration
+// silently into an absent record.
+func TestConformanceCapabilities_ReverseTokenCountingMismatch_FailsEntryNeverPanics(t *testing.T) {
+	defer requireNoPanicHere(t)
+
+	f := Factory{
+		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
+			return tokenCountingStub{Provider: NewProvider(scripts...)} // satisfies ai.TokenCounter
+		},
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(false), // declared NOT offered — the reverse contradiction
+		CacheBoundary: boolPtr(false),
+	}
+	record := newCapabilityRecord(t.Name())
+	probe := &probeTB{}
+	crossCheckDeclaredOptionalCapabilities(probe, f, &record)
+
+	if !probe.failed {
+		t.Error("probe.failed = false, want true (reverse declaration/discovery contradiction, R-CNF-002)")
+	}
+	entry, ok := record.Entry(CapTokenCounting)
+	if !ok || entry.Outcome != OutcomeFailed {
+		t.Errorf("CapTokenCounting entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeFailed)
+	}
+}
+
+// S-CNF-042 (offered half) — cacheBoundaryHonoringCase passes when driven
+// against a factory declaring cache-boundary honoring offered.
+func TestConformanceCapabilities_CacheBoundaryHonoringCase_PassesWhenDeclaredOffered(t *testing.T) {
+	f := Factory{
+		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
+			return NewProvider(scripts...)
+		},
+		Reasoning:     boolPtr(false),
+		TokenCounting: boolPtr(false),
+		CacheBoundary: boolPtr(true),
+	}
+	cacheBoundaryHonoringCase(t, f)
+}
+
+// S-CNF-042 (declared-absent half) — FakeFactory declares CacheBoundary
+// not offered; the entry is absent with a reported skip, the runner's own
+// generic mechanism, reconfirmed for this leaf's registered case.
+func TestConformanceCapabilities_CacheBoundaryDeclaredAbsent_SkippedRecordedAbsent(t *testing.T) {
+	f := FakeFactory()
+	record := runConformanceCases(t, f, []conformanceCase{
+		{name: "cache_boundary/honoring_is_consumer_visible", capability: CapCacheBoundary, run: cacheBoundaryHonoringCase},
+	})
+	entry, ok := record.Entry(CapCacheBoundary)
+	if !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapCacheBoundary entry = %+v (ok=%v), want Outcome=%v (S-CNF-042)", entry, ok, OutcomeAbsent)
+	}
+}
+
+// S-CNF-043 — all seven finish reasons pass; S-CNF-046 (standing) is
+// covered by TestConformanceSkeleton_CompletionMetadataStanding_IsRequired
+// (AI-23.1) against the identical CapCompletionMetadata key this case
+// registers under (confirmed by grep below, not re-derived here).
+func TestConformanceCapabilities_FinishReasonExhaustivenessCase_PassesAgainstFakeFactory(t *testing.T) {
+	finishReasonExhaustivenessCase(t, FakeFactory())
+}
+
+// S-CNF-044 — the drift guard fires in both directions against an
+// artificially shrunk (simulating a removed value) or grown (simulating an
+// added, eighth value) hand-list. A real eighth ai.FinishReason cannot be
+// constructed — the vocabulary is closed — so this is the pure, permanent
+// proof the guard mechanism itself has teeth.
+func TestFinishReasonDriftGuardAgainst_ShrunkOrGrownList_FailsInBothDirections(t *testing.T) {
+	t.Run("shrunk (simulates a removed value)", func(t *testing.T) {
+		shrunk := handListedFinishReasons[:len(handListedFinishReasons)-1]
+		if _, matches := finishReasonDriftGuardAgainst(shrunk); matches {
+			t.Error("finishReasonDriftGuardAgainst(shrunk) reports matches=true, want false")
+		}
+	})
+
+	t.Run("grown (simulates an added, eighth value)", func(t *testing.T) {
+		grown := make([]ai.FinishReason, len(handListedFinishReasons)+1)
+		copy(grown, handListedFinishReasons)
+		grown[len(grown)-1] = ai.FinishReasonStop // any valid member repeated — only the COUNT matters to this guard
+		if _, matches := finishReasonDriftGuardAgainst(grown); matches {
+			t.Error("finishReasonDriftGuardAgainst(grown) reports matches=true, want false")
+		}
+	})
+
+	t.Run("the real hand-list still matches (companion case)", func(t *testing.T) {
+		if _, matches := finishReasonDriftGuardAgainst(handListedFinishReasons); !matches {
+			t.Error("finishReasonDriftGuardAgainst(handListedFinishReasons) reports matches=false, want true")
+		}
+	})
+}
+
+// S-CNF-045 — usageAbsentVsZeroCase passes; S-CNF-046 (standing) shares
+// TestConformanceSkeleton_CompletionMetadataStanding_IsRequired's coverage,
+// same as the finish-reason case above.
+func TestConformanceCapabilities_UsageAbsentVsZeroCase_PassesAgainstFakeFactory(t *testing.T) {
+	usageAbsentVsZeroCase(t, FakeFactory())
 }

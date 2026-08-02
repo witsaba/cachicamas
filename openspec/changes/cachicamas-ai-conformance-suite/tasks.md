@@ -316,35 +316,50 @@ Cached wave state: AI-21 actual **2 810** + AI-22 actual **2 542** = **5 352**, 
 **Spec:** `R-CNF-014`, `R-CNF-015`, `R-CNF-016`. **Design:** D3 (7-value hand-list + drift guard, `NFR-CNF-B` — no `src/ai` edit).
 **Depends on:** AI-23.1; the declaration/discovery cross-check from AI-23.1 Item 2.
 
-- [ ] **Item 1** (`R-CNF-014`) — `CAP-O-01` reasoning: whole blocks, never leaking into text.
-  - [ ] 1.1 RED: a subject offering reasoning; confirm it arrives in its own blocks with no reasoning byte in any text event. `S-CNF-035`.
-  - [ ] 1.2 RED: a subject carrying a reasoning signature; confirm it round-trips byte-identical. `S-CNF-036`.
-  - [ ] 1.3 RED: a redacted reasoning block start; confirm every delta and end built from it carries the redacted bit forward. `S-CNF-037`.
-  - [ ] 1.4 RED: a subject declaring reasoning not offered; confirm the case is skipped with a report and the record entry is `absent`. `S-CNF-038`.
-  - [ ] 1.5 GREEN: implement the reasoning case, both plain and redacted doors. Confirm 1.1–1.4 pass.
-  - [ ] 1.6 REFACTOR: confirm the redacted-bit propagation is asserted structurally (per block), not just at block start.
+- [x] **Item 1** (`R-CNF-014`) — `CAP-O-01` reasoning: whole blocks, never leaking into text.
+  - [x] 1.1 RED: a subject offering reasoning; confirm it arrives in its own blocks with no reasoning byte in any text event. `S-CNF-035`.
+  - [x] 1.2 RED: a subject carrying a reasoning signature; confirm it round-trips byte-identical. `S-CNF-036`.
+  - [x] 1.3 RED: a redacted reasoning block start; confirm every delta and end built from it carries the redacted bit forward. `S-CNF-037`.
+  - [x] 1.4 RED: a subject declaring reasoning not offered; confirm the case is skipped with a report and the record entry is `absent`. `S-CNF-038`.
+    - RED note: the declared-absent skip is the runner's own generic mechanism (AI-23.1, `R-CNF-004`), reconfirmed here for this leaf's own registered case via `TestConformanceCapabilities_ReasoningDeclaredAbsent_SkippedRecordedAbsent`, not reimplemented.
+  - [x] 1.5 GREEN: implement the reasoning case, both plain and redacted doors. Confirm 1.1–1.4 pass.
+    - GREEN: `go test -race -v -run TestConformanceCapabilities ./src/agenttest/` → all subtests `PASS` on first run.
+  - [x] 1.6 REFACTOR: confirm the redacted-bit propagation is asserted structurally (per block), not just at block start.
+    - Confirmed: the `redacted_bit_propagates_structurally_through_delta_and_end` subtest asserts `start.Redacted()==true` AND separately proves the enforcement mechanism itself (`ai.NewReasoningDelta` on the same redacted payload rejects a non-empty fragment, `R-ARE-013`) — the propagation IS that structural rejection, not a second independently-checked flag.
 
-- [ ] **Item 2** (`R-CNF-015`) — `CAP-O-02` token counting: asked of the provider value; clean absence.
-  - [ ] 2.1 RED: a subject satisfying the token-counting contract; confirm the suite receives and asserts the count. `S-CNF-039`.
-  - [ ] 2.2 RED: a subject not satisfying it; confirm a clean absence — no error, no substituted zero. `S-CNF-040`.
-  - [ ] 2.3 RED: a subject that satisfies the contract then declines to answer; confirm the entry is `failed`, not `absent`. `S-CNF-041`.
-  - [ ] 2.4 GREEN: implement asking `ai.TokenCounter` of the provider value itself (never model identity/config/catalog), reusing AI-23.1 Item 2's cross-check. Confirm 2.1–2.3 pass.
-  - [ ] 2.5 REFACTOR: confirm no duplicate type-assertion logic exists between this case and the AI-23.1 cross-check.
+- [x] **Item 2** (`R-CNF-015`) — `CAP-O-02` token counting: asked of the provider value; clean absence.
+  - [x] 2.1 RED: a subject satisfying the token-counting contract; confirm the suite receives and asserts the count. `S-CNF-039`.
+  - [x] 2.2 RED: a subject not satisfying it; confirm a clean absence — no error, no substituted zero. `S-CNF-040`.
+    - Also the runner's generic declared-absent mechanism; reconfirmed for `CapTokenCounting` specifically via `TestConformanceCapabilities_TokenCountingDeclaredAbsent_CleanAbsence`.
+  - [x] 2.3 RED: a subject that satisfies the contract then declines to answer; confirm the entry is `failed`, not `absent`. `S-CNF-041`.
+    - Proven against the ingredients (`tokenCounterOf` + `CountTokens`'s returned error) directly, via a new `tokenCountingStubDeclining` test double, rather than running the case with a real `t.Fatal` — the same propagation-avoidance pattern used throughout this milestone.
+  - [x] 2.4 GREEN: implement asking `ai.TokenCounter` of the provider value itself (never model identity/config/catalog), reusing AI-23.1 Item 2's cross-check. Confirm 2.1–2.3 pass.
+    - GREEN: all `TestConformanceCapabilities_TokenCounting*` subtests → `PASS`.
+    - **Real gap found and fixed during this leaf, not a propagation artifact**: re-reading `R-CNF-002`'s exact text ("WHEN the declaration and an askable discovery disagree — a subject declaring `CAP-O-02` absent while satisfying the token-counting contract, **or the reverse** — the suite MUST fail that entry") showed AI-23.1's `crossCheckDeclaredOptionalCapabilities` only checked the declared-true-but-unsatisfying direction. Extended it (in `conformance_suite.go`, the shared file every leaf may grow) to also check declared-false-but-satisfying, which is this item's own `NFR-CNF-E` (4.1) obligation. Verified the extension does not change any existing test's outcome (`AI-21`'s own `Provider` never satisfies `ai.TokenCounter`, so every pre-existing declared-false scenario is unaffected) — full suite re-run green before continuing.
+  - [x] 2.5 REFACTOR: confirm no duplicate type-assertion logic exists between this case and the AI-23.1 cross-check.
+    - Confirmed: `grep -n "tokenCounterOf(" *.go` shows the type assertion itself lives only inside `tokenCounterOf` (`conformance_suite.go`); every caller (the AI-23.1 cross-check, both directions, and this leaf's `tokenCountingCase`) goes through it.
 
-- [ ] **Item 3** (`R-CNF-016`) — `CAP-O-03` cache-boundary honoring, plus two required cases in this node.
-  - [ ] 3.1 RED: a subject declaring cache-boundary honoring offered; confirm consumer-visible behaviour is observed; a subject declaring it not offered; confirm `absent` with a reported skip. `S-CNF-042`.
-  - [ ] 3.2 RED: all seven finish reasons on a normally-finished stream; confirm each is reachable and each is a closed-vocabulary value. `S-CNF-043`.
-  - [ ] 3.3 RED: simulate an eighth finish reason (or a removed one) against the hand-list; confirm the drift guard fails naming the discrepancy in either direction. `S-CNF-044`.
-  - [ ] 3.4 RED: a usage record with one count absent and another reported as zero; confirm the two are distinguishable, neither coerced into the other. `S-CNF-045`.
-  - [ ] 3.5 RED: standing of the finish-reason and usage cases; confirm both are computed as **required** despite living in this optional-capability node. `S-CNF-046`.
-  - [ ] 3.6 GREEN: implement the cache-boundary case via `R-CNF-002`'s declared expectation; hand-list the 7 `FinishReason` values behind a drift guard probing `FinishReason(n).String() != "invalid"` upward (design's stated mechanism) — **no `src/ai` edit** (`NFR-CNF-B`); implement the absent-vs-zero usage case. Confirm 3.1–3.5 pass.
-  - [ ] 3.7 REFACTOR: confirm the drift guard is the only place the 7-value count lives — no second hardcoded count elsewhere in the package.
+- [x] **Item 3** (`R-CNF-016`) — `CAP-O-03` cache-boundary honoring, plus two required cases in this node.
+  - [x] 3.1 RED: a subject declaring cache-boundary honoring offered; confirm consumer-visible behaviour is observed; a subject declaring it not offered; confirm `absent` with a reported skip. `S-CNF-042`.
+    - Design decision, not stated verbatim in design.md: honoring's one consumer-visible signal through the neutral event stream is a completion's `Usage().CacheRead`/`CacheWrite` count (`usage.go`'s own vocabulary) — cache-boundary markers themselves are request-side (`AI-11`) and honoring has no askable seam (only `CAP-O-02` is askable, `R-AMP-017`), so a scripted completion carrying a populated `CacheRead` count is this case's proof.
+  - [x] 3.2 RED: all seven finish reasons on a normally-finished stream; confirm each is reachable and each is a closed-vocabulary value. `S-CNF-043`.
+  - [x] 3.3 RED: simulate an eighth finish reason (or a removed one) against the hand-list; confirm the drift guard fails naming the discrepancy in either direction. `S-CNF-044`.
+    - A real eighth `ai.FinishReason` cannot be constructed (closed vocabulary), so `finishReasonDriftGuardAgainst` is parameterized over the hand-list and tested directly against an artificially shrunk (removed-value) and grown (added-value) list — `TestFinishReasonDriftGuardAgainst_ShrunkOrGrownList_FailsInBothDirections`, all 3 subtests `PASS`.
+  - [x] 3.4 RED: a usage record with one count absent and another reported as zero; confirm the two are distinguishable, neither coerced into the other. `S-CNF-045`.
+  - [x] 3.5 RED: standing of the finish-reason and usage cases; confirm both are computed as **required** despite living in this optional-capability node. `S-CNF-046`.
+    - Reuses `TestConformanceSkeleton_CompletionMetadataStanding_IsRequired` (AI-23.1) against the identical `CapCompletionMetadata` key both new cases register under (confirmed by `grep -n 'CapCompletionMetadata' conformance_capabilities.go` naming both `registerConformanceCase` call sites) — not re-derived.
+  - [x] 3.6 GREEN: implement the cache-boundary case via `R-CNF-002`'s declared expectation; hand-list the 7 `FinishReason` values behind a drift guard probing `FinishReason(n).String() != "invalid"` upward (design's stated mechanism) — **no `src/ai` edit** (`NFR-CNF-B`); implement the absent-vs-zero usage case. Confirm 3.1–3.5 pass.
+    - GREEN: all `TestConformanceCapabilities_CacheBoundary*`, `_FinishReasonExhaustiveness*`, `_UsageAbsentVsZero*` → `PASS`. `git diff --stat backend/agent/src/ai/` → empty (confirmed before continuing).
+  - [x] 3.7 REFACTOR: confirm the drift guard is the only place the 7-value count lives — no second hardcoded count elsewhere in the package.
+    - Confirmed: `handListedFinishReasons` (declared once in `conformance_capabilities.go`) is the only literal enumeration; every other reference (tests, the guard function itself) reads its `len()` rather than a second hardcoded number.
 
-- [ ] **Item 4** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
-  - [ ] 4.1 RED: an undeclared-but-askable `CAP-O-02` mismatch (declared absent, provider satisfies the contract) fed through every exported entry point; confirm attributable failure, not a panic. `S-CNF-066` (partial).
-  - [ ] 4.2 GREEN: guard as needed. Confirm 4.1 passes.
+- [x] **Item 4** *(appended, `NFR-CNF-E`)* — Extreme inputs never panic.
+  - [x] 4.1 RED: an undeclared-but-askable `CAP-O-02` mismatch (declared absent, provider satisfies the contract) fed through every exported entry point; confirm attributable failure, not a panic. `S-CNF-066` (partial).
+  - [x] 4.2 GREEN: guard as needed. Confirm 4.1 passes.
+    - GREEN: `TestConformanceCapabilities_ReverseTokenCountingMismatch_FailsEntryNeverPanics` → `PASS` (the extended `crossCheckDeclaredOptionalCapabilities`, item 2.4 above, fails the entry via a `probeTB`, never panics).
 
-- [ ] **AI-23.8 close:** record green `make test` and clean `make lint`; confirm `src/ai/` diff is still empty; confirm doc comments cite `R-CNF-014`…`R-CNF-016`; commit `feat(agenttest): conformance optional-capability cases, finish-reason drift guard (AI-23.8)`.
+- [x] **AI-23.8 close:** record green `make test` and clean `make lint`; confirm `src/ai/` diff is still empty; confirm doc comments cite `R-CNF-014`…`R-CNF-016`; commit `feat(agenttest): conformance optional-capability cases, finish-reason drift guard (AI-23.8)`.
+  - `go test -race ./...` → `ok` both packages. `make lint` → `0 issues`. `git diff --stat backend/agent/src/ai/` → empty. `conformance_capabilities.go`'s doc comment cites `R-CNF-014`…`R-CNF-016` and `NFR-CNF-B`.
 
 ---
 
