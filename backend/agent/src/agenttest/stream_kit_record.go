@@ -38,7 +38,7 @@ func (r Recording) Events() []ai.Event {
 	return slices.Clone(r.events)
 }
 
-// Len reports the number of events the recording holds.
+// Len reports the number of events the recording holds (R-STK-002).
 func (r Recording) Len() int {
 	return len(r.events)
 }

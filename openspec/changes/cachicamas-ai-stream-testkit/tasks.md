@@ -211,30 +211,37 @@ AI-21 verified actual: **2 241** code + **569** openspec = **2 810** of the wave
 **Spec:** `R-STK-011` … `R-STK-013`. **Design:** D5.
 **Depends on:** none of AI-22.1–.4 at the code level; ordered here per D-sequence.
 
-- [ ] **Item 1** (`R-STK-011`) — The view never owns and never closes the stream.
-  - [ ] 1.1 RED: a stream and a view over it; iterate to completion; confirm the view performed no close — only the producer's own close occurred. `S-STK-031`.
-  - [ ] 1.2 RED: a view abandoned before the stream ends, then the caller cancels; confirm the stream terminates exactly as without a view interposed. `S-STK-032`.
-  - [ ] 1.3 GREEN: implement `NewIter(ch <-chan ai.Event) *Iter` per design D5. Confirm 1.1–1.2 pass.
+- [x] **Item 1** (`R-STK-011`) — The view never owns and never closes the stream.
+  - [x] 1.1 RED: a stream and a view over it; iterate to completion; confirm the view performed no close — only the producer's own close occurred. `S-STK-031`.
+  - [x] 1.2 RED: a view abandoned before the stream ends, then the caller cancels; confirm the stream terminates exactly as without a view interposed. `S-STK-032`.
+    - RED output (1.1–1.2): `go test -race -run 'TestIter_' -v ./src/agenttest/...` → `src/agenttest/stream_kit_iter_test.go:29:20: undefined: agenttest.NewIter` (× 2 call sites) → `FAIL [build failed]`.
+  - [x] 1.3 GREEN: implement `NewIter(ch <-chan ai.Event) *Iter` per design D5. Confirm 1.1–1.2 pass. GREEN output: implemented `NewIter` + a minimal `Events(ctx)` (plain `for ev := range it.ch` — no `ctx`-select, no `Err()` yet; genuinely separable since S-STK-031/032's own scenarios cancel the STREAM's context directly, never the view's `ctx` parameter) → `go test -race -run 'TestIter_' -v ./src/agenttest/...` → `--- PASS: TestIter_IterateToCompletion_ProducersOwnCloseIsWhatEndsIt`, `--- PASS: TestIter_AbandonedThenCancelled_StreamTerminatesExactlyAsWithoutAView`, `PASS`. S-STK-031's own proof is partly structural: `Iter.ch` is typed `<-chan ai.Event` (receive-only), so `close(it.ch)` inside the view would not even compile — the test only needs to confirm the CHANNEL correctly reports closed after the view's loop ends.
 
-- [ ] **Item 2** (`R-STK-012`) — Terminal error surfaced after the loop; cancellation respected during it.
-  - [ ] 2.1 RED: a stream ending in a terminal error; iterate to the end, then inspect `Err()`; confirm the terminal failure is reported with its category intact. `S-STK-033`.
-  - [ ] 2.2 RED: a stream that completes normally; confirm `Err()` reports none after the loop. `S-STK-034`.
-  - [ ] 2.3 RED: a mid-iteration cancellation; confirm iteration ends before a bounded wait deadline rather than blocking. `S-STK-035`.
-  - [ ] 2.4 GREEN: implement `(*Iter).Events(ctx context.Context) iter.Seq[ai.Event]` and `(*Iter).Err() error` per design D5 (range-over-func, `bufio.Scanner`-style post-loop error). Confirm 2.1–2.3 pass.
-  - [ ] 2.5 REFACTOR: confirm `Err()`'s precedence (terminal failure, else `ctx.Err()`, else nil) is exercised by all three tests above, not assumed.
+- [x] **Item 2** (`R-STK-012`) — Terminal error surfaced after the loop; cancellation respected during it.
+  - [x] 2.1 RED: a stream ending in a terminal error; iterate to the end, then inspect `Err()`; confirm the terminal failure is reported with its category intact. `S-STK-033`.
+  - [x] 2.2 RED: a stream that completes normally; confirm `Err()` reports none after the loop. `S-STK-034`.
+  - [x] 2.3 RED: a mid-iteration cancellation; confirm iteration ends before a bounded wait deadline rather than blocking. `S-STK-035`.
+    - RED output (2.1–2.3): `go test -race -run 'TestIter_' -v ./src/agenttest/...` → `src/agenttest/stream_kit_iter_test.go:115:18: view.Err undefined (type *agenttest.Iter has no field or method Err, but does have unexported field err)` (× 3 call sites) → `FAIL [build failed]`. Genuinely distinct from item 1's RED: item 1's tests still compiled and passed at this point (their own dependency, `NewIter`, already existed).
+  - [x] 2.4 GREEN: implement `(*Iter).Events(ctx context.Context) iter.Seq[ai.Event]` and `(*Iter).Err() error` per design D5 (range-over-func, `bufio.Scanner`-style post-loop error). Confirm 2.1–2.3 pass. GREEN output: added the `ctx`-`select` branch and terminal-error tracking to `Events`, plus `Err()` → `go test -race -run 'TestIter_' -v ./src/agenttest/...` → all 5 `TestIter_*` tests `--- PASS` (items 1 and 2 together, no regression), `PASS`, `ok github.com/cachicamas/backend/agent/src/agenttest 1.579s`. Stress-checked for flakiness (channel-close-vs-`ctx.Done()` race at end of stream): 5× repeated `go test -race -count=1 -run 'TestIter_' ./src/agenttest/...` → all 5 `ok`, no flakes. Design note: the `case <-ctx.Done(): if it.err == nil { it.err = ctx.Err() }` guard is load-bearing — without the `it.err == nil` check, a terminal-error event immediately followed by the channel's own close could race against an already-cancelled `ctx` in `select`, letting `ctx.Err()` overwrite the already-recorded terminal failure non-deterministically; the guard makes the "terminal failure wins" precedence sticky rather than last-write-wins.
+  - [x] 2.5 REFACTOR: confirm `Err()`'s precedence (terminal failure, else `ctx.Err()`, else nil) is exercised by all three tests above, not assumed. Confirmed: S-STK-033 exercises "terminal failure" (asserts a non-nil `*ai.Failure`); S-STK-034 exercises "else nil" (normal completion, no cancellation); S-STK-035 exercises "else `ctx.Err()`" (cancellation, no terminal event). All three branches of the precedence are covered by a real, distinct scenario.
 
-- [ ] **Item 3** (`R-STK-013`) — Lives outside the provider package; signature guard passes unmodified.
-  - [ ] 3.1 Diff-check (`S-STK-036`): confirm no edit exists to `src/ai/provider.go` or to AI-20.4's signature-guard test file.
-  - [ ] 3.2 Regression run (`S-STK-037`): run the existing signature guard; confirm it still passes, observing the single decided method with its decided carrier result.
+- [x] **Item 3** (`R-STK-013`) — Lives outside the provider package; signature guard passes unmodified.
+  - [x] 3.1 Diff-check (`S-STK-036`): confirm no edit exists to `src/ai/provider.go` or to AI-20.4's signature-guard test file. Confirmed: `git diff --stat -- backend/agent/src/ai/provider.go backend/agent/src/agenttest/provider_signature_guard_test.go` → empty.
+  - [x] 3.2 Regression run (`S-STK-037`): run the existing signature guard; confirm it still passes, observing the single decided method with its decided carrier result. Confirmed: `go test -race -run 'TestModelProviderInterface_SignatureGuard' -v ./src/agenttest/...` → `--- PASS: TestModelProviderInterface_SignatureGuard`, `PASS`.
 
-- [ ] **Item 4** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
-  - [ ] 4.1 RED: `NewIter` against a nil channel, and `Err()` called before any iteration; confirm no panic and an attributable result. `S-STK-044` (partial).
-  - [ ] 4.2 GREEN: guard both cases explicitly. Confirm 4.1 passes.
+- [x] **Item 4** *(appended, `NFR-STK-E`)* — Extreme inputs never panic.
+  - [x] 4.1 RED: `NewIter` against a nil channel, and `Err()` called before any iteration; confirm no panic and an attributable result. `S-STK-044` (partial).
+  - [x] 4.2 GREEN: guard both cases explicitly. Confirm 4.1 passes. RED/GREEN output: `go test -race -run 'TestIter_ExtremeInputs' -v ./src/agenttest/...` → **both subtests PASS immediately** (nil channel: `Events` yields 0 events via the `it.ch == nil` guard already added in item 1's GREEN; `Err()` before any iteration: `it.err`'s zero value is `nil`, Go's own default) — honestly recorded, no forced failure; both guards were already in place from earlier items.
 
-- [ ] **Item 5** *(`NFR-STK-F`)* — Package documentation names the kit.
-  - [ ] 5.1 Modify `doc.go`: name the stream test kit alongside AI-21's fake, retain AI-21's existing framing, state the dependency-free pin `R-STK-009` depends on. `S-STK-045`.
+- [x] **Item 5** *(`NFR-STK-F`)* — Package documentation names the kit.
+  - [x] 5.1 Modify `doc.go`: name the stream test kit alongside AI-21's fake, retain AI-21's existing framing, state the dependency-free pin `R-STK-009` depends on. `S-STK-045`. Done: extended the existing "library role" numbered item to name all five exported kit entry points (`DrainAndRecord`/`Recording`, `RequireSameEvents`, `RequireValidStream`/`CheckContiguity`, `RequireNoGoroutineLeak`, `Iter`); added a new "Dependency-free (R-STK-009)" section citing the AI-22.4 rejection decision and `go.mod`'s zero requires; AI-21's proof-role/library-role numbered framing and the "Contract-faithful" / "sibling of src/ai" sections are otherwise untouched. Verified rendering with `go doc ./src/agenttest`.
 
-- [ ] **AI-22.5 close:** record green `make test` and clean `make lint`; confirm `Iter`'s exported methods cite `R-STK-011`/`R-STK-012`; commit `feat(agenttest): carrier view over a stream, package doc updated (AI-22.5)`.
+- [x] **AI-22.5 close:** record green `make test` and clean `make lint`; confirm `Iter`'s exported methods cite `R-STK-011`/`R-STK-012`; commit `feat(agenttest): carrier view over a stream, package doc updated (AI-22.5)`.
+  - `make test`: `go test -race -count=1 ./...` (forced fresh run) → `ok github.com/cachicamas/backend/agent/src/agenttest 1.886s`, `ok github.com/cachicamas/backend/agent/src/ai 3.533s`.
+  - `make lint`: first run caught `revive: empty-block` in `stream_kit_iter_test.go` (a deliberately-empty `for range ... {}` drain loop) → fixed by counting yielded events and asserting the count (strengthens the test, not just satisfies the linter) → re-run: `0 issues.`
+  - Doc-citation gap found and fixed during this close's own NFR-STK-D sweep (see milestone close checklist below): `Recording.Len()`'s doc comment cited no requirement identifier; `NewIter`'s cited only `NFR-STK-E`, not `R-STK-011`. Both fixed; re-ran `make lint` + `go test -race -count=1 ./...` → still clean/green.
+  - Doc comments: `Iter`'s doc cites `(R-STK-011)`; `NewIter` cites `(R-STK-011)`; `Events` cites `(R-STK-011, R-STK-012)`; `Err` cites `(R-STK-012)`. Confirmed.
+  - Commit: `feat(agenttest): carrier view over a stream, package doc updated (AI-22.5)`.
 
 ---
 

@@ -13,8 +13,27 @@
 //  2. The library role (AI-21 onward): [Provider] is an exported, scriptable
 //     [ai.ModelProvider] — the one producer every consumer above Layer 1
 //     needs and, before this milestone, the only one existed unexported
-//     inside ai's own tests (R-AMP-013). AI-22's stream test kit, AI-23's
-//     conformance suite and every Layer 2 agent-loop test are built on it.
+//     inside ai's own tests (R-AMP-013). AI-22 builds the stream test kit
+//     on top of it, in this package's own stream_kit_*.go files:
+//     [DrainAndRecord] and [Recording] (timeout-safe drain, one recording
+//     backing many assertions), [RequireSameEvents] (readable, bounded
+//     diffs), [RequireValidStream] and [CheckContiguity] (ordering,
+//     delegated to [ai.CheckStream], plus new sequence contiguity),
+//     [RequireNoGoroutineLeak] (opt-in, serial-only leak detection), and
+//     [Iter] (a carrier view over a stream the caller already holds).
+//     AI-23's conformance suite and every Layer 2 agent-loop test are built
+//     on both the fake and the kit.
+//
+// # Dependency-free (R-STK-009)
+//
+// This package imports only the standard library and this module's own
+// src/ai — [Provider] and the AI-22 stream test kit alike. AI-22.4's
+// goroutine leak helper ([RequireNoGoroutineLeak]) deliberately rejected a
+// third-party detector (go.uber.org/goleak) for exactly this reason:
+// adopting one would need its own ADR (openspec/AGENTS.md rule 5) and would
+// break this pin before AI-24 first selects a transport dependency.
+// backend/agent/go.mod carries zero requires; both AI-00 import guards
+// enforce that as a build failure, not a review convention.
 //
 // # Contract-faithful, not convenient
 //
