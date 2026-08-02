@@ -82,12 +82,12 @@ budget (foundational: core physics + 8 script vocabularies). Track cumulative bu
 
 ## Phase 4 — AI-21.4 Delays and the blocked stream (`fake_gate.go`, `fake_gate_test.go`)
 
-- [ ] 4.1 RED — S-022–024 (R-AFP-010): held stream blocks a second receive until test-controlled release; releasing drains remaining events in order; no sleep used as coordination anywhere in the assertions. RED output:
-- [ ] 4.2 GREEN — implement `Gate` (`Reached()`,`Release()`, `sync.Once`-guarded) and producer `Hold` handling (`select` on released/`ctx.Done()`) in `fake_gate.go`/`fake_provider.go`. GREEN output:
-- [ ] 4.3 REFACTOR — note:
-- [ ] 4.4 RED — S-025–026 (R-AFP-011): unread consumer deterministically saturates a buffered script (`Script.Buffer`); a slow-but-resumed (non-cancelling) consumer still receives every event, none dropped. RED output:
-- [ ] 4.5 GREEN — implement per-script `Buffer` capacity (`cap(ch)` exactly) in `fake_script.go`/`fake_provider.go`. GREEN output:
-- [ ] 4.6 REFACTOR — note:
+- [x] 4.1 RED — S-022–024 (R-AFP-010): held stream blocks a second receive until test-controlled release; releasing drains remaining events in order; no sleep used as coordination anywhere in the assertions. RED output: `go test -race -run 'TestProvider_HeldStream|TestProvider_UnreadConsumer_DeterministicallySaturatesBuffer' ./...` → compile failure: `fake_gate_test.go:26:20: undefined: agenttest.NewGate`, `...:33:13: undefined: agenttest.Hold`. `FAIL [build failed]`.
+- [x] 4.2 GREEN — implement `Gate` (`Reached()`,`Release()`, `sync.Once`-guarded) and producer `Hold` handling (`select` on released/`ctx.Done()`) in `fake_gate.go`/`fake_provider.go`. GREEN output: added `fake_gate.go` (`Gate`,`NewGate`,`Reached`,`Release`,`markReached`), extended `Step` with `gate`/`isHold`, added `Hold(g *Gate) Step` in `fake_script.go`, and taught `stampSteps`/`stepEvents`/`produce` in `fake_provider.go` to skip/handle Hold steps → same command → `--- PASS: TestProvider_UnreadConsumer_DeterministicallySaturatesBuffer_...`, `--- PASS: TestProvider_HeldStream_...`, `PASS`. Every wait in the test file is on `gate.Reached()` or `time.After(boundedFakeTimeout)` as a failure deadline — no sleep used as coordination.
+- [x] 4.3 REFACTOR — note: none; `go vet ./...` clean.
+- [x] 4.4 RED — S-025–026 (R-AFP-011): unread consumer deterministically saturates a buffered script (`Script.Buffer`); a slow-but-resumed (non-cancelling) consumer still receives every event, none dropped. RED output: covered by the same compile-failure RED as 4.1 (`TestProvider_UnreadConsumer_DeterministicallySaturatesBuffer_...` was in the same file, same undefined symbols).
+- [x] 4.5 GREEN — implement per-script `Buffer` capacity (`cap(ch)` exactly) in `fake_script.go`/`fake_provider.go`. GREEN output: `Buffer` → `make(chan ai.Event, script.Buffer)` was already wired since Phase 1 (task 1.2); this task's own new work was the Gate/Hold machinery from 4.2, without which the saturation recipe (`n` emits + `Hold` + late emit) could not run at all — genuinely GREEN together with 4.2, not a pass-for-free case. Same PASS output as 4.2.
+- [x] 4.6 REFACTOR — note: none.
 
 ## Phase 5 — AI-21.5 Cancellation fidelity (`fake_cancellation_test.go`)
 

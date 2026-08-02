@@ -58,6 +58,23 @@ func drainFake(t *testing.T, ch <-chan ai.Event) []ai.Event {
 	}
 }
 
+// mustReceive receives exactly one event from ch within boundedFakeTimeout,
+// failing the test if it does not arrive or the channel closes first.
+func mustReceive(t *testing.T, ch <-chan ai.Event) ai.Event {
+	t.Helper()
+
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("channel closed, want an event")
+		}
+		return ev
+	case <-time.After(boundedFakeTimeout):
+		t.Fatal("no event received within the bounded timeout")
+		return ai.Event{}
+	}
+}
+
 // settleAfterFakeCancel gives a producer's goroutine a window to observe an
 // already-cancelled context with no receiver of this file's own in flight —
 // ai/provider_test.go's settleAfterCancel, restated for this package

@@ -1,18 +1,20 @@
-// AI-21.1 — the script vocabulary: what a test tells the fake to do on one
-// streaming call, expressed as an ordered list of opaque steps.
+// AI-21.1, AI-21.4 — the script vocabulary: what a test tells the fake to
+// do on one streaming call, expressed as an ordered list of opaque steps.
 //
-// Emit is the door onto a Step that sends an event; Hold (AI-21.4) is the
-// door onto a Step that blocks the producer at a Gate instead. Together
-// they are the whole vocabulary — a Step cannot express a third shape.
+// Emit is the door onto a Step that sends an event; Hold is the door onto a
+// Step that blocks the producer at a Gate instead. Together they are the
+// whole vocabulary — a Step cannot express a third shape.
 package agenttest
 
 import "github.com/cachicamas/backend/agent/src/ai"
 
-// Step is one instruction in a Script: emit one event today; AI-21.4 adds a
-// second shape once Gate exists to hold on. It is opaque so a script cannot
-// express anything Emit (or, later, Hold) does not build.
+// Step is one instruction in a Script: emit one event, or block until a
+// Gate releases. It is opaque so a script cannot express anything Emit or
+// Hold does not build.
 type Step struct {
-	event ai.Event
+	event  ai.Event
+	gate   *Gate
+	isHold bool
 }
 
 // Emit returns a Step that, when the producer reaches it, sends ev on the
@@ -29,6 +31,12 @@ func Emit(ev ai.Event) Step {
 		panic("agenttest: Emit given an ai.Event that was never constructed (zero Kind) — build it through one of the ai package's own constructors first")
 	}
 	return Step{event: ev}
+}
+
+// Hold returns a Step that blocks the producer at this point in the script
+// until g is released or the stream's context is cancelled (R-AFP-010).
+func Hold(g *Gate) Step {
+	return Step{gate: g, isHold: true}
 }
 
 // Script describes one streaming call's scripted behavior: the steps to run,

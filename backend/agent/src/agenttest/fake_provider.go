@@ -99,12 +99,16 @@ func (p *Provider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event,
 	return out, nil
 }
 
-// stepEvents extracts the ordered events a script's Emit steps carry, for
-// ai.CheckStream to validate before any goroutine starts.
+// stepEvents extracts the ordered events a script's Emit steps carry,
+// skipping Hold steps (which carry none), for ai.CheckStream to validate
+// before any goroutine starts.
 func stepEvents(steps []Step) []ai.Event {
-	events := make([]ai.Event, len(steps))
-	for i, step := range steps {
-		events[i] = step.event
+	events := make([]ai.Event, 0, len(steps))
+	for _, step := range steps {
+		if step.isHold {
+			continue
+		}
+		events = append(events, step.event)
 	}
 	return events
 }
@@ -139,31 +143,48 @@ func (p *Provider) Requests() []ai.Request {
 	return slices.Clone(p.requests)
 }
 
-// stampSteps assigns a fresh ai.Stamper's sequence to every step's event —
-// one Stamper per Stream call, so sequencing is per-stream, never
+// stampSteps assigns a fresh ai.Stamper's sequence to every Emit step's
+// event — one Stamper per Stream call, so sequencing is per-stream, never
 // per-provider, and two streams from the same fake (or two different
-// fakes) never share a counter (R-AFP-003).
+// fakes) never share a counter (R-AFP-003). A Hold step carries no event
+// and is passed through unstamped: only emitted events consume a sequence
+// number.
 func stampSteps(steps []Step) []Step {
 	var stamper ai.Stamper
 	out := make([]Step, len(steps))
 	for i, step := range steps {
+		if step.isHold {
+			out[i] = step
+			continue
+		}
 		out[i] = Step{event: stamper.Stamp(step.event)}
 	}
 	return out
 }
 
 // produce is the fake's one producer goroutine, run once per Stream call
-// (R-AMP-009): it sends every step's event in order, then returns straight
-// into the deferred close — the one closing site, reached on every exit
-// path, after the last send attempt. Every send selects on ctx.Done()
-// (R-AMP-010): with no receiver and a full buffer, this is also the
-// sanctioned loss path — cancellation wins, the event (and everything
-// scripted after it) is dropped, and the function returns into the
-// deferred close, bare, with no terminal event forced through.
+// (R-AMP-009): it runs every step in order, then returns straight into the
+// deferred close — the one closing site, reached on every exit path, after
+// the last send attempt. Every send selects on ctx.Done() (R-AMP-010):
+// with no receiver and a full buffer, this is also the sanctioned loss
+// path — cancellation wins, the event (and everything scripted after it)
+// is dropped, and the function returns into the deferred close, bare, with
+// no terminal event forced through. A Hold step signals Reached, then
+// blocks the identical way: selecting on the Gate's release as well as on
+// ctx.Done(), so a never-released Gate still honors bounded cancellation.
 func produce(ctx context.Context, out chan<- ai.Event, steps []Step) {
 	defer close(out)
 
 	for _, step := range steps {
+		if step.isHold {
+			step.gate.markReached()
+			select {
+			case <-step.gate.released:
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
 		select {
 		case out <- step.event:
 		case <-ctx.Done():
