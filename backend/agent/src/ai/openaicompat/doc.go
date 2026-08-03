@@ -143,6 +143,45 @@
 // research. All four are treated as cited for every node whose behaviour
 // depends on them, per R-ART-001.
 //
+// # System role: system, not developer (AI-26.2, R-ART-005)
+//
+// Claim 1 above cites both `system` and `developer` as legal roles for a
+// system-instruction message and defers which one an adapter renders to
+// "a later slice" — this one. The ruling: this adapter always renders
+// the wire role `system`. `ChatCompletionRequestDeveloperMessage` exists
+// in the cited OpenAPI specification (claim 1, same commit) and is
+// deliberately never used by this package.
+//
+// The reason is the vendor selection itself, not a coin flip between two
+// cited options. AI-24 chose the OpenAI-compatible dialect explicitly
+// for its widest reach across every vendor sharing that dialect —
+// OpenRouter, vLLM, llama.cpp, Ollama, LocalAI and similar — not for
+// first-party OpenAI fidelity. `developer` is a recent OpenAI-proprietary
+// addition that replaces `system` "with o1 models and newer" (claim 1's
+// own quote); it is precisely the part of the schema that is NOT shared
+// across that wider dialect. Emitting it would narrow this adapter to
+// recent first-party OpenAI models and defeat the reach rationale that
+// selected the dialect in the first place. Between the two cited,
+// legal, accepted roles, the one shared by the whole target population
+// wins over the one proprietary to a single vendor's newest models.
+//
+// This package holds no model catalog (NFR-ART-B; the same V-OUT-14
+// posture noted above), so per-model detection was never available as a
+// third option: the choice had to be one constant for every model this
+// adapter is pointed at. `system` is that constant.
+//
+// # Living-graph reopen trigger — not a hedge
+//
+// This ruling is scoped to what AI-24 chose this dialect for: breadth
+// across shared-dialect vendors. If this adapter is ever pointed at a
+// first-party OpenAI endpoint whose target models require `developer`
+// (o1-and-newer, per claim 1), that is a real, concrete future condition
+// this package cannot detect on its own — and this decision reopens when
+// it occurs. It is written down as a reopen trigger, not folded silently
+// into "always system", so a later reader who hits that condition knows
+// this is the place the decision was made and why, rather than
+// rediscovering the same research from nothing.
+//
 // # Refusal taxonomy: AI-25 vs AI-26 (NFR-ART-E)
 //
 // AI-25's construction faults and AI-26's capability refusals are
@@ -185,33 +224,29 @@
 //
 // That conditioning is why this slice's twin-comparison proof
 // (cache_marker_test.go) walks every region ai.CacheRegions() enumerates
-// but runs only the messages region to completion today, non-vacuously:
-// appendMessageObject (body.go, AI-26.1) is the only per-carrier renderer
-// that already emits a carrier's full substantive content — role and
-// text — onto the wire. The other two cache regions are each recorded
-// SKIP, with a named reason, rather than a fabricated PASS over content
-// that is not rendered at all:
+// but runs only two of three to completion, non-vacuously:
+// appendMessageObject (body.go, AI-26.1) and appendSystemMessageObject
+// (system.go, AI-26.2) are the only per-carrier renderers that already
+// emit a carrier's full substantive content — role and text, and segment
+// text in the system role, respectively — onto the wire. The remaining
+// cache region is recorded SKIP, with a named reason, rather than a
+// fabricated PASS over content that is not rendered at all:
 //
 //   - Tools: tool.go does not exist before AI-26.4 (slice 3). A
 //     marker-drop proof over declarations Translate does not render at
 //     all would be vacuous under S-ACB-035, not a proof that the marker
 //     specifically is what is dropped.
-//   - System: system.go does not exist yet. Which wire role a rendered
-//     system segment uses — system or developer, both cited as legal
-//     members of the vendor's messages union (see "Wire-shape
-//     provenance" above) — is a decision this slice deliberately did
-//     not make silently: this package holds no model catalog (mirroring
-//     this file's own V-OUT-14-posture note above) and so cannot
-//     condition the choice on which models a caller targets, and picking
-//     either role without that resolution risks a systematic, untestable
-//     multi-model compatibility defect this package's own test suite
-//     could not catch (translation is pure and constructs no client —
-//     NFR-ART-C — so there is no live call to validate a guess against).
-//     Recorded here as an open decision, not resolved. system.go,
-//     system_segment_test.go and this test's "system" sub-test all land
-//     together once it is.
 //
-// Both gaps are structural and self-closing: cache_marker_test.go's walk
-// is driven by ai.CacheRegions(), so once tool.go and system.go exist,
-// the same unedited test starts proving R-ART-006 for those regions too.
+// That gap is structural and self-closing: cache_marker_test.go's walk
+// is driven by ai.CacheRegions(), so once tool.go exists, the same
+// unedited test starts proving R-ART-006 for that region too, with no
+// edit needed here.
+//
+// The system sub-test's own twin comparison was green on first write,
+// for the same structural reason the messages sub-test was
+// (appendSystemMessageObject never reads Segment.IsCacheBoundary()):
+// falsifiability was proven by a staged, reverted mutation — temporarily
+// rendering a marked segment's marker as a scratch wire field, observing
+// the sub-test fail, then reverting — mirroring the messages region's
+// own staged-mutation proof exactly (S-ART-023).
 package openaicompat
