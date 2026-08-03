@@ -93,11 +93,9 @@ var forbiddenPrefixes = []struct {
 // allowedNonStdlibPrefixes is the deny-by-default allowlist, minus the standard
 // library (which is filtered by the toolchain itself — see listNonStdlibDeps).
 //
-// It holds exactly one entry today. Two milestones may add a second, and each
+// It holds exactly one entry today. One milestone may add a second, and it
 // carries its own gate:
 //
-//   - AI-24 selects the first vendor transport. That is a new top-level
-//     dependency and needs its own ADR (openspec/AGENTS.md rule 5).
 //   - AI-37 adds the OpenTelemetry API — and ONLY the API paths enumerated in
 //     ADR 0005 § D3, which pre-authorises them and nothing else.
 //
@@ -131,7 +129,7 @@ func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 				"the Go standard library nor a package of %s.\n"+
 				"  No forbidden prefix names it, and that is not a licence to add it: adding a "+
 				"top-level dependency needs its own ADR (openspec/AGENTS.md rule 5). If this is "+
-				"the AI-24 transport or the AI-37 OpenTelemetry API, extend "+
+				"the AI-37 OpenTelemetry API, extend "+
 				"allowedNonStdlibPrefixes in the same commit as the ADR.",
 				dep, modulePath)
 		}
