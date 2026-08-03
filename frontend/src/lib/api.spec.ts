@@ -15,6 +15,8 @@ import {
   getWorkspace,
   deleteWorkspace,
   createWorkspace,
+  createOrganization,
+  startWorkspaceSync,
   listGitHubRepos,
 } from "~/lib/api";
 describe("api.ts — workspaces client (PR2-i)", () => {
@@ -194,6 +196,96 @@ describe("api.ts — workspaces client (PR2-i)", () => {
       if (result.ok) return;
       expect(["server", "not_found"]).toContain(result.kind);
     });
+
+    // Spec: sdd/security-vulnerability-remediation/spec/csrf-origin-validation
+    //   REQ-02 — state-changing requests MUST include X-Requested-With.
+    //   The helper is unit-tested in csrf.spec.ts; this test pins the
+    //   contract at the api.ts call site so a future refactor cannot
+    //   silently drop the header.
+    it("CSRF-T-CSRF-API-001: DELETE sends X-Requested-With: XMLHttpRequest", async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(null, { status: 204 }));
+      await deleteWorkspace(7);
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = new Headers(init.headers as HeadersInit);
+      expect(headers.get("x-requested-with")).toBe("XMLHttpRequest");
+    });
+  });
+});
+
+describe("api.ts — CSRF defense-in-depth on state-changing calls", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function captureHeaders(): Headers {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    return new Headers(init.headers as HeadersInit);
+  }
+
+  it("CSRF-T-CSRF-API-002: createOrganization(POST) sends X-Requested-With", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 201 }));
+    await createOrganization({
+      fullName: "Acme",
+      identification: "ID-1",
+    });
+    expect(captureHeaders().get("x-requested-with")).toBe("XMLHttpRequest");
+  });
+
+  it("CSRF-T-CSRF-API-003: createWorkspace(POST) sends X-Requested-With", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 1 }), { status: 201 }),
+      );
+    await createWorkspace({
+      name: "ws",
+      repository: {
+        github_id: 1,
+        full_name: "o/r",
+        owner: "o",
+        name: "r",
+      },
+    });
+    expect(captureHeaders().get("x-requested-with")).toBe("XMLHttpRequest");
+  });
+
+  it("CSRF-T-CSRF-API-004: startWorkspaceSync(POST) sends X-Requested-With", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ job_id: 1 }), { status: 202 }),
+      );
+    await startWorkspaceSync(7);
+    expect(captureHeaders().get("x-requested-with")).toBe("XMLHttpRequest");
+  });
+
+  it("CSRF-T-CSRF-API-005: listWorkspaces(GET) does NOT send X-Requested-With", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ workspaces: [] }), { status: 200 }),
+      );
+    await listWorkspaces();
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // Safe methods either pass init undefined or carry no headers;
+    // either way the test asserts the header is absent.
+    const headers = init?.headers
+      ? new Headers(init.headers as HeadersInit)
+      : new Headers();
+    expect(headers.get("x-requested-with")).toBeNull();
   });
 });
 
