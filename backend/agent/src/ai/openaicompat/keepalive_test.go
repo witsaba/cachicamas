@@ -83,12 +83,14 @@ func TestKeepalive_CommentLinesInterleavedLeavePayloadUnchanged(t *testing.T) {
 // a comment-only stream that ends cleanly must not be mistaken for
 // something requiring an error.
 //
-// Finish()'s "no error" is stub-true today — AI-27.6/slice 6 has not yet
-// implemented truncation detection, so this assertion cannot yet fail.
-// This test still calls Finish(), both because the scenario's own
-// Given/When/Then names the end-of-input signal explicitly, and because it
-// becomes a live regression guard the moment slice 6's Finish()
-// implementation starts inspecting d.buf/d.data/d.eventType.
+// Finish()'s "no error" here is a genuinely live assertion, not a stub
+// artifact: AI-27.6/slice 6 implemented Finish()'s truncation detection
+// (decoder.go, Finish around lines 282-299), which reports ErrTruncated
+// whenever d.buf, d.data or d.eventType is still non-empty at end-of-input.
+// This test proves a comment-only stream ending cleanly at a line boundary
+// leaves all three empty, so that check does NOT fire — a Finish()
+// implementation that mistakenly treated a comment-only clean ending as
+// truncation would fail this assertion.
 func TestKeepalive_CommentOnlyStreamEndingAtLineBoundaryYieldsZeroFrames(t *testing.T) {
 	t.Parallel()
 
