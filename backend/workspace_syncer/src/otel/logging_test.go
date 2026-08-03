@@ -146,3 +146,59 @@ func TestRedactionHandler_PreservesContext(t *testing.T) {
 		t.Errorf("Handle failed to propagate; got: %s", buf.String())
 	}
 }
+
+// TestRedactionHandler_RedactsErrorField is the regression test
+// for spec audit finding H-1: the `error` field can carry an
+// err.Error() that includes the clone URL with embedded token.
+// The redaction handler MUST replace the value with the
+// redaction marker so the token never reaches stdout.
+func TestRedactionHandler_RedactsErrorField(t *testing.T) {
+	logger, buf := captureLogger(slog.LevelInfo)
+	// Simulate an err.Error() that leaked the token URL.
+	logger.Error("clone failed",
+		slog.String("error", "fatal: could not clone https://x-access-token:ghp_abc@github.com/foo/bar.git"),
+	)
+	out := buf.String()
+	if strings.Contains(out, "ghp_abc") {
+		t.Errorf("token leaked via the error field: %s", out)
+	}
+	if !strings.Contains(out, redactedValue) {
+		t.Errorf("error field must be replaced with %q: %s", redactedValue, out)
+	}
+}
+
+// TestRedactionHandler_RedactsStderrField is the regression test
+// for spec audit finding H-1: the `stderr` field captures the
+// raw git output (which can echo the URL or token). The handler
+// MUST redact this field too.
+func TestRedactionHandler_RedactsStderrField(t *testing.T) {
+	logger, buf := captureLogger(slog.LevelInfo)
+	logger.Error("clone failed",
+		slog.String("stderr", "fatal: Authentication failed for 'https://x-access-token:ghp_secret@github.com/octocat/repo.git/'"),
+	)
+	out := buf.String()
+	if strings.Contains(out, "ghp_secret") {
+		t.Errorf("token leaked via the stderr field: %s", out)
+	}
+	if !strings.Contains(out, redactedValue) {
+		t.Errorf("stderr field must be replaced with %q: %s", redactedValue, out)
+	}
+}
+
+// TestRedactionHandler_ErrorFieldCaseInsensitive pins the
+// case-insensitive match: a future contributor who writes
+// `slog.String("Error", ...)` must still get redacted.
+func TestRedactionHandler_ErrorFieldCaseInsensitive(t *testing.T) {
+	logger, buf := captureLogger(slog.LevelInfo)
+	logger.Error("test",
+		slog.String("Error", "x-access-token:ghp_xyz in here"),
+		slog.String("STDERR", "stderr with ghp_abc"),
+	)
+	out := buf.String()
+	if strings.Contains(out, "ghp_xyz") {
+		t.Errorf("token leaked via Error field: %s", out)
+	}
+	if strings.Contains(out, "ghp_abc") {
+		t.Errorf("token leaked via STDERR field: %s", out)
+	}
+}

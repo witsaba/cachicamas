@@ -58,6 +58,88 @@ const (
 	ErrCodeCloneFailed = "CLONE_FAILED"
 )
 
+// CloneErrorCode is the closed vocabulary of error codes that the
+// application layer attaches to the database_administrator callback
+// when the clone pipeline fails. Per spec audit finding H-1 the
+// code MUST be a value from this set — never a free-form string,
+// never an echo of stderr or err.Error(). The db_admin
+// denormalizes the code onto sync_job.error_code; a future code
+// is a breaking change to the cross-service contract.
+//
+// The set deliberately excludes codes that carry context the
+// caller might leak (e.g. "INVALID_REPO" is preferred over
+// "REPO_NOT_FOUND: <owner>/<repo>" so the owner/repo never reaches
+// the wire on a failure).
+type CloneErrorCode string
+
+const (
+	// CloneErrCodeFailed — catch-all for unexpected git failures.
+	CloneErrCodeFailed CloneErrorCode = CloneErrorCode(ErrCodeCloneFailed)
+	// CloneErrCodeTimeout — the git clone exceeded the timeout.
+	CloneErrCodeTimeout CloneErrorCode = CloneErrorCode(ErrCodeCloneTimeout)
+	// CloneErrCodeWorktreeProbeFailed — the worktree probe exited non-zero.
+	CloneErrCodeWorktreeProbeFailed CloneErrorCode = CloneErrorCode(ErrCodeWorktreeProbeFailed)
+	// CloneErrCodeGitHubUnreachable — the GitHub REST API was not reachable
+	// (network error, DNS failure, TLS handshake). Distinct from INVALID_REPO
+	// (which means the repo exists but the token can't push to it) and from
+	// AUTH_FAILED (which means the token is invalid).
+	CloneErrCodeGitHubUnreachable CloneErrorCode = "GITHUB_UNREACHABLE"
+	// CloneErrCodeInvalidRepo — the repo is not accessible to the token
+	// (404, or push permission denied). Distinct from AUTH_FAILED which is
+	// reserved for credential-shape failures.
+	CloneErrCodeInvalidRepo CloneErrorCode = "INVALID_REPO"
+	// CloneErrCodeAuthFailed — the token is malformed, expired, revoked,
+	// or otherwise rejected by GitHub with 401/403.
+	CloneErrCodeAuthFailed CloneErrorCode = "AUTH_FAILED"
+)
+
+// String returns the wire string for the code. The value MUST
+// match one of the locked ErrCode* constants (the enum values
+// above are pinned to those strings).
+func (c CloneErrorCode) String() string { return string(c) }
+
+// IsValid reports whether the code is a member of the closed
+// vocabulary. The clone_service uses this to assert that no
+// free-form string leaks into the callback envelope.
+func (c CloneErrorCode) IsValid() bool {
+	switch c {
+	case CloneErrCodeFailed, CloneErrCodeTimeout, CloneErrCodeWorktreeProbeFailed,
+		CloneErrCodeGitHubUnreachable, CloneErrCodeInvalidRepo, CloneErrCodeAuthFailed:
+		return true
+	}
+	return false
+}
+
+// lockedCloneErrorMessages is the closed vocabulary for the
+// callback's `error_message` field. Per spec audit finding H-1
+// the message MUST come from this set — NEVER from err.Error(),
+// NEVER from stderr, NEVER from user input. An empty string is
+// the default and is itself a member of the closed vocab
+// ("no detail is the safe default").
+//
+// The slice is used at runtime to assert closed-vocab; a future
+// contributor who adds a free-form message will fail the
+// assertion in CloneAndValidate.
+var lockedCloneErrorMessages = map[string]struct{}{
+	"":                  {},
+	"token lacks push permission on this repository": {},
+	"github api unreachable":                            {},
+	"repository not accessible to this token":           {},
+	"token rejected by github":                          {},
+	"clone failed unexpectedly":                         {},
+	"clone exceeded timeout":                            {},
+	"worktree probe failed":                             {},
+}
+
+// IsLockedErrorMessage reports whether msg is in the closed
+// vocabulary. The clone_service uses this in a test (and at
+// runtime in dev builds via the errCodeMessage helper) to
+// guarantee no free-form text reaches the callback.
+func IsLockedErrorMessage(msg string) bool {
+	_, ok := lockedCloneErrorMessages[msg]
+	return ok
+}
+
 // ---------------------------------------------------------------------------
 // AppError interface — the marker for handler errors. The handler
 // uses errors.As to map each typed error to the locked HTTP

@@ -48,3 +48,86 @@ func TestAppError_NotNil(t *testing.T) {
 		}
 	}
 }
+
+// TestCloneErrorCode_IsValid pins the closed vocab of codes the
+// application layer is permitted to send in a callback. Per spec
+// audit finding H-1, the callback envelope MUST NOT carry a
+// free-form code; a future contributor who adds a code outside
+// this set MUST update this test (and the locked vocabulary).
+func TestCloneErrorCode_IsValid(t *testing.T) {
+	cases := []struct {
+		code CloneErrorCode
+		want bool
+	}{
+		{CloneErrCodeFailed, true},
+		{CloneErrCodeTimeout, true},
+		{CloneErrCodeWorktreeProbeFailed, true},
+		{CloneErrCodeGitHubUnreachable, true},
+		{CloneErrCodeInvalidRepo, true},
+		{CloneErrCodeAuthFailed, true},
+		{CloneErrorCode("FREE_FORM"), false},
+		{CloneErrorCode(""), false},
+		{CloneErrorCode("CLONE_FAILED: detail here"), false},
+	}
+	for _, tc := range cases {
+		if got := tc.code.IsValid(); got != tc.want {
+			t.Errorf("CloneErrorCode(%q).IsValid() = %v, want %v", tc.code, got, tc.want)
+		}
+	}
+}
+
+// TestCloneErrorCode_WireStrings pins the wire string for each
+// code. The cross-service contract is the literal string;
+// renaming a code is a breaking change.
+func TestCloneErrorCode_WireStrings(t *testing.T) {
+	cases := []struct {
+		code CloneErrorCode
+		want string
+	}{
+		{CloneErrCodeFailed, "CLONE_FAILED"},
+		{CloneErrCodeTimeout, "CLONE_TIMEOUT"},
+		{CloneErrCodeWorktreeProbeFailed, "WORKTREE_PROBE_FAILED"},
+		{CloneErrCodeGitHubUnreachable, "GITHUB_UNREACHABLE"},
+		{CloneErrCodeInvalidRepo, "INVALID_REPO"},
+		{CloneErrCodeAuthFailed, "AUTH_FAILED"},
+	}
+	for _, tc := range cases {
+		if got := tc.code.String(); got != tc.want {
+			t.Errorf("CloneErrorCode(%q).String() = %q, want %q", tc.code, got, tc.want)
+		}
+	}
+}
+
+// TestIsLockedErrorMessage_ClosedVocab asserts that arbitrary
+// text (including text containing err.Error() content or
+// stderr) is REJECTED by the closed-vocab guard.
+func TestIsLockedErrorMessage_ClosedVocab(t *testing.T) {
+	allowed := []string{
+		"",
+		"token lacks push permission on this repository",
+		"github api unreachable",
+		"repository not accessible to this token",
+		"token rejected by github",
+		"clone failed unexpectedly",
+		"clone exceeded timeout",
+		"worktree probe failed",
+	}
+	for _, msg := range allowed {
+		if !IsLockedErrorMessage(msg) {
+			t.Errorf("IsLockedErrorMessage(%q) = false; want true (this is a locked message)", msg)
+		}
+	}
+	rejected := []string{
+		"fatal: could not clone https://x-access-token:ghp_abc@github.com/foo/bar",
+		"network down",
+		"stderr: fatal: Authentication failed",
+		"some user-supplied note",
+		"clone failed: exit status 128",
+		"permission denied (publickey)",
+	}
+	for _, msg := range rejected {
+		if IsLockedErrorMessage(msg) {
+			t.Errorf("IsLockedErrorMessage(%q) = true; want false (free-form text must be rejected)", msg)
+		}
+	}
+}

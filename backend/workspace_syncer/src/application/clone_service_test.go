@@ -3,10 +3,12 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/cachicamas/backend/workspace_syncer/src/domain"
+	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/git"
 	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/httpclient"
 )
 
@@ -200,8 +202,11 @@ func TestCloneService_CloneAndValidate_PermissionDenied(t *testing.T) {
 	if c.Status != "failed" {
 		t.Errorf("status = %q, want failed", c.Status)
 	}
-	if c.ErrorCode != "WORKSPACE_PERMISSIONS_INSUFFICIENT" {
-		t.Errorf("error_code = %q, want WORKSPACE_PERMISSIONS_INSUFFICIENT", c.ErrorCode)
+	if c.ErrorCode != domain.CloneErrCodeInvalidRepo.String() {
+		t.Errorf("error_code = %q, want %q (INVALID_REPO closed vocab)", c.ErrorCode, domain.CloneErrCodeInvalidRepo.String())
+	}
+	if !domain.IsLockedErrorMessage(c.ErrorMessage) {
+		t.Errorf("error_message = %q is NOT in the closed vocab (H-1 regression)", c.ErrorMessage)
 	}
 }
 
@@ -220,8 +225,16 @@ func TestCloneService_CloneAndValidate_CloneError(t *testing.T) {
 	if c.Status != "failed" {
 		t.Errorf("status = %q, want failed", c.Status)
 	}
-	if c.ErrorCode != "CLONE_FAILED" {
-		t.Errorf("error_code = %q, want CLONE_FAILED", c.ErrorCode)
+	if c.ErrorCode != domain.CloneErrCodeFailed.String() {
+		t.Errorf("error_code = %q, want %q (CLONE_FAILED closed vocab)", c.ErrorCode, domain.CloneErrCodeFailed.String())
+	}
+	// Per H-1: the message MUST be closed-vocab and MUST NOT
+	// echo the err.Error() ("network down" must not appear).
+	if !domain.IsLockedErrorMessage(c.ErrorMessage) {
+		t.Errorf("error_message = %q is NOT in the closed vocab (H-1 regression)", c.ErrorMessage)
+	}
+	if strings.Contains(c.ErrorMessage, "network down") {
+		t.Errorf("error_message = %q echoes err.Error() (H-1 regression)", c.ErrorMessage)
 	}
 }
 
@@ -243,8 +256,14 @@ func TestCloneService_CloneAndValidate_ProbeError(t *testing.T) {
 	if c.Status != "failed" {
 		t.Errorf("status = %q, want failed", c.Status)
 	}
-	if c.ErrorCode != "WORKTREE_PROBE_FAILED" {
-		t.Errorf("error_code = %q, want WORKTREE_PROBE_FAILED", c.ErrorCode)
+	if c.ErrorCode != domain.CloneErrCodeWorktreeProbeFailed.String() {
+		t.Errorf("error_code = %q, want %q (WORKTREE_PROBE_FAILED closed vocab)", c.ErrorCode, domain.CloneErrCodeWorktreeProbeFailed.String())
+	}
+	if !domain.IsLockedErrorMessage(c.ErrorMessage) {
+		t.Errorf("error_message = %q is NOT in the closed vocab (H-1 regression)", c.ErrorMessage)
+	}
+	if strings.Contains(c.ErrorMessage, "worktree add failed") {
+		t.Errorf("error_message = %q echoes err.Error() (H-1 regression)", c.ErrorMessage)
 	}
 }
 
@@ -277,8 +296,47 @@ func TestCloneService_CloneAndValidate_GitHubAccessorError(t *testing.T) {
 		t.Fatalf("callback calls = %d, want 1", len(callback.calls))
 	}
 	c := callback.calls[0]
-	if c.ErrorCode != "GITHUB_UNREACHABLE" {
-		t.Errorf("error_code = %q, want GITHUB_UNREACHABLE", c.ErrorCode)
+	if c.ErrorCode != domain.CloneErrCodeGitHubUnreachable.String() {
+		t.Errorf("error_code = %q, want %q (GITHUB_UNREACHABLE closed vocab)", c.ErrorCode, domain.CloneErrCodeGitHubUnreachable.String())
+	}
+	// Per H-1: the err.Error() detail ("network unreachable")
+	// MUST NOT appear in the callback envelope.
+	if strings.Contains(c.ErrorMessage, "network unreachable") {
+		t.Errorf("error_message = %q echoes err.Error() (H-1 regression)", c.ErrorMessage)
+	}
+	if !domain.IsLockedErrorMessage(c.ErrorMessage) {
+		t.Errorf("error_message = %q is NOT in the closed vocab", c.ErrorMessage)
+	}
+}
+
+// TestCloneService_CloneAndValidate_CloneTimeoutError is the
+// regression test for the CLONE_TIMEOUT path: a timeout error
+// from the runner MUST produce the CLONE_TIMEOUT code and a
+// closed-vocab message (not the err.Error() which would echo
+// the timeout duration).
+func TestCloneService_CloneAndValidate_CloneTimeoutError(t *testing.T) {
+	timeoutErr := &git.CloneTimeoutErrorAlias{Seconds: 90}
+	runner := &fakeRunner{cloneErr: timeoutErr}
+	callback := &fakeCallback{}
+	github := &fakeGitHub{accessible: true}
+	svc := NewCloneService(runner, callback, github, nil)
+
+	svc.CloneAndValidate(context.Background(), validRequest())
+
+	if len(callback.calls) != 1 {
+		t.Fatalf("callback calls = %d, want 1", len(callback.calls))
+	}
+	c := callback.calls[0]
+	if c.ErrorCode != domain.CloneErrCodeTimeout.String() {
+		t.Errorf("error_code = %q, want %q", c.ErrorCode, domain.CloneErrCodeTimeout.String())
+	}
+	if !domain.IsLockedErrorMessage(c.ErrorMessage) {
+		t.Errorf("error_message = %q is NOT in the closed vocab", c.ErrorMessage)
+	}
+	// The err.Error() message would contain "90 seconds"; that
+	// MUST NOT appear in the callback.
+	if strings.Contains(c.ErrorMessage, "90") || strings.Contains(c.ErrorMessage, "second") {
+		t.Errorf("error_message = %q echoes timeout details (H-1 regression)", c.ErrorMessage)
 	}
 }
 

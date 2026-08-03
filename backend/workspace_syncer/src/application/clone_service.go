@@ -115,6 +115,10 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 	if s.github != nil {
 		accessible, err := s.github.IsRepoAccessible(ctx, req.Owner, req.Repo)
 		if err != nil {
+			// Per spec audit finding H-1, the ErrorMessage MUST
+			// NOT echo err.Error() (which may contain the URL with
+			// embedded token, network details, etc.). Use a
+			// closed-vocab message; log the actual error server-side.
 			s.logger.WarnContext(ctx, "clone: github accessor error (treating as inaccessible)",
 				slog.Int64("job_id", req.JobID),
 				slog.String("error", err.Error()),
@@ -123,8 +127,8 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 				JobID:        req.JobID,
 				WorkspaceID:  req.WorkspaceID,
 				Status:       "failed",
-				ErrorCode:    "GITHUB_UNREACHABLE",
-				ErrorMessage: "Could not verify repo permissions: " + err.Error(),
+				ErrorCode:    domain.CloneErrCodeGitHubUnreachable.String(),
+				ErrorMessage: "github api unreachable",
 			})
 			return
 		}
@@ -138,8 +142,8 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 				JobID:        req.JobID,
 				WorkspaceID:  req.WorkspaceID,
 				Status:       "failed",
-				ErrorCode:    "WORKSPACE_PERMISSIONS_INSUFFICIENT",
-				ErrorMessage: "Token lacks push permission on this repository.",
+				ErrorCode:    domain.CloneErrCodeInvalidRepo.String(),
+				ErrorMessage: "token lacks push permission on this repository",
 			})
 			return
 		}
@@ -148,22 +152,28 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 	// Step 3: run the clone.
 	path, err := s.runner.Clone(ctx, req.WorkspaceID, req.Owner, req.Repo, req.OAuthToken)
 	if err != nil {
-		code := "CLONE_FAILED"
+		// Per spec audit finding H-1: classify to a closed-vocab
+		// code and a closed-vocab message. err.Error() may contain
+		// git stderr (which itself may contain the URL or token);
+		// NEVER echo it to the callback.
+		code := domain.CloneErrCodeFailed
+		message := "clone failed unexpectedly"
 		var toErr *git.CloneTimeoutErrorAlias
 		if errors.As(err, &toErr) {
-			code = "CLONE_TIMEOUT"
+			code = domain.CloneErrCodeTimeout
+			message = "clone exceeded timeout"
 		}
 		s.logger.ErrorContext(ctx, "clone: runner.Clone failed",
 			slog.Int64("job_id", req.JobID),
-			slog.String("code", code),
+			slog.String("code", code.String()),
 			slog.String("error", err.Error()),
 		)
 		s.postCallback(ctx, req, startedAt, httpclient.CallbackRequest{
 			JobID:        req.JobID,
 			WorkspaceID:  req.WorkspaceID,
 			Status:       "failed",
-			ErrorCode:    code,
-			ErrorMessage: err.Error(),
+			ErrorCode:    code.String(),
+			ErrorMessage: message,
 		})
 		return
 	}
@@ -171,16 +181,19 @@ func (s *CloneService) CloneAndValidate(ctx context.Context, req domain.CloneReq
 	// Step 4: run the worktree probe.
 	sha, err := s.runner.WorktreeProbe(ctx, path)
 	if err != nil {
+		// Closed-vocab classification (H-1). err.Error() may
+		// contain git stderr; never echo it to the callback.
 		s.logger.ErrorContext(ctx, "clone: runner.WorktreeProbe failed",
 			slog.Int64("job_id", req.JobID),
+			slog.String("code", domain.CloneErrCodeWorktreeProbeFailed.String()),
 			slog.String("error", err.Error()),
 		)
 		s.postCallback(ctx, req, startedAt, httpclient.CallbackRequest{
 			JobID:        req.JobID,
 			WorkspaceID:  req.WorkspaceID,
 			Status:       "failed",
-			ErrorCode:    "WORKTREE_PROBE_FAILED",
-			ErrorMessage: err.Error(),
+			ErrorCode:    domain.CloneErrCodeWorktreeProbeFailed.String(),
+			ErrorMessage: "worktree probe failed",
 		})
 		return
 	}

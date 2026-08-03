@@ -30,11 +30,20 @@ const redactedValue = "[REDACTED]"
 // redacted. The match is case-insensitive. Add a new key here
 // only after updating logging_test.go with a corresponding
 // redaction case.
+//
+// Per spec audit finding H-1, the `error` and `stderr` fields
+// MUST be redacted too — git error messages echo the clone URL
+// (with embedded token) and the raw stderr from `git` itself.
+// Redacting these keys at the handler level is the cheap fix
+// that protects every caller; the alternative (vetting every
+// err.Error() in the codebase) is brittle.
 var redactKeys = map[string]struct{}{
 	"oauth_token":   {},
 	"authorization": {},
 	"access_token":  {},
 	"refresh_token": {},
+	"error":         {},
+	"stderr":        {},
 }
 
 // keyNeedsRedaction reports whether the given attr key must be
