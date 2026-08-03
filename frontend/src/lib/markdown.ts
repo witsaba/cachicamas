@@ -1,25 +1,68 @@
 /**
  * Markdown rendering utilities.
  *
- * Uses `marked` for parsing. Output is safe for SSR: `marked.parse()`
- * with `async: false` returns a synchronously-resolved string, suitable
- * for Qwik's SSR pipeline. The resulting HTML is rendered via
- * `{dangerouslySetInnerHTML}` in MarkdownPreview components.
+ * `renderMarkdown` is the low-level parser. It runs `marked` in sync mode
+ * (suitable for Qwik SSR) and PRESERVES raw HTML embedded in the source —
+ * the parser does not strip or escape `<script>`, event handlers, or
+ * `javascript:` URLs. Its output is NOT safe to inject via
+ * `dangerouslySetInnerHTML`.
  *
- * SECURITY NOTE: `marked` does not execute arbitrary HTML or scripts.
- * It parses markdown syntax into HTML elements. No sanitization library
- * is needed for v1 given that (a) only admin users access this page and
- * (b) prompt bodies are controlled by trusted admin input.
+ * `renderSanitizedMarkdown` wraps `renderMarkdown` with
+ * `isomorphic-dompurify`, applying a tight allowlist of tags, attributes,
+ * and URI schemes. Always reach for `renderSanitizedMarkdown` when the
+ * HTML reaches the DOM (prompt-body previews, etc.).
  */
 
+import DOMPurify from "isomorphic-dompurify";
 import { marked } from "marked";
 
-/**
- * Render a markdown string to an HTML string.
- *
- * @param md - The raw markdown text
- * @returns An HTML string safe to use with `dangerouslySetInnerHTML`
- */
+interface SanitizerConfig {
+  ALLOWED_TAGS: string[];
+  ALLOWED_ATTR: string[];
+  // Restrict URIs to safe schemes; reject javascript:, data:text/html,
+  // and any obfuscated variants.
+  ALLOWED_URI_REGEXP: RegExp;
+}
+
+const SANITIZER_CONFIG: SanitizerConfig = {
+  ALLOWED_TAGS: [
+    "p",
+    "br",
+    "strong",
+    "em",
+    "u",
+    "s",
+    "code",
+    "pre",
+    "blockquote",
+    "ul",
+    "ol",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "a",
+    "img",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "hr",
+  ],
+  ALLOWED_ATTR: ["href", "src", "alt", "title"],
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|\/|#)/i,
+};
+
 export function renderMarkdown(md: string): string {
   return marked.parse(md, { async: false }) as string;
+}
+
+export function renderSanitizedMarkdown(md: string): string {
+  const html = renderMarkdown(md);
+  return DOMPurify.sanitize(html, SANITIZER_CONFIG) as string;
 }

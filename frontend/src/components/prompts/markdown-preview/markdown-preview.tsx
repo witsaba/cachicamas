@@ -2,15 +2,17 @@
  * MarkdownPreview — the right pane of the split editor.
  *
  * Renders the prompt body as formatted HTML using the `prose` class from
- * @tailwindcss/typography. Uses `dangerouslySetInnerHTML` because the
- * output is trusted (admin-only input, no user-generated content).
+ * @tailwindcss/typography. The HTML reaches the DOM through
+ * `dangerouslySetInnerHTML`, so it MUST be sanitized first via
+ * `renderSanitizedMarkdown` (allowlist-based DOMPurify pass). See
+ * spec `markdown-xss-prevention` (REQ-01).
  *
  * Props:
  *   body — the raw markdown string to render
  */
 
 import { component$ } from "@builder.io/qwik";
-import { renderMarkdown } from "~/lib/markdown";
+import { renderSanitizedMarkdown } from "~/lib/markdown";
 
 export interface MarkdownPreviewProps {
   body: string;
@@ -19,7 +21,7 @@ export interface MarkdownPreviewProps {
 
 export const MarkdownPreview = component$<MarkdownPreviewProps>(
   ({ body, testId }) => {
-    const html = renderMarkdown(body);
+    const html = renderSanitizedMarkdown(body);
 
     return (
       <div

@@ -61,6 +61,7 @@
     "@auth/core": "0.41.3",
     "@auth/qwik": "0.9.2",
     "@panva/hkdf": "1.2.1",
+    "isomorphic-dompurify": "^2.26.0",
     "marked": "^18.0.6",
     "postgres": "3.4.5",
     "zod": "3.25.48"
