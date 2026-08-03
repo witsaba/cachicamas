@@ -216,6 +216,54 @@ func TestRunner_CloneCmd_ParentEnvUnchanged(t *testing.T) {
 	}
 }
 
+// TestNewProbeDir_UnderTempDirAndRandom asserts spec audit
+// finding L-2 (predictable /tmp/probe-<nanos> path): the new
+// helper uses os.MkdirTemp, so the resulting directory lives
+// under os.TempDir() with a randomized suffix. Two consecutive
+// calls return distinct paths so concurrent probes cannot
+// collide.
+func TestNewProbeDir_UnderTempDirAndRandom(t *testing.T) {
+	path1, cleanup1, err := newProbeDir()
+	if err != nil {
+		t.Fatalf("newProbeDir 1: %v", err)
+	}
+	defer cleanup1()
+
+	// Path is non-empty and lives under os.TempDir().
+	if path1 == "" {
+		t.Fatal("probe dir path is empty")
+	}
+	tmpDir := os.TempDir()
+	if !strings.HasPrefix(path1, tmpDir) {
+		t.Errorf("probe dir %q is not under os.TempDir() %q", path1, tmpDir)
+	}
+
+	// The directory exists.
+	info, err := os.Stat(path1)
+	if err != nil {
+		t.Fatalf("stat probe dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("probe path is not a directory: %q", path1)
+	}
+
+	// Two consecutive calls return distinct paths.
+	path2, cleanup2, err := newProbeDir()
+	if err != nil {
+		t.Fatalf("newProbeDir 2: %v", err)
+	}
+	defer cleanup2()
+	if path1 == path2 {
+		t.Errorf("two probe dirs collided: %q == %q", path1, path2)
+	}
+
+	// Cleanup removes the directory.
+	cleanup1()
+	if _, err := os.Stat(path1); err == nil {
+		t.Errorf("cleanup1 did not remove %q", path1)
+	}
+}
+
 func TestRunner_Clone_RejectsBadPath(t *testing.T) {
 	// The validation in WorkspacePath rejects bad workspaceID/owner/repo.
 	// The Clone method must surface the validation error before

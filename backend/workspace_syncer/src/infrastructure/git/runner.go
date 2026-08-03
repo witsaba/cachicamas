@@ -241,30 +241,54 @@ func (r *realRunner) Clone(ctx context.Context, workspaceID int64, owner, repo, 
 	return path, nil
 }
 
+// newProbeDir creates a fresh temp directory under os.TempDir()
+// for the worktree probe. The directory has a randomized suffix
+// so two concurrent probes never collide (the prior
+// `/tmp/probe-<nano>` scheme was predictable and world-writable;
+// spec audit finding L-2). Returns the path and a cleanup func
+// that the caller MUST `defer`.
+func newProbeDir() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "ws-syncer-probe-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create probe dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	return dir, cleanup, nil
+}
+
 // WorktreeProbe runs the locked probe: `git -C <path> worktree add
-// /tmp/probe-<id> HEAD`. The probe validates that the bare mirror
+// <tmp> HEAD`. The probe validates that the bare mirror
 // is fully usable (a future `git worktree add` from a working tree
-// will succeed). The /tmp/probe-<id> path is removed after the probe
-// regardless of success or failure.
+// will succeed). The probe directory is created with
+// os.MkdirTemp (random suffix under os.TempDir) and removed
+// after the probe regardless of success or failure.
+//
+// Spec audit finding L-2: the prior `/tmp/probe-<nanos>` path was
+// predictable in a world-writable dir; an attacker could
+// pre-create the path with malicious contents. os.MkdirTemp
+// returns a unique path that no other process can guess.
 func (r *realRunner) WorktreeProbe(ctx context.Context, path string) (string, error) {
 	// The probe is fast (no actual checkout, just metadata). We
 	// use a 30s ceiling which is generous for any real-world repo.
 	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	probePath := fmt.Sprintf("/tmp/probe-%d", time.Now().UnixNano())
+	probePath, probeCleanup, err := newProbeDir()
+	if err != nil {
+		return "", err
+	}
+	defer probeCleanup()
+
 	cmd := exec.CommandContext(probeCtx, r.gitPath,
 		"-C", path, // run from the bare mirror
 		"worktree", "add", // create a worktree
 		"--detach", // detached HEAD (no branch checkout)
-		probePath,  // destination
+		probePath,  // destination (unique per call)
 		"HEAD",     // from the HEAD commit
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		// Best-effort cleanup of the probe dir.
-		_ = exec.CommandContext(ctx, "rm", "-rf", probePath).Run()
 		return "", &worktreeProbeFailedError{Stderr: stderr.String(), Cause: err}
 	}
 
@@ -272,14 +296,12 @@ func (r *realRunner) WorktreeProbe(ctx context.Context, path string) (string, er
 	// HEAD is the same as the bare's HEAD at this point).
 	sha, err := r.ResolveHead(probeCtx, path)
 	if err != nil {
-		_ = exec.CommandContext(ctx, "rm", "-rf", probePath).Run()
 		return "", &cloneFailedError{Cause: err, Stderr: "failed to resolve HEAD after worktree probe"}
 	}
 
-	// Clean up the probe dir. We do this AFTER capturing the SHA
-	// so a failure to clean up does not lose the data the
-	// application layer needs.
-	_ = exec.CommandContext(ctx, "rm", "-rf", probePath).Run()
+	// Cleanup runs via the deferred probeCleanup so a failure
+	// to capture the SHA does not lose the data the application
+	// layer needs (cleanup happens AFTER the SHA is returned).
 	return sha, nil
 }
 
