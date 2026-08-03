@@ -275,12 +275,12 @@
 // asserted absent when it is not, rather than merely missing from an
 // expectation literal that could simply have forgotten to mention it.
 //
-// # Escape hatch: reserved namespace not yet defined upstream (AI-26.7, R-ART-019)
+// # Escape hatch: reserved namespace (AI-26.7, R-ART-019)
 //
 // R-ART-019 requires this adapter's own reserved provider-extension
 // namespace value to be read from AI-25's landed artifact, never
-// re-invented here. This slice searched AI-25's landed artifact
-// exhaustively before writing any escape-hatch code: every AI-25 non-test
+// re-invented here. Before writing any escape-hatch code, this slice
+// searched AI-25's landed artifact exhaustively: every AI-25 non-test
 // source this package owns (client.go, credential.go, endpoint.go,
 // request.go), this file's own AI-25-era sections above, AI-25's own SDD
 // artifact (openspec/changes/cachicamas-ai-provider-client/{proposal,
@@ -290,16 +290,57 @@
 // namespace value anywhere. The generic escape-hatch mechanism itself
 // (request_extension.go, AI-12.3) takes an arbitrary caller-supplied
 // namespace and reserves none of its own, by design — R-REX-006 states
-// "Layer 1 MUST NOT maintain any list of recognised namespaces", so
-// Layer 1 was never going to be the source of this value either.
+// "Layer 1 MUST NOT maintain any list of recognised namespaces".
 //
-// Because this node's own instruction forbids inventing the value here,
-// R-ART-019's escape-hatch merge (tasks.md 4.7-4.11: own-namespace merge,
-// foreign-namespace twin comparison) is NOT implemented in this slice.
-// appendBody's own splice-point comment (body.go) marks exactly where it
-// would land once the value exists. This is a disclosed gap, not a
-// silent omission: tasks.md's Phase 4 evidence log records the search
-// performed and the requirement blocked, the same posture R-ART-001
-// takes toward an unobtainable citation (S-ART-004) — halted and
-// recorded, not invented locally.
+// # Coordinator ruling: the value is "openaicompat", and this milestone defines it
+//
+// The instruction to read the value from AI-25 was itself the defect,
+// not this package's search: AI-25 was never given a task to define one.
+// Reserving a namespace was always this milestone's own job, not AI-25's
+// (construction) or AI-12's (the neutral escape-hatch mechanism, which
+// deliberately reserves nothing of its own per R-REX-006 above) — this
+// milestone is the sole owner of the wire body a reserved value would
+// merge into.
+//
+// The value is the exported constant [Namespace] (option.go), equal to
+// the string "openaicompat":
+//
+//   - It is this adapter package's own identity, so a caller writing
+//     ai.WithProviderExtension(openaicompat.Namespace, value) is
+//     unambiguous about which adapter the value targets.
+//   - It is dialect-named, not vendor-branded — the same reasoning that
+//     named this package openaicompat rather than something
+//     OpenAI-specific: OpenRouter, vLLM, Ollama, LocalAI and other
+//     OpenAI-compatible servers are all in this adapter's scope, not
+//     first-party OpenAI alone.
+//   - Namespace is exported specifically so a caller references it by
+//     name rather than hand-typing the string: a caller who mistypes a
+//     hand-written namespace silently gets "foreign namespace, ignored
+//     whole" (below), with no error anywhere — a miserable failure mode
+//     an exported constant is the cheapest guard against.
+//
+// # Own namespace merges; every other namespace is ignored whole
+//
+// appendExtensionFields (option.go) reads req.ProviderExtension(Namespace)
+// and, when present, splices its Value() bytes raw into the wire body,
+// last, merged as additional top-level members — the same raw-splice
+// reasoning tool.go's schema splice already establishes (R-ART-010): a
+// caller-supplied JSON fragment must survive byte-exact, never
+// decoded/re-encoded. Every namespace other than Namespace is never
+// separately read or rendered by this function at all: "ignored whole"
+// is what NOT reading any other namespace produces structurally, the
+// same reasoning appendMessageObject/appendSystemMessageObject never
+// reading IsCacheBoundary() already established for cache-boundary
+// markers (above).
+//
+// "Ignored whole" is proven by the same twin-comparison shape R-ART-006
+// established: a request carrying a foreign-namespace extension and its
+// extension-free twin translate byte-identically (extension_test.go),
+// anchored against a hard-coded expectation literal on both sides — not
+// merely against each other — so the proof cannot pass vacuously either
+// because nothing was implemented yet, or because both sides shared one
+// (potentially buggy) code path. Falsifiability is a staged, reverted
+// mutation that rendered every namespace rather than only the reserved
+// one, breaking both the twin comparison and the hard-coded anchor for a
+// single foreign namespace and for three attached at once.
 package openaicompat
