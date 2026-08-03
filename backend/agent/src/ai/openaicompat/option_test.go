@@ -162,3 +162,34 @@ func TestOption_MaxOutputTokensOmitted_FieldExplicitlyAbsent(t *testing.T) {
 		t.Fatalf("Translate() = %s, want no \"max_tokens\" field at all when the option is unset", got)
 	}
 }
+
+// TestExpectationCases_AllCarryUsageOptIn is R-ART-017's total, positive
+// proof (S-ART-059, S-ART-060): every registered case's actual translated
+// bytes are asserted, directly and by name, to carry the usage opt-in —
+// not inferred from TestExpectationCases_MatchByteExact's byte-exact
+// pass, which could in principle hide a wrong expectation literal. AI-24
+// §§ 8 and 13.1 assign this total assertion to this node by name; the
+// bytes themselves have been emitted unconditionally since
+// translation.go/body.go's slice-1 skeleton (design.md "Usage opt-in
+// placement"), so this test is GREEN on first write — evidence class 4
+// (tasks.md's Evidence Classes), disclosed rather than presented as a
+// fabricated red. Its falsifiability is the staged, reverted mutation
+// recorded in tasks.md's evidence log for S-ART-061, not a red phase of
+// its own.
+func TestExpectationCases_AllCarryUsageOptIn(t *testing.T) {
+	const usageOptIn = `"stream_options":{"include_usage":true}`
+	if len(expectationCases) == 0 {
+		t.Fatal("expectationCases is empty; the total walk has nothing to walk")
+	}
+	for _, tc := range expectationCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := openaicompat.Translate(tc.build())
+			if err != nil {
+				t.Fatalf("Translate: unexpected error: %v", err)
+			}
+			if !strings.Contains(string(got), usageOptIn) {
+				t.Fatalf("Translate() = %s, want it to contain the usage opt-in %q", got, usageOptIn)
+			}
+		})
+	}
+}
