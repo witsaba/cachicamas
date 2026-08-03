@@ -5,9 +5,12 @@
 // mandatory-default branch is a deliberate no-op for this vendor
 // (R-ART-018, doc.go).
 //
-// The escape hatch (R-ART-019) is NOT implemented in this file — see
-// doc.go's "Escape hatch: reserved namespace not yet defined upstream"
-// section and tasks.md's Phase 4 evidence log.
+// The escape hatch (R-ART-019) is implemented in this file too:
+// [Namespace] is this adapter's own reserved provider-extension
+// namespace, and appendExtensionFields merges its members into the wire
+// body while every foreign namespace is ignored whole — see doc.go's
+// "Escape hatch: reserved namespace" section for the coordinator ruling
+// that defined this value (AI-25's landed artifact never did).
 
 package openaicompat
 
@@ -16,6 +19,49 @@ import (
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
+
+// Namespace is this adapter's own reserved provider-extension namespace
+// (R-ART-019, AI-12.3's escape hatch, V-REQ-28). A caller wanting a
+// value merged into this adapter's wire body attaches it via
+// ai.WithProviderExtension(openaicompat.Namespace, value) — exported so
+// a caller references it by name rather than hand-typing (and
+// potentially mistyping) the string: a caller who typos a hand-written
+// namespace silently gets "foreign namespace, ignored whole" (R-ART-019)
+// with no error anywhere, which is exactly the miserable failure mode an
+// exported constant is the cheapest guard against.
+//
+// AI-25's landed artifact never defined this value — verified by
+// exhaustive search (tasks.md's Phase 4 evidence log) — because AI-25
+// was never given a task to define one. See doc.go's "Escape hatch:
+// reserved namespace" section for the coordinator ruling and its full
+// rationale: dialect-named, not vendor-branded, matching this package's
+// own naming, and reserved here because this milestone — not AI-25's
+// construction or AI-12's neutral mechanism — owns the wire body the
+// value merges into.
+const Namespace = "openaicompat"
+
+// appendExtensionFields appends this adapter's own reserved-namespace
+// provider-extension members, merged raw into the wire body, last
+// (R-ART-019). Every namespace other than [Namespace] a request's
+// req.ProviderExtensions() carries is never separately read or rendered
+// by this function at all — "ignored whole" is simply what NOT reading
+// any other namespace produces, structurally, the same reasoning
+// appendMessageObject/appendSystemMessageObject never reading
+// IsCacheBoundary() already established for cache-boundary markers
+// (doc.go's "Cache-boundary markers vanish whole" section).
+//
+// extension.Value() bytes are spliced RAW, exactly like tool.go's schema
+// splice (R-ART-010) and for the identical reason: these are
+// caller-supplied JSON object members — one or more "key":value pairs,
+// with no enclosing braces of their own — not a value this package's own
+// json.Marshal should re-encode.
+func appendExtensionFields(buf []byte, req ai.Request) []byte {
+	if extension, ok := req.ProviderExtension(Namespace); ok {
+		buf = append(buf, ',')
+		buf = append(buf, extension.Value()...)
+	}
+	return buf
+}
 
 // appendGenerationOptionFields appends this request's max_tokens,
 // temperature, top_p and stop fields, each independently gated on its own
