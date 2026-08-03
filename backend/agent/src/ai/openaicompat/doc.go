@@ -167,4 +167,51 @@
 // unsupported feature>}), reachable via errors.Is(err,
 // ai.ErrUnsupportedCapability) through ai.Failure.Is — the same uniform
 // door for both later slices, never a per-site construction.
+//
+// # Cache-boundary markers vanish whole (AI-26.2, R-ART-006)
+//
+// This adapter targets a vendor that caches automatically and exposes no
+// client-supplied cache-boundary annotation, so every marker a request
+// carries — on a system-instruction segment, a tool declaration or a
+// message — is dropped whole: it renders as no wire field, no hint, no
+// comment and no ordering change. This exercises, and does not modify,
+// AI-11.3's own advisory contract (openspec/specs/ai-cache-breakpoints/
+// spec.md, R-ACB-008): "markers are advisory: a translator may ignore
+// every one of them", conditioned on reading a region's full substantive
+// content and simply never consulting the marker on it — R-ACB-008's own
+// text names the control (S-ACB-034) that keeps the identity from being
+// vacuous, and S-ACB-035 requires the region read to be complete, not
+// merely present, for the proof to count.
+//
+// That conditioning is why this slice's twin-comparison proof
+// (cache_marker_test.go) walks every region ai.CacheRegions() enumerates
+// but runs only the messages region to completion today, non-vacuously:
+// appendMessageObject (body.go, AI-26.1) is the only per-carrier renderer
+// that already emits a carrier's full substantive content — role and
+// text — onto the wire. The other two cache regions are each recorded
+// SKIP, with a named reason, rather than a fabricated PASS over content
+// that is not rendered at all:
+//
+//   - Tools: tool.go does not exist before AI-26.4 (slice 3). A
+//     marker-drop proof over declarations Translate does not render at
+//     all would be vacuous under S-ACB-035, not a proof that the marker
+//     specifically is what is dropped.
+//   - System: system.go does not exist yet. Which wire role a rendered
+//     system segment uses — system or developer, both cited as legal
+//     members of the vendor's messages union (see "Wire-shape
+//     provenance" above) — is a decision this slice deliberately did
+//     not make silently: this package holds no model catalog (mirroring
+//     this file's own V-OUT-14-posture note above) and so cannot
+//     condition the choice on which models a caller targets, and picking
+//     either role without that resolution risks a systematic, untestable
+//     multi-model compatibility defect this package's own test suite
+//     could not catch (translation is pure and constructs no client —
+//     NFR-ART-C — so there is no live call to validate a guess against).
+//     Recorded here as an open decision, not resolved. system.go,
+//     system_segment_test.go and this test's "system" sub-test all land
+//     together once it is.
+//
+// Both gaps are structural and self-closing: cache_marker_test.go's walk
+// is driven by ai.CacheRegions(), so once tool.go and system.go exist,
+// the same unedited test starts proving R-ART-006 for those regions too.
 package openaicompat
