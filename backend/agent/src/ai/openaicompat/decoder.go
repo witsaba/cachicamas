@@ -67,8 +67,9 @@ func NewDecoder(maxFrameBytes int) *Decoder {
 // in arrival order (R-ASD-002). Bytes that do not yet form a complete
 // line are retained for the next Feed call.
 //
-// This slice's scan recognizes a single line feed as the only line
-// terminator; CR and CRLF handling is AI-27.2's growth (slice 2a).
+// A line may be terminated by CRLF, a lone LF, or a lone CR (R-ASD-006);
+// see nextLine for how a CRLF pair split across two Feed calls stays a
+// single terminator instead of injecting a phantom blank line.
 func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 	d.buf = append(d.buf, p...)
 
@@ -97,18 +98,55 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 // terminator has arrived yet, in which case buf[start:] must be retained
 // as an unconsumed tail rather than treated as a (short) line.
 //
-// This is the whole cursor-bookkeeping contract Feed's scan loop depends
-// on, extracted so slice 2a can grow it into full three-terminator
-// handling (CR, LF, and CRLF-as-one, including a CRLF split across two
-// Feed calls) without touching Feed's own loop shape. This slice's
-// version recognizes a single line feed only.
+// Three terminators are recognized per WHATWG HTML § 9.2 (R-ASD-006): a
+// lone LF, a lone CR, or a CRLF pair treated as ONE terminator — never as
+// two independently-ending lines, which would inject a spurious blank
+// line at exactly that split offset (R-ASD-013). A CR found at the very
+// end of the bytes currently available is never resolved here: whether
+// it is a lone CR or the first half of a CRLF whose LF has not arrived
+// yet requires a following byte nextLine does not have. That CR is left
+// exactly where it is, in the retained tail buf already carries across
+// Feed calls — held structurally, with no separate "pending CR" flag
+// that could desynchronize — and is resolved by the next Feed call's
+// leading byte, or (AI-27.6, slice 6) by Finish.
 func nextLine(buf []byte, start int) (line []byte, next int, ok bool) {
-	i := bytes.IndexByte(buf[start:], '\n')
+	rest := buf[start:]
+	i := bytes.IndexAny(rest, "\r\n")
 	if i < 0 {
 		return nil, start, false
 	}
+
+	if rest[i] == '\n' {
+		end := start + i
+		return buf[start:end], end + 1, true
+	}
+
+	termLen, ok := resolveCR(rest, i)
+	if !ok {
+		return nil, start, false
+	}
 	end := start + i
-	return buf[start:end], end + 1, true
+	return buf[start:end], end + termLen, true
+}
+
+// resolveCR decides how many bytes the CR found at rest[crPos] terminates
+// with: 2 for a CRLF pair, when the CR's very next byte is LF; 1 for a
+// lone CR. ok is false when rest has no byte after the CR yet, so the
+// question cannot be answered from the bytes fed so far — the caller
+// must leave the CR unresolved rather than guess.
+//
+// This is the general "a boundary is visible but not yet resolvable
+// without one more byte" shape nextLine needs for CR/CRLF; slice 2b's BOM
+// prefix-wait check (a fixed 3-byte prefix, not a 1-byte lookahead) grows
+// the same wait-rather-than-guess idea for a different boundary.
+func resolveCR(rest []byte, crPos int) (termLen int, ok bool) {
+	if crPos+1 >= len(rest) {
+		return 0, false
+	}
+	if rest[crPos+1] == '\n' {
+		return 2, true
+	}
+	return 1, true
 }
 
 // Finish signals that no further bytes will arrive.
