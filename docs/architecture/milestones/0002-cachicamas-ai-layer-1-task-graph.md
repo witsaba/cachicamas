@@ -1,6 +1,6 @@
 # Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Wave 0 + Wave 1 + Wave 2 complete — **21 of 41** milestones shipped. **AI-00 through AI-20 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 33 production files and 44 test files.
+> **Status:** Wave 0 + Wave 1 + Wave 2 + Wave 3 complete — **24 of 41** milestones shipped. **AI-00 through AI-23 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 49 production files and 58 test files.
 > **Single source.** This document owns milestone identity, scope and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. It supersedes the plan dated 2026-07-30 that assumed seventeen shipped milestones inside `database_administrator`; see [what changed and why](#what-changed-from-the-retired-plan) for the identifier map from that plan to this one.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md) — downstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
@@ -2284,7 +2284,7 @@ Layer 1 is complete when every box holds. The [traceability spine](#completion-c
 - [x] The provider interface exposes no vendor type, and optional capabilities are discovered rather than required.
 - [ ] Cancellation cannot leak goroutines.
 - [ ] Backpressure is bounded and lossless, with exactly one sanctioned loss path.
-- [ ] The fake provider supports deterministic Layer 2 tests.
+- [x] The fake provider supports deterministic Layer 2 tests.
 - [ ] The conformance suite can be reused for every future adapter.
 - [ ] The first concrete adapter passes deterministic conformance.
 - [ ] Secrets and sensitive bodies are absent from diagnostics by default.
@@ -2301,6 +2301,11 @@ Layer 1 is complete when every box holds. The [traceability spine](#completion-c
 > **Item 12 (bounded, lossless backpressure) deliberately stays open.** AI-20's `R-AMP-012` states the contract — one sanctioned loss path, on cancellation with a saturated buffer, with the contract naming the consumer as the party in error — but the spine maps this item to **AI-34**, which locks buffer sizing and the behaviour itself. Stating the rule is not the same as locking it; the box moves when AI-34 lands.
 >
 > **Item 6 also stays open**, unchanged: its wire half is AI-26.6 / AI-29.2. AI-17 closed the *stream* half of the reasoning round-trip token (`R-ARE-009`/`R-ARE-010`), and that is recorded on the **G12(b)** spine row rather than here, because item 6's own text names the wire.
+
+> **Amended 2026-08-03 — Wave 3 close.** One item moved to checked; one item's node set is only half satisfied and stays open.
+>
+> - **Item 13** (the fake provider supports deterministic Layer 2 tests) — closed by **AI-21** in full: twenty requirements, fifty-nine scenarios, verified `-race`-clean and repeatable across runs with no wall-clock dependence on any scripted path (`NFR-AFP-C`).
+> - **Item 14** (the conformance suite can be reused for every future adapter) stays **open**. Its own traceability-spine mapping names two nodes, **AI-23** and **AI-38.1** — AI-23 proves the suite is pluggable and runs with zero copied assertions against its *first* subject (AI-21's fake), which is necessary but not sufficient for "reused for every future adapter": that claim needs a second, independent subject to corroborate. The box moves when AI-38.1 (transcript replay against the first concrete adapter, Wave 4) lands.
 
 ## Explicitly deferred until after Layer 1
 
@@ -2347,16 +2352,16 @@ Two-way coverage: every defect class, gap and completion-checklist item maps to 
 | **C4** — unconstructible terminal error | **Closed.** AI-19.1 landed — a package other than `ai` constructs the terminal error event through exported identifiers only — guarded by AI-14.1's exhaustiveness assertion; the ordering obligation held, AI-19 shipped before AI-20. |
 | **G4** — cache breakpoints (Layer 1 half) | **Layer 1 half closed.** AI-10.2 (segments from birth), AI-11.1 … AI-11.3 landed. Remaining: wire rendering by AI-26.2 (Wave 4). |
 | **G5** — tool-call ordinal survives normalization | **Layer 1 half closed.** AI-09.2 (request side) and **AI-18.3** (stream side — the ordinal is derived from stream position and stored on no payload) both landed. Remaining: AI-30.5 (wire, Wave 4). |
-| **G8** — partial-output discriminator and typed taxonomy | **Layer 1 half closed.** AI-19.2 … AI-19.5 landed: the discriminator is a single boolean, perpendicular to the delivery path, with the two-axis collapse prohibited by `R-AIP-012`. Remaining: AI-32.2, AI-32.3, AI-35.1; suite case AI-23.4. |
+| **G8** — partial-output discriminator and typed taxonomy | **Layer 1 half closed.** AI-19.2 … AI-19.5 landed: the discriminator is a single boolean, perpendicular to the delivery path, with the two-axis collapse prohibited by `R-AIP-012`. **Suite case AI-23.4 landed** (Wave 3) — all nine categories iterated exhaustively against the shipped enumerator, on both delivery paths. Remaining: AI-32.2, AI-32.3, AI-35.1 (Wave 4). |
 | **G9** — per-request options and escape hatch | **Closed.** AI-12.1 … AI-12.4 landed. Rendering by AI-26.7 (Wave 4). |
-| **G12(a)** — delta-optional tool calls | **Layer 1 half closed.** AI-18.2 landed — a zero-delta call is legal and complete, and is indistinguishable after reconstruction from its fragmented equivalent. Exercised later by AI-21.2, AI-30.2; suite case AI-23.3. |
+| **G12(a)** — delta-optional tool calls | **Layer 1 half closed.** AI-18.2 landed — a zero-delta call is legal and complete, and is indistinguishable after reconstruction from its fragmented equivalent. **AI-21.2 (fake) and AI-23.3 (suite) landed** (Wave 3) — the zero-delta shape is scriptable and the suite asserts it is mandatory to support. Remaining: AI-30.2 (Wave 4, wire). |
 | **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild; **AI-17.2** carries it across the event boundary byte-exactly, whole on block-end only. Wire-proven by AI-29.2 and AI-26.6 (Wave 4). |
 | **G12(c)** — refusal and pause finish reasons | **Closed.** AI-13.1, AI-13.2 landed with all seven values, and **AI-15.2** delivers them on the stream — the completion event embeds AI-13's `FinishReason` and `Usage` by value, so a refusal or pause reaches a consumer as a terminal event rather than only as a constructible part. Mapped from vendor stop values by AI-31.1 (Wave 4). |
 | **G13** — stream carrier | **Closed.** AI-02.1 decided it; **AI-20.4** pins it mechanically — an AST walk asserting a receive-only channel of `Event`, with the declaring file's imports allowlisted to exactly `{"context"}`, proven to bite on both a vendor stand-in and a changed carrier. Ergonomics remain AI-22.5. |
 | Leakage register rows 1–9 | row 1 = G12(a) above · row 2 = G12(b) above · row 3 = G12(c) above · row 4 AI-26.5 · row 5 AI-26.3 · row 6 AI-26.7 · row 7 AI-26.5 · row 8 **Layer 1 half closed** by AI-10.2 · row 9 **Layer 1 half closed** by AI-11.3 (wire rendering AI-26.2, Wave 2) |
 | **Wave 2 obligation: Region-exhaustiveness guard one-directional.** | `request_test.go:1745` asserts `len(regions) != 11`, catching a **deleted table row** but not a **field added to `requestDraft`** — which is the failure mode that recurred three times (AI-10.6, AI-11.1, AI-12.3). Record this limitation in the first Wave 2 milestone that adds a `Request` region, with a plan to add a per-field heuristic or switched architecture when value/flag pairs are no longer tenable. |
 | **Wave 2 obligation: JSON scanner depth cap.** | `isWellFormedJSON` in `json_syntax.go:55` recurses without a nesting-depth cap and is reachable from caller input through `tool_call.go:91`. Measured: it **agrees** with `encoding/json.Valid` at depth 5 000, **disagrees** at depth 10 001, and produces `fatal error: stack overflow` at depth 20 000 000 — an unrecoverable crash, not a returned error. Its differential generator caps generated nesting at ~5 (`json_syntax_differential_internal_test.go:76`), so the differential test cannot reach the divergence. **The same test's doc comment at `json_syntax_differential_internal_test.go:28` claims coverage of "deeply nested structures", which is not true as written** — the false coverage claim is part of this obligation and must be corrected in the same change, not separately. Owned by AI-24 (first transport) or the first Wave 2 milestone feeding provider bytes into `NewToolCall`. Fix: cap nesting at 10 000, add a corpus case at 10 001, raise the generator's nesting bound above the cap, and correct the doc comment to state the depth the generator actually reaches. |
-| Required conformance case "redaction" | AI-23.7 (suite); AI-36 (adapter hardening) |
+| Required conformance case "redaction" | **AI-23.7 landed** (Wave 3) — a planted sentinel is required to appear in no event, error string, or test-failure output the suite produces, including bounded diffs and payload summaries. Remaining: AI-36 (adapter hardening, Wave 4). |
 | ADR 0005 Guards A / B / C | AI-00.3 · AI-00.4 (both halves) · AI-00.2 + AI-20.4 |
 | ADR 0005 § D3 observability boundary | AI-37.1 … AI-37.4 |
 | ADR 0005 § D2 location mapping | AI-00.1, AI-00.2 |

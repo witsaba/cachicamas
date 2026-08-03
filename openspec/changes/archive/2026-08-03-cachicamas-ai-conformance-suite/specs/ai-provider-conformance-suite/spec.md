@@ -1,4 +1,4 @@
-# Spec — the provider conformance suite
+> **Archived 2026-08-03.** This is the delta spec as written during the SDD cycle. The **promoted live contract** is [`openspec/specs/ai-provider-conformance-suite/spec.md`](../../../../../specs/ai-provider-conformance-suite/spec.md) — read that file, not this one, for the current requirement text, including the `Factory` bool-to-`*bool` correction caught before apply and design's resolution of the other three items this delta left open. `ai-fake-provider` and `ai-stream-testkit` are cited below as "not yet archived"; both are archived alongside this file.
 
 > **Change**: `cachicamas-ai-conformance-suite` · **Milestone**: AI-23 — Create the provider conformance suite (Wave 3 "Prove", the wave's **final** milestone)
 > **Nodes** (8 leaves): AI-23.1 pluggable skeleton · AI-23.2 text + lifecycle · AI-23.3 tool calls · AI-23.4 terminal + error · AI-23.5 cancellation + closure · AI-23.7 redaction · AI-23.8 optional capabilities · AI-23.6 capability record
@@ -7,14 +7,14 @@
 > **Requirement IDs**: `R-CNF-0NN` · **Scenario IDs**: `S-CNF-0NN` — prefix re-verified unused across `openspec/specs/` and `openspec/changes/` at spec time (wave siblings in use: `AFP` AI-21, `STK` AI-22; also `AIP`, `AMP`, `AMR`, `AIE`, `ARC`, `ACP`, `ATD`, `REX`, `WSY`). Neither `AFP` nor `STK` is reused.
 > **Format**: RFC 2119 keywords + Given/When/Then, per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable.
 > **Binding predecessors, cited by identifier and never modified**:
-> [`ai-minimum-capabilities`](../../../../specs/ai-minimum-capabilities/spec.md) (AI-03) — § 5 `CAP-R-01…05`, § 6 `CAP-O-01…03`, § 9 discovery, § 10 the record and its four-value outcome set, § 11 the marking rule, § 12 what AI-23 inherits, § 13 standing rules;
-> [`ai-model-provider`](../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-009` … `R-AMP-012` mid-stream physics, AI-20.3 saturated drop, AI-20.4 signature guard, `R-AMP-017` the single askable optional contract;
-> [`ai-stream-lifecycle`](../../../../specs/ai-stream-lifecycle/spec.md) — § 4 ownership, § 5 cancellation, § 6 buffering, § 7 failure delivery;
-> [`ai-event-envelope`](../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, the kind vocabulary, `CheckStream`'s ordering invariants;
-> [`ai-fake-provider`](../../cachicamas-ai-fake-provider/specs/ai-fake-provider/spec.md) (AI-21, **not yet archived** — read from its active change folder) — `Script`/`Step`/`Emit`/`Hold`/`Gate`, the suite's scenario language and its first subject;
-> [`ai-stream-testkit`](../../cachicamas-ai-stream-testkit/specs/ai-stream-testkit/spec.md) (AI-22, **not yet archived** — read from its active change folder) — `R-STK-001` drain, `R-STK-003` diff, `R-STK-005`/`R-STK-006` ordering and contiguity, `R-STK-007`/`R-STK-008` leak detection
+> [`ai-minimum-capabilities`](../../../../../specs/ai-minimum-capabilities/spec.md) (AI-03) — § 5 `CAP-R-01…05`, § 6 `CAP-O-01…03`, § 9 discovery, § 10 the record and its four-value outcome set, § 11 the marking rule, § 12 what AI-23 inherits, § 13 standing rules;
+> [`ai-model-provider`](../../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-009` … `R-AMP-012` mid-stream physics, AI-20.3 saturated drop, AI-20.4 signature guard, `R-AMP-017` the single askable optional contract;
+> [`ai-stream-lifecycle`](../../../../../specs/ai-stream-lifecycle/spec.md) — § 4 ownership, § 5 cancellation, § 6 buffering, § 7 failure delivery;
+> [`ai-event-envelope`](../../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, the kind vocabulary, `CheckStream`'s ordering invariants;
+> [`ai-fake-provider`](../../../2026-08-03-cachicamas-ai-fake-provider/specs/ai-fake-provider/spec.md) (AI-21, **not yet archived** — read from its active change folder) — `Script`/`Step`/`Emit`/`Hold`/`Gate`, the suite's scenario language and its first subject;
+> [`ai-stream-testkit`](../../../2026-08-03-cachicamas-ai-stream-testkit/specs/ai-stream-testkit/spec.md) (AI-22, **not yet archived** — read from its active change folder) — `R-STK-001` drain, `R-STK-003` diff, `R-STK-005`/`R-STK-006` ordering and contiguity, `R-STK-007`/`R-STK-008` leak detection
 > **Depends on**: AI-03, AI-19, AI-20, AI-21, AI-22 (all shipped) · **Blocks**: AI-24, AI-38
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-23.1 … AI-23.8
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-23.1 … AI-23.8
 
 ---
 
