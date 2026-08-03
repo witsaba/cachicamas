@@ -498,3 +498,70 @@ func TestNew_AdapterBuiltTransportBoundsExist(t *testing.T) {
 		}
 	}
 }
+
+// TestNew_TotalityAcrossExtremeInputs covers S-APC-072 (NFR-APC-F): every
+// extreme input to New — empty endpoint, empty credential, whitespace-only
+// endpoint, both empty — returns a typed AI-04 failure naming the
+// offending input's position, and none panics.
+func TestNew_TotalityAcrossExtremeInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		endpoint   string
+		credential string
+		wantRule   error
+		wantField  string
+	}{
+		{"empty endpoint", "", "token", ai.ErrMalformed, "endpoint"},
+		{"empty credential", "http://example.invalid/v1", "", ai.ErrEmpty, "credential"},
+		{"whitespace-only endpoint", "   ", "token", ai.ErrMalformed, "endpoint"},
+		{"both endpoint and credential empty", "", "", ai.ErrMalformed, "endpoint"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				c   *Client
+				err error
+			)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("New() panicked: %v, want a typed failure instead (S-APC-072)", r)
+					}
+				}()
+				c, err = New(Config{
+					Endpoint:   tc.endpoint,
+					Credential: NewCredential(tc.credential),
+				})
+			}()
+
+			assertConfigurationFault(t, c, err, tc.wantRule, tc.wantField, &stubTransport{})
+		})
+	}
+}
+
+// TestNew_SucceedsWithNoHTTPClientSupplied covers S-APC-073 (NFR-APC-F): a
+// valid endpoint and credential with no HTTP client supplied succeeds,
+// returns a usable adapter, and returns no error — an absent client is the
+// documented selector for the adapter-built path, never a fault.
+func TestNew_SucceedsWithNoHTTPClientSupplied(t *testing.T) {
+	t.Parallel()
+
+	c, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil (S-APC-073)", err)
+	}
+	if c == nil {
+		t.Fatal("New() returned a nil *Client, want a usable adapter (S-APC-073)")
+	}
+	if c.httpClient == nil {
+		t.Error("c.httpClient is nil, want the adapter-built client (S-APC-073)")
+	}
+}
