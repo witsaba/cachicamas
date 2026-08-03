@@ -272,27 +272,38 @@ func writePromptError(c *echo.Context, logger *slog.Logger, status int, code, me
 // writePromptErrorFromErr maps a domain error to the locked HTTP
 // envelope. Returns 410 only for *GoneError; everything else uses
 // the existing type-based mapping (validation/conflict/not_found).
+//
+// 2026-08-02-security-vulnerability-remediation (M-5, M-6): the
+// log line now carries the closed-vocabulary error_kind and
+// NEVER the raw err.Error() text. The response body message is
+// also fixed-vocabulary (the only exception is the validation
+// fields map, which is operator-curated and safe to echo).
 func writePromptErrorFromErr(c *echo.Context, logger *slog.Logger, op, slug string, err error) error {
 	if err == nil {
 		return nil
 	}
-	// Per S-PR-X3 the log line must NOT contain the request body or
-	// the prompt body. Slug is safe; we log it.
-	if logger != nil {
-		logger.InfoContext(c.Request().Context(), "prompt request failed",
-			slog.String("op", op),
-			slog.String("slug", slug),
-			slog.String("err", err.Error()),
-		)
-	}
 
 	// Special case: *GoneError -> 410 with the prompt_deleted code.
 	if _, ok := domain.AsPromptDeleted(err); ok {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "prompt request failed",
+				slog.String("op", op),
+				slog.String("slug", slug),
+				slog.String("error_kind", string(ErrorKindNotFound)),
+			)
+		}
 		return writePromptError(c, nil, http.StatusGone, domain.CodePromptDeleted, domain.MsgPromptDeleted)
 	}
 
 	var verr *domain.ValidationError
 	if errors.As(err, &verr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "prompt request failed",
+				slog.String("op", op),
+				slog.String("slug", slug),
+				slog.String("error_kind", string(ErrorKindValidationFailed)),
+			)
+		}
 		// Use the first field's message as the top-level message; the
 		// full Fields map is in the data field for richer clients.
 		msg := domain.MsgPromptValidationFailed
@@ -311,11 +322,25 @@ func writePromptErrorFromErr(c *echo.Context, logger *slog.Logger, op, slug stri
 
 	var cerr *domain.ConflictError
 	if errors.As(err, &cerr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "prompt request failed",
+				slog.String("op", op),
+				slog.String("slug", slug),
+				slog.String("error_kind", string(ErrorKindConflict)),
+			)
+		}
 		return writePromptError(c, nil, http.StatusConflict, domain.CodeConflict, domain.MsgPromptSlugTaken)
 	}
 
 	var nerr *domain.NotFoundError
 	if errors.As(err, &nerr) {
+		if logger != nil {
+			logger.InfoContext(c.Request().Context(), "prompt request failed",
+				slog.String("op", op),
+				slog.String("slug", slug),
+				slog.String("error_kind", string(ErrorKindNotFound)),
+			)
+		}
 		// Distinguish "revision not found" from "prompt not found"
 		// by the resource name. The repo sets Resource to
 		// promptTableName or promptRevisionTableName.
@@ -327,21 +352,40 @@ func writePromptErrorFromErr(c *echo.Context, logger *slog.Logger, op, slug stri
 		return writePromptError(c, nil, http.StatusNotFound, code, msg)
 	}
 
-	// Fallback: internal error.
+	// Fallback: internal error. Log raw err.Error at DEBUG only.
+	if logger != nil {
+		logger.InfoContext(c.Request().Context(), "prompt request failed",
+			slog.String("op", op),
+			slog.String("slug", slug),
+			slog.String("error_kind", string(ErrorKindInternal)),
+		)
+		logger.DebugContext(c.Request().Context(), "prompt request failed (raw error)",
+			slog.String("op", op),
+			slog.String("error", err.Error()),
+		)
+	}
 	return writePromptError(c, nil, http.StatusInternalServerError, domain.CodeServer, "Something went wrong. Please try again.")
 }
 
 // RegisterPromptRoutes wires all 7 routes onto the given Echo group.
 // The caller is responsible for any auth middleware applied to the
 // group (Q-D locked: admin-only, no extra header required for v1).
-func (h *PromptHandler) RegisterPromptRoutes(e *echo.Echo) {
-	e.POST("/prompts", h.Create)
-	e.GET("/prompts", h.List)
-	e.GET("/prompts/:slug", h.GetBySlug)
-	e.PATCH("/prompts/:slug", h.Update)
-	e.DELETE("/prompts/:slug", h.Delete)
-	e.GET("/prompts/:slug/revisions", h.ListRevisions)
-	e.POST("/prompts/:slug/revisions/:n/restore", h.Restore)
+//
+// 2026-08-02-security-vulnerability-remediation (H-2): the route
+// group changed from *echo.Echo to *echo.Group so the production
+// wiring in main.go can mount /prompts on an auth-protected group
+// (IdentityFromCookie + LoadGitHubTokenMiddleware). The signature
+// change is load-bearing — production code that calls the old
+// *echo.Echo variant will fail to compile, which is the
+// regression guard.
+func (h *PromptHandler) RegisterPromptRoutes(g *echo.Group) {
+	g.POST("/prompts", h.Create)
+	g.GET("/prompts", h.List)
+	g.GET("/prompts/:slug", h.GetBySlug)
+	g.PATCH("/prompts/:slug", h.Update)
+	g.DELETE("/prompts/:slug", h.Delete)
+	g.GET("/prompts/:slug/revisions", h.ListRevisions)
+	g.POST("/prompts/:slug/revisions/:n/restore", h.Restore)
 }
 
 // ---------------------------------------------------------------------------

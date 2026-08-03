@@ -117,9 +117,14 @@ func makeOrg(t *testing.T, db *sql.DB, nameSuffix string) int64 {
 
 // makeWorkspaceInput builds a minimal valid CreateWorkspaceInput for
 // the given org id. Tests can mutate fields before calling Insert.
+// The OwnerUserID is set to a deterministic test value (1) so the
+// post-H-1 repo signatures (UpdateName, SoftDelete) accept the
+// call without the test having to thread a separate owner id.
 func makeWorkspaceInput(orgID int64, name string) *domain.Workspace {
+	owner := int64(1)
 	return &domain.Workspace{
 		OrganizationID: orgID,
+		OwnerUserID:    &owner,
 		Name:           name,
 		RepoGitHubID:   123456,
 		RepoFullName:   "octocat/" + name,
@@ -127,6 +132,11 @@ func makeWorkspaceInput(orgID int64, name string) *domain.Workspace {
 		RepoName:       name,
 	}
 }
+
+// seedOwnerID is the implicit owner_id the test seeds use (matches
+// makeWorkspaceInput's default). Tests that need to assert the
+// cross-tenant filter use a different id.
+const seedOwnerID = int64(1)
 
 // ---------------------------------------------------------------------------
 // Insert
@@ -218,7 +228,7 @@ func TestWorkspaceRepo_Insert_NilOwnerUserID_StoresNULL(t *testing.T) {
 	}
 
 	// Round-trip via SelectByID must return OwnerUserID == nil.
-	got2, err := repo.SelectByID(ctx, got.ID)
+	got2, err := repo.SelectByID(ctx, orgID, got.ID)
 	if err != nil {
 		t.Fatalf("SelectByID: %v", err)
 	}
@@ -287,7 +297,7 @@ func TestWorkspaceRepo_SelectByID_ReturnsInserted(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	got, err := repo.SelectByID(ctx, inserted.ID)
+	got, err := repo.SelectByID(ctx, orgID, inserted.ID)
 	if err != nil {
 		t.Fatalf("SelectByID: %v", err)
 	}
@@ -318,7 +328,7 @@ func TestWorkspaceRepo_SelectByID_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := repo.SelectByID(ctx, 99999999)
+	_, err := repo.SelectByID(ctx, 1, 99999999)
 	if err == nil {
 		t.Fatalf("SelectByID(99999999): expected error, got nil")
 	}
@@ -349,11 +359,11 @@ func TestWorkspaceRepo_SelectByID_SoftDeletedReturnsNotFound(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	if err := repo.SoftDelete(ctx, inserted.ID); err != nil {
+	if err := repo.SoftDelete(ctx, orgID, seedOwnerID, inserted.ID); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
 
-	_, err = repo.SelectByID(ctx, inserted.ID)
+	_, err = repo.SelectByID(ctx, orgID, inserted.ID)
 	if err == nil {
 		t.Fatalf("SelectByID on soft-deleted row: expected error, got nil")
 	}
@@ -489,7 +499,7 @@ func TestWorkspaceRepo_SelectAllByOrg_FiltersSoftDeleted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Insert dead %q: %v", n, err)
 		}
-		if err := repo.SoftDelete(ctx, w.ID); err != nil {
+		if err := repo.SoftDelete(ctx, orgID, seedOwnerID, w.ID); err != nil {
 			t.Fatalf("SoftDelete %q: %v", n, err)
 		}
 	}
@@ -542,7 +552,7 @@ func TestWorkspaceRepo_UpdateName_RenamesAndBumpsUpdatedAt(t *testing.T) {
 	// Sleep a moment so updated_at has a chance to advance.
 	time.Sleep(10 * time.Millisecond)
 
-	got, err := repo.UpdateName(ctx, inserted.ID, "new-name")
+	got, err := repo.UpdateName(ctx, orgID, seedOwnerID, inserted.ID, "new-name")
 	if err != nil {
 		t.Fatalf("UpdateName: %v", err)
 	}
@@ -557,7 +567,7 @@ func TestWorkspaceRepo_UpdateName_RenamesAndBumpsUpdatedAt(t *testing.T) {
 	}
 
 	// Round-trip via SelectByID confirms the persisted row matches.
-	got2, err := repo.SelectByID(ctx, inserted.ID)
+	got2, err := repo.SelectByID(ctx, orgID, inserted.ID)
 	if err != nil {
 		t.Fatalf("SelectByID: %v", err)
 	}
@@ -592,7 +602,7 @@ func TestWorkspaceRepo_UpdateName_DuplicateInSameOrgReturnsConflict(t *testing.T
 	}
 
 	// Try to rename b to "name-a" → must Conflict.
-	_, err = repo.UpdateName(ctx, b.ID, "name-a")
+	_, err = repo.UpdateName(ctx, orgID, seedOwnerID, b.ID, "name-a")
 	if err == nil {
 		t.Fatalf("UpdateName duplicate: expected error, got nil")
 	}
@@ -622,11 +632,11 @@ func TestWorkspaceRepo_UpdateName_SoftDeletedReturnsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if err := repo.SoftDelete(ctx, inserted.ID); err != nil {
+	if err := repo.SoftDelete(ctx, orgID, seedOwnerID, inserted.ID); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
 
-	_, err = repo.UpdateName(ctx, inserted.ID, "resurrected-name")
+	_, err = repo.UpdateName(ctx, orgID, seedOwnerID, inserted.ID, "resurrected-name")
 	if err == nil {
 		t.Fatalf("UpdateName on soft-deleted: expected error, got nil")
 	}
@@ -662,7 +672,7 @@ func TestWorkspaceRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	}
 
 	// SoftDelete.
-	if err := repo.SoftDelete(ctx, inserted.ID); err != nil {
+	if err := repo.SoftDelete(ctx, orgID, seedOwnerID, inserted.ID); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
 
@@ -677,7 +687,7 @@ func TestWorkspaceRepo_SoftDelete_SetsDeletedAt(t *testing.T) {
 	}
 
 	// Workspace row is invisible to SelectByID.
-	_, err = repo.SelectByID(ctx, inserted.ID)
+	_, err = repo.SelectByID(ctx, orgID, inserted.ID)
 	if err == nil {
 		t.Errorf("SelectByID post-delete: expected error, got nil")
 	}
@@ -703,11 +713,11 @@ func TestWorkspaceRepo_SoftDelete_AlreadyDeletedReturnsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if err := repo.SoftDelete(ctx, inserted.ID); err != nil {
+	if err := repo.SoftDelete(ctx, orgID, seedOwnerID, inserted.ID); err != nil {
 		t.Fatalf("SoftDelete (first): %v", err)
 	}
 
-	err = repo.SoftDelete(ctx, inserted.ID)
+	err = repo.SoftDelete(ctx, orgID, seedOwnerID, inserted.ID)
 	if err == nil {
 		t.Fatalf("SoftDelete (second): expected error, got nil")
 	}

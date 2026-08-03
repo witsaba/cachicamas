@@ -150,9 +150,111 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	})
 }
 
+// TestLoadConfigFromEnv_SSLMODE exercises the POSTGRES_SSLMODE env
+// behavior (security M-2): the discrete-vars path MUST honor the env
+// variable (default "require") and never silently leave
+// `sslmode=disable` in the assembled DSN. The DATABASE_URL path is
+// independent — the URL is passed through verbatim, so the caller
+// owns the SSL mode.
+//
+// Test coverage:
+//   (a) empty POSTGRES_SSLMODE → DSN carries `sslmode=require` (default).
+//   (b) POSTGRES_SSLMODE=require → DSN carries `sslmode=require`.
+//   (c) POSTGRES_SSLMODE=verify-full → DSN carries `sslmode=verify-full`.
+//   (d) POSTGRES_SSLMODE=disable → DSN carries `sslmode=disable` (dev escape).
+//   (e) DATABASE_URL set → URL passed through unchanged; POSTGRES_SSLMODE ignored.
+func TestLoadConfigFromEnv_SSLMODE(t *testing.T) {
+	clearPostgresEnv(t)
+
+	t.Run("default sslmode is require", func(t *testing.T) {
+		clearPostgresEnv(t)
+		t.Setenv("POSTGRES_HOST", "db")
+		t.Setenv("POSTGRES_DB", "x")
+		t.Setenv("POSTGRES_USER", "u")
+		t.Setenv("POSTGRES_PASSWORD", "p")
+		_ = os.Unsetenv("POSTGRES_SSLMODE")
+
+		cfg, err := LoadConfigFromEnv()
+		if err != nil {
+			t.Fatalf("LoadConfigFromEnv: %v", err)
+		}
+		if !strings.Contains(cfg.DSN, "sslmode=require") {
+			t.Errorf("DSN %q must contain sslmode=require by default", cfg.DSN)
+		}
+		if strings.Contains(cfg.DSN, "sslmode=disable") {
+			t.Errorf("DSN %q must NOT contain sslmode=disable by default", cfg.DSN)
+		}
+	})
+
+	t.Run("POSTGRES_SSLMODE=require is honored", func(t *testing.T) {
+		clearPostgresEnv(t)
+		t.Setenv("POSTGRES_HOST", "db")
+		t.Setenv("POSTGRES_DB", "x")
+		t.Setenv("POSTGRES_USER", "u")
+		t.Setenv("POSTGRES_PASSWORD", "p")
+		t.Setenv("POSTGRES_SSLMODE", "require")
+
+		cfg, err := LoadConfigFromEnv()
+		if err != nil {
+			t.Fatalf("LoadConfigFromEnv: %v", err)
+		}
+		if !strings.Contains(cfg.DSN, "sslmode=require") {
+			t.Errorf("DSN %q must contain sslmode=require", cfg.DSN)
+		}
+	})
+
+	t.Run("POSTGRES_SSLMODE=verify-full is honored", func(t *testing.T) {
+		clearPostgresEnv(t)
+		t.Setenv("POSTGRES_HOST", "db")
+		t.Setenv("POSTGRES_DB", "x")
+		t.Setenv("POSTGRES_USER", "u")
+		t.Setenv("POSTGRES_PASSWORD", "p")
+		t.Setenv("POSTGRES_SSLMODE", "verify-full")
+
+		cfg, err := LoadConfigFromEnv()
+		if err != nil {
+			t.Fatalf("LoadConfigFromEnv: %v", err)
+		}
+		if !strings.Contains(cfg.DSN, "sslmode=verify-full") {
+			t.Errorf("DSN %q must contain sslmode=verify-full", cfg.DSN)
+		}
+	})
+
+	t.Run("POSTGRES_SSLMODE=disable is honored for dev escape", func(t *testing.T) {
+		clearPostgresEnv(t)
+		t.Setenv("POSTGRES_HOST", "db")
+		t.Setenv("POSTGRES_DB", "x")
+		t.Setenv("POSTGRES_USER", "u")
+		t.Setenv("POSTGRES_PASSWORD", "p")
+		t.Setenv("POSTGRES_SSLMODE", "disable")
+
+		cfg, err := LoadConfigFromEnv()
+		if err != nil {
+			t.Fatalf("LoadConfigFromEnv: %v", err)
+		}
+		if !strings.Contains(cfg.DSN, "sslmode=disable") {
+			t.Errorf("DSN %q must contain sslmode=disable when env=disable", cfg.DSN)
+		}
+	})
+
+	t.Run("DATABASE_URL passes through verbatim; POSTGRES_SSLMODE ignored", func(t *testing.T) {
+		clearPostgresEnv(t)
+		t.Setenv("DATABASE_URL", "postgres://u:p@db:5432/d?sslmode=verify-ca")
+		t.Setenv("POSTGRES_SSLMODE", "require")
+
+		cfg, err := LoadConfigFromEnv()
+		if err != nil {
+			t.Fatalf("LoadConfigFromEnv: %v", err)
+		}
+		if cfg.DSN != "postgres://u:p@db:5432/d?sslmode=verify-ca" {
+			t.Errorf("DSN %q must equal DATABASE_URL verbatim (POSTGRES_SSLMODE ignored on DATABASE_URL path)", cfg.DSN)
+		}
+	})
+}
+
 // TestApplyPoolSettings covers the post-Open pool tuning knobs. It is a
 // unit test because we never dial — we just verify that the pool fields
-// on a Config propagate to a *sql.DB via SetMaxOpenConns/SetMaxIdleConns/
+// on a Config propagate to a *sql.DB via SetMaxOpenConns/SetIdleConns/
 // SetConnMaxLifetime. This is the smallest piece of Open() that can be
 // exercised without a live DB.
 func TestApplyPoolSettings(t *testing.T) {
@@ -272,6 +374,7 @@ func clearPostgresEnv(t *testing.T) {
 		"POSTGRES_DB",
 		"POSTGRES_USER",
 		"POSTGRES_PASSWORD",
+		"POSTGRES_SSLMODE",
 	} {
 		t.Setenv(k, "")
 		// t.Setenv above records the empty value; we also need to unset

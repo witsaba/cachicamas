@@ -50,8 +50,14 @@ import (
 // SyncCallbackProcessor is the slice of *application.SyncService
 // the handler consumes. Tests can wire a fake without standing up
 // the full hexagonal graph.
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the
+// signature gained an organization_id parameter (position 3) so
+// the SQL UPDATE can scope the workspace denormalization to the
+// matching tenant. The handler decodes + validates the field
+// from the callback body and passes it through.
 type SyncCallbackProcessor interface {
-	ProcessSyncCallback(ctx context.Context, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error)
+	ProcessSyncCallback(ctx context.Context, orgID, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error)
 }
 
 // SyncCallbackHandler is the receiver for the workspace_syncer's
@@ -96,13 +102,19 @@ func RegisterInternalSyncCallbackRoute(e *echo.Echo, processor SyncCallbackProce
 // syncCallbackBody is the JSON body the workspace_syncer POSTs.
 // Optional fields are pointers so we can distinguish "not set"
 // from "set to empty string".
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the
+// OrganizationID field is REQUIRED. The handler 400s if it is
+// missing or <= 0; the wire is therefore a hard contract that
+// the ws-syncer can't silently drop.
 type syncCallbackBody struct {
-	JobID        int64   `json:"job_id"`
-	Status       string  `json:"status"`
-	CommitSHA    *string `json:"commit_sha,omitempty"`
-	DefaultBranch *string `json:"default_branch,omitempty"`
-	ErrorCode    *string `json:"error_code,omitempty"`
-	ErrorMessage *string `json:"error_message,omitempty"`
+	JobID          int64   `json:"job_id"`
+	OrganizationID int64   `json:"organization_id"`
+	Status         string  `json:"status"`
+	CommitSHA      *string `json:"commit_sha,omitempty"`
+	DefaultBranch  *string `json:"default_branch,omitempty"`
+	ErrorCode      *string `json:"error_code,omitempty"`
+	ErrorMessage   *string `json:"error_message,omitempty"`
 }
 
 // HandleSyncCallback is the HTTP transport for the workspace_syncer's
@@ -117,13 +129,18 @@ func (h *SyncCallbackHandler) HandleSyncCallback(c *echo.Context) error {
 	}
 
 	// 2. Parse + canonicalize.
+	//
+	// 2026-08-02-security-vulnerability-remediation (M-5): the
+	// response body MUST NOT echo err.Error() — the raw error text
+	// can be attacker-controlled. The log line carries the closed
+	// error_kind; the raw error is logged at DEBUG only.
 	var parsed any
 	if err := json.Unmarshal(rawBody, &parsed); err != nil {
-		return h.writeUnprocessable(c, "body is not valid JSON: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body could not be parsed", "decode_failed", err)
 	}
 	canonical, err := canonicalizeCallbackJSON(parsed)
 	if err != nil {
-		return h.writeUnprocessable(c, "body could not be canonicalized: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body could not be parsed", "decode_failed", err)
 	}
 
 	// 3. Read + validate headers.
@@ -165,12 +182,23 @@ func (h *SyncCallbackHandler) HandleSyncCallback(c *echo.Context) error {
 	}
 
 	// 6. Body schema validation.
+	//
+	// 2026-08-02-security-vulnerability-remediation (M-5): the
+	// schema-mismatch path also uses the sanitized message; the
+	// raw error is logged at DEBUG only.
 	var body syncCallbackBody
 	if err := json.Unmarshal(rawBody, &body); err != nil {
-		return h.writeUnprocessable(c, "body schema mismatch: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body schema mismatch", "decode_failed", err)
 	}
 	if body.JobID <= 0 {
 		return h.writeUnprocessable(c, "job_id is required and must be > 0")
+	}
+	// 2026-08-02-security-vulnerability-remediation (H-1): the
+	// organization_id is mandatory from the ws-syncer; a missing
+	// or zero value is a 400 (not a default fallback) so the
+	// cross-tenant path is impossible to deploy by mistake.
+	if body.OrganizationID <= 0 {
+		return h.writeUnprocessable(c, "organization_id is required and must be > 0")
 	}
 	if body.Status != domain.SyncJobStatusDone && body.Status != domain.SyncJobStatusFailed {
 		return h.writeUnprocessable(c, "status must be done or failed")
@@ -199,15 +227,22 @@ func (h *SyncCallbackHandler) HandleSyncCallback(c *echo.Context) error {
 		errorMessage = *body.ErrorMessage
 	}
 
-	if _, err := h.processor.ProcessSyncCallback(req.Context(), body.JobID, body.Status, commitSHA, defaultBranch, errorCode, errorMessage); err != nil {
+	if _, err := h.processor.ProcessSyncCallback(req.Context(), body.OrganizationID, body.JobID, body.Status, commitSHA, defaultBranch, errorCode, errorMessage); err != nil {
 		var verr *domain.ValidationError
 		if errors.As(err, &verr) {
-			return h.writeUnprocessable(c, "validation: "+err.Error())
+			// 2026-08-02-security-vulnerability-remediation (M-5):
+			// fixed-vocabulary message; raw err.Error() at DEBUG.
+			return h.writeUnprocessableSanitized(c, "validation failed", "validation_failed", err)
 		}
+		// 2026-08-02-security-vulnerability-remediation (M-5):
+		// closed error_kind in the log; raw err.Error() at DEBUG.
 		h.logger.ErrorContext(req.Context(), "sync-callback: service error",
-			slog.String("error", err.Error()),
+			slog.String("error_kind", "internal"),
 			slog.Int64("job_id", body.JobID),
 			slog.String("status", body.Status),
+		)
+		h.logger.DebugContext(req.Context(), "sync-callback: service error (raw error)",
+			slog.String("error", err.Error()),
 		)
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"code":    "internal_error",
@@ -239,6 +274,29 @@ func (h *SyncCallbackHandler) writeUnprocessable(c *echo.Context, reason string)
 	return c.JSON(http.StatusUnprocessableEntity, map[string]any{
 		"code":    "unprocessable_entity",
 		"message": reason,
+	})
+}
+
+// writeUnprocessableSanitized emits the locked 422 envelope with a
+// FIXED-VOCABULARY message (the user-supplied raw error is NOT
+// echoed). The slog line carries the closed error_kind and the raw
+// err.Error() at DEBUG only.
+//
+// 2026-08-02-security-vulnerability-remediation (M-5): the
+// previous code path concatenated `+err.Error()` into the
+// response body, leaking attacker-controlled fragments.
+func (h *SyncCallbackHandler) writeUnprocessableSanitized(c *echo.Context, message, kind string, rawErr error) error {
+	h.logger.WarnContext(c.Request().Context(), "sync-callback invalid body",
+		slog.String("error_kind", kind),
+	)
+	if rawErr != nil {
+		h.logger.DebugContext(c.Request().Context(), "sync-callback invalid body (raw error)",
+			slog.String("error", rawErr.Error()),
+		)
+	}
+	return c.JSON(http.StatusUnprocessableEntity, map[string]any{
+		"code":    "unprocessable_entity",
+		"message": message,
 	})
 }
 

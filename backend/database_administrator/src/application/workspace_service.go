@@ -256,16 +256,17 @@ func (s *WorkspaceService) List(ctx context.Context, orgID int64, limit int) ([]
 	return out, nil
 }
 
-// Get returns one live workspace by id. Soft-deleted rows return
-// *domain.NotFoundError from the repo (the WHERE deleted_at IS NULL
-// filter); the handler maps that to HTTP 404.
-func (s *WorkspaceService) Get(ctx context.Context, id int64) (*domain.Workspace, error) {
+// Get returns one live workspace by id, scoped to the given
+// organization. Soft-deleted rows AND cross-tenant access return
+// *domain.NotFoundError from the repo; the handler maps that to
+// HTTP 404 (security H-1: no existence disclosure).
+func (s *WorkspaceService) Get(ctx context.Context, orgID, id int64) (*domain.Workspace, error) {
 	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceGet)
 	defer span.End()
 
 	setHTTPRouteAttrs(span, "GET", httpRouteWorkspaceGet)
 
-	w, err := s.repo.SelectByID(ctx, id)
+	w, err := s.repo.SelectByID(ctx, orgID, id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -280,25 +281,25 @@ func (s *WorkspaceService) Get(ctx context.Context, id int64) (*domain.Workspace
 	return w, nil
 }
 
-// Update renames a workspace. Per design T9, the repository field on
-// the input is silently dropped — the repo is the workspace's identity
-// and cannot be changed post-create. The locked invariant is
-// preserved at the application layer so the handler does not need to
-// filter the input.
+// Update renames a workspace. The repo enforces the tenant + owner
+// filter (security H-1); a non-owner or cross-tenant attempt returns
+// *NotFoundError from the repo, which the handler maps to 404. Per
+// design T9, the repository field on the input is silently dropped —
+// the repo is the workspace's identity and cannot be changed.
 //
 // On a unique-violation (duplicate name), the *ConflictError propagates
 // unchanged so the handler can map to HTTP 409.
-func (s *WorkspaceService) Update(ctx context.Context, id int64, in domain.UpdateWorkspaceInput) (*domain.Workspace, error) {
+func (s *WorkspaceService) Update(ctx context.Context, orgID, ownerID, id int64, in domain.UpdateWorkspaceInput) (*domain.Workspace, error) {
 	if in.Name == nil {
 		// Nothing to do. Return the current row so the caller can render.
-		return s.Get(ctx, id)
+		return s.Get(ctx, orgID, id)
 	}
 	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceUpdate)
 	defer span.End()
 
 	setHTTPRouteAttrs(span, "PATCH", httpRouteWorkspaceUpdate)
 
-	w, err := s.repo.UpdateName(ctx, id, *in.Name)
+	w, err := s.repo.UpdateName(ctx, orgID, ownerID, id, *in.Name)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -314,18 +315,20 @@ func (s *WorkspaceService) Update(ctx context.Context, id int64, in domain.Updat
 	return w, nil
 }
 
-// Delete soft-deletes the workspace (sets deleted_at = now()). Returns
-// *NotFoundError if the row is already soft-deleted or never existed.
+// Delete soft-deletes the workspace (sets deleted_at = now()), scoped
+// to the given orgID + ownerID. Returns *NotFoundError if the row is
+// already soft-deleted, in a different tenant, or owned by a
+// different user (security H-1: IDOR).
 //
 // 2026-07-08-workspaces-simplify: no longer cascades into
 // workspace_repository (the table no longer exists).
-func (s *WorkspaceService) Delete(ctx context.Context, id int64) error {
+func (s *WorkspaceService) Delete(ctx context.Context, orgID, ownerID, id int64) error {
 	ctx, span := s.tracer.Start(ctx, spanNameWorkspaceDelete)
 	defer span.End()
 
 	setHTTPRouteAttrs(span, "DELETE", httpRouteWorkspaceDelete)
 
-	if err := s.repo.SoftDelete(ctx, id); err != nil {
+	if err := s.repo.SoftDelete(ctx, orgID, ownerID, id); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return err
@@ -344,12 +347,16 @@ func (s *WorkspaceService) Delete(ctx context.Context, id int64) error {
 //
 // 2026-07-08-workspaces-simplify: 5 methods (was 8); the linked-repo
 // use cases are gone.
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): Get/Update/
+// Delete now take (orgID, [ownerID], id) so the application layer
+// can broadcast tenancy constraints to the repo.
 var _ interface {
 	Create(ctx context.Context, in domain.CreateWorkspaceInput) (*domain.Workspace, error)
 	List(ctx context.Context, orgID int64, limit int) ([]domain.Workspace, error)
-	Get(ctx context.Context, id int64) (*domain.Workspace, error)
-	Update(ctx context.Context, id int64, in domain.UpdateWorkspaceInput) (*domain.Workspace, error)
-	Delete(ctx context.Context, id int64) error
+	Get(ctx context.Context, orgID, id int64) (*domain.Workspace, error)
+	Update(ctx context.Context, orgID, ownerID, id int64, in domain.UpdateWorkspaceInput) (*domain.Workspace, error)
+	Delete(ctx context.Context, orgID, ownerID, id int64) error
 } = (*WorkspaceService)(nil)
 
 // Compile-time guard: GitHubNotConnectedError must implement AppError so

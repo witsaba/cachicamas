@@ -107,7 +107,7 @@ func (f *wsFakeRepo) SelectAllByOrg(_ context.Context, orgID int64, limit int) (
 	return f.selectAllResult, f.selectAllErr
 }
 
-func (f *wsFakeRepo) SelectByID(_ context.Context, id int64) (*domain.Workspace, error) {
+func (f *wsFakeRepo) SelectByID(_ context.Context, orgID, id int64) (*domain.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls++
@@ -121,7 +121,7 @@ func (f *wsFakeRepo) SelectByID(_ context.Context, id int64) (*domain.Workspace,
 	return nil, &domain.NotFoundError{Resource: "workspace"}
 }
 
-func (f *wsFakeRepo) UpdateName(_ context.Context, id int64, name string) (*domain.Workspace, error) {
+func (f *wsFakeRepo) UpdateName(_ context.Context, orgID, ownerID, id int64, name string) (*domain.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateNameCalls++
@@ -135,11 +135,16 @@ func (f *wsFakeRepo) UpdateName(_ context.Context, id int64, name string) (*doma
 		return &out, nil
 	}
 	// Default: update the row that SelectByID would return.
-	out := domain.Workspace{ID: id, Name: name, CreatedAt: time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Now().UTC()}
+	owner := ownerID
+	out := domain.Workspace{
+		ID: id, OrganizationID: orgID, OwnerUserID: &owner, Name: name,
+		CreatedAt: time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Now().UTC(),
+	}
 	return &out, nil
 }
 
-func (f *wsFakeRepo) SoftDelete(_ context.Context, id int64) error {
+func (f *wsFakeRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteCalls++
@@ -147,7 +152,7 @@ func (f *wsFakeRepo) SoftDelete(_ context.Context, id int64) error {
 	return f.deleteErr
 }
 
-func (f *wsFakeRepo) MarkSynced(_ context.Context, id int64, commitSHA, defaultBranch string) error {
+func (f *wsFakeRepo) MarkSynced(_ context.Context, orgID, id int64, commitSHA, defaultBranch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markSyncedCalls++
@@ -482,7 +487,7 @@ func TestWorkspaceService_Get_Found(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out, err := svc.Get(ctx, 7)
+	out, err := svc.Get(ctx, 1, 7)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -500,7 +505,7 @@ func TestWorkspaceService_Get_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := svc.Get(ctx, 999)
+	_, err := svc.Get(ctx, 1, 999)
 	if err == nil {
 		t.Fatalf("Get: expected NotFoundError, got nil")
 	}
@@ -533,7 +538,7 @@ func TestWorkspaceService_Update_RenameOnly(t *testing.T) {
 	defer cancel()
 
 	newName := "new-name"
-	out, err := svc.Update(ctx, 7, domain.UpdateWorkspaceInput{Name: &newName})
+	out, err := svc.Update(ctx, 1, 99, 7, domain.UpdateWorkspaceInput{Name: &newName})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -560,7 +565,7 @@ func TestWorkspaceService_Update_NilName_NoOp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out, err := svc.Update(ctx, 7, domain.UpdateWorkspaceInput{Name: nil})
+	out, err := svc.Update(ctx, 1, 99, 7, domain.UpdateWorkspaceInput{Name: nil})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -585,7 +590,7 @@ func TestWorkspaceService_Update_DuplicateName_ReturnsConflict(t *testing.T) {
 	defer cancel()
 
 	newName := "dup"
-	_, err := svc.Update(ctx, 7, domain.UpdateWorkspaceInput{Name: &newName})
+	_, err := svc.Update(ctx, 1, 99, 7, domain.UpdateWorkspaceInput{Name: &newName})
 	if err == nil {
 		t.Fatalf("Update: expected ConflictError, got nil")
 	}
@@ -608,7 +613,7 @@ func TestWorkspaceService_Delete_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := svc.Delete(ctx, 42); err != nil {
+	if err := svc.Delete(ctx, 1, 99, 42); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if repo.deleteID != 42 {
@@ -628,7 +633,7 @@ func TestWorkspaceService_Delete_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := svc.Delete(ctx, 999)
+	err := svc.Delete(ctx, 1, 99, 999)
 	if err == nil {
 		t.Fatalf("Delete: expected NotFoundError, got nil")
 	}

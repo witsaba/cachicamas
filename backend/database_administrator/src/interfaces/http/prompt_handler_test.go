@@ -61,7 +61,7 @@ func setupHandler(t *testing.T) (*echo.Echo, *httpiface.PromptHandler, *sql.DB) 
 
 	h := httpiface.NewPromptHandler(svc, logger)
 	e := echo.New()
-	h.RegisterPromptRoutes(e)
+	h.RegisterPromptRoutes(e.Group(""))
 	return e, h, dbConn
 }
 
@@ -354,7 +354,7 @@ func TestPromptHandler_NoPIIInLogs(t *testing.T) {
 	svc := application.NewPromptService(prompts.NewPromptRepo(dbConn), prompts.NewPromptRevisionRepo(dbConn), dbConn, logger)
 	h := httpiface.NewPromptHandler(svc, logger)
 	e := echo.New()
-	h.RegisterPromptRoutes(e)
+	h.RegisterPromptRoutes(e.Group(""))
 
 	defer func() { _ = dbConn.Close() }()
 	sentinel := "SECRET_SENTINEL_TOKEN_DO_NOT_LOG"

@@ -73,7 +73,7 @@ type fakeWorkspaceRowLoader struct {
 	workspace *domain.Workspace
 }
 
-func (f *fakeWorkspaceRowLoader) SelectByID(_ context.Context, _ int64) (*domain.Workspace, error) {
+func (f *fakeWorkspaceRowLoader) SelectByID(_ context.Context, _, _ int64) (*domain.Workspace, error) {
 	return f.workspace, nil
 }
 

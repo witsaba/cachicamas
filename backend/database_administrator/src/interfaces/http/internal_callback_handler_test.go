@@ -26,6 +26,7 @@ import (
 
 type fakeProcessor struct {
 	mu            sync.Mutex
+	orgID         int64
 	jobID         int64
 	status        string
 	commitSHA     string
@@ -36,9 +37,10 @@ type fakeProcessor struct {
 	err           error
 }
 
-func (f *fakeProcessor) ProcessSyncCallback(_ context.Context, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error) {
+func (f *fakeProcessor) ProcessSyncCallback(_ context.Context, orgID, jobID int64, status, commitSHA, defaultBranch, errorCode, errorMessage string) (*domain.SyncJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.orgID = orgID
 	f.jobID = jobID
 	f.status = status
 	f.commitSHA = commitSHA
@@ -151,7 +153,10 @@ func TestSyncCallback_Done_204(t *testing.T) {
 	proc := &fakeProcessor{job: &domain.SyncJob{ID: 7, Status: domain.SyncJobStatusDone}}
 	e := newCallbackHandler(t, proc)
 
-	body := []byte(`{"job_id":7,"status":"done","commit_sha":"abc123","default_branch":"main"}`)
+	// 2026-08-02-security-vulnerability-remediation (H-1): the
+	// callback must include organization_id; the handler 400s if
+	// it is missing or zero.
+	body := []byte(`{"job_id":7,"organization_id":1,"status":"done","commit_sha":"abc123","default_branch":"main"}`)
 	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	tsH, sigH := signSyncBody(testSyncCallbackSecret, ts, body)
 
@@ -171,13 +176,16 @@ func TestSyncCallback_Done_204(t *testing.T) {
 	if proc.commitSHA != "abc123" {
 		t.Errorf("processor.commitSHA = %q, want abc123", proc.commitSHA)
 	}
+	if proc.orgID != 1 {
+		t.Errorf("processor.orgID = %d, want 1", proc.orgID)
+	}
 }
 
 func TestSyncCallback_Failed_204(t *testing.T) {
 	proc := &fakeProcessor{job: &domain.SyncJob{ID: 7, Status: domain.SyncJobStatusFailed}}
 	e := newCallbackHandler(t, proc)
 
-	body := []byte(`{"job_id":7,"status":"failed","error_code":"BRANCH_NOT_FOUND","error_message":"main not found"}`)
+	body := []byte(`{"job_id":7,"organization_id":1,"status":"failed","error_code":"BRANCH_NOT_FOUND","error_message":"main not found"}`)
 	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	tsH, sigH := signSyncBody(testSyncCallbackSecret, ts, body)
 

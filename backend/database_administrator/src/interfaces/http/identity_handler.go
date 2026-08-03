@@ -164,13 +164,19 @@ func (h *IdentityHandler) HandleSignInCallback(c *echo.Context) error {
 	//    the schema (after HMAC verification), once to canonicalize
 	//    (canonical is computed on the wire bytes — same input must
 	//    produce same canonical bytes on both sides).
+	//
+	// 2026-08-02-security-vulnerability-remediation (M-5): the
+	// response body MUST NOT echo err.Error() — the raw error text
+	// can be attacker-controlled (truncated JSON, embedded
+	// fragments, etc.). The log line carries the closed error_kind;
+	// the raw error is logged at DEBUG only.
 	var parsed any
 	if err := json.Unmarshal(rawBody, &parsed); err != nil {
-		return h.writeUnprocessable(c, "body is not valid JSON: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body could not be parsed", "decode_failed", err)
 	}
 	canonical, err := canonicalizeJSON(parsed)
 	if err != nil {
-		return h.writeUnprocessable(c, "body could not be canonicalized: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body could not be parsed", "decode_failed", err)
 	}
 
 	// 3. Read + validate the headers.
@@ -217,9 +223,13 @@ func (h *IdentityHandler) HandleSignInCallback(c *echo.Context) error {
 	//    valid signature still 422s, but the test suite asserts this
 	//    ordering by passing a valid signature alongside an invalid
 	//    body).
+	//
+	// 2026-08-02-security-vulnerability-remediation (M-5): the schema
+	// failure path also uses the sanitized message; the raw error
+	// is logged at DEBUG only.
 	var body signInCallbackBody
 	if err := json.Unmarshal(rawBody, &body); err != nil {
-		return h.writeUnprocessable(c, "body schema mismatch: "+err.Error())
+		return h.writeUnprocessableSanitized(c, "body schema mismatch", "decode_failed", err)
 	}
 	if body.User.Email == "" || body.User.ID == "" {
 		return h.writeUnprocessable(c, "user.email and user.id are required")
@@ -309,6 +319,30 @@ func (h *IdentityHandler) writeUnprocessable(c *echo.Context, reason string) err
 	return c.JSON(http.StatusUnprocessableEntity, map[string]any{
 		"code":    "unprocessable_entity",
 		"message": reason,
+	})
+}
+
+// writeUnprocessableSanitized emits the locked 422 envelope with a
+// FIXED-VOCABULARY message (the user-supplied raw error is NOT
+// echoed). The slog line carries the closed error_kind and the raw
+// err.Error() at DEBUG only.
+//
+// 2026-08-02-security-vulnerability-remediation (M-5): the
+// previous code path concatenated `+err.Error()` into the
+// response body, leaking attacker-controlled fragments. The
+// sanitized path closes that surface.
+func (h *IdentityHandler) writeUnprocessableSanitized(c *echo.Context, message, kind string, rawErr error) error {
+	h.logger.WarnContext(c.Request().Context(), "identity signin-callback invalid body",
+		slog.String("error_kind", kind),
+	)
+	if rawErr != nil {
+		h.logger.DebugContext(c.Request().Context(), "identity signin-callback invalid body (raw error)",
+			slog.String("error", rawErr.Error()),
+		)
+	}
+	return c.JSON(http.StatusUnprocessableEntity, map[string]any{
+		"code":    "unprocessable_entity",
+		"message": message,
 	})
 }
 

@@ -15,14 +15,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	otelglobal "go.opentelemetry.io/otel"
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
@@ -101,6 +104,55 @@ func resolveCORSAllowOrigins() []string {
 		return []string{"http://localhost:5173"}
 	}
 	return nil
+}
+
+// resolveSyncerURL encodes the WORKSPACE_SYNCER_URL_REQUIRE_TLS opt-in
+// policy (security M-3). When the env is set to a truthy value
+// ("1", "true", "yes") an http:// URL is rejected; otherwise the URL
+// is returned verbatim. The default URL flips to https only when an
+// operator actively opts in — the v1 plain-HTTP deployment still works
+// until the workspace_syncer TLS change lands in slice B.
+//
+// Documented values:
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=0  (or unset) → http:// accepted
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=1            → http:// rejected
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=true         → http:// rejected
+//   WORKSPACE_SYNCER_URL_REQUIRE_TLS=yes          → http:// rejected
+func resolveSyncerURL(rawURL string) (string, error) {
+	requireTLS := false
+	if v := os.Getenv("WORKSPACE_SYNCER_URL_REQUIRE_TLS"); v != "" {
+		parsed, err := parseBoolLoose(v)
+		if err != nil {
+			// Treat malformed values as "off" but log the discrepancy.
+			slog.Warn("WORKSPACE_SYNCER_URL_REQUIRE_TLS: invalid value, treating as false",
+				slog.String("value", v),
+				slog.String("hint", "use 1, true, yes, 0, false, or no"),
+			)
+		} else {
+			requireTLS = parsed
+		}
+	}
+	if requireTLS && strings.HasPrefix(strings.ToLower(rawURL), "http://") {
+		return "", fmt.Errorf(
+			"resolveSyncerURL: WORKSPACE_SYNCER_URL_REQUIRE_TLS=1 but URL is http:// (%s); "+
+				"either unset the env, flip the URL to https://, or set the env to 0",
+			rawURL,
+		)
+	}
+	return rawURL, nil
+}
+
+// parseBoolLoose accepts strconv.ParseBool's documented values plus
+// "yes" / "no" (the common shell idiom). Anything else returns an
+// error so the caller can log + fall back to false.
+func parseBoolLoose(v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "yes":
+		return true, nil
+	case "no":
+		return false, nil
+	}
+	return strconv.ParseBool(v)
 }
 
 func main() {
@@ -196,7 +248,25 @@ func main() {
 	// HTTP server with the OTel middleware installed globally so every
 	// route emits a span (and the span is correlated with any slog
 	// record that carries a request context).
+	//
+	// Security middleware (security M-1 + M-4 + design §3):
+	//   - middleware.Recover() — catches any handler panic and returns
+	//     a 500 envelope instead of crashing the process. Production
+	//     stability without this is a single buggy handler away.
+	//   - middleware.BodyLimit(1 << 20) — caps request bodies at 1 MiB
+	//     so a malicious / buggy client can't OOM the process by
+	//     streaming a 10 GiB body. Mirrors the workspace_syncer's
+	//     MaxBytesReader cap (slice B).
+	//
+	// Recover is installed FIRST so the body-limit handler still
+	// benefits from the panic-recovery net.
 	e := echo.New()
+	e.Use(middleware.Recover())
+	e.Use(middleware.BodyLimit(1 << 20))
+	// CSRF Origin/Referer validation: protects state-changing
+	// routes against cross-origin requests (security M-2 + design
+	// §3). Empty ORIGIN env disables enforcement (development).
+	e.Use(httpiface.CSRFOriginValidate())
 	e.Use(otel.Middleware(serviceName))
 	httpiface.RegisterHealthRoute(e)
 
@@ -329,7 +399,16 @@ func main() {
 	// with the shared INTERNAL_SERVICE_TOKEN; the URL defaults to
 	// http://workspace_syncer:8080 (the docker-compose service
 	// name; overridable for dev).
-	syncerBaseURL := envString("WORKSPACE_SYNCER_URL", "http://workspace_syncer:8080")
+	//
+	// Security M-3: WORKSPACE_SYNCER_URL_REQUIRE_TLS=1 enforces that
+	// the URL is https:// — when the env is set and an http:// URL is
+	// supplied the service refuses to start (fail-fast), so the
+	// cleartext path is impossible to deploy by mistake.
+	syncerBaseURL, err := resolveSyncerURL(envString("WORKSPACE_SYNCER_URL", "http://workspace_syncer:8080"))
+	if err != nil {
+		slog.Error("WORKSPACE_SYNCER_URL rejected; exiting", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	syncerToken := envString("INTERNAL_SERVICE_TOKEN", "")
 	if syncerToken == "" {
 		slog.Error("INTERNAL_SERVICE_TOKEN must be set; exiting (workspace_syncer auth)")
@@ -415,25 +494,38 @@ func main() {
 	// anti-replay pattern but use independent secrets.
 
 	// 2026-07-15-prompt-storage-table PR 4 of 4: wire the prompts
-	// HTTP surface. Admin-only, no extra header (Q-D locked). The
-	// routes mount on the public Echo group; in production they
-	// should sit behind the compose internal network only.
+	// HTTP surface.
+	//
+	// 2026-08-02-security-vulnerability-remediation (H-2): the
+	// prompts + skills routes are mounted on an auth-protected
+	// group (not the root Echo). The previous comment said
+	// "admin-only on internal network only" — that was the
+	// security-gap that H-2 closes. The authChain is the same
+	// one /workspaces uses: IdentityFromCookie → LoadGitHubToken
+	// → handler. The internal/sync-callback route stays on the
+	// root Echo (HMAC + anti-replay is its own auth).
 	promptRepo := promptspg.NewPromptRepo(db)
 	promptRevRepo := promptspg.NewPromptRevisionRepo(db)
 	promptService := application.NewPromptService(promptRepo, promptRevRepo, db, logger)
 	promptHandler := httpiface.NewPromptHandler(promptService, logger)
-	promptHandler.RegisterPromptRoutes(e)
 
 	// 2026-07-17-skills-foundational PR1d of 7: wire the skills
-	// HTTP surface. Admin-only, no extra header (mirrors prompts).
-	// The 7 routes mount on the public Echo group; the SQL JOIN
-	// that emits current_revision (anti-drift gate ADR-SK-008)
-	// lives in SkillRepo.ListWithCurrentRevision / SelectByIDWithCurrentRevision.
+	// HTTP surface. The 7 routes mount on the same auth-protected
+	// group as /prompts (see H-2 above). The SQL JOIN that emits
+	// current_revision (anti-drift gate ADR-SK-008) lives in
+	// SkillRepo.ListWithCurrentRevision / SelectByIDWithCurrentRevision.
 	skillRepo := skillspg.NewSkillRepo(db)
 	skillRevRepo := skillspg.NewSkillRevisionRepo(db)
 	skillService := application.NewSkillService(skillRepo, skillRevRepo, db, logger)
 	skillHandler := httpiface.NewSkillHandler(skillService, logger)
-	skillHandler.RegisterSkillRoutes(e)
+
+	// Single empty-prefix group runs the full auth chain once;
+	// prompt + skill routes share it. The
+	// /api/v1/internal/sync-callback route is mounted on the root
+	// Echo (HMAC + anti-replay, NOT session auth).
+	adminGroup := e.Group("", authChain...)
+	promptHandler.RegisterPromptRoutes(adminGroup)
+	skillHandler.RegisterSkillRoutes(adminGroup)
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port

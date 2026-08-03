@@ -49,8 +49,13 @@ type SyncEnqueuer interface {
 // the workspace row in the handler. The workspace row carries
 // the repo identity (RepoOwner, RepoName) the syncer needs.
 // Production: *postgres.WorkspaceRepo. Tests: a fake.
+//
+// 2026-08-02-security-vulnerability-remediation (H-1): the
+// SelectByID signature now takes orgID so the SQL cannot return
+// a workspace in a different tenant than the one the handler
+// knows the request belongs to.
 type WorkspaceRowLoader interface {
-	SelectByID(ctx context.Context, id int64) (*domain.Workspace, error)
+	SelectByID(ctx context.Context, orgID, id int64) (*domain.Workspace, error)
 }
 
 // SyncHandler exposes the 2 sync endpoints. The handler depends
@@ -213,8 +218,10 @@ func (h *SyncHandler) dispatchToSyncer(c *echo.Context, identity *domain.Identit
 	}
 	ctx := c.Request().Context()
 
-	// 1. Load the workspace row.
-	ws, err := h.workspaces.SelectByID(ctx, workspaceID)
+	// 1. Load the workspace row, scoped to the same tenant the
+	// authenticated identity belongs to (security H-1: IDOR).
+	orgID := singleTenantOrganizationID(c)
+	ws, err := h.workspaces.SelectByID(ctx, orgID, workspaceID)
 	if err != nil {
 		h.logger.WarnContext(ctx,
 			"sync handler: workspace lookup failed; job remains pending",
