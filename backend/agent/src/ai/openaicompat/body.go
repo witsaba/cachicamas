@@ -73,12 +73,13 @@ func appendModelField(buf []byte, req ai.Request) []byte {
 // source of entries, so the join works whether or not a system
 // instruction is present.
 //
-// This skeleton renders exactly the shape R-ART-002's minimal request
-// needs: one role name plus one text-part content string. Every other
-// role and every other content-part variant is AI-26.3's (message.go,
-// slice 5), which replaces appendMessageObject and
-// appendSingleTextContent outright; this is not the milestone's full
-// message rendering.
+// This loop is also the whole of R-ART-009's "no merging" guarantee: it
+// calls appendMessageObject (message.go, AI-26.3) once per req.Messages()
+// element, unconditionally, with no lookahead or grouping by role, so a
+// run of consecutive same-role messages always produces that many
+// distinct wire objects. Every role and every content-part variant this
+// phase reads is message.go's own (AI-26.3, slice 5), which replaced this
+// skeleton's original one-role/one-text-part-only rendering outright.
 func appendMessagesField(buf []byte, req ai.Request) []byte {
 	buf = append(buf, `"messages":[`...)
 	wrote := false
@@ -100,35 +101,6 @@ func appendMessagesField(buf []byte, req ai.Request) []byte {
 	}
 	buf = append(buf, ']')
 	return buf
-}
-
-// appendMessageObject appends one wire message object for message.
-func appendMessageObject(buf []byte, message ai.Message) []byte {
-	buf = append(buf, `{"role":`...)
-	buf = appendJSONString(buf, message.Role().String())
-	buf = append(buf, `,"content":`...)
-	buf = appendSingleTextContent(buf, message)
-	return append(buf, '}')
-}
-
-// appendSingleTextContent appends message's content as a JSON string —
-// one of the two shapes the vendor's "Create chat completion" reference
-// documents for a message's content field, the other being an array of
-// typed content parts (doc.go's wire-shape provenance section, task
-// 1.0.5). A plain string is what this skeleton's one-text-part case
-// renders.
-//
-// Slice 1's own scenarios construct only a single text part per message;
-// every other content shape is AI-26.3's (message.go, slice 5), which
-// replaces this function outright rather than growing a case list here.
-func appendSingleTextContent(buf []byte, message ai.Message) []byte {
-	content := message.Content()
-	if len(content) == 1 {
-		if text, ok := content[0].Text(); ok {
-			return appendJSONString(buf, text)
-		}
-	}
-	panic("openaicompat: content shape not supported before AI-26.3 (message.go)")
 }
 
 // appendStreamFields appends

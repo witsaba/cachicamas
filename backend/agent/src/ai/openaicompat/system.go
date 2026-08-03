@@ -25,10 +25,11 @@ import "github.com/cachicamas/backend/agent/src/ai"
 // (the vendor's documented parallel-tool-call flow) already establishes
 // multiple CONSECUTIVE same-role messages as a working, vendor-endorsed
 // pattern general to any role, not scoped to "tool". The plain-string
-// content shape is the same one appendSingleTextContent (body.go,
-// AI-26.1) already uses and cites. Composing these already-cited facts
-// avoids introducing an unverified claim about a system message's own
-// content-array element shape.
+// content shape is the same one appendMessageContent's own single-part
+// branch (message.go, AI-26.3; originally appendSingleTextContent,
+// body.go, AI-26.1) already uses and cites. Composing these already-cited
+// facts avoids introducing an unverified claim about a system message's
+// own content-array element shape.
 //
 // This also satisfies R-ART-005's "no segment MUST be ... merged" for
 // free, structurally: each segment is its own distinct wire message
