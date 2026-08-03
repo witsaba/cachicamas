@@ -186,6 +186,7 @@ function offlineMessage(err: unknown): string {
 // ---------------------------------------------------------------------------
 
 import { getSsrCookieHeader } from "./ssr-cookie-context";
+import { stateChangingFetch } from "./csrf";
 
 function ssrBaseUrl(): string {
   const v = process.env.SERVER_API_BASE_URL;
@@ -369,7 +370,7 @@ export async function createOrganization(
 ): Promise<ApiResult<OrganizationReadModel>> {
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/organizations`, {
+    res = await stateChangingFetch(`${apiBaseUrl()}/organizations`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: toFormBody(input),
@@ -588,7 +589,7 @@ export async function getWorkspace(
 export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`, {
+    res = await stateChangingFetch(`${apiBaseUrl()}/workspaces/${id}`, {
       method: "DELETE",
     });
   } catch (err) {
@@ -618,7 +619,7 @@ export async function startWorkspaceSync(
 ): Promise<ApiResult<SyncJob>> {
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/workspaces/${id}/sync`, {
+    res = await stateChangingFetch(`${apiBaseUrl()}/workspaces/${id}/sync`, {
       method: "POST",
     });
   } catch (err) {
@@ -699,7 +700,7 @@ export async function createWorkspace(
 ): Promise<ApiResult<WorkspaceDetail>> {
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/workspaces`, {
+    res = await stateChangingFetch(`${apiBaseUrl()}/workspaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

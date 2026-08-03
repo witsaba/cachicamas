@@ -40,6 +40,7 @@ import {
   postIdentityCallback,
   type SignInEvent,
 } from "~/lib/identity-callback-client";
+import { SESSION_COOKIE_OPTIONS } from "~/lib/auth-cookie-config";
 
 // 2026-07-06 native-auth-UI carve-out: we deliberately do NOT
 // destructure `onRequest` from the library's return value. Instead we
@@ -196,6 +197,25 @@ const auth = QwikAuth$((ev) => {
     pages: {
       signIn: "/auth/signin",
       signOut: "/auth/signout",
+    },
+    // Session-cookie attribute policy.
+    // Reference: sdd/security-vulnerability-remediation/spec/session-cookie-attr-policy
+    //   REQ-01 — explicit HttpOnly, SameSite=Lax, Path=/.
+    //   The `secure` flag is intentionally delegated to Auth.js (it
+    //   is derived from the request URL scheme — HTTPS → true,
+    //   HTTP → false — and hardcoding it would break either dev or
+    //   production).
+    // The cookie name keeps the Auth.js default (`__Secure-...`
+    // under HTTPS / `authjs.session-token` under HTTP). The `__Host-`
+    // prefix is NOT used because the project's deploy topology
+    // (path-prefixed origin behind fronting proxies) does not
+    // reliably satisfy the `__Host-` invariants (Secure + Path=/ +
+    // no Domain). The constant is defined in `auth-cookie-config.ts`
+    // so the policy is auditable and unit-testable end-to-end.
+    cookies: {
+      sessionToken: {
+        options: SESSION_COOKIE_OPTIONS,
+      },
     },
     // The same AUTH_SECRET the Go verifier uses to decrypt the JWE
     // cookie (PR-3). Locked contract per ADR 0002 §3.1 — the byte-level
