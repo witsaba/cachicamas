@@ -7,10 +7,12 @@ import (
 )
 
 // appendBody hand-assembles req's wire body into one contiguous byte
-// slice, in one fixed source-code order: model, messages, [tools,
-// tool_choice, generation options — later slices splice these in here],
-// stream/stream_options, [provider-extension members — later slices
-// splice these in last] (design.md "Data Flow").
+// slice, in one fixed source-code order: model, messages, tools (this
+// slice's own field, AI-26.4, present only when the request declares at
+// least one — appendToolsField, tool.go), [tool_choice, generation
+// options — later slices splice these in here], stream/stream_options,
+// [provider-extension members — later slices splice these in last]
+// (design.md "Data Flow").
 //
 // This is deliberately NOT struct-marshalled through encoding/json — see
 // doc.go's wire-shape provenance section, claim 3: json.Marshal pipes
@@ -33,9 +35,12 @@ func appendBody(req ai.Request) []byte {
 	buf = appendModelField(buf, req)
 	buf = append(buf, ',')
 	buf = appendMessagesField(buf, req)
-	// Later slices splice tools (26.4), tool_choice and generation
-	// options (26.7) in here, between messages and stream, in that fixed
-	// order.
+	if tools, hasTools := req.Tools(); hasTools {
+		buf = append(buf, ',')
+		buf = appendToolsField(buf, tools)
+	}
+	// Later slices splice tool_choice and generation options (26.7) in
+	// here, between tools and stream, in that fixed order.
 	buf = append(buf, ',')
 	buf = appendStreamFields(buf)
 	// Later slices splice this adapter's own provider-extension namespace
