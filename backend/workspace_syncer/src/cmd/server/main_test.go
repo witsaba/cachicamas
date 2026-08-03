@@ -153,6 +153,33 @@ func TestEchoContextType(t *testing.T) {
 	_ = c
 }
 
+// TestNewHardenedServer_ExplicitLimits asserts spec
+// http-server-hardening REQ-01: the production server MUST declare
+// ReadTimeout, WriteTimeout, IdleTimeout, and MaxHeaderBytes.
+// A future change that omits any of these fields MUST fail this
+// test before it reaches CI. Values are pinned by spec REQ-01
+// (30s, 30s, 120s, 1<<20).
+func TestNewHardenedServer_ExplicitLimits(t *testing.T) {
+	srv := newHardenedServer(":0", http.NewServeMux())
+	if srv.ReadTimeout != 30*time.Second {
+		t.Errorf("ReadTimeout = %v, want 30s", srv.ReadTimeout)
+	}
+	if srv.WriteTimeout != 30*time.Second {
+		t.Errorf("WriteTimeout = %v, want 30s", srv.WriteTimeout)
+	}
+	if srv.IdleTimeout != 120*time.Second {
+		t.Errorf("IdleTimeout = %v, want 120s", srv.IdleTimeout)
+	}
+	if srv.MaxHeaderBytes != 1<<20 {
+		t.Errorf("MaxHeaderBytes = %d, want %d (1 MiB)", srv.MaxHeaderBytes, 1<<20)
+	}
+	// ReadHeaderTimeout is the existing slow-loris guard; assert
+	// it remains in place so a regression that drops it is caught.
+	if srv.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want 5s", srv.ReadHeaderTimeout)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers (test-local; production code owns the canonical wiring).
 // ---------------------------------------------------------------------------

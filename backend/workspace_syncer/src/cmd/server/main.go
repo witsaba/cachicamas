@@ -42,6 +42,27 @@ const (
 	// default; we keep it.
 	readHeaderTimeout = 5 * time.Second
 
+	// serverReadTimeout is the per-request read ceiling (covers
+	// the request body too). 30s bounds a normal clone request
+	// without holding open slow connections. Spec
+	// http-server-hardening REQ-01.
+	serverReadTimeout = 30 * time.Second
+
+	// serverWriteTimeout is the per-request write ceiling. 30s
+	// caps the response time for the clone + probe pipeline.
+	serverWriteTimeout = 30 * time.Second
+
+	// serverIdleTimeout is the keep-alive idle ceiling. 120s
+	// reuses connections for fast follow-up requests while
+	// preventing long-lived idle sockets from accumulating.
+	serverIdleTimeout = 120 * time.Second
+
+	// serverMaxHeaderBytes caps the size of the request header
+	// block. 1 MiB is generous for any legitimate clone request
+	// (the body is bounded separately by MaxBytesReader) and
+	// small enough to deter header-bomb attacks.
+	serverMaxHeaderBytes = 1 << 20
+
 	// shutdownTimeout bounds the graceful-shutdown window. After
 	// this, the server force-closes any in-flight connections.
 	shutdownTimeout = 10 * time.Second
@@ -186,6 +207,27 @@ func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Ech
 	return e
 }
 
+// newHardenedServer builds the production *http.Server with
+// explicit timeouts and a header-size cap. Extracted as a
+// standalone function so main_test.go can assert the struct
+// literal fields against spec http-server-hardening REQ-01.
+//
+// Per spec REQ-01 the server MUST declare ReadTimeout,
+// WriteTimeout, IdleTimeout, and MaxHeaderBytes. The values
+// are sourced from the package constants (30s, 30s, 120s, 1<<20)
+// so a future tuning change updates both prod and tests in lockstep.
+func newHardenedServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
+	}
+}
+
 // runServer starts the HTTP server on the given port and blocks
 // until ctx is cancelled (signal) or the server fails to start. On
 // cancellation, the server is given shutdownTimeout to drain
@@ -196,11 +238,8 @@ func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Ech
 // spinning up a real HTTP server.
 func runServer(ctx context.Context, e *echo.Echo, port string, logger *slog.Logger) error {
 	addr := ":" + port
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           e,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	srv := newHardenedServer(addr, e)
+
 
 	// Start the server in a goroutine so we can wait for the
 	// context to be cancelled (signal) in the main goroutine.
