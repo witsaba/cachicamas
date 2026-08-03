@@ -419,3 +419,83 @@ Both items were already recorded as explicit, named obligations before this run 
 **Diff size:** `git diff --cached --stat -- specs/ai-stream-decoder/spec.md proposal.md` (2 files, staged individually by path): small, targeted edits to both — see the commit for exact line counts.
 
 **Rollback boundary:** `specs/ai-stream-decoder/spec.md`'s `S-ASD-045` scenario text, tally header, and inspection-ID list, plus its one added revision-note blockquote; `proposal.md`'s one corrected sentence and one rewritten blockquote. Independently revertible from Slice 6's own `decoder.go`/`eof_test.go`/tasks.md changes — different files entirely.
+
+## Phase 8 — Post-verify durability fixes (`verify-report.md` W1, W2)
+
+Small, focused follow-up closing the two WARNING findings from AI-27's `sdd-verify` pass (PASS WITH WARNINGS: 0 blockers, 0 CRITICAL, 25/25 requirements, 85/85 scenarios, 546 tests, `make lint` 0 issues at verify time — see `verify-report.md`'s Issues section for the original text). Both findings concern evidence durability, not correctness; the milestone's requirement/scenario coverage does not change.
+
+- [x] 8.1 **W1** — factor the offset sweep's size guard (`R-ASD-014`/`S-ASD-049`) into a pure function, `checkSweepFixtureBound(candidates []sweepTranscript) []sweepFixtureBoundViolation` (`offset_sweep_test.go`), and add a permanent test, `TestOffsetSweep_SyntheticOverweightFixture_Fails`, that constructs a synthetic 1025-byte transcript in-test and asserts the guard rejects it, naming the offending transcript and its exact size — the `TestSequenceGuard_*_Fails` idiom `src/ai/sequence_guard_test.go` (AI-24) already established, applied here. `TestOffsetSweep_FixturesWithinSweepBound` (the pre-existing positive-clause test) now calls the same pure function against the real registry; the real `sweepTranscripts` registry is never staged with a violating fixture.
+- [x] 8.2 **W2** — correct `keepalive_test.go`'s stale comment (previously lines 86–91, on `TestKeepalive_CommentOnlyStreamEndingAtLineBoundaryYieldsZeroFrames`) that still described `Finish()` as an unimplemented stub whose assertion "cannot yet fail." Slice 6 implemented `Finish()`'s truncation discipline (`decoder.go`, `Finish` ~lines 282–299); the comment now states what the now-live assertion actually proves. No test logic changed.
+- [x] 8.3 `specs/ai-stream-decoder/spec.md`: added a revision-note blockquote recording the W1 durability fix. `S-ASD-049` stays `[test]` — no marking or tally change; mechanically re-verified (see Evidence Log).
+
+### Evidence Log — Phase 8 (post-verify durability fixes)
+
+**W1 — RED, genuine and compile-level (the strongest class, same as Slice 1's own pattern).** `offset_sweep_test.go` was edited to call a not-yet-existing `checkSweepFixtureBound` — both the rewritten `TestOffsetSweep_FixturesWithinSweepBound` and the new `TestOffsetSweep_SyntheticOverweightFixture_Fails` — before that function was written:
+
+```
+$ go test -race -run TestOffsetSweep -v ./src/ai/openaicompat/...
+# github.com/cachicamas/backend/agent/src/ai/openaicompat_test [github.com/cachicamas/backend/agent/src/ai/openaicompat.test]
+src/ai/openaicompat/offset_sweep_test.go:38:20: undefined: checkSweepFixtureBound
+src/ai/openaicompat/offset_sweep_test.go:74:16: undefined: checkSweepFixtureBound
+src/ai/openaicompat/offset_sweep_test.go:89:12: undefined: checkSweepFixtureBound
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat [build failed]
+FAIL
+```
+
+**W1 — GREEN.** `checkSweepFixtureBound` and `sweepFixtureBoundViolation` (name + size, with a `String()` reproducing the guard's pre-existing failure-message text byte-for-byte, so `TestOffsetSweep_FixturesWithinSweepBound`'s output is unchanged) added. `go test -race -run TestOffsetSweep -v ./src/ai/openaicompat/...` → PASS, 8/8 top-level functions (the 7 pre-existing ones + `TestOffsetSweep_SyntheticOverweightFixture_Fails`), 0 FAIL.
+
+**W1 — falsifiability, 2 scratch break-and-revert cycles against `checkSweepFixtureBound`** (each applied, run, observed, reverted; the working file was diffed byte-for-byte against a pre-break snapshot after reverting — this run's own guard-proof convention, since neither break was ever committed to history):
+
+1. **Size check removed entirely** (the comparison body replaced with a no-op) — simulates the guard silently no-opping after a future refactor, the exact risk W1 named:
+   ```
+   $ go test -race -run TestOffsetSweep_SyntheticOverweightFixture_Fails -v ./src/ai/openaicompat/...
+   === RUN   TestOffsetSweep_SyntheticOverweightFixture_Fails
+       offset_sweep_test.go:76: checkSweepFixtureBound(1025-byte synthetic fixture) = 0 violations, want exactly 1
+   --- FAIL: TestOffsetSweep_SyntheticOverweightFixture_Fails (0.00s)
+   FAIL
+   FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.367s
+   FAIL
+   ```
+2. **Comparison inverted** (`<` in place of `>`) — simulates an off-by-one/sign mistake silently defanging the guard:
+   ```
+   $ go test -race -run TestOffsetSweep_SyntheticOverweightFixture_Fails -v ./src/ai/openaicompat/...
+   === RUN   TestOffsetSweep_SyntheticOverweightFixture_Fails
+       offset_sweep_test.go:76: checkSweepFixtureBound(1025-byte synthetic fixture) = 0 violations, want exactly 1
+   --- FAIL: TestOffsetSweep_SyntheticOverweightFixture_Fails (0.00s)
+   FAIL
+   FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.341s
+   FAIL
+   ```
+
+Both breaks reverted; `diff` against the pre-break snapshot: empty (byte-identical). Re-ran the full `TestOffsetSweep` group after revert: 8/8 PASS. The same test's exactly-1024-byte candidate assertion (zero violations expected) is what break 2 above would have silently inverted had it shipped, directly exercising the inclusive `<= 1024` relation (S-ASD-049, design.md Rev 3) rather than only the over-bound side.
+
+**W2 — no RED/GREEN cycle: prose-only change, no assertion touched.** `go test -race -run TestKeepalive -v ./src/ai/openaicompat/...` before and after the comment edit: 8/8 PASS both times, byte-identical test behavior.
+
+**`specs/ai-stream-decoder/spec.md` tally re-verified mechanically, unchanged after adding the revision-note blockquote:**
+```
+$ grep -E '^\- \*\*S-ASD-[0-9]{3}\*\*' spec.md | grep -oE '\*\[test\]\*|\*\[inspection\]\*' | sort | uniq -c
+  12 *[inspection]*
+  73 *[test]*
+```
+Unrestricted grep (the same over-count trap Phase 7 documented): `76 *[test]*` / `13 *[inspection]*` — the Definitions section's own explanatory prose reuses the bold-bracket literal; the restricted (scenario-bullets-only) form is the correct one. `85` scenario IDs and `25` requirement headings both reconfirmed complete.
+
+**Full-suite gate (final, fresh, `go clean -testcache` then `make test`):** exit 0. `ok .../src/agenttest` (2.223s), `ok .../src/ai` (3.238s), `ok .../src/ai/openaicompat` (3.586s). **547** top-level `--- PASS` (546 Slice-6 baseline + 1 new `TestOffsetSweep_SyntheticOverweightFixture_Fails`), **0** `--- FAIL`, **0** `DATA RACE`, `-race` clean throughout. **8** `--- SKIP` at any nesting level — all pre-existing AI-24 conformance subtests in `src/ai`/`src/agenttest` for declared-absent optional capabilities; **0** in `openaicompat`, identical set to the milestone's prior baseline. `openaicompat`'s own `TestOffsetSweep_*`/`TestKeepalive_*`/`TestEOF_*` top-level pass count: **28** (8 + 8 + 12, matching 7+1/8/12 exactly).
+
+`make lint`: `go vet ./...` clean; `bin/golangci-lint run --config=.golangci.yml ./...` → `0 issues.` on the first run, no fix needed. `go.mod` diff against `feat/ai-27-6-eof-discipline`: empty — unchanged, still `module github.com/cachicamas/backend/agent` / `go 1.26.3`, zero `require`, no `go.sum`. AI-00 guards `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` and `TestLayer1_ModuleHasNoDependencies_ZeroRequires`: both PASS, no allowlist edit. AI-25 guard `TestAmbientAuthority_NoForbiddenCallSitesInAdapterSources` (plus its three sibling `TestAmbientAuthority_*` tests): all PASS — `decoder.go`'s only import remains `"bytes"`; no production source (`decoder.go`/`errors.go`/`frame.go`) touched this run at all. `grep -nE "t\.Skip|TODO|FIXME|XXX|HACK"` over both edited test files: no matches.
+
+**Diff size:** `git diff feat/ai-27-6-eof-discipline --numstat` (3 files, staged individually by path): `keepalive_test.go` +8/−6 (comment only), `offset_sweep_test.go` +103/−4 (the pure-function extraction + one refactored test + one new test), `specs/ai-stream-decoder/spec.md` +2/−0 (one revision-note blockquote) → **3 files changed, 113 insertions(+), 10 deletions(-)**. No production source touched. Well within a single small work unit; no `size:exception` needed.
+
+### TDD Cycle Evidence — Phase 8
+| Task | Test file | RED | GREEN | REFACTOR |
+|---|---|---|---|---|
+| 8.1 (W1) | offset_sweep_test.go | Genuine, compile-level (`undefined: checkSweepFixtureBound`, 3 call sites) | `checkSweepFixtureBound` + `sweepFixtureBoundViolation` added, 8/8 PASS | Falsifiability proven by 2 scratch break-and-revert cycles (removal, inversion), both reverted byte-identical; no further structural refactor needed beyond the extraction itself |
+| 8.2 (W2) | keepalive_test.go | N/A — prose-only correction, no assertion changed | Re-ran `TestKeepalive`: 8/8 PASS, unchanged from the pre-edit baseline | N/A |
+| 8.3 | specs/ai-stream-decoder/spec.md | N/A — documentation | Mechanically re-verified tally unchanged (73 `[test]` / 12 `[inspection]`) | N/A |
+
+### Work Unit Evidence — Phase 8
+- Focused test command and exact result: `go test -race -run TestOffsetSweep -v ./src/ai/openaicompat/...` → PASS, 8/8; `go test -race -run TestKeepalive -v ./src/ai/openaicompat/...` → PASS, 8/8.
+- Runtime harness command/scenario and exact result: N/A — pure unit tests are the harness; no external process (unchanged from every prior slice's own Work Unit Evidence).
+- Rollback boundary: `offset_sweep_test.go`'s `checkSweepFixtureBound`/`sweepFixtureBoundViolation` addition plus the two edited/added test functions; `keepalive_test.go`'s one comment block; `specs/ai-stream-decoder/spec.md`'s one added blockquote; this tasks.md Phase-8 section. Reverting = revert those four hunks; no other slice's files touched, no production (`decoder.go`/`errors.go`/`frame.go`) file touched this run at all.
+
+### Commits (this run, on `feat/ai-27-7-durable-guard-proof`, base `feat/ai-27-6-eof-discipline`)
+See apply-progress for exact commit hashes and the branch diff total.
