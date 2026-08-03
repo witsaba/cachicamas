@@ -198,14 +198,72 @@
 //
 // AI-03 §10.4 settles the classification: unsupported capability is a
 // request-time failure and is not an absent optional capability. AI-26
-// adds no new sentinel: every refusal this package will construct
-// (AI-26.6's reasoning refusal and AI-26.8.2's exhaustive-walk refusals,
-// both later slices) is
+// adds no new sentinel: every refusal this package constructs (AI-26.6's
+// reasoning refusal, landed below, and AI-26.8.2's exhaustive-walk
+// refusals, a later slice) is
 // ai.PreStreamFailure(ai.FailureReport{Category:
 // ai.FailureCategoryUnsupportedCapability, Cause: <error naming the
 // unsupported feature>}), reachable via errors.Is(err,
 // ai.ErrUnsupportedCapability) through ai.Failure.Is — the same uniform
-// door for both later slices, never a per-site construction.
+// door for both, never a per-site construction. policy.go's refuse is
+// that one door; reasoning_refusal_test.go's
+// TestPolicy_NoNewSentinelsExported keeps the "zero new sentinels" claim
+// mechanical, not only prose, for every future change to this package.
+//
+// # Reasoning replay refuses; Layer 2 must strip first (AI-26.6, R-ART-015)
+//
+// A neutral request whose assistant message carries a reasoning content
+// part — [ai.ReasoningStateText], [ai.ReasoningStateRedacted] or
+// [ai.ReasoningStateTokenOnly], at any position, in any message —
+// fails [Translate]. It does not drop the part, does not render it as
+// text (no accessor yields reasoning content as text — AI-07.1 item 2,
+// and mechanically impossible for the redacted and token-only states
+// anyway, which have no text to render at all), and does not smuggle it
+// through this package's own reserved provider-extension namespace
+// ("Escape hatch: reserved namespace", above): that namespace is
+// caller-owned by contract (request_extension.go), not an
+// adapter-internal channel this package may repurpose for its own
+// unexpressed content.
+//
+// This is stated plainly here so a later reader who hits it never mistakes
+// it for an unfixed defect:
+//
+//   - A reasoning-bearing transcript fails hard, here, every time, for as
+//     long as this vendor's wire schema carries no field for it. Every
+//     reasoning state refuses identically; position — first, last or
+//     mid-message, in the first message or a later one — never changes
+//     the outcome (S-ART-051, S-ART-052), because policy.go's
+//     refuseReasoning walks the whole request before Translate calls
+//     appendBody at all, never discovering a reasoning part mid-render.
+//   - The remedy is consumer-owned, not this package's: Layer 2 MUST strip
+//     every reasoning content part from a message before handing that
+//     message's history to this adapter for replay. AI-03's standing
+//     rule 4 anticipates exactly this shape of gap — "Layer 1 never
+//     substitutes for an absent capability... Layer 1 states the
+//     absence, the consumer owns the fallback" — so an unstripped replay
+//     failing here is this package doing its one documented job, not a
+//     bug report waiting to happen.
+//   - The duty is written down, and it is routed to AI-40 ("Publish the
+//     Layer 2 readiness contract", doc 0002 — Layer 1's own exit
+//     milestone): AI-40.2's capability matrix and AI-40.3's compatibility
+//     statement are where "Layer 2 must strip reasoning before replay"
+//     becomes part of the frozen v1 surface a consumer reads, not a fact
+//     only this file states. AI-26 needs no node of its own to publish
+//     that — AI-40 already owns the job.
+//
+// The classification is a refusal (AI-19's [ai.PreStreamFailure] +
+// [ai.ErrUnsupportedCapability]), not a validation fault (AI-04's
+// [ai.Violation], which AI-25 correctly uses for a construction-time
+// defect): the request is neutrally valid — AI-10 and AI-12 both accept
+// it — and what fails is this vendor's own expressiveness, never the
+// caller's contract. See "Refusal taxonomy: AI-25 vs AI-26 (NFR-ART-E)",
+// above, for the full comparison table and its AI-03 §10.4 citation.
+//
+// If a future vendor update adds a wire field this adapter can express
+// reasoning content through, AI-26.6 is revisited from refusal back to
+// rendering — the same living-graph reopen-trigger discipline "System
+// role: system, not developer", above, already applies to this package's
+// other vendor-schema-shaped decision.
 //
 // # Cache-boundary markers vanish whole (AI-26.2, R-ART-006)
 //

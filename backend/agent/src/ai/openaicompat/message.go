@@ -237,9 +237,12 @@ func appendToolResultObject(buf []byte, result ai.ToolResult) []byte {
 //
 // A single part of a kind this phase cannot read renders through the
 // same panic appendContentPartObject's default case uses, naming the
-// kind — see that function's own doc comment for why a panic, and
-// message_test.go's partKindDispositions table for which phase owns the
-// one remaining deferred kind (Reasoning) and what it must verify.
+// kind — see that function's own doc comment for why a panic. As of
+// AI-26.6 (Phase 7), the one kind this used to defer to (Reasoning) is
+// refused before this function — before appendBody, in fact — ever runs
+// (Translate, translation.go; policy.go's refuseReasoning), so this
+// panic path is not currently reachable by any ai.PartKinds() member;
+// message_test.go's partKindDispositions table records this precisely.
 func appendMessageContent(buf []byte, content []ai.Part) []byte {
 	if len(content) == 1 {
 		part := content[0]
@@ -273,13 +276,19 @@ func appendMessageContent(buf []byte, content []ai.Part) []byte {
 // PartKindToolResult never reaches this path either — a RoleTool message
 // is intercepted whole by appendMessageObject's own dispatch, before
 // content or its parts are ever inspected (appendToolResultMessages,
-// above). The one member of ai.PartKinds() still deferred past this
-// point is PartKindReasoning: AI-26.6's own refusal door (Phase 7,
-// policy.go) intercepts it earlier still, before appendBody appends
-// anything at all; this function's default case remains the transitional
-// safety net for it in the meantime, exactly as message_test.go's
-// partKindDispositions table (TestMessage_PartKindCoverage, S-ART-027)
-// records.
+// above). PartKindReasoning, the one member of ai.PartKinds() this
+// function used to defer past this point (AI-26.3/AI-26.5), is now
+// refused before Translate ever calls appendBody at all (AI-26.6, Phase
+// 7: policy.go's refuseReasoning, wired from translation.go) — R-ART-015
+// requires that refusal to run to completion over the whole request
+// first, so a reasoning part can no longer reach this function, at any
+// position, in any message. This function's default case therefore has
+// no live path to it for any currently-declared ai.PartKind; it remains
+// as the same standing safety net R-ART-007 has always required
+// ("none translates by accident"), now guarding only against a future
+// vocabulary member this package has neither rendered nor refused —
+// message_test.go's partKindDispositions table (TestMessage_PartKindCoverage,
+// S-ART-027) records the current disposition of every member precisely.
 //
 // Reaching the default case panics, naming the kind via kind.String(),
 // rather than silently rendering nothing or the wrong bytes — both of
