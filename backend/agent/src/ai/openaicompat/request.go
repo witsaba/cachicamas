@@ -13,7 +13,7 @@ import (
 // the AI-25.3 viability probe, and AI-26 is the seam that will drive this
 // method with a real request body.
 func (c *Client) newRequest(ctx context.Context, segments ...string) (*http.Request, error) {
-	target := c.base.JoinPath(segments...)
+	target := joinRequestPath(c.base, segments...)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), nil)
 	if err != nil {
