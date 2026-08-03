@@ -1,6 +1,7 @@
 package openaicompat_test
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,13 +25,69 @@ import (
 // what keeps the multi-megabyte fixture (Slice 5's own scope, R-ASD-014)
 // structurally out of this O(N^2) sweep, rather than relying on
 // convention or reviewer diligence.
+//
+// This proves S-ASD-049's POSITIVE clause only (every real fixture is
+// within bound). checkSweepFixtureBound below factors the identical check
+// into a pure function callable over any candidate set, so the scenario's
+// NEGATIVE clause — "a deliberately overweight fixture trips the guard" —
+// can be proven permanently too, without staging a violating fixture in
+// this real registry. See TestOffsetSweep_SyntheticOverweightFixture_Fails.
 func TestOffsetSweep_FixturesWithinSweepBound(t *testing.T) {
 	t.Parallel()
 
-	for _, tr := range sweepTranscripts {
-		if len(tr.transcript) > maxSweepFixtureBytes {
-			t.Errorf("transcript %q is %d bytes, want <= %d (S-ASD-049)", tr.name, len(tr.transcript), maxSweepFixtureBytes)
-		}
+	for _, v := range checkSweepFixtureBound(sweepTranscripts) {
+		t.Error(v)
+	}
+}
+
+// TestOffsetSweep_SyntheticOverweightFixture_Fails is S-ASD-049's second
+// clause — "a deliberately overweight fixture trips the guard" — made
+// PERMANENTLY runnable (post-verify durability fix, W1 in
+// verify-report.md), replacing a proof that previously existed only once,
+// transiently: Slice 3 staged a deliberately overweight fixture directly in
+// sweepTranscripts, ran the guard, recorded it failing loudly, then removed
+// the fixture (see this file's own history and tasks.md's Slice-3 evidence
+// log for the exact recorded failure line). That proof was real but left
+// nothing in the shipped suite to re-establish it — a future refactor that
+// silently defanged the size comparison would go unnoticed.
+//
+// checkSweepFixtureBound is exercised directly against a synthetic
+// candidate constructed in-test; sweepTranscripts (the real registry) is
+// never touched. This is exactly src/ai/sequence_guard_test.go's
+// TestSequenceGuard_*_Fails idiom (e.g.
+// TestSequenceGuard_ScratchPackageLevelInteger_Fails): construct a
+// deliberately violating input in-test, assert the guard rejects it and
+// names the offender, leave the real subject clean.
+//
+// Falsifiable by construction: if checkSweepFixtureBound's size comparison
+// were removed or inverted, this test fails (see this task's own scratch
+// break-and-revert record in tasks.md).
+func TestOffsetSweep_SyntheticOverweightFixture_Fails(t *testing.T) {
+	t.Parallel()
+
+	const oversizedName = "SYNTHETIC-OVERWEIGHT-FOR-GUARD-PROOF"
+	oversized := sweepTranscript{
+		name:       oversizedName,
+		transcript: bytes.Repeat([]byte("x"), maxSweepFixtureBytes+1), // 1025 bytes: one over the inclusive bound
+	}
+
+	violations := checkSweepFixtureBound([]sweepTranscript{oversized})
+	if len(violations) != 1 {
+		t.Fatalf("checkSweepFixtureBound(1025-byte synthetic fixture) = %d violations, want exactly 1", len(violations))
+	}
+	if violations[0].name != oversizedName {
+		t.Errorf("violation names transcript %q, want %q — the guard must name the offending transcript", violations[0].name, oversizedName)
+	}
+	if violations[0].size != maxSweepFixtureBytes+1 {
+		t.Errorf("violation reports size %d, want %d — the guard must name the offending transcript's exact size", violations[0].size, maxSweepFixtureBytes+1)
+	}
+
+	// The bound is inclusive (S-ASD-049, design.md Rev 3): exactly
+	// maxSweepFixtureBytes MUST NOT trip the guard — never silently
+	// flipped to a strict `<`.
+	atBound := sweepTranscript{name: "AT-BOUND", transcript: bytes.Repeat([]byte("x"), maxSweepFixtureBytes)}
+	if got := checkSweepFixtureBound([]sweepTranscript{atBound}); len(got) != 0 {
+		t.Errorf("checkSweepFixtureBound(exactly-at-bound fixture) = %v, want no violations — the bound is inclusive, exactly %d bytes is admissible", got, maxSweepFixtureBytes)
 	}
 }
 
@@ -321,4 +378,46 @@ func sweepMismatch(transcriptName string, offset int, got, want []openaicompat.F
 		return "", false
 	}
 	return fmt.Sprintf("transcript %q split at byte offset %d: frames = %+v, want %+v (canonical decode)", transcriptName, offset, got, want), true
+}
+
+// --- S-ASD-049 durability (post-verify W1): the size guard as a pure function ---
+
+// sweepFixtureBoundViolation names one candidate transcript whose size
+// exceeds maxSweepFixtureBytes (S-ASD-049): the transcript's name and its
+// exact byte size, so a caller can report which fixture is over the bound
+// and by how much.
+type sweepFixtureBoundViolation struct {
+	name string
+	size int
+}
+
+// String renders a violation exactly as the guard has always reported it,
+// so TestOffsetSweep_FixturesWithinSweepBound's failure text is unchanged
+// by this refactor.
+func (v sweepFixtureBoundViolation) String() string {
+	return fmt.Sprintf("transcript %q is %d bytes, want <= %d (S-ASD-049)", v.name, v.size, maxSweepFixtureBytes)
+}
+
+// checkSweepFixtureBound is R-ASD-014/S-ASD-049's structural size guard,
+// factored into a pure function over any candidate transcript set — never
+// only the real sweepTranscripts registry — so both of S-ASD-049's clauses
+// stay permanently provable: the positive clause by
+// TestOffsetSweep_FixturesWithinSweepBound (the real registry, want zero
+// violations) and the negative clause by
+// TestOffsetSweep_SyntheticOverweightFixture_Fails (a synthetic candidate
+// built in-test, want exactly one named violation) — without ever staging
+// a violating fixture inside the real registry the way Slice 3's original,
+// transient proof did.
+//
+// The bound is inclusive: len(tr.transcript) == maxSweepFixtureBytes does
+// NOT violate; only strictly greater does (design.md Rev 3) — this
+// comparison must never be silently flipped to a strict `<`.
+func checkSweepFixtureBound(candidates []sweepTranscript) []sweepFixtureBoundViolation {
+	var violations []sweepFixtureBoundViolation
+	for _, tr := range candidates {
+		if len(tr.transcript) > maxSweepFixtureBytes {
+			violations = append(violations, sweepFixtureBoundViolation{name: tr.name, size: len(tr.transcript)})
+		}
+	}
+	return violations
 }
