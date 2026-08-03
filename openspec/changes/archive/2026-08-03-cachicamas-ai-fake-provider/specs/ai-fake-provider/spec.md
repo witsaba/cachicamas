@@ -1,3 +1,5 @@
+> **Archived 2026-08-03.** This is the delta spec as written during the SDD cycle. The **promoted live contract** is [`openspec/specs/ai-fake-provider/spec.md`](../../../../../specs/ai-fake-provider/spec.md) — read that file, not this one, for the current requirement text, including the resolution of `R-AFP-014`'s pre-apply correction and design's resolution of the two items this delta left open.
+
 # Spec — the scripted fake provider
 
 > **Change**: `cachicamas-ai-fake-provider` · **Milestone**: AI-21 — Build a scripted fake provider (Wave 3 "Prove", the wave's **first** milestone)
@@ -7,13 +9,13 @@
 > **Requirement IDs**: `R-AFP-0NN` · **Scenario IDs**: `S-AFP-0NN` — prefix re-verified unused across `openspec/specs/` and `openspec/changes/` at spec time; siblings AI-22 and AI-23 must not reuse it
 > **Format**: RFC 2119 keywords + Given/When/Then, per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable.
 > **Binding predecessors, cited by identifier and never modified**:
-> [`ai-model-provider`](../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-003` external implementability, `R-AMP-005` … `R-AMP-008` the pre-stream contract, `R-AMP-009` … `R-AMP-012` the mid-stream contract, `R-AMP-013` the local single-purpose producer that this milestone succeeds;
-> [`ai-stream-lifecycle`](../../../../specs/ai-stream-lifecycle/spec.md) — § 3 carrier, § 4 ownership, § 5 cancellation, § 6 buffering, § 7 failure delivery, § 9 the eight statements;
-> [`ai-event-envelope`](../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, its kind vocabulary, `CheckEmit`, and per-stream sequencing;
-> [`ai-text-events`](../../../../specs/ai-text-events/spec.md) (AI-16), [`ai-reasoning-events`](../../../../specs/ai-reasoning-events/spec.md) (AI-17), [`ai-tool-call-events`](../../../../specs/ai-tool-call-events/spec.md) (AI-18), [`ai-provider-errors`](../../../../specs/ai-provider-errors/spec.md) (AI-19) — the four script vocabularies;
-> [`ai-model-request`](../../../../specs/ai-model-request/spec.md) (AI-10.5 readability, AI-10.6 immutability) — what request capture asserts on
+> [`ai-model-provider`](../../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-003` external implementability, `R-AMP-005` … `R-AMP-008` the pre-stream contract, `R-AMP-009` … `R-AMP-012` the mid-stream contract, `R-AMP-013` the local single-purpose producer that this milestone succeeds;
+> [`ai-stream-lifecycle`](../../../../../specs/ai-stream-lifecycle/spec.md) — § 3 carrier, § 4 ownership, § 5 cancellation, § 6 buffering, § 7 failure delivery, § 9 the eight statements;
+> [`ai-event-envelope`](../../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, its kind vocabulary, `CheckEmit`, and per-stream sequencing;
+> [`ai-text-events`](../../../../../specs/ai-text-events/spec.md) (AI-16), [`ai-reasoning-events`](../../../../../specs/ai-reasoning-events/spec.md) (AI-17), [`ai-tool-call-events`](../../../../../specs/ai-tool-call-events/spec.md) (AI-18), [`ai-provider-errors`](../../../../../specs/ai-provider-errors/spec.md) (AI-19) — the four script vocabularies;
+> [`ai-model-request`](../../../../../specs/ai-model-request/spec.md) (AI-10.5 readability, AI-10.6 immutability) — what request capture asserts on
 > **Depends on**: AI-20 (shipped) · **Blocks**: AI-22, AI-23, doc 0003 wave C
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-21.1 … AI-21.8 (lines 1168–1251) · ADR 0005 § D2 / Guard C (the `src/agenttest` sibling layout)
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-21.1 … AI-21.8 (lines 1168–1251) · ADR 0005 § D2 / Guard C (the `src/agenttest` sibling layout)
 
 ---
 

@@ -1,4 +1,4 @@
-# Spec — the stream test kit
+> **Archived 2026-08-03.** This is the delta spec as written during the SDD cycle. The **promoted live contract** is [`openspec/specs/ai-stream-testkit/spec.md`](../../../../../specs/ai-stream-testkit/spec.md) — read that file, not this one, for the current requirement text, including design's resolution of the three items this delta left open. `ai-fake-provider` is cited below as "not yet archived"; it is archived alongside this file — see its own promoted spec at `openspec/specs/ai-fake-provider/spec.md`.
 
 > **Change**: `cachicamas-ai-stream-testkit` · **Milestone**: AI-22 — Build stream recording and assertion helpers (Wave 3 "Prove", the wave's **second** milestone)
 > **Nodes**: AI-22.1 `[leaf]` timeout-safe drain and record · AI-22.2 `[leaf]` readable event diffs · AI-22.3 `[leaf]` ordering and gap assertions · AI-22.4 `[decision]` leak-detection mechanism · AI-22.5 `[leaf]` carrier view
@@ -6,14 +6,14 @@
 > **Predecessor**: [`proposal.md`](../../proposal.md) · Engram `sdd/cachicamas-ai-stream-testkit/proposal` (obs #2394), `sdd/cachicamas-ai-stream-testkit/explore` (obs #2393)
 > **Requirement IDs**: `R-STK-0NN` · **Scenario IDs**: `S-STK-0NN` — prefix re-verified unused across `openspec/specs/` and `openspec/changes/` at spec time (siblings in use: `AFP` AI-21, `AIP`, `AMP`, `AMR`, `AIE`, `ARC`, `ACP`, `ATD`, `REX`, `WSY`). AI-23 must not reuse `STK`.
 > **Format**: RFC 2119 keywords + Given/When/Then, per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable.
-> **Vocabulary owned by this milestone**: [`ai-contract-vocabulary`](../../../../specs/ai-contract-vocabulary/spec.md) `V-PRV-11` **stream test kit** (AI-22) and `V-STR-22` **carrier view** (appended by AI-02.1, ergonomics delegated to AI-22.5). Both terms are used as the register defines them; neither is renamed and no alternate name is coined.
+> **Vocabulary owned by this milestone**: [`ai-contract-vocabulary`](../../../../../specs/ai-contract-vocabulary/spec.md) `V-PRV-11` **stream test kit** (AI-22) and `V-STR-22` **carrier view** (appended by AI-02.1, ergonomics delegated to AI-22.5). Both terms are used as the register defines them; neither is renamed and no alternate name is coined.
 > **Binding predecessors, cited by identifier and never modified**:
-> [`ai-model-provider`](../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-009` … `R-AMP-012` mid-stream physics, AI-20.4's signature guard;
-> [`ai-stream-lifecycle`](../../../../specs/ai-stream-lifecycle/spec.md) — § 3 carrier, § 4 ownership, § 5 cancellation (the abandoned-never-cancelled path it rules untestable), § 6 buffering, § 7 failure delivery;
-> [`ai-event-envelope`](../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, its kind vocabulary, `CheckStream`'s ordering invariants (AI-14.4) and per-stream sequencing;
-> [`ai-fake-provider`](../../cachicamas-ai-fake-provider/specs/ai-fake-provider/spec.md) (AI-21, **not yet archived** — read from its active change folder) — the producer these helpers are proved against
+> [`ai-model-provider`](../../../../../specs/ai-model-provider/spec.md) (AI-20) — `R-AMP-009` … `R-AMP-012` mid-stream physics, AI-20.4's signature guard;
+> [`ai-stream-lifecycle`](../../../../../specs/ai-stream-lifecycle/spec.md) — § 3 carrier, § 4 ownership, § 5 cancellation (the abandoned-never-cancelled path it rules untestable), § 6 buffering, § 7 failure delivery;
+> [`ai-event-envelope`](../../../../../specs/ai-event-envelope/spec.md) (AI-14) — the envelope, its kind vocabulary, `CheckStream`'s ordering invariants (AI-14.4) and per-stream sequencing;
+> [`ai-fake-provider`](../../../2026-08-03-cachicamas-ai-fake-provider/specs/ai-fake-provider/spec.md) (AI-21, **not yet archived** — read from its active change folder) — the producer these helpers are proved against
 > **Depends on**: AI-21 (shipped on this branch) · **Blocks**: AI-23, AI-33, doc 0003's hardening wave
-> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-22.1 … AI-22.5 · design D10 (`CheckStream` defers contiguity to AI-22.3) · G13 (carrier ergonomics are AI-22.5)
+> **Sources**: [doc 0002 — Layer 1 task graph](../../../../../../docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) §§ AI-22.1 … AI-22.5 · design D10 (`CheckStream` defers contiguity to AI-22.3) · G13 (carrier ergonomics are AI-22.5)
 
 ---
 
