@@ -27,16 +27,20 @@ const DefaultMaxFrameBytes = 8 * 1024 * 1024
 // caller owns every I/O concern and chooses every chunk boundary; decoding
 // the same bytes always yields the same frames.
 //
-// # maxFrameBytes: accepted here, enforced from AI-27.5
+// # maxFrameBytes: a single in-progress frame's hard cap
 //
-// NewDecoder's maxFrameBytes parameter is normalized and stored from this
-// slice onward, but no code path in this slice's Feed checks it: cap
-// enforcement (ErrFrameTooLarge) is AI-27.5's own RED/GREEN pair. A
-// reviewer of this slice should not read the parameter's presence as
-// proof the cap is already live — it is deliberately inert until then.
+// NewDecoder's maxFrameBytes parameter bounds a single in-progress
+// frame's accumulated size (R-ASD-018..021). Feed aborts with
+// ErrFrameTooLarge the instant that accumulation grows strictly greater
+// than the cap — never merely equal to it, so a frame that reaches
+// exactly the cap and no further still decodes (S-ASD-063). Frames
+// already dispatched earlier in the same Feed call are still returned
+// alongside the error, never dropped because an error accompanies them
+// (S-ASD-085). The first terminal error poisons the decoder: every later
+// Feed or Finish call returns that same error, with zero frames.
 type Decoder struct {
-	// maxFrameBytes bounds a single in-progress frame's accumulated size.
-	// Not yet enforced in this slice; see the type's doc comment.
+	// maxFrameBytes bounds a single in-progress frame's accumulated size
+	// (R-ASD-018..021); see the type's doc comment for enforcement.
 	maxFrameBytes int
 
 	// buf is the retained tail: bytes fed but not yet resolved into a
@@ -54,14 +58,23 @@ type Decoder struct {
 	// mark occurring anywhere else, including immediately after a
 	// stripped leading one, is ordinary content (S-ASD-026).
 	bomChecked bool
+
+	// err is the decoder's terminal error, once one occurs (R-ASD-019's
+	// cap-exceeded abort is the only source in this slice; AI-27.6 adds
+	// truncation as a second). Once set, every later Feed and Finish
+	// call returns it immediately, touching no other state (design.md's
+	// "Poisoning" decision) — a half-consumed frame boundary is
+	// unrecoverable, so there is nothing safe to resume.
+	err error
 }
 
 // NewDecoder returns a Decoder ready to accept bytes through Feed.
 //
-// maxFrameBytes bounds a single in-progress frame's accumulated size. A
-// non-positive value selects DefaultMaxFrameBytes. See Decoder's doc
-// comment for why this slice accepts and normalizes the value without yet
-// enforcing it.
+// maxFrameBytes bounds a single in-progress frame's accumulated size
+// (R-ASD-018..021). A non-positive value selects DefaultMaxFrameBytes —
+// pinned by bounded_memory_test.go's own dedicated assertion, since which
+// exact value zero selects had never previously been observable. See
+// Decoder's doc comment for the cap's enforcement and poisoning behavior.
 func NewDecoder(maxFrameBytes int) *Decoder {
 	if maxFrameBytes <= 0 {
 		maxFrameBytes = DefaultMaxFrameBytes
@@ -82,7 +95,19 @@ func NewDecoder(maxFrameBytes int) *Decoder {
 // the whole stream before any line is scanned (R-ASD-007); see stripBOM.
 // A blank line dispatches only when the data accumulation is non-empty
 // (R-ASD-008); see dispatch.
+//
+// If the current in-progress frame's accumulated size grows strictly
+// greater than maxFrameBytes, Feed returns ErrFrameTooLarge alongside any
+// frames already dispatched earlier in this same call (R-ASD-019,
+// S-ASD-085) — never dropping delivered content because an error
+// accompanies it. Once returned, that error poisons the decoder: every
+// later Feed call returns it immediately with zero frames, touching no
+// other state.
 func (d *Decoder) Feed(p []byte) ([]Frame, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+
 	d.buf = append(d.buf, p...)
 	d.stripBOM()
 
@@ -91,6 +116,20 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 	for {
 		line, next, ok := nextLine(d.buf, cursor)
 		if !ok {
+			// d.buf[cursor:] is now confirmed a genuine partial line —
+			// nextLine searched it in full and found no terminator — so
+			// its length is safe to add to the cap accounting here. This
+			// must NOT be checked any earlier, at an arbitrary cursor:
+			// summing the entire unscanned suffix before nextLine has
+			// looked at it would count bytes belonging to a later,
+			// not-yet-reached frame in the same input chunk against the
+			// current one (S-ASD-085's mixed case would wrongly abort
+			// before its complete first frame ever dispatches). See
+			// exceedsCap's doc comment for the full accounting.
+			if d.exceedsCap(len(d.buf) - cursor) {
+				d.err = ErrFrameTooLarge
+				return frames, d.err
+			}
 			break
 		}
 		cursor = next
@@ -102,6 +141,10 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 			continue
 		}
 		d.processFieldLine(line)
+		if d.exceedsCap(0) {
+			d.err = ErrFrameTooLarge
+			return frames, d.err
+		}
 	}
 
 	d.buf = append(d.buf[:0], d.buf[cursor:]...)
@@ -202,14 +245,23 @@ func (d *Decoder) stripBOM() {
 
 // Finish signals that no further bytes will arrive.
 //
-// This slice's implementation is intentionally a stub returning nil
-// unconditionally: truncation detection (an incomplete frame still
-// pending when the caller signals completion) is AI-27.6's ErrTruncated
-// obligation. Every scenario this slice proves ends its transcript at a
-// clean frame boundary, so Finish has nothing yet to detect — but the
-// method exists now because it is part of the public shape every later
-// slice builds on (R-ASD-003's "decode completes" scenarios call it).
+// If an earlier Feed call already returned ErrFrameTooLarge, Finish
+// returns that same error (design.md's poisoning decision) rather than
+// nil: the decoder has nothing further to report once its first terminal
+// error has occurred.
+//
+// Beyond that poisoning check, this slice's implementation is still a
+// stub: truncation detection (an incomplete frame still pending when the
+// caller signals completion) is AI-27.6's own ErrTruncated obligation.
+// Every non-poisoned scenario this slice proves ends its transcript at a
+// clean frame boundary, so Finish has nothing else yet to detect — but
+// the method exists now because it is part of the public shape every
+// later slice builds on (R-ASD-003's "decode completes" scenarios call
+// it).
 func (d *Decoder) Finish() error {
+	if d.err != nil {
+		return d.err
+	}
 	return nil
 }
 
@@ -301,4 +353,30 @@ func (d *Decoder) dispatch() (frame Frame, dispatched bool) {
 func (d *Decoder) reset() {
 	d.data = d.data[:0]
 	d.eventType = d.eventType[:0]
+}
+
+// exceedsCap reports whether the current in-progress frame's accumulated
+// size is strictly greater than maxFrameBytes (R-ASD-019): retainedTail —
+// the not-yet-resolved bytes beyond the scan cursor, when there are any —
+// plus the already-accumulated data and event-type buffers. The relation
+// is deliberately >, never >=: a frame whose accumulation reaches exactly
+// the cap and no further still decodes (S-ASD-063).
+//
+// This is the one counter both of Feed's cap-check call sites share
+// (task 5.8's consolidation): the retained-tail branch, reached only
+// once nextLine has confirmed d.buf[cursor:] is a genuine partial line
+// rather than more complete, not-yet-scanned lines (retainedTail > 0);
+// and the post-field-line branch, reached after a resolved line has just
+// grown data or eventType (retainedTail == 0, since nothing beyond the
+// line just resolved has been examined yet).
+//
+// Passing the whole unscanned suffix at an arbitrary cursor — rather
+// than only once nextLine has confirmed it is a genuine partial line —
+// would count bytes belonging to a later, not-yet-reached frame in the
+// same input chunk against the frame currently in progress: exactly the
+// bug that would make S-ASD-085's mixed case (a complete frame followed
+// by an over-cap frame, in one Feed call) wrongly abort before the
+// complete frame ever has a chance to dispatch.
+func (d *Decoder) exceedsCap(retainedTail int) bool {
+	return retainedTail+len(d.data)+len(d.eventType) > d.maxFrameBytes
 }
