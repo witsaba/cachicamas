@@ -213,16 +213,42 @@ Falsifiability was demonstrated by 5 scratch break-and-revert cycles against `de
 
 ## Phase 4 — Slice 4: AI-27.4 keep-alives and unknowns (R-ASD-015…017 · S-ASD-052…057; R-ASD-025 partial · S-ASD-079…081)
 
-- [ ] 4.1 RED `keepalive_test.go`: comment lines interleaved with data lines leave the payload identical to the comments-removed version; comment-only stream ending at a line boundary yields zero frames, no error (S052–053).
-- [ ] 4.2 RED: invented field name ignored without residue; unrecognized event-type name yielded verbatim (S054–055).
-- [ ] 4.3 RED: an explicit event-type line inserted into a data-only transcript sets that frame's type only; surrounding frames keep the default; no error (S057).
-- [ ] 4.4 RED (charter-boundary pin): `data: [DONE]` yielded as an ordinary frame with the exact string payload, no special status/early finish/error; frames following the sentinel frame are still yielded normally; two frames differing only in payload content decode with identical framing outcomes (S079–081).
-- [ ] 4.5 GREEN: comment-line (leading `:`) short-circuit ahead of field dispatch; no event-type registry/allowlist introduced — faithful compliance already yields S055.
-- [ ] 4.6 GREEN: register the comment-interleaved fixture into `sweepTranscripts` (grows the slice-3 registry).
-- [ ] 4.7 REFACTOR: none required — the comment short-circuit is a one-line guard.
-- [ ] 4.8 INSPECTION: no event-type registry/allowlist/recognition table exists in shipped source (S056).
+- [x] 4.1 RED `keepalive_test.go`: comment lines interleaved with data lines leave the payload identical to the comments-removed version; comment-only stream ending at a line boundary yields zero frames, no error (S052–053).
+- [x] 4.2 RED: invented field name ignored without residue; unrecognized event-type name yielded verbatim (S054–055).
+- [x] 4.3 RED: an explicit event-type line inserted into a data-only transcript sets that frame's type only; surrounding frames keep the default; no error (S057).
+- [x] 4.4 RED (charter-boundary pin): `data: [DONE]` yielded as an ordinary frame with the exact string payload, no special status/early finish/error; frames following the sentinel frame are still yielded normally; two frames differing only in payload content decode with identical framing outcomes (S079–081).
+- [x] 4.5 GREEN: comment-line (leading `:`) short-circuit ahead of field dispatch; no event-type registry/allowlist introduced — faithful compliance already yields S055.
+- [x] 4.6 GREEN: register the comment-interleaved fixture into `sweepTranscripts` (grows the slice-3 registry).
+- [x] 4.7 REFACTOR: none required — the comment short-circuit is a one-line guard.
+- [x] 4.8 INSPECTION: no event-type registry/allowlist/recognition table exists in shipped source (S056).
 
 > **Note for slice 4's own apply run**: slice 1's field-line split already resolves a colon-at-position-0 line (a comment) to an empty field name that falls through the `default:` case unrecognized — the same path id/retry/unknown fields take. 4.1/4.5's RED may find comment-ignoring already green from slice 1 rather than genuinely red; disclose plainly if so.
+>
+> **Confirmed by this slice's own apply run**: the note above was exactly right. See the Evidence Log below.
+
+### Evidence Log — Slice 4 (AI-27.4 keep-alives and unknowns)
+
+**Disclosed non-red — all 8 scenarios (S-ASD-052…057, 079…081), confirmed by the actual pre-4.x run.** `go test -race -v -run TestKeepalive ./src/ai/openaicompat/...` (run immediately after `keepalive_test.go` was written, against the unmodified Slice-3 `decoder.go`) passed all 8 top-level functions on the first run. Exactly as the milestone's own forward-looking note anticipated: slice 1's naive `default:`-falls-through field-name switch already ignores a comment line's empty name (and any invented name) identically to id/retry; the field-name switch has never consulted the event-type *value*, so an unrecognized event-type name was always yielded verbatim; the unconditional per-dispatch `reset()` (slice 2b) already prevents any type from leaking into a later frame; and the decoder has zero code path anywhere that inspects `Frame.Data`'s content, so `[DONE]` was never special-cased — it could not have been, structurally, without new code no task in this slice adds. Zero production changes were needed (matching Slice 3's own zero-production-change precedent).
+
+**Falsifiability demonstrated via 5 scratch break-and-revert cycles against `decoder.go`** (each applied, run, observed, reverted; `git diff --stat` against HEAD confirmed empty after each):
+
+1. **Unmatched field names (comments, invented names) routed into the data accumulator** (`default:` case added to `processFieldLine`'s switch). Falsified `TestKeepalive_CommentLinesInterleavedLeavePayloadUnchanged` and `TestKeepalive_InventedFieldNameIgnoredWithoutResidue` (S052/S054), plus, broader than targeted, four pre-existing Slice 2a/2b regressions at once (colonless-unrecognized-name, both retry tests, both identifier tests, and the two-leading-BOMs test) — this milestone's established "combined break, broader blast radius" pattern.
+2. **An event-type allowlist** (`case "event":` guarded by `map[string]bool{"message": true}`). Falsified `TestKeepalive_UnrecognizedEventTypeNameYieldedVerbatim` (S055) and `TestKeepalive_ExplicitEventTypeLineInDataOnlyTranscriptSetsOnlyThatFrame` (S057, `"custom"` isn't allowlisted either), plus a very broad pre-existing regression across slices 1–3 (every fixture using `"greet"`) — direct, measured proof of why R-ASD-016 forbids this mechanism, not a stylistic preference.
+3. **`reset()`'s `eventType` clear removed** (forward-leak simulation). Falsified `TestKeepalive_ExplicitEventTypeLineInDataOnlyTranscriptSetsOnlyThatFrame` (S057, `frames[2].Event` leaked `"custom"`) plus pre-existing Slice 2b regressions S032/S034.
+4. **The sentinel frame dropped** (`if string(frame.Data) != "[DONE]" { … }` guarding the dispatch-append) — the "dropping the sentinel frame" leak design.md names explicitly. Falsified exactly the three `[DONE]`-touching tests: S079 (count 0, want 1), S080 (missing the sentinel frame), S081 (frame counts diverge: 0 vs. 1).
+5. **Post-sentinel suppression** (temporary `sawDone bool`; the `[DONE]` frame itself still appended, everything dispatched afterward silently dropped) — the "AI-28.2 item 3, misplaced a layer down" leak design.md names explicitly. Falsified **only** `TestKeepalive_FramesFollowingDoneSentinelStillYieldedNormally` (S080; 1 frame instead of 3) — `TestKeepalive_DoneSentinelYieldedVerbatimNoSpecialHandling` (S079) **kept passing**, since its fixture has no content after the sentinel to observe the suppression through. This is the precise, surgical proof this milestone's evidence discipline demanded: S079 alone cannot catch the post-sentinel-suppression leak; only S080's own dedicated assertion (two further frames, full byte content asserted, not merely counted) does.
+
+**Anti-vacuous-pass disclosure (S053), found by reasoning about the fixture, not by a surprise test run.** `TestKeepalive_CommentOnlyStreamEndingAtLineBoundaryYieldsZeroFrames` cannot, by its own scenario's construction, distinguish "comments correctly ignored" from "comments misrouted but never assembled into an observable frame": its fixture has no blank line at all, so `Feed` cannot dispatch under any comment-handling implementation, and `Finish()` is an unconditional stub this slice. Confirmed directly: re-running this one test under break 1 above still passes. Not a defect — S053's own job (boundary-cleanliness) is narrower than S052's (comment-routing correctness); the two are complementary, the same pattern this milestone already used for the BOM pair S025/026 in slice 2b.
+
+**Registry growth (task 4.6).** `comment-interleaved` registered into `sweepTranscripts` (92 bytes, well under the 1024-byte bound; `TestOffsetSweep_FixturesWithinSweepBound` re-verified passing). It sets `want`, participates in the canonical-anchor check, and is swept exhaustively (`TestOffsetSweep_EveryOffsetMatchesCanonicalDecode` now 7 sub-tests, was 6, confirmed by name in verbose output) — the sweep's first fixture containing a comment line, proving a split landing inside a comment's own bytes or exactly at its leading colon reconstructs identically to the unsplit reference.
+
+**Literal-search evidence for R-ASD-025 (S-ASD-082-adjacent; formally closed at slice 6's task 6.8 milestone-close inspection — checked proactively here too).** `grep -n "\[DONE\]" *.go` finds the literal only in `keepalive_test.go`; restricted to non-test sources, zero matches. `grep -inE "registry|allowlist|recogni[sz]ed.*type|knownEvent|eventTypes"` over `decoder.go`/`frame.go` (task 4.8, S056): zero matches — confirmed by trace.
+
+**Full-suite gate:** `go test -race -v -count=1 ./...` (from `backend/agent/`) → exit 0; `ok .../src/agenttest`, `ok .../src/ai`, `ok .../src/ai/openaicompat` (3.019s). **524** top-level `--- PASS` lines (516 Slice-3 baseline + 8 new top-level `TestKeepalive_*` functions), **0** `--- FAIL`, `-race` clean throughout. `make lint` → `0 issues.` `go.mod`/`go.sum` diff against `feat/ai-27-3-offset-sweep`: empty. AI-00 guards and the AI-25 guard: all PASS, no allowlist edit.
+
+**Diff size:** `keepalive_test.go` +298 new, `sweep_transcripts_test.go` +19/−3 → **2 files changed, 317 insertions(+), 3 deletions(-)** — within this unit's own pre-forecast band (240–640). `decoder.go`/`frame.go` byte-identical to `feat/ai-27-3-offset-sweep` — the second slice this milestone to land with zero production changes (slice 3 was the first).
+
+**Forward-looking notes for Phases 5/6, reviewed and found still accurate — no revision made.** Phase 5's note (offset-sweep helpers) is unaffected by which fixtures are registered in `sweepTranscripts`, since slice 5's own multi-MB fixture stays a local variable, never registered. Phase 6's note (BOM-prefix-pending-at-`Finish`) is untouched by comment/unknown-field/`[DONE]` handling.
 
 ## Phase 5 — Slice 5: AI-27.5 bounded memory (R-ASD-018…021 · S-ASD-058…069, 085)
 
