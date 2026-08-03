@@ -143,30 +143,34 @@ Chain strategy: feature-branch-chain
 
 ## Phase C.0 — R-APC-013 test-server viability
 
-- [ ] C.0.1 RED `viability_test.go`: `httptest.NewServer` handler records `Authorization` header + path; construct adapter with **nil** `HTTPClient` (adapter-built path); drive one request; assert exactly one request observed, Bearer credential present in dialect shape, path equals `R-APC-006`'s joined path, a second construction with a different credential carries the second value. Covers `S-APC-048…051`.
-- [ ] C.0.2 GREEN: wire the probe against `New`/`newRequest`; confirm it passes.
+- [x] C.0.1 RED `viability_test.go`: `httptest.NewServer` handler records `Authorization` header + path; construct adapter with **nil** `HTTPClient` (adapter-built path); drive one request; assert exactly one request observed, Bearer credential present in dialect shape, path equals `R-APC-006`'s joined path, a second construction with a different credential carries the second value. Covers `S-APC-048…051`. **Note**: passed immediately (no red) — see Evidence Log for what provides falsifiability instead.
+- [x] C.0.2 GREEN: wire the probe against `New`/`newRequest`; confirm it passes.
 
 ## Phase C.1 — R-APC-013 proxy immunity (SERIAL — no `t.Parallel()`)
 
-- [ ] C.1.1 RED: `t.Setenv("HTTP_PROXY", <dead-address>)`; assert the probe still reaches the local server unaffected — the adapter-built client's unset proxy resolver (`R-APC-009`) makes this trustworthy. Covers `S-APC-052`. **Must not add `t.Parallel()`** — `t.Setenv` panics under parallel execution; Go runs a package's non-parallel tests strictly sequentially, so this and Phase A.4's timing pair queue rather than overlap, and `t.Setenv`'s automatic cleanup restores the environment before the next serial test runs.
-- [ ] C.1.2 GREEN: confirm the adapter-built transport's unset `Proxy` (from A.3.2) already satisfies this without further code change.
+- [x] C.1.1 RED: `t.Setenv("HTTP_PROXY", <dead-address>)`; assert the probe still reaches the local server unaffected — the adapter-built client's unset proxy resolver (`R-APC-009`) makes this trustworthy. Covers `S-APC-052`. **Must not add `t.Parallel()`** — `t.Setenv` panics under parallel execution; Go runs a package's non-parallel tests strictly sequentially, so this and Phase A.4's timing pair queue rather than overlap, and `t.Setenv`'s automatic cleanup restores the environment before the next serial test runs. **Note**: passed immediately (no red) — see Evidence Log.
+- [x] C.1.2 GREEN: confirm the adapter-built transport's unset `Proxy` (from A.3.2) already satisfies this without further code change.
 
 ## Phase C.2 — R-APC-014 probe-doc review
 
-- [ ] C.2.1 *Review*: confirm the viability probe's own documentation states attachment-only scope, naming AI-32.5/AI-36.1 as wire-level owners (cross-ref A.8.3). Covers the probe-specific portion of `S-APC-054, S-APC-055`. No red phase.
+- [x] C.2.1 *Review*: confirm the viability probe's own documentation states attachment-only scope, naming AI-32.5/AI-36.1 as wire-level owners (cross-ref A.8.3). Covers the probe-specific portion of `S-APC-054, S-APC-055`. No red phase. **Discharges the A.8.3 deferral**: the viability-probe-doc half of that confirmation, explicitly left open in Slice A, is closed here.
 
 ## Phase C.3 — Slice-C closure
 
-- [ ] C.3.1 Run `make test` green + `make lint` clean; record evidence.
+- [x] C.3.1 Run `make test` green + `make lint` clean; record evidence.
 
 ---
 
 ## Phase D — Cross-cutting determinism and final coverage sweep
 
-- [ ] D.1 Run the whole milestone's test set repeatedly under `-race`; confirm identical results and no race-detector report. Covers `S-APC-069`.
-- [ ] D.2 *Review*: confirm Phase A.4's timing pair declares no parallelism, asserts the control's failure **shape** rather than duration, and uses a wide ratio margin. Covers `S-APC-070`. No red phase.
-- [ ] D.3 Confirm no single test's wall-clock runtime approaches the 60s time-to-headers bound — bounds are asserted structurally (Phase A.5), never waited out. Covers `S-APC-071`.
-- [ ] D.4 Final evidence walk: every runnable scenario in this file carries recorded red output, recorded green output and a refactor note; every `*(review)*` scenario carries a recorded confirmation naming what was read; Slice-B's PR carries all four bite-proof reds plus final green. Covers `S-APC-075, S-APC-076` (NFR-APC-G).
+- [x] D.1 Run the whole milestone's test set repeatedly under `-race`; confirm identical results and no race-detector report. Covers `S-APC-069`.
+- [x] D.2 *Review*: confirm Phase A.4's timing pair declares no parallelism, asserts the control's failure **shape** rather than duration, and uses a wide ratio margin. Covers `S-APC-070`. No red phase. **Completes the Slice-A-partial record**: full confirmation below.
+- [x] D.3 Confirm no single test's wall-clock runtime approaches the 60s time-to-headers bound — bounds are asserted structurally (Phase A.5), never waited out. Covers `S-APC-071`.
+- [x] D.4 Final evidence walk: every runnable scenario in this file carries recorded red output, recorded green output and a refactor note; every `*(review)*` scenario carries a recorded confirmation naming what was read; Slice-B's PR carries all four bite-proof reds plus final green. Covers `S-APC-075, S-APC-076` (NFR-APC-G).
+
+---
+
+**Milestone AI-25 status**: all tasks in this file (A.0–A.11, B.0–B.3, C.0–C.3, D) are now `[x]`. See the Requirement/NFR Coverage Map below — all 14 requirements and all 7 NFRs are discharged. AI-25 is complete.
 
 ---
 
@@ -268,3 +272,56 @@ Review-obligation confirmations (Slice B `*(review)*` scenarios — no red phase
 | B.1.4 | S-APC-068 | `openaicompat/doc.go`'s "The no-ambient-authority guarantee is scoped, not absolute" section (landed in Slice A) re-read here: confirmed it states the guarantee covers only this package's own sources and the client it builds for itself, and that an injected client's transport remains its injector's responsibility. Closed formally in Slice B, since this is the guard node that discharges it (cross-ref A.0.1, which first stated the same four documentation obligations). |
 
 Determinism and closure (NFR-APC-E, B.3.1): `go test -race -v -count=1 ./...` run again after `make lint` — identical `ok` results, no flakiness, no race-detector report. `make lint`: **0 issues** (`go vet ./...` clean; `bin/golangci-lint run --config=.golangci.yml ./...` — "0 issues."; no new `nolint` needed for `ambient_authority_test.go`). `go.mod` unchanged: still declares zero `require` directives. Both AI-00 guards (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`) re-ran green; `allowedNonStdlibPrefixes` is untouched by this slice (no file outside `openaicompat/` and `tasks.md` was edited). Diff vs `feat/ai-25a-injected-construction` (chain base, commit `37ffea2`): one new file, `ambient_authority_test.go`, 334 lines added, 0 removed — well under the design's ~700–1,400 corrected forecast for Slice B and the 5,000-line session budget.
+
+## Evidence Log — Slice C (populated during sdd-apply)
+
+**Header-shape resolution (task preface, R-APC-013)**: AI-24's merged `decision.md` was read at apply time, as instructed. § 4's credential-handling-boundary axis states: "A bearer token is attached as a single `Authorization: Bearer <token>` header at request-construction time, entirely inside code this repo owns and can audit." § 11's credential boundary states the same shape under "Receives": "An opaque bearer-token value, supplied at construction through injected configuration." Both sections settle the literal header form — `Authorization: Bearer <token>` — which is also exactly what `request.go` already implements (`Credential.bearer()` returns `"Bearer " + c.token`, attached via `req.Header.Set("Authorization", ...)`). Merged fact and landed Slice-A code agree; `viability_test.go`'s assertions are pinned against this confirmed literal, not a placeholder, and its file-level doc comment records the same citation.
+
+**Evidence-class disclosure, per this milestone's own discipline (do not fabricate a red)**: both C.0.1 and C.1.1 passed on first run — no genuine red phase occurred for either. This is the same disclosed pattern already recorded for A.4.1, A.5.1, A.7.1 and A.9.1: the behaviour each scenario exercises was already fully implemented and independently proven correct in Slice A (Bearer attachment: Phase A.1; endpoint joining: Phase A.6; adapter-built client construction, bounds and unset `Proxy`: Phases A.3/A.5), so composing them into one real-network, real-server round trip for the first time did not surface a gap. What provides falsifiability instead:
+
+- For C.0.1 (S-APC-048…051): Phase A.1's stub-transport tests (`TestNew_InjectedClientObservesOutboundRequest`, `TestNew_TwoAdaptersDoNotShareStubbedClients`) already proved credential attachment and cross-construction non-leakage at the unit level; this test composes the same proven behaviour end-to-end against a real socket instead of a stub, and would fail if any of that composition regressed — confirmed directly, see the scratch verification below.
+- For C.1.1 (S-APC-052): Slice A's mutation proof #5 (`S-APC-037`, Phase A.3.5) already staged "route the adapter-built client through `http.DefaultTransport`" and recorded a red against the structural nil-proxy and fresh-identity assertions. This test is a second, independent, **behavioral** line of defense for the identical regression class — it would also fail if that same mutation were re-staged, because a `DefaultTransport`-routed client would consult `HTTP_PROXY` and fail to reach the dead proxy address's non-existent listener instead of reaching the real local server directly.
+
+**Scratch verification (not committed, confirms falsifiability, reverted after use)**: to confirm the disclosure above is not merely asserted, `request.go`'s `req.Header.Set("Authorization", c.credential.bearer())` line was replaced with `_ = c.credential.bearer()` (header never attached), and `go test -race -v -run TestViability ./src/ai/openaicompat/...` was run. All three viability assertions failed, exactly as expected:
+
+```
+viability_test.go:217: Authorization header = "", want "Bearer viability-proxy-token" — the request must still carry the credential despite the poisoned proxy environment (S-APC-052)
+--- FAIL: TestViability_AdapterBuiltClientIgnoresProxyEnvironment (0.00s)
+viability_test.go:151: Authorization header = "", want "Bearer viability-token-one" (S-APC-049)
+viability_test.go:175: Authorization header = "", want "Bearer viability-token-two" — attachment derives from the injected credential, not a hard-coded value (S-APC-051)
+--- FAIL: TestViability_RequestReachesLocalServerWithCredentialAttached (0.00s)
+    --- FAIL: TestViability_RequestReachesLocalServerWithCredentialAttached/first_construction,_first_credential (0.00s)
+    --- FAIL: TestViability_RequestReachesLocalServerWithCredentialAttached/second_construction,_different_credential_carries_the_second_value (0.00s)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.539s
+```
+
+All three top-level assertions failed (exit code 1), not merely the two anticipated in the disclosure above — the proxy-immunity test's own credential check (S-APC-052) shares the same underlying attachment path and caught the same break independently, which is itself further evidence the two tests are not redundant with each other. `git checkout -- backend/agent/src/ai/openaicompat/request.go` reverted the break; the full suite was re-confirmed green (`go test -race -v -count=1 ./...` → `ok` across all three packages) before proceeding.
+
+Runnable-scenario evidence:
+
+| Task | Scenario(s) | Red recorded | Green recorded | Refactor note |
+|---|---|---|---|---|
+| C.0.1/C.0.2 | S-APC-048…051 | **N/A — passed on first run** (Slice A's Phase A.1/A.6/A.3/A.5 already proved the composed behaviour); falsifiability confirmed instead by the scratch verification above | `go test -race -v -run TestViability ./src/ai/openaicompat/...` → `TestViability_RequestReachesLocalServerWithCredentialAttached` PASS (both subtests) | none needed |
+| C.1.1/C.1.2 | S-APC-052 | **N/A — passed on first run** (Slice A's mutation proof #5, `S-APC-037`, already proved the identical regression class structurally); this test is an independent behavioral proof of the same property | `go test -race -v -run TestViability ./src/ai/openaicompat/...` → `TestViability_AdapterBuiltClientIgnoresProxyEnvironment` PASS | none needed |
+
+Review-obligation confirmation (Slice C `*(review)*` scenario — no red phase):
+
+| Task | Scenario(s) | Recorded confirmation |
+|---|---|---|
+| C.2.1 | S-APC-054, S-APC-055 (probe-specific portion) | `viability_test.go`'s file-level doc comment read in full: its "Scope: attachment only, not a wire-level secrecy guarantee (R-APC-014)" section states that nothing in the file asserts wire-level redaction, provider-returned-content non-disclosure, or log safety; names AI-32.5 as owning the wire-error-body bound and AI-36.1 as owning the exhaustive sentinel sweep; and states explicitly that this file does not duplicate or extend `credential_test.go`'s `S-APC-053` type-shape assertion. This discharges the A.8.3 deferral recorded in Slice A's evidence log (the viability-probe-doc half of that confirmation, left open because `viability_test.go` did not exist yet). |
+
+Determinism (Slice C portion of NFR-APC-E, D.1/D.3): `go test -race -v -count=1 ./...` run 3 times total after Slice C's changes landed (once immediately after each commit, once at final closure) — identical `ok` results every time across `src/agenttest`, `src/ai`, `src/ai/openaicompat`, no flakiness, no race-detector report. Longest single package run observed: `src/ai` at ~3.5s; `src/ai/openaicompat` (carrying every Slice A/B/C test, including the new real-network round trips) at ~2.6–3.0s — no test anywhere near the 60s `defaultResponseHeaderTimeout` bound.
+
+Diff vs `feat/ai-25b-ambient-authority-guard` (chain base): one file, `viability_test.go`, 219 lines added, 0 removed, across 2 commits — within the design's ~200–480 corrected forecast for Slice C and comfortably under the 5,000-line session budget.
+
+## Evidence Log — Phase D (cross-cutting closure, populated during sdd-apply)
+
+**D.1 (S-APC-069)**: the whole milestone's test set (`src/agenttest`, `src/ai`, `src/ai/openaicompat`) was run repeatedly under `-race -count=1` across this session — twice as the Slice-A/B baseline (470 `--- PASS`, 0 `--- FAIL`), then after each Slice-C commit and twice more at final closure (472 `--- PASS`, 0 `--- FAIL` throughout Slice C, since Slice C added exactly 2 new top-level tests to the 470-test baseline). Every run: identical `ok` results, exit 0, no race-detector report.
+
+**D.2 (S-APC-070)**: `timeout_test.go` re-read in full at Slice-C closure to complete the record Slice A's evidence log marked partial. Confirmed: (a) no `t.Parallel()` call appears anywhere in `TestTimeout_NoWholeRequestCapOnAdapterBuiltClient` or either of its two `t.Run` subtests; (b) the control subtest asserts failure **shape** only — a `net.Error` type assertion, `Timeout() == true`, and a chunk count strictly fewer than `chunks` — never an exact duration; (c) the ratio margin is wide: `interval = 200ms`, `chunks = 5`, so the control's cap (`2 * interval = 400ms`) is half the handler's total span (`(chunks-1) * interval = 800ms`) — a 2× margin, not a tight one, so ordinary scheduling jitter on a loaded machine cannot flip the outcome.
+
+**D.3 (S-APC-071)**: confirmed via the determinism runs above — no single test's observed wall-clock duration (longest package total ~3.5s; longest individual test well under 1s outside the deliberate ~1.2s timing pair) approaches the 60s `defaultResponseHeaderTimeout` bound. Every bound this milestone asserts is asserted structurally (Phase A.5's `TestNew_AdapterBuiltTransportBoundsExist`), never waited out.
+
+**D.4 (S-APC-075, S-APC-076, final evidence walk)**: every runnable scenario across Slices A, B and C carries a recorded red-or-disclosed-N/A entry, a recorded green entry and a refactor note in this file's three Evidence Log sections above. Every `*(review)*` scenario across all three slices carries a recorded confirmation naming what was read (Slice A: A.0.1, A.8.3 partial, A.9.3, A.10.4, D.2 partial; Slice B: B.1.1, B.1.3, B.1.4; Slice C: C.2.1, closing A.8.3's deferral; D.2 fully closed here). Slice B's evidence log carries all four bite-proof reds (B.2.1–B.2.4) plus the final green (B.2.5) verbatim, as `S-APC-076` requires. No gap found across the full walk.
+
+**Final milestone-wide evidence**: `make test` (`go test -race -v -count=1 ./...`) from `backend/agent/`: **PASS**, exit 0, **472** `--- PASS`, **0** `--- FAIL`, across `src/agenttest`, `src/ai`, `src/ai/openaicompat`. `make lint`: **0 issues** (`go vet ./...` clean; `golangci-lint run --config=.golangci.yml ./...` — "0 issues."). `go.mod`: unchanged, zero `require` directives (`module github.com/cachicamas/backend/agent` / `go 1.26.3` only). Both AI-00 guards re-ran green with no allowlist edit. Slice B's ambient-authority guard (`TestAmbientAuthority_*`, 4 tests) re-ran green, unaffected by `viability_test.go`'s addition (excluded from the guard's scan as a `_test.go` file, confirmed by `TestAmbientAuthority_IsAdapterSourceFile` still passing). Total diff vs `feat/ai-25b-ambient-authority-guard`: 219 lines added, 0 removed, 1 file (`viability_test.go`), across 2 work-unit commits plus this closure commit.
