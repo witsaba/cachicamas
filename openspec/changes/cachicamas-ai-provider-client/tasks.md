@@ -117,27 +117,27 @@ Chain strategy: feature-branch-chain
 
 ## Phase B.0 — R-APC-008 guard implementation (green from birth)
 
-- [ ] B.0.1 Create `ambient_authority_test.go`: `go/parser`+`go/ast`+`go/token` call-site scan over this package's non-test `.go` files; forbidden set `{os, os/exec, syscall, io/ioutil}` resolved by local identifier (alias-aware via `file.Imports`); dot-import of a forbidden path is an independent violation; failure message names file, line, package. Base case: passes clean on landed sources with no violation. Covers `S-APC-033, S-APC-034, S-APC-035`.
+- [x] B.0.1 Create `ambient_authority_test.go`: `go/parser`+`go/ast`+`go/token` call-site scan over this package's non-test `.go` files; forbidden set `{os, os/exec, syscall, io/ioutil}` resolved by local identifier (alias-aware via `file.Imports`); dot-import of a forbidden path is an independent violation; failure message names file, line, package. Base case: passes clean on landed sources with no violation. Covers `S-APC-033, S-APC-034, S-APC-035`.
 
 ## Phase B.1 — R-APC-011 / R-APC-012 scope and limitation, documented
 
-- [ ] B.1.1 Document the non-test-only scan scope in the guard's own comment, citing the in-repo precedent (`import_boundary_test.go`'s "-test would also pull in `testing`, which imports `os`"). *Review*: `S-APC-043`. No red phase.
-- [ ] B.1.2 Add tests: guard stays green while adapter tests use `httptest`; guard's own source is exempt as meta-tooling. Covers `S-APC-044, S-APC-045`.
-- [ ] B.1.3 Document the local-shadow false-positive limitation as an accepted, reversible non-requirement scoped to this change. *Review*: `S-APC-046, S-APC-047`. No red phase.
-- [ ] B.1.4 *Review*: confirm adapter documentation states the ambient-authority guarantee is scoped to the adapter's own sources and its own client, and that an injected client's transport is its injector's responsibility. Covers `S-APC-068` (cross-ref A.0.1, closed formally here since B closes the guard node).
+- [x] B.1.1 Document the non-test-only scan scope in the guard's own comment, citing the in-repo precedent (`import_boundary_test.go`'s "-test would also pull in `testing`, which imports `os`"). *Review*: `S-APC-043`. No red phase.
+- [x] B.1.2 Add tests: guard stays green while adapter tests use `httptest`; guard's own source is exempt as meta-tooling. Covers `S-APC-044, S-APC-045`.
+- [x] B.1.3 Document the local-shadow false-positive limitation as an accepted, reversible non-requirement scoped to this change. *Review*: `S-APC-046, S-APC-047`. No red phase.
+- [x] B.1.4 *Review*: confirm adapter documentation states the ambient-authority guarantee is scoped to the adapter's own sources and its own client, and that an injected client's transport is its injector's responsibility. Covers `S-APC-068` (cross-ref A.0.1, closed formally here since B closes the guard node).
 
 ## Phase B.2 — R-APC-010 four recorded bite proofs (non-negotiable, own tasks each)
 
-- [ ] B.2.1 **Bite proof 1/4 — plain environment read**: stage `os.Getenv(...)` in real non-test adapter source (e.g. `client.go`); run `make test`; guard fails naming that file and package; **record the red output verbatim**; revert. Covers `S-APC-038`.
-- [ ] B.2.2 **Bite proof 2/4 — aliased import**: stage `osx "os"` aliased call; run; guard fails (alias resolved via local-identifier map, not bypassed); record red; revert. Covers `S-APC-039`.
-- [ ] B.2.3 **Bite proof 3/4 — process spawn**: stage `exec.Command(...)`; run; guard fails naming `os/exec`; record red; revert. Covers `S-APC-040`.
-- [ ] B.2.4 **Bite proof 4/4 — dot-import**: stage `import . "os"` with no call site; run; guard fails on the dot-import itself (independent violation, no `go/types` needed); record red; revert. Covers `S-APC-041`.
-- [ ] B.2.5 After all four scratch violations are dropped, re-run the suite; record final green alongside the four recorded reds in the same evidence log. Covers `S-APC-042`.
+- [x] B.2.1 **Bite proof 1/4 — plain environment read**: stage `os.Getenv(...)` in real non-test adapter source (e.g. `client.go`); run `make test`; guard fails naming that file and package; **record the red output verbatim**; revert. Covers `S-APC-038`.
+- [x] B.2.2 **Bite proof 2/4 — aliased import**: stage `osx "os"` aliased call; run; guard fails (alias resolved via local-identifier map, not bypassed); record red; revert. Covers `S-APC-039`.
+- [x] B.2.3 **Bite proof 3/4 — process spawn**: stage `exec.Command(...)`; run; guard fails naming `os/exec`; record red; revert. Covers `S-APC-040`.
+- [x] B.2.4 **Bite proof 4/4 — dot-import**: stage `import . "os"` with no call site; run; guard fails on the dot-import itself (independent violation, no `go/types` needed); record red; revert. Covers `S-APC-041`.
+- [x] B.2.5 After all four scratch violations are dropped, re-run the suite; record final green alongside the four recorded reds in the same evidence log. Covers `S-APC-042`.
 
 ## Phase B.3 — Slice-B closure
 
-- [ ] B.3.1 Run `make test` green + `make lint` clean.
-- [ ] B.3.2 Assemble PR-B description carrying all four bite-proof red runs (B.2.1–B.2.4) and the final green run (B.2.5) verbatim. Covers `S-APC-076` (NFR-APC-G).
+- [x] B.3.1 Run `make test` green + `make lint` clean.
+- [x] B.3.2 Assemble PR-B description carrying all four bite-proof red runs (B.2.1–B.2.4) and the final green run (B.2.5) verbatim. Covers `S-APC-076` (NFR-APC-G).
 
 ---
 
@@ -243,3 +243,28 @@ Review-obligation confirmations (Slice A `*(review)*` scenarios — no red phase
 | D.2 (partial, Slice-A-relevant) | S-APC-070 | `timeout_test.go` read: the timing pair declares no `t.Parallel()` anywhere in its call tree, asserts the control's failure via `net.Error`+`Timeout()` shape and a chunk-count bound rather than any duration, and uses a cap (2d=400ms) comfortably inside a handler span (4d=800ms) that does not depend on machine speed. |
 
 Determinism (Slice A portion of NFR-APC-E, D.1/D.3): `go test -race -count=1 ./...` run twice after the final lint fix — identical `ok` results both times (`src/agenttest`, `src/ai`, `src/ai/openaicompat`), no flakiness. Longest single test observed: the timing pair at ~1.2s combined; no test approached the 60s `defaultResponseHeaderTimeout` bound. Full milestone-wide D.1/D.4 (spanning Slices B/C) is out of scope for this apply batch.
+
+## Evidence Log — Slice B (populated during sdd-apply)
+
+**Guard evidence-class note** (per this milestone's Evidence Classes, applied as framed rather than as a deviation): AI-25.2 is a `[guard]` node, green from birth over clean code. Ordinary TDD red→green does not apply to Phase B.0/B.1's tests: `TestAmbientAuthority_NoForbiddenCallSitesInAdapterSources` (S-APC-033), `TestAmbientAuthority_ForbiddenSetIsPackageScopedDenyByDefault` (S-APC-034), `TestAmbientAuthority_IsAdapterSourceFile` (S-APC-045) and `TestAmbientAuthority_TestSourcesStayGreenEvenWithForbiddenCalls` (S-APC-044) all passed on first run, written together with their implementation in one commit (`bdda353`) — this is Evidence Class 1's stated reading, not an invented false red. This guard's falsifiability comes entirely from Phase B.2's four recorded bite proofs below, which ARE its RED phase (Evidence Class 2).
+
+Bite-proof evidence (Phase B.2, all four — `R-APC-010`, non-negotiable). Each was staged one at a time directly in `client.go` (a real, non-test, already-landed adapter source file), run via `make test` (full suite), the exact `--- FAIL` line and guard message recorded verbatim below, then reverted via `git checkout -- backend/agent/src/ai/openaicompat/client.go` and confirmed clean (`git status --short` empty) before the next proof was staged. None of these edits were committed — they exist only in this recorded evidence.
+
+| # | Scenario | Staged violation (real, non-test adapter source) | Recorded red `make test` output (verbatim) | Reverted, re-run green |
+|---|---|---|---|---|
+| 1/4 | S-APC-038 (plain environment read) | Added `"os"` to `client.go`'s import block plus `func scratchAmbientAuthorityBiteProof1() string { return os.Getenv("OPENAICOMPAT_SCRATCH_BITE_PROOF_1") }` | `ambient_authority_test.go:257: ambient authority: client.go:18: call os.Getenv reaches forbidden package "os" (R-APC-008: no environment variable read, no filesystem path touched)` / `--- FAIL: TestAmbientAuthority_NoForbiddenCallSitesInAdapterSources (0.00s)` — exactly 1 `--- FAIL` in the whole suite, exit code 2 | Yes — `git checkout --` reverted `client.go`; `git status --short` empty; full suite green after |
+| 2/4 | S-APC-039 (aliased-import environment read) | `osx "os"` in place of `"os"`, plus `func scratchAmbientAuthorityBiteProof2() string { return osx.Getenv("OPENAICOMPAT_SCRATCH_BITE_PROOF_2") }` | `ambient_authority_test.go:257: ambient authority: client.go:19: call osx.Getenv reaches forbidden package "os" (R-APC-008: no environment variable read, no filesystem path touched)` — the alias resolved back to `"os"` via the local-identifier map, not bypassed; exactly 1 `--- FAIL`, exit code 2 | Yes — reverted, confirmed clean, green after |
+| 3/4 | S-APC-040 (process spawn) | `"os/exec"` import plus `func scratchAmbientAuthorityBiteProof3() *exec.Cmd { return exec.Command("echo", "scratch-bite-proof-3") }` | `ambient_authority_test.go:257: ambient authority: client.go:19: call exec.Command reaches forbidden package "os/exec" (R-APC-008: no process spawned)` — exactly 1 `--- FAIL`, exit code 2 | Yes — reverted, confirmed clean, green after |
+| 4/4 | S-APC-041 (dot-import environment read) | `. "os"` import plus `func scratchAmbientAuthorityBiteProof4() string { return Getenv("OPENAICOMPAT_SCRATCH_BITE_PROOF_4") }` (bare call, no selector — invisible to the call-site scan by design) | `ambient_authority_test.go:257: ambient authority: client.go:7: dot-import of forbidden package "os" (R-APC-008: no environment variable read, no filesystem path touched)` — the guard flagged the **import declaration itself** (line 7 — the `. "os"` line), never resolving the bare `Getenv` call; exactly 1 `--- FAIL`, exit code 2 | Yes — reverted, confirmed clean, green after |
+
+Final green (Phase B.2.5, S-APC-042): all four scratch violations dropped and confirmed absent (`git diff --stat` empty on `client.go`); `go test -race -v -count=1 ./...` from `backend/agent/`: **exit 0**, **470** `--- PASS` (466 Slice-A baseline + 4 new top-level Slice-B tests), **0** `--- FAIL`, across `src/agenttest`, `src/ai`, `src/ai/openaicompat`.
+
+Review-obligation confirmations (Slice B `*(review)*` scenarios — no red phase):
+
+| Task | Scenario(s) | Recorded confirmation |
+|---|---|---|
+| B.1.1 | S-APC-043 | `ambient_authority_test.go`'s file-level comment read in full: states the non-test-only scan scope and cites the in-repo precedent verbatim — `import_boundary_test.go`'s own words, "-test would also pull in \"testing\", which imports \"os\" itself... a guard that scanned test imports could never pass" — rather than leaving the reason to be rediscovered. |
+| B.1.3 | S-APC-046, S-APC-047 | Same file's "Recorded limitation: a local shadow can false-positive" section read: states the local-shadow false-positive explicitly, names the exact cost of closing it (a non-stdlib type-checking dependency — `go/types` at minimum, realistically `golang.org/x/tools/go/analysis` — spending the zero-module-requires invariant, NFR-APC-A), and states the record is scoped to this change and reversible by a later ADR, not a permanent prohibition. Confirmed no such local shadow exists in this package's own sources today (all four bite proofs used the real, unshadowed package names). |
+| B.1.4 | S-APC-068 | `openaicompat/doc.go`'s "The no-ambient-authority guarantee is scoped, not absolute" section (landed in Slice A) re-read here: confirmed it states the guarantee covers only this package's own sources and the client it builds for itself, and that an injected client's transport remains its injector's responsibility. Closed formally in Slice B, since this is the guard node that discharges it (cross-ref A.0.1, which first stated the same four documentation obligations). |
+
+Determinism and closure (NFR-APC-E, B.3.1): `go test -race -v -count=1 ./...` run again after `make lint` — identical `ok` results, no flakiness, no race-detector report. `make lint`: **0 issues** (`go vet ./...` clean; `bin/golangci-lint run --config=.golangci.yml ./...` — "0 issues."; no new `nolint` needed for `ambient_authority_test.go`). `go.mod` unchanged: still declares zero `require` directives. Both AI-00 guards (`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`, `TestLayer1_ModuleHasNoDependencies_ZeroRequires`) re-ran green; `allowedNonStdlibPrefixes` is untouched by this slice (no file outside `openaicompat/` and `tasks.md` was edited). Diff vs `feat/ai-25a-injected-construction` (chain base, commit `37ffea2`): one new file, `ambient_authority_test.go`, 334 lines added, 0 removed — well under the design's ~700–1,400 corrected forecast for Slice B and the 5,000-line session budget.
