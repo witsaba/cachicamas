@@ -222,33 +222,38 @@
 // vacuous, and S-ACB-035 requires the region read to be complete, not
 // merely present, for the proof to count.
 //
-// That conditioning is why this slice's twin-comparison proof
-// (cache_marker_test.go) walks every region ai.CacheRegions() enumerates
-// but runs only two of three to completion, non-vacuously:
-// appendMessageObject (body.go, AI-26.1) and appendSystemMessageObject
-// (system.go, AI-26.2) are the only per-carrier renderers that already
-// emit a carrier's full substantive content — role and text, and segment
-// text in the system role, respectively — onto the wire. The remaining
-// cache region is recorded SKIP, with a named reason, rather than a
-// fabricated PASS over content that is not rendered at all:
+// That conditioning is why this proof (cache_marker_test.go) walks every
+// region ai.CacheRegions() enumerates: appendMessageObject (message.go,
+// AI-26.3; originally body.go, AI-26.1), appendSystemMessageObject
+// (system.go, AI-26.2) and appendToolObject (tool.go, AI-26.4) are each a
+// per-carrier renderer that emits a carrier's full substantive content —
+// role/text, segment text in the system role, and a tool's
+// name/description/schema bytes, respectively — onto the wire, so all
+// three sub-tests now run to completion, non-vacuously, under S-ACB-035.
+// None is recorded SKIP.
 //
-//   - Tools: tool.go does not exist before AI-26.4 (slice 3). A
-//     marker-drop proof over declarations Translate does not render at
-//     all would be vacuous under S-ACB-035, not a proof that the marker
-//     specifically is what is dropped.
+// At AI-26.2's own slice-open, tool.go did not yet exist (it landed at
+// AI-26.4, slice 3), and the tools sub-test recorded a disclosed t.Skip
+// rather than a fabricated PASS over declarations Translate did not yet
+// render at all — cache_marker_test.go's own loop/switch structure needed
+// no edit to pick that region up once tool.go landed, exactly as this
+// section originally predicted. This paragraph is a belated correction:
+// AI-26.4's own tasks.md evidence log claimed this section was "updated
+// to reflect completion" at the time, but the update itself was not
+// actually made until AI-26.3 found the stale two-of-three text while
+// editing this file for its own, unrelated reason and corrected it here
+// — recorded per this milestone's own practice of disclosing a correction
+// in place rather than silently overwriting an inaccurate prior claim.
 //
-// That gap is structural and self-closing: cache_marker_test.go's walk
-// is driven by ai.CacheRegions(), so once tool.go exists, the same
-// unedited test starts proving R-ART-006 for that region too, with no
-// edit needed here.
-//
-// The system sub-test's own twin comparison was green on first write,
-// for the same structural reason the messages sub-test was
-// (appendSystemMessageObject never reads Segment.IsCacheBoundary()):
-// falsifiability was proven by a staged, reverted mutation — temporarily
-// rendering a marked segment's marker as a scratch wire field, observing
-// the sub-test fail, then reverting — mirroring the messages region's
-// own staged-mutation proof exactly (S-ART-023).
+// The messages and system sub-tests' own twin comparisons were green on
+// first write, for the same structural reason (neither
+// appendMessageObject nor appendSystemMessageObject ever reads a
+// carrier's IsCacheBoundary()): falsifiability for each was proven by a
+// staged, reverted mutation — temporarily rendering a marked carrier's
+// marker as a scratch wire field, observing the sub-test fail, then
+// reverting (S-ART-023). The tools region's own analogous staged
+// mutation, gated on Tool.IsCacheBoundary(), is recorded in tasks.md's
+// Phase 3 evidence log.
 //
 // # Output-token limit: optional for this vendor, mandatory-default branch dead (AI-26.7, R-ART-018)
 //
@@ -343,4 +348,43 @@
 // mutation that rendered every namespace rather than only the reserved
 // one, breaking both the twin comparison and the hard-coded anchor for a
 // single foreign namespace and for three attached at once.
+//
+// # No merging of consecutive same-role messages (AI-26.3, R-ART-009)
+//
+// appendMessageObject (message.go) renders exactly one wire message
+// object per ai.Message, unconditionally: it carries no memory of a
+// previously rendered message's role, and appendMessagesField's own loop
+// (body.go) never groups, folds or skips a message because an adjacent
+// one shares its role. A run of two, three, or any longer sequence of
+// consecutive same-role ai.Message values therefore always produces that
+// many distinct wire message objects, never fewer — structurally, by
+// construction, not by a check that could be bypassed.
+//
+// This is a deliberate reading of claim 4 (this file's own "Wire-shape
+// provenance" section), not an oversight this adapter happened not to
+// hit. The cited specification imposes no role-alternation constraint on
+// the messages array at all, and the vendor's own documented
+// parallel-function-calling flow appends multiple CONSECUTIVE
+// role:"tool" messages onto one messages list as its supported, canonical
+// shape for a single turn's several tool results — evidence for a role
+// repeating consecutively being an accepted, working pattern, not merely
+// for a distinct role existing once. Merging would therefore not be a
+// defensible simplification: it would silently discard caller-authored
+// message boundaries the vendor is documented to accept as given, with no
+// error the caller could observe anywhere on the response side — exactly
+// the failure mode S-ART-031 names.
+//
+// message_test.go's "two/three consecutive same-role messages render as
+// ... distinct wire objects" registered cases exercise this directly,
+// each anchored against a hard-coded expectation. Falsifiability was
+// proven by a staged, reverted mutation that collapsed each run of
+// consecutive same-role messages down to one representative wire object
+// (S-ART-033) — dropping the rest of the run is the mutation's concrete
+// shape, chosen because appendBody's byte-append architecture has no
+// in-place buffer to concatenate two already-written wire objects'
+// content arrays without a larger refactor; dropping still violates
+// R-ART-009's "not merged" contract exactly as a content-concatenating
+// merge would, and is caught by the same registered cases either mutation
+// shape would break. See tasks.md's Phase 5 evidence log for the exact
+// staged change and its observed, then reverted, failures.
 package openaicompat
