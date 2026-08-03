@@ -95,11 +95,37 @@ Resolution: the same substantive content (framing layer, semantic boundary, "`ma
 
 ## Phase 2a — Slice 2a: AI-27.2 items 1–3 (R-ASD-004…006 · S-ASD-012…024)
 
-- [ ] 2a.1 RED `field_grammar_test.go`: colon-in-value splits at first colon only; exactly one leading space stripped (two-space case retains the second); no-space value verbatim; colonless line = field named by whole line, empty value; unrecognized colonless name ignored (S012–016).
-- [ ] 2a.2 RED: three data lines join with one LF each, no trailing LF; single data line no trailing LF; empty last line preserves interior LF; content-embedded LF survives (S017–020).
-- [ ] 2a.3 RED: CRLF/LF/lone-CR of the same transcript decode identically; CRLF-only produces no empty frame; mixed terminators accumulate uniformly; CRLF split across chunks reconstructs with no injected blank line (S021–024).
-- [ ] 2a.4 GREEN `decoder.go`: full first-colon/one-`if`-space rule, data-join-then-trim-at-dispatch, three-terminator handling via retained-tail deferred-final-CR (no boolean flag).
-- [ ] 2a.5 REFACTOR: consolidate terminator resolution into a helper shared with slice 2b's BOM prefix-wait logic.
+- [x] 2a.1 RED `field_grammar_test.go`: colon-in-value splits at first colon only; exactly one leading space stripped (two-space case retains the second); no-space value verbatim; colonless line = field named by whole line, empty value; unrecognized colonless name ignored (S012–016).
+- [x] 2a.2 RED: three data lines join with one LF each, no trailing LF; single data line no trailing LF; empty last line preserves interior LF; content-embedded LF survives (S017–020).
+- [x] 2a.3 RED: CRLF/LF/lone-CR of the same transcript decode identically; CRLF-only produces no empty frame; mixed terminators accumulate uniformly; CRLF split across chunks reconstructs with no injected blank line (S021–024).
+- [x] 2a.4 GREEN `decoder.go`: full first-colon/one-`if`-space rule, data-join-then-trim-at-dispatch, three-terminator handling via retained-tail deferred-final-CR (no boolean flag).
+- [x] 2a.5 REFACTOR: consolidate terminator resolution into a helper shared with slice 2b's BOM prefix-wait logic.
+
+### Evidence Log — Slice 2a (AI-27.2 items 1–3)
+
+**Disclosed non-red scenarios (S012–020, 9 of the slice's 13).** Before any 2a production change, `go test -race -run TestFieldGrammar ./src/ai/openaicompat/...` (run against slice 1's committed `decoder.go` immediately after `field_grammar_test.go` was written) already showed these 9 scenarios passing. Slice 1's `splitField` already implemented the complete first-colon/one-`if`-space rule (R-ASD-004), and `processFieldLine`+`dispatch` already implemented the complete data-join-then-trim-at-dispatch rule (R-ASD-005) — there was nothing left for task 2a.4 to make green for these nine.
+
+Falsifiability was demonstrated instead by scratch break-and-revert cycles against `decoder.go`, run one at a time and reverted immediately after observing the failure (`git diff` against the committed file confirmed empty after each):
+- `for` loop replacing the one-`if` space-strip → falsified `TestFieldGrammar_TwoLeadingSpacesRetainsSecondSpace` (S013) in isolation; no effect on S012/014–020.
+- `bytes.TrimRight(d.data, "\n")` replacing the single-LF strip → falsified S019 and S020 together; no effect on S017/018 (exactly one trailing LF each, so trim-all and strip-one coincide there).
+- Removing dispatch's strip entirely → falsified **all nine** of S012–020 at once (every data-bearing frame carries an unstripped trailing LF) — broader than the two targeted cycles above predicted, matching this wave's established pattern of a combined break surfacing more failures than expected.
+- `bytes.LastIndexByte` replacing `bytes.IndexByte` for the colon search → falsified S012 in isolation.
+- Swapping the colonless fallback's `return line, nil` to `return nil, line` → falsified S015 (after its fixture was strengthened, see below) in isolation; no effect on S016.
+- Adding a `default:` case that misroutes unrecognized field names into the data accumulator → falsified S016 in isolation; no effect on S015.
+
+**S015 fixture strengthened before use.** A literal single-line fixture (`"data\n\n"`) cannot distinguish "colonless `data` correctly recognized, contributed an empty value" from "not recognized at all," because dispatch is still unconditional in this slice (R-ASD-008 is Phase 2b's rule) — both readings yield an empty `Data`. Strengthened to `"data\ndata: second\n\n"` (expects `"\nsecond"`), which only survives if the colonless line was genuinely routed to the data accumulator.
+
+**S024 self-referential comparison caught and fixed before commit.** The first draft compared a split decode only to a same-code "unsplit reference" decode. Pre-fix, the CRLF blank line in `"data: x\r\n\r\n"` was misparsed as a one-byte `"\r"` content line by both the split feed and the reference feed identically, so both produced zero frames and the equality check passed for the wrong reason — caught by actually running the test, not by reasoning about it alone. Fixed by asserting the reference decode against a hard-coded `[]Frame{{Event:"message",Data:"x"}}` before comparing the split decode to it, which made the fixture genuinely RED pre-fix.
+
+**Genuine RED (S021–024, R-ASD-006).** Confirmed by an actual pre-2a.4 run: `TestFieldGrammar_ThreeTerminatorStylesDecodeIdentically`'s `/CRLF` and `/lone_CR` sub-tests FAIL (its `/LF` sub-test passes); `TestFieldGrammar_CRLFOnlyProducesNoEmptyFrame` FAILS (0 frames, want 1); `TestFieldGrammar_MixedTerminatorsAccumulateUniformly` FAILS (0 frames, want 1); `TestFieldGrammar_CRLFSplitAcrossChunksReconstructsNoBlankLine` FAILS once its assertion was hard-coded. Root cause: pre-fix `nextLine` located only `'\n'`; a CRLF blank line was returned as a one-byte `"\r"` line (non-empty, no dispatch), and a lone-CR-only transcript never resolved any line (no `'\n'` byte exists anywhere in it).
+
+**GREEN (task 2a.4).** `nextLine` rewritten around `bytes.IndexAny(rest, "\r\n")` for the earliest terminator candidate of either kind, delegating a found CR to a new `resolveCR` helper: 2-byte terminator (CRLF) when the CR's immediate next byte is `'\n'`, 1-byte (lone CR) otherwise, `ok=false` — deferred, never guessed — when no next byte exists yet in the retained buffer. `Feed`'s scan loop itself was not touched, matching slice 1's own forward note that `nextLine` was extracted precisely so this could grow without reshaping the loop.
+
+**REFACTOR (task 2a.5).** `resolveCR` is the "boundary visible but not yet resolvable without one more byte" shape extracted for reuse; its doc comment names slice 2b's BOM prefix-wait check (a fixed 3-byte prefix, not a 1-byte lookahead) as the next grower of the same wait-rather-than-guess idea. No BOM code was written here — that remains slice 2b's own scope.
+
+**Full-suite gate:** `make test` (from `backend/agent/`) → exit 0; `ok .../src/agenttest`, `ok .../src/ai`, `ok .../src/ai/openaicompat`; 494 top-level `--- PASS` lines (481 slice-1 baseline + 13 new `TestFieldGrammar_*` top-level functions), 0 `--- FAIL`, `-race` clean throughout. `make lint` → `golangci-lint run --config=.golangci.yml ./...` → `0 issues.` `go.mod` diff against `feat/ai-27-1-decoder-skeleton`: unchanged, still `module github.com/cachicamas/backend/agent` / `go 1.26.3`, zero `require`, no `go.sum`. AI-00 guards `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` and `TestLayer1_ModuleHasNoDependencies_ZeroRequires`: both PASS, no allowlist edit. AI-25 guard `TestAmbientAuthority_NoForbiddenCallSitesInAdapterSources`: PASS — `decoder.go`'s only import remains `"bytes"`.
+
+**Diff size:** `git diff feat/ai-27-1-decoder-skeleton --stat` (2 files, staged individually by path): `decoder.go` +47/-9, `field_grammar_test.go` +366 new → **2 files changed, 413 insertions(+), 9 deletions(-)**. Within this unit's own pre-forecast band (300–800).
 
 ## Phase 2b — Slice 2b: AI-27.2 items 4–7 (R-ASD-007…011 · S-ASD-025…040, 084)
 
