@@ -209,3 +209,61 @@ func TestCloneHandler_WellKnownContract(t *testing.T) {
 // Compile-time guard that the domain error types are exported (so
 // errors.As works in the handler).
 var _ error = (*domain.ValidationError)(nil)
+
+// TestCloneHandler_OversizeBody_Returns400 is the regression test
+// for spec audit finding M-1: a 2 MiB POST body MUST be rejected
+// with 400 BEFORE the handler allocates a matching buffer. The
+// http.MaxBytesReader wrapper in handler.Clone enforces this.
+func TestCloneHandler_OversizeBody_Returns400(t *testing.T) {
+	h, _, _ := newTestCloneHandler(t)
+	e := echo.New()
+	h.Register(e)
+
+	// 2 MiB body. Use a JSON object with a single huge field so
+	// the JSON decoder cannot short-circuit before reading the
+	// full bytes. The body MUST be rejected with 400 (not 413;
+	// the design uses 400 to keep the envelope shape consistent
+	// with the existing validation envelope).
+	oversize := bytes.Repeat([]byte("a"), 2<<20)
+	body := []byte(`{"job_id":1,"workspace_id":1,"owner":"o","repo":"r","default_branch":"main","oauth_token":"t","filler":"` +
+		string(oversize) + `"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (oversize body must be rejected); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCloneHandler_NormalBody_Returns202 is the happy-path
+// counterpart to TestCloneHandler_OversizeBody_Returns400: a
+// well-formed 100 KiB body (well under the 1 MiB cap) MUST be
+// accepted and return 202.
+func TestCloneHandler_NormalBody_Returns202(t *testing.T) {
+	h, _, _ := newTestCloneHandler(t)
+	e := echo.New()
+	h.Register(e)
+
+	// Build a body whose padding keeps it comfortably under 1 MiB.
+	body := cloneRequestBody{
+		JobID:         42,
+		WorkspaceID:   7,
+		Owner:         "octocat",
+		Repo:          "hello-world",
+		DefaultBranch: "main",
+		OAuthToken:    "gho_xxx",
+	}
+	bodyJSON, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (well-formed body must be accepted); body=%s", rec.Code, rec.Body.String())
+	}
+}

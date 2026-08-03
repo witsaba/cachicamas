@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -31,6 +32,14 @@ import (
 // to derive a fresh context from context.Background() so the
 // goroutine is decoupled from the request lifecycle.
 const asyncJobTimeout = 5 * time.Minute
+
+// maxRequestBodyBytes bounds the size of the clone request body.
+// Per spec audit finding M-1 the prior code accepted unbounded
+// bodies (a 100 MiB JSON payload would be happily JSON-decoded
+// into memory before any validation). 1 MiB is generous for the
+// 6-field clone payload (a few hundred bytes in practice) and
+// matches the database_administrator's BodyLimit("1M") value.
+const maxRequestBodyBytes = 1 << 20
 
 // cloneRequestBody is the JSON body the handler decodes. It mirrors
 // domain.CloneRequest field-for-field so the handler stays a thin
@@ -72,17 +81,44 @@ func (h *CloneHandler) Register(e *echo.Echo) {
 // Clone is the HTTP transport method for POST
 // /internal/clone-and-validate. The flow is:
 //
-//  1. Parse + validate the JSON body (synchronous).
-//  2. Return 400 with the validation envelope on parse failure.
-//  3. Return 202 immediately, then run the use case in a
+//  1. Cap the request body at 1 MiB (http.MaxBytesReader).
+//  2. Parse + validate the JSON body (synchronous).
+//  3. Return 400 with the validation envelope on parse failure.
+//  4. Return 202 immediately, then run the use case in a
 //     goroutine.
+//
+// Per spec audit finding M-1 the request body is bounded by
+// http.MaxBytesReader so a 100 MiB POST does not allocate a
+// matching buffer in the handler. The resulting decode error
+// is mapped to a 400 envelope (a 2 MiB body is rejected before
+// JSON parsing begins).
 //
 // The 202 + goroutine pattern matches the design (T-WSY-001
 // S-WSY-001): the database_administrator does not block on the
 // clone. The use case posts the outcome via the callback.
 func (h *CloneHandler) Clone(c *echo.Context) error {
+	// Spec audit M-1: cap the request body at maxRequestBodyBytes
+	// BEFORE JSON decode. http.MaxBytesReader replaces r.Body with
+	// a reader that returns an error on the next Read past the cap;
+	// the JSON decoder surfaces that as ErrBodyTooLarge (or a
+	// wrapped form), which we map to a 400 envelope below.
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxRequestBodyBytes)
+
 	var body cloneRequestBody
 	if err := c.Bind(&body); err != nil {
+		// Distinguish body-too-large from generic JSON errors.
+		// http.MaxBytesReader returns *http.MaxBytesError via the
+		// json decoder (the decoder wraps it). If the body
+		// exceeds maxRequestBodyBytes, return 400 with a closed-
+		// vocab message; otherwise the generic JSON error.
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error":   "validation",
+				"fields":  map[string]string{"body": fmt.Sprintf("body exceeds %d bytes", maxRequestBodyBytes)},
+				"message": "Request body too large.",
+			})
+		}
 		// Bad JSON or missing Content-Type. Return the flat
 		// validation envelope (matches the database_administrator
 		// convention).
