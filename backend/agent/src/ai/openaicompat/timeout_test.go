@@ -27,7 +27,9 @@ func newDripHandler(chunks int, interval time.Duration) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		for i := range chunks {
-			fmt.Fprintf(w, "chunk-%d\n", i)
+			// The handler cannot usefully act on a write failure to a
+			// ResponseWriter — the client side is what this test observes.
+			_, _ = fmt.Fprintf(w, "chunk-%d\n", i)
 			flusher.Flush()
 			if i < chunks-1 {
 				time.Sleep(interval)
@@ -87,7 +89,7 @@ func TestTimeout_NoWholeRequestCapOnAdapterBuiltClient(t *testing.T) {
 		if err != nil {
 			readErr = err
 		} else {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			got, readErr = countChunksUntilError(resp.Body)
 		}
 
@@ -126,7 +128,7 @@ func TestTimeout_NoWholeRequestCapOnAdapterBuiltClient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("httpClient.Do() error = %v, want nil (S-APC-018/S-APC-019)", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		got, readErr := countChunksUntilError(resp.Body)
 		if readErr != nil {

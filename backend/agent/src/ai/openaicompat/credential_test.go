@@ -23,13 +23,20 @@ func TestCredential_NeverRendersRawToken(t *testing.T) {
 	cred := NewCredential(token)
 
 	renderings := map[string]string{
-		"%v":  fmt.Sprintf("%v", cred),
-		"%s":  fmt.Sprintf("%s", cred),
+		"%v": fmt.Sprintf("%v", cred),
+		// Deliberately exercising the %s verb through fmt.Sprintf rather
+		// than calling cred.String() directly: this test's whole point is
+		// proving the formatting *verb* path never leaks, not merely that
+		// the method itself is safe.
+		"%s":  fmt.Sprintf("%s", cred), //nolint:staticcheck // see comment above
 		"%+v": fmt.Sprintf("%+v", cred),
 		"%#v": fmt.Sprintf("%#v", cred),
 	}
 
-	jsonBytes, err := json.Marshal(cred)
+	// SA9005: Credential has no exported fields and no custom marshaling on
+	// purpose (see credential.go) — json.Marshal always yielding "{}" is the
+	// intended, tested safety property, not a mistake.
+	jsonBytes, err := json.Marshal(cred) //nolint:staticcheck // intentional: see comment above
 	if err != nil {
 		t.Fatalf("json.Marshal(cred) error = %v, want nil", err)
 	}
