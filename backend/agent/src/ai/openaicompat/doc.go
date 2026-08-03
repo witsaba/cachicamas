@@ -249,4 +249,57 @@
 // rendering a marked segment's marker as a scratch wire field, observing
 // the sub-test fail, then reverting — mirroring the messages region's
 // own staged-mutation proof exactly (S-ART-023).
+//
+// # Output-token limit: optional for this vendor, mandatory-default branch dead (AI-26.7, R-ART-018)
+//
+// doc 0002's own amended AI-26.7 charter (line 1569, dated 2026-08-03,
+// AI-24) already records this vendor's output-token limit as optional,
+// not mandatory: "AI-24.1 recorded that this vendor's output-token limit
+// is optional, not mandatory. Item 2's IF-guard therefore never fires for
+// this adapter, recorded per this node's own instruction rather than left
+// unmentioned. The text stays in force for a future adapter whose vendor
+// does mandate a limit." R-ART-018 restates the same fact as this node's
+// own obligation: omitting the neutral max-output-tokens option MUST
+// leave the wire body's max_tokens field explicitly absent, never a
+// supplied default value.
+//
+// appendGenerationOptionFields (option.go) renders max_tokens only when
+// Request.MaxOutputTokens' own presence flag is true; when it is false,
+// no code path constructs a default, a fallback or a placeholder — the
+// field is simply never appended. This is the honest pin for a dead
+// branch: absence is asserted directly
+// (TestOption_MaxOutputTokensOmitted_FieldExplicitlyAbsent,
+// option_test.go), paired with the registered "max output tokens option
+// present with caller value" case proving the field renders when the
+// caller does set it — the field is asserted present when set and
+// asserted absent when it is not, rather than merely missing from an
+// expectation literal that could simply have forgotten to mention it.
+//
+// # Escape hatch: reserved namespace not yet defined upstream (AI-26.7, R-ART-019)
+//
+// R-ART-019 requires this adapter's own reserved provider-extension
+// namespace value to be read from AI-25's landed artifact, never
+// re-invented here. This slice searched AI-25's landed artifact
+// exhaustively before writing any escape-hatch code: every AI-25 non-test
+// source this package owns (client.go, credential.go, endpoint.go,
+// request.go), this file's own AI-25-era sections above, AI-25's own SDD
+// artifact (openspec/changes/cachicamas-ai-provider-client/{proposal,
+// spec,design,tasks}.md), AI-24's merged decision
+// (cachicamas-ai-first-provider-decision/decision.md), and doc 0002's own
+// AI-25 charter (§§ AI-25 … AI-25.3). None of these defines a reserved
+// namespace value anywhere. The generic escape-hatch mechanism itself
+// (request_extension.go, AI-12.3) takes an arbitrary caller-supplied
+// namespace and reserves none of its own, by design — R-REX-006 states
+// "Layer 1 MUST NOT maintain any list of recognised namespaces", so
+// Layer 1 was never going to be the source of this value either.
+//
+// Because this node's own instruction forbids inventing the value here,
+// R-ART-019's escape-hatch merge (tasks.md 4.7-4.11: own-namespace merge,
+// foreign-namespace twin comparison) is NOT implemented in this slice.
+// appendBody's own splice-point comment (body.go) marks exactly where it
+// would land once the value exists. This is a disclosed gap, not a
+// silent omission: tasks.md's Phase 4 evidence log records the search
+// performed and the requirement blocked, the same posture R-ART-001
+// takes toward an unobtainable citation (S-ART-004) — halted and
+// recorded, not invented locally.
 package openaicompat
