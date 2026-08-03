@@ -47,6 +47,13 @@ type Decoder struct {
 	// Both reset to empty immediately after each dispatch.
 	data      []byte
 	eventType []byte
+
+	// bomChecked is true once the decoder has resolved whether the
+	// stream begins with a byte-order mark (R-ASD-007). It is set at
+	// most once, for the whole stream's lifetime — never reset — so a
+	// mark occurring anywhere else, including immediately after a
+	// stripped leading one, is ordinary content (S-ASD-026).
+	bomChecked bool
 }
 
 // NewDecoder returns a Decoder ready to accept bytes through Feed.
@@ -70,8 +77,14 @@ func NewDecoder(maxFrameBytes int) *Decoder {
 // A line may be terminated by CRLF, a lone LF, or a lone CR (R-ASD-006);
 // see nextLine for how a CRLF pair split across two Feed calls stays a
 // single terminator instead of injecting a phantom blank line.
+//
+// A leading byte-order mark, if present, is stripped exactly once for
+// the whole stream before any line is scanned (R-ASD-007); see stripBOM.
+// A blank line dispatches only when the data accumulation is non-empty
+// (R-ASD-008); see dispatch.
 func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 	d.buf = append(d.buf, p...)
+	d.stripBOM()
 
 	var frames []Frame
 	cursor := 0
@@ -83,7 +96,9 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 		cursor = next
 
 		if len(line) == 0 {
-			frames = append(frames, d.dispatch())
+			if frame, dispatched := d.dispatch(); dispatched {
+				frames = append(frames, frame)
+			}
 			continue
 		}
 		d.processFieldLine(line)
@@ -149,6 +164,42 @@ func resolveCR(rest []byte, crPos int) (termLen int, ok bool) {
 	return 1, true
 }
 
+// bom is the three-byte UTF-8 byte-order mark. A leading occurrence is
+// stripped exactly once for the whole stream (R-ASD-007); an occurrence
+// anywhere else — immediately after a stripped leading one, or inside a
+// field value — is ordinary content the decoder never touches.
+var bom = []byte{0xEF, 0xBB, 0xBF}
+
+// stripBOM resolves, at most once per Decoder, whether the retained
+// buffer starts with a byte-order mark, stripping it if so. bomChecked
+// guards it so it runs at most once in the decoder's lifetime, however
+// many Feed calls that takes.
+//
+// This grows resolveCR's "boundary visible but not yet resolvable
+// without one more byte" shape (see its doc comment) for a fixed 3-byte
+// prefix instead of a 1-byte lookahead: while the bytes seen so far are
+// a proper prefix of the mark, stripBOM consumes nothing and waits for
+// the next Feed call rather than guessing — the mark can arrive split
+// across feeds (S-ASD-028). Once decided — either a full 3-byte match
+// (strip) or an early mismatch (nothing to strip) — bomChecked is set
+// and this never runs again, so a second mark immediately following the
+// first is never re-examined and survives as ordinary content
+// (S-ASD-026).
+func (d *Decoder) stripBOM() {
+	if d.bomChecked {
+		return
+	}
+	if len(d.buf) < len(bom) {
+		if bytes.HasPrefix(bom, d.buf) {
+			return // proper prefix so far — wait for more bytes, never guess
+		}
+		d.bomChecked = true
+		return
+	}
+	d.buf = bytes.TrimPrefix(d.buf, bom)
+	d.bomChecked = true
+}
+
 // Finish signals that no further bytes will arrive.
 //
 // This slice's implementation is intentionally a stub returning nil
@@ -166,12 +217,16 @@ func (d *Decoder) Finish() error {
 // accumulator its name selects.
 //
 // Any name other than "event" or "data" — including a comment line
-// (whose name is the empty string produced by a line starting with ':')
-// and the id/retry fields slice 2b pins as ignored — falls through
-// unrecognized and disturbs no accumulation. That is this slice's minimum
-// needed to keep S-ASD-001…009 honest about a line it does not
-// specifically recognize; slice 2a and 2b each add their own RED/GREEN
-// pair for the field grammar's remaining edge cases.
+// (whose name is the empty string produced by a line starting with ':'),
+// an "id" line and a "retry" line — falls through unrecognized and
+// disturbs no accumulation. The decoder deliberately tracks no
+// last-event-id or retry-interval state at all (R-ASD-010): id/retry
+// lines are simply never matched by this switch, so their values are
+// parsed off the line but discarded, never contributing to any
+// accumulator — pinned by field_grammar_test.go's id/retry equivalence
+// cases (S-ASD-035..038) rather than left as an accident of the
+// fallthrough. Comment-line and unknown-event-name handling remain
+// slice 4's own scope (AI-27.4).
 func (d *Decoder) processFieldLine(line []byte) {
 	name, value := splitField(line)
 	switch string(name) {
@@ -205,6 +260,12 @@ func splitField(line []byte) (name, value []byte) {
 }
 
 // dispatch builds a Frame from the current accumulation and resets it.
+// dispatched is false when the data accumulation is empty (R-ASD-008):
+// no frame is yielded, but the accumulation and event-type state are
+// still reset, so a suppressed frame leaves no residue for the next one
+// (R-ASD-009, S-ASD-034). The reset is unconditional — a single deferred
+// call covers both the empty-data path and the normal-dispatch path, so
+// there is exactly one place a dispatch can forget to reset, not two.
 //
 // The trailing line feed each data line's append leaves behind is
 // stripped once, here, per § 9.2's dispatch step — the same mechanism
@@ -212,7 +273,13 @@ func splitField(line []byte) (name, value []byte) {
 // single data line's payload is byte-exact with no trailing separator
 // (S-ASD-001). Data is copied so a later Feed's buffer reuse can never
 // observably change a Frame already returned.
-func (d *Decoder) dispatch() Frame {
+func (d *Decoder) dispatch() (frame Frame, dispatched bool) {
+	defer d.reset()
+
+	if len(d.data) == 0 {
+		return Frame{}, false
+	}
+
 	data := d.data
 	if n := len(data); n > 0 && data[n-1] == '\n' {
 		data = data[:n-1]
@@ -223,12 +290,10 @@ func (d *Decoder) dispatch() Frame {
 		eventType = string(d.eventType)
 	}
 
-	frame := Frame{
+	return Frame{
 		Event: eventType,
 		Data:  append([]byte(nil), data...),
-	}
-	d.reset()
-	return frame
+	}, true
 }
 
 // reset clears the in-progress frame's accumulators after a dispatch,
