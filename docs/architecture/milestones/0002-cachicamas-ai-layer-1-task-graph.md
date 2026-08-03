@@ -1,6 +1,6 @@
 # Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Wave 0 + Wave 1 + Wave 2 + Wave 3 complete — **24 of 41** milestones shipped. **AI-00 through AI-23 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 49 production files and 58 test files.
+> **Status:** Wave 0 + Wave 1 + Wave 2 + Wave 3 complete — **24 of 42** milestones shipped. **AI-00 through AI-23 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 49 production files and 58 test files.
 > **Single source.** This document owns milestone identity, scope and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. It supersedes the plan dated 2026-07-30 that assumed seventeen shipped milestones inside `database_administrator`; see [what changed and why](#what-changed-from-the-retired-plan) for the identifier map from that plan to this one.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md) — downstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
@@ -8,6 +8,8 @@
 > **Date:** 2026-07-30.
 > **Milestone identifiers are append-only from this document forward.** AI-NN ids are contiguous in dependency order today because the plan is starting from zero and nothing yet cites them. From the first merged milestone onward the append-only rule binds: new work takes the next free number, and logical insertion points are expressed with a `Blocks:` field, never by renumbering.
 > **Node identifiers are append-only.** A node is `AI-NN.p` (subtask of milestone AI-NN) or `AI-NN.p.q` (fractal subdivision of `AI-NN.p`). Splitting a node appends children under it; it never renumbers siblings. A node discovered during implementation is appended with the next free ordinal and an edge, exactly like the milestone rule above.
+
+> **Amended 2026-08-03 (AI-24)** — milestone total ~~41~~ → **42**; `AI-41` appended per the Wave-2 carryover assignment. Shipped count unchanged at 24.
 
 > [!IMPORTANT]
 > **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures — each milestone's SDD cycle owns those. "The request", "the envelope", "the provider interface" are concept names from the architecture reference, not type names. From Wave 1 forward, this document cites shipped Layer 1 code as evidence for completed milestones, never for unshipped ones.
@@ -35,7 +37,7 @@ Every leaf is sized to be implemented test-first in one sitting, is verifiable b
 - [Wave 2 — Stream](#wave-2--stream): [AI-14](#ai-14--define-the-event-envelope-with-per-stream-sequencing) · [AI-15](#ai-15--add-response-lifecycle-events) · [AI-16](#ai-16--add-text-delta-events) · [AI-17](#ai-17--add-reasoning-delta-events) · [AI-18](#ai-18--add-tool-call-delta-events) · [AI-19](#ai-19--define-the-provider-error-taxonomy-and-the-terminal-error-event) · [AI-20](#ai-20--define-the-provider-interface)
 - [Wave 3 — Prove](#wave-3--prove): [AI-21](#ai-21--build-a-scripted-fake-provider) · [AI-22](#ai-22--build-stream-recording-and-assertion-helpers) · [AI-23](#ai-23--create-the-provider-conformance-suite)
 - [Wave 4 — Connect the vendor](#wave-4--connect-the-vendor): [AI-24](#ai-24--select-first-provider-and-transport) · [AI-25](#ai-25--provider-configuration-and-client-construction) · [AI-26](#ai-26--translate-normalized-requests-to-wire-requests) · [AI-27](#ai-27--implement-the-streaming-frame-decoder) · [AI-28](#ai-28--translate-response-lifecycle-and-text) · [AI-29](#ai-29--translate-the-reasoning-stream) · [AI-30](#ai-30--translate-the-tool-call-stream) · [AI-31](#ai-31--translate-usage-and-finish-reasons) · [AI-32](#ai-32--map-http-and-provider-failures)
-- [Wave 5 — Harden](#wave-5--harden): [AI-33](#ai-33--prove-cancellation-and-goroutine-cleanup) · [AI-34](#ai-34--lock-backpressure-and-buffer-behavior) · [AI-35](#ai-35--define-retry-and-idempotency-policy) · [AI-36](#ai-36--enforce-secret-redaction) · [AI-37](#ai-37--add-the-observability-boundary)
+- [Wave 5 — Harden](#wave-5--harden): [AI-33](#ai-33--prove-cancellation-and-goroutine-cleanup) · [AI-34](#ai-34--lock-backpressure-and-buffer-behavior) · [AI-35](#ai-35--define-retry-and-idempotency-policy) · [AI-36](#ai-36--enforce-secret-redaction) · [AI-37](#ai-37--add-the-observability-boundary) · [AI-41](#ai-41--discharge-the-wave-2-carryovers)
 - [Wave 6 — Hand off](#wave-6--hand-off): [AI-38](#ai-38--run-full-deterministic-adapter-conformance) · [AI-39](#ai-39--add-the-opt-in-live-smoke-test) · [AI-40](#ai-40--publish-the-layer-2-readiness-contract)
 - [Layer 1 completion checklist](#layer-1-completion-checklist)
 - [Explicitly deferred until after Layer 1](#explicitly-deferred-until-after-layer-1)
@@ -66,7 +68,9 @@ Each milestone below should become its **own change** unless its SDD exploration
 - Public types need stable semantics before a concrete adapter depends on them.
 - A milestone may refine later names, but it must not violate ADR 0004.
 - Each SDD must state what remains intentionally unsupported.
-- **The module stays dependency-free until a milestone has an ADR to add one.** `go.mod` carries zero requires from AI-00 until AI-24 selects a transport (its own ADR gate) and AI-37 adds the OTel API (pre-authorized by ADR 0005 § D3, and by nothing else).
+- **The module stays dependency-free until a milestone has an ADR to add one.** `go.mod` carries zero requires from AI-00 until ~~AI-24 selects a transport (its own ADR gate) and~~ AI-37 adds the OTel API (pre-authorized by ADR 0005 § D3, and by nothing else).
+
+> **Amended 2026-08-03 (AI-24)** — AI-24 selected raw `net/http`: standard library, zero `go.mod` requires. The ADR gate this bullet named resolved to a **no-op** — evaluated, and firing no obligation, because the chosen transport adds no dependency. The AI-00.3 forward guard's allowlist gained no second entry. See `decision.md` § 9.
 
 ---
 
@@ -187,7 +191,7 @@ flowchart LR
     W1 --> W2["Wave 2 — Stream<br/>AI-14 … AI-20<br/>events, errors, interface"]
     W2 --> W3["Wave 3 — Prove<br/>AI-21 · AI-22 · AI-23<br/>fake, test kit, conformance"]
     W3 --> W4["Wave 4 — Connect<br/>AI-24 … AI-32<br/>first adapter"]
-    W4 --> W5["Wave 5 — Harden<br/>AI-33 … AI-37"]
+    W4 --> W5["Wave 5 — Harden<br/>AI-33 … AI-37 · AI-41"]
     W5 --> W6["Wave 6 — Hand off<br/>AI-38 · AI-39 · AI-40"]
 
     classDef w fill:#dbeafe,stroke:#1d4ed8,color:#1f2937
@@ -209,7 +213,7 @@ One structural property is worth naming because the retired plan lacked it: **th
 | **2 — Stream** | AI-14 to AI-20 | Per-stream sequenced events for every content family, a constructible terminal error with its taxonomy, and a provider interface that exposes no vendor type. |
 | **3 — Prove** | AI-21 to AI-23 | A scripted fake, reusable stream assertions, and a conformance suite that already judges the fake. |
 | **4 — Connect the vendor** | AI-24 to AI-32 | The first adapter streams normalized text, reasoning, tools and metadata, and maps every failure into the taxonomy. |
-| **5 — Harden** | AI-33 to AI-37 | Cancellation, backpressure, retry, redaction and observability are safe and proven. |
+| **5 — Harden** | AI-33 to AI-37, AI-41 | Cancellation, backpressure, retry, redaction and observability are safe and proven, and the Wave-2 carryovers are discharged. |
 | **6 — Hand off** | AI-38 to AI-40 | The adapter passes conformance deterministically and Layer 2 can consume a frozen v1 API. |
 
 **First SDD to start: AI-00** (`cachicamas-agent-module-scaffold`). Its preconditions are satisfied — ADR 0005 and ADR 0006 are merged, and the tree is quiet because there is nothing to conflict with. Nothing else may start before it: there is no module to hold a test.
@@ -1415,6 +1419,8 @@ SDD change: `cachicamas-ai-first-provider-decision` · The first milestone that 
 - **Depends on:** AI-03, AI-11, AI-12, AI-23. · **Blocks:** AI-25 … AI-32.
 - **Out of scope:** Adapter implementation.
 
+> **Amended 2026-08-03 (AI-24)** — Decided: the OpenAI-compatible Chat Completions streaming dialect, over raw `net/http`. Both verdicts, the seven-axis argument and the priced losses are recorded in `decision.md` of this milestone's SDD change. The acceptance clause's ADR condition did not fire — the chosen transport adds no `go.mod` dependency, so no ADR was required and the AI-00.3 guard's allowlist is unchanged.
+
 #### AI-24.1 — The provider decision `[decision]`
 
 - **Closing checklist:**
@@ -1464,8 +1470,10 @@ flowchart LR
 
 #### AI-25.2 — No ambient authority `[guard]`
 
+> **Amended 2026-08-03 (AI-25.2 item 1 correction, AI-24) — the stated mechanism cannot bite.** AI-00.3 is an **import-path** scan (`go list -deps -test` against a deny-by-default allowlist) — it asserts which *packages* are imported, not which calls a file makes. The chosen transport, `net/http`, transitively imports `os`, which is already on this module's own allowlist as a legitimate transitive dependency of the standard library HTTP client. Reusing AI-00.3's mechanism here would therefore either false-positive on every legitimate use of `net/http`, or — since `os` must stay allowed — miss a narrow `os.Getenv` call inside the adapter entirely. The guard needs a **call-site** scan, not an import-path scan.
+
 - **Test list:**
-  1. The adapter package reads no environment variable, touches no filesystem, and spawns no process — proven mechanically with an AST import-and-call scan in the AI-00.3 style, not by convention.
+  1. The adapter package reads no environment variable, touches no filesystem, and spawns no process — proven mechanically with ~~an AST import-and-call scan in the AI-00.3 style~~ **a call-site scan over the adapter package's own source files**, not by convention.
   2. **Bite proof:** a scratch environment read in the adapter fails the guard; recorded, dropped.
 - **Depends on:** AI-25.1.
 
@@ -1513,6 +1521,8 @@ flowchart TB
 
 #### AI-26.2 — System segments and cache markers `[leaf]`
 
+> **Amended 2026-08-03 (AI-24) — item 3's branch has no subject for this adapter.** AI-24.1 recorded that the chosen vendor caches **automatically**; there is no vendor-side cap to enforce, so item 3's translation-refusal branch never fires. Item 2's "dropped whole" branch is the one this adapter takes, exercising AI-11.3's advisory contract in full. Item 3's text stays in force for a future adapter whose vendor requires explicit cache annotation with its own cap.
+
 - **Test list:**
   1. Ordered system segments render into the vendor's system shape preserving order and content.
   2. Cache-boundary markers render into the vendor's cache annotation at the marked positions, respecting the tools → system → messages hierarchy — or are dropped whole if AI-24.1 recorded an auto-caching vendor, which is the advisory contract of AI-11.3 exercised.
@@ -1537,6 +1547,8 @@ flowchart TB
 
 #### AI-26.5 — Tool results and identifiers `[leaf]`
 
+> **Amended 2026-08-03 (AI-24) — item 2's branch has no subject for this adapter.** AI-24.1 recorded that the chosen vendor **does assign** tool-call identifiers, on the call's opening delta. Item 2's synthetic-minting branch therefore never fires for this adapter and is marked **not-applicable**, not silently skipped; the requirement text stays in force for a future adapter whose vendor assigns none. This adapter's conformance exercises only the vendor-assigns branch.
+
 - **Test list:**
   1. Tool results translate into the vendor's result shape — block inside a user-role message, distinct role, or nested object, whichever AI-24.1 recorded.
   2. IF the vendor assigns no tool-call identifiers THEN synthetic identifiers are minted here, deterministically, and the mapping is **exposed** so a session can persist it — the Layer 3 half is out of scope, the mint-and-expose half is this node.
@@ -1553,6 +1565,8 @@ flowchart TB
 - **Depends on:** AI-26.3, AI-07.
 
 #### AI-26.7 — Options, limits and the escape hatch `[leaf]`
+
+> **Amended 2026-08-03 (AI-24) — item 2 is a deliberate no-op for this vendor.** AI-24.1 recorded that this vendor's output-token limit is **optional**, not mandatory. Item 2's IF-guard therefore never fires for this adapter, recorded per this node's own instruction rather than left unmentioned. The text stays in force for a future adapter whose vendor does mandate a limit.
 
 - **Test list:**
   1. Every neutral generation option maps to its vendor field; unsupported combinations fail explicitly.
@@ -1748,6 +1762,8 @@ flowchart LR
 ```
 
 #### AI-29.0 — Reasoning emission policy `[decision]`
+
+> **Amended 2026-08-03 (AI-24) — a note, not a verdict.** AI-24.1 answers § 7 of `decision.md`: this vendor signs no reasoning blocks, only an opaque `reasoning_tokens` count. That **strongly indicates** absence, but the emit-versus-absence decision remains this node's, made against the exact backend chosen for AI-38/AI-39 — some servers sharing this dialect emit a non-standard `reasoning_content`-style extension field that is no part of the shared dialect itself. This amendment does not resolve this node's checklist and does not strike it.
 
 - **Closing checklist:**
   1. Record whether v1 emits reasoning events for the first provider or documents a capability absence — AI-03.1 makes both legal, and every sibling node below assumes emission.
@@ -2089,6 +2105,8 @@ SDD change: `cachicamas-ai-redaction` · Adversarial by design: every test plant
 - **Acceptance:** Sentinel secrets appear in no error, log field, fixture, event metadatum, or test-failure output.
 - **Depends on:** AI-25, AI-32. **Parallel with:** AI-33 … AI-35. · **Blocks:** AI-37.
 
+> **Amended 2026-08-03 (AI-24) — mirrors AI-41's edge.** AI-41 (Wave 5, appended by this amendment) declares `Blocks: AI-36`: its adversarial sweep must not run against the provider-failure payload while that payload is still missing its redacting formatting method. The authoritative edge lives on AI-41's `Blocks:` field, per the append-only rule; this blockquote exists only so a reader of this charter sees it. This node's own `Depends on:` line above is unchanged.
+
 #### AI-36.1 — Sentinel sweep `[leaf]`
 
 - **Test list:**
@@ -2160,6 +2178,32 @@ flowchart LR
 - **Test list:**
   1. WHEN no tracer is configured THEN streaming behaves identically — drained event sequences with and without tracing are equal — and nothing panics; the API's no-op default suffices without adapter-side nil checks.
 - **Depends on:** AI-37.2.
+
+### AI-41 — Discharge the Wave-2 carryovers
+
+> **Amended 2026-08-03 (AI-24)** — appended, next free milestone ordinal, per the Wave-2 carryover assignment `decision.md` § 13.3 records. Two Wave-2 carryovers — the testkit's emission-boundary check's fourth-rule failure-path coverage gap, and the missing redacting formatting method on the provider-failure payload — went unassigned through Wave 2 and Wave 3; a third silent pass is the failure mode this assignment exists to stop. Neither carryover blocks any Wave-4 node (AI-24 … AI-32 touch neither), and Wave 4 already forecasts 20,000–25,000 changed lines against a 5,000-line review budget, so the assignment lands now and the work lands in Wave 5. This append forces four navigational surfaces to agree on a milestone total of **42**: the header `> **Status:**` line, the Quick-navigation line below, the mermaid Wave 5 label, and the Delivery-sequence Wave 5 row.
+
+SDD change: `cachicamas-ai-wave2-carryovers` · Scheduled Wave 5: neither carryover blocks a Wave-4 node, and Wave 4 is already over its review-load forecast.
+
+**Charter**
+
+- **Goal:** Discharge the two Wave-2 carryovers recorded at `openspec/specs/ai-stream-testkit/spec.md`.
+- **Deliverable:** The emission-boundary checker's fourth-rule failure path proven directly, and a redacting alternate-verb formatting method on the provider-failure payload.
+- **Acceptance:** The testkit spec's carryover status line names this milestone as owner; both items close; the provider-failure payload's redacting formatting method matches the pattern its sibling payloads already carry.
+- **Depends on:** AI-14, AI-19. · **Blocks:** AI-36.
+- **Out of scope:** Any other redaction or emission-boundary behavior already proven; AI-36's adversarial sweep, which consumes this milestone's result rather than repeating it.
+
+#### AI-41.1 — Emission-boundary failure path `[leaf]`
+
+- **Test list:**
+  1. WHEN an event the testkit's emission-boundary check's fourth rule itself rejects is exercised THEN that rule's failure path is proven directly — the gap AI-21 parked and Wave 2 and Wave 3 both left open.
+- **Depends on:** AI-14.
+
+#### AI-41.2 — Redacting failure-payload formatting `[leaf]`
+
+- **Test list:**
+  1. The provider-failure payload gains a redacting alternate-verb formatting method, matching the pattern its sibling payloads already carry, so a caller formatting the failure payload cannot fall back to reflection over unexported fields and leak one.
+- **Depends on:** AI-19.
 
 ---
 
