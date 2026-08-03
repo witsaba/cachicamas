@@ -51,10 +51,17 @@ func appendModelField(buf []byte, req ai.Request) []byte {
 	return appendJSONString(buf, req.Model())
 }
 
-// appendMessagesField appends `"messages":[...]`, one rendered object per
-// req.Messages(), in caller order — Messages() is already a
-// caller-ordered slice, so this loop introduces no map (design.md "Map
-// discipline").
+// appendMessagesField appends `"messages":[...]`. Each of req's
+// system-instruction segments renders first, one wire message per
+// segment (system.go's appendSystemMessageObject, AI-26.2, R-ART-005),
+// followed by one rendered object per req.Messages(), in caller order —
+// both SystemInstruction.Segments() and Messages() are already
+// caller-ordered slices, so this introduces no map (design.md "Map
+// discipline"). A request with no system instruction (S-ART-020)
+// contributes no system message at all — wrote tracks whether anything
+// has been appended yet, rather than assuming messages is the sole
+// source of entries, so the join works whether or not a system
+// instruction is present.
 //
 // This skeleton renders exactly the shape R-ART-002's minimal request
 // needs: one role name plus one text-part content string. Every other
@@ -64,11 +71,22 @@ func appendModelField(buf []byte, req ai.Request) []byte {
 // message rendering.
 func appendMessagesField(buf []byte, req ai.Request) []byte {
 	buf = append(buf, `"messages":[`...)
-	for i, message := range req.Messages() {
-		if i > 0 {
+	wrote := false
+	if system, hasSystem := req.SystemInstruction(); hasSystem {
+		for _, segment := range system.Segments() {
+			if wrote {
+				buf = append(buf, ',')
+			}
+			buf = appendSystemMessageObject(buf, segment)
+			wrote = true
+		}
+	}
+	for _, message := range req.Messages() {
+		if wrote {
 			buf = append(buf, ',')
 		}
 		buf = appendMessageObject(buf, message)
+		wrote = true
 	}
 	buf = append(buf, ']')
 	return buf

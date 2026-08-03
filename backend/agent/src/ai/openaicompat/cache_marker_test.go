@@ -15,9 +15,9 @@
 // S-ACB-035 requires the region to be complete, not merely present, for
 // the twin comparison to be non-vacuous. See doc.go's "Cache-boundary
 // markers vanish whole" section for why this file's walk over
-// ai.CacheRegions() runs one region to completion today and records the
-// other two SKIP, with a named reason, rather than a fabricated PASS over
-// content Translate does not render at all yet.
+// ai.CacheRegions() runs two regions (messages, system) to completion and
+// records the third (tools) SKIP, with a named reason, rather than a
+// fabricated PASS over content Translate does not render at all yet.
 package openaicompat_test
 
 import (
@@ -57,19 +57,63 @@ func buildMessagesRegionTwin(t *testing.T) (plain, marked ai.Request) {
 	return build(false), build(true)
 }
 
+// buildSystemRegionTwin builds two requests identical but for a
+// cache-boundary marker on the one system-instruction segment each
+// carries — mirroring buildMessagesRegionTwin above. Now that system.go
+// (AI-26.2) renders a segment's full substantive content — its text, in
+// this adapter's system role — onto the wire, this twin comparison is
+// non-vacuous under AI-11.3's own S-ACB-035.
+func buildSystemRegionTwin(t *testing.T) (plain, marked ai.Request) {
+	t.Helper()
+
+	build := func(mark bool) ai.Request {
+		segment, err := ai.NewSegment("be terse")
+		if err != nil {
+			t.Fatalf("ai.NewSegment returned %v, want no failure", err)
+		}
+		if mark {
+			segment = segment.MarkCacheBoundary()
+		}
+		system, err := ai.NewSystemInstruction(segment)
+		if err != nil {
+			t.Fatalf("ai.NewSystemInstruction returned %v, want no failure", err)
+		}
+
+		part, err := ai.NewText("plan a trip")
+		if err != nil {
+			t.Fatalf("ai.NewText returned %v, want no failure", err)
+		}
+		msg, err := ai.NewMessage(ai.RoleUser, part)
+		if err != nil {
+			t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+		}
+
+		request, err := ai.NewRequest("gpt-4o", []ai.Message{msg}, ai.WithSystemInstruction(system))
+		if err != nil {
+			t.Fatalf("ai.NewRequest returned %v, want no failure", err)
+		}
+		return request
+	}
+
+	return build(false), build(true)
+}
+
 // TestCacheMarker_MarkedTwinAcrossEveryRegion walks every cache region
 // ai.CacheRegions() enumerates (R-ART-006, S-ART-022) — mechanically, not
 // hand-listed, so a later slice's own region-rendering work is picked up
 // here with no edit to this loop or this walk's structure.
 //
-// Today only the messages region has a renderer (appendMessageObject,
-// body.go, AI-26.1) that already emits a carrier's full substantive
-// content — role and text — onto the wire, so it is the only sub-test run
-// to completion (S-ART-021). The other two are recorded SKIP with the
-// exact blocking reason: a marker-drop proof over content that is not
-// rendered at all yet would be vacuous under AI-11.3's own S-ACB-035, not
-// a proof that the marker specifically is what is dropped. Both gaps are
-// structural and self-closing — see doc.go.
+// The messages region (appendMessageObject, body.go, AI-26.1) and the
+// system region (appendSystemMessageObject, system.go, AI-26.2) both have
+// a renderer that already emits a carrier's full substantive content —
+// role/text, and segment text in the system role, respectively — onto
+// the wire, so both sub-tests run to completion (S-ART-021). The tools
+// region is recorded SKIP with the exact blocking reason: a marker-drop
+// proof over declarations Translate does not render at all would be
+// vacuous under AI-11.3's own S-ACB-035, not a proof that the marker
+// specifically is what is dropped. That gap is structural and
+// self-closing — it starts proving something real once AI-26.4's
+// tool.go lands, with no edit needed to this file — see doc.go.
 func TestCacheMarker_MarkedTwinAcrossEveryRegion(t *testing.T) {
 	for _, region := range ai.CacheRegions() {
 		t.Run(region.String(), func(t *testing.T) {
@@ -90,10 +134,19 @@ func TestCacheMarker_MarkedTwinAcrossEveryRegion(t *testing.T) {
 				}
 
 			case ai.CacheRegionSystem:
-				t.Skip("blocked: system.go does not exist yet — which wire role a rendered system segment " +
-					"uses (system vs developer) is an open decision this slice did not pick silently (see " +
-					"doc.go's Wire-shape provenance section, claim 1); a marker-drop proof over unrendered " +
-					"system-instruction content would be vacuous under AI-11.3's own S-ACB-035")
+				plain, marked := buildSystemRegionTwin(t)
+
+				plainBytes, err := openaicompat.Translate(plain)
+				if err != nil {
+					t.Fatalf("Translate(plain): unexpected error: %v", err)
+				}
+				markedBytes, err := openaicompat.Translate(marked)
+				if err != nil {
+					t.Fatalf("Translate(marked): unexpected error: %v", err)
+				}
+				if string(plainBytes) != string(markedBytes) {
+					t.Fatalf("Translate(marked) =\n%s\nwant byte-identical to Translate(plain) =\n%s", markedBytes, plainBytes)
+				}
 
 			case ai.CacheRegionTools:
 				t.Skip("deferred to AI-26.4 (slice 3): tool.go does not exist yet, so Translate does not " +
