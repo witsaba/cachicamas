@@ -106,10 +106,10 @@ That is a different failure in kind, and the vocabulary has no home for it.
 **Recommendation: (i), with an escalation trigger recorded rather than a silent compromise.** Map
 cap-exceeded to `FailureCategoryMalformedResponse`, keep two distinct local sentinels so no
 information is lost at the error level, and escalate the tenth-category question to the milestone
-that owns the taxonomy. The escalation is not hypothetical: **AI-31 already plans a second consumer**
-of the same concept — "AI-27.5 bounds a single frame; this bounds the sum" (doc 0002, per-call
-accumulation cap). Two consumers is a real case for option (ii); one framing milestone is the wrong
-place to make it.
+that owns the taxonomy. The escalation is not hypothetical: **AI-30.1 item 4 already plans a second
+consumer** of the same concept — "AI-27.5 bounds a single frame; this bounds the sum" (doc 0002,
+per-call accumulation cap). Two consumers is a real case for option (ii); one framing milestone is the
+wrong place to make it.
 
 ### Does AI-27 construct `ai.Failure`? — **No.**
 
@@ -231,8 +231,10 @@ its own rollback.
 - [ ] The AI-19 cap-exceeded category decision is recorded in `design.md` with its rationale.
 - [ ] `make test` green, `make lint` clean, AI-00 import guards pass, `go.mod` unchanged.
 
-> **Known stale citation (flagged, not fixed here — Phase 7 of tasks.md owns the correction).**
-> This proposal's "escalation trigger" paragraph above names **AI-31** as the second consumer of the
-> resource-exhaustion concept. `design.md`, `specs/ai-stream-decoder/spec.md`, and doc 0002 line 1819
-> all correctly place that second consumer at **AI-30.1 item 4**. Do not propagate the AI-31 figure
-> into any new artifact; it is corrected at archive time, not by editing this proposal in place.
+> **Stale citation corrected (Phase 7 coordination, task 7.2, applied at Slice 6).** This proposal's
+> "escalation trigger" paragraph above previously named **AI-31** as the second consumer of the
+> resource-exhaustion concept. `design.md` and `specs/ai-stream-decoder/spec.md` always correctly
+> placed that second consumer at **AI-30.1 item 4** (doc 0002 line 1819 agrees), so this proposal was
+> the only artifact still carrying the stale figure. It has been corrected in place above rather than
+> left for archive time, since Slice 6 is this change's own final apply run — no later apply phase
+> would otherwise have touched this file again before archive.

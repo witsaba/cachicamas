@@ -27,9 +27,11 @@ Three distinctions shape every requirement below and are stated once here.
 
 **Naming a category is not constructing a failure.** AI-27's declared dependency is on AI-19.2 — the **category vocabulary** — not on AI-19's constructors. A pure byte decoder cannot answer whether normalized output preceded a failure, nor which carrier handed it over, so it MUST NOT construct provider-failure values. Its own errors *name* a category and stay wrappable; AI-28/AI-32 build the provider failure.
 
-Requirement count: **25** (`R-ASD-001` … `R-ASD-025`). Scenario count: **85** (`S-ASD-001` … `S-ASD-085`) — **72 [test]**, **13 [inspection]**.
+Requirement count: **25** (`R-ASD-001` … `R-ASD-025`). Scenario count: **85** (`S-ASD-001` … `S-ASD-085`) — **73 [test]**, **12 [inspection]**.
 
-*Counted mechanically over the scenario bullets after the corrective pass, not estimated. The thirteen `[inspection]` scenarios are `S-ASD-010`, `011`, `039`, `040`, `045`, `051`, `056`, `064`, `068`, `069`, `078`, `082`, `083`. Evidence rules key off these markings, so a reconciliation that finds a different split is reading a stale revision, not a downgraded test.*
+*Counted mechanically over the scenario bullets, not estimated. The twelve `[inspection]` scenarios are `S-ASD-010`, `011`, `039`, `040`, `051`, `056`, `064`, `068`, `069`, `078`, `082`, `083`. Evidence rules key off these markings, so a reconciliation that finds a different split is reading a stale revision, not a downgraded test.*
+
+> **Revision note (Phase 7 coordination, applied at Slice 6).** `S-ASD-045` shipped as `[inspection]` with a recorded upgrade condition: it becomes `[test]` once the sweep harness's mismatch-message construction is factored into a separately callable pure function. Slice 3's own implementation of `offset_sweep_test.go` did exactly that (`sweepMismatch`), so the condition was met before this file was updated to say so — `TestOffsetSweep_MismatchMessageNamesOffendingByteOffset` has been exercising the runnable scenario since Slice 3 landed; only this document's own marking lagged until now, exactly as tasks.md's Phase 7 coordination note anticipated.
 
 ## Requirement ownership by node
 
@@ -209,7 +211,7 @@ For every golden transcript, and for **every** byte offset from zero through its
 - **S-ASD-042** *[test]* — Given a split landing inside a field **name**, when the two chunks are fed, then the reconstructed field name is correct and the result matches the reference.
 - **S-ASD-043** *[test]* — Given a split landing inside a multi-byte character of a data value, when the two chunks are fed, then the yielded payload bytes match the reference exactly.
 - **S-ASD-044** *[test]* — Given a byte-order-mark-prefixed transcript split at offsets one and two — inside the three-byte mark itself — when the chunks are fed, then the mark is still stripped once and the result matches the reference.
-- **S-ASD-045** *[inspection]* — Given the sweep harness source, when a reviewer reads its mismatch path, then the message it produces names the offending byte offset — a bare boolean mismatch is not sufficient to locate the defect. This is an inspection, not a test: a passing suite never executes the mismatch path, so no runnable assertion can observe it. It becomes a **[test]** obligation only if the harness's message construction is factored into a separately callable pure function, which the design does not currently provide.
+- **S-ASD-045** *[test]* — Given the sweep harness's mismatch-message construction, factored into the separately callable pure function `sweepMismatch`, when it is called directly with a differing and an identical frame-sequence pair, then the message it produces for the differing pair names both the offending transcript and the exact byte offset, and no message is produced for the identical pair — a bare boolean mismatch would not be sufficient to locate the defect. Upgraded from `[inspection]` to `[test]`: the harness's message construction is factored into a separately callable pure function (`offset_sweep_test.go`'s `sweepMismatch`, extracted by Slice 3), so the construction itself is directly callable and failable without needing a real decoder defect to reach it.
 
 ### R-ASD-013 — A split between CR and LF MUST NOT inject a phantom blank line
 
