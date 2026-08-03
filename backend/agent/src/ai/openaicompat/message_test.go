@@ -214,16 +214,17 @@ var partKindDispositions = []partKindDisposition{
 		handled: false,
 		handoff: "AI-26.6 (Phase 7): policy.go's refuse() door must intercept a reasoning part — every state, every position — before appendBody starts appending anything, returning ai.PreStreamFailure+ai.ErrUnsupportedCapability naming \"reasoning\", with no wire body produced even when the reasoning part sits after otherwise-renderable messages. message.go's current panic is a transitional safety net, not the replacement site.",
 	},
-	{
-		kind:    ai.PartKindToolCall,
-		handled: false,
-		handoff: "AI-26.5 (Phase 6): a tool call renders as an element of a SEPARATE top-level tool_calls array on the assistant message object (claim 2, doc.go) — never as a content-part array element. Phase 6 must intercept PartKindToolCall in appendMessageObject/appendMessageContent, not grow appendContentPartObject's case for it.",
-	},
-	{
-		kind:    ai.PartKindToolResult,
-		handled: false,
-		handoff: "AI-26.5 (Phase 6): a tool result renders as its own distinct wire message carrying tool_call_id and content directly on the message object (R-ART-012) — never as a content-part array element on some other message. Phase 6 must special-case a RoleTool message in appendMessageObject itself, not grow appendContentPartObject's case for it.",
-	},
+	// PartKindToolCall and PartKindToolResult carried the AI-26.5 (Phase 6)
+	// hand-off recorded here at AI-26.3 (Phase 5) — see this file's own
+	// prior revision for its exact text. Both are now handled: a tool call
+	// renders as an element of message.go's own tool_calls array
+	// (splitToolCalls, appendToolCallObject); a tool result renders as its
+	// own distinct role:"tool" wire message (appendToolResultMessages,
+	// appendToolResultObject). See doc.go's "Tool calls render in their
+	// own tool_calls array; tool results render as their own distinct
+	// role:\"tool\" messages" section (R-ART-012, R-ART-013, R-ART-014).
+	{kind: ai.PartKindToolCall, handled: true},
+	{kind: ai.PartKindToolResult, handled: true},
 }
 
 // lookupPartKindDisposition returns kind's recorded disposition and
@@ -255,13 +256,14 @@ func TestMessage_PartKindCoverage(t *testing.T) {
 
 			switch disposition.kind {
 			case ai.PartKindText:
-				assertKindTranslates(t, disposition)
+				message := mustMessage(ai.NewMessage(ai.RoleUser, mustPart(ai.NewText("coverage: text renders"))))
+				assertKindTranslates(t, disposition, message)
 			case ai.PartKindReasoning:
 				message := mustMessage(ai.NewMessage(ai.RoleAssistant, mustPart(ai.NewReasoning("thinking it through", nil))))
 				assertKindIsDeferred(t, disposition, message)
 			case ai.PartKindToolCall:
 				message := mustMessage(ai.NewMessage(ai.RoleAssistant, mustPart(ai.NewToolCall("call_1", "get_weather", []byte(`{}`)))))
-				assertKindIsDeferred(t, disposition, message)
+				assertKindTranslates(t, disposition, message)
 			case ai.PartKindToolResult:
 				// A tool result must correlate to a tool call somewhere in
 				// the same request (ai.NewRequest's own
@@ -269,17 +271,15 @@ func TestMessage_PartKindCoverage(t *testing.T) {
 				// "earlier" — so a bare tool-result-only request fails at
 				// mustRequest, before Translate is ever reached. The
 				// satisfying tool call is therefore supplied as a SECOND
-				// message, positioned after the tool-result message under
-				// test: message order is preserved (R-ART-008, this
-				// file's own TestMessage_AdjacentSwap_TranslatesDifferently),
-				// so appendMessagesField reaches the tool-result message
-				// first and panics naming "tool_result" before it ever
-				// reaches the tool-call message — which is itself also a
-				// deferred kind and would otherwise panic naming
-				// "tool_call" instead, misattributing the observed panic.
+				// message. Unlike this file's prior revision (AI-26.3),
+				// misattribution is no longer a risk to guard against:
+				// this phase (AI-26.5) renders both kinds, so
+				// assertKindTranslates only has to observe "no error",
+				// never attribute a panic to the right one of two
+				// deferred kinds.
 				resultMessage := mustMessage(ai.NewMessage(ai.RoleTool, mustPart(ai.NewToolResult("call_1", "sunny"))))
 				callMessage := mustMessage(ai.NewMessage(ai.RoleAssistant, mustPart(ai.NewToolCall("call_1", "get_weather", []byte(`{}`)))))
-				assertKindIsDeferred(t, disposition, resultMessage, callMessage)
+				assertKindTranslates(t, disposition, resultMessage, callMessage)
 			default:
 				t.Fatalf("ai.PartKind %s has a disposition entry but this test's own switch was not updated to exercise it", kind)
 			}
@@ -288,15 +288,21 @@ func TestMessage_PartKindCoverage(t *testing.T) {
 }
 
 // assertKindTranslates proves a "handled: true" kind actually translates
-// without error — the coverage test's own positive half.
-func assertKindTranslates(t *testing.T, disposition partKindDisposition) {
+// without error — the coverage test's own positive half — using messages
+// that genuinely carry that kind. It does not fall back to a generic
+// Text-only smoke request: doing so would pass regardless of whether the
+// kind under test renders at all, exactly the "fixture cannot distinguish
+// implemented from not-implemented" trap assertKindIsDeferred's own doc
+// comment names for the coverage test's negative half.
+func assertKindTranslates(t *testing.T, disposition partKindDisposition, messages ...ai.Message) {
 	t.Helper()
 	if !disposition.handled {
 		t.Fatalf("assertKindTranslates called for a kind recorded handled: false (%s)", disposition.kind)
 	}
-	req := mustRequest(ai.NewRequest("gpt-4o", []ai.Message{
-		mustMessage(ai.NewMessage(ai.RoleUser, mustPart(ai.NewText("coverage: text renders")))),
-	}))
+	if len(messages) == 0 {
+		t.Fatalf("assertKindTranslates called with no messages")
+	}
+	req := mustRequest(ai.NewRequest("gpt-4o", messages))
 	if _, err := openaicompat.Translate(req); err != nil {
 		t.Fatalf("Translate: unexpected error for a handled kind (%s): %v", disposition.kind, err)
 	}
