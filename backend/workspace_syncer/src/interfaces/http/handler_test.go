@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -26,12 +27,19 @@ type fakeRunnerForHandler struct {
 	cloneErr  error
 	probeSHA  string
 	probeErr  error
+	// block, when non-nil, makes WorktreeProbe block on the
+	// channel until it is closed. Used by the semaphore test
+	// to hold the slot open while the second request arrives.
+	block chan struct{}
 }
 
 func (f *fakeRunnerForHandler) Clone(ctx context.Context, workspaceID int64, owner, repo, oauthToken string) (string, error) {
 	return f.clonePath, f.cloneErr
 }
 func (f *fakeRunnerForHandler) WorktreeProbe(ctx context.Context, path string) (string, error) {
+	if f.block != nil {
+		<-f.block
+	}
 	return f.probeSHA, f.probeErr
 }
 func (f *fakeRunnerForHandler) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
@@ -62,6 +70,9 @@ func newTestCloneHandler(t *testing.T) (*CloneHandler, *fakeRunnerForHandler, *f
 	}
 	callback := &fakeCallbackForHandler{}
 	svc := application.NewCloneService(runner, callback, nil, nil)
+	// Use the production default (4 slots) so existing tests
+	// pass; the semaphore-specific tests construct their own
+	// handler with a 1-slot limit.
 	return NewCloneHandler(svc, nil), runner, callback
 }
 
@@ -265,5 +276,101 @@ func TestCloneHandler_NormalBody_Returns202(t *testing.T) {
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (well-formed body must be accepted); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCloneHandler_SemaphoreFull_Returns503 is the regression
+// test for spec audit finding M-3: an unbounded goroutine per
+// clone request would let a single misbehaving client exhaust
+// memory. The handler MUST cap concurrent clones with a bounded
+// semaphore and reject overflow with 503 + Retry-After.
+//
+// We construct a 1-slot handler, fill the slot, then send
+// another request and assert 503.
+func TestCloneHandler_SemaphoreFull_Returns503(t *testing.T) {
+	// Construct a 1-slot handler so the first request fills the
+	// semaphore. The slot is released when the goroutine exits;
+	// we use a blocking runner so the goroutine stays alive
+	// long enough for the second request to see the full
+	// semaphore.
+	runner := &fakeRunnerForHandler{}
+	callback := &fakeCallbackForHandler{}
+	runner.block = make(chan struct{}) // blocks WorktreeProbe
+	defer close(runner.block)          // release the blocked goroutine at end of test
+
+	svc := application.NewCloneService(runner, callback, nil, nil)
+	h := NewCloneHandlerWithLimit(svc, nil, 1)
+	e := echo.New()
+	h.Register(e)
+
+	body := cloneRequestBody{
+		JobID:         1,
+		WorkspaceID:   1,
+		Owner:         "octocat",
+		Repo:          "hello-world",
+		DefaultBranch: "main",
+		OAuthToken:    "gho_xxx",
+	}
+	bodyJSON, _ := json.Marshal(body)
+
+	// First request: 202 (acquires the slot, goroutine runs and
+	// blocks in WorktreeProbe).
+	req1 := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(bodyJSON))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	e.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusAccepted {
+		t.Fatalf("first request: status = %d, want 202", rec1.Code)
+	}
+
+	// Give the goroutine a moment to enter WorktreeProbe and
+	// hold the slot. We poll the semaphore channel with a
+	// short timeout to avoid a timing race.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(h.sem) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(h.sem) != 1 {
+		t.Fatalf("first goroutine did not acquire the slot (sem len=%d, want 1)", len(h.sem))
+	}
+
+	// Second request: 503 (semaphore full).
+	req2 := httptest.NewRequest(http.MethodPost, "/internal/clone-and-validate", bytes.NewReader(bodyJSON))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second request: status = %d, want 503 (semaphore must reject overflow); body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	// Retry-After header is set so the db_admin client backs off.
+	if rec2.Header().Get("Retry-After") == "" {
+		t.Errorf("Retry-After header is missing on 503 response (the db_admin client needs it to back off)")
+	}
+}
+
+// TestNewCloneHandlerWithLimit_FallsBackOnNonPositive asserts the
+// constructor's defensive default: a maxConcurrent < 1 value
+// MUST fall back to DefaultMaxConcurrentClones rather than
+// produce a 0-slot handler that rejects every request.
+func TestNewCloneHandlerWithLimit_FallsBackOnNonPositive(t *testing.T) {
+	runner := &fakeRunnerForHandler{}
+	callback := &fakeCallbackForHandler{}
+	svc := application.NewCloneService(runner, callback, nil, nil)
+
+	for _, limit := range []int{0, -1, -100} {
+		h := NewCloneHandlerWithLimit(svc, nil, limit)
+		if h.maxConcurrentClones != DefaultMaxConcurrentClones {
+			t.Errorf("limit=%d: maxConcurrentClones=%d, want %d (default fallback)",
+				limit, h.maxConcurrentClones, DefaultMaxConcurrentClones)
+		}
+		if cap(h.sem) != DefaultMaxConcurrentClones {
+			t.Errorf("limit=%d: sem cap=%d, want %d", limit, cap(h.sem), DefaultMaxConcurrentClones)
+		}
 	}
 }

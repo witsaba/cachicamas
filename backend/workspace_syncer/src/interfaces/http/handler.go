@@ -41,6 +41,12 @@ const asyncJobTimeout = 5 * time.Minute
 // matches the database_administrator's BodyLimit("1M") value.
 const maxRequestBodyBytes = 1 << 20
 
+// DefaultMaxConcurrentClones is the production default for the
+// bounded clone semaphore (spec audit M-3). The handler accepts
+// at most this many in-flight clones; additional requests are
+// rejected with 503 + Retry-After until a slot frees up.
+const DefaultMaxConcurrentClones = 4
+
 // cloneRequestBody is the JSON body the handler decodes. It mirrors
 // domain.CloneRequest field-for-field so the handler stays a thin
 // transport adapter. The field tags are locked.
@@ -57,17 +63,46 @@ type cloneRequestBody struct {
 // It is constructed with the application-layer use case so the
 // transport layer depends on the application, not the other way
 // around (hexagonal boundary).
+//
+// The handler holds a bounded semaphore (maxConcurrentClones) that
+// caps the number of in-flight clones. When the semaphore is full,
+// new requests are rejected with 503 + Retry-After so the caller
+// backs off (the database_administrator client treats 503 as
+// retryable). The semaphore is acquired at the START of the
+// request and released when the goroutine completes — the slot
+// stays busy for the full 5-minute asyncJobTimeout, mirroring
+// the worst-case clone + probe + callback window.
 type CloneHandler struct {
-	svc    *application.CloneService
-	logger *slog.Logger
+	svc                *application.CloneService
+	logger             *slog.Logger
+	maxConcurrentClones int
+	sem                chan struct{}
 }
 
-// NewCloneHandler constructs a CloneHandler.
+// NewCloneHandler constructs a CloneHandler with the production
+// default semaphore size (DefaultMaxConcurrentClones).
 func NewCloneHandler(svc *application.CloneService, logger *slog.Logger) *CloneHandler {
+	return NewCloneHandlerWithLimit(svc, logger, DefaultMaxConcurrentClones)
+}
+
+// NewCloneHandlerWithLimit constructs a CloneHandler with a
+// caller-specified semaphore size. The size MUST be >= 1; a
+// non-positive value falls back to DefaultMaxConcurrentClones.
+// Tests use this to construct a 1-slot handler that can be
+// deterministically filled.
+func NewCloneHandlerWithLimit(svc *application.CloneService, logger *slog.Logger, maxConcurrent int) *CloneHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &CloneHandler{svc: svc, logger: logger}
+	if maxConcurrent < 1 {
+		maxConcurrent = DefaultMaxConcurrentClones
+	}
+	return &CloneHandler{
+		svc:                svc,
+		logger:             logger,
+		maxConcurrentClones: maxConcurrent,
+		sem:                make(chan struct{}, maxConcurrent),
+	}
 }
 
 // Register registers the routes onto an Echo instance. The caller
@@ -154,6 +189,32 @@ func (h *CloneHandler) Clone(c *echo.Context) error {
 		})
 	}
 
+	// Spec audit M-3: cap concurrent clones with a bounded
+	// semaphore. Acquire a slot BEFORE returning 202 so the
+	// caller sees 503 immediately when the queue is full
+	// (without acquiring, the 202 + goroutine pattern would
+	// happily accept unbounded concurrent clones, exhausting
+	// memory under load).
+	select {
+	case h.sem <- struct{}{}:
+		// Slot acquired; release it inside the goroutine when
+		// CloneAndValidate returns (NOT in this handler's defer
+		// chain — the handler returns 202 within milliseconds and
+		// releasing the slot then would defeat the cap).
+	default:
+		// Semaphore full. Return 503 + Retry-After so the
+		// database_administrator client backs off and retries.
+		h.logger.WarnContext(c.Request().Context(), "clone: semaphore full, rejecting with 503",
+			slog.Int64("job_id", req.JobID),
+			slog.Int("max_concurrent", h.maxConcurrentClones),
+		)
+		c.Response().Header().Set("Retry-After", "5")
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"error":   "server_busy",
+			"message": "Server is at clone capacity. Please retry shortly.",
+		})
+	}
+
 	// Run the use case in a goroutine. The HTTP response is
 	// 202 immediately. The use case posts the outcome via the
 	// callback; the client polls the database_administrator's
@@ -165,7 +226,12 @@ func (h *CloneHandler) Clone(c *echo.Context) error {
 	// when Echo returns the 202 response to the client; the
 	// clone then aborts immediately with "context canceled"
 	// and the sync_job row stays in 'pending' forever.
+	//
+	// M-3 fix: the semaphore slot is released at the END of the
+	// goroutine so the cap applies to the full clone window
+	// (clone 90s + probe 30s + callback 30s = up to 5 min).
 	go func() {
+		defer func() { <-h.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), asyncJobTimeout)
 		defer cancel()
 		h.svc.CloneAndValidate(ctx, req)

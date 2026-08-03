@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -67,6 +68,28 @@ const (
 	// this, the server force-closes any in-flight connections.
 	shutdownTimeout = 10 * time.Second
 )
+
+// maxConcurrentClonesEnv is the env var name for tuning the
+// bounded clone semaphore (spec audit M-3). The default
+// (httphandler.DefaultMaxConcurrentClones) is 4; operators can
+// raise it on a larger host, lower it on a smaller one. The
+// handler rejects overflow with 503 + Retry-After.
+const maxConcurrentClonesEnv = "WORKSPACE_SYNCER_MAX_CONCURRENT_CLONES"
+
+// resolveMaxConcurrentClones reads the env var and applies the
+// default when unset or invalid. A non-positive or non-numeric
+// value falls back to httphandler.DefaultMaxConcurrentClones.
+func resolveMaxConcurrentClones() int {
+	raw := os.Getenv(maxConcurrentClonesEnv)
+	if raw == "" {
+		return httphandler.DefaultMaxConcurrentClones
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return httphandler.DefaultMaxConcurrentClones
+	}
+	return n
+}
 
 func main() {
 	// Read the service-to-service bearer token. The token is required:
@@ -201,7 +224,9 @@ func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Ech
 	// client lands in PR-2c). The use case skips permission
 	// validation when the accessor is nil.
 	svc := application.NewCloneService(runner, callback, nil, logger)
-	cloneHandler := httphandler.NewCloneHandler(svc, logger)
+	// Spec audit M-3: bounded clone semaphore. The env-driven
+	// value lets operators tune the cap without a code change.
+	cloneHandler := httphandler.NewCloneHandlerWithLimit(svc, logger, resolveMaxConcurrentClones())
 	cloneHandler.Register(e)
 
 	return e

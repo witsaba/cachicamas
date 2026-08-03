@@ -180,6 +180,43 @@ func TestNewHardenedServer_ExplicitLimits(t *testing.T) {
 	}
 }
 
+// TestResolveMaxConcurrentClones_EnvVariants pins the
+// WORKSPACE_SYNCER_MAX_CONCURRENT_CLONES env var behavior: unset
+// → default; valid positive integer → that value; invalid →
+// default (defense in depth so a typo never disables the cap).
+func TestResolveMaxConcurrentClones_EnvVariants(t *testing.T) {
+	cases := []struct {
+		name     string
+		envValue string
+		set      bool
+		want     int
+	}{
+		{"unset (empty)", "", false, 4}, // httphandler.DefaultMaxConcurrentClones = 4
+		{"set empty string", "", true, 4},
+		{"positive integer", "16", true, 16},
+		{"explicit default", "4", true, 4},
+		{"zero falls back", "0", true, 4},
+		{"negative falls back", "-5", true, 4},
+		{"non-numeric falls back", "abc", true, 4},
+		{"float falls back", "4.5", true, 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set {
+				t.Setenv(maxConcurrentClonesEnv, tc.envValue)
+			} else {
+				// Ensure unset.
+				t.Setenv(maxConcurrentClonesEnv, "")
+				// os.Unsetenv via t.Setenv requires a value; clear it.
+				_ = os.Unsetenv(maxConcurrentClonesEnv)
+			}
+			if got := resolveMaxConcurrentClones(); got != tc.want {
+				t.Errorf("resolveMaxConcurrentClones = %d, want %d (env=%q)", got, tc.want, tc.envValue)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers (test-local; production code owns the canonical wiring).
 // ---------------------------------------------------------------------------
