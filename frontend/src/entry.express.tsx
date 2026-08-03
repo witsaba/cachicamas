@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync, statSync, createReadStream } from "node:fs";
 import render from "./entry.ssr";
+import { setSecurityHeaders, getSecurityHeaders } from "./lib/security-headers";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -105,7 +106,16 @@ function proxyToApi(
       headers,
     },
     (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+      // Merge our security headers on top of the upstream response so
+      // a permissive backend cannot re-introduce a relaxed header (e.g.
+      // X-Frame-Options: SAMEORIGIN). Node's writeHead merges with
+      // previously-set headers, but the merge favors the values
+      // passed here, so we re-apply ours explicitly.
+      const outHeaders = {
+        ...proxyRes.headers,
+        ...getSecurityHeaders(req),
+      };
+      res.writeHead(proxyRes.statusCode ?? 502, outHeaders);
       proxyRes.pipe(res);
     },
   );
@@ -184,22 +194,29 @@ function serveStaticAssets(
 }
 
 const server = createServer((req, res) => {
-  // 1. /api/* → Go binary reverse proxy.
-  if (req.url?.startsWith("/api/")) {
-    return proxyToApi(req, res);
-  }
+  // 0. Security headers (CSP/HSTS/X-Content-Type-Options/etc.) on
+  //    every response — runs first so the proxy, the static assets,
+  //    the SSR router, and the 404 fallback all carry the headers.
+  //    For the proxy, the headers are ALSO re-merged into the upstream
+  //    response (see proxyToApi) to override any permissive backend.
+  setSecurityHeaders(req, res, () => {
+    // 1. /api/* → Go binary reverse proxy.
+    if (req.url?.startsWith("/api/")) {
+      return proxyToApi(req, res);
+    }
 
-  // 2. Static assets (cache headers, fast path).
-  serveStaticAssets(req, res, () => {
-    // 3. Qwik SSR (handles prerendered + dynamic routes).
-    staticFile(req, res, () => {
-      router(req, res, () => {
-        notFound(req, res, () => {
-          // Last resort: 404 plain text.
-          if (!res.headersSent) {
-            res.writeHead(404, { "content-type": "text/plain" });
-          }
-          res.end("Not found");
+    // 2. Static assets (cache headers, fast path).
+    serveStaticAssets(req, res, () => {
+      // 3. Qwik SSR (handles prerendered + dynamic routes).
+      staticFile(req, res, () => {
+        router(req, res, () => {
+          notFound(req, res, () => {
+            // Last resort: 404 plain text.
+            if (!res.headersSent) {
+              res.writeHead(404, { "content-type": "text/plain" });
+            }
+            res.end("Not found");
+          });
         });
       });
     });
