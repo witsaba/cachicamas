@@ -4,24 +4,26 @@ import "github.com/cachicamas/backend/agent/src/ai"
 
 // Translate renders req as this adapter's wire body: a neutral request in,
 // wire bytes out, taking no client, performing no I/O and mutating nothing
-// req holds (NFR-ART-C). Once a later slice's refusal path exists
-// (R-ART-015, R-ART-021), a refusal returns nil bytes and a
-// [ai.PreStreamFailure] error; this slice never refuses, so it always
-// returns a nil error.
+// req holds (NFR-ART-C).
+//
+// A request carrying a reasoning content part refuses (R-ART-015,
+// policy.go's refuseReasoning/refuse): nil bytes and an
+// [ai.PreStreamFailure] error, checked BEFORE appendBody runs at all, so
+// no wire body is ever produced for a refused request — not even a
+// partial one covering the messages that precede the reasoning part.
+// AI-26.8's own exhaustive-walk refusals (R-ART-021, a later slice, for
+// every other refuse-disposition feature) are still to come, added
+// without changing this function's signature: refuseReasoning is one
+// call among what will be more than one, not a special case wired
+// directly into this function forever.
 //
 // The body is hand-assembled by body.go's appendBody, in one fixed
 // source-code order, never struct-marshalled — see doc.go's wire-shape
 // provenance section (claim 3) for why encoding/json's own compaction and
 // HTML-escaping disqualify it for this milestone (R-ART-010).
-//
-// R-ART-002 is this slice's whole scope: model identity, one rendered
-// message and the unconditional stream/stream_options.include_usage
-// fields (R-ART-017; the bytes are emitted here so no later slice rewrites
-// every earlier expectation literal — design.md "Usage opt-in
-// placement"). System segments, tools, generation options, every
-// content-part variant, tool results, reasoning refusal and the
-// exhaustive feature policy are later slices', added without changing
-// this function's signature.
 func Translate(req ai.Request) ([]byte, error) {
+	if err := refuseReasoning(req); err != nil {
+		return nil, err
+	}
 	return appendBody(req), nil
 }

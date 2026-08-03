@@ -4,6 +4,7 @@
 package openaicompat_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -193,27 +194,44 @@ func TestMessage_PartOrderSwap_TranslatesDifferently(t *testing.T) {
 	}
 }
 
-// partKindDisposition records, for one ai.PartKinds() member, whether this
-// phase renders it or defers it — and, when deferred, precisely which
-// later phase/node owns it and what that phase must verify. This is a
-// phase-5-local bookkeeping table, distinct from AI-26.8's own production
-// policy.go table (Phase 8): it exists only to keep S-ART-027's "none is
-// unaddressed" claim mechanically total for this node, walking
-// ai.PartKinds() itself rather than a hand-maintained prose list that
-// could silently rot as the vocabulary grows.
+// partKindDisposition records, for one ai.PartKinds() member, whether
+// this phase renders it or refuses it with a typed error. This is a
+// phase-5-local bookkeeping table, distinct from AI-26.8's own
+// production policy.go table (Phase 8): it exists only to keep
+// S-ART-027's "none is unaddressed" claim mechanically total for this
+// node, walking ai.PartKinds() itself rather than a hand-maintained prose
+// list that could silently rot as the vocabulary grows.
+//
+// A third disposition — deferred, accounted for by neither renders nor
+// refuses, only a recorded hand-off to a later phase — existed through
+// AI-26.3/AI-26.5, for PartKindReasoning specifically. AI-26.6 (Phase 7)
+// resolved that hand-off (refused, not rendered), which leaves zero
+// currently-declared ai.PartKinds() members deferred; the "deferred"
+// disposition and its own proof (a checked, panic-based assertion) were
+// removed with it rather than kept as unreachable dead code no test
+// exercised — lookupPartKindDisposition's own ok==false branch, below,
+// remains the mechanism that catches a genuinely new, unaccounted-for
+// kind, deferred or otherwise, the moment ai.PartKinds() grows again.
 type partKindDisposition struct {
 	kind    ai.PartKind
 	handled bool
-	handoff string // required when handled is false; empty when handled
+	refused bool // only meaningful when handled is true: renders (false) vs. refuses with a typed error (true)
 }
 
 var partKindDispositions = []partKindDisposition{
 	{kind: ai.PartKindText, handled: true},
-	{
-		kind:    ai.PartKindReasoning,
-		handled: false,
-		handoff: "AI-26.6 (Phase 7): policy.go's refuse() door must intercept a reasoning part — every state, every position — before appendBody starts appending anything, returning ai.PreStreamFailure+ai.ErrUnsupportedCapability naming \"reasoning\", with no wire body produced even when the reasoning part sits after otherwise-renderable messages. message.go's current panic is a transitional safety net, not the replacement site.",
-	},
+	// PartKindReasoning was AI-26.3's (Phase 5) own hand-off, recorded here
+	// at that phase in this file's prior revision — see that revision for
+	// its exact text. AI-26.6 (Phase 7, policy.go's refuse() door,
+	// refuseReasoning) now intercepts every reasoning part, every state,
+	// every position, before Translate ever calls appendBody: it is
+	// "handled" in the sense that S-ART-027 means (accounted for,
+	// mechanically, not merely by inspection), but handled BY REFUSAL, not
+	// by rendering — assertKindRefuses (below) is this table's own
+	// positive proof of that, distinct from assertKindTranslates' proof
+	// for the three kinds that render. See doc.go's "Reasoning replay
+	// refuses; Layer 2 must strip first" section (R-ART-015).
+	{kind: ai.PartKindReasoning, handled: true, refused: true},
 	// PartKindToolCall and PartKindToolResult carried the AI-26.5 (Phase 6)
 	// hand-off recorded here at AI-26.3 (Phase 5) — see this file's own
 	// prior revision for its exact text. Both are now handled: a tool call
@@ -260,7 +278,7 @@ func TestMessage_PartKindCoverage(t *testing.T) {
 				assertKindTranslates(t, disposition, message)
 			case ai.PartKindReasoning:
 				message := mustMessage(ai.NewMessage(ai.RoleAssistant, mustPart(ai.NewReasoning("thinking it through", nil))))
-				assertKindIsDeferred(t, disposition, message)
+				assertKindRefuses(t, disposition, message)
 			case ai.PartKindToolCall:
 				message := mustMessage(ai.NewMessage(ai.RoleAssistant, mustPart(ai.NewToolCall("call_1", "get_weather", []byte(`{}`)))))
 				assertKindTranslates(t, disposition, message)
@@ -287,17 +305,18 @@ func TestMessage_PartKindCoverage(t *testing.T) {
 	}
 }
 
-// assertKindTranslates proves a "handled: true" kind actually translates
-// without error — the coverage test's own positive half — using messages
-// that genuinely carry that kind. It does not fall back to a generic
-// Text-only smoke request: doing so would pass regardless of whether the
-// kind under test renders at all, exactly the "fixture cannot distinguish
-// implemented from not-implemented" trap assertKindIsDeferred's own doc
-// comment names for the coverage test's negative half.
+// assertKindTranslates proves a "handled: true, refused: false" kind
+// actually translates without error — the coverage test's own
+// render-side proof — using messages that genuinely carry that kind. It
+// does not fall back to a generic Text-only smoke request: doing so would
+// pass regardless of whether the kind under test renders at all, exactly
+// the "fixture cannot distinguish implemented from not-implemented" trap
+// this milestone's own evidence discipline exists to catch (assertKindRefuses,
+// below, names the same trap for the refusal-side proof).
 func assertKindTranslates(t *testing.T, disposition partKindDisposition, messages ...ai.Message) {
 	t.Helper()
-	if !disposition.handled {
-		t.Fatalf("assertKindTranslates called for a kind recorded handled: false (%s)", disposition.kind)
+	if !disposition.handled || disposition.refused {
+		t.Fatalf("assertKindTranslates called for a kind not recorded handled+not-refused (%s)", disposition.kind)
 	}
 	if len(messages) == 0 {
 		t.Fatalf("assertKindTranslates called with no messages")
@@ -308,59 +327,49 @@ func assertKindTranslates(t *testing.T, disposition partKindDisposition, message
 	}
 }
 
-// assertKindIsDeferred proves a deferred kind is neither silently rendered
-// nor silently dropped: translating a request whose FIRST message carries
-// only that kind currently panics with a message naming the kind by its
-// own registered name (disposition.kind.String()), rather than succeeding
-// with a wrong or incomplete body, and rather than merely panicking for
-// some unrelated reason (R-ART-007). Checking the panic message's content,
-// not only that a panic occurred, is deliberate: a generic "content shape
-// not supported" panic that names no kind would satisfy a bare panic check
-// just as well without this file's own per-kind handling existing at all —
-// exactly the vacuous-pass shape ("fixture cannot distinguish implemented
-// from not-implemented") this milestone's evidence discipline exists to
-// catch.
+// assertKindRefuses proves a "handled: true, refused: true" kind fails
+// translation with a typed AI-19 refusal, reachable via
+// errors.Is(err, ai.ErrUnsupportedCapability) through ai.Failure's own Is
+// method — never with an unrecovered panic, which is what this same kind
+// (PartKindReasoning) produced before AI-26.6 (Phase 7) landed the
+// refusal door (a plain, checked panic-content assertion, the same
+// "check content, not occurrence" discipline this function now applies
+// to the returned error instead). Checking error identity rather than
+// merely "Translate returned a non-nil error" is deliberate: a
+// translation that failed for some unrelated reason would satisfy a bare
+// non-nil check just as well, which is exactly the vacuous-pass shape
+// this milestone's evidence discipline exists to catch (this coverage
+// test's own analogue of reasoning_refusal_test.go's
+// TestRefusalCases_FailWithUnsupportedCapability).
 //
-// messages accepts more than one message so a kind whose construction
-// rules need a cross-request correlate (a tool result needs a tool call
-// "somewhere" in the request, ai.NewRequest's own unresolvedToolResultRule)
-// can still build a request that survives mustRequest — the correlate is
-// supplied as a later message, never the first, so the panic this function
-// observes is always attributable to messages[0]'s own kind.
-//
-// It also requires disposition.handoff to be recorded, so a "handled:
-// false" entry can never ship without stating which later phase owns it
-// and what that phase must verify.
-func assertKindIsDeferred(t *testing.T, disposition partKindDisposition, messages ...ai.Message) {
+// It also asserts no wire body is produced alongside the error (R-ART-015
+// — "no wire body is produced"), and that the returned error's own
+// unwrapped cause names disposition.kind.String() ("reasoning") — the
+// same "name the kind, not just fail somehow" discipline the pre-AI-26.6
+// panic-content check applied to the panic message it used to check.
+func assertKindRefuses(t *testing.T, disposition partKindDisposition, messages ...ai.Message) {
 	t.Helper()
-	if disposition.handled {
-		t.Fatalf("assertKindIsDeferred called for a kind recorded handled: true (%s)", disposition.kind)
-	}
-	if disposition.handoff == "" {
-		t.Fatalf("ai.PartKind %s is recorded deferred but carries no hand-off note — S-ART-027 requires every unaddressed kind to name what later phase owns it", disposition.kind)
+	if !disposition.handled || !disposition.refused {
+		t.Fatalf("assertKindRefuses called for a kind not recorded handled+refused (%s)", disposition.kind)
 	}
 	if len(messages) == 0 {
-		t.Fatalf("assertKindIsDeferred called with no messages")
+		t.Fatalf("assertKindRefuses called with no messages")
 	}
 
 	req := mustRequest(ai.NewRequest("gpt-4o", messages))
 
-	recovered := func() (recovered any) {
-		defer func() {
-			recovered = recover()
-		}()
-		_, _ = openaicompat.Translate(req)
-		return nil
-	}()
-
-	if recovered == nil {
-		t.Fatalf("Translate did not panic for a deferred kind (%s) — it must fail loudly, not silently render or silently drop the part (R-ART-007)", disposition.kind)
+	got, err := openaicompat.Translate(req)
+	if err == nil {
+		t.Fatalf("Translate: no error for a refused kind (%s) — R-ART-015 requires a typed refusal, not a silent success", disposition.kind)
 	}
-	panicMessage, ok := recovered.(string)
-	if !ok {
-		t.Fatalf("Translate panicked with a non-string value (%v, %T) for a deferred kind (%s)", recovered, recovered, disposition.kind)
+	if got != nil {
+		t.Fatalf("Translate: got %d byte(s) of wire body alongside a refusal error for kind %s, want none", len(got), disposition.kind)
 	}
-	if !strings.Contains(panicMessage, disposition.kind.String()) {
-		t.Fatalf("Translate panicked with %q, want a message naming the deferred kind %q", panicMessage, disposition.kind.String())
+	if !errors.Is(err, ai.ErrUnsupportedCapability) {
+		t.Fatalf("Translate error = %v, want errors.Is(err, ai.ErrUnsupportedCapability) for a refused kind (%s)", err, disposition.kind)
+	}
+	cause := errors.Unwrap(err)
+	if cause == nil || !strings.Contains(cause.Error(), disposition.kind.String()) {
+		t.Fatalf("Translate error's unwrapped cause = %v, want it to name the refused kind %q", cause, disposition.kind.String())
 	}
 }
