@@ -19,6 +19,14 @@ const DefaultMaxFrameBytes = 8 * 1024 * 1024
 // frame; classifying wire failures and reading a frame's meaning both
 // belong to later milestones (R-ASD-025).
 //
+// # End-of-input is a decoder signal, not a transport condition
+//
+// Finish is the caller's explicit statement that no further bytes will
+// ever arrive (R-ASD-024). The decoder never interprets, produces or
+// depends on a transport end-of-file value such as io.EOF or
+// io.ErrUnexpectedEOF — translating a read-loop end into a Finish call is
+// entirely the caller's job, outside this package.
+//
 // # Pure incremental function over bytes
 //
 // Decoder is driven entirely by its caller pushing bytes through Feed and
@@ -59,10 +67,10 @@ type Decoder struct {
 	// stripped leading one, is ordinary content (S-ASD-026).
 	bomChecked bool
 
-	// err is the decoder's terminal error, once one occurs (R-ASD-019's
-	// cap-exceeded abort is the only source in this slice; AI-27.6 adds
-	// truncation as a second). Once set, every later Feed and Finish
-	// call returns it immediately, touching no other state (design.md's
+	// err is the decoder's terminal error, once one occurs: R-ASD-019's
+	// cap-exceeded abort (Feed) and R-ASD-023's truncation (Finish) are
+	// its only two sources. Once set, every later Feed and Finish call
+	// returns it immediately, touching no other state (design.md's
 	// "Poisoning" decision) — a half-consumed frame boundary is
 	// unrecoverable, so there is nothing safe to resume.
 	err error
@@ -166,7 +174,8 @@ func (d *Decoder) Feed(p []byte) ([]Frame, error) {
 // exactly where it is, in the retained tail buf already carries across
 // Feed calls — held structurally, with no separate "pending CR" flag
 // that could desynchronize — and is resolved by the next Feed call's
-// leading byte, or (AI-27.6, slice 6) by Finish.
+// leading byte, or, once no further byte will ever arrive, by Finish
+// (see pendingFinalCR).
 func nextLine(buf []byte, start int) (line []byte, next int, ok bool) {
 	rest := buf[start:]
 	i := bytes.IndexAny(rest, "\r\n")
@@ -243,26 +252,73 @@ func (d *Decoder) stripBOM() {
 	d.bomChecked = true
 }
 
-// Finish signals that no further bytes will arrive.
+// Finish signals that no further bytes will ever arrive (R-ASD-024): a
+// decoder-level signal the caller states explicitly, never inferred by
+// the decoder from byte content and never a transport end-of-file value
+// — see the Decoder type's own doc comment.
 //
-// If an earlier Feed call already returned ErrFrameTooLarge, Finish
-// returns that same error (design.md's poisoning decision) rather than
-// nil: the decoder has nothing further to report once its first terminal
+// If an earlier Feed call already returned ErrFrameTooLarge, or a
+// previous Finish call already returned ErrTruncated, Finish returns that
+// same error (design.md's poisoning decision) rather than re-deriving it:
+// the decoder has nothing further to report once its first terminal
 // error has occurred.
 //
-// Beyond that poisoning check, this slice's implementation is still a
-// stub: truncation detection (an incomplete frame still pending when the
-// caller signals completion) is AI-27.6's own ErrTruncated obligation.
-// Every non-poisoned scenario this slice proves ends its transcript at a
-// clean frame boundary, so Finish has nothing else yet to detect — but
-// the method exists now because it is part of the public shape every
-// later slice builds on (R-ASD-003's "decode completes" scenarios call
-// it).
+// Otherwise, Finish first resolves a pending buffer-final CR — the one
+// ambiguity Feed structurally defers rather than guesses (see
+// pendingFinalCR) — as a lone-CR terminator, since no further byte will
+// ever arrive to make it the first half of a CRLF pair instead. Once
+// resolved, Finish reports ErrTruncated (R-ASD-023) the instant any of
+// the following is still true: unresolved bytes remain in the retained
+// tail, the data accumulation is non-empty, or the event-type
+// accumulation is non-empty. No frame is ever dispatched from this
+// check — reporting success on a half-answer is the exact failure this
+// requirement exists to prevent, so a partial frame is discarded, never
+// silently completed. Only when none of those three hold does Finish
+// report nil: a clean end at a frame boundary (R-ASD-022) — including
+// the case where the only pending byte was a buffer-final CR terminating
+// an otherwise-empty line with nothing else accumulated, where resolving
+// it changes nothing observable and must not be misreported as
+// truncation.
 func (d *Decoder) Finish() error {
 	if d.err != nil {
 		return d.err
 	}
+
+	if content, ok := pendingFinalCR(d.buf); ok {
+		if len(content) > 0 {
+			d.processFieldLine(content)
+		}
+		d.buf = d.buf[:0]
+	}
+
+	if len(d.buf) > 0 || len(d.data) > 0 || len(d.eventType) > 0 {
+		d.err = ErrTruncated
+		return d.err
+	}
 	return nil
+}
+
+// pendingFinalCR reports whether buf's very last byte is an unresolved
+// carriage return — the exact ambiguity nextLine defers rather than
+// guesses (see resolveCR's doc comment): whether a CR is a lone-CR
+// terminator or the first half of a CRLF pair depends on the next byte,
+// and Feed leaves it sitting in the retained tail whenever that next byte
+// has not arrived yet. Finish is the one caller who can answer the
+// question nextLine cannot: no further byte is EVER coming, so a pending
+// buffer-final CR always resolves as a lone-CR terminator.
+//
+// content is the (possibly empty) line that CR terminates — everything in
+// buf before it. Because Feed's scan loop always resolves every earlier
+// terminator before it ever returns (nextLine's failure path is the very
+// first unresolved point reached, never a later one), buf can hold at
+// most one such ambiguity, and only ever as its final byte; content is
+// therefore guaranteed free of any terminator of its own and safe to hand
+// directly to processFieldLine.
+func pendingFinalCR(buf []byte) (content []byte, ok bool) {
+	if len(buf) == 0 || buf[len(buf)-1] != '\r' {
+		return nil, false
+	}
+	return buf[:len(buf)-1], true
 }
 
 // processFieldLine parses one non-blank line as a field and updates the
