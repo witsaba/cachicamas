@@ -74,12 +74,16 @@ func appendModelField(buf []byte, req ai.Request) []byte {
 // instruction is present.
 //
 // This loop is also the whole of R-ART-009's "no merging" guarantee: it
-// calls appendMessageObject (message.go, AI-26.3) once per req.Messages()
-// element, unconditionally, with no lookahead or grouping by role, so a
-// run of consecutive same-role messages always produces that many
-// distinct wire objects. Every role and every content-part variant this
-// phase reads is message.go's own (AI-26.3, slice 5), which replaced this
-// skeleton's original one-role/one-text-part-only rendering outright.
+// calls appendMessageObject (message.go, AI-26.3, grown at AI-26.5) once
+// per req.Messages() element, unconditionally, with no lookahead or
+// grouping by role, so a run of consecutive same-role messages never
+// produces fewer wire objects than the ai.Message values that produced
+// them — a RoleTool message carrying more than one tool result can
+// produce MORE (appendToolResultMessages, message.go, AI-26.5), never
+// fewer. Every role and every content-part variant this phase reads is
+// message.go's own (AI-26.3, slice 5; AI-26.5, slice 6), which replaced
+// this skeleton's original one-role/one-text-part-only rendering
+// outright.
 func appendMessagesField(buf []byte, req ai.Request) []byte {
 	buf = append(buf, `"messages":[`...)
 	wrote := false

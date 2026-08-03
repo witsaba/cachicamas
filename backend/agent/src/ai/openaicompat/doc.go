@@ -387,4 +387,86 @@
 // merge would, and is caught by the same registered cases either mutation
 // shape would break. See tasks.md's Phase 5 evidence log for the exact
 // staged change and its observed, then reverted, failures.
+//
+// # Tool calls render in their own tool_calls array; tool results render as their own distinct role:"tool" messages (AI-26.5, R-ART-012 … R-ART-014)
+//
+// message_test.go's own hand-off note (partKindDispositions,
+// PartKindToolCall/PartKindToolResult, recorded at AI-26.3) already
+// stated the shape this slice discharges: a tool call renders as an
+// element of a SEPARATE top-level tool_calls array on the assistant
+// message object, never as a content-part array element; a tool result
+// renders as its own distinct role:"tool" wire message, never a block
+// nested inside a user-role message and never a nested object on another
+// message (R-ART-012, AI-24 §6's given shape, not re-derived here).
+//
+// splitToolCalls (message.go) is where the two paths separate: it
+// partitions a non-tool-role message's content, once, into its
+// non-tool-call remainder (rendered as "content") and its tool-call
+// parts (rendered as "tool_calls"), so appendMessageContent and
+// appendContentPartObject never need to know a tool-call part can occur
+// in their own input at all — PartKindToolCall reaches neither. A
+// RoleTool message is intercepted whole, before any of that, by
+// appendMessageObject's own dispatch (appendToolResultMessages) — request.go's
+// own rolePermittedKinds table already restricts such a message to
+// PartKindToolResult alone, enforced by ai.NewRequest before Translate is
+// ever reached, so PartKindToolResult reaches neither path either.
+//
+// # Tool-call identifier: pass-through only, the minting branch has no subject (R-ART-013)
+//
+// Doc 0002's amended AI-26.5 charter (2026-08-03) records that this
+// vendor assigns tool-call identifiers on the call's own opening delta,
+// so the requirement's synthetic-minting branch is marked NOT-APPLICABLE
+// for this adapter, not silently skipped — the text stays in force for a
+// future adapter whose vendor assigns none. What this adapter proves
+// instead is the pass-through half: appendToolCallObject's "id" and
+// appendToolResultObject's "tool_call_id" both splice ai.ToolCall.ID()/
+// ai.ToolResult.CallID() through appendJSONString unchanged — no
+// generation, derivation, normalization or truncation on any path.
+// Result-to-call correlation (R-ART-014) is a direct consequence, not a
+// separate algorithm: appendToolResultObject performs no lookup, no
+// matching and no positional reasoning of its own — the wire
+// tool_call_id is literally the value the caller supplied when it built
+// the ai.ToolResult, so correlation survives translation because nothing
+// on this path has an opportunity to substitute anything else for it.
+// tool_result_test.go's own interleaved multi-call case and its staged,
+// reverted position-based mutation (S-ART-048/049) both exist because a
+// NON-interleaved fixture cannot distinguish this direct pass-through
+// from a plausible positional bug that happens to produce the same bytes
+// when calls and results are declared in matching order.
+//
+// # Assistant "content" is omitted, never null, when a message carries only tool calls
+//
+// Claim 1.0.5 (this file's own wire-shape provenance section) settled
+// content's shape as oneOf[string, array] — it was never settled as
+// oneOf[string, array, null]. An assistant message whose content is
+// entirely tool calls (ai.rolePermittedKinds' own RoleAssistant row
+// permits Text, Reasoning and ToolCall in any combination, including
+// zero Text parts) therefore has nothing citable to put in "content" at
+// all: appendMessageObject omits the field outright rather than
+// fabricating a "content":null this citation gate never licensed. This
+// is not a new convention invented for this case — it is the same
+// presence-flag, omit-when-absent shape every other optional field in
+// this package already uses (option.go's generation options and
+// tool_choice, tool.go's own "tools" field, body.go's extension
+// members): "the caller said nothing here" renders as no field, never a
+// placeholder value standing in for absence.
+//
+// # No distinct wire field for a failed tool result (S-ART-044)
+//
+// AI-24 §6's given shape for a tool-role message carries no field
+// recording whether the tool failed, and this package invents none:
+// appendToolResultObject renders result.Content() unconditionally,
+// identically whether result.Failed() is true or false, never branching
+// on it. tool_result.go's own doc comment states the reason at the
+// source: a failing tool's answer is content the model reasons about,
+// not a fault this package's taxonomy names ("a taxonomy here would be
+// Layer 2's policy wearing a Layer 1 type"). "Not silently rendered as
+// success" (S-ART-044) is exactly what this produces: there is no
+// separate "success" code path a failed result could fall into, because
+// there is only one code path. tool_result_test.go's
+// TestToolResult_FailedAndSucceededRenderIdentically proves this beyond
+// one hand-picked case: two results differing only in identifier,
+// content and Failed() translate to bodies differing only in identifier
+// and content — substituting one identifier for the other in the
+// succeeded body's own bytes reproduces the failed body exactly.
 package openaicompat
