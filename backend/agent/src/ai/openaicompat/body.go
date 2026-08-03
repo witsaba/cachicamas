@@ -7,12 +7,15 @@ import (
 )
 
 // appendBody hand-assembles req's wire body into one contiguous byte
-// slice, in one fixed source-code order: model, messages, tools (this
-// slice's own field, AI-26.4, present only when the request declares at
-// least one — appendToolsField, tool.go), [tool_choice, generation
-// options — later slices splice these in here], stream/stream_options,
-// [provider-extension members — later slices splice these in last]
-// (design.md "Data Flow").
+// slice, in one fixed source-code order: model, messages, tools
+// (AI-26.4, present only when the request declares at least one —
+// appendToolsField, tool.go), tool_choice and the generation options
+// max_tokens/temperature/top_p/stop (AI-26.7, this slice's own fields,
+// each present only when its own presence flag is set —
+// appendToolChoiceField/appendGenerationOptionFields, option.go),
+// stream/stream_options, [provider-extension members — NOT implemented
+// this slice; see doc.go's "Escape hatch: reserved namespace not yet
+// defined upstream" section] (design.md "Data Flow").
 //
 // This is deliberately NOT struct-marshalled through encoding/json — see
 // doc.go's wire-shape provenance section, claim 3: json.Marshal pipes
@@ -39,12 +42,19 @@ func appendBody(req ai.Request) []byte {
 		buf = append(buf, ',')
 		buf = appendToolsField(buf, tools)
 	}
-	// Later slices splice tool_choice and generation options (26.7) in
-	// here, between tools and stream, in that fixed order.
+	if choice, hasChoice := req.ToolChoice(); hasChoice {
+		buf = append(buf, ',')
+		buf = appendToolChoiceField(buf, choice)
+	}
+	buf = appendGenerationOptionFields(buf, req)
 	buf = append(buf, ',')
 	buf = appendStreamFields(buf)
-	// Later slices splice this adapter's own provider-extension namespace
-	// members in here, last (26.7).
+	// This adapter's own provider-extension namespace members would
+	// splice in here, last (R-ART-019) — NOT implemented this slice: see
+	// doc.go's "Escape hatch: reserved namespace not yet defined
+	// upstream" section. AI-25's landed artifact never defines the
+	// reserved namespace value this splice needs, and this node's own
+	// instruction forbids inventing one here.
 	buf = append(buf, '}')
 	return buf
 }
