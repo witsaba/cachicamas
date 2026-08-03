@@ -32,6 +32,7 @@ import { dirname, join } from "node:path";
 import { existsSync, statSync, createReadStream } from "node:fs";
 import render from "./entry.ssr";
 import { setSecurityHeaders, getSecurityHeaders } from "./lib/security-headers";
+import { logInternalTarget } from "./lib/log-config";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -225,6 +226,11 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[qwik-server] listening on http://${HOST}:${PORT}`);
-  console.log(`[qwik-server] API target: ${API_TARGET}`);
+  // Internal topology (API_TARGET = database_administrator:8080) MUST
+  // not appear in production logs. Gated behind DEBUG=1 — see
+  // lib/log-config.ts and security-response-headers spec REQ-03.
+  if (logInternalTarget()) {
+    console.log(`[qwik-server] API target: ${API_TARGET}`);
+  }
   console.log(`[qwik-server] static root: ${STATIC_ROOT}`);
 });
