@@ -450,3 +450,51 @@ func TestNew_AdapterBuiltTransportLeavesProxyUnset(t *testing.T) {
 		t.Error("adapter-built transport's Proxy resolver is set, want nil — no environment-derived proxy (S-APC-036)")
 	}
 }
+
+// TestNew_AdapterBuiltTransportBoundsExist covers S-APC-021 and S-APC-022
+// (R-APC-005): the adapter-built client's connect, TLS-handshake,
+// time-to-headers and idle bounds are each non-zero and equal the design's
+// recorded safe values. This is a deliberately structural assertion, not a
+// behavioural one — see R-APC-005's own reasoning on why a probe would
+// either wait a real bound out or produce a vacuous green. It is also the
+// mutation-detection test for S-APC-023 (Mutation proof #4).
+func TestNew_AdapterBuiltTransportBoundsExist(t *testing.T) {
+	t.Parallel()
+
+	c, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil", err)
+	}
+
+	tr, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("adapter-built client's Transport is %T, want *http.Transport", c.httpClient.Transport)
+	}
+
+	if tr.DialContext == nil {
+		t.Error("DialContext is nil, want non-nil — a connect-phase bound must exist (S-APC-021)")
+	}
+	if tr.TLSHandshakeTimeout != defaultTLSHandshakeTimeout {
+		t.Errorf("TLSHandshakeTimeout = %v, want %v (S-APC-021)", tr.TLSHandshakeTimeout, defaultTLSHandshakeTimeout)
+	}
+	if tr.ResponseHeaderTimeout != defaultResponseHeaderTimeout {
+		t.Errorf("ResponseHeaderTimeout = %v, want %v (S-APC-022)", tr.ResponseHeaderTimeout, defaultResponseHeaderTimeout)
+	}
+	if tr.IdleConnTimeout != defaultIdleConnTimeout {
+		t.Errorf("IdleConnTimeout = %v, want %v (S-APC-022)", tr.IdleConnTimeout, defaultIdleConnTimeout)
+	}
+
+	for name, d := range map[string]time.Duration{
+		"defaultDialTimeout":           defaultDialTimeout,
+		"defaultTLSHandshakeTimeout":   defaultTLSHandshakeTimeout,
+		"defaultResponseHeaderTimeout": defaultResponseHeaderTimeout,
+		"defaultIdleConnTimeout":       defaultIdleConnTimeout,
+	} {
+		if d <= 0 {
+			t.Errorf("%s = %v, want > 0 — bounds are asserted, not assumed (S-APC-021/S-APC-022)", name, d)
+		}
+	}
+}
