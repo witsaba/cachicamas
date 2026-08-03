@@ -35,7 +35,9 @@ import (
 // them) could silently misroute this probe on any developer machine with
 // HTTP_PROXY set. Every construction in this file therefore leaves
 // Config.HTTPClient nil, so New builds its own client, whose transport
-// leaves Proxy unset (R-APC-009) — proxy-immune by construction.
+// leaves Proxy unset (R-APC-009) — proxy-immune by construction, which is
+// what TestViability_AdapterBuiltClientIgnoresProxyEnvironment below
+// exercises directly.
 //
 // # The header shape, resolved against merged fact
 //
@@ -173,4 +175,45 @@ func TestViability_RequestReachesLocalServerWithCredentialAttached(t *testing.T)
 			t.Errorf("Authorization header = %q, want %q — attachment derives from the injected credential, not a hard-coded value (S-APC-051)", got.authorization, wantAuth)
 		}
 	})
+}
+
+// TestViability_AdapterBuiltClientIgnoresProxyEnvironment covers S-APC-052:
+// with a proxy environment variable set in this test process to an address
+// that would fail, the probe still reaches the local test server — the
+// adapter-built client's transport leaves its proxy resolver unset
+// (R-APC-009), so it never consults HTTP_PROXY at all.
+//
+// This test is deliberately SERIAL. Do NOT add t.Parallel() anywhere in
+// this test: t.Setenv panics if called from a parallel test. This package
+// already has one other serial test for the same reason (timeout_test.go's
+// paired comparison). Go runs a package's non-parallel tests strictly
+// sequentially, so the two never overlap, and t.Setenv's automatic cleanup
+// restores the environment before the next serial test runs.
+func TestViability_AdapterBuiltClientIgnoresProxyEnvironment(t *testing.T) {
+	ch := make(chan capturedRequest, 1)
+	server := newViabilityServer(ch)
+	defer server.Close()
+
+	// A dead address: nothing listens here. If the adapter-built client
+	// consulted this at all, every request would fail to reach the real
+	// local server instead of arriving directly.
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+
+	c, err := New(Config{
+		Endpoint:   server.URL,
+		Credential: NewCredential("viability-proxy-token"),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil", err)
+	}
+
+	driveOneViabilityRequest(t, c, "chat", "completions")
+
+	got := receiveCapturedRequest(t, ch)
+	assertNoExtraRequest(t, ch)
+
+	const wantAuth = "Bearer viability-proxy-token"
+	if got.authorization != wantAuth {
+		t.Errorf("Authorization header = %q, want %q — the request must still carry the credential despite the poisoned proxy environment (S-APC-052)", got.authorization, wantAuth)
+	}
 }
