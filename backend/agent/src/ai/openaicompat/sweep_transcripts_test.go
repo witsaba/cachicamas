@@ -55,9 +55,10 @@ func sweepTemplateFrames() []openaicompat.Frame {
 // carries one representative transcript per terminator style plus the BOM
 // and multi-line-data cases the sweep must prove re-entrant, per
 // tasks.md 3.1: LF-only, CRLF, lone-CR, mixed, BOM-prefixed,
-// multi-line-data. Every entry sets want — see sweepTranscript's doc
-// comment for why that matters beyond the one entry the spec requires as a
-// minimum.
+// multi-line-data, comment-interleaved (added by slice 4, AI-27.4 /
+// R-ASD-015 — design.md names this exact entry name for the slice-4
+// addition). Every entry sets want — see sweepTranscript's doc comment for
+// why that matters beyond the one entry the spec requires as a minimum.
 var sweepTranscripts = []sweepTranscript{
 	{
 		name:       "lf-only",
@@ -114,6 +115,21 @@ var sweepTranscripts = []sweepTranscript{
 		want: []openaicompat.Frame{
 			{Event: "message", Data: []byte("line one\nline two\nline three")},
 			{Event: "message", Data: []byte("café ❤️ \U0001F600")},
+		},
+	},
+	{
+		// Added by slice 4 (AI-27.4, R-ASD-015): comment (keep-alive)
+		// lines interleaved before, between and after the frame's own
+		// field lines. This gives the offset sweep its first fixture
+		// containing a comment line, so the exhaustive per-offset loop
+		// necessarily lands, at some offset, inside a comment's own
+		// bytes or exactly at its leading colon — a boundary the sweep
+		// never previously exercised — reconstructing identically to the
+		// unsplit reference (R-ASD-012).
+		name:       "comment-interleaved",
+		transcript: []byte(": keep-alive before\ndata: first\n: keep-alive between\ndata: second\n: keep-alive after\n\n"),
+		want: []openaicompat.Frame{
+			{Event: "message", Data: []byte("first\nsecond")},
 		},
 	},
 }
