@@ -1,6 +1,7 @@
 package openaicompat
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -68,8 +69,10 @@ type Client struct {
 // New returns a configured Client from cfg.
 //
 // A malformed endpoint or an empty credential fails construction with an
-// AI-04 Violation before any request exists (R-APC-002). The nil-HTTPClient
-// default path arrives in a later phase of this milestone.
+// AI-04 Violation before any request exists (R-APC-002). When cfg.HTTPClient
+// is nil, New builds its own bounded client rather than failing or falling
+// back to any process-wide default (R-APC-003, NFR-APC-F); when non-nil, it
+// is used verbatim and is never mutated (R-APC-003).
 func New(cfg Config) (*Client, error) {
 	base, err := parseEndpoint(cfg.Endpoint)
 	if err != nil {
@@ -79,11 +82,38 @@ func New(cfg Config) (*Client, error) {
 		return nil, ai.Invalid(ai.ErrEmpty, ai.At("credential"))
 	}
 
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = newDefaultHTTPClient()
+	}
+
 	return &Client{
 		base:       base,
 		credential: cfg.Credential,
-		httpClient: cfg.HTTPClient,
+		httpClient: httpClient,
 	}, nil
+}
+
+// newDefaultHTTPClient builds the bounded client this package uses for
+// itself when the caller injects none.
+//
+// Client.Timeout is deliberately left at its zero value: see doc.go for why
+// no whole-request cap may exist on this path. Proxy is deliberately left
+// nil: this is a fresh transport, independent of http.DefaultTransport, so
+// it never resolves a proxy from the environment (R-APC-009).
+func newDefaultHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy: nil,
+		DialContext: (&net.Dialer{
+			Timeout: defaultDialTimeout,
+		}).DialContext,
+		TLSHandshakeTimeout:   defaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout: defaultResponseHeaderTimeout,
+		IdleConnTimeout:       defaultIdleConnTimeout,
+	}
+	return &http.Client{
+		Transport: transport,
+	}
 }
 
 // parseEndpoint validates raw as an absolute http(s) URL and returns its

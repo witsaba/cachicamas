@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -230,5 +232,221 @@ func assertConfigurationFault(t *testing.T, c *Client, err error, wantRule error
 	}
 	if matches != 1 {
 		t.Errorf("err matched %d of the known AI-04 sentinels, want exactly 1 — zero new sentinels (S-APC-009)", matches)
+	}
+}
+
+// defaultTransportSnapshot captures the observable fields of
+// http.DefaultTransport that this package must never mutate. It is a plain
+// value of comparable fields so two snapshots compare with ==.
+type defaultTransportSnapshot struct {
+	dialContextSet        bool
+	tlsHandshakeTimeout   time.Duration
+	responseHeaderTimeout time.Duration
+	idleConnTimeout       time.Duration
+	proxySet              bool
+	maxIdleConns          int
+}
+
+func snapshotDefaultTransport(t *testing.T) defaultTransportSnapshot {
+	t.Helper()
+	tr, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatalf("http.DefaultTransport is %T, want *http.Transport", http.DefaultTransport)
+	}
+	return defaultTransportSnapshot{
+		dialContextSet:        tr.DialContext != nil,
+		tlsHandshakeTimeout:   tr.TLSHandshakeTimeout,
+		responseHeaderTimeout: tr.ResponseHeaderTimeout,
+		idleConnTimeout:       tr.IdleConnTimeout,
+		proxySet:              tr.Proxy != nil,
+		maxIdleConns:          tr.MaxIdleConns,
+	}
+}
+
+// defaultClientSnapshot captures the observable fields of http.DefaultClient
+// that this package must never mutate.
+type defaultClientSnapshot struct {
+	timeout        time.Duration
+	transportIsNil bool
+}
+
+func snapshotDefaultClient(t *testing.T) defaultClientSnapshot {
+	t.Helper()
+	return defaultClientSnapshot{
+		timeout:        http.DefaultClient.Timeout,
+		transportIsNil: http.DefaultClient.Transport == nil,
+	}
+}
+
+// TestNew_DoesNotMutateProcessWideDefaults covers S-APC-012: the observable
+// configuration of http.DefaultClient and http.DefaultTransport is
+// unchanged after construction on both the injected-client path and the
+// adapter-built (nil-client) path. It is also the mutation-detection test
+// for S-APC-014 (Mutation proof #2): staging a deliberate assignment onto
+// http.DefaultTransport's fields must make this test fail.
+func TestNew_DoesNotMutateProcessWideDefaults(t *testing.T) {
+	t.Parallel()
+
+	beforeTransport := snapshotDefaultTransport(t)
+	beforeClient := snapshotDefaultClient(t)
+
+	stub := &stubTransport{}
+	if _, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+		HTTPClient: &http.Client{Transport: stub},
+	}); err != nil {
+		t.Fatalf("New() injected path error = %v, want nil", err)
+	}
+
+	if _, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+	}); err != nil {
+		t.Fatalf("New() adapter-built path error = %v, want nil", err)
+	}
+
+	afterTransport := snapshotDefaultTransport(t)
+	afterClient := snapshotDefaultClient(t)
+
+	if beforeTransport != afterTransport {
+		t.Errorf("http.DefaultTransport observably changed: before=%+v after=%+v (S-APC-012/S-APC-014)", beforeTransport, afterTransport)
+	}
+	if beforeClient != afterClient {
+		t.Errorf("http.DefaultClient observably changed: before=%+v after=%+v (S-APC-012/S-APC-014)", beforeClient, afterClient)
+	}
+}
+
+// TestNew_SharedInjectedClientNotMutatedAcrossTwoConstructions covers
+// S-APC-013: one HTTP client value used to construct two adapters is left
+// exactly as it was, and the first adapter's outbound behaviour is
+// unaffected by the second construction.
+func TestNew_SharedInjectedClientNotMutatedAcrossTwoConstructions(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubTransport{}
+	shared := &http.Client{Transport: stub}
+
+	c1, err := New(Config{
+		Endpoint:   "http://one.invalid/v1",
+		Credential: NewCredential("token-one"),
+		HTTPClient: shared,
+	})
+	if err != nil {
+		t.Fatalf("New() c1 error = %v, want nil", err)
+	}
+
+	beforeTimeout := shared.Timeout
+	beforeTransport := shared.Transport
+
+	if _, err := New(Config{
+		Endpoint:   "http://two.invalid/v1",
+		Credential: NewCredential("token-two"),
+		HTTPClient: shared,
+	}); err != nil {
+		t.Fatalf("New() c2 error = %v, want nil", err)
+	}
+
+	if shared.Timeout != beforeTimeout {
+		t.Errorf("shared.Timeout changed after second construction: before=%v after=%v (S-APC-013)", beforeTimeout, shared.Timeout)
+	}
+	if shared.Transport != beforeTransport {
+		t.Error("shared.Transport changed identity after second construction (S-APC-013)")
+	}
+
+	driveOneRequest(t, c1)
+	if len(stub.requests) != 1 {
+		t.Fatalf("stub observed %d requests after driving c1, want 1 (S-APC-013)", len(stub.requests))
+	}
+	if stub.requests[0].URL.Host != "one.invalid" {
+		t.Errorf("c1 request host = %q, want %q — c1 unaffected by c2's construction (S-APC-013)", stub.requests[0].URL.Host, "one.invalid")
+	}
+}
+
+// TestConfig_SurfaceIsEndpointCredentialAndOptionalClient covers S-APC-015:
+// the construction surface is exactly the endpoint, the credential and an
+// optional HTTP client — no timeout, deadline or bound value among them.
+func TestConfig_SurfaceIsEndpointCredentialAndOptionalClient(t *testing.T) {
+	t.Parallel()
+
+	typ := reflect.TypeOf(Config{})
+	if typ.NumField() != 3 {
+		t.Fatalf("Config has %d fields, want exactly 3 (S-APC-015)", typ.NumField())
+	}
+
+	wantKinds := map[string]reflect.Kind{
+		"Endpoint":   reflect.String,
+		"Credential": reflect.Struct,
+		"HTTPClient": reflect.Ptr,
+	}
+	for name, wantKind := range wantKinds {
+		field, ok := typ.FieldByName(name)
+		if !ok {
+			t.Errorf("Config has no field %q (S-APC-015)", name)
+			continue
+		}
+		if field.Type.Kind() != wantKind {
+			t.Errorf("Config.%s kind = %v, want %v (S-APC-015)", name, field.Type.Kind(), wantKind)
+		}
+	}
+
+	forbiddenNameFragments := []string{"Timeout", "Deadline", "Bound", "Duration"}
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		for _, fragment := range forbiddenNameFragments {
+			if strings.Contains(name, fragment) {
+				t.Errorf("Config.%s looks like a timeout/deadline/bound field, which must not be caller-injectable (S-APC-015)", name)
+			}
+		}
+	}
+}
+
+// TestNew_AdapterBuiltClientIsNeitherDefaultClientNorDefaultTransport
+// covers S-APC-016: constructing with no client supplied builds a fresh
+// client and transport rather than adopting the shared, process-wide
+// defaults it could not bound without mutating. It is also part of the
+// mutation-detection coverage for S-APC-037 (Mutation proof #5): routing
+// the adapter-built client through http.DefaultTransport must make this
+// test fail.
+func TestNew_AdapterBuiltClientIsNeitherDefaultClientNorDefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	c, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil", err)
+	}
+
+	if c.httpClient == http.DefaultClient {
+		t.Error("adapter-built client is http.DefaultClient itself (S-APC-016)")
+	}
+	if c.httpClient.Transport == http.DefaultTransport {
+		t.Error("adapter-built client's transport is http.DefaultTransport itself (S-APC-016/S-APC-037)")
+	}
+}
+
+// TestNew_AdapterBuiltTransportLeavesProxyUnset covers S-APC-036
+// (R-APC-009): the adapter-built client's transport never resolves a proxy
+// from the environment. It is also part of the mutation-detection coverage
+// for S-APC-037 (Mutation proof #5).
+func TestNew_AdapterBuiltTransportLeavesProxyUnset(t *testing.T) {
+	t.Parallel()
+
+	c, err := New(Config{
+		Endpoint:   "http://example.invalid/v1",
+		Credential: NewCredential("token"),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil", err)
+	}
+
+	tr, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("adapter-built client's Transport is %T, want *http.Transport", c.httpClient.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Error("adapter-built transport's Proxy resolver is set, want nil — no environment-derived proxy (S-APC-036)")
 	}
 }
