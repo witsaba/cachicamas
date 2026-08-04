@@ -108,10 +108,18 @@ import (
 // independent of this value.
 const streamReadBufferSize = 32 * 1024
 
-// doneSentinel is the terminal sentinel's data payload (C5): the six-byte
-// literal a frame carries to signal clean termination, recognised here
-// before any attempt to decode the frame as a chunk (R-ATS-012, a later
-// slice's own requirement, honored already since slice 1).
+// doneSentinel is the terminal sentinel's data payload — C5, cited here
+// together with its posture stated exactly as C5 states it
+// (verify-report W2, R-ATS-012, S-ATS-047): for Chat Completions this
+// sentinel is prose-documented at the pinned commit — presupposed by the
+// include_usage description — and is NOT a schema constant; the only
+// `enum: - "[DONE]"` at that commit belongs to the Assistants DoneEvent.
+// It is therefore a dialect-conventional recognition carrying a
+// fixture-pin obligation, discharged by this package's own committed
+// transcript fixtures, not a schema-derived fact. The six-byte literal a
+// frame carries to signal clean termination, recognised here before any
+// attempt to decode the frame as a chunk (R-ATS-012, a later slice's own
+// requirement, honored already since slice 1).
 const doneSentinel = "[DONE]"
 
 // errIncompleteStream is this package's own unexported cause for a stream
@@ -308,9 +316,11 @@ func refuseNonStreamContentType(resp *http.Response) error {
 // minting, the finish-reason gate), and closes out exactly once — the one
 // deferred close in this package (S-ATS-019).
 //
-// The terminal sentinel (C5) is recognised here, before any attempt to
-// decode a frame as a chunk — [DONE] is never handed to decodeChunk.
-// Completion is built separately, only at the sentinel (design.md D4/D9):
+// The terminal sentinel (C5, prose-documented and dialect-conventional —
+// see doneSentinel's own doc comment for the posture stated exactly as C5
+// states it) is recognised here, before any attempt to decode a frame as
+// a chunk — [DONE] is never handed to decodeChunk. Completion is built
+// separately, only at the sentinel (design.md D4/D9):
 // the mapper accumulates identity and finish-reason state across chunks,
 // but constructs no completion event of its own.
 func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
@@ -341,10 +351,12 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					// R-ATS-017: a frame whose SSE event type is not the
 					// default type is skipped unconditionally — never
 					// decoded, never applied, never treated as the
-					// sentinel even if its data happens to match (C5
-					// states no event-type requirement, but R-ATS-017's
-					// own skip rule is unconditional and this is the
-					// simpler, single-branch reading of it).
+					// sentinel even if its data happens to match (C5, the
+					// prose-documented, dialect-conventional sentinel —
+					// see doneSentinel's own doc comment — states no
+					// event-type requirement, but R-ATS-017's own skip
+					// rule is unconditional and this is the simpler,
+					// single-branch reading of it).
 					continue
 				}
 

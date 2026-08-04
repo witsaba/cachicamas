@@ -3,6 +3,20 @@
 // finish-reason gate that feeds the sentinel-deferred completion (R-ATS-010,
 // design.md D4/D5/D9).
 //
+// # Block boundaries are minted here, not read from the wire (C3, verify-report W4)
+//
+// C3 (negative, load-bearing): the Chat Completions stream schema defines
+// no block, content-part, start, or stop framing events of any kind — text
+// arrives solely as flat delta.content string fragments (C7), with
+// boundaries signaled only implicitly (role on the first delta, an empty
+// delta with a non-null finish_reason on the last chunk). Every
+// TextBlockStart/TextBlockEnd this file mints below (textBlockIndex,
+// applyChunk) is therefore this adapter's OWN boundary, never a
+// vendor-reported one — R-ATS-008's own contract, restated here at its
+// minting source rather than only at bridge_test.go's own citations
+// (which prove the wire carries no block bytes to RENDER, not why this
+// file mints them on decode).
+//
 // # One state machine, not two (a slice-1→slice-2 structural consequence)
 //
 // Slice 1 split frame-to-event mapping across two things: stream.go's own
@@ -46,7 +60,8 @@ import (
 )
 
 // textBlockIndex is R-ATS-008 rule 1's constant: at most one text block is
-// minted per stream, always at this index.
+// minted per stream, always at this index — an adapter-minted boundary
+// (C3, this file's own header comment), never one the wire itself carries.
 const textBlockIndex ai.BlockIndex = 1
 
 // errMalformedIdentity is this package's own unexported cause for a first
