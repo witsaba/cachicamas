@@ -382,6 +382,36 @@
 //     whole" (below), with no error anywhere — a miserable failure mode
 //     an exported constant is the cheapest guard against.
 //
+// # Reserved-namespace reopen trigger — not a hedge
+//
+// This ruling is scoped to what it was made for: one constant, chosen
+// once, for a module that ships exactly one OpenAI-compatible adapter
+// today. Two concrete future conditions reopen it — the same
+// living-graph reopen-trigger discipline "System role: system, not
+// developer", above, already applies to this package's other
+// vendor-schema-shaped ruling:
+//
+//   - A vendor sharing this dialect defines its own reserved extension
+//     namespace and that value collides with "openaicompat". This
+//     package holds no registry of vendor-reserved strings to detect
+//     the collision itself (R-REX-006 forbids Layer 1 from maintaining
+//     one), so a collision would surface only as a caller's own
+//     extension silently merging where it should not.
+//   - A second OpenAI-compatible adapter is added to this module, so
+//     that the single string "openaicompat" no longer unambiguously
+//     names one adapter package. This is the same failure mode the
+//     exported constant above already guards a caller against at the
+//     call-site level (a hand-typed, mistyped namespace becomes
+//     "foreign namespace, ignored whole" with no error) — a second
+//     adapter reusing this same string would be that identical failure
+//     at the package-naming level instead.
+//
+// Neither condition exists today. It is written down as a reopen
+// trigger, not folded silently into "the value is openaicompat", so a
+// later reader who hits either condition knows this is the place the
+// decision was made and why, rather than rediscovering the same
+// research from nothing.
+//
 // # Own namespace merges; every other namespace is ignored whole
 //
 // appendExtensionFields (option.go) reads req.ProviderExtension(Namespace)
