@@ -4,7 +4,7 @@
 > **Amended requirements (8, all MODIFIED)**: `R-CNF-005`, `R-CNF-006`, `R-CNF-007`, `R-CNF-008`, `R-CNF-009`, `R-CNF-011`, `R-CNF-014`, `R-CNF-016`
 > **New requirements (6, ADDED)**: `R-CNF-019` (count derivation), `R-CNF-020` (durable negative), `R-CNF-021` (tolerance register), `R-CNF-022` (neutrality), `R-CNF-023` (capability-scoped entry point), `R-CNF-024` (script introspection) · **Removed / renamed**: none
 > **Requirement total**: **14** (8 MODIFIED + 6 ADDED).
-> **Scenario counts** — new scenarios `S-CLA-001 … S-CLA-035` = **35** (**23** `[test]`, **12** `[inspection]`); retained/edited predecessor scenarios carrying their original `S-CNF-0NN` ids = **24**. Every row of the proposal's 17-row scope table maps to at least one `S-CLA` scenario.
+> **Scenario counts** — new scenarios `S-CLA-001 … S-CLA-035` = **35** (**22** `[test]`, **13** `[inspection]`; corrected 2026-08-04 per verify finding S4 — the original 23/12 header miscounted the split, the per-scenario markings were always authoritative); retained/edited predecessor scenarios carrying their original `S-CNF-0NN` ids = **24**. Every row of the proposal's 17-row scope table maps to at least one `S-CLA` scenario.
 > **Sources**: proposal `openspec/changes/cachicamas-ai-conformance-lifecycle-amendment/proposal.md` · doc 0002 § AI-28.1.1 · `src/ai/response_start.go` (`ai.NewResponseStart`, `ResponseStart.ResponseID()`, `ResponseStart.ServedModel()`)
 > This delta **strengthens and never contradicts** the shipped contract. No `src/ai` change, no `openaicompat` change: `NFR-CNF-A` … `NFR-CNF-F` hold unmodified and are not restated here.
 
