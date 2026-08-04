@@ -56,10 +56,14 @@ Chain strategy: feature-branch-chain
 
 ## Phase 3: R-CNF-023 scoped entry point (D8)
 
-- [ ] 3.1 RED: create `conformance_scoped_test.go` (white-box, `package agenttest`) against not-yet-existing `RunConformanceFor`/`casesFor` — `casesFor(CapStreamingText)` returns exactly the two text case names, scoped run green end-to-end, undeclared-capability construction failure. Compile-fail RED. [S-CLA-029/031]
-- [ ] 3.2 GREEN: create `conformance_scoped.go` with `func RunConformanceFor(t *testing.T, f Factory, capability Capability)` (no return value) and `func casesFor(c Capability) []conformanceCase`. Fail-fast `t.Fatalf` on unregistered capability; delegate to unmodified `runConformanceCases`/`requireValidFactory`. New file only.
-- [ ] 3.3 Add subtest asserting a factory failing an in-scope case fails the scoped run and names it. Capture ONE scratch end-to-end RED run (evidence note: ancestor-failure propagation per `conformance_suite_test.go:622`) before this subtest is durable-passing; do not leave the scratch failure committed. [S-CLA-030]
-- [ ] 3.4 Verify `RunConformance` behavior is byte-unchanged (still iterates full registry, non-waivable required capabilities) — inspection, no code change. [S-CLA-032]
+- [x] 3.1 RED: create `conformance_scoped_test.go` (white-box, `package agenttest`) against not-yet-existing `RunConformanceFor`/`casesFor` — `casesFor(CapStreamingText)` returns exactly the two text case names, scoped run green end-to-end, undeclared-capability construction failure. Compile-fail RED. [S-CLA-029/031]
+  - Evidence: `go test -race -count=1 -run TestCasesFor ./src/agenttest/...` → `src/agenttest/conformance_scoped_test.go:20:11: undefined: casesFor` (+3 more `casesFor`/`RunConformanceFor` undefined errors) — `FAIL ... [build failed]`.
+- [x] 3.2 GREEN: create `conformance_scoped.go` with `func RunConformanceFor(t *testing.T, f Factory, capability Capability)` (no return value) and `func casesFor(c Capability) []conformanceCase`. Fail-fast `t.Fatalf` on unregistered capability; delegate to unmodified `runConformanceCases`/`requireValidFactory`. New file only.
+  - Evidence: `go test -race -count=1 -v -run 'TestCasesFor|TestRunConformanceFor' ./src/agenttest/...` → all 5 tests `--- PASS`, including `TestRunConformanceFor_StreamingTextScope_PassesEndToEnd` running exactly the two `text/...` subtests.
+- [x] 3.3 Add subtest asserting a factory failing an in-scope case fails the scoped run and names it. Capture ONE scratch end-to-end RED run (evidence note: ancestor-failure propagation per `conformance_suite_test.go:622`) before this subtest is durable-passing; do not leave the scratch failure committed. [S-CLA-030]
+  - Scratch evidence (captured, then the scratch file deleted — never committed, confirmed via `git status`): temporary `zzscratch_scoped_failure_test.go` drove `RunConformanceFor(t, f, CapStreamingText)` against a factory whose subject emits nothing — `conformance_suite.go:477: agenttest: drained 0 event(s), want 6 [...]` and `... want 2 [...]`, both subtests `--- FAIL`, ancestor `TestScratch_..._PropagatesAndNamesIt` also `--- FAIL` (propagation confirmed). Durable committed proof: `TestRunConformanceFor_FailingInScopeCase_ReachesTheIdenticalPropagationSeam` (registry-inclusion, structural) — `--- PASS`.
+- [x] 3.4 Verify `RunConformance` behavior is byte-unchanged (still iterates full registry, non-waivable required capabilities) — inspection, no code change. [S-CLA-032]
+  - Evidence: `git diff --stat backend/agent/src/agenttest/conformance_suite.go` → empty (zero diff); `RunConformance`/`runRegisteredCase` untouched.
 
 ## Phase 4: R-CNF-024 script introspection (D9)
 
