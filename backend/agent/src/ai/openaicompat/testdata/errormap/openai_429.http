@@ -1,0 +1,4 @@
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+
+{"error":{"type":"requests","message":"Rate limit reached for requests.","param":null,"code":"rate_limit_exceeded"}}

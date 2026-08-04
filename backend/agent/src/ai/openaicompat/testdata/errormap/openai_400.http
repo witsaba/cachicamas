@@ -1,0 +1,4 @@
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{"error":{"type":"invalid_request_error","message":"Invalid value for messages.","param":"messages","code":null}}
