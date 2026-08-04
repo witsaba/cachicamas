@@ -49,8 +49,16 @@ import (
 // AI-27 never constructs an ai.Failure, ai.PreStreamFailure or
 // ai.MidStreamFailure value from this sentinel (S-ASD-064): a pure byte
 // decoder has no outputPreceded fact and no delivery carrier to supply
-// either constructor. AI-28 and AI-32 own turning a named category into a
-// constructed provider failure.
+// either constructor.
+//
+// AI-32 owns turning a named category into a constructed, wire-side
+// provider failure (failure_map.go's mapErrorResponse, and
+// stream_failure.go's stage-2 seams) — the first construction site in this
+// package that builds an ai.Failure from the wire itself. AI-28 owns the
+// producer path that calls it. AI-26.6's policy.go refuse remains a
+// distinct, pre-existing construction site: it decides a failure entirely
+// from the request, at translation time, before any provider is
+// contacted, and AI-32 neither invokes nor alters it (S-AEM-067).
 var ErrFrameTooLarge = fmt.Errorf("openaicompat: frame exceeded the configured hard cap: %w", ai.ErrMalformedResponse)
 
 // ErrTruncated is returned by Finish (AI-27.6) when the end-of-input
@@ -72,9 +80,14 @@ var ErrTruncated = fmt.Errorf("openaicompat: stream ended with a partial frame p
 // distinction lives at the error-identity level, not the category level
 // (S-ASD-067).
 //
-// Category never constructs an ai.Failure value of any kind: it only
-// names a category from AI-19.2's vocabulary. AI-28 and AI-32 own
-// construction.
+// Category never constructs an ai.Failure value of any kind: it only names
+// a category from AI-19.2's vocabulary.
+//
+// AI-32 owns turning that named category into a constructed, wire-side
+// provider failure; AI-28 owns the producer path that calls it. AI-26.6's
+// policy.go refuse remains a distinct, pre-existing, translation-time
+// construction site — deciding a failure from the request alone, before
+// any provider is contacted — left untouched by this milestone (S-AEM-067).
 func Category(err error) (ai.FailureCategory, bool) {
 	if errors.Is(err, ErrFrameTooLarge) || errors.Is(err, ErrTruncated) {
 		return ai.FailureCategoryMalformedResponse, true

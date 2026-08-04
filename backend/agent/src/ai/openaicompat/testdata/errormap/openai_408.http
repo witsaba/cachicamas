@@ -1,0 +1,4 @@
+HTTP/1.1 408 Request Timeout
+Content-Type: application/json
+
+{"error":{"type":"timeout_error","message":"The request timed out.","param":null,"code":null}}
