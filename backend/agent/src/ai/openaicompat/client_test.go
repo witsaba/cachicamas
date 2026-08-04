@@ -37,7 +37,7 @@ func (s *stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // proves an injected value was used.
 func driveOneRequest(t *testing.T, c *Client) {
 	t.Helper()
-	req, err := c.newRequest(context.Background(), "chat", "completions")
+	req, err := c.newRequest(context.Background(), nil, "chat", "completions")
 	if err != nil {
 		t.Fatalf("newRequest() error = %v, want nil", err)
 	}

@@ -120,7 +120,7 @@ func TestTimeout_NoWholeRequestCapOnAdapterBuiltClient(t *testing.T) {
 		// A caller context carrying no deadline: any internally imposed
 		// deadline would have to originate inside the adapter itself
 		// (S-APC-019).
-		req, err := c.newRequest(context.Background())
+		req, err := c.newRequest(context.Background(), nil)
 		if err != nil {
 			t.Fatalf("newRequest() error = %v, want nil", err)
 		}

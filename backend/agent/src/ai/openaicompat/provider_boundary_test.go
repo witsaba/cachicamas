@@ -7,34 +7,38 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// TestClient_HasNoStreamingEntryPoint covers S-APC-030: no streaming entry
-// point exists on the landed adapter — not even one that returns an
-// "unimplemented" result, a nil stream, or any other stand-in. At AI-25 the
-// adapter is a configured value only; streaming arrives at AI-26.
+// TestClient_HasNoStreamingEntryPoint covers S-ATS-020 (AI-28, R-ATS-001,
+// R-ATS-006): the landed adapter exposes a Stream method. Flipped in place
+// from its AI-25 form (S-APC-030), which asserted the opposite — that no
+// streaming entry point existed yet, because streaming had not arrived.
+// The name and the test identity are unchanged; only the assertion's
+// polarity is inverted, never removed (S-ATS-020, S-ATS-022): it now fails
+// if Stream is absent and passes only once the method exists.
 func TestClient_HasNoStreamingEntryPoint(t *testing.T) {
 	t.Parallel()
 
 	typ := reflect.TypeOf(&Client{})
-	if _, ok := typ.MethodByName("Stream"); ok {
-		t.Fatal("*Client exposes a Stream method at AI-25 — streaming arrives at AI-26 (S-APC-030)")
+	if _, ok := typ.MethodByName("Stream"); !ok {
+		t.Fatal("*Client exposes no Stream method — AI-28 must land it (R-ATS-001, S-ATS-020)")
 	}
 }
 
-// TestClient_DoesNotSatisfyModelProviderAtRuntime covers S-APC-031: a
-// run-time type assertion reports the adapter does not implement
-// ai.ModelProvider.
+// TestClient_DoesNotSatisfyModelProviderAtRuntime covers S-ATS-021 (AI-28,
+// R-ATS-001, R-ATS-006): a run-time type assertion reports the adapter DOES
+// implement ai.ModelProvider. Flipped in place from its AI-25 form
+// (S-APC-031), which asserted the opposite.
 //
 // This is deliberately NOT the compile-time idiom
 // var _ ai.ModelProvider = (*Client)(nil), which would fail the *build*
-// rather than fail as a test — the wrong failure mode for a milestone
-// whose whole point is proving the adapter does not yet falsely advertise
-// an interface it has not implemented. This test is expected to flip to
-// asserting ok == true once AI-26 lands Stream.
+// rather than fail as a test — the wrong failure mode for a guard whose
+// whole point is proving the adapter now advertises an interface it truly
+// implements, checked the identical way its AI-25 predecessor proved the
+// opposite (S-ATS-021).
 func TestClient_DoesNotSatisfyModelProviderAtRuntime(t *testing.T) {
 	t.Parallel()
 
 	_, ok := any(&Client{}).(ai.ModelProvider)
-	if ok {
-		t.Fatal("*Client satisfies ai.ModelProvider at AI-25 — it must not until AI-26 ships Stream (S-APC-031)")
+	if !ok {
+		t.Fatal("*Client does not satisfy ai.ModelProvider — AI-28 must land Stream (R-ATS-001, S-ATS-021)")
 	}
 }

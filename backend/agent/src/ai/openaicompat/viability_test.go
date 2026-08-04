@@ -81,7 +81,7 @@ func newViabilityServer(ch chan<- capturedRequest) *httptest.Server {
 // the deferred server.Close() to clean up.
 func driveOneViabilityRequest(t *testing.T, c *Client, segments ...string) {
 	t.Helper()
-	req, err := c.newRequest(context.Background(), segments...)
+	req, err := c.newRequest(context.Background(), nil, segments...)
 	if err != nil {
 		t.Fatalf("newRequest() error = %v, want nil", err)
 	}
