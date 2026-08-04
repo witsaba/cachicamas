@@ -40,8 +40,8 @@ func TestCharter_TruncatedTranscript_CategoryMatchesOpenAICompatCategory(t *test
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-cs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-cs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"mid"
+		"data: {\"id\":\"chatcmpl-cs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-cs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"mid"
 	server := sseServer(t, transcript)
 	defer server.Close()
 	c := mustClient(t, server.URL)
@@ -82,7 +82,7 @@ func TestCharter_PreAndPostHandoverFailures_DeliveryPathsDiffer(t *testing.T) {
 	t.Run("pre-handover: DeliveryPreStream", func(t *testing.T) {
 		t.Parallel()
 
-		server := sseServer(t, "data: {\"id\":\"chatcmpl-ph\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		server := sseServer(t, "data: {\"id\":\"chatcmpl-ph\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 		defer server.Close()
 		c := mustClient(t, server.URL)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +101,7 @@ func TestCharter_PreAndPostHandoverFailures_DeliveryPathsDiffer(t *testing.T) {
 	t.Run("post-handover: DeliveryMidStream", func(t *testing.T) {
 		t.Parallel()
 
-		transcript := "data: {\"id\":\"chatcmpl-ph2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n"
+		transcript := "data: {\"id\":\"chatcmpl-ph2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n"
 		server := sseServer(t, transcript)
 		defer server.Close()
 		c := mustClient(t, server.URL)
@@ -157,10 +157,10 @@ func TestCharter_ErrorShapedJSONBetweenContentChunks_NoBespokeErrorPath(t *testi
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"error\":{\"message\":\"boom\",\"type\":\"server_error\"}}\n\n" +
-		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -199,10 +199,10 @@ func TestCharter_ErrorEventType_SkippedAsUnknownEventType(t *testing.T) {
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
 		"event: error\ndata: {\"error\":{\"message\":\"boom\"}}\n\n" +
-		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-c6b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()

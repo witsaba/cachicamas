@@ -35,8 +35,8 @@ func TestTruncation_TwoContentChunksNoSentinel_ErrorEventWithPrecedingDeltas(t *
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-tr\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"uno\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-tr\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"dos\"},\"finish_reason\":null}]}\n\n"
+		"data: {\"id\":\"chatcmpl-tr\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"uno\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-tr\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"dos\"},\"finish_reason\":null}]}\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
 
@@ -100,7 +100,7 @@ func TestTruncation_TwoContentChunksNoSentinel_ErrorEventWithPrecedingDeltas(t *
 func TestTruncation_ResponseStartOnlyNoSentinel_PartialOutputFalse(t *testing.T) {
 	t.Parallel()
 
-	transcript := "data: {\"id\":\"chatcmpl-ro\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n"
+	transcript := "data: {\"id\":\"chatcmpl-ro\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
 
@@ -135,8 +135,8 @@ func TestTruncation_CutMidDataLine_NoEventFromPendingPartialFrame(t *testing.T) 
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-cut\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-cut\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"mid"
+		"data: {\"id\":\"chatcmpl-cut\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-cut\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"mid"
 	server := sseServer(t, transcript)
 	defer server.Close()
 

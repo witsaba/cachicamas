@@ -50,10 +50,10 @@ func TestProtocolViolation_AbsentObjectDiscriminator_SkippedBetweenTwoContentChu
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"alpha\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"alpha\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"INTRUDER\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"omega\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"omega\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-abs\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -109,8 +109,8 @@ func TestProtocolViolation_MissingRequiredModelField_MalformedTerminal(t *testin
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-req\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-req\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-req\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-req\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -179,9 +179,9 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 		{
 			name: "row 1: delta after close (S-ATS-074)",
 			transcript: "" +
-				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r1\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
 				"data: [DONE]\n\n",
 			check: func(t *testing.T, events []ai.Event, _ *ai.Failure) {
 				t.Helper()
@@ -200,9 +200,9 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 		{
 			name: "row 2: duplicate close (S-ATS-075)",
 			transcript: "" +
-				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r2\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
 				"data: [DONE]\n\n",
 			check: func(t *testing.T, events []ai.Event, _ *ai.Failure) {
 				t.Helper()
@@ -220,9 +220,9 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 		{
 			name: "row 3: second response start (S-ATS-076)",
 			transcript: "" +
-				"data: {\"id\":\"chatcmpl-A\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-A\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-B\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"three\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-A\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-A\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-B\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"three\"},\"finish_reason\":null}]}\n\n" +
 				"data: [DONE]\n\n",
 			check: func(t *testing.T, events []ai.Event, _ *ai.Failure) {
 				t.Helper()
@@ -253,8 +253,8 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 		{
 			name: "row 4: delta with no open block, absent index (S-ATS-077)",
 			transcript: "" +
-				"data: {\"id\":\"chatcmpl-r4\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
-				"data: {\"id\":\"chatcmpl-r4\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r4\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-r4\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
 				"data: [DONE]\n\n",
 			check: func(t *testing.T, events []ai.Event, _ *ai.Failure) {
 				t.Helper()
@@ -272,7 +272,7 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 		},
 		{
 			name:       "row 5: close without open, no usable identity (S-ATS-078)",
-			transcript: "data: {\"id\":\"\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+			transcript: "data: {\"id\":\"\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
 			check: func(t *testing.T, _ []ai.Event, failure *ai.Failure) {
 				t.Helper()
 				if failure.PartialOutput() {
@@ -325,8 +325,8 @@ func TestProtocolViolation_NegativeIndexWithContent_MalformedTerminal(t *testing
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-neg\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-neg\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":-1,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-neg\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-neg\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":-1,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -370,7 +370,7 @@ func TestProtocolViolation_NegativeIndexWithContent_MalformedTerminal(t *testing
 func TestProtocolViolation_InvalidJSON_MalformedTerminal(t *testing.T) {
 	t.Parallel()
 
-	transcript := "data: {\"object\":\"chat.completion.chunk\",\"choices\":\n\n"
+	transcript := "data: {\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
 	c := mustClient(t, server.URL)
@@ -406,10 +406,10 @@ func TestProtocolViolation_UnknownTypeVsBrokenKnownType_DifferentOutcomes(t *tes
 		t.Parallel()
 
 		transcript := "" +
-			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
 			"data: {\"object\":\"chat.completion\",\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"INTRUDER\"},\"finish_reason\":null}]}\n\n" +
-			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
-			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-uk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 			"data: [DONE]\n\n"
 		server := sseServer(t, transcript)
 		defer server.Close()
@@ -443,8 +443,8 @@ func TestProtocolViolation_UnknownTypeVsBrokenKnownType_DifferentOutcomes(t *tes
 		t.Parallel()
 
 		transcript := "" +
-			"data: {\"id\":\"chatcmpl-bk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
-			"data: {\"id\":\"chatcmpl-bk\",\"object\":\"chat.completion.chunk\",\"choices\":\n\n" +
+			"data: {\"id\":\"chatcmpl-bk\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-bk\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":\n\n" +
 			"data: [DONE]\n\n"
 		server := sseServer(t, transcript)
 		defer server.Close()
@@ -496,35 +496,35 @@ func TestProtocolViolation_NoPanicAcrossEveryViolatingRow(t *testing.T) {
 		chunks []string
 	}{
 		{"row 1: delta after close", []string{
-			`{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}`,
-			`{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-			`{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"two"},"finish_reason":null}]}`,
+			`{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}`,
+			`{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"two"},"finish_reason":null}]}`,
 		}},
 		{"row 2: duplicate close", []string{
-			`{"id":"r2","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-			`{"id":"r2","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+			`{"id":"r2","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"r2","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
 		}},
 		{"row 3: second response start", []string{
-			`{"id":"A","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}`,
-			`{"id":"B","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"two"},"finish_reason":null}]}`,
+			`{"id":"A","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}`,
+			`{"id":"B","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"two"},"finish_reason":null}]}`,
 		}},
 		{"row 4: absent index with content", []string{
-			`{"id":"r4","model":"m","object":"chat.completion.chunk","choices":[{"delta":{"content":"one"},"finish_reason":null}]}`,
+			`{"id":"r4","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"delta":{"content":"one"},"finish_reason":null}]}`,
 		}},
 		{"row 4b: negative index with content", []string{
-			`{"id":"r4b","model":"m","object":"chat.completion.chunk","choices":[{"index":-1,"delta":{"content":"one"},"finish_reason":null}]}`,
+			`{"id":"r4b","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":-1,"delta":{"content":"one"},"finish_reason":null}]}`,
 		}},
 		{"row 5: close without open, no usable identity", []string{
-			`{"id":"","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		}},
 		{"required field missing", []string{
-			`{"id":"r6","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"r6","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		}},
 		{"unrecognised finish_reason", []string{
-			`{"id":"r7","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"quota_burned"}]}`,
+			`{"id":"r7","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"quota_burned"}]}`,
 		}},
 		{"empty frame: no choices, no usage", []string{
-			`{"id":"r8","model":"m","object":"chat.completion.chunk","choices":[]}`,
+			`{"id":"r8","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[]}`,
 		}},
 	}
 

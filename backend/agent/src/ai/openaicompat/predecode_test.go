@@ -119,7 +119,7 @@ func TestPreDecode_NonStreamContentType_HTMLErrorPage_RefusedWithBoundedExcerpt(
 func TestPreDecode_StreamContentTypeToleratesCaseAndParameters_AcceptedAndDecodesNormally(t *testing.T) {
 	t.Parallel()
 
-	chunk := `{"id":"chatcmpl-tol","model":"gizmo-tol","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	chunk := `{"id":"chatcmpl-tol","model":"gizmo-tol","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 	transcript := "data: " + chunk + "\n\ndata: [DONE]\n\n"
 	server := contentTypeServer(t, http.StatusOK, "TEXT/EVENT-STREAM; charset=utf-8", transcript)
 	defer server.Close()
@@ -183,8 +183,8 @@ func TestPreDecode_NonStreamContentTypeHugeBody_ExcerptBoundedByCaptureLimit(t *
 func TestPreDecode_MissingContentTypeHeader_RefusedBeforeDecodingDespiteValidBody(t *testing.T) {
 	t.Parallel()
 
-	chunk1 := `{"id":"chatcmpl-nc","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"should never decode"},"finish_reason":null}]}`
-	chunk2 := `{"id":"chatcmpl-nc","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	chunk1 := `{"id":"chatcmpl-nc","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"should never decode"},"finish_reason":null}]}`
+	chunk2 := `{"id":"chatcmpl-nc","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 	transcript := "data: " + chunk1 + "\n\ndata: " + chunk2 + "\n\ndata: [DONE]\n\n"
 	server := noContentTypeServer(t, http.StatusOK, transcript)
 	defer server.Close()
@@ -256,8 +256,8 @@ func TestPreDecode_FailureStatus429WithJSONErrorBody_ZeroContentEventsBeforeTerm
 func TestPreDecode_FailureStatus500WithValidSSETranscriptBody_NoTextDeltaEmitted(t *testing.T) {
 	t.Parallel()
 
-	chunk1 := `{"id":"chatcmpl-500","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"should never decode"},"finish_reason":null}]}`
-	chunk2 := `{"id":"chatcmpl-500","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	chunk1 := `{"id":"chatcmpl-500","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"should never decode"},"finish_reason":null}]}`
+	chunk2 := `{"id":"chatcmpl-500","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 	transcript := "data: " + chunk1 + "\n\ndata: " + chunk2 + "\n\ndata: [DONE]\n\n"
 	server := contentTypeServer(t, http.StatusInternalServerError, "text/event-stream", transcript)
 	defer server.Close()
