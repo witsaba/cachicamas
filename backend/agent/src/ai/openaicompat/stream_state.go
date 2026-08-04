@@ -90,6 +90,13 @@ type mapperState struct {
 	// terminalSeen is true once choice 0's terminal chunk (a non-null,
 	// gate-accepted finish_reason) has been observed.
 	terminalSeen bool
+
+	// usage is the last populated usage chunk's mapping (AI-28.3, D10): the
+	// zero ai.Usage{} — every field absent — until a chunk carrying a
+	// non-null usage object arrives, at which point this is OVERWRITTEN
+	// wholesale (never merged) with usageFromWire's result. A later
+	// usage:null chunk (C4) never touches this field.
+	usage ai.Usage
 }
 
 // applyChunk maps one decoded, non-sentinel chunk to zero or more
@@ -103,6 +110,14 @@ type mapperState struct {
 //     string (R-ATS-007's trichotomy, chunk.go's contentText);
 //  4. at most one TextBlockEnd, when this chunk carries choice 0's
 //     terminal finish_reason and a block was open.
+//
+// Usage mapping (R-ATS-015/016, AI-28.3) is not part of the numbered
+// sequence above: it never contributes an event of its own — usage
+// surfaces only inside the eventual Completion, at the sentinel
+// (buildCompletion) — so it is applied unconditionally, ahead of the
+// choice-0 checks below, since the dedicated usage chunk (C4) carries an
+// EMPTY choices array and would otherwise never reach any per-choice logic
+// at all.
 //
 // A malformed identity or an out-of-enum finish_reason returns a nil event
 // slice and this package's own unexported cause — the caller (stream.go's
@@ -119,10 +134,16 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		events = append(events, started)
 	}
 
+	if chunk.Usage != nil {
+		// C4: last populated usage chunk wins, no cumulative merge (D10) —
+		// this OVERWRITES s.usage wholesale rather than folding fields in.
+		s.usage = usageFromWire(*chunk.Usage)
+	}
+
 	choice, hasChoice := chunk.choice0()
 	if !hasChoice {
 		// The usage chunk (C4) and any other choice-less frame contribute
-		// nothing beyond identity, which is already handled above.
+		// nothing beyond identity and usage, both already handled above.
 		return events, nil
 	}
 
@@ -165,11 +186,12 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 }
 
 // buildCompletion constructs the sentinel-triggered completion from
-// whatever finish reason this mapper's chunks captured, with usage left
-// wholly absent (R-ATS-015…016 land in AI-28.3, a later slice). An error
-// here means no terminal chunk was ever observed before the sentinel
-// arrived (design.md D9, spec-silent) — the caller (stream.go's run) folds
-// it into errIncompleteStream, unchanged from slice 1's own handling.
+// whatever finish reason this mapper's chunks captured, and s.usage —
+// wholly absent (ai.Usage{}'s zero value) unless a usage chunk populated
+// it along the way (R-ATS-015…016, AI-28.3). An error here means no
+// terminal chunk was ever observed before the sentinel arrived (design.md
+// D9, spec-silent) — the caller (stream.go's run) folds it into
+// errIncompleteStream, unchanged from slice 1's own handling.
 func (s *mapperState) buildCompletion() (ai.Event, error) {
-	return ai.NewCompletion(s.finishReason, ai.Usage{})
+	return ai.NewCompletion(s.finishReason, s.usage)
 }

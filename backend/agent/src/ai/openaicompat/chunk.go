@@ -44,11 +44,52 @@ import (
 // wireChunk is this dialect's streaming chunk shape (C1): the fields
 // R-ATS-007…010 need to map choice 0's content and finish reason. Unlike
 // stream.go's slice-1-scoped wireChunk (superseded by this type), Choices
-// carries the full per-choice delta, byte-preserving.
+// carries the full per-choice delta, byte-preserving. Usage is a pointer
+// (AI-28.3, D10) so an absent key and an explicit JSON null both decode to
+// nil identically (C4: "usage: null contributes nothing" makes no
+// distinction between the two at the chunk level) while a populated usage
+// object decodes to a non-nil *wireUsage.
 type wireChunk struct {
 	ID      string       `json:"id"`
 	Model   string       `json:"model"`
 	Choices []wireChoice `json:"choices"`
+	Usage   *wireUsage   `json:"usage"`
+}
+
+// wireUsage is the streaming usage object's field set this milestone maps
+// (AI-28.3, C8, D10): prompt_tokens → Usage.Input, completion_tokens →
+// Usage.Output. Both are pointers so a present-but-explicit-0 value
+// (Tokens(0), a reported zero) is distinguishable from an absent key
+// (TokenCount's zero value, R-ATS-015/AI-13.3) — the same absent/null/
+// present-string trichotomy contentText resolves for delta.content, here
+// resolved by json.Unmarshal's own pointer-nil-on-absence behavior instead
+// of a hand-rolled decoder, since C8's prompt_tokens/completion_tokens are
+// plain JSON numbers with no byte-preservation concern like content has.
+// total_tokens (C8's third required field) is deliberately not decoded
+// here: ai.Usage has no corresponding field, and R-ATS-026 forbids this
+// milestone from inventing one — the two nested detail objects
+// (completion_tokens_details, prompt_tokens_details) are the same
+// out-of-charter territory (AI-31.2's full usage field mapping).
+type wireUsage struct {
+	PromptTokens     *int64 `json:"prompt_tokens"`
+	CompletionTokens *int64 `json:"completion_tokens"`
+}
+
+// usageFromWire maps w's two mapped fields onto an ai.Usage record
+// (R-ATS-015/016, D10): present() only when the wire key was present —
+// including an explicit 0 — else the field stays TokenCount's absent zero
+// value. CacheRead, CacheWrite and Reasoning are never touched here: they
+// stay absent by construction for every transcript, because no wire field
+// this milestone reads maps to them (R-ATS-026's charter boundary).
+func usageFromWire(w wireUsage) ai.Usage {
+	var u ai.Usage
+	if w.PromptTokens != nil {
+		u.Input = ai.Tokens(*w.PromptTokens)
+	}
+	if w.CompletionTokens != nil {
+		u.Output = ai.Tokens(*w.CompletionTokens)
+	}
+	return u
 }
 
 // wireChoice is one choice item's minimal shape this slice reads: the
