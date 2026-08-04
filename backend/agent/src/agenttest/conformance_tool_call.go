@@ -142,12 +142,16 @@ func toolCallInterleavedCase(t *testing.T, f Factory) {
 func toolCallZeroDeltaCase(t *testing.T, f Factory) {
 	t.Helper()
 
+	responseStart, err := ai.NewResponseStart("resp-zero-delta", "model-zero-delta")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	start, err := ai.NewToolCallStart(1, "call-1", "search")
 	requireConstructed(t, err, "ai.NewToolCallStart")
 	end, err := ai.NewToolCallEnd(1, []byte(`{"q":"weather"}`))
 	requireConstructed(t, err, "ai.NewToolCallEnd")
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	requireConstructed(t, err, "ai.NewCompletion")
 
-	script := Script{Steps: []Step{Emit(start), Emit(end)}}
+	script := Script{Steps: []Step{Emit(responseStart), Emit(start), Emit(end), Emit(completion)}}
 	subject := f.New(t, script)
 	ch, err := subject.Stream(t.Context(), minimalRequest(t))
 	if err != nil {
@@ -157,9 +161,7 @@ func toolCallZeroDeltaCase(t *testing.T, f Factory) {
 	RequireValidStream(t, rec)
 
 	events := rec.Events()
-	if len(events) != 2 {
-		t.Fatalf("drained %d event(s), want 2 (start immediately followed by end, no delta) (S-CNF-018)", len(events))
-	}
+	requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindToolCallStart, ai.EventKindToolCallEnd, ai.EventKindCompletion}) // S-CLA-006: exactly four, behind the lifecycle prefix and terminal — no finish-reason equality assertion added (D6)
 	calls := reconstructToolCalls(events)
 	call, ok := calls[1]
 	if !ok || !call.sawStart || !call.sawEnd {
@@ -216,6 +218,8 @@ func toolCallOrdinalCase(t *testing.T, f Factory) {
 func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	t.Helper()
 
+	responseStart, err := ai.NewResponseStart("resp-mixed-text-and-tool", "model-mixed-text-and-tool")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	textStart, err := ai.NewTextBlockStart(1)
 	requireConstructed(t, err, "ai.NewTextBlockStart")
 	textDelta, err := ai.NewTextDelta(1, "let me check that")
@@ -230,6 +234,7 @@ func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	requireConstructed(t, err, "ai.NewCompletion")
 
 	script := Script{Steps: []Step{
+		Emit(responseStart),
 		Emit(textStart), Emit(textDelta), Emit(textEnd),
 		Emit(callStart), Emit(callEnd),
 		Emit(completion),
@@ -243,9 +248,12 @@ func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	RequireValidStream(t, rec)
 
 	events := rec.Events()
-	if len(events) != 6 {
-		t.Fatalf("drained %d event(s), want 6 (text start/delta/end, call start/end, completion) (S-CNF-020)", len(events))
-	}
+	requireDrainedKinds(t, events, []ai.EventKind{
+		ai.EventKindResponseStart,
+		ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextBlockEnd,
+		ai.EventKindToolCallStart, ai.EventKindToolCallEnd,
+		ai.EventKindCompletion,
+	}) // S-CLA-007: exactly seven, behind the lifecycle prefix
 
 	sawText := false
 	for _, ev := range events {

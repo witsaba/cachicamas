@@ -114,8 +114,12 @@ func reasoningWholeBlocksCase(t *testing.T, f Factory) {
 		}
 		redactedEnd, err := ai.NewReasoningBlockEnd(redactedPayload, []byte("redacted-token"))
 		requireConstructed(t, err, "ai.NewReasoningBlockEnd")
+		responseStart, err := ai.NewResponseStart("resp-redacted-reasoning", "model-redacted-reasoning")
+		requireConstructed(t, err, "ai.NewResponseStart")
+		completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+		requireConstructed(t, err, "ai.NewCompletion")
 
-		script := Script{Steps: []Step{Emit(redactedStart), Emit(redactedEnd)}}
+		script := Script{Steps: []Step{Emit(responseStart), Emit(redactedStart), Emit(redactedEnd), Emit(completion)}}
 		subject := f.New(t, script)
 		ch, err := subject.Stream(t.Context(), minimalRequest(t))
 		if err != nil {
@@ -125,10 +129,8 @@ func reasoningWholeBlocksCase(t *testing.T, f Factory) {
 		RequireValidStream(t, rec)
 
 		events := rec.Events()
-		if len(events) != 2 {
-			t.Fatalf("drained %d event(s), want 2 (start, end)", len(events))
-		}
-		start, ok := events[0].ReasoningBlockStart()
+		requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindReasoningBlockStart, ai.EventKindReasoningBlockEnd, ai.EventKindCompletion}) // S-CLA-011: exactly four, behind the lifecycle prefix and terminal
+		start, ok := events[1].ReasoningBlockStart()
 		if !ok || !start.Redacted() {
 			t.Errorf("start.Redacted() = %v (ok=%v), want true (S-CNF-037)", start.Redacted(), ok)
 		}
@@ -190,9 +192,11 @@ func tokenCountingCase(t *testing.T, f Factory) {
 func cacheBoundaryHonoringCase(t *testing.T, f Factory) {
 	t.Helper()
 
+	responseStart, err := ai.NewResponseStart("resp-cache-boundary", "model-cache-boundary")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{CacheRead: ai.Tokens(128)})
 	requireConstructed(t, err, "ai.NewCompletion")
-	script := Script{Steps: []Step{Emit(completion)}}
+	script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
 	subject := f.New(t, script)
 	ch, err := subject.Stream(t.Context(), minimalRequest(t))
 	if err != nil {
@@ -200,12 +204,10 @@ func cacheBoundaryHonoringCase(t *testing.T, f Factory) {
 	}
 	rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 	events := rec.Events()
-	if len(events) != 1 {
-		t.Fatalf("drained %d event(s), want 1 (the completion alone)", len(events))
-	}
-	comp, ok := events[0].Completion()
+	requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion}) // S-CLA-012: exactly two, behind the lifecycle prefix
+	comp, ok := events[1].Completion()
 	if !ok {
-		t.Fatal("the one drained event is not a Completion")
+		t.Fatal("event 1 is not a Completion")
 	}
 	count, present := comp.Usage().CacheRead.Count()
 	if !present {
@@ -263,9 +265,11 @@ func finishReasonExhaustivenessCase(t *testing.T, f Factory) {
 
 	for _, reason := range handListedFinishReasons {
 		t.Run(reason.String(), func(t *testing.T) {
+			responseStart, err := ai.NewResponseStart("resp-finish-reason", "model-finish-reason")
+			requireConstructed(t, err, "ai.NewResponseStart")
 			completion, err := ai.NewCompletion(reason, ai.Usage{})
 			requireConstructed(t, err, "ai.NewCompletion")
-			script := Script{Steps: []Step{Emit(completion)}}
+			script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
 			subject := f.New(t, script)
 			ch, err := subject.Stream(t.Context(), minimalRequest(t))
 			if err != nil {
@@ -273,12 +277,10 @@ func finishReasonExhaustivenessCase(t *testing.T, f Factory) {
 			}
 			rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 			events := rec.Events()
-			if len(events) != 1 {
-				t.Fatalf("drained %d event(s), want 1", len(events))
-			}
-			comp, ok := events[0].Completion()
+			requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion}) // S-CLA-013: exactly two per subtest, behind the lifecycle prefix
+			comp, ok := events[1].Completion()
 			if !ok {
-				t.Fatal("the one drained event is not a Completion")
+				t.Fatal("event 1 is not a Completion")
 			}
 			if comp.FinishReason() != reason {
 				t.Errorf("FinishReason() = %v, want %v (S-CNF-043)", comp.FinishReason(), reason)
@@ -302,9 +304,11 @@ func usageAbsentVsZeroCase(t *testing.T, f Factory) {
 	t.Helper()
 
 	usage := ai.Usage{Output: ai.Tokens(0)} // Input left at its zero value: absent, never set
+	responseStart, err := ai.NewResponseStart("resp-usage-absent-vs-zero", "model-usage-absent-vs-zero")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	completion, err := ai.NewCompletion(ai.FinishReasonStop, usage)
 	requireConstructed(t, err, "ai.NewCompletion")
-	script := Script{Steps: []Step{Emit(completion)}}
+	script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
 	subject := f.New(t, script)
 	ch, err := subject.Stream(t.Context(), minimalRequest(t))
 	if err != nil {
@@ -312,12 +316,10 @@ func usageAbsentVsZeroCase(t *testing.T, f Factory) {
 	}
 	rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 	events := rec.Events()
-	if len(events) != 1 {
-		t.Fatalf("drained %d event(s), want 1", len(events))
-	}
-	comp, ok := events[0].Completion()
+	requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion}) // S-CLA-014: exactly two, behind the lifecycle prefix
+	comp, ok := events[1].Completion()
 	if !ok {
-		t.Fatal("the one drained event is not a Completion")
+		t.Fatal("event 1 is not a Completion")
 	}
 
 	if _, present := comp.Usage().Input.Count(); present {
