@@ -144,8 +144,8 @@ Every send on the carrier MUST select on the caller's cancellation signal, so a 
 
 #### Scenarios
 
-- **S-ATS-020** *[test]* — Given the reconciled boundary test file, when `TestClient_HasNoStreamingEntryPoint`'s successor runs, then it **fails** if `Stream` is absent and passes only when the method exists — the assertion's polarity is inverted, not removed.
-- **S-ATS-021** *[test]* — Given the reconciled boundary test file, when `TestClient_DoesNotSatisfyModelProviderAtRuntime`'s successor runs, then it asserts `ok == true` and fails when `*Client` stops satisfying `ai.ModelProvider`.
+- **S-ATS-020** *[test]* — Given the reconciled boundary test file, when `TestClient_HasNoStreamingEntryPoint`'s successor runs (`TestClient_HasStreamingEntryPoint`, renamed to match its post-flip meaning — verify-report S2), then it **fails** if `Stream` is absent and passes only when the method exists — the assertion's polarity is inverted, not removed.
+- **S-ATS-021** *[test]* — Given the reconciled boundary test file, when `TestClient_DoesNotSatisfyModelProviderAtRuntime`'s successor runs (`TestClient_SatisfiesModelProviderAtRuntime`, renamed to match its post-flip meaning — verify-report S2), then it asserts `ok == true` and fails when `*Client` stops satisfying `ai.ModelProvider`.
 - **S-ATS-022** *[inspection]* — Given `provider_boundary_test.go` after this milestone, when a reviewer reads it, then both tests are present with inverted assertions and a doc comment naming AI-28 and this spec's requirement — neither is `t.Skip`ped, commented out or deleted.
 - **S-ATS-023** *[inspection]* — Given `doc.go` after this milestone, when a reviewer reads its opening prose, then the "streaming arrives at AI-26" claim is corrected to name AI-28, and every sentinel this milestone exports (if any) appears in S-ART-054's allowlist with its `R-ATS-0NN` citation.
 

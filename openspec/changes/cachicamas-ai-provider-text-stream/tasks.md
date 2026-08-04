@@ -20,7 +20,7 @@ Chain strategy: feature-branch-chain
 
 | Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
 |---|---|---|---|---|---|
-| 1 | Producer shell: `Stream`, cancellation, guard flips (R-ATS-001…006) | PR 1 (base=tracker) | `go test -race -count=1 -run 'TestClient_HasNoStreamingEntryPoint|TestClient_DoesNotSatisfyModelProviderAtRuntime|TestStream' ./...` | `httptest.Server` transcript replay, real loopback HTTP | Revert `stream.go` + guard-flip commit; `*Client` returns to AI-25 shape |
+| 1 | Producer shell: `Stream`, cancellation, guard flips (R-ATS-001…006) | PR 1 (base=tracker) | `go test -race -count=1 -run 'TestClient_HasStreamingEntryPoint|TestClient_SatisfiesModelProviderAtRuntime|TestStream' ./...` (renamed from `TestClient_HasNoStreamingEntryPoint`/`TestClient_DoesNotSatisfyModelProviderAtRuntime` — verify-report S2 corrective, AI-28.7) | `httptest.Server` transcript replay, real loopback HTTP | Revert `stream.go` + guard-flip commit; `*Client` returns to AI-25 shape |
 | 2 | Text mapping + conformance bridge (R-ATS-007…011) — BLOCKED, see gate | PR 2 → PR1 | `-run 'TestChunk|TestStreamState|TestConformanceBridge'` | `agenttest.RunConformanceFor(CapStreamingText)` over bridge's `httptest.Server` | Revert `chunk.go`+`stream_state.go`+bridge; slice 1 unaffected |
 | 3 | Terminal discipline (R-ATS-012…014) | PR 3 → PR2 | `-run 'TestTerminal|TestTruncation'` | `[DONE]`-terminated fixture replay | Revert terminal-handling diff only |
 | 4 | Absent-vs-zero usage (R-ATS-015…016) | PR 4 → PR3 | `-run TestUsage` | Usage-chunk fixture replay | Revert usage-mapping diff only |
