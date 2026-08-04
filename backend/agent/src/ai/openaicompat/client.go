@@ -59,7 +59,7 @@ type Config struct {
 
 // Client is a configured value for the OpenAI-compatible dialect. At AI-25
 // it does nothing but hold configuration; it acquires streaming behaviour
-// at AI-26.
+// at AI-28.
 type Client struct {
 	base       *url.URL
 	credential Credential

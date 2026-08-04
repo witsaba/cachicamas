@@ -2,8 +2,9 @@
 // begins at AI-25. At this milestone it is a configured value only:
 // construction turns an injected endpoint, an injected credential and an
 // optional injected HTTP client into a value later milestones build
-// against. Streaming behaviour arrives at AI-26; this package does not ship
-// a placeholder for it (see provider_boundary_test.go).
+// against. Streaming behaviour arrives at AI-28 (see stream.go); this
+// package shipped no placeholder for it before then (see
+// provider_boundary_test.go, R-ATS-006).
 //
 // It lives in its own subpackage rather than inside package ai because
 // AI-25.2's ambient-authority guard must scan "the adapter's own source
