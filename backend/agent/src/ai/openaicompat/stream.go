@@ -279,6 +279,17 @@ func isStreamContentType(contentType string) bool {
 // credential — it is built solely from the response's Content-Type header
 // and body — so it cannot reproduce one (R-ATS-023's "MUST NOT reproduce
 // credential material").
+//
+// Credential-scan posture (S-ATS-089 rev 4): the credential-scan guard's
+// designed scope is external-package (`package openaicompat_test`) test
+// files only, and every test file in this milestone is internal-package by
+// load-bearing necessity — the error-mapping milestone plants
+// above-threshold credential sentinels in internal test files precisely
+// because the guard cannot see them there, so widening the guard would
+// break the build on those deliberate plants. A package-internal sweep
+// that understands deliberate plants is possible future hardening, owned
+// by a future guard change; recorded here so the gap is disclosed, never
+// silent.
 type nonStreamContentType struct {
 	contentType string
 	excerpt     []byte
