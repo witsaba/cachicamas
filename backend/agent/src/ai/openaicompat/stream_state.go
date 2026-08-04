@@ -65,6 +65,15 @@ var errMalformedIdentity = fmt.Errorf("openaicompat: first chunk's response iden
 // does; unexported for the same reason (R-ATS-025).
 var errUnrecognizedFinishReason = fmt.Errorf("openaicompat: terminal chunk's finish_reason was outside the recognised enum: %w", ai.ErrMalformedResponse)
 
+// errMissingRequiredField is this package's own unexported cause for a
+// chunk recognized by isChunk() (object present and correct) that is
+// nonetheless missing a C1 required top-level field this milestone
+// re-validates on every chunk, not merely the first (R-ATS-021, S-ATS-081;
+// chunk.go's wireChunk.hasRequiredFields). Wraps ai.ErrMalformedResponse
+// with %w for the same reason errMalformedIdentity does; unexported for
+// the same reason (R-ATS-025).
+var errMissingRequiredField = fmt.Errorf("openaicompat: recognized chunk was missing a C1 required top-level field: %w", ai.ErrMalformedResponse)
+
 // mapperState is AI-28.1.2's frame-to-events mapper. Its zero value is
 // ready to use: no chunk has been read yet, no block minted, no terminal
 // seen — the same "ready without a constructor" posture ai.Stamper's own
@@ -124,6 +133,15 @@ type mapperState struct {
 // run) never inspects a partial events slice on error.
 func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 	var events []ai.Event
+
+	// R-ATS-021/S-ATS-081: a recognized chunk (the caller already confirmed
+	// isChunk()) missing a C1 required field is a broken KNOWN shape, never
+	// a skip — checked first, and uniformly on every chunk, not merely the
+	// first (chunk.go's wireChunk.hasRequiredFields doc comment explains the
+	// field scope).
+	if !chunk.hasRequiredFields() {
+		return nil, errMissingRequiredField
+	}
 
 	if !s.identityEstablished {
 		started, err := ai.NewResponseStart(chunk.ID, chunk.Model)

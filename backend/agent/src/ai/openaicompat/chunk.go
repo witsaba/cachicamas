@@ -66,28 +66,60 @@ type wireChunk struct {
 const chunkObjectDiscriminator = "chat.completion.chunk"
 
 // isChunk reports whether c should be treated as a recognized streaming
-// chunk (R-ATS-017, D3): true when Object is either absent — the shape
-// every fixture predating this slice's own Object field already uses, and
-// no scenario in this node exercises an absent-object skip — or present
-// and matching chunkObjectDiscriminator exactly. Only a PRESENT,
-// MISMATCHED value (S-ATS-066) is skipped.
+// chunk (R-ATS-017, D3, final three-way rule): true only when Object is
+// PRESENT and matches chunkObjectDiscriminator exactly. Object ABSENT is
+// no longer treated as a chunk — the spec's own Definitions section makes
+// the discriminator constitutive of "a chunk" in the first place, and
+// R-ATS-017's own text ("whose top-level object is not chat.completion.chunk")
+// is trivially true of an absent value too — so an object-absent frame is
+// skipped exactly like a present-and-mismatched one (S-ATS-066).
 //
-// This is deliberately narrower than design.md D3's own literal "≠
-// chat.completion.chunk (or absent) → skip" text, which would ALSO skip
-// every existing chunk fixture across this package's 176 pre-slice-5
-// tests — none of them set the object field, since it was not previously
-// part of wireChunk and setting it is not the point of those tests.
-// Skipping on absence would silently degrade every one of those transcript
-// drains into empty streams, a safety-net regression this slice must not
-// introduce. Disclosed in this milestone's apply-progress record as a
-// deviation from D3's literal text, chosen because (a) it satisfies every
-// WRITTEN scenario in R-ATS-017…019 — none tests the absent-object case —
-// and (b) enforcing a required field's mere absence, as opposed to an
-// actively wrong value, is squarely R-ATS-021's "recognized chunk missing
-// a C1 required field" charter (a later, not-yet-implemented slice), not
-// this loose, skip-oriented rule's.
+// # Corrective: supersedes slice 5's own pragmatic deviation
+//
+// Slice 5 deliberately implemented this method as "absent OR matching" —
+// disclosed as narrower than design.md D3's own literal "≠
+// chat.completion.chunk (or absent) → skip" text — because none of this
+// package's 176 pre-slice-5 fixtures set the object field at all, and the
+// literal rule would have skipped every one of them, a safety-net
+// regression. Slice 6's own precondition commit normalized every existing
+// fixture to carry the field (C1 requires it: those fixtures were the
+// defect, not the rule), discharging that conflict, so this method now
+// implements D3's literal three-way rule in full: absent → skip
+// (R-ATS-017 family); present-and-mismatched → skip (S-ATS-066); present
+// and correct but some OTHER C1 required field missing is NOT this
+// method's concern — see wireChunk.hasRequiredFields, R-ATS-021,
+// S-ATS-081 — that is a recognized-but-broken chunk, never a skip.
 func (c wireChunk) isChunk() bool {
-	return c.Object == "" || c.Object == chunkObjectDiscriminator
+	return c.Object == chunkObjectDiscriminator
+}
+
+// hasRequiredFields reports whether c, already recognized as a chunk by
+// isChunk(), nonetheless carries every C1 required top-level field this
+// milestone's own wireChunk captures and depends on (R-ATS-021, S-ATS-081):
+// today, only Model. Model is genuinely re-validated here because no other
+// code path re-reads it past the first chunk — R-ATS-004's own identity
+// path (ai.NewResponseStart) only ever runs once, on the chunk that
+// establishes identity, so a LATER chunk's empty or absent model would
+// otherwise pass through unchecked.
+//
+// ID is deliberately NOT re-checked here: an empty/absent id on the FIRST
+// chunk is already rejected by ai.NewResponseStart's own constructor
+// (S-ATS-015, errMalformedIdentity); on a LATER chunk, R-ATS-020 row 3's
+// own established-identity comparison (stream_state.go) already rejects an
+// id that differs from the one already established — including the empty
+// string, which can never equal a non-empty established id — so a second,
+// independent id-presence check here would be redundant with that rule,
+// not a gap it leaves open.
+//
+// Created is never decoded by wireChunk at all (out of this milestone's
+// charter, R-ATS-026: no field this milestone does not need), and
+// Choices' own required-key presence is deliberately not probed here: an
+// empty choices array is C4's own legitimate usage-chunk shape, and Go's
+// zero-value decode cannot distinguish "the key was absent" from "the key
+// was present as []" without an unwarranted raw-presence probe no scenario
+// in this node asks for.
+func (c wireChunk) hasRequiredFields() bool {
+	return c.Model != ""
 }
 
 // wireUsage is the streaming usage object's field set this milestone maps
