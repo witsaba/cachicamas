@@ -140,21 +140,30 @@ func renderScript(tb testing.TB, script agenttest.Script) []byte {
 	return buf.Bytes()
 }
 
+// bridgeChunkCreated is the fixed "created" value every chunk this bridge
+// renders carries (R-ATS-021's C1 required-field set, verify-report W1):
+// nothing in this bridge or the scripts it renders ever reads it back, so
+// one fixed value — matching the rest of this package's own fixture
+// normalization — is enough to keep every rendered chunk a recognized,
+// non-malformed one.
+const bridgeChunkCreated = 1700000000
+
 // writeDeltaChunk appends one SSE data frame carrying a choice-0 content
 // delta (R-ATS-007). The object discriminator (C1) is set to the chunk
 // spelling so this bridge's rendered transcripts model legal wire bytes,
-// matching every other fixture in this package (R-ATS-017/D3 normalization).
+// matching every other fixture in this package (R-ATS-017/D3 normalization,
+// W1's own created-field normalization).
 func writeDeltaChunk(buf *bytes.Buffer, id, model, content string) {
-	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%s},\"finish_reason\":null}]}\n\n",
-		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), chunkObjectDiscriminator, bridgeQuoteJSONString(content))
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%s},\"finish_reason\":null}]}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), bridgeChunkCreated, chunkObjectDiscriminator, bridgeQuoteJSONString(content))
 }
 
 // writeTerminalChunk appends one SSE data frame carrying choice-0's
 // terminal finish_reason with an empty delta (C2's own convention). The
 // object discriminator (C1) is set the same way writeDeltaChunk sets it.
 func writeTerminalChunk(buf *bytes.Buffer, id, model string, reason ai.FinishReason) {
-	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]}\n\n",
-		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), chunkObjectDiscriminator, bridgeQuoteJSONString(reason.String()))
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), bridgeChunkCreated, chunkObjectDiscriminator, bridgeQuoteJSONString(reason.String()))
 }
 
 // bridgeQuoteJSONString renders s as one JSON string literal, escaping only

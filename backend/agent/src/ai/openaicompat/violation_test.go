@@ -148,6 +148,91 @@ func TestProtocolViolation_MissingRequiredModelField_MalformedTerminal(t *testin
 	requireCheckStreamClean(t, events)
 }
 
+// TestProtocolViolation_C1RequiredFieldMissing_MalformedTerminal covers
+// R-ATS-021's C1 required-field set (choices, created, id, model, object)
+// at the two fields wireChunk.hasRequiredFields checks directly — model
+// (S-ATS-081's own shape, restated here as one row of this table so the
+// two fields it enforces share one contract test) and created
+// (verify-report W1: wireChunk declared no Created field at all, so a
+// chunk omitting it was silently accepted instead of yielding the
+// malformed terminal R-ATS-021 mandates). id, object and choices are the
+// OTHER three C1-required fields and are deliberately NOT repeated here —
+// each already has its own dedicated coverage documented at
+// wireChunk.hasRequiredFields' own doc comment (id:
+// TestStream_FirstChunkMalformedIdentity_TerminatesWithMalformedResponseFailure
+// plus R-ATS-020 row 3's own established-identity check; object:
+// TestProtocolViolation_AbsentObjectDiscriminator_SkippedBetweenTwoContentChunks;
+// choices: an absent/empty array is C4's own legitimate usage-chunk
+// shape, TestUsage_EmptyChoicesArray_NoTextEventNoProtocolViolation).
+//
+// Both rows use a SECOND chunk, after a first chunk already established
+// identity and emitted one delta, matching S-ATS-081's own established
+// pattern (the offending chunk is deliberately not the first one, and
+// deliberately carries the terminal finish_reason "stop" rather than a
+// null one — see that test's own doc comment for why).
+func TestProtocolViolation_C1RequiredFieldMissing_MalformedTerminal(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name      string
+		offending string
+	}{
+		{
+			name:      "model missing (S-ATS-081)",
+			offending: `{"id":"chatcmpl-req2","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		},
+		{
+			name:      "created missing",
+			offending: `{"id":"chatcmpl-req2","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		},
+	}
+
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			t.Parallel()
+
+			transcript := "" +
+				"data: {\"id\":\"chatcmpl-req2\",\"model\":\"m\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
+				"data: " + r.offending + "\n\n" +
+				"data: [DONE]\n\n"
+			server := sseServer(t, transcript)
+			defer server.Close()
+			c := mustClient(t, server.URL)
+			ch, err := c.Stream(context.Background(), validRequest(t))
+			if err != nil {
+				t.Fatalf("Stream() error = %v, want nil", err)
+			}
+			events := drainAll(t, ch)
+			if len(events) == 0 {
+				t.Fatal("drained zero events, want the preceding delta and a terminal failure")
+			}
+
+			last := events[len(events)-1]
+			failure, ok := last.ErrorPayload()
+			if !ok {
+				t.Fatalf("last event carries no ErrorPayload, want a malformed-response terminal: %+v", last)
+			}
+			if failure.Category() != ai.FailureCategoryMalformedResponse {
+				t.Errorf("Category() = %v, want FailureCategoryMalformedResponse", failure.Category())
+			}
+			if !errors.Is(failure, ai.ErrMalformedResponse) {
+				t.Error("errors.Is(failure, ai.ErrMalformedResponse) = false, want true")
+			}
+
+			var deltas []string
+			for _, ev := range events[:len(events)-1] {
+				if d, ok := ev.TextDelta(); ok {
+					deltas = append(deltas, d.Delta())
+				}
+			}
+			if len(deltas) != 1 || deltas[0] != "before" {
+				t.Errorf("preceding deltas = %q, want exactly [\"before\"] preserved byte-exact", deltas)
+			}
+			requireCheckStreamClean(t, events)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------
 // R-ATS-020 — the five-row structural violation table (S-ATS-074…079).
 // ---------------------------------------------------------------------

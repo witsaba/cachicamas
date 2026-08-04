@@ -52,6 +52,7 @@ import (
 type wireChunk struct {
 	ID      string       `json:"id"`
 	Model   string       `json:"model"`
+	Created *int64       `json:"created"`
 	Choices []wireChoice `json:"choices"`
 	Usage   *wireUsage   `json:"usage"`
 	Object  string       `json:"object"`
@@ -94,13 +95,22 @@ func (c wireChunk) isChunk() bool {
 }
 
 // hasRequiredFields reports whether c, already recognized as a chunk by
-// isChunk(), nonetheless carries every C1 required top-level field this
-// milestone's own wireChunk captures and depends on (R-ATS-021, S-ATS-081):
-// today, only Model. Model is genuinely re-validated here because no other
-// code path re-reads it past the first chunk — R-ATS-004's own identity
-// path (ai.NewResponseStart) only ever runs once, on the chunk that
+// isChunk(), nonetheless carries every C1 required top-level field
+// (choices, created, id, model, object — R-ATS-021, S-ATS-081, verify-
+// report W1). The five-field set is discharged five different ways, not
+// five identical checks: Model and Created are genuinely re-validated
+// here directly, because no other code path re-reads either one past the
+// first chunk; id, object and choices are each covered by a DIFFERENT
+// mechanism, documented below, so repeating them here would be redundant
+// with a rule that already closes the same gap.
+//
+// Model is checked because R-ATS-004's own identity path
+// (ai.NewResponseStart) only ever runs once, on the chunk that
 // establishes identity, so a LATER chunk's empty or absent model would
-// otherwise pass through unchecked.
+// otherwise pass through unchecked. Created is checked for the identical
+// reason: no code path anywhere in this package reads it at all, so
+// nothing else could ever notice its absence — wireChunk declared no
+// Created field until this check needed one.
 //
 // ID is deliberately NOT re-checked here: an empty/absent id on the FIRST
 // chunk is already rejected by ai.NewResponseStart's own constructor
@@ -111,15 +121,20 @@ func (c wireChunk) isChunk() bool {
 // independent id-presence check here would be redundant with that rule,
 // not a gap it leaves open.
 //
-// Created is never decoded by wireChunk at all (out of this milestone's
-// charter, R-ATS-026: no field this milestone does not need), and
+// Object is deliberately NOT re-checked here either: isChunk() — the
+// caller's own precondition for ever calling this method — already
+// requires Object to be present and correct (R-ATS-017/D3); by the time
+// this method runs, Object has already been proven both present and
+// exactly chunkObjectDiscriminator, so a second check here could never
+// fail.
+//
 // Choices' own required-key presence is deliberately not probed here: an
 // empty choices array is C4's own legitimate usage-chunk shape, and Go's
 // zero-value decode cannot distinguish "the key was absent" from "the key
 // was present as []" without an unwarranted raw-presence probe no scenario
 // in this node asks for.
 func (c wireChunk) hasRequiredFields() bool {
-	return c.Model != ""
+	return c.Model != "" && c.Created != nil
 }
 
 // wireUsage is the streaming usage object's field set this milestone maps
