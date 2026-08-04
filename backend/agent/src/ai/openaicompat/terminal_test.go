@@ -51,7 +51,7 @@ func TestTerminal_TerminalChunkThenDone_EndsCleanlyWithCompletion(t *testing.T) 
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-term\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-term\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -114,7 +114,7 @@ func TestTerminal_DoneWithNoPaddingBeyondMandatoryBlankLine_SameOutcome(t *testi
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-pad\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-pad\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -157,9 +157,9 @@ func TestTerminal_WellFormedChunkAfterSentinel_Ignored(t *testing.T) {
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-post\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-post\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n" +
-		"data: {\"id\":\"chatcmpl-post\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ghost\"},\"finish_reason\":null}]}\n\n"
+		"data: {\"id\":\"chatcmpl-post\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ghost\"},\"finish_reason\":null}]}\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
 
@@ -190,7 +190,7 @@ func TestTerminal_MalformedFrameAfterSentinel_StillEndsCleanly(t *testing.T) {
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-mal\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-mal\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n" +
 		"data: {this is not valid json at all\n\n"
 	server := sseServer(t, transcript)
@@ -223,7 +223,7 @@ func TestTerminal_DuplicateSentinel_ExactlyOneTerminalEvent(t *testing.T) {
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-dup\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-dup\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)

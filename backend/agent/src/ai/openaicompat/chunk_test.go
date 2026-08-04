@@ -208,7 +208,7 @@ func TestRawStrictFinishReason_OutsideEnum_RejectedEvenWhenNormalizeWouldAccept(
 func TestDecodeChunk_ReadsIdentityAndChoice0(t *testing.T) {
 	t.Parallel()
 
-	data := []byte(`{"id":"chatcmpl-Xq7","model":"gizmo-4o","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`)
+	data := []byte(`{"id":"chatcmpl-Xq7","model":"gizmo-4o","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`)
 	chunk, err := decodeChunk(data)
 	if err != nil {
 		t.Fatalf("decodeChunk() error = %v, want nil", err)
@@ -237,7 +237,7 @@ func TestDecodeChunk_ReadsIdentityAndChoice0(t *testing.T) {
 func TestDecodeChunk_EmptyChoicesArray_NoChoice0(t *testing.T) {
 	t.Parallel()
 
-	data := []byte(`{"id":"chatcmpl-x","model":"m","choices":[]}`)
+	data := []byte(`{"id":"chatcmpl-x","model":"m","object":"chat.completion.chunk","choices":[]}`)
 	chunk, err := decodeChunk(data)
 	if err != nil {
 		t.Fatalf("decodeChunk() error = %v, want nil", err)

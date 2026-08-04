@@ -22,7 +22,7 @@ import (
 // ...\n\n" SSE frame, or "" to omit it entirely), then the sentinel.
 func usageTranscript(usageChunk string) string {
 	return "" +
-		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		usageChunk +
 		"data: [DONE]\n\n"
 }
@@ -54,7 +54,7 @@ func drainLastCompletion(t *testing.T, ch <-chan ai.Event) ai.Completion {
 func TestUsage_OnlyPromptAndCompletionTokens_UnmappedFieldsReadAbsent(t *testing.T) {
 	t.Parallel()
 
-	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":22,\"total_tokens\":33}}\n\n")
+	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":22,\"total_tokens\":33}}\n\n")
 	server := sseServer(t, transcript)
 	defer server.Close()
 	c := mustClient(t, server.URL)
@@ -87,7 +87,7 @@ func TestUsage_OnlyPromptAndCompletionTokens_UnmappedFieldsReadAbsent(t *testing
 func TestUsage_ExplicitZero_ReportsReportedZeroNotAbsent(t *testing.T) {
 	t.Parallel()
 
-	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
+	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
 	server := sseServer(t, transcript)
 	defer server.Close()
 	c := mustClient(t, server.URL)
@@ -112,8 +112,8 @@ func TestUsage_ExplicitZero_ReportsReportedZeroNotAbsent(t *testing.T) {
 func TestUsage_OmittedVsExplicitZero_UsageRecordsNotEqual(t *testing.T) {
 	t.Parallel()
 
-	omitted := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
-	explicitZero := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
+	omitted := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
+	explicitZero := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":5,\"total_tokens\":5}}\n\n")
 
 	drain := func(transcript string) ai.Usage {
 		server := sseServer(t, transcript)
@@ -148,9 +148,9 @@ func TestUsage_NullOnNonFinalChunks_DoesNotOverwritePopulatedUsage(t *testing.T)
 	t.Parallel()
 
 	transcript := "" +
-		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
-		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
-		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":9,\"total_tokens\":16}}\n\n" +
+		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":9,\"total_tokens\":16}}\n\n" +
 		"data: [DONE]\n\n"
 	server := sseServer(t, transcript)
 	defer server.Close()
@@ -190,7 +190,7 @@ func usagePresent(u ai.Usage) bool {
 func TestUsage_PresenceAssertedPositively_AndNegativeControlFails(t *testing.T) {
 	t.Parallel()
 
-	withUsage := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6,\"total_tokens\":10}}\n\n")
+	withUsage := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6,\"total_tokens\":10}}\n\n")
 	withoutUsage := usageTranscript("")
 
 	t.Run("usage chunk present: assertion holds (S-ATS-059)", func(t *testing.T) {
@@ -230,7 +230,7 @@ func TestUsage_PresenceAssertedPositively_AndNegativeControlFails(t *testing.T) 
 func TestUsage_EmptyChoicesArray_NoTextEventNoProtocolViolation(t *testing.T) {
 	t.Parallel()
 
-	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n")
+	transcript := usageTranscript("data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n")
 	server := sseServer(t, transcript)
 	defer server.Close()
 	c := mustClient(t, server.URL)

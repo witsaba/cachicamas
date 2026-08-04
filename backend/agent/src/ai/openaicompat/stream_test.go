@@ -371,7 +371,7 @@ func TestStream_InvalidRequestAndCancelledContext_ReportsValidationFailureFirst(
 func TestStream_MinimalTranscript_DrainsResponseStartThenCompletion(t *testing.T) {
 	t.Parallel()
 
-	server := sseServer(t, "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gizmo-1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	server := sseServer(t, "data: {\"id\":\"chatcmpl-abc\",\"model\":\"gizmo-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	defer server.Close()
 
 	c := mustClient(t, server.URL)
@@ -424,7 +424,7 @@ func TestStream_MinimalTranscript_DrainsResponseStartThenCompletion(t *testing.T
 func TestStream_ResponseIdentity_ByteExactAndNeverComparedToRequestedModel(t *testing.T) {
 	t.Parallel()
 
-	server := sseServer(t, "data: {\"id\":\"chatcmpl-Xq7\",\"model\":\"gizmo-4o-2026-05-13\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	server := sseServer(t, "data: {\"id\":\"chatcmpl-Xq7\",\"model\":\"gizmo-4o-2026-05-13\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	defer server.Close()
 
 	c := mustClient(t, server.URL)
@@ -467,7 +467,7 @@ func TestStream_ResponseIdentity_PreservesWhitespaceAndCase(t *testing.T) {
 	t.Parallel()
 
 	const id = "  ChatCmpl-MiXeD-Id  "
-	transcript := fmt.Sprintf("data: {\"id\":%q,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", id)
+	transcript := fmt.Sprintf("data: {\"id\":%q,\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", id)
 	server := sseServer(t, transcript)
 	defer server.Close()
 
@@ -499,9 +499,9 @@ func TestStream_FirstChunkMalformedIdentity_TerminatesWithMalformedResponseFailu
 		name  string
 		chunk string
 	}{
-		{"empty id", `{"id":"","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
-		{"empty model", `{"id":"x","model":"","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
-		{"absent id key", `{"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
+		{"empty id", `{"id":"","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
+		{"empty model", `{"id":"x","model":"","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
+		{"absent id key", `{"model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`},
 	}
 
 	for _, tc := range cases {
@@ -547,7 +547,7 @@ func TestStream_CancellationMidStream_GoroutineExitsAndCarrierClosesCleanly(t *t
 
 	before := runtime.NumGoroutine()
 
-	server, release := slowSSEServer(t, "data: {\"id\":\"chatcmpl-x\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
+	server, release := slowSSEServer(t, "data: {\"id\":\"chatcmpl-x\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
 	defer close(release)
 	defer server.Close()
 
@@ -583,7 +583,7 @@ func TestStream_CarrierClosesExactlyOnce_AcrossOutcomes(t *testing.T) {
 	t.Run("normal completion", func(t *testing.T) {
 		t.Parallel()
 
-		server := sseServer(t, "data: {\"id\":\"chatcmpl-a\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		server := sseServer(t, "data: {\"id\":\"chatcmpl-a\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 		defer server.Close()
 
 		c := mustClient(t, server.URL)
@@ -598,7 +598,7 @@ func TestStream_CarrierClosesExactlyOnce_AcrossOutcomes(t *testing.T) {
 	t.Run("terminal failure", func(t *testing.T) {
 		t.Parallel()
 
-		server := sseServer(t, "data: {\"id\":\"\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		server := sseServer(t, "data: {\"id\":\"\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 		defer server.Close()
 
 		c := mustClient(t, server.URL)
@@ -613,7 +613,7 @@ func TestStream_CarrierClosesExactlyOnce_AcrossOutcomes(t *testing.T) {
 	t.Run("cancellation", func(t *testing.T) {
 		t.Parallel()
 
-		server, release := slowSSEServer(t, "data: {\"id\":\"chatcmpl-b\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
+		server, release := slowSSEServer(t, "data: {\"id\":\"chatcmpl-b\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
 		defer close(release)
 		defer server.Close()
 

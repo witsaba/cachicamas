@@ -62,9 +62,9 @@ func TestMapperState_ThreeContentChunks_EmitsThreeOrderedDeltas(t *testing.T) {
 
 	state := &mapperState{}
 	events := driveChunks(t, state,
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Hola"},"finish_reason":null}]}`),
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":", "},"finish_reason":null}]}`),
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":"mundo"},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Hola"},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":", "},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"mundo"},"finish_reason":null}]}`),
 	)
 
 	var deltas []string
@@ -99,9 +99,9 @@ func TestMapperState_TwoContentChunksAndTerminal_EmitsSixKindsInOrder(t *testing
 
 	state := &mapperState{}
 	events := driveChunks(t, state,
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":"un"},"finish_reason":null}]}`),
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":" dos"},"finish_reason":null}]}`),
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"un"},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" dos"},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
 	)
 	completion, err := state.buildCompletion()
 	if err != nil {
@@ -162,7 +162,7 @@ func TestMapperState_RoleOnlyOpeningThenContent_BlockStartBetweenThem(t *testing
 
 	state := &mapperState{}
 
-	opening, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`))
+	opening, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatalf("applyChunk(opening) error = %v, want nil", err)
 	}
@@ -170,7 +170,7 @@ func TestMapperState_RoleOnlyOpeningThenContent_BlockStartBetweenThem(t *testing
 		t.Fatalf("opening chunk emitted kinds = %v, want exactly [ResponseStart] (S-ATS-030)", got)
 	}
 
-	content, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":"hola"},"finish_reason":null}]}`))
+	content, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hola"},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatalf("applyChunk(content) error = %v, want nil", err)
 	}
@@ -189,8 +189,8 @@ func TestMapperState_NoContentAnywhere_NoBlockMintedAtAll(t *testing.T) {
 
 	state := &mapperState{}
 	events := driveChunks(t, state,
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`),
-		mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`),
+		mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
 	)
 	completion, err := state.buildCompletion()
 	if err != nil {
@@ -230,7 +230,7 @@ func TestMapperState_TerminalThenDeltaLessAndUsageChunks_ClosesCleanly(t *testin
 	// also establishes identity (ResponseStart) alongside the block open
 	// and first delta — S-ATS-030 covers the role-only-opening-chunk shape
 	// separately; this test's own focus is the terminal→sentinel window.
-	content, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`))
+	content, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatalf("applyChunk(content) error = %v, want nil", err)
 	}
@@ -239,7 +239,7 @@ func TestMapperState_TerminalThenDeltaLessAndUsageChunks_ClosesCleanly(t *testin
 		t.Fatalf("content chunk emitted kinds = %v, want %v", got, wantContentKinds)
 	}
 
-	terminal, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+	terminal, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
 	if err != nil {
 		t.Fatalf("applyChunk(terminal) error = %v, want nil", err)
 	}
@@ -249,7 +249,7 @@ func TestMapperState_TerminalThenDeltaLessAndUsageChunks_ClosesCleanly(t *testin
 
 	// A delta-less chunk in the terminal→sentinel window (C4's own window)
 	// — carries a choice item, but no content and no (re-)finish_reason.
-	deltaLess, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":null}]}`))
+	deltaLess, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":null}]}`))
 	if err != nil {
 		t.Fatalf("applyChunk(deltaLess) error = %v, want nil (S-ATS-032)", err)
 	}
@@ -258,7 +258,7 @@ func TestMapperState_TerminalThenDeltaLessAndUsageChunks_ClosesCleanly(t *testin
 	}
 
 	// The usage chunk itself (C4): an empty choices array.
-	usage, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`))
+	usage, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`))
 	if err != nil {
 		t.Fatalf("applyChunk(usage) error = %v, want nil (S-ATS-032)", err)
 	}
