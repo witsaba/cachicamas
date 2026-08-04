@@ -192,6 +192,17 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 		if n > 0 {
 			frames, feedErr := decoder.Feed(buf[:n])
 			for _, frame := range frames {
+				if frame.Event != defaultEventType {
+					// R-ATS-017: a frame whose SSE event type is not the
+					// default type is skipped unconditionally — never
+					// decoded, never applied, never treated as the
+					// sentinel even if its data happens to match (C5
+					// states no event-type requirement, but R-ATS-017's
+					// own skip rule is unconditional and this is the
+					// simpler, single-branch reading of it).
+					continue
+				}
+
 				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
@@ -206,6 +217,12 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				if decodeErr != nil {
 					emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
 					return
+				}
+				if !chunk.isChunk() {
+					// R-ATS-017/D3: a present-but-mismatched object
+					// discriminator means this frame's JSON is not
+					// recognized as a chunk at all — skipped, not applied.
+					continue
 				}
 
 				events, applyErr := state.applyChunk(chunk)

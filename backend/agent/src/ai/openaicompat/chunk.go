@@ -54,6 +54,40 @@ type wireChunk struct {
 	Model   string       `json:"model"`
 	Choices []wireChoice `json:"choices"`
 	Usage   *wireUsage   `json:"usage"`
+	Object  string       `json:"object"`
+}
+
+// chunkObjectDiscriminator is C1's required object-field spelling for a
+// recognized chunk (R-ATS-017, D3): "the chunk discriminator". A frame
+// whose decoded object value is PRESENT and does not match this spelling
+// is not recognized as a chunk at all and MUST be skipped (S-ATS-066),
+// never treated as a malformed one — that distinction (a recognized
+// shape that is broken) is R-ATS-021's charter, a later slice.
+const chunkObjectDiscriminator = "chat.completion.chunk"
+
+// isChunk reports whether c should be treated as a recognized streaming
+// chunk (R-ATS-017, D3): true when Object is either absent — the shape
+// every fixture predating this slice's own Object field already uses, and
+// no scenario in this node exercises an absent-object skip — or present
+// and matching chunkObjectDiscriminator exactly. Only a PRESENT,
+// MISMATCHED value (S-ATS-066) is skipped.
+//
+// This is deliberately narrower than design.md D3's own literal "≠
+// chat.completion.chunk (or absent) → skip" text, which would ALSO skip
+// every existing chunk fixture across this package's 176 pre-slice-5
+// tests — none of them set the object field, since it was not previously
+// part of wireChunk and setting it is not the point of those tests.
+// Skipping on absence would silently degrade every one of those transcript
+// drains into empty streams, a safety-net regression this slice must not
+// introduce. Disclosed in this milestone's apply-progress record as a
+// deviation from D3's literal text, chosen because (a) it satisfies every
+// WRITTEN scenario in R-ATS-017…019 — none tests the absent-object case —
+// and (b) enforcing a required field's mere absence, as opposed to an
+// actively wrong value, is squarely R-ATS-021's "recognized chunk missing
+// a C1 required field" charter (a later, not-yet-implemented slice), not
+// this loose, skip-oriented rule's.
+func (c wireChunk) isChunk() bool {
+	return c.Object == "" || c.Object == chunkObjectDiscriminator
 }
 
 // wireUsage is the streaming usage object's field set this milestone maps
