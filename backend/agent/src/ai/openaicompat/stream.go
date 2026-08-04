@@ -54,6 +54,21 @@
 // that same rejection is what turns "the sentinel arrived early" into the
 // malformed-response terminal design.md's D9 calls for, with no separate
 // branch needed to detect it.
+//
+// # Pre-decode checks now gate the carrier (AI-28.6, R-ATS-023/024)
+//
+// Between the response arriving and the carrier being created, Stream now
+// runs two checks — design.md D1's own numbered step 6, strictly before
+// step 7's channel creation — so both are pre-handover, ai.PreStreamFailure
+// refusals (R-ATS-025's own handover rule), never something observed on the
+// carrier: a failure status routes through mapResponse (failure_map.go,
+// AI-32.1) before any byte reaches the decoder (R-ATS-024), and a success
+// response whose Content-Type is not the streaming media type is refused
+// with a bounded body excerpt before any byte reaches the decoder
+// (R-ATS-023). Both checks consume machinery this file does not own or
+// widen: mapResponse is AI-32.1's own status-to-category mapper, and the
+// excerpt reuses capture.go's own captureBody/captureLimit rather than a
+// second, independent bound.
 
 package openaicompat
 
@@ -61,7 +76,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -142,6 +159,20 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 		return nil, preStreamTransportFailure(ctx, err)
 	}
 
+	// R-ATS-024: a failure status routes to AI-32's own failure mapping
+	// before any byte reaches the decoder. mapResponse returns nil for a
+	// 2xx response without touching resp.Body, so a success response falls
+	// through to the content-type check below untouched.
+	if failure := mapResponse(resp, time.Now()); failure != nil {
+		return nil, failure
+	}
+
+	// R-ATS-023: a success response whose Content-Type is not the
+	// streaming media type is refused before any byte reaches the decoder.
+	if !isStreamContentType(resp.Header.Get("Content-Type")) {
+		return nil, refuseNonStreamContentType(resp)
+	}
+
 	out := make(chan ai.Event)
 	go run(ctx, resp, out)
 	return out, nil
@@ -181,6 +212,72 @@ func preStreamTransportFailure(ctx context.Context, cause error) error {
 	}
 	failure, err := ai.PreStreamFailure(ai.FailureReport{Category: category, Cause: cause})
 	if err != nil {
+		return err
+	}
+	return failure
+}
+
+// streamContentType is the streaming media type this dialect's own request
+// declares via its Accept header (request.go's newRequest): the one
+// Content-Type a success response must carry for its body to ever reach the
+// decoder (R-ATS-023).
+const streamContentType = "text/event-stream"
+
+// isStreamContentType reports whether contentType names the streaming media
+// type, tolerating an optional parameter (a charset, for example) and case
+// on the type and subtype (R-ATS-023, S-ATS-087) — mime.ParseMediaType
+// already lower-cases the returned media type and separates any parameters,
+// so no hand-rolled case-folding or parameter-stripping is needed here. A
+// missing or unparseable value is never treated as a match — refused, never
+// decoded optimistically (S-ATS-090).
+func isStreamContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return mediaType == streamContentType
+}
+
+// nonStreamContentType is R-ATS-023's typed cause for a success response
+// whose Content-Type is not the streaming media type. Unlike capture.go's
+// own capturedBody — whose Error() deliberately never reproduces its bytes
+// (R-AEM-016, AI-32's own, different obligation) — this type's Error() text
+// embeds the excerpt itself, because R-ATS-023 requires a caller reading
+// the terminal failure's rendered text to see it; ai.Failure's own Error()
+// stays the frozen AI-19 form and never reproduces a wrapped cause's text
+// (R-AIP-009), so this cause is what a caller unwraps to reach it. The
+// excerpt is bounded by capture.go's own captureLimit (captureBody, below —
+// AI-32.1's bounded-capture machinery, reused rather than a second,
+// independent bound, S-ATS-089). This type never reads the request's own
+// credential — it is built solely from the response's Content-Type header
+// and body — so it cannot reproduce one (R-ATS-023's "MUST NOT reproduce
+// credential material").
+type nonStreamContentType struct {
+	contentType string
+	excerpt     []byte
+}
+
+// Error renders the refusal together with the bounded body excerpt
+// (R-ATS-023, S-ATS-086, S-ATS-088).
+func (e *nonStreamContentType) Error() string {
+	return fmt.Sprintf("openaicompat: response content type %q is not the streaming media type %q; body excerpt: %s", e.contentType, streamContentType, e.excerpt)
+}
+
+// refuseNonStreamContentType builds R-ATS-023's pre-handover failure for a
+// success response whose Content-Type is not the streaming media type,
+// capturing a bounded excerpt of resp's body through capture.go's own
+// captureBody — which also closes the body, so no byte reaches the decoder.
+func refuseNonStreamContentType(resp *http.Response) error {
+	captured := captureBody(resp.Body)
+	failure, err := ai.PreStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryMalformedResponse,
+		Cause:    &nonStreamContentType{contentType: resp.Header.Get("Content-Type"), excerpt: captured.bytes()},
+	})
+	if err != nil {
+		// FailureCategoryMalformedResponse is always a member of the
+		// vocabulary, so this can never actually fail — handled rather
+		// than ignored (errcheck), the same posture this file's other
+		// pre-stream builders already take.
 		return err
 	}
 	return failure
