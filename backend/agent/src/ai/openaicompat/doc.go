@@ -527,4 +527,85 @@
 // content and Failed() translate to bodies differing only in identifier
 // and content — substituting one identifier for the other in the
 // succeeded body's own bytes reproduces the failed body exactly.
+//
+// # Feature inventory: hybrid derivation, reflection rejected (AI-26.8.1, R-ART-020)
+//
+// R-ART-020 requires the inventory of every feature a request can express
+// to be derived mechanically, not maintained as a list this adapter keeps
+// about itself. Two derivation surfaces, chosen for what each is actually
+// capable of enumerating, not by preference between otherwise-equivalent
+// options:
+//
+//   - The AI-10 base surface, AI-11's cache markers and AI-08.3's
+//     tool-choice modes are each a closed, exported vocabulary already
+//     shaped for runtime enumeration: [ai.PartKinds], [ai.ReasoningStates],
+//     [ai.ToolChoiceModes], [ai.CacheRegions] and [ai.Roles] each walk their
+//     own declared constant space and return it in declaration order
+//     (role.go's own pattern, package ai — "the pattern every later closed
+//     vocabulary in this package reuses"). feature_inventory_test.go's
+//     discoverVocabularyFeatures calls all five directly. No reflection is
+//     involved in this half at all: these are ordinary exported function
+//     calls, the same as any other consumer of package ai would make.
+//
+//   - AI-12's ten With* option constructors are a different shape entirely:
+//     plain fields, not a closed vocabulary (request.go's own RequestOption
+//     GoDoc: "the set of options is ... exactly this package's own
+//     constructors" — an open-ended, growable set of functions, not a
+//     bounded enum). There is no WithOptions() enumerator to call.
+//     feature_inventory_test.go's requestOptionConstructorNames instead
+//     parses package ai's own non-test sources with go/parser — the
+//     identical idiom content_part_registry_test.go and
+//     validation_registry_internal_test.go (package ai) already use to
+//     guard their own surfaces — matching an exported, top-level,
+//     With*-named function whose one result is RequestOption.
+//
+// Reflection is rejected for this second half — R-ART-020's own explicit
+// requirement — for a reason stronger than style: Go's reflect package
+// inspects values already in hand (reflect.TypeOf, reflect.ValueOf, walking
+// a struct's fields or an interface's method set); it has no operation that
+// enumerates "every top-level function declared in this package", because
+// there is no runtime value that IS the package's declaration list to
+// reflect over. Discovering a set of free functions by name-and-signature
+// pattern is a source-level, not a runtime-value-level, question, so only a
+// parser can answer it — go/ast reads the same text a human reads, which is
+// also why content_part_registry_test.go's own header names this "parse,
+// don't reflect" (S-ART-073).
+//
+// # The policy is total: translate, drop or refuse, and every feature resolves to exactly one (AI-26.8.2, R-ART-021)
+//
+// policy.go's featurePolicy is the production record of R-ART-021's own
+// requirement: every feature the inventory above discovers resolves to
+// exactly one of three dispositions — dispositionTranslate (render it,
+// faithfully), dispositionDrop (render nothing, for a recorded reason) or
+// dispositionRefuse (fail the whole request, naming it, through refuse —
+// the same one door AI-26.6 built, reused rather than duplicated). None may
+// be silently unaccounted for: that is the one forbidden outcome this whole
+// node exists to close, and feature_inventory_test.go's
+// TestFeatureInventory_MatchesProductionPolicyExactly plus
+// policy_walk_test.go's
+// TestPolicyWalk_EveryInventoriedFeatureResolvesToExactlyOneDisposition
+// keep it mechanical rather than a claim resting on this paragraph alone.
+//
+// The table carries 28 rows, not the 15 a reader counting "5 vocabularies +
+// 10 constructors" might expect: [ai.ReasoningStates]'s 3 members and
+// [ai.CacheRegions]'s 3 members each get their own row, even though every
+// member of a vocabulary shares one disposition with its siblings (every
+// reasoning state refuses via the identical mechanism as "PartKind:
+// reasoning"; every cache region drops for the identical AI-11.3 reason) —
+// deliberate redundancy, not oversight, so a member-level row exists
+// uniformly across all five runtime-enumerated vocabularies rather than
+// three of them being walked one way and two another. WithProviderExtension
+// contributes two rows instead of one, for the opposite reason: its two
+// namespace cases carry GENUINELY different dispositions (this adapter's
+// own reserved namespace translates/merges; every other namespace drops),
+// so one row could not have carried both without breaking "exactly one".
+//
+// This confirms, mechanically and not merely by inspection, Phase 7's own
+// hand-off question: "reasoning" — via [ai.PartKindReasoning] and its own
+// three [ai.ReasoningState] rows — is the ONLY refuse-disposition feature
+// this milestone's inventory currently produces. refuse (policy.go) and
+// refuseReasoning (policy.go) therefore needed no change to support this
+// node: no second refusal construction site, no signature change, and
+// Translate's (translation.go) existing single pre-appendBody check needed
+// no composition with a second one.
 package openaicompat
