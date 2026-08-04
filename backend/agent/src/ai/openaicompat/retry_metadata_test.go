@@ -97,14 +97,19 @@ func TestRetryMetadata_CredentialHeaderNeverCaptured(t *testing.T) {
 		t.Fatalf("Failure.Error() = %q leaks the planted credential", failure.Error())
 	}
 
+	// The fixture carries a telemetry header, so the carrier MUST be
+	// reachable — a bare `if errors.As` here passed vacuously when a
+	// verify-phase mutation probe disabled telemetry capture entirely
+	// (verify finding W2). The premise is asserted, then the leak checks.
 	var telemetry *RateLimitTelemetry
-	if errors.As(failure, &telemetry) {
-		if strings.Contains(telemetry.Error(), planted) {
-			t.Errorf("RateLimitTelemetry.Error() = %q leaks the planted credential", telemetry.Error())
-		}
-		if telemetry.LimitRequests == planted || telemetry.RemainingRequests == planted || telemetry.ResetRequests == planted {
-			t.Errorf("planted credential captured into an allowlisted field: %+v", telemetry)
-		}
+	if !errors.As(failure, &telemetry) {
+		t.Fatal("errors.As found no *RateLimitTelemetry in the chain, want one — the fixture carries X-Ratelimit-Remaining-Requests")
+	}
+	if strings.Contains(telemetry.Error(), planted) {
+		t.Errorf("RateLimitTelemetry.Error() = %q leaks the planted credential", telemetry.Error())
+	}
+	if telemetry.LimitRequests == planted || telemetry.RemainingRequests == planted || telemetry.ResetRequests == planted {
+		t.Errorf("planted credential captured into an allowlisted field: %+v", telemetry)
 	}
 }
 
