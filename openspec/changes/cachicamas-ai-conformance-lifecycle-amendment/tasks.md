@@ -69,8 +69,10 @@ Chain strategy: feature-branch-chain
 
 > WARNING (NFR-CNF-D): this phase adds methods to `Step`. They MUST land in the new `script_introspect.go` — never edit `fake_script.go` or any `fake_*.go`/`stream_kit_*.go` file.
 
-- [ ] 4.1 RED: create `script_introspect_test.go` (external `package agenttest_test`) against not-yet-existing `Step.Event()`/`Step.IsHold()` — emit-only script vs `DrainAndRecord` kind/payload comparison (S-CLA-033); mixed `Emit`+`Hold(Gate)` script, introspection only, no drain (S-CLA-034). Compile-fail RED.
-- [ ] 4.2 GREEN: create `script_introspect.go` with `func (s Step) IsHold() bool` and `func (s Step) Event() (ai.Event, bool)`, value-copy returns, no setter, no `Gate()` accessor. New file only. Re-run — passes. [S-CLA-035]
+- [x] 4.1 RED: create `script_introspect_test.go` (external `package agenttest_test`) against not-yet-existing `Step.Event()`/`Step.IsHold()` — emit-only script vs `DrainAndRecord` kind/payload comparison (S-CLA-033); mixed `Emit`+`Hold(Gate)` script, introspection only, no drain (S-CLA-034). Compile-fail RED.
+  - Evidence: `go test -race -count=1 -run TestStepIntrospection ./src/agenttest/...` → `src/agenttest/script_introspect_test.go:65:11: step.IsHold undefined (type agenttest.Step has no field or method IsHold, but does have unexported field isHold)` (+5 more `IsHold`/`Event` undefined errors) — `FAIL ... [build failed]`.
+- [x] 4.2 GREEN: create `script_introspect.go` with `func (s Step) IsHold() bool` and `func (s Step) Event() (ai.Event, bool)`, value-copy returns, no setter, no `Gate()` accessor. New file only. Re-run — passes. [S-CLA-035]
+  - Evidence: same command (`-v`) → all 3 tests `--- PASS`, including a reflection-based structural check that `agenttest.Step`'s exported method set is exactly `{Event, IsHold}` (S-CLA-035). `fake_*.go`/`stream_kit_*.go`: zero diff (`git diff --stat` — NFR-CNF-D held).
 
 ## Phase 5: Verification
 
