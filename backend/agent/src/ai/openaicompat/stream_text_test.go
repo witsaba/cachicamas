@@ -216,3 +216,54 @@ func TestStream_ContentThenUnrecognizedFinishReason_TerminatesMalformedWithParti
 		t.Fatal("no TextDelta event preceded the terminal failure — test premise broken")
 	}
 }
+
+// TestStream_FiveNullFinishChunksNoTerminal_EmitsNoCompletion covers
+// S-ATS-038 (R-ATS-010): five content chunks each carrying
+// "finish_reason":null, and the stream ends before any terminal chunk
+// arrives. No completion event may have been emitted at any point — the
+// stream's terminal is the truncation failure, never a premature
+// Completion. The assertion is a positive drain-and-count over every
+// event, not an absence-of-failure: all five deltas must be present (so a
+// premature Completion cannot hide behind an early terminal), and zero
+// events of the completion kind may appear anywhere.
+//
+// This test was added at milestone close: the whole-surface scenario
+// tally found S-ATS-038 uncovered — each slice had reviewed only its own
+// files, and no slice's tests ever drained a multi-chunk transcript that
+// ends before its terminal chunk.
+func TestStream_FiveNullFinishChunksNoTerminal_EmitsNoCompletion(t *testing.T) {
+	t.Parallel()
+
+	transcript := "" +
+		"data: {\"id\":\"chatcmpl-e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"one \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"three \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"four \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"five\"},\"finish_reason\":null}]}\n\n"
+	server := sseServer(t, transcript)
+	defer server.Close()
+
+	c := mustClient(t, server.URL)
+	ch, err := c.Stream(context.Background(), validRequest(t))
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want nil (S-ATS-038)", err)
+	}
+	events := drainAll(t, ch)
+
+	deltas := 0
+	for _, ev := range events {
+		if _, ok := ev.Completion(); ok {
+			t.Fatalf("a completion event was emitted with no terminal chunk ever observed (S-ATS-038, R-ATS-010); kinds: %v", kindsOf(events))
+		}
+		if _, ok := ev.TextDelta(); ok {
+			deltas++
+		}
+	}
+	if deltas != 5 {
+		t.Fatalf("drained %d text deltas, want 5 — every null-finish chunk's content must precede the terminal (S-ATS-038)", deltas)
+	}
+	last := events[len(events)-1]
+	if _, ok := last.ErrorPayload(); !ok {
+		t.Fatalf("last event carries no ErrorPayload, want the truncation terminal (R-ATS-013); kinds: %v", kindsOf(events))
+	}
+}
