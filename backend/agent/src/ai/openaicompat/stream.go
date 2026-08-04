@@ -89,6 +89,26 @@ const doneSentinel = "[DONE]"
 // %w for the same reason errMalformedIdentity does.
 var errIncompleteStream = fmt.Errorf("openaicompat: stream ended before reaching a well-formed completion: %w", ai.ErrMalformedResponse)
 
+// errMalformedChunkJSON is this package's own unexported cause for a
+// dispatched frame whose data is not syntactically valid JSON for its
+// declared, known type (R-ATS-021, S-ATS-080) — distinct from
+// errIncompleteStream, which names the stream itself ending early, not a
+// single frame's own payload being broken while the stream is still very
+// much in progress. Wraps ai.ErrMalformedResponse with %w for the same
+// reason errMalformedIdentity does.
+//
+// # Corrective: previously misnamed as errIncompleteStream (slice 6)
+//
+// Slices 1/2 reused errIncompleteStream for this branch — functionally
+// harmless, since Category(cause) does not recognize either identity and
+// emitFailure's own fallback assigns ai.FailureCategoryMalformedResponse
+// regardless (S-ATS-080/082 both already passed under the old identity) —
+// but semantically confusing: a reader debugging "why did errIncompleteStream
+// fire here" would find no incomplete STREAM, only one malformed FRAME.
+// Corrected alongside R-ATS-021's own implementation work, disclosed as a
+// zero-behavior-change clarity fix.
+var errMalformedChunkJSON = fmt.Errorf("openaicompat: a dispatched frame's data was not valid JSON for its declared type: %w", ai.ErrMalformedResponse)
+
 // Stream implements ai.ModelProvider (R-ATS-001): it sends req to the
 // OpenAI-compatible endpoint and returns the normalized events the
 // response answers with.
@@ -215,7 +235,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
-					emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
+					emitFailure(ctx, out, stamper, errMalformedChunkJSON, outputPreceded)
 					return
 				}
 				if !chunk.isChunk() {

@@ -23,19 +23,19 @@
 // complete completion record eventually needs (a later slice's own
 // R-ATS-015/016; this slice always reports absent usage).
 //
-// # The terminal→sentinel window (R-ATS-008, C-1 corrective)
+// # The terminal→sentinel window (R-ATS-008, C-1 corrective; AI-28.5 rows 1/2)
 //
 // Once a chunk sets terminalSeen, applyChunk closes an open block on that
-// same chunk. Every later chunk this slice's own scenarios exercise in that
-// window is delta-less or the usage chunk (an empty choices array, C4) —
-// both are absorbed as zero events by construction: hasChoice is false for
-// the usage chunk, and a delta-less choice item contributes nothing to
-// either the finish-reason gate or the content check. A choice-0 content
-// STRING arriving in that window is R-ATS-020 row 1's own violation
-// (S-ATS-074) — the 5-row table living in AI-28.5, a later slice. No
-// scenario this slice implements exercises that shape; this mapper does
-// not yet special-case it, and this is a disclosed, deliberate deferral,
-// not an oversight — see the slice-2 apply-progress record.
+// same chunk. A LATER chunk in that window is either delta-less or the
+// usage chunk (an empty choices array, C4) — both absorbed as zero events
+// by construction: hasChoice is false for the usage chunk, and a
+// delta-less choice item contributes nothing to either the finish-reason
+// gate or the content check — or it is one of AI-28.5's own two violations
+// this same window can carry: a choice-0 content STRING (R-ATS-020 row 1,
+// "delta after close", S-ATS-074) or a second non-null finish_reason
+// (row 2, "duplicate close", S-ATS-075). Both are checked explicitly, once
+// terminalSeen is already true from a PRIOR chunk — never on the chunk
+// that sets terminalSeen for the first time.
 
 package openaicompat
 
@@ -74,6 +74,35 @@ var errUnrecognizedFinishReason = fmt.Errorf("openaicompat: terminal chunk's fin
 // the same reason (R-ATS-025).
 var errMissingRequiredField = fmt.Errorf("openaicompat: recognized chunk was missing a C1 required top-level field: %w", ai.ErrMalformedResponse)
 
+// R-ATS-020's five-row structural violation table (AI-28.5, doc 0002's own
+// row names) each get their own unexported cause, all wrapping
+// ai.ErrMalformedResponse for the same reason errMalformedIdentity does,
+// all unexported for the same reason (R-ATS-025, no new sentinel). Row 5
+// ("close without open") needs none of its own: a terminal chunk with no
+// usable response identity is the same shape errMalformedIdentity already
+// covers (S-ATS-078).
+var (
+	// errDeltaAfterClose is row 1 (S-ATS-074): a choice-0 content string
+	// arriving after that choice's terminal chunk and before the terminal
+	// sentinel — R-ATS-008's own "what may legally follow the terminal
+	// chunk" paragraph names this the violation reading of that window, in
+	// contrast to a delta-less or usage chunk there (S-ATS-032).
+	errDeltaAfterClose = fmt.Errorf("openaicompat: a content delta arrived after choice 0's terminal chunk: %w", ai.ErrMalformedResponse)
+
+	// errDuplicateClose is row 2 (S-ATS-075): a second chunk carrying a
+	// non-null finish_reason for choice 0.
+	errDuplicateClose = fmt.Errorf("openaicompat: a second chunk carried a non-null finish_reason for choice 0: %w", ai.ErrMalformedResponse)
+
+	// errSecondResponseStart is row 3 (S-ATS-076): a chunk whose top-level
+	// id differs from the response identity already established.
+	errSecondResponseStart = fmt.Errorf("openaicompat: a later chunk's id differed from the established response identity: %w", ai.ErrMalformedResponse)
+
+	// errDeltaWithNoOpenBlock is row 4 (S-ATS-077), doc 0002's own
+	// structural name: a choice item whose index is negative or absent
+	// while carrying a content string.
+	errDeltaWithNoOpenBlock = fmt.Errorf("openaicompat: a content delta's choice item carried a negative or absent index: %w", ai.ErrMalformedResponse)
+)
+
 // mapperState is AI-28.1.2's frame-to-events mapper. Its zero value is
 // ready to use: no chunk has been read yet, no block minted, no terminal
 // seen — the same "ready without a constructor" posture ai.Stamper's own
@@ -82,6 +111,12 @@ type mapperState struct {
 	// identityEstablished is true once the first chunk's id/model produced
 	// a ResponseStart (R-ATS-004).
 	identityEstablished bool
+
+	// responseID is the id byte-exactly established by the first chunk
+	// (R-ATS-004), remembered so a LATER chunk carrying a different id can
+	// be recognized as R-ATS-020 row 3's own violation (S-ATS-076,
+	// "second response start") rather than silently ignored.
+	responseID string
 
 	// blockOpen is true between a minted TextBlockStart and its matching
 	// TextBlockEnd (R-ATS-008 rules 2/3).
@@ -143,12 +178,21 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		return nil, errMissingRequiredField
 	}
 
+	// R-ATS-020 row 3 (S-ATS-076): a chunk whose id differs from the
+	// already-established response identity is a second response start,
+	// checked before ever touching identity establishment itself — which
+	// only ever runs once, on the chunk that has not yet established it.
+	if s.identityEstablished && chunk.ID != s.responseID {
+		return nil, errSecondResponseStart
+	}
+
 	if !s.identityEstablished {
 		started, err := ai.NewResponseStart(chunk.ID, chunk.Model)
 		if err != nil {
 			return nil, errMalformedIdentity
 		}
 		s.identityEstablished = true
+		s.responseID = chunk.ID
 		events = append(events, started)
 	}
 
@@ -165,6 +209,28 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		return events, nil
 	}
 
+	// R-ATS-020 rows 1/2 (S-ATS-074/075): once choice 0's terminal chunk
+	// has already closed things, on a PRIOR chunk, the only shapes the wire
+	// may legally carry in that window are delta-less chunks and the usage
+	// chunk (R-ATS-008's own "what may legally follow the terminal chunk"
+	// paragraph) — both already absorbed as zero events below, since this
+	// chunk's own choice item carries neither a content string nor a
+	// non-null finish_reason. A content string here is row 1 (delta after
+	// close); a second non-null finish_reason here is row 2 (duplicate
+	// close). Checked before this chunk's own finish_reason/content are
+	// otherwise processed, so the terminal chunk itself — which SETS
+	// terminalSeen for the first time, on this same call — never trips
+	// either row.
+	if s.terminalSeen {
+		if _, present := contentText(choice.Delta.Content); present {
+			return nil, errDeltaAfterClose
+		}
+		if choice.FinishReason != nil {
+			return nil, errDuplicateClose
+		}
+		return events, nil
+	}
+
 	if choice.FinishReason != nil {
 		reason, ok := rawStrictFinishReason(*choice.FinishReason)
 		if !ok {
@@ -175,6 +241,12 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 	}
 
 	if text, present := contentText(choice.Delta.Content); present {
+		// R-ATS-020 row 4 (S-ATS-077): a choice item carrying content with
+		// a negative or absent index is a violation, checked before this
+		// content contributes any block-minting or delta event.
+		if !choice.hasValidIndex() {
+			return nil, errDeltaWithNoOpenBlock
+		}
 		if !s.blockOpen && !s.blockClosed {
 			start, err := ai.NewTextBlockStart(textBlockIndex)
 			if err != nil {

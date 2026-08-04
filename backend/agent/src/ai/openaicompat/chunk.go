@@ -159,14 +159,25 @@ func usageFromWire(w wireUsage) ai.Usage {
 }
 
 // wireChoice is one choice item's minimal shape this slice reads: the
-// delta object and finish_reason, via a pointer so JSON null and an absent
-// key both decode to nil, matching C2's own null-until-terminal behavior.
-// This milestone maps choice 0 only (spec.md's own "Definitions" section);
-// no index field is read here — R-ATS-020 row 4's index validation is
-// slice 6's own scope.
+// delta object, finish_reason (via a pointer so JSON null and an absent
+// key both decode to nil, matching C2's own null-until-terminal behavior),
+// and Index (R-ATS-020 row 4, slice 6): also a pointer, so an absent index
+// key is distinguishable from an explicit 0 — the same absent/present
+// pattern wireUsage's own fields already use. This milestone maps choice 0
+// only (spec.md's own "Definitions" section).
 type wireChoice struct {
 	Delta        wireDelta `json:"delta"`
 	FinishReason *string   `json:"finish_reason"`
+	Index        *int      `json:"index"`
+}
+
+// hasValidIndex reports whether c carries a present, non-negative index
+// (R-ATS-020 row 4: "negative or absent" both violate). Only consulted when
+// c also carries a choice-0 content string — a role-only or delta-less
+// choice item's own index is not this row's concern, per the row's own
+// wire-shape text ("...while carrying content").
+func (c wireChoice) hasValidIndex() bool {
+	return c.Index != nil && *c.Index >= 0
 }
 
 // wireDelta is choice 0's delta object, byte-preserving (D2): Content is
