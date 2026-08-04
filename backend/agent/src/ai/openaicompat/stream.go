@@ -22,23 +22,29 @@
 // context" (R-ATS-002) — its refusal is a property of the request, so it
 // outranks a property of the call's context.
 //
-// # Text mapping is not this file's job yet
+// # Text mapping now lives in stream_state.go (AI-28.1.2)
 //
-// This slice maps only what a minimal transcript needs to establish
-// identity and reach a terminal event: no choice-0 content string is read
-// or emitted as a text delta anywhere in this file (R-ATS-007…010 land in
-// AI-28.1.2, the next slice). A transcript this file drains that happens
-// to carry content deltas produces no text event for them — that gap
-// closes in the next slice, not here.
+// R-ATS-007…010 — choice-0 content deltas, block minting, byte-exact
+// reconstruction and the finish-reason gate — are implemented by
+// stream_state.go's mapperState, not this file. This file's own job is
+// unchanged from slice 1: drive the read/decode loop, recognise the
+// terminal sentinel, and translate whatever the mapper reports into
+// selected sends and the one closing site. errMalformedIdentity (a
+// present-but-empty first-chunk id or model, design.md D7/N-7b) and the
+// finish-reason gate's own malformed cause now live beside mapperState in
+// stream_state.go, for the same reason: both are decisions the mapper
+// makes while reading a chunk, not this file's read loop.
 //
-// # A first chunk with a present-but-empty id or model (design.md D7, N-7b)
+// # outputPreceded is now tracked, not hardcoded (design.md D7, R-AIP-010)
 //
-// ai.NewResponseStart requires both the response id and the served model
-// to be non-empty. When the first chunk supplies one present but empty (or
-// omits it — the same zero-value Go string either way), that constructor's
-// own error is converted here into a malformed-response terminal
-// (errMalformedIdentity, wrapping ai.ErrMalformedResponse) — never minted,
-// defaulted or substituted to dodge the constructor (R-ATS-004, S-ATS-015).
+// Slice 1's own version of this file hardcoded emitFailure's outputPreceded
+// argument to false, because no text event could exist yet to precede a
+// failure with — its own comment named R-ATS-007 landing in AI-28.1.2 as
+// the trigger to revisit this. That milestone is this one: run now tracks
+// whether any text-block-scoped event (isOutputEvent, below) was emitted
+// before a given failure, and passes that fact through, unconditionally
+// (D7: "outputPreceded = any text event already emitted; ResponseStart
+// does not count", S-ATS-050).
 //
 // # A sentinel with no terminal chunk ever observed (design.md D9, spec-silent)
 //
@@ -53,7 +59,6 @@ package openaicompat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,14 +72,11 @@ import (
 // independent of this value.
 const streamReadBufferSize = 32 * 1024
 
-// errMalformedIdentity is this package's own unexported cause for a first
-// chunk whose id or model surfaced, through ai.NewResponseStart's own
-// constructor error, as present but empty (design.md D7, N-7b): both
-// fields are required non-empty by that constructor. Wraps
-// ai.ErrMalformedResponse with %w so errors.Is(err, ai.ErrMalformedResponse)
-// holds; unexported so S-ART-054's allowlist stays untouched — no new
-// exported sentinel (R-ATS-025).
-var errMalformedIdentity = fmt.Errorf("openaicompat: first chunk's response identity was malformed: %w", ai.ErrMalformedResponse)
+// doneSentinel is the terminal sentinel's data payload (C5): the six-byte
+// literal a frame carries to signal clean termination, recognised here
+// before any attempt to decode the frame as a chunk (R-ATS-012, a later
+// slice's own requirement, honored already since slice 1).
+const doneSentinel = "[DONE]"
 
 // errIncompleteStream is this package's own unexported cause for a stream
 // that ended — by transport EOF, by a non-cancellation read failure, or by
@@ -164,47 +166,25 @@ func preStreamTransportFailure(ctx context.Context, cause error) error {
 	return failure
 }
 
-// wireChunk is the minimal, slice-1-scoped shape this file reads from a
-// decoded frame: only the fields R-ATS-003…005 need to drain a minimal
-// transcript — the response identity (C1) and choice 0's finish reason
-// (C2). It is deliberately not chunk.go's eventual byte-preserving
-// structure: no delta.content is read here at all (that lands in
-// AI-28.1.2, R-ATS-007), and finish_reason is read leniently via
-// ai.NormalizeFinishReason rather than gated against C2's enum (D5's
-// raw-string-strict gate is R-ATS-010, also AI-28.1.2).
-type wireChunk struct {
-	ID      string       `json:"id"`
-	Model   string       `json:"model"`
-	Choices []wireChoice `json:"choices"`
-}
-
-// wireChoice is choice 0's minimal shape this file reads: only
-// finish_reason, via a pointer so JSON null and an absent key both decode
-// to nil, matching C2's own null-until-terminal behavior.
-type wireChoice struct {
-	FinishReason *string `json:"finish_reason"`
-}
-
-// producerState is the identity/terminal tracking this slice's minimal run
-// loop needs — not AI-28.1.2's full mapper state machine (stream_state.go,
-// a later slice, lands the block-minting, terminal-window and
-// violation-table state).
-type producerState struct {
-	identityEstablished bool
-	finishReason        ai.FinishReason
-}
-
 // run is the stream's one producer goroutine (R-ATS-003, R-ATS-005): reads
-// the response body, drives Decoder.Feed, maps a minimal transcript to
-// ResponseStart/Completion/ErrorEvent, and closes out exactly once — the
-// one deferred close in this package (S-ATS-019).
+// the response body, drives Decoder.Feed, maps every decoded chunk through
+// stream_state.go's mapperState (AI-28.1.2: response identity, text-block
+// minting, the finish-reason gate), and closes out exactly once — the one
+// deferred close in this package (S-ATS-019).
+//
+// The terminal sentinel (C5) is recognised here, before any attempt to
+// decode a frame as a chunk — [DONE] is never handed to decodeChunk.
+// Completion is built separately, only at the sentinel (design.md D4/D9):
+// the mapper accumulates identity and finish-reason state across chunks,
+// but constructs no completion event of its own.
 func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 	defer close(out)
 	defer func() { _ = resp.Body.Close() }()
 
 	stamper := &ai.Stamper{}
 	decoder := NewDecoder(0)
-	state := &producerState{}
+	state := &mapperState{}
+	outputPreceded := false
 
 	buf := make([]byte, streamReadBufferSize)
 	for {
@@ -212,39 +192,51 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 		if n > 0 {
 			frames, feedErr := decoder.Feed(buf[:n])
 			for _, frame := range frames {
-				sentinel, ev, hasEvent, applyErr := state.applyFrame(frame)
-				if applyErr != nil {
-					emitFailure(ctx, out, stamper, applyErr)
-					return
-				}
-				if hasEvent && !emit(ctx, out, stamper, ev) {
-					return
-				}
-				if sentinel {
+				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
-						emitFailure(ctx, out, stamper, errIncompleteStream)
+						emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
 						return
 					}
 					emit(ctx, out, stamper, completion)
 					return
 				}
+
+				chunk, decodeErr := decodeChunk(frame.Data)
+				if decodeErr != nil {
+					emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
+					return
+				}
+
+				events, applyErr := state.applyChunk(chunk)
+				if applyErr != nil {
+					emitFailure(ctx, out, stamper, applyErr, outputPreceded)
+					return
+				}
+				for _, ev := range events {
+					if !emit(ctx, out, stamper, ev) {
+						return
+					}
+					if isOutputEvent(ev) {
+						outputPreceded = true
+					}
+				}
 			}
 			if feedErr != nil {
-				emitFailure(ctx, out, stamper, feedErr)
+				emitFailure(ctx, out, stamper, feedErr, outputPreceded)
 				return
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				if finishErr := decoder.Finish(); finishErr != nil {
-					emitFailure(ctx, out, stamper, finishErr)
+					emitFailure(ctx, out, stamper, finishErr, outputPreceded)
 					return
 				}
 				// Clean SSE framing, but the sentinel was never observed
 				// — design.md D9's sibling case at the transport-EOF edge
 				// rather than the [DONE]-with-no-terminal-chunk edge.
-				emitFailure(ctx, out, stamper, errIncompleteStream)
+				emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
 				return
 			}
 			if ctx.Err() != nil {
@@ -254,51 +246,23 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				// (R-ATS-005).
 				return
 			}
-			emitFailure(ctx, out, stamper, errIncompleteStream)
+			emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
 			return
 		}
 	}
 }
 
-// applyFrame maps one decoded frame under this slice's minimal shape: the
-// terminal sentinel, this dialect's own identity-establishment chunk, and
-// finish-reason capture. It returns at most one event — this slice emits
-// only ResponseStart from a frame; Completion is built separately at the
-// sentinel (design.md D1: "on the sentinel, emit Completion").
-func (s *producerState) applyFrame(frame Frame) (sentinel bool, ev ai.Event, hasEvent bool, err error) {
-	if string(frame.Data) == "[DONE]" {
-		return true, ai.Event{}, false, nil
+// isOutputEvent reports whether ev counts toward R-AIP-010's PartialOutput
+// discriminator (design.md D7): every text-block-scoped kind counts;
+// ResponseStart never does (S-ATS-050) — it is not a normalized output
+// event, only the announcement that one may follow.
+func isOutputEvent(ev ai.Event) bool {
+	switch ev.Kind() {
+	case ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextBlockEnd:
+		return true
+	default:
+		return false
 	}
-
-	var chunk wireChunk
-	if jsonErr := json.Unmarshal(frame.Data, &chunk); jsonErr != nil {
-		return false, ai.Event{}, false, errIncompleteStream
-	}
-
-	if !s.identityEstablished {
-		started, startErr := ai.NewResponseStart(chunk.ID, chunk.Model)
-		if startErr != nil {
-			return false, ai.Event{}, false, errMalformedIdentity
-		}
-		s.identityEstablished = true
-		ev, hasEvent = started, true
-	}
-
-	if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != nil {
-		s.finishReason = ai.NormalizeFinishReason(*chunk.Choices[0].FinishReason)
-	}
-
-	return false, ev, hasEvent, nil
-}
-
-// buildCompletion constructs the sentinel-triggered completion from
-// whatever finish reason this slice's minimal loop captured, with usage
-// left wholly absent (R-ATS-015…016 land in AI-28.3, a later slice). An
-// error here means no terminal chunk was ever observed before the
-// sentinel arrived — design.md D9's spec-silent shape, folded into
-// errIncompleteStream by run.
-func (s *producerState) buildCompletion() (ai.Event, error) {
-	return ai.NewCompletion(s.finishReason, ai.Usage{})
 }
 
 // emit stamps ev with this stream's Stamper and sends it, selecting on
@@ -319,17 +283,17 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // emitFailure builds and sends the D7 mid-stream terminal (design.md D7,
 // R-ATS-025): category via Category(cause) when cause is one of the
 // decoder's own two sentinels, else ai.FailureCategoryMalformedResponse —
-// every cause this file constructs on its own (errMalformedIdentity,
-// errIncompleteStream) already names that category. outputPreceded is
-// always false in this slice: no text event exists yet to precede a
-// failure with (R-ATS-007 lands in AI-28.1.2); ResponseStart never counts
-// either way (S-ATS-050).
-func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, cause error) {
+// every cause this file or stream_state.go constructs on its own
+// (errMalformedIdentity, errUnrecognizedFinishReason, errIncompleteStream)
+// already names that category. outputPreceded is the caller's own tracked
+// fact (run, above) — whether any text-block-scoped event was already
+// emitted on this stream — never derived here.
+func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, cause error, outputPreceded bool) {
 	category, ok := Category(cause)
 	if !ok {
 		category = ai.FailureCategoryMalformedResponse
 	}
-	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category, Cause: cause}, false)
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category, Cause: cause}, outputPreceded)
 	if err != nil {
 		// category is always a valid member here, so this can never
 		// actually fail — handled rather than ignored (errcheck).
