@@ -145,6 +145,7 @@ func TestProtocolViolation_MissingRequiredModelField_MalformedTerminal(t *testin
 	if len(deltas) != 1 || deltas[0] != "before" {
 		t.Errorf("preceding deltas = %q, want exactly [\"before\"] preserved byte-exact (S-ATS-081)", deltas)
 	}
+	requireCheckStreamClean(t, events)
 }
 
 // ---------------------------------------------------------------------
@@ -307,6 +308,7 @@ func TestProtocolViolation_StructuralViolationTable(t *testing.T) {
 			if failure.Category() != ai.FailureCategoryMalformedResponse {
 				t.Errorf("Category() = %v, want FailureCategoryMalformedResponse (S-ATS-079)", failure.Category())
 			}
+			requireCheckStreamClean(t, events)
 
 			r.check(t, events, failure)
 		})
@@ -354,6 +356,7 @@ func TestProtocolViolation_NegativeIndexWithContent_MalformedTerminal(t *testing
 	if len(deltas) != 1 || deltas[0] != "one" {
 		t.Errorf("deltas = %q, want exactly [\"one\"] — no delta derives from the negative-index choice item", deltas)
 	}
+	requireCheckStreamClean(t, events)
 }
 
 // ---------------------------------------------------------------------
@@ -387,6 +390,7 @@ func TestProtocolViolation_InvalidJSON_MalformedTerminal(t *testing.T) {
 	if failure.Category() != ai.FailureCategoryMalformedResponse {
 		t.Errorf("Category() = %v, want FailureCategoryMalformedResponse (S-ATS-080)", failure.Category())
 	}
+	requireCheckStreamClean(t, events)
 }
 
 // TestProtocolViolation_UnknownTypeVsBrokenKnownType_DifferentOutcomes
@@ -457,6 +461,13 @@ func TestProtocolViolation_UnknownTypeVsBrokenKnownType_DifferentOutcomes(t *tes
 		if _, ok := last.ErrorPayload(); !ok {
 			t.Errorf("last event kind = %v, want a terminal failure — the broken-known-type case must fail, not complete (S-ATS-082)", last.Kind())
 		}
+
+		// design.md D8 (verify-report C1): this is the invalid-JSON-mid-
+		// block probe shape — the "before" delta mints and holds an open
+		// block, then the next frame's broken JSON fails decodeChunk. The
+		// producer must close that block before the terminal error.
+		requireCheckStreamClean(t, events)
+		requireBlockClosedBeforeError(t, events)
 	})
 }
 

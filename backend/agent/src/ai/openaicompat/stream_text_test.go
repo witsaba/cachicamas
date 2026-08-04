@@ -215,6 +215,14 @@ func TestStream_ContentThenUnrecognizedFinishReason_TerminatesMalformedWithParti
 	if !sawDelta {
 		t.Fatal("no TextDelta event preceded the terminal failure — test premise broken")
 	}
+
+	// design.md D8 (verify-report C1): this is the out-of-enum-finish-
+	// reason-mid-block probe shape — the "partial" delta mints and holds
+	// an open block, then the unrecognised finish_reason fails the
+	// terminal chunk itself. The producer must close that block before
+	// the terminal error.
+	requireCheckStreamClean(t, events)
+	requireBlockClosedBeforeError(t, events)
 }
 
 // TestStream_FiveNullFinishChunksNoTerminal_EmitsNoCompletion covers
@@ -266,4 +274,5 @@ func TestStream_FiveNullFinishChunksNoTerminal_EmitsNoCompletion(t *testing.T) {
 	if _, ok := last.ErrorPayload(); !ok {
 		t.Fatalf("last event carries no ErrorPayload, want the truncation terminal (R-ATS-013); kinds: %v", kindsOf(events))
 	}
+	requireCheckStreamClean(t, events)
 }

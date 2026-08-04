@@ -69,6 +69,25 @@
 // widen: mapResponse is AI-32.1's own status-to-category mapper, and the
 // excerpt reuses capture.go's own captureBody/captureLimit rather than a
 // second, independent bound.
+//
+// # An open text block closes before a mid-stream terminal failure (AI-28.7, design.md D8)
+//
+// design.md D8: a stream this file terminates in a mid-stream failure must
+// still satisfy AI-14.4's own ai.CheckStream — in particular its
+// no-unterminated-block invariant (AI-16) — exactly like a stream that
+// terminates cleanly already does. Every pre-terminal failure path (a
+// truncated transcript, an invalid-JSON frame, an out-of-enum
+// finish_reason, and every other cause stream_state.go's own applyChunk
+// can return) can leave a text block open: R-ATS-008's own minting logic
+// (stream_state.go) only closes a block once a chunk both sets
+// terminalSeen AND that same chunk's own applyChunk call returns
+// successfully — a chunk that FAILS before reaching that point leaves the
+// block exactly as open as it was the instant before. run tracks that fact
+// itself, from what it has actually sent on out — never from
+// stream_state.go's own internal bookkeeping, which can legitimately mark
+// a block open a few instructions before the corresponding event is ever
+// handed to emit — see run's own blockOpen local and emitFailure's own doc
+// comment.
 
 package openaicompat
 
@@ -302,6 +321,15 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 	decoder := NewDecoder(0)
 	state := &mapperState{}
 	outputPreceded := false
+	// blockOpen mirrors, from run's own vantage point, whether a
+	// TextBlockStart has been handed to emit with no matching
+	// TextBlockEnd handed to emit yet (design.md D8). It is deliberately
+	// NOT read from state.blockOpen: stream_state.go's own field can be
+	// true for a few instructions before the corresponding event is ever
+	// appended to applyChunk's returned slice — let alone sent — so
+	// run's own copy, updated only once emit actually confirms a send,
+	// is the one true account of what the CARRIER has observed.
+	blockOpen := false
 
 	buf := make([]byte, streamReadBufferSize)
 	for {
@@ -323,7 +351,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
-						emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
+						emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
 						return
 					}
 					emit(ctx, out, stamper, completion)
@@ -332,7 +360,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
-					emitFailure(ctx, out, stamper, errMalformedChunkJSON, outputPreceded)
+					emitFailure(ctx, out, stamper, errMalformedChunkJSON, outputPreceded, blockOpen)
 					return
 				}
 				if !chunk.isChunk() {
@@ -344,7 +372,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				events, applyErr := state.applyChunk(chunk)
 				if applyErr != nil {
-					emitFailure(ctx, out, stamper, applyErr, outputPreceded)
+					emitFailure(ctx, out, stamper, applyErr, outputPreceded, blockOpen)
 					return
 				}
 				for _, ev := range events {
@@ -354,23 +382,29 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					if isOutputEvent(ev) {
 						outputPreceded = true
 					}
+					switch ev.Kind() {
+					case ai.EventKindTextBlockStart:
+						blockOpen = true
+					case ai.EventKindTextBlockEnd:
+						blockOpen = false
+					}
 				}
 			}
 			if feedErr != nil {
-				emitFailure(ctx, out, stamper, feedErr, outputPreceded)
+				emitFailure(ctx, out, stamper, feedErr, outputPreceded, blockOpen)
 				return
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				if finishErr := decoder.Finish(); finishErr != nil {
-					emitFailure(ctx, out, stamper, finishErr, outputPreceded)
+					emitFailure(ctx, out, stamper, finishErr, outputPreceded, blockOpen)
 					return
 				}
 				// Clean SSE framing, but the sentinel was never observed
 				// — design.md D9's sibling case at the transport-EOF edge
 				// rather than the [DONE]-with-no-terminal-chunk edge.
-				emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
+				emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
 				return
 			}
 			if ctx.Err() != nil {
@@ -380,7 +414,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				// (R-ATS-005).
 				return
 			}
-			emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded)
+			emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
 			return
 		}
 	}
@@ -422,7 +456,39 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // already names that category. outputPreceded is the caller's own tracked
 // fact (run, above) — whether any text-block-scoped event was already
 // emitted on this stream — never derived here.
-func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, cause error, outputPreceded bool) {
+//
+// blockOpen is run's own tracked fact, too (design.md D8, AI-28.7): whether
+// a text block is currently open on the carrier. Every one of run's own
+// seven call sites can reach this function with a block genuinely open —
+// truncation, an invalid-JSON frame, an out-of-enum finish_reason, and
+// every other cause applyChunk can return all leave a block open exactly
+// when the failing chunk arrives before a terminal chunk ever closes it.
+// When blockOpen is true, this function sends the closing TextBlockEnd —
+// through the same emit helper, selecting on ctx like every other send —
+// before building or sending the terminal ErrorEvent, so a stream this
+// function terminates still satisfies ai.CheckStream's no-unterminated-
+// block invariant (AI-16) exactly like a cleanly-terminated one already
+// does. If the close loses the race with cancellation, this function
+// returns immediately without attempting the ErrorEvent send either — the
+// same "cancellation wins, nothing further is observable" posture every
+// other emit call in this package already keeps.
+func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, cause error, outputPreceded, blockOpen bool) {
+	if blockOpen {
+		// textBlockIndex is this package's own nonzero constant — the
+		// only rule NewTextBlockEnd checks — so this can never actually
+		// fail; handled rather than ignored because errcheck requires it
+		// (the same posture this file's other builders already take,
+		// e.g. preStreamCancellation above). Falling through on an
+		// unreachable error still reports the terminal failure itself,
+		// which matters more than a close this package can never
+		// actually fail to construct.
+		if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+			if !emit(ctx, out, stamper, end) {
+				return
+			}
+		}
+	}
+
 	category, ok := Category(cause)
 	if !ok {
 		category = ai.FailureCategoryMalformedResponse

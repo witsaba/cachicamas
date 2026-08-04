@@ -68,6 +68,7 @@ func TestCharter_TruncatedTranscript_CategoryMatchesOpenAICompatCategory(t *test
 	if failure.Category() != wantCategory {
 		t.Errorf("failure.Category() = %v, want %v — the same value Category(ErrTruncated) reports (S-ATS-094)", failure.Category(), wantCategory)
 	}
+	requireCheckStreamClean(t, events)
 }
 
 // TestCharter_PreAndPostHandoverFailures_DeliveryPathsDiffer covers
@@ -119,6 +120,7 @@ func TestCharter_PreAndPostHandoverFailures_DeliveryPathsDiffer(t *testing.T) {
 		if failure.Delivery() != ai.DeliveryMidStream {
 			t.Errorf("Delivery() = %v, want DeliveryMidStream (S-ATS-095)", failure.Delivery())
 		}
+		requireCheckStreamClean(t, events)
 	})
 }
 

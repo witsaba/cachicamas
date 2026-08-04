@@ -179,6 +179,43 @@ func assertClosedExactlyOnce(t *testing.T, ch <-chan ai.Event) {
 	}
 }
 
+// requireCheckStreamClean asserts events satisfies AI-14.4's own
+// ai.CheckStream ordering invariants (design.md D8, verify-report C1/S3):
+// every text block this package opened must be closed by the time the
+// stream's own terminal event — a normal completion or a mid-stream error
+// — appears. This is the one shared invocation site every failure-path
+// test in this package calls, not merely the tests naming an
+// unterminated-block probe by name — the whole-suite invariant S3 asked
+// for, not just the three named probe shapes.
+func requireCheckStreamClean(t *testing.T, events []ai.Event) {
+	t.Helper()
+	if report := ai.CheckStream(events); report.Violation() != nil {
+		t.Errorf("CheckStream violation = %v, want nil — every open text block must close before the stream's terminal event (design.md D8)", report.Violation())
+	}
+}
+
+// requireBlockClosedBeforeError asserts events end in a mid-stream
+// ErrorPayload terminal, immediately preceded by the TextBlockEnd that
+// closed the block the failure interrupted (design.md D8). This is the
+// stronger, shape-specific companion to requireCheckStreamClean, reserved
+// for the probe shapes verify-report C1 named explicitly — a block that
+// was genuinely open at the moment of failure: truncation mid-block,
+// invalid JSON mid-block, and an out-of-enum finish_reason mid-block.
+func requireBlockClosedBeforeError(t *testing.T, events []ai.Event) {
+	t.Helper()
+	if len(events) < 2 {
+		t.Fatalf("drained %d event(s), want at least a text_block_end and the terminal error event (design.md D8)", len(events))
+	}
+	last := events[len(events)-1]
+	if _, ok := last.ErrorPayload(); !ok {
+		t.Fatalf("last event kind = %v, want the terminal error event (design.md D8)", last.Kind())
+	}
+	preceding := events[len(events)-2]
+	if _, ok := preceding.TextBlockEnd(); !ok {
+		t.Fatalf("event preceding the terminal error = %v, want text_block_end (design.md D8)", preceding.Kind())
+	}
+}
+
 // waitForGoroutineBaseline polls runtime.NumGoroutine() until it returns to
 // within goroutineTolerance of before, or fails the test once timeout
 // elapses — S-ATS-005's and S-ATS-016's own leak checks, both needing a
@@ -531,6 +568,7 @@ func TestStream_FirstChunkMalformedIdentity_TerminatesWithMalformedResponseFailu
 			if !errors.Is(failure, ai.ErrMalformedResponse) {
 				t.Error("errors.Is(failure, ai.ErrMalformedResponse) = false, want true (S-ATS-015)")
 			}
+			requireCheckStreamClean(t, events)
 		})
 	}
 }
@@ -606,8 +644,9 @@ func TestStream_CarrierClosesExactlyOnce_AcrossOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Stream() error = %v, want nil", err)
 		}
-		drainAll(t, ch)
+		events := drainAll(t, ch)
 		assertClosedExactlyOnce(t, ch)
+		requireCheckStreamClean(t, events)
 	})
 
 	t.Run("cancellation", func(t *testing.T) {

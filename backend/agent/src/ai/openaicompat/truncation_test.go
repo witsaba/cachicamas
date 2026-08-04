@@ -82,6 +82,14 @@ func TestTruncation_TwoContentChunksNoSentinel_ErrorEventWithPrecedingDeltas(t *
 	if failure.Delivery() != ai.DeliveryMidStream {
 		t.Errorf("Delivery() = %v, want DeliveryMidStream (S-ATS-049)", failure.Delivery())
 	}
+
+	// design.md D8 (verify-report C1): this is the truncation-mid-block
+	// probe shape — two content deltas mint and hold an open block, then
+	// the connection ends with no sentinel. The producer must close that
+	// block before the terminal error, so a recorded failure stream still
+	// satisfies ai.CheckStream's no-unterminated-block invariant.
+	requireCheckStreamClean(t, events)
+	requireBlockClosedBeforeError(t, events)
 }
 
 // TestTruncation_ResponseStartOnlyNoSentinel_PartialOutputFalse covers
@@ -116,6 +124,7 @@ func TestTruncation_ResponseStartOnlyNoSentinel_PartialOutputFalse(t *testing.T)
 	if failure.Delivery() != ai.DeliveryMidStream {
 		t.Errorf("Delivery() = %v, want DeliveryMidStream (S-ATS-050)", failure.Delivery())
 	}
+	requireCheckStreamClean(t, events)
 }
 
 // TestTruncation_CutMidDataLine_NoEventFromPendingPartialFrame covers
@@ -150,4 +159,5 @@ func TestTruncation_CutMidDataLine_NoEventFromPendingPartialFrame(t *testing.T) 
 	if _, ok := last.ErrorPayload(); !ok {
 		t.Fatalf("last event carries no ErrorPayload, want a terminal failure for the cut connection (S-ATS-051): %+v", last)
 	}
+	requireCheckStreamClean(t, events)
 }
