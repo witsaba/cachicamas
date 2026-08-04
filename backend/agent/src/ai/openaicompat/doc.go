@@ -207,8 +207,12 @@
 // ai.ErrUnsupportedCapability) through ai.Failure.Is — the same uniform
 // door for both, never a per-site construction. policy.go's refuse is
 // that one door; reasoning_refusal_test.go's
-// TestPolicy_NoNewSentinelsExported keeps the "zero new sentinels" claim
-// mechanical, not only prose, for every future change to this package.
+// TestPolicy_NoNewSentinelsExported keeps the claim mechanical, not only
+// prose, as an enumerated allowlist. AI-26 contributed no entry; the
+// only sanctioned entries are AI-27's two decoder sentinels (errors.go's
+// ErrFrameTooLarge and ErrTruncated, R-ASD-019/R-ASD-020), admitted when
+// the two milestone chains merged. Any future sentinel fails the scan
+// until a spec sanctions it and the want-list names it.
 //
 // # Reasoning replay refuses; Layer 2 must strip first (AI-26.6, R-ART-015)
 //

@@ -223,15 +223,20 @@ func TestReasoningRefusal_NamesReasoningContentAsTheUnsupportedFeature(t *testin
 	}
 }
 
-// TestPolicy_NoNewSentinelsExported proves S-ART-054: this package's own
-// non-test sources export no error-sentinel-shaped identifier of their
-// own. Every refusal openaicompat.Translate can return is reachable only
-// through ai.ErrUnsupportedCapability — already exported by package ai
-// (provider_failure.go, AI-19) before this milestone existed — so the set
-// this scan expects is, and stays, empty: doc.go's "Refusal taxonomy:
-// AI-25 vs AI-26" section (NFR-ART-E) states in prose that this package
-// "adds no new sentinel"; this test makes that claim mechanical and keeps
-// it live for every future change to this package, not just this one —
+// TestPolicy_NoNewSentinelsExported proves S-ART-054: AI-26 itself
+// exported no error-sentinel-shaped identifier of its own. The scenario
+// is change-scoped — "compared against the set before the change" — and
+// every refusal openaicompat.Translate can return is reachable only
+// through ai.ErrUnsupportedCapability, already exported by package ai
+// (provider_failure.go, AI-19) before this milestone existed. The scan's
+// want-set is therefore an enumerated allowlist, not an empty freeze:
+// AI-26 contributed no entry, and the only sanctioned entries are the
+// two the decoder milestone's spec requires as exported, mutually
+// distinguishable identities (errors.go's ErrFrameTooLarge and
+// ErrTruncated, R-ASD-019/R-ASD-020), admitted when the AI-26 and AI-27
+// chains merged. doc.go's "Refusal taxonomy: AI-25 vs AI-26" section
+// (NFR-ART-E) states the same scoping in prose; this test keeps it
+// mechanical and live for every future change to this package —
 // credential_scan_test.go's own "later nodes covered automatically"
 // property (S-ART-014), restated for sentinels instead of credentials.
 //
@@ -245,7 +250,15 @@ func TestReasoningRefusal_NamesReasoningContentAsTheUnsupportedFeature(t *testin
 // so it is not part of "the module's exported sentinel set" this
 // scenario means.
 func TestPolicy_NoNewSentinelsExported(t *testing.T) {
-	wantSentinels := []string{} // the set before this milestone: none.
+	// AI-26's own contribution to this set is zero (S-ART-054). The two
+	// entries below are AI-27's, required exported and mutually
+	// distinguishable by the decoder spec (R-ASD-019, R-ASD-020). A
+	// future sentinel fails this scan until a spec sanctions it and this
+	// list names it.
+	wantSentinels := []string{
+		"errors.go:ErrFrameTooLarge",
+		"errors.go:ErrTruncated",
+	}
 
 	entries, err := os.ReadDir(".")
 	if err != nil {
