@@ -219,12 +219,15 @@ func appendToolResultObject(buf []byte, result ai.ToolResult) []byte {
 // with an empty slice, since appendMessageObject only calls it when
 // len(contentParts) > 0.
 //
-// Claim 1.0.5 (doc.go's wire-shape provenance section) documents content
-// as oneOf[string, array]: exactly one part renders as a bare JSON
-// string (the shape AI-26.1's skeleton already used and every earlier
-// slice's expectation already commits to, preserved here byte for byte);
-// more than one part renders as an array, one typed content-part object
-// per part (appendContentPartObject, below), in that same order.
+// This package's own recorded inference (doc.go's "Assistant \"content\"
+// is omitted, never null, when a message carries only tool calls"
+// section) — not a citation from any of the four claims — treats
+// content as oneOf[string, array]: exactly one part renders as a bare
+// JSON string (the shape AI-26.1's skeleton already used and every
+// earlier slice's expectation already commits to, preserved here byte
+// for byte); more than one part renders as an array, one typed
+// content-part object per part (appendContentPartObject, below), in
+// that same order.
 //
 // content is already ordered the way the caller built it: splitToolCalls
 // preserves relative order while filtering, and before that,

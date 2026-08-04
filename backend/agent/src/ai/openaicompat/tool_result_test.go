@@ -114,7 +114,7 @@ func init() {
 			// S-ART-048: a turn with three tool calls and interleaved,
 			// out-of-order results — each wire result names its own
 			// call's identifier. Gated on claim 2's request-side
-			// confirmation (1.0.2): each call carries its own distinctive
+			// confirmation: each call carries its own distinctive
 			// arguments object, so claim 2's "arguments is a wire STRING,
 			// not a nested object" encoding is genuinely observable in
 			// this expectation, not merely asserted.

@@ -494,20 +494,43 @@
 //
 // # Assistant "content" is omitted, never null, when a message carries only tool calls
 //
-// Claim 1.0.5 (this file's own wire-shape provenance section) settled
-// content's shape as oneOf[string, array] — it was never settled as
-// oneOf[string, array, null]. An assistant message whose content is
-// entirely tool calls (ai.rolePermittedKinds' own RoleAssistant row
-// permits Text, Reasoning and ToolCall in any combination, including
-// zero Text parts) therefore has nothing citable to put in "content" at
-// all: appendMessageObject omits the field outright rather than
-// fabricating a "content":null this citation gate never licensed. This
-// is not a new convention invented for this case — it is the same
-// presence-flag, omit-when-absent shape every other optional field in
-// this package already uses (option.go's generation options and
-// tool_choice, tool.go's own "tools" field, body.go's extension
-// members): "the caller said nothing here" renders as no field, never a
-// placeholder value standing in for absence.
+// This is a recorded inference, not a citation: none of the four claims
+// above settles content's nullability, or even names "content" as a
+// field at all. Claim 1 concerns system-instruction placement and role,
+// claim 2 concerns tool-call-argument encoding, claim 3 concerns
+// tools[].function.parameters, and claim 4 concerns role alternation —
+// none says whether an assistant message's "content" may be null, must
+// be omitted, or must always be present, when the message carries only
+// tool calls. That question is left open by everything actually cited
+// here (see message.go's own appendMessageContent doc comment for the
+// closely related, equally uncited string-vs-array shape question).
+//
+// The rule this package applies to that gap is inferred, not read off
+// the vendor's spec: it follows this package's own existing
+// presence-flag, omit-when-absent convention — the same shape every
+// other optional field in this package already uses (option.go's
+// generation options and tool_choice, tool.go's own "tools" field,
+// body.go's extension members): "the caller said nothing here" renders
+// as no field, never a placeholder value standing in for absence.
+// appendMessageObject therefore omits "content" outright for an
+// assistant message whose content is entirely tool calls
+// (ai.rolePermittedKinds' own RoleAssistant row permits Text, Reasoning
+// and ToolCall in any combination, including zero Text parts), rather
+// than fabricating a "content":null no citation licenses.
+//
+// The choice is byte-proven, not merely reasoned: every registered
+// expectation in tool_result_test.go whose assistant message carries
+// only tool calls (e.g. "one tool result renders as exactly one
+// tool-role message") renders {"role":"assistant","tool_calls":[...]}
+// with no "content" key at all — TestExpectationCases_MatchByteExact
+// would fail the instant the implementation emitted "content":null
+// instead, since the byte-exact literal contains no such substring.
+//
+// This is a candidate for a future citation, not a settled fact: if the
+// vendor's own OpenAPI specification later documents content's
+// nullability explicitly, this section should be revisited and updated
+// to cite it properly, rather than continuing to rest on this package's
+// own convention alone.
 //
 // # No distinct wire field for a failed tool result (S-ART-044)
 //
