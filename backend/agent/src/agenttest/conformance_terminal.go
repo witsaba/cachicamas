@@ -51,7 +51,8 @@ func terminalExactlyOneCase(t *testing.T, f Factory) {
 		}
 		rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 		RequireValidStream(t, rec) // ai.CheckStream's own terminal-exclusivity rule, delegated (R-AEE-018)
-		requireDrainedKinds(t, rec.Events(), []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion}) // S-CLA-008: exactly two, behind the lifecycle prefix
+		// S-CLA-008: exactly two, behind the lifecycle prefix.
+		requireDrainedKinds(t, rec.Events(), []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion})
 	})
 
 	t.Run("pre_stream_failure", func(t *testing.T) {

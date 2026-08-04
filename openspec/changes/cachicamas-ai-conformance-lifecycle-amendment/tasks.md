@@ -76,9 +76,15 @@ Chain strategy: feature-branch-chain
 
 ## Phase 5: Verification
 
-- [ ] 5.1 Run `go test -race -count=1 ./...` from `backend/agent/` twice — deterministic green both runs.
-- [ ] 5.2 Run configured Go linter over the 11 changed/new `agenttest` files.
-- [ ] 5.3 `git diff --stat` confirms zero changes under `src/ai/`, `openaicompat/`, and `backend/agent/go.mod`. [S-CLA-026]
-- [ ] 5.4 Run `openaicompat` package's own test suite standalone — still green (sibling package unaffected).
-- [ ] 5.5 Confirm `RunConformance(t, FakeFactory())` (both drivers, ll.124/1355) returns pass, exactly 8 capability entries, none `not exercised`. [S-CLA-025]
-- [ ] 5.6 Inspection pass: confirm the 7 R-CNF-021 register cases are unchanged and each amended case's derived window matches its script kind-for-kind. [S-CLA-017…024, 027/028]
+- [x] 5.1 Run `go test -race -count=1 ./...` from `backend/agent/` twice — deterministic green both runs.
+  - Evidence: both runs → `ok github.com/cachicamas/backend/agent/src/agenttest`, `ok .../src/ai`, `ok .../src/ai/openaicompat` (final pair re-run after the gofmt fix below, both still green).
+- [x] 5.2 Run configured Go linter over the 11 changed/new `agenttest` files.
+  - Evidence: `make lint` (backend/agent) → `go vet ./...` clean, `golangci-lint run --config=.golangci.yml ./...` → `0 issues.` `gofmt -l src/agenttest/*.go` initially flagged `conformance_terminal.go` (adjacent trailing-comment alignment padding introduced by task 2.5/2.6's edit); restructured the new `requireDrainedKinds` line's comment onto its own leading line to avoid the alignment group — re-ran `gofmt -l`: clean, `go build ./...` and `TestConformanceTerminal` still green.
+- [x] 5.3 `git diff --stat` confirms zero changes under `src/ai/`, `openaicompat/`, and `backend/agent/go.mod`. [S-CLA-026]
+  - Evidence: `git diff --stat <session-start-commit>..HEAD -- backend/agent/src/ai/ backend/agent/src/ai/openaicompat/ backend/agent/go.mod backend/agent/go.sum` → empty for all four (zero touch). Full session diff-stat: exactly the 11 `agenttest` files (5 amended + 6 new) + 4 openspec docs, 1135 insertions(+)/59 deletions(-) total (~670 lines in the 11 code files alone, once the docs are excluded — under the Review Workload Forecast's ~380-420 estimate's order of magnitude for a single auto-chain PR; no chaining needed, matching the Low-risk forecast).
+- [x] 5.4 Run `openaicompat` package's own test suite standalone — still green (sibling package unaffected).
+  - Evidence: `go test -race -count=1 -v ./src/ai/openaicompat/...` → `PASS`, `ok`.
+- [x] 5.5 Confirm `RunConformance(t, FakeFactory())` (both drivers, ll.124/1355) returns pass, exactly 8 capability entries, none `not exercised`. [S-CLA-025]
+  - Evidence: `go test -race -count=1 -v -run 'TestRunConformance_PublicEntryPoint_AgainstFakeFactory|TestRunConformance_FakeFactoryEndToEnd_VerdictPassEveryRequiredSatisfied' ./src/agenttest/...` → both `--- PASS`; first asserts `len(record.Entries())==8`; second asserts `Verdict()==VerdictPass` (structurally excludes any not-exercised entry — S-CNF-053 already proves a not-exercised entry forces Inconclusive, never Pass) plus explicit per-entry checks for `CapReasoningContent`=Satisfied, `CapTokenCounting`/`CapCacheBoundary`=Absent (FakeFactory's own declared-false optional capabilities, not not-exercised).
+- [x] 5.6 Inspection pass: confirm the 7 R-CNF-021 register cases are unchanged and each amended case's derived window matches its script kind-for-kind. [S-CLA-017…024, 027/028]
+  - Evidence: `git diff <session-start>..HEAD` inspected hunk-by-hunk per file — confirmed zero changed lines inside `toolCallInterleavedCase` (S-CLA-018), `toolCallOrdinalCase` (S-CLA-019), `terminalDiscriminatorCase` (S-CLA-020), `terminalFailureCategoryExhaustivenessCase` (S-CLA-021), `cancellationAbandonedThenCancelledCase` (S-CLA-022), `tokenCountingCase` (S-CLA-024), and zero diff on all of `conformance_redaction.go` (S-CLA-023). Cross-checked all 11 amended-case `requireDrainedKinds`/positional want-lists against design.md's per-case derivation table row by row — all 11 match kind-for-kind (S-CLA-027) and each script's terminal choice matches its charter (completion / error-as-terminal / no-terminal-bare-close) (S-CLA-028).
