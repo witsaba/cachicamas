@@ -23,11 +23,11 @@
 // mutation and its output), the same disclosed pattern slice 2 used for
 // its own already-satisfied cases.
 //
-// S-ATS-046's own fixture below is deliberately the WEAKER of two possible
-// readings of its scenario text; see the test's own doc comment and this
-// milestone's apply-progress record for why the stronger reading is a hard
-// conflict with R-ATS-013's own unconditional rule and is flagged as a
-// risk rather than silently decided in production code either way.
+// S-ATS-046's own fixture below models a well-formed sentinel frame — its
+// own mandatory blank line present — followed immediately by EOF with no
+// further bytes; see the test's own doc comment and spec.md's rev-3
+// revision note (slice-6 coordinator ruling) for why this is the
+// scenario's sole correct reading, not one of two competing ones.
 
 package openaicompat
 
@@ -86,33 +86,30 @@ func TestTerminal_TerminalChunkThenDone_EndsCleanlyWithCompletion(t *testing.T) 
 }
 
 // TestTerminal_DoneWithNoPaddingBeyondMandatoryBlankLine_SameOutcome covers
-// S-ATS-046. "No trailing blank line before EOF" is read here as: the
+// S-ATS-046 (spec.md rev 3). The scenario now reads precisely: the
 // sentinel's own SSE-mandatory blank line — the ONE line every S-ATS-04x
 // fixture in this file already needs for [DONE] to dispatch as a Frame at
 // all — is immediately followed by EOF, with zero further bytes of any
-// kind (no keep-alive, no extra terminator, no padding). This is
-// deliberately the WEAKER of two possible readings of the scenario text.
+// kind (no keep-alive, no extra terminator, no padding).
 //
-// The STRONGER reading — the sentinel's own mandatory blank line itself
-// missing, leaving the literal bytes "data: [DONE]" pending and
-// undispatched at EOF — was empirically probed against Decoder.Finish()
-// (a frozen AI-27 file this milestone MUST NOT amend, per spec.md's own
-// "binding predecessors, cited by identifier and never amended"): Finish()
-// returns ErrTruncated for that exact byte shape, because the sentinel's
-// own frame was never fully dispatched by Decoder.Feed for want of its
-// terminating blank line. Under R-ATS-013's own unconditional text — "When
-// the connection closes before the terminal sentinel arrives, the
-// producer MUST end the stream with a typed terminal error event" — a
-// partially-arrived sentinel line has NOT arrived, so R-ATS-013 demands
-// exactly the terminal failure R-ATS-012's S-ATS-046 (under the stronger
-// reading) forbids. Resolving that in favour of S-ATS-046 would require
-// either touching the frozen decoder (out of authority for this slice) or
-// inventing a new "terminalSeen implies EOF-truncation-is-actually-clean"
-// heuristic not stated anywhere in design.md's D1…D12 and not required by
-// any OTHER scenario in this node — an undisclosed behavior addition
-// strict-tdd.md's own discipline forbids. Flagged as a risk in this
-// milestone's apply-progress record rather than silently decided either
-// way in production code.
+// # Why the fixture never models an unterminated sentinel frame
+//
+// An earlier reading of this scenario's rev-1/rev-2 wording ("no trailing
+// blank line before EOF") could be taken as the sentinel's own mandatory
+// blank line itself missing, leaving the literal bytes "data: [DONE]"
+// pending and undispatched at EOF. That shape was empirically probed
+// against Decoder.Finish() (a frozen AI-27 file this milestone MUST NOT
+// amend, per spec.md's own "binding predecessors, cited by identifier and
+// never amended") and confirmed to return ErrTruncated, because the
+// sentinel's own frame is never fully dispatched by Decoder.Feed for want
+// of its terminating blank line — per WHATWG dispatch, an unterminated
+// event is never received at all. That is R-ATS-013's truncation case, not
+// this rule's clean termination, and R-ATS-013's own unconditional text
+// forbids reading it any other way. spec.md's rev-3 revision note (the
+// slice-6 coordinator ruling) corrects the scenario text itself to the
+// well-formed-frame-at-exact-EOF reading this fixture already models —
+// this test's fixture and assertions are unchanged by that correction;
+// only the scenario's own wording was.
 func TestTerminal_DoneWithNoPaddingBeyondMandatoryBlankLine_SameOutcome(t *testing.T) {
 	t.Parallel()
 
