@@ -47,6 +47,8 @@ func cancellationBoundedCloseCase(t *testing.T, f Factory) {
 	t.Helper()
 
 	scenario := func() {
+		responseStart, err := ai.NewResponseStart("resp-bounded-close", "model-bounded-close")
+		requireConstructed(t, err, "ai.NewResponseStart")
 		start, err := ai.NewTextBlockStart(1)
 		requireConstructed(t, err, "ai.NewTextBlockStart")
 		delta, err := ai.NewTextDelta(1, "hello")
@@ -54,7 +56,7 @@ func cancellationBoundedCloseCase(t *testing.T, f Factory) {
 		end, err := ai.NewTextBlockEnd(1)
 		requireConstructed(t, err, "ai.NewTextBlockEnd")
 
-		script := Script{Steps: []Step{Emit(start), Emit(delta), Emit(end)}} // Buffer 0: unbuffered
+		script := Script{Steps: []Step{Emit(responseStart), Emit(start), Emit(delta), Emit(end)}} // Buffer 0: unbuffered; no terminal — a cancelled stream closes bare (AI-20.3)
 		subject := f.New(t, script)
 		ctx, cancel := context.WithCancel(t.Context())
 		ch, err := subject.Stream(ctx, minimalRequest(t))
@@ -68,8 +70,8 @@ func cancellationBoundedCloseCase(t *testing.T, f Factory) {
 		if !ok {
 			t.Fatal("first receive reported the stream already closed, want the scripted first event")
 		}
-		if first.Kind() != ai.EventKindTextBlockStart {
-			t.Fatalf("first event kind = %v, want %v", first.Kind(), ai.EventKindTextBlockStart)
+		if first.Kind() != ai.EventKindResponseStart {
+			t.Fatalf("first event kind = %v, want %v (S-CLA-010: the synchronous-handoff proof now targets the lifecycle prefix)", first.Kind(), ai.EventKindResponseStart)
 		}
 
 		cancel()

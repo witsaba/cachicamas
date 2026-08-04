@@ -39,9 +39,11 @@ func terminalExactlyOneCase(t *testing.T, f Factory) {
 	t.Helper()
 
 	t.Run("normal_finish", func(t *testing.T) {
+		responseStart, err := ai.NewResponseStart("resp-normal-finish", "model-normal-finish")
+		requireConstructed(t, err, "ai.NewResponseStart")
 		completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
 		requireConstructed(t, err, "ai.NewCompletion")
-		script := Script{Steps: []Step{Emit(completion)}}
+		script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
 		subject := f.New(t, script)
 		ch, err := subject.Stream(t.Context(), minimalRequest(t))
 		if err != nil {
@@ -49,9 +51,8 @@ func terminalExactlyOneCase(t *testing.T, f Factory) {
 		}
 		rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 		RequireValidStream(t, rec) // ai.CheckStream's own terminal-exclusivity rule, delegated (R-AEE-018)
-		if got := rec.Len(); got != 1 {
-			t.Errorf("drained %d event(s), want 1 (the completion alone) (S-CNF-021)", got)
-		}
+		// S-CLA-008: exactly two, behind the lifecycle prefix.
+		requireDrainedKinds(t, rec.Events(), []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion})
 	})
 
 	t.Run("pre_stream_failure", func(t *testing.T) {
@@ -69,11 +70,13 @@ func terminalExactlyOneCase(t *testing.T, f Factory) {
 	})
 
 	t.Run("mid_stream_failure", func(t *testing.T) {
+		responseStart, err := ai.NewResponseStart("resp-mid-stream-failure", "model-mid-stream-failure")
+		requireConstructed(t, err, "ai.NewResponseStart")
 		failure, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable}, false)
 		requireConstructed(t, err, "ai.MidStreamFailure")
 		terminal, err := ai.ErrorEvent(failure)
 		requireConstructed(t, err, "ai.ErrorEvent")
-		script := Script{Steps: []Step{Emit(terminal)}}
+		script := Script{Steps: []Step{Emit(responseStart), Emit(terminal)}}
 		subject := f.New(t, script)
 		ch, err := subject.Stream(t.Context(), minimalRequest(t))
 		if err != nil {
@@ -81,9 +84,7 @@ func terminalExactlyOneCase(t *testing.T, f Factory) {
 		}
 		rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 		RequireValidStream(t, rec)
-		if got := rec.Len(); got != 1 {
-			t.Errorf("drained %d event(s), want 1 (the terminal error alone) (S-CNF-021)", got)
-		}
+		requireDrainedKinds(t, rec.Events(), []ai.EventKind{ai.EventKindResponseStart, ai.EventKindError}) // S-CLA-009: exactly two — the error terminal IS this path's terminal, no completion added
 	})
 }
 
