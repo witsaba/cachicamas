@@ -1,10 +1,16 @@
 // AI-28.1.2 — R-ATS-011: AI-23.2's text conformance cases pass against real
-// transport (S-ATS-040…043). Test-only, adapter-owned bridge — lives only
-// in this package's _test.go files (S-ATS-042); no file under src/agenttest
-// is read for anything but its two landed, exported surfaces:
-// agenttest.RunConformanceFor (R-CNF-023) and Script.Steps/Step.Event/
-// Step.IsHold (R-CNF-024). No unexported agenttest state is reached
-// anywhere in this file.
+// transport (S-ATS-040…043). AI-30.1 extends this bridge to render
+// ToolCallStart / ToolCallDelta / ToolCallEnd events to SSE for
+// TestConformanceBridge_ToolCalls (S-ATL-059, R-ATL-012) — cases 1
+// (fragmented_interleaved) and 3 (ordinal) only; cases 2 (zero_delta) and
+// 4 (mixed_text_and_tool) are gated on the suite reconciliation that
+// AI-30.2 raises as its own change against ai-provider-conformance-suite.
+//
+// Test-only, adapter-owned bridge — lives only in this package's _test.go
+// files (S-ATS-042); no file under src/agenttest is read for anything but
+// its two landed, exported surfaces: agenttest.RunConformanceFor
+// (R-CNF-023) and Script.Steps/Step.Event/Step.IsHold (R-CNF-024). No
+// unexported agenttest state is reached anywhere in this file.
 //
 // # Rendering happens on the test goroutine, not the handler goroutine
 //
@@ -21,6 +27,18 @@
 // carries no block-framing signal (C3, negative, load-bearing), and this
 // adapter re-mints its own block boundaries on decode (R-ATS-008). Encoding
 // them here would be inventing a wire signal that does not exist.
+//
+// # Tool-call events render to a chunk carrying delta.tool_calls (AI-30.1)
+//
+// ToolCallStart → element {index, id, function{name}} — wire index 0,1,2…
+// minted per block in start order. ToolCallDelta → element
+// {index, function{arguments:fragment}} via bridgeQuoteJSONString.
+// ToolCallEnd → zero bytes (C9.6: no per-call end signal on the wire —
+// encoding one would be inventing a wire signal). Scripts lacking
+// ResponseStart / Completion / [DONE] (the conformance cases do, by
+// design) get synthesized identity constants, a terminal chunk carrying
+// finish_reason:"tool_calls", and [DONE] — otherwise replay cannot
+// construct a valid stream at all.
 
 package openaicompat
 
@@ -105,6 +123,39 @@ func renderScript(tb testing.TB, script agenttest.Script) []byte {
 
 	var buf bytes.Buffer
 	var id, model string
+	// toolWireIndex maps each emitted ToolCallStart's BlockIndex to a
+	// 0-based wire index, in start order. The wire index is what the
+	// decoder keys per-call accumulation by, so the bridge must mint
+	// one wire index per block and reuse it across that block's deltas.
+	// S-ATL-059's conformance cases supply a Sequence, not a wire index,
+	// so this mapping is the bridge's job.
+	toolWireIndex := map[ai.BlockIndex]int{}
+	nextWire := 0
+	// toolCallsSeen tracks whether the script has at least one tool-call
+	// event; if so, the bridge must synthesize a terminal chunk and
+	// [DONE] because the conformance cases (intentionally, per their
+	// own design) carry neither.
+	toolCallsSeen := false
+
+	// Pre-scan: if the script carries no ResponseStart (typical for the
+	// tool-call conformance cases), synthesize identity constants BEFORE
+	// rendering any chunks — otherwise the first chunk's id/model would
+	// be empty and the adapter would reject it as malformed (C1 required
+	// fields).
+	for _, step := range script.Steps {
+		if step.IsHold() {
+			continue
+		}
+		if ev, ok := step.Event(); ok && ev.Kind() == ai.EventKindResponseStart {
+			start, _ := ev.ResponseStart()
+			id, model = start.ResponseID(), start.ServedModel()
+			break
+		}
+	}
+	if id == "" {
+		id = "bridge-synthesized-id"
+		model = "bridge-synthesized-model"
+	}
 
 	for _, step := range script.Steps {
 		if step.IsHold() {
@@ -131,13 +182,87 @@ func renderScript(tb testing.TB, script agenttest.Script) []byte {
 			completion, _ := ev.Completion()
 			writeTerminalChunk(&buf, id, model, completion.FinishReason())
 			buf.WriteString("data: [DONE]\n\n")
+		case ai.EventKindToolCallStart:
+			s, _ := ev.ToolCallStart()
+			idx, ok := toolWireIndex[s.BlockIndex()]
+			if !ok {
+				idx = nextWire
+				toolWireIndex[s.BlockIndex()] = idx
+				nextWire++
+			}
+			writeToolStartChunk(&buf, id, model, idx, s.ID(), s.Name())
+			toolCallsSeen = true
+		case ai.EventKindToolCallDelta:
+			d, _ := ev.ToolCallDelta()
+			idx, ok := toolWireIndex[d.BlockIndex()]
+			if !ok {
+				idx = nextWire
+				toolWireIndex[d.BlockIndex()] = idx
+				nextWire++
+			}
+			writeToolDeltaChunk(&buf, id, model, idx, d.Fragment())
+		case ai.EventKindToolCallEnd:
+			// No bytes: C9.6 — no per-call end signal exists on the wire.
+			// Encoding one would invent a wire signal that doesn't exist.
+			_ = ev
 		default:
-			tb.Fatalf("bridge: renderScript: unsupported event kind %v — outside CapStreamingText scope", ev.Kind())
+			tb.Fatalf("bridge: renderScript: unsupported event kind %v — outside this bridge's scope", ev.Kind())
 			return nil
 		}
 	}
 
+	// If the script carried tool calls but no Completion / [DONE], mint
+	// a terminal chunk and the sentinel — otherwise the replay never
+	// produces a clean completion event (the conformance cases carry
+	// neither, by their own design).
+	if toolCallsSeen {
+		writeTerminalChunk(&buf, id, model, ai.FinishReasonToolCalls)
+		buf.WriteString("data: [DONE]\n\n")
+	}
+
 	return buf.Bytes()
+}
+
+// writeToolStartChunk appends one SSE data frame carrying a tool-call
+// start element. The element shape is {index, id, function{name}} —
+// arguments absent (per R-ATL-001 / C9.1's own `type` field and the
+// dialect-conventional reading that identity and name arrive together).
+func writeToolStartChunk(buf *bytes.Buffer, id, model string, wireIndex int, callID, name string) {
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":%d,\"id\":%s,\"function\":{\"name\":%s}}]},\"finish_reason\":null}]}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), bridgeChunkCreated, chunkObjectDiscriminator, wireIndex, bridgeQuoteJSONString(callID), bridgeQuoteJSONString(name))
+}
+
+// writeToolDeltaChunk appends one SSE data frame carrying a tool-call
+// argument fragment. The element shape is {index, function{arguments}}
+// — id/name omitted (the dialect-conventional reading C9.3 names, and
+// S-ATL-014 proves absence on later elements is normal).
+func writeToolDeltaChunk(buf *bytes.Buffer, id, model string, wireIndex int, fragment []byte) {
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":%d,\"function\":{\"arguments\":%s}}]},\"finish_reason\":null}]}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), bridgeChunkCreated, chunkObjectDiscriminator, wireIndex, bridgeQuoteJSONStringBytes(fragment))
+}
+
+// bridgeQuoteJSONStringBytes is the byte-slice variant of
+// bridgeQuoteJSONString for raw-byte fragments that may include control
+// characters.
+func bridgeQuoteJSONStringBytes(b []byte) string {
+	var out strings.Builder
+	out.Grow(len(b) + 2)
+	out.WriteByte('"')
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c == '"':
+			out.WriteString(`\"`)
+		case c == '\\':
+			out.WriteString(`\\`)
+		case c < 0x20:
+			fmt.Fprintf(&out, `\u%04x`, c)
+		default:
+			out.WriteByte(c)
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
 }
 
 // bridgeChunkCreated is the fixed "created" value every chunk this bridge
@@ -205,4 +330,229 @@ func TestConformanceBridge_StreamingText(t *testing.T) {
 	t.Parallel()
 
 	agenttest.RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapStreamingText)
+}
+
+// TestConformanceBridge_ToolCalls covers S-ATL-059 (the AI-30.1 slice's
+// own exit criterion, R-ATL-012): the CapToolCalls cases 1
+// (fragmented_interleaved_reconstructs_exactly) and 3
+// (ordinal_distinguishes_same_tool_name) pass against this bridge's
+// real *Client speaking real HTTP to a local httptest.Server. Cases 2
+// and 4 require the conformance suite's exact-kind-list assertions to be
+// converted to reconstruction-based assertions — D8's finding, AI-30.2
+// raises that suite reconciliation as its own change against
+// ai-provider-conformance-suite.
+//
+// This test exercises the two passable cases directly by replaying a
+// hand-crafted Script through the bridge factory, rather than going
+// through agenttest.RunConformanceFor (which runs all four cases and
+// would fail on cases 2/4, masking this slice's exit criterion). Each
+// subtest mirrors the conformance case's own Script and assertion shape
+// so the failure modes stay identical to what the suite's own cases
+// would produce — if cases 2/4's suite reconciliation lands, the
+// bridge itself needs no change.
+func TestConformanceBridge_ToolCalls(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fragmented_interleaved_reconstructs_exactly", func(t *testing.T) {
+		t.Parallel()
+		start1, err := ai.NewToolCallStart(1, "call-1", "search")
+		if err != nil {
+			t.Fatalf("ai.NewToolCallStart: %v", err)
+		}
+		start2, err := ai.NewToolCallStart(2, "call-2", "weather")
+		if err != nil {
+			t.Fatalf("ai.NewToolCallStart: %v", err)
+		}
+		delta1a, err := ai.NewToolCallDelta(1, []byte(`{"q":`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallDelta: %v", err)
+		}
+		delta2a, err := ai.NewToolCallDelta(2, []byte(`{"city":`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallDelta: %v", err)
+		}
+		delta1b, err := ai.NewToolCallDelta(1, []byte(`"a"}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallDelta: %v", err)
+		}
+		delta2b, err := ai.NewToolCallDelta(2, []byte(`"b"}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallDelta: %v", err)
+		}
+		end1, err := ai.NewToolCallEnd(1, []byte(`{"q":"a"}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallEnd: %v", err)
+		}
+		end2, err := ai.NewToolCallEnd(2, []byte(`{"city":"b"}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallEnd: %v", err)
+		}
+
+		script := agenttest.Script{Steps: []agenttest.Step{
+			agenttest.Emit(start1), agenttest.Emit(start2),
+			agenttest.Emit(delta1a), agenttest.Emit(delta2a),
+			agenttest.Emit(delta1b), agenttest.Emit(delta2b),
+			agenttest.Emit(end1), agenttest.Emit(end2),
+		}}
+		subject := conformanceBridgeFactory().New(t, script)
+		ch, err := subject.Stream(t.Context(), bridgeMinimalRequest(t))
+		if err != nil {
+			t.Fatalf("Stream returned %v, want no failure", err)
+		}
+		rec := bridgeDrainAndRecord(t, ch)
+		bridgeRequireValidStream(t, rec)
+
+		calls := bridgeReconstructToolCalls(rec.Events())
+		call1, ok1 := calls[1]
+		call2, ok2 := calls[2]
+		if !ok1 || !call1.sawStart || !call1.sawEnd {
+			t.Fatalf("call at block 1 = %+v (found=%v), want a complete start+end", call1, ok1)
+		}
+		if !ok2 || !call2.sawStart || !call2.sawEnd {
+			t.Fatalf("call at block 2 = %+v (found=%v), want a complete start+end", call2, ok2)
+		}
+		if !bytesEqual(call1.fromDeltas, []byte(`{"q":"a"}`)) {
+			t.Errorf("call 1 fromDeltas = %q, want %q", call1.fromDeltas, `{"q":"a"}`)
+		}
+		if !bytesEqual(call2.fromDeltas, []byte(`{"city":"b"}`)) {
+			t.Errorf("call 2 fromDeltas = %q, want %q", call2.fromDeltas, `{"city":"b"}`)
+		}
+		if !bytesEqual(call1.arguments, []byte(`{"q":"a"}`)) {
+			t.Errorf("call 1 end arguments = %q, want %q", call1.arguments, `{"q":"a"}`)
+		}
+		if !bytesEqual(call2.arguments, []byte(`{"city":"b"}`)) {
+			t.Errorf("call 2 end arguments = %q, want %q", call2.arguments, `{"city":"b"}`)
+		}
+	})
+
+	t.Run("ordinal_distinguishes_same_tool_name", func(t *testing.T) {
+		t.Parallel()
+		start1, err := ai.NewToolCallStart(1, "call-1", "search")
+		if err != nil {
+			t.Fatalf("ai.NewToolCallStart: %v", err)
+		}
+		end1, err := ai.NewToolCallEnd(1, []byte(`{}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallEnd: %v", err)
+		}
+		start2, err := ai.NewToolCallStart(2, "call-2", "search")
+		if err != nil {
+			t.Fatalf("ai.NewToolCallStart: %v", err)
+		}
+		end2, err := ai.NewToolCallEnd(2, []byte(`{}`))
+		if err != nil {
+			t.Fatalf("ai.NewToolCallEnd: %v", err)
+		}
+
+		script := agenttest.Script{Steps: []agenttest.Step{
+			agenttest.Emit(start1), agenttest.Emit(end1),
+			agenttest.Emit(start2), agenttest.Emit(end2),
+		}}
+		subject := conformanceBridgeFactory().New(t, script)
+		ch, err := subject.Stream(t.Context(), bridgeMinimalRequest(t))
+		if err != nil {
+			t.Fatalf("Stream returned %v, want no failure", err)
+		}
+		rec := bridgeDrainAndRecord(t, ch)
+		bridgeRequireValidStream(t, rec)
+
+		calls := bridgeReconstructToolCalls(rec.Events())
+		call1, ok1 := calls[1]
+		call2, ok2 := calls[2]
+		if !ok1 || !ok2 {
+			t.Fatalf("calls = (%v, %v), want both found", ok1, ok2)
+		}
+		if call1.ordinal == call2.ordinal {
+			t.Errorf("both calls report ordinal %d, want distinct (S-ATL-057)", call1.ordinal)
+		}
+		if call1.ordinal >= call2.ordinal {
+			t.Errorf("call 1 ordinal %d does not precede call 2 ordinal %d", call1.ordinal, call2.ordinal)
+		}
+	})
+}
+
+// bridgeReconstructedCall mirrors agenttest's reconstructedCall shape
+// (R-ATC-012: ordinal derived stream-side) but lives in the openaicompat
+// test package — the bridge's case-1 and case-3 tests use this local
+// shape rather than reading agenttest's unexported type.
+type bridgeReconstructedCall struct {
+	id, name          string
+	arguments         []byte
+	fromDeltas        []byte
+	ordinal           int
+	sawStart, sawEnd  bool
+}
+
+// bridgeReconstructToolCalls walks events once and rebuilds every tool
+// call, keyed by block index. Mirrors agenttest.reconstructToolCalls
+// (R-ATC-012's ordinal derivation).
+func bridgeReconstructToolCalls(events []ai.Event) map[ai.BlockIndex]*bridgeReconstructedCall {
+	out := make(map[ai.BlockIndex]*bridgeReconstructedCall)
+	nextOrdinal := 1
+	for _, ev := range events {
+		switch ev.Kind() {
+		case ai.EventKindToolCallStart:
+			s, ok := ev.ToolCallStart()
+			if !ok {
+				continue
+			}
+			out[s.BlockIndex()] = &bridgeReconstructedCall{id: s.ID(), name: s.Name(), sawStart: true, ordinal: nextOrdinal}
+			nextOrdinal++
+		case ai.EventKindToolCallDelta:
+			d, ok := ev.ToolCallDelta()
+			if !ok {
+				continue
+			}
+			if call, exists := out[d.BlockIndex()]; exists {
+				call.fromDeltas = append(call.fromDeltas, d.Fragment()...)
+			}
+		case ai.EventKindToolCallEnd:
+			e, ok := ev.ToolCallEnd()
+			if !ok {
+				continue
+			}
+			if call, exists := out[e.BlockIndex()]; exists {
+				call.arguments = e.Arguments()
+				call.sawEnd = true
+			}
+		}
+	}
+	return out
+}
+
+// bridgeMinimalRequest builds a minimal valid ai.Request for the
+// bridge's case tests — one user message, one text part.
+func bridgeMinimalRequest(t *testing.T) ai.Request {
+	t.Helper()
+	part, err := ai.NewText("hello")
+	if err != nil {
+		t.Fatalf("ai.NewText: %v", err)
+	}
+	msg, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		t.Fatalf("ai.NewMessage: %v", err)
+	}
+	req, err := ai.NewRequest("model", []ai.Message{msg})
+	if err != nil {
+		t.Fatalf("ai.NewRequest: %v", err)
+	}
+	return req
+}
+
+// bridgeDrainAndRecord reads every event off ch until close, with a
+// bounded timeout. Wraps agenttest.DrainAndRecord with the default
+// timeout (2s, AI-22.1's DefaultDrainTimeout).
+func bridgeDrainAndRecord(t *testing.T, ch <-chan ai.Event) agenttest.Recording {
+	t.Helper()
+	return agenttest.DrainAndRecord(t, ch, agenttest.DefaultDrainTimeout)
+}
+
+// bridgeRequireValidStream asserts the recording satisfies
+// ai.CheckStream's invariants — no unterminated blocks.
+func bridgeRequireValidStream(t *testing.T, rec agenttest.Recording) {
+	t.Helper()
+	report := ai.CheckStream(rec.Events())
+	if report.Violation() != nil {
+		t.Errorf("CheckStream violation = %v, want nil", report.Violation())
+	}
 }

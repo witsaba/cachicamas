@@ -50,10 +50,27 @@
 // (row 2, "duplicate close", S-ATS-075). Both are checked explicitly, once
 // terminalSeen is already true from a PRIOR chunk — never on the chunk
 // that sets terminalSeen for the first time.
+//
+// # AI-30 tool-call accumulation (R-ATL-001…006)
+//
+// mapperState grows a per-call map keyed by wire index, plus a shared
+// nextBlockIndex allocator starting at 1 (D1). Each element of
+// choice 0's tool_calls array is processed in array order: missing
+// index → errToolElementMissingIndex (S-ATL-011); identity merge (unset→set,
+// identical-repeat no-op S-ATL-015, differing non-empty → errToolCallIdentityMismatch
+// S-ATL-016); once id+name are set, ToolCallStart is emitted and any
+// pending fragments flush as one ToolCallDelta each; non-empty fragments
+// append to per-call buffers bounded by toolCallAccumulationCap.
+//
+// Assembly happens exactly once at close, through ai.NewToolCall
+// (R-ATC-007), on the terminal chunk — never per-fragment, never
+// per-chunk. The ordinal is the position in toolOpenOrder (R-ATL-005,
+// R-ATC-012: this package ships no accumulator).
 
 package openaicompat
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -63,6 +80,21 @@ import (
 // minted per stream, always at this index — an adapter-minted boundary
 // (C3, this file's own header comment), never one the wire itself carries.
 const textBlockIndex ai.BlockIndex = 1
+
+// toolCallAccumulationCap bounds the per-call argument-byte buffer
+// (R-ATL-006, D5): 4× DefaultMaxFrameBytes (8 MiB × 4 = 32 MiB) so any
+// single frame this adapter can decode (≤ 8 MiB) cannot on its own trip
+// the per-call cap, but a runaway accumulation across many frames does.
+// Recorded as an unexported package constant in captureLimit's mold.
+// The relation is strict (S-ATL-029): accumulation reaching exactly the
+// cap still completes; exceeding it fails.
+//
+// The tenth failure category's second consumer (D5/S-ATL-032):
+// errors.go records that AI-30.1 item 4 now exists; the per-call cap is
+// the second consumer that closes the loop on the resource-exhaustion
+// concept errors.go named but did not absorb. Widening ai.FailureCategory
+// is a separate change.
+const toolCallAccumulationCap = 4 * DefaultMaxFrameBytes
 
 // errMalformedIdentity is this package's own unexported cause for a first
 // chunk whose id or model surfaced, through ai.NewResponseStart's own
@@ -85,9 +117,52 @@ var errUnrecognizedFinishReason = fmt.Errorf("openaicompat: terminal chunk's fin
 // nonetheless missing a C1 required top-level field this milestone
 // re-validates on every chunk, not merely the first (R-ATS-021, S-ATS-081;
 // chunk.go's wireChunk.hasRequiredFields). Wraps ai.ErrMalformedResponse
-// with %w for the same reason errMalformedIdentity does; unexported for
-// the same reason (R-ATS-025).
+// with %w for the same reason errMalformedIdentity does; unexported for the
+// same reason (R-ATS-025).
 var errMissingRequiredField = fmt.Errorf("openaicompat: recognized chunk was missing a C1 required top-level field: %w", ai.ErrMalformedResponse)
+
+// errToolElementMissingIndex is this package's own unexported cause for a
+// tool_calls element with no `index` key (R-ATL-002, S-ATL-011, C9.1's
+// required list). Wraps ai.ErrMalformedResponse for the same reason
+// errMalformedIdentity does; unexported for the same reason (R-ATS-025).
+var errToolElementMissingIndex = fmt.Errorf("openaicompat: a tool_calls element arrived without an index: %w", ai.ErrMalformedResponse)
+
+// errToolCallIdentityMismatch is this package's own unexported cause for a
+// tool call whose later element carries a DIFFERENT non-empty id or name
+// from the one already established (R-ATL-003, S-ATL-016). Wraps
+// ai.ErrMalformedResponse for the same reason; unexported for the same
+// reason (R-ATS-025). Identical repeats (S-ATL-015) are tolerated, not
+// failed.
+var errToolCallIdentityMismatch = fmt.Errorf("openaicompat: a tool call's id or name differed from the value already established: %w", ai.ErrMalformedResponse)
+
+// errToolCallMissingIdentity is this package's own unexported cause for a
+// tool call that closed without id or name ever supplied (R-ATL-003,
+// S-ATL-017/053). Wraps ai.ErrMalformedResponse for the same reason;
+// unexported for the same reason (R-ATS-025).
+var errToolCallMissingIdentity = fmt.Errorf("openaicompat: a tool call closed without id or name ever supplied: %w", ai.ErrMalformedResponse)
+
+// errToolCallOverCap is this package's own unexported cause for an
+// accumulation whose per-call byte total exceeded toolCallAccumulationCap
+// (R-ATL-006, D5, S-ATL-028). Wraps ai.ErrMalformedResponse for the same
+// reason errMalformedIdentity does — a payload that exceeds the cap may
+// be perfectly well-formed JSON, but is reported under the malformed
+// category (ErrFrameTooLarge's existing compromise form, restated in this
+// comment so the cause and its rationale travel together).
+var errToolCallOverCap = fmt.Errorf("openaicompat: a tool call's argument accumulation exceeded the documented per-call cap: %w", ai.ErrMalformedResponse)
+
+// errToolDeltaAfterCloseToolCalls is this package's own unexported cause
+// for a tool_calls element arriving after choice 0's terminal chunk
+// (D4, R-ATS-020 row 1's tool-call analog, S-ATL-074's mirror).
+// Wraps ai.ErrMalformedResponse for the same reason; unexported for the
+// same reason (R-ATS-025).
+var errToolDeltaAfterCloseToolCalls = fmt.Errorf("openaicompat: a tool_calls element arrived after choice 0's terminal chunk: %w", ai.ErrMalformedResponse)
+
+// errTextAfterToolBlock is this package's own unexported cause for an
+// unrepresentable shape: content text arriving AFTER a tool block has
+// already consumed block index 1 (D1's edge case, R-ATL-010 posture).
+// Wraps ai.ErrMalformedResponse for the same reason; unexported for the
+// same reason (R-ATS-025).
+var errTextAfterToolBlock = fmt.Errorf("openaicompat: content text arrived after a tool block consumed block index 1: %w", ai.ErrMalformedResponse)
 
 // R-ATS-020's five-row structural violation table (AI-28.5, doc 0002's own
 // row names) each get their own unexported cause, all wrapping
@@ -117,6 +192,21 @@ var (
 	// while carrying a content string.
 	errDeltaWithNoOpenBlock = fmt.Errorf("openaicompat: a content delta's choice item carried a negative or absent index: %w", ai.ErrMalformedResponse)
 )
+
+// toolCallState is the per-call accumulation record (R-ATL-002/003/004,
+// D3). One entry per call, keyed by wire index. id/name are the
+// "currently established" identity values ("" = not yet supplied; S-ATL-014).
+// args holds the accumulated fragment bytes byte-exact (S-ATL-022).
+// pending holds fragments received before identity completed — flushed
+// as one ToolCallDelta each at start (R-ATL-003, R-ATL-004).
+type toolCallState struct {
+	block   ai.BlockIndex
+	id      string
+	name    string
+	args    []byte
+	pending [][]byte
+	started bool
+}
 
 // mapperState is AI-28.1.2's frame-to-events mapper. Its zero value is
 // ready to use: no chunk has been read yet, no block minted, no terminal
@@ -156,6 +246,30 @@ type mapperState struct {
 	// wholesale (never merged) with usageFromWire's result. A later
 	// usage:null chunk (C4) never touches this field.
 	usage ai.Usage
+
+	// toolCalls is the per-call accumulation map keyed by wire index
+	// (R-ATL-002, D3). Each entry is the call's own buffered state —
+	// per-call buffers, never shared (R-ATL-004, S-ATL-019/020).
+	toolCalls map[int]*toolCallState
+
+	// toolOpenOrder records the wire indexes in first-seen order — the
+	// call's ordinal is its 1-based position in this slice (R-ATL-005,
+	// S-ATL-024, R-ATC-012). This package ships no ordinal field on the
+	// call state (S-ATL-058): the slice IS the derivation.
+	toolOpenOrder []int
+
+	// nextBlockIndex is the shared next-free block allocator starting at 1
+	// (R-ATL-002, D1). textBlockIndex (1) is consumed by the first text
+	// block; every new tool call takes the counter value and increments.
+	// Never equal to the wire index (R-ATL-002). ≥ 1, stream-wide unique,
+	// stable per call.
+	nextBlockIndex ai.BlockIndex
+
+	// textBlockConsumed is true once the text block has been opened —
+	// D1's edge case detector: content text arriving AFTER a tool block
+	// has already consumed index 1 yields errTextAfterToolBlock rather
+	// than a silent re-index (R-ATL-010 posture).
+	textBlockConsumed bool
 }
 
 // applyChunk maps one decoded, non-sentinel chunk to zero or more
@@ -243,6 +357,13 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		if choice.FinishReason != nil {
 			return nil, errDuplicateClose
 		}
+		// Tool-call elements in the terminal window are an analogous
+		// violation (D4). The terminal chunk itself may legally carry
+		// tool_calls (its own applyChunk processes them before close) —
+		// this check fires only on a LATER chunk after terminalSeen.
+		if len(choice.Delta.ToolCalls) > 0 {
+			return nil, errToolDeltaAfterCloseToolCalls
+		}
 		return events, nil
 	}
 
@@ -255,12 +376,48 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		s.terminalSeen = true
 	}
 
+	// Process this chunk's tool_calls elements BEFORE the text-handling
+	// path so that a single chunk carrying BOTH a content string and tool
+	// elements preserves the documented emission order (text block start
+	// precedes tool-call start; text deltas interleave with tool deltas).
+	// Each element's processing follows D3's sequence:
+	//   1. Index == nil → errToolElementMissingIndex (S-ATL-011)
+	//   2. lookup/create state (create mints block, appends to toolOpenOrder)
+	//   3. identity merge (unset→set, identical repeat no-op, differing → errToolCallIdentityMismatch)
+	//   4. if both id+name set and !started: emit start, flush pending as deltas
+	//   5. non-empty fragment → cap check, append, emit delta (or queue if !started)
+	//   6. empty/absent fragment → no-op (S-ATL-033/035)
+	for _, elem := range choice.Delta.ToolCalls {
+		more, err := s.applyToolElement(elem)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, more...)
+	}
+
 	if text, present := contentText(choice.Delta.Content); present {
 		// R-ATS-020 row 4 (S-ATS-077): a choice item carrying content with
 		// a negative or absent index is a violation, checked before this
 		// content contributes any block-minting or delta event.
 		if !choice.hasValidIndex() {
 			return nil, errDeltaWithNoOpenBlock
+		}
+		// D1 edge case: content text arriving AFTER a tool block has
+		// already consumed block index 1 is unrepresentable — typed
+		// failure, never a silent re-index (R-ATL-010 posture).
+		if s.toolCalls != nil && !s.textBlockConsumed {
+			// Has any tool call been opened? toolCalls being non-nil
+			// with at least one entry means yes.
+			sawTool := false
+			for _, st := range s.toolCalls {
+				if st.started {
+					sawTool = true
+					break
+				}
+			}
+			if sawTool {
+				return nil, errTextAfterToolBlock
+			}
 		}
 		if !s.blockOpen && !s.blockClosed {
 			start, err := ai.NewTextBlockStart(textBlockIndex)
@@ -269,6 +426,11 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 			}
 			events = append(events, start)
 			s.blockOpen = true
+			s.textBlockConsumed = true
+			// Mark nextBlockIndex so the first tool call skips 1.
+			if s.nextBlockIndex < 2 {
+				s.nextBlockIndex = 2
+			}
 		}
 		delta, err := ai.NewTextDelta(textBlockIndex, text)
 		if err != nil {
@@ -277,17 +439,228 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		events = append(events, delta)
 	}
 
-	if s.terminalSeen && s.blockOpen {
-		end, err := ai.NewTextBlockEnd(textBlockIndex)
-		if err != nil {
-			return nil, err
+	if s.terminalSeen {
+		// Close text block first (if open).
+		if s.blockOpen {
+			end, err := ai.NewTextBlockEnd(textBlockIndex)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, end)
+			s.blockOpen = false
+			s.blockClosed = true
 		}
-		events = append(events, end)
-		s.blockOpen = false
-		s.blockClosed = true
+		// Then assemble and close every open tool call, in toolOpenOrder
+		// (R-ATL-005 / S-ATL-024, ascending ordinal).
+		for _, wireIdx := range s.toolOpenOrder {
+			st := s.toolCalls[wireIdx]
+			if st == nil {
+				continue
+			}
+			if st.id == "" || st.name == "" {
+				return nil, errToolCallMissingIdentity
+			}
+			part, err := ai.NewToolCall(st.id, st.name, st.args)
+			if err != nil {
+				// R-ATL-009: malformed assembly carries the raw partial
+				// fragment bytes through a typed cause. The bytes reach
+				// stream.go's failure path via this return; the
+				// cause-typed return (this is error, not an event) is what
+				// carries them.
+				return nil, &malformedToolCallAssembly{data: st.args, wireIdx: wireIdx}
+			}
+			tc, _ := part.ToolCall()
+			ended, err := ai.NewToolCallEnd(st.block, tc.Arguments())
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, ended)
+		}
 	}
 
 	return events, nil
+}
+
+// applyToolElement processes one wireToolCallElement per D3's sequence.
+// On error returns nil and the package's unexported cause; on success
+// returns the additional events (ToolCallStart and any ToolCallDelta)
+// this element contributed.
+func (s *mapperState) applyToolElement(elem wireToolCallElement) ([]ai.Event, error) {
+	if elem.Index == nil {
+		return nil, errToolElementMissingIndex
+	}
+	wireIdx := *elem.Index
+
+	if s.toolCalls == nil {
+		s.toolCalls = make(map[int]*toolCallState)
+	}
+	st, exists := s.toolCalls[wireIdx]
+	if !exists {
+		// Mint a new block from the shared allocator (D1):
+		// - if no text block has been minted yet, the first tool call
+		//   takes block 1 (textBlockIndex). conformance case 1
+		//   (toolCallInterleavedCase) uses block 1 for the first tool.
+		// - if a text block has already been minted (textBlockIndex = 1),
+		//   the first tool call takes block 2.
+		if s.nextBlockIndex < 1 {
+			if s.textBlockConsumed {
+				s.nextBlockIndex = 2
+			} else {
+				s.nextBlockIndex = 1
+			}
+		}
+		st = &toolCallState{block: s.nextBlockIndex}
+		s.nextBlockIndex++
+		s.toolCalls[wireIdx] = st
+		s.toolOpenOrder = append(s.toolOpenOrder, wireIdx)
+	}
+
+	// Identity merge (S-ATL-013/014/015/016/017).
+	if elem.Function != nil {
+		if len(elem.Function.Name) > 0 {
+			nameStr := string(unquoteJSONString(elem.Function.Name))
+			if st.name == "" {
+				st.name = nameStr
+			} else if nameStr != st.name {
+				return nil, errToolCallIdentityMismatch
+			}
+		}
+	}
+	if len(elem.ID) > 0 {
+		idStr := string(unquoteJSONString(elem.ID))
+		if st.id == "" {
+			st.id = idStr
+		} else if idStr != st.id {
+			return nil, errToolCallIdentityMismatch
+		}
+	}
+
+	// Fragment handling.
+	var fragment []byte
+	if elem.Function != nil && len(elem.Function.Arguments) > 0 {
+		fragment = unquoteJSONString(elem.Function.Arguments)
+	}
+
+	// If identity not yet complete, queue the fragment (R-ATL-003:
+	// start precedes any delta). Otherwise emit start + flush + delta.
+	var events []ai.Event
+	if !st.started {
+		// Need both id and name before we can emit start.
+		if st.id != "" && st.name != "" {
+			start, err := ai.NewToolCallStart(st.block, st.id, st.name)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, start)
+			st.started = true
+			// Flush any queued fragments as one ToolCallDelta each,
+			// boundaries preserved (S-ATL-036's count behavior).
+			for _, pending := range st.pending {
+				if len(pending) == 0 {
+					continue
+				}
+				d, err := ai.NewToolCallDelta(st.block, pending)
+				if err != nil {
+					return nil, err
+				}
+				events = append(events, d)
+				if err := s.appendArgs(st, pending); err != nil {
+					return nil, err
+				}
+			}
+			st.pending = nil
+		} else {
+			// Queue until identity completes; if the chunk had a fragment,
+			// queue it too. Empty fragments are no-ops (S-ATL-033).
+			if len(fragment) > 0 {
+				st.pending = append(st.pending, fragment)
+			}
+			return events, nil
+		}
+	}
+
+	// Identity complete (started). Apply this fragment if non-empty.
+	if len(fragment) == 0 {
+		// S-ATL-033/035: empty or absent argument is a no-op.
+		return events, nil
+	}
+
+	// Cap check BEFORE appending (D5: "len(args)+len(frag) > cap fails").
+	if len(st.args)+len(fragment) > int(toolCallAccumulationCap) {
+		return nil, errToolCallOverCap
+	}
+	if err := s.appendArgs(st, fragment); err != nil {
+		return nil, err
+	}
+	d, err := ai.NewToolCallDelta(st.block, fragment)
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, d)
+	return events, nil
+}
+
+// appendArgs appends fragment to st.args while enforcing the per-call cap
+// (D5). The cap check lives here rather than at the call site so every
+// append path (initial flush of pending, post-start deltas, and any
+// future re-entry) goes through one bounded function. Returns
+// errToolCallOverCap on overflow.
+func (s *mapperState) appendArgs(st *toolCallState, fragment []byte) error {
+	if len(st.args)+len(fragment) > int(toolCallAccumulationCap) {
+		return errToolCallOverCap
+	}
+	st.args = append(st.args, fragment...)
+	return nil
+}
+
+// malformedToolCallAssembly is R-ATL-009's typed cause for a call whose
+// accumulated bytes are not well-formed JSON at close. The bytes are
+// reachable only through the unexported bytes() accessor — Error() is a
+// fixed string built from no captured byte (R-AEM-016 / capturedBody's
+// posture). Unwrap chains to ai.ErrMalformedResponse so errors.Is holds.
+//
+// The bytes are bounded by captureLimit (8 KiB, capture.go's own) —
+// reused, never a second, independent bound (R-AEM-015, design D6).
+type malformedToolCallAssembly struct {
+	data    []byte
+	wireIdx int
+}
+
+// Error returns a fixed diagnostic string (R-AEM-016): never built from
+// the captured bytes, so no captured content can reach any rendered
+// failure text.
+func (m *malformedToolCallAssembly) Error() string {
+	return "openaicompat: a tool call's assembled arguments were not well-formed JSON"
+}
+
+// Unwrap returns the wrapped ai.ErrMalformedResponse so errors.Is(err,
+// ai.ErrMalformedResponse) holds.
+func (m *malformedToolCallAssembly) Unwrap() error {
+	return ai.ErrMalformedResponse
+}
+
+// bytes returns the raw accumulated bytes, bounded by captureLimit on
+// read. Unexported and never rendered by any Error()/%v/%+v path.
+func (m *malformedToolCallAssembly) bytes() []byte {
+	if len(m.data) > captureLimit {
+		out := make([]byte, captureLimit)
+		copy(out, m.data[:captureLimit])
+		return out
+	}
+	return m.data
+}
+
+// malformedAssemblyBytes is the exported-side helper (R-ATL-009,
+// S-ATL-045/047): errors.As the typed cause and reads its bytes. This is
+// the test-side path the conformance uses; it cannot be invoked by
+// shipped production code because bytes() is unexported and the type is
+// likewise unexported. Test files in this package see it directly.
+func malformedAssemblyBytes(err error) ([]byte, bool) {
+	var m *malformedToolCallAssembly
+	if errors.As(err, &m) {
+		return m.bytes(), true
+	}
+	return nil, false
 }
 
 // buildCompletion constructs the sentinel-triggered completion from
@@ -299,4 +672,29 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 // errIncompleteStream, unchanged from slice 1's own handling.
 func (s *mapperState) buildCompletion() (ai.Event, error) {
 	return ai.NewCompletion(s.finishReason, s.usage)
+}
+
+// truncateOpenCalls closes every still-open tool call at stream end with
+// its accumulated bytes — raw, never canonicalized (R-ATL-009, D7, Q2
+// coordinator ruling). Called only from stream.go's failure paths after
+// D8's text-block close, never from the clean close path (where
+// applyChunk's terminal-chunk branch already handled them).
+func (s *mapperState) truncateOpenCalls() ([]ai.Event, error) {
+	var events []ai.Event
+	for _, wireIdx := range s.toolOpenOrder {
+		st := s.toolCalls[wireIdx]
+		if st == nil {
+			continue
+		}
+		if st.id == "" || st.name == "" {
+			return nil, errToolCallMissingIdentity
+		}
+		// Carry the raw bytes; NewToolCallEnd does not validate them.
+		ended, err := ai.NewToolCallEnd(st.block, st.args)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, ended)
+	}
+	return events, nil
 }
