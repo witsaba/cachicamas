@@ -62,10 +62,10 @@ Chain strategy: feature-branch-chain
 
 ## Slice 4 (PR4, AI-31.3)
 
-- [ ] 4.1 RED `TestUsage_CacheReadPresentCacheWriteAbsent_NoPanic` (S-ACP-021).
-- [ ] 4.2 RED `TestUsage_OddPositionFrame_BeforeTerminalChunk` (S-ACP-022; precondition: non-empty `model` + same `id` on the odd-position frame).
-- [ ] 4.3 RED `TestUsage_MetadataOnlyFrame_ZeroContentEvents` (S-ACP-023; the explicit `requireCheckStreamClean` assertion IS the scenario).
-- [ ] 4.4 GREEN: expect coverage-only (spec-risk-3 resolved); an unexpected RED needing a code change is new information — STOP+report.
-- [ ] 4.5 Gate: `go.mod` 0 requires, lint, gofmt, full suite ×2 (close-of-change).
+- [x] 4.1 RED `TestUsage_CacheReadPresentCacheWriteAbsent_NoPanic` (S-ACP-021).
+- [x] 4.2 RED `TestUsage_OddPositionFrame_BeforeTerminalChunk` (S-ACP-022; precondition: non-empty `model` + same `id` on the odd-position frame).
+- [x] 4.3 RED `TestUsage_MetadataOnlyFrame_ZeroContentEvents` (S-ACP-023; the explicit `requireCheckStreamClean` assertion IS the scenario).
+- [x] 4.4 GREEN: expect coverage-only (spec-risk-3 resolved); an unexpected RED needing a code change is new information — STOP+report.
+- [x] 4.5 Gate: `go.mod` 0 requires, lint, gofmt, full suite ×2 (close-of-change).
 
 Note: first commit banks THIS change's planning artifacts only (`tasks.md` + Engram twin) — never `git add -A`.
