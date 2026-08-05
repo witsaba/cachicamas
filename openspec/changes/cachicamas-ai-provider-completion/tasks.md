@@ -44,12 +44,12 @@ Chain strategy: feature-branch-chain
 
 ## Slice 2 (PR2, AI-31.2a)
 
-- [ ] 2.1 RED `usage_test.go`: `TestUsage_AllDetailFields_Present` (S-ACP-011), `TestUsage_DetailFieldsAbsent_NegativeControl` (S-ACP-012).
-- [ ] 2.2 RED `TestUsage_CachedTokensZeroVsAbsent` (S-ACP-013), `TestUsage_ReasoningContainedInOutput` (S-ACP-014).
-- [ ] 2.3 GREEN `chunk.go`: add `wirePromptTokensDetails{CachedTokens,CacheWriteTokens *int64}` / `wireCompletionTokensDetails{ReasoningTokens *int64}`; `usageFromWire` +3 raw mappings only, no arithmetic; Input/Output rows untouched.
-- [ ] 2.4 Add D-C doc comment on `usageFromWire` (quote AI-13.4 Input sentence, cite U1/U2, name AI-38.2) — S-ACP-016.
-- [ ] 2.5 Frozen gate: diff `usage_test.go` shows S-ATS-055…062 byte-identical (S-ACP-024); confirm they pass (S-ACP-025).
-- [ ] 2.6 Gate: `go.mod` 0 requires, lint, gofmt, suite ×1; every new test asserts `requireCheckStreamClean`.
+- [x] 2.1 RED `usage_test.go`: `TestUsage_AllDetailFields_Present` (S-ACP-011), `TestUsage_DetailFieldsAbsent_NegativeControl` (S-ACP-012).
+- [x] 2.2 RED `TestUsage_CachedTokensZeroVsAbsent` (S-ACP-013), `TestUsage_ReasoningContainedInOutput` (S-ACP-014).
+- [x] 2.3 GREEN `chunk.go`: add `wirePromptTokensDetails{CachedTokens,CacheWriteTokens *int64}` / `wireCompletionTokensDetails{ReasoningTokens *int64}`; `usageFromWire` +3 raw mappings only, no arithmetic; Input/Output rows untouched.
+- [x] 2.4 Add D-C doc comment on `usageFromWire` (quote AI-13.4 Input sentence, cite U1/U2, name AI-38.2) — S-ACP-016.
+- [x] 2.5 Frozen gate: diff `usage_test.go` shows S-ATS-055…062 byte-identical (S-ACP-024); confirm they pass (S-ACP-025).
+- [x] 2.6 Gate: `go.mod` 0 requires, lint, gofmt, suite ×1; every new test asserts `requireCheckStreamClean`.
 
 ## Slice 3 (PR3, AI-31.2b)
 
