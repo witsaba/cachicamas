@@ -64,16 +64,16 @@ Full-suite gate before each PR: `go test -race -count=1 ./...` (from `backend/ag
 
 ## Phase 2a — Slice 2a: AI-32.2 mid-stream error frames (R-AEM-010, 011 · S-AEM-040…044; 045 inspection) — BLOCKED-ON: AI-28.1 landed + chains merged
 
-- [ ] 2a.0 Gate check: confirm AI-28.1's producer surface (single closing site, `outputPreceded bool`) is present on the tracker before branching; if absent, STOP and report blocked.
-- [ ] 2a.1 RED `stream_failure_test.go`: in-band error frame → terminal event, `PartialOutput()` true iff output preceded, `RawLabel()` survives opaque, no events follow the terminal event (S-AEM-040–042).
-- [ ] 2a.2 RED `stream_failure_test.go`: in-band frame vs. transport failure distinguishable by `errors.Is` stable identity, never by message-text inspection (S-AEM-043).
-- [ ] 2a.3 RED `reasoning_refusal_test.go` — **S-ART-054 bite-proof**: run `TestPolicy_NoNewSentinelsExported` before the allowlist edit and capture it failing on the new `ErrInBandErrorFrame` identity (guard's own RED phase; a guard checked only pre-edit is green from birth otherwise).
-- [ ] 2a.4 GREEN `errors.go`: declare exported `ErrInBandErrorFrame` immediately after `ErrTruncated` (D8).
-- [ ] 2a.5 GREEN `stream_failure.go`: `categorizeStreamError` frame branch, `midStreamFailureFrom`, `failureFromErrorFrame` wired to the producer's `outputPreceded` parameter.
-- [ ] 2a.6 GREEN `reasoning_refusal_test.go`: append `errors.go:ErrInBandErrorFrame` as the allowlist's **third entry, in the scan's own order**, with an adjacent comment citing R-AEM-010/R-AEM-011 — exact set equality preserved, never re-frozen, never weakened (S-AEM-044).
-- [ ] 2a.7 Inspection (S-AEM-045): reviewer confirms the allowlist edit carries its citing comment and the guard's comparison remains exact set equality.
-- [ ] 2a.8 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
-- [ ] 2a.9 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions.
+- [x] 2a.0 Gate check: confirm AI-28.1's producer surface (single closing site, `outputPreceded bool`) is present on the tracker before branching; if absent, STOP and report blocked.
+- [x] 2a.1 RED `stream_failure_test.go`: in-band error frame → terminal event, `PartialOutput()` true iff output preceded, `RawLabel()` survives opaque, no events follow the terminal event (S-AEM-040–042).
+- [x] 2a.2 RED `stream_failure_test.go`: in-band frame vs. transport failure distinguishable by `errors.Is` stable identity, never by message-text inspection (S-AEM-043).
+- [x] 2a.3 RED `reasoning_refusal_test.go` — **S-ART-054 bite-proof**: run `TestPolicy_NoNewSentinelsExported` before the allowlist edit and capture it failing on the new `ErrInBandErrorFrame` identity (guard's own RED phase; a guard checked only pre-edit is green from birth otherwise).
+- [x] 2a.4 GREEN `errors.go`: declare exported `ErrInBandErrorFrame` immediately after `ErrTruncated` (D8).
+- [x] 2a.5 GREEN `stream_failure.go`: `categorizeStreamError` frame branch, `midStreamFailureFrom`, `failureFromErrorFrame` wired to the producer's `outputPreceded` parameter.
+- [x] 2a.6 GREEN `reasoning_refusal_test.go`: append `errors.go:ErrInBandErrorFrame` as the allowlist's **third entry, in the scan's own order**, with an adjacent comment citing R-AEM-010/R-AEM-011 — exact set equality preserved, never re-frozen, never weakened (S-AEM-044).
+- [x] 2a.7 Inspection (S-AEM-045): reviewer confirms the allowlist edit carries its citing comment and the guard's comparison remains exact set equality.
+- [x] 2a.8 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
+- [x] 2a.9 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions.
 
 ## Phase 2b — Slice 2b: AI-32.3 disconnects and deadlines (R-AEM-012…014 · S-AEM-046…055) — BLOCKED-ON: same gate as 2a; branches from 2a
 
