@@ -78,10 +78,85 @@ Cumulative tests at slice-5 tip: all packages green
 - D8's finding (cases 2 and 4 originally could not pass unmodified) is now fully resolved: the conformance amendment added `requireRelativeKindOrder`, and the conformance cases were updated to use it. The remaining bytes.Equal-on-end-bytes assertions were retired per C9.6.
 - Q2 contingency (`ai.NewToolCallEnd` validation door): confirmed `NewToolCallEnd` validates only the block index, so raw partial/malformed bytes carry through `truncateOpenCalls` on stream-end failure paths (no fabricated `{}`).
 
+## Corrective round — AI-30 verify FAIL follow-up (2026-08-05, rev 1)
+
+sdd-verify reported 5 CRITICAL findings (3 UNTESTED `[test]` scenarios,
+2 VIOLATED `[inspection]` scenarios) plus 3 WARNINGS (lint drift,
+gofmt drift, mutation-discipline bypass — see obs #2543). The
+spec amendment at commit `49cfafa` accepted the S-ATL-061/070
+inspections without further edits. This corrective round closes the
+remaining findings.
+
+### Closed findings
+
+| Finding | Closed by | TDD evidence |
+|---|---|---|
+| S-ATL-023 UNTESTED | `tool_stream_corrective_test.go`: `TestS_ATL_023_KeepAliveBeforeTerminal_ZeroEnds` + 2 companions | RED: scenario described; GREEN: 3 tests pass; TRIANGULATE: comment-only + multi-call companions |
+| S-ATL-026 UNTESTED | `tool_stream_corrective_test.go`: `TestS_ATL_026_PartialJSONFragments_ConcatenateCleanly` + companion | RED: scenario described; GREEN: passes; TRIANGULATE: empty-args companion |
+| S-ATL-060 UNTESTED | `tool_stream_corrective_test.go`: `TestS_ATL_060_BridgeReplay_ByteEqualToScripted` + companion | RED: scenario described; GREEN: passes through real *Client; TRIANGULATE: simple-end companion |
+| Lint drift (12 issues) | commits `d00f54c` — empty-block, var-naming, SA4010, package-comments, unused helpers | mechanical fixes; `make lint` now `0 issues.` |
+| Gofmt drift (10 files) | commits `d00f54c` — `gofmt -w` + struct-field alignment + trailing newlines | mechanical; `gofmt -l` now empty |
+
+### Work unit evidence
+
+| Unit | Focused test command | Result | Runtime harness | Rollback boundary |
+|---|---|---|---|---|
+| S-ATL-023 | `go test -race -count=1 -run='TestS_ATL_023_' ./src/ai/openaicompat/` | exit 0 | wire-path Decoder.Feed + applyChunk on real SSE transcript (no HTTP, no httptest) | Revert `tool_stream_corrective_test.go` (1 file); no production change |
+| S-ATL-026 | `go test -race -count=1 -run='TestS_ATL_026_' ./src/ai/openaicompat/` | exit 0 | mapperState.applyChunk with raw `{"path":"/e` + `tc/hosts"}` fragments | Revert `tool_stream_corrective_test.go`; no production change |
+| S-ATL-060 | `go test -race -count=1 -run='TestS_ATL_060_' ./src/ai/openaicompat/` | exit 0 | conformanceBridgeFactory() → real *Client → real httptest.Server → DrainAndRecord | Revert `tool_stream_corrective_test.go`; no production change |
+| Lint/gofmt | `make lint && gofmt -l src/ai/openaicompat/ src/agenttest/` | `0 issues.` and empty | N/A (static checks) | Revert `d00f54c`; mechanical only |
+
+### Strict TDD cycle evidence (per scenario)
+
+| Scenario | RED test file | RED → GREEN | TRIANGULATE | REFACTOR |
+|---|---|---|---|---|
+| S-ATL-023 | `tool_stream_corrective_test.go` | RED: wire-path keeps-alive-before-terminal scenario newly described; GREEN: 3/3 PASS | 3 cases (single-call-zero-ends, comment-only-no-events, multi-call-no-cross-bleed) | ➖ n/a |
+| S-ATL-026 | `tool_stream_corrective_test.go` | RED: partial-JSON fragment concatenation scenario newly described; GREEN: 2/2 PASS | 2 cases (positive partial-JSON concat, empty-args canonicalization) | ➖ n/a |
+| S-ATL-060 | `tool_stream_corrective_test.go` | RED: bridge replay round-trip scenario newly described; GREEN: 2/2 PASS | 2 cases (literal-newline byte-equal, simple-end byte-equal) | ➖ n/a |
+
+### Vacuous-pass discipline applied
+
+For each scenario, the 9 vacuous-pass shapes from obs #2471 were
+applied. Empty-collection companions added where the assertion could
+be vacuously true:
+
+- S-ATL-023: TestS_ATL_023_KeepAlive_DoesNotEmitAnything pins
+  comment-only streams produce zero frames (shape 4 / 5).
+- S-ATL-023: TestS_ATL_023_KeepAlive_AcrossTwoToolCalls_NoCrossInterference
+  pins no cross-call state bleed (shape 6).
+- S-ATL-026: TestS_ATL_026_FreshClose_YieldsEmpty pins the
+  byte-equal assertion is non-vacuous (shape 5).
+- S-ATL-060: TestS_ATL_060_SimpleEnd_PreservesBytes pins the
+  byte-equal assertion is non-trivially about the newline byte
+  (shape 2).
+
+### Hard rule conformance
+
+- `go.mod` byte-identical (zero requires; verified `git diff
+  feat/ai-30-tool-stream~7..feat/ai-30-tool-stream -- go.mod go.work`
+  is empty)
+- No new exported identifiers added (helpers in tool_stream_corrective_test.go
+  all unexported)
+- `src/ai` (the `ai` package itself) not modified
+- `src/agenttest` not modified (R-ATL-015 preserved)
+- No Factory declaration flip (R-ATL-012 STOP posture preserved)
+- Bridge factory `conformanceBridgeFactory()` declaration not touched;
+  S-ATL-060 reuses the bridge machinery via its existing surface
+
+### Commits added by this corrective round
+
+- `74ad3ad` — test(openaicompat): add S-ATL-023/S-ATL-026/S-ATL-060
+  missing coverage
+- `d00f54c` — style(openaicompat,agenttest): gofmt -w and resolve
+  lint drift
+
 ## Next steps
 
-- `sdd-verify` for AI-30 (verify phase confirms implementation matches all 16 requirements / 73 scenarios in spec)
-- After verify PASS, `sdd-archive` for AI-30 (sync delta specs, archive the change)
+- Re-launch `sdd-verify` for AI-30 — verify confirms all 16
+  requirements / 73 scenarios covered (51 → 54 `[test]` scenarios,
+  17/19 → 19/19 `[inspection]` scenarios)
+- After re-verify PASS, `sdd-archive` for AI-30 (sync delta specs,
+  archive the change)
 
 ## Files changed
 
