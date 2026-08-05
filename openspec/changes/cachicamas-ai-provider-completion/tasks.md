@@ -53,12 +53,12 @@ Chain strategy: feature-branch-chain
 
 ## Slice 3 (PR3, AI-31.2b)
 
-- [ ] 3.1 RED `TestUsage_ImpossibleArithmeticUnderExclusivity` (S-ACP-017: `prompt_tokens:500`/`cached_tokens:800` → `Input=500`, `CacheRead=800` raw, no error/clamp).
-- [ ] 3.2 RED `TestUsage_SingleFrame_U6Shape` (S-ACP-018).
-- [ ] 3.3 RED `TestUsage_MultiplePopulatedFrames_LastWinsNoFold` (S-ACP-019: inline 3-frame `10/20/30` → `Input=30`; the ONE dialect-conventional label pin).
-- [ ] 3.4 GREEN: confirm D10 last-wins wholesale-overwrite needs no change; STOP+report if a new mechanism is needed.
-- [ ] 3.5 Inspection S-ACP-016/020/030/031: label table has exactly one row naming `TestUsage_MultiplePopulatedFrames_LastWinsNoFold`.
-- [ ] 3.6 Gate: `go.mod` 0 requires, lint, gofmt, suite ×1; `requireCheckStreamClean` on every new test.
+- [x] 3.1 RED `TestUsage_ImpossibleArithmeticUnderExclusivity` (S-ACP-017: `prompt_tokens:500`/`cached_tokens:800` → `Input=500`, `CacheRead=800` raw, no error/clamp).
+- [x] 3.2 RED `TestUsage_SingleFrame_U6Shape` (S-ACP-018).
+- [x] 3.3 RED `TestUsage_MultiplePopulatedFrames_LastWinsNoFold` (S-ACP-019: inline 3-frame `10/20/30` → `Input=30`; the ONE dialect-conventional label pin).
+- [x] 3.4 GREEN: confirm D10 last-wins wholesale-overwrite needs no change; STOP+report if a new mechanism is needed.
+- [x] 3.5 Inspection S-ACP-016/020/030/031: label table has exactly one row naming `TestUsage_MultiplePopulatedFrames_LastWinsNoFold`.
+- [x] 3.6 Gate: `go.mod` 0 requires, lint, gofmt, suite ×1; `requireCheckStreamClean` on every new test.
 
 ## Slice 4 (PR4, AI-31.3)
 
