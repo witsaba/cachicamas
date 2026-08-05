@@ -166,8 +166,13 @@ func TestPreDecode_NonStreamContentTypeHugeBody_ExcerptBoundedByCaptureLimit(t *
 	if !errors.As(err, &typed) {
 		t.Fatalf("errors.As(err, &typed) = false, want R-ATS-023's own typed cause reachable (S-ATS-088)")
 	}
-	if len(typed.excerpt) != captureLimit {
-		t.Errorf("len(excerpt) = %d, want exactly captureLimit (%d) for a body far larger than the bound (S-ATS-088)", len(typed.excerpt), captureLimit)
+	// capture.go's D7 finalization (slice 2c, S-AEM-056) appends the
+	// fixed truncationMarker to overflow captures, so the upper bound
+	// for an over-sized body is captureLimit + len(truncationMarker),
+	// not captureLimit alone.
+	wantLen := captureLimit + len(truncationMarker)
+	if len(typed.excerpt) != wantLen {
+		t.Errorf("len(excerpt) = %d, want exactly %d (captureLimit + len(truncationMarker)) for a body far larger than the bound (S-ATS-088)", len(typed.excerpt), wantLen)
 	}
 }
 

@@ -86,10 +86,10 @@ Full-suite gate before each PR: `go test -race -count=1 ./...` (from `backend/ag
 
 ## Phase 2c — Slice 2c: AI-32.5 bounded, sanitized capture proofs (R-AEM-015, 016 · S-AEM-056…063) — BLOCKED-ON: 2a + 2b merged
 
-- [ ] 2c.1 RED `capture_proof_test.go`: capture stops exactly at `captureLimit`, marker present iff truncated, `len == captureLimit + len(truncationMarker)` (S-AEM-056–058).
-- [ ] 2c.2 RED `capture_proof_test.go`: multi-megabyte body fully drained and closed exactly once, never retains more than `captureLimit` (S-AEM-059).
-- [ ] 2c.3 RED `capture_proof_test.go` — **load-bearing package warning**: `S-AEM-060`'s sentinel `sk-AEM060-planted-in-body-only` matches `credential_scan_test.go`'s raw regex `sk-[A-Za-z0-9_-]{20,}`. This file, and every file asserting the S-AEM-060/062 planted sentinel, **MUST declare `package openaicompat`** (internal) — `package openaicompat_test` WILL fail the credential-scan guard's build. Assert the sentinel absent from `Error()`, every `Unwrap()`-reachable cause's `Error()`, and `%v`/`%+v` renderings (S-AEM-060–062).
-- [ ] 2c.4 RED `capture_proof_test.go`: sentinel-removed fixture, surrounding body text kept — retained diagnostic still contains it, proving genuine capture, not a vacuous pass (S-AEM-063).
-- [ ] 2c.5 GREEN `capture.go`: finalize D7 — `io.LimitReader(rc, captureLimit+1)` probe read, retain exactly the first `captureLimit` bytes + marker on overflow, `io.Copy(io.Discard, rc)` drain + single `Close`, `Unwrap() error` to the inner cause (`RateLimitTelemetry` / `ErrInBandErrorFrame` / nil).
-- [ ] 2c.6 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
-- [ ] 2c.7 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions; confirm all 65 `[test]` scenarios across the four slices are exercised (42 + 5 + 10 + 8).
+- [x] 2c.1 RED `capture_proof_test.go`: capture stops exactly at `captureLimit`, marker present iff truncated, `len == captureLimit + len(truncationMarker)` (S-AEM-056–058).
+- [x] 2c.2 RED `capture_proof_test.go`: multi-megabyte body fully drained and closed exactly once, never retains more than `captureLimit` (S-AEM-059).
+- [x] 2c.3 RED `capture_proof_test.go` — **load-bearing package warning**: `S-AEM-060`'s sentinel `sk-AEM060-planted-in-body-only` matches `credential_scan_test.go`'s raw regex `sk-[A-Za-z0-9_-]{20,}`. This file, and every file asserting the S-AEM-060/062 planted sentinel, **MUST declare `package openaicompat`** (internal) — `package openaicompat_test` WILL fail the credential-scan guard's build. Assert the sentinel absent from `Error()`, every `Unwrap()`-reachable cause's `Error()`, and `%v`/`%+v` renderings (S-AEM-060–062).
+- [x] 2c.4 RED `capture_proof_test.go`: sentinel-removed fixture, surrounding body text kept — retained diagnostic still contains it, proving genuine capture, not a vacuous pass (S-AEM-063).
+- [x] 2c.5 GREEN `capture.go`: finalize D7 — `io.LimitReader(rc, captureLimit+1)` probe read, retain exactly the first `captureLimit` bytes + marker on overflow, `io.Copy(io.Discard, rc)` drain + single `Close`, `Unwrap() error` to the inner cause (`RateLimitTelemetry` / `ErrInBandErrorFrame` / nil).
+- [x] 2c.6 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
+- [x] 2c.7 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions; confirm all 65 `[test]` scenarios across the four slices are exercised (42 + 5 + 10 + 8).

@@ -6,6 +6,19 @@
 // bytes — capturedBody.Error() is a fixed string, and the bytes themselves
 // are reachable only through the unexported bytes() accessor, never
 // rendered by any Error()/%v/%+v path (design.md D7).
+//
+// # D7 finalization (slice 2c, S-AEM-056…063)
+//
+// captureBody reads at most captureLimit+1 bytes via io.LimitReader. If
+// the read returned exactly captureLimit+1 bytes, the body exceeded the
+// limit and captureBody retains the first captureLimit bytes plus the
+// fixed truncationMarker; if it returned fewer, captureBody retains
+// whatever was read with no marker. Either way the remainder is
+// drained (io.Copy to io.Discard) before the single Close — the
+// slow-loris guard (S-AEM-059). The +1 probe is the cheap detection
+// mechanism: a body exactly at the limit reads captureLimit bytes (no
+// overflow), a body over the limit reads captureLimit+1 (overflow →
+// marker), a body under the limit reads < captureLimit (under).
 
 package openaicompat
 
@@ -19,12 +32,10 @@ const captureLimit = 8 << 10
 
 // truncationMarker is the fixed ASCII suffix a capture that hit
 // captureLimit carries, present on no capture that did not (R-AEM-015).
-// [Slice 1 does not yet append this marker to any capture — every fixture
-// this stage exercises is far under captureLimit by construction, so the
-// exact truncation invariant (S-AEM-056…059) is deliberately unexercised
-// here. capture.go's D7 finalization, gated on slices 2a+2b merging, is
-// what proves and completes the truncate-back mechanics; see
-// capture_test.go's own file comment.]
+// Pinned to its literal value by TestCapture_TruncationMarkerIsPinned
+// (capture_test.go, slice 1's test for the value alone; slice 2c's
+// capture_proof_test.go proves the marker is appended iff truncated,
+// S-AEM-057).
 const truncationMarker = "...(truncated)"
 
 // capturedBodyText is capturedBody's fixed Error() text — never built from
@@ -44,9 +55,16 @@ type capturedBody struct {
 // reproduces the captured bytes.
 func (c capturedBody) Error() string { return capturedBodyText }
 
-// Unwrap returns the next cause in the chain — nil in slice 1, since
-// ErrInBandErrorFrame (the frame-path cause slice 2a adds, design.md D7)
-// does not exist yet.
+// Unwrap returns the next cause in the chain (R-AEM-014, design D7):
+// the rate-limit telemetry carrier (retry_metadata.go) when the
+// status path attaches telemetry ahead of the capturedBody. For the
+// status-without-telemetry and the non-stream-content-type paths,
+// Unwrap returns nil — capturedBody is the chain's terminal link.
+// errors.As traverses the chain through this link, so callers reach
+// *ai.Failure, then *RateLimitTelemetry if any, then *capturedBody,
+// in that order. The link is what the S-AEM-060/061/062
+// sentinel-leak-proofs traverse when they assert every chain link's
+// Error() is sentinel-free.
 func (c capturedBody) Unwrap() error { return c.cause }
 
 // bytes returns the retained diagnostic bytes. Unexported and never
@@ -54,17 +72,54 @@ func (c capturedBody) Unwrap() error { return c.cause }
 // guarantee (design.md D7).
 func (c capturedBody) bytes() []byte { return c.data }
 
-// captureBody reads rc bounded to captureLimit bytes and closes it,
-// returning a capturedBody carrying whatever was actually read.
+// captureBody reads rc bounded to captureLimit+1 bytes, retains at most
+// the first captureLimit bytes plus a fixed truncation marker on
+// overflow, drains the unread remainder, and closes rc exactly once
+// (S-AEM-056…059, design D7 finalization). The returned capturedBody's
+// Unwrap() returns nil — the cause chain ends at the capturedBody for
+// the status path (failure_map.go wraps the body directly when no
+// telemetry is present), and the rate-limit telemetry path
+// (retry_metadata.go) wraps capturedBody rather than the other way
+// around. errors.As on the resulting *ai.Failure reaches the
+// capturedBody via that link, and the S-AEM-060/061/062 sentinel-leak
+// proofs traverse it.
 //
-// [Minimal for slice 1 (S-AEM-014…016 via capture_test.go, task 1.13):
-// bounded by captureLimit via io.LimitReader, so it structurally cannot
-// retain more than the limit, but it does not yet drain an unread
-// remainder beyond the limit or append truncationMarker on overflow — that
-// finalization (D7) is slice 2c's own RED-first proof
-// (capture_proof_test.go, S-AEM-056…059), gated on 2a+2b merging.]
+// The truncation probe is a single io.LimitReader(rc, captureLimit+1)
+// ReadAll: a body that exceeds the limit returns captureLimit+1 bytes
+// (overflow → marker); a body within the limit returns < captureLimit+1
+// bytes (no overflow → no marker). The slice 1 implementation used
+// io.LimitReader(rc, captureLimit) and dropped the unread remainder;
+// slice 2c's finalization drains that remainder into io.Discard so
+// the connection can be reused / freed by the transport.
 func captureBody(rc io.ReadCloser) capturedBody {
 	defer func() { _ = rc.Close() }()
-	data, _ := io.ReadAll(io.LimitReader(rc, captureLimit))
+
+	// Probe read: captureLimit+1 bytes — one byte past the cap so a
+	// body that exactly hits the cap reads captureLimit bytes (no
+	// overflow) while a body one byte over reads captureLimit+1
+	// (overflow → marker).
+	probe, _ := io.ReadAll(io.LimitReader(rc, captureLimit+1))
+
+	var data []byte
+	if len(probe) > captureLimit {
+		// Overflow: retain the first captureLimit bytes, append the
+		// fixed truncation marker. The marker carries no payload bytes
+		// (R-AEM-016 structural redaction; the marker is its own
+		// constant).
+		data = make([]byte, 0, captureLimit+len(truncationMarker))
+		data = append(data, probe[:captureLimit]...)
+		data = append(data, truncationMarker...)
+	} else {
+		// Within limit: retain exactly what was read. No marker.
+		data = probe
+	}
+
+	// Drain the unread remainder (slow-loris guard, S-AEM-059) before
+	// the deferred Close fires. The drain is silent — any error from
+	// io.Copy is the network's problem, not a capture-level concern;
+	// the structural invariants we care about (closed exactly once,
+	// drained to EOF) are observable independently.
+	_, _ = io.Copy(io.Discard, rc)
+
 	return capturedBody{data: data}
 }
