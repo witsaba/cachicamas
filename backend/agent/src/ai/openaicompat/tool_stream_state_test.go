@@ -27,10 +27,6 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// toolTestText is a fixture-only convenience: zero-length string for
-// fixtures that exercise tool-call-only streams.
-const toolTestText = ""
-
 // chunkFromTools builds a wireChunk whose choice-0 delta carries the
 // given tool_calls elements and an empty content (matches every
 // fixture in this file; AI-30.1's tool-call-only shape).
@@ -40,18 +36,6 @@ func chunkFromTools(id string, toolCallsJSON string) wireChunk {
 	chunk, err := decodeChunk(raw)
 	if err != nil {
 		panic("chunkFromTools: " + err.Error())
-	}
-	return chunk
-}
-
-// chunkFromTextAndTools builds a wireChunk that carries BOTH a content
-// string AND tool_calls — used by the mixed text+tool tests in Phase 4
-// and by the block-collision test S-ATL-009.
-func chunkFromTextAndTools(id, text, toolCallsJSON string) wireChunk {
-	raw := []byte(`{"id":"` + id + `","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"` + text + `","tool_calls":[` + toolCallsJSON + `]},"finish_reason":null}]}`)
-	chunk, err := decodeChunk(raw)
-	if err != nil {
-		panic("chunkFromTextAndTools: " + err.Error())
 	}
 	return chunk
 }

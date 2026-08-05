@@ -356,11 +356,11 @@ func TestConformanceBridge_ToolCalls(t *testing.T) {
 // test package — the bridge's case-1 and case-3 tests use this local
 // shape rather than reading agenttest's unexported type.
 type bridgeReconstructedCall struct {
-	id, name          string
-	arguments         []byte
-	fromDeltas        []byte
-	ordinal           int
-	sawStart, sawEnd  bool
+	id, name         string
+	arguments        []byte
+	fromDeltas       []byte
+	ordinal          int
+	sawStart, sawEnd bool
 }
 
 // bridgeReconstructToolCalls walks events once and rebuilds every tool

@@ -423,14 +423,6 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 						toolBlocksOpen--
 					}
 				}
-				// Track whether there are tool blocks still in flight at
-				// the mapper's vantage point (not the carrier's) — this
-				// is what truncateOpenCalls reads. We approximate by
-				// checking the count; a positive count means truncate
-				// has work to do.
-				if toolBlocksOpen > 0 && feedErr == nil {
-					// no-op; count tracks the carrier's view.
-				}
 			}
 			if feedErr != nil {
 				emitFailure(ctx, out, stamper, state, feedErr, outputPreceded, blockOpen)

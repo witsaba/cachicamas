@@ -376,13 +376,13 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		s.terminalSeen = true
 	}
 
-// Process this chunk's tool_calls elements. Before processing the first
-// tool element, if the text block is open and the chunk carries no
-// content text of its own, close the text block first — the conformance
-// case mixedTextAndToolCallCase requires TextBlockEnd to come BEFORE
-// any tool-call event (text precedes tool semantically). D4's terminal
-// close path remains: terminalSeen-set chunks still close text blocks
-// before emitting tool-block ends (S-ATL-024).
+	// Process this chunk's tool_calls elements. Before processing the first
+	// tool element, if the text block is open and the chunk carries no
+	// content text of its own, close the text block first — the conformance
+	// case mixedTextAndToolCallCase requires TextBlockEnd to come BEFORE
+	// any tool-call event (text precedes tool semantically). D4's terminal
+	// close path remains: terminalSeen-set chunks still close text blocks
+	// before emitting tool-block ends (S-ATL-024).
 	if len(choice.Delta.ToolCalls) > 0 && s.blockOpen {
 		_, textPresent := contentText(choice.Delta.Content)
 		if !textPresent {

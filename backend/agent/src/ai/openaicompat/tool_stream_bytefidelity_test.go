@@ -123,7 +123,7 @@ func TestByteFidelity_SplitInsideEscape(t *testing.T) {
 	// Wire-level (JSON-string-encoded): the backslash is escaped as `\\`
 	// so the raw wire value ends with two `\\` bytes.
 	half1 := `{"k":"val\` // 10 bytes; ends with single backslash byte
-	half2 := `u00e9"}`     // 7 bytes; continues the escape
+	half2 := `u00e9"}`    // 7 bytes; continues the escape
 
 	// After unquote + concatenation, the decoded content is:
 	//   {"k":"val\u00e9"}
@@ -160,27 +160,22 @@ func TestByteFidelity_SplitInsideEscape(t *testing.T) {
 func TestByteFidelity_TwoIndependentComparisons(t *testing.T) {
 	t.Parallel()
 
-	state := &mapperState{}
-	id := `{"index":0,"id":"call_T","function":{"name":"search"}}`
-	if _, err := state.applyChunk(chunkFromTools("c", id)); err != nil {
-		t.Fatalf("applyChunk(id) error = %v", err)
-	}
-	// Feed as TWO fragments, each independently readable.
+	// Feed identity chunk + two fragments + terminal chunk all through
+	// drainEventsFromMapper — the deltas are emitted at fragment-apply
+	// time (not at terminal), so to compare against what the producer
+	// actually emitted we must walk the full event stream across all
+	// chunks, not just the terminal chunk's own events.
+	idChunk := chunkFromTools("c", `{"index":0,"id":"call_T","function":{"name":"search"}}`)
 	frag1 := `{"a":`
 	frag2 := `"value"}`
-	if _, err := state.applyChunk(chunkFromTools("c", `{"index":0,"function":{"arguments":`+quoteJSONStringBytes([]byte(frag1))+`}}`)); err != nil {
-		t.Fatalf("applyChunk(frag1) error = %v", err)
-	}
-	if _, err := state.applyChunk(chunkFromTools("c", `{"index":0,"function":{"arguments":`+quoteJSONStringBytes([]byte(frag2))+`}}`)); err != nil {
-		t.Fatalf("applyChunk(frag2) error = %v", err)
-	}
-	evs, err := state.applyChunk(mustDecode(`{"id":"c","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
-	if err != nil {
-		t.Fatalf("applyChunk(term) error = %v", err)
-	}
+	frag1Chunk := chunkFromTools("c", `{"index":0,"function":{"arguments":`+quoteJSONStringBytes([]byte(frag1))+`}}`)
+	frag2Chunk := chunkFromTools("c", `{"index":0,"function":{"arguments":`+quoteJSONStringBytes([]byte(frag2))+`}}`)
+	termChunk := mustDecode(`{"id":"c","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`)
+	all := drainEventsFromMapper(t, idChunk, frag1Chunk, frag2Chunk, termChunk)
+
 	var endArgs []byte
 	var emittedFrags []byte
-	for _, ev := range evs {
+	for _, ev := range all {
 		if e, ok := ev.ToolCallEnd(); ok {
 			endArgs = e.Arguments()
 		}
@@ -195,12 +190,14 @@ func TestByteFidelity_TwoIndependentComparisons(t *testing.T) {
 		t.Errorf("end args = %q, want fixture literal %q (S-ATL-042, comparison 1)", endArgs, wantLiteral)
 	}
 
-	// Second independent comparison: end args byte-equal to concatenation
-	// of emitted fragments. We compute the expected concatenation
-	// independently (here, by re-concatenating the original fragments)
-	// and compare.
-	wantConcatenated := frag1 + frag2
-	if string(endArgs) != wantConcatenated {
-		t.Errorf("end args = %q, want concatenated fragments %q (S-ATL-042, comparison 2)", endArgs, wantConcatenated)
+	// Second independent comparison: end args byte-equal to the
+	// fragments the producer actually emitted during accumulation
+	// (collected live from the ToolCallDelta events, NOT derived
+	// from the source fixture). This is the discriminating
+	// comparison: a producer that re-marshalled or canonicalised
+	// would still match the source-derived literal in comparison 1
+	// but would diverge from the live-emitted fragments here.
+	if string(endArgs) != string(emittedFrags) {
+		t.Errorf("end args = %q, want emitted fragments %q (S-ATL-042, comparison 2)", endArgs, emittedFrags)
 	}
 }

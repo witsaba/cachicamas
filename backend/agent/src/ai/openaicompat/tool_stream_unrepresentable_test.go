@@ -46,9 +46,9 @@ func TestUnrepresentable_NeverSuppliedIdentity(t *testing.T) {
 	t.Parallel()
 
 	state := &mapperState{}
-	noId := `{"index":0,"function":{"name":"search","arguments":"{}"}}`
-	if _, err := state.applyChunk(chunkFromTools("c", noId)); err != nil {
-		t.Fatalf("applyChunk(noId) error = %v", err)
+	noID := `{"index":0,"function":{"name":"search","arguments":"{}"}}`
+	if _, err := state.applyChunk(chunkFromTools("c", noID)); err != nil {
+		t.Fatalf("applyChunk(noID) error = %v", err)
 	}
 	_, err := state.applyChunk(mustDecode(`{"id":"c","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
 	if err == nil {

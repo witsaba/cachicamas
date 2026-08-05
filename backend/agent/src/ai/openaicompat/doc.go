@@ -237,7 +237,7 @@
 // change (S-ATL-067…070), go.mod is byte-identical (S-ATL-067), no new
 // exported sentinel (S-ATL-068, S-ART-054 allowlist untouched), no
 // widened ai.FailureCategory (S-ATL-068, taxonomy at nine).
-
+//
 // # Reasoning replay refuses; Layer 2 must strip first (AI-26.6, R-ART-015)
 //
 // A neutral request whose assistant message carries a reasoning content
