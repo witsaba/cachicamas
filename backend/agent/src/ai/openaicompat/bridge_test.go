@@ -201,6 +201,25 @@ func bridgeQuoteJSONString(s string) string {
 // invoked. This is the slice's own exit criterion: the AI-23.2 text
 // conformance cases (textOrderingCase, textEmptyCompletionCase) passing
 // against real transport for the first time.
+//
+// # AI-31.1 — CapCompletionMetadata is NOT extended to the bridge (D3, R-ACP-010)
+//
+// This bridge deliberately runs only CapStreamingText, not
+// CapCompletionMetadata. Extending RunConformanceFor to the metadata
+// capability would force writeTerminalChunk (above) to render
+// reason.String() straight onto the wire for every ai.FinishReason —
+// including the three unreachable-on-this-dialect values Refusal,
+// PauseTurn, and Unknown — all of which this adapter's strict gate
+// correctly rejects as typed malformed responses (S-ATS-039 / S-ACP-006).
+// The `finish_reason/all_seven_values_reachable_drift_guarded` case
+// would therefore FAIL against the real adapter, by construction.
+//
+// The obligation to discharge that capability gap is routed to AI-38.2
+// (real-backend evidence for expected-vs-generated capability standing)
+// and recorded here so a reviewer reads it at the bridge's run-set
+// decision rather than at agenttest (which this change does not modify
+// per R-ACP-010 / S-ACP-027). The "scoped run is never full-conformance
+// evidence" principle is R-CNF-023.
 func TestConformanceBridge_StreamingText(t *testing.T) {
 	t.Parallel()
 

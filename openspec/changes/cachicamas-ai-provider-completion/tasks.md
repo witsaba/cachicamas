@@ -27,20 +27,20 @@ Chain strategy: feature-branch-chain
 
 ## Phase 0: Branch setup
 
-- [ ] 0.1 Verify chain tip ancestry includes `feat/ai-28-8-d8-close-discipline` and `requireCheckStreamClean` exists; branch slice 1 from the current tip (record actual base).
+- [x] 0.1 Verify chain tip ancestry includes `feat/ai-28-8-d8-close-discipline` and `requireCheckStreamClean` exists; branch slice 1 from the current tip (record actual base).
 
 ## Slice 1 (PR1, AI-31.1)
 
-- [ ] 1.1 RED `openaicompat/finish_reason_test.go`: `TestFinishReason_FiveWireValues_MapTable` (S-ACP-001, row count=5), `TestFinishReason_DeprecatedFunctionCall` + `TestFinishReason_ContentFilterDistinctFromRefusal` (S-ACP-002/003).
-- [ ] 1.2 RED same file: `TestFinishReason_NeverUnreachable` (S-ACP-005, incl. out-of-enum negative control).
-- [ ] 1.3 RED `TestFinishReason_NovelValue_TypedMalformed` (S-ACP-006: `"STOP"`, `" stop"`, `"halted"`).
-- [ ] 1.4 RED `TestStopSequence_NothingIdentifiesMatch` (S-ACP-010, extra-`stop_sequence`-key negative control).
-- [ ] 1.5 GREEN: confirm 1.1–1.4 pass unmodified (finish mapping already landed, coverage-only); STOP+report if a code change is needed.
-- [ ] 1.6 Inspection S-ACP-004/007/008: confirm `ai.NormalizeFinishReason` totality/no-panic and the malformed diagnostic chain carries the raw label; `ai.Completion` unchanged.
-- [ ] 1.7 Records: comment at `rawStrictFinishReason`/`finishReasonEnum` (unreachable table, S-ACP-004); `buildCompletion` U4 comment (S-ACP-009); `bridge_test.go` D3 comment at `RunConformanceFor` ~L198 (S-ACP-026/027, `agenttest` untouched).
-- [ ] 1.8 Doc 0002: 5 dated blockquotes below original wording — item 1 vacuity, item 2 D1 split, item 3 unexercisable, AI-31.1 Note vacuity, charter Acceptance unsatisfiable-and-unviolated (S-ACP-028/029; cite U5/D2, agree with R-ACP-002 table).
-- [ ] 1.9 Confirm `specs/ai-provider-text-stream/spec.md` R-ATS-026 delta already authored (S-ATS-098…101); no action if present.
-- [ ] 1.10 Gate: `go.mod` 0 requires, gofmt (ignore pre-existing `src/ai/completion_test.go`), lint, `go test -race -count=1 ./...` ×1; every new drained-stream test asserts `requireCheckStreamClean`.
+- [x] 1.1 RED `openaicompat/finish_reason_test.go`: `TestFinishReason_FiveWireValues_MapTable` (S-ACP-001, row count=5), `TestFinishReason_DeprecatedFunctionCall` + `TestFinishReason_ContentFilterDistinctFromRefusal` (S-ACP-002/003).
+- [x] 1.2 RED same file: `TestFinishReason_NeverUnreachable` (S-ACP-005, incl. out-of-enum negative control).
+- [x] 1.3 RED `TestFinishReason_NovelValue_TypedMalformed` (S-ACP-006: `"STOP"`, `" stop"`, `"halted"`).
+- [x] 1.4 RED `TestStopSequence_NothingIdentifiesMatch` (S-ACP-010, extra-`stop_sequence`-key negative control).
+- [x] 1.5 GREEN: confirm 1.1–1.4 pass unmodified (finish mapping already landed, coverage-only); STOP+report if a code change is needed.
+- [x] 1.6 Inspection S-ACP-004/007/008: confirm `ai.NormalizeFinishReason` totality/no-panic and the malformed diagnostic chain carries the raw label; `ai.Completion` unchanged.
+- [x] 1.7 Records: comment at `rawStrictFinishReason`/`finishReasonEnum` (unreachable table, S-ACP-004); `buildCompletion` U4 comment (S-ACP-009); `bridge_test.go` D3 comment at `RunConformanceFor` ~L198 (S-ACP-026/027, `agenttest` untouched).
+- [x] 1.8 Doc 0002: 5 dated blockquotes below original wording — item 1 vacuity, item 2 D1 split, item 3 unexercisable, AI-31.1 Note vacuity, charter Acceptance unsatisfiable-and-unviolated (S-ACP-028/029; cite U5/D2, agree with R-ACP-002 table).
+- [x] 1.9 Confirm `specs/ai-provider-text-stream/spec.md` R-ATS-026 delta already authored (S-ATS-098…101); no action if present.
+- [x] 1.10 Gate: `go.mod` 0 requires, gofmt (ignore pre-existing `src/ai/completion_test.go`), lint, `go test -race -count=1 ./...` ×1; every new drained-stream test asserts `requireCheckStreamClean`.
 
 ## Slice 2 (PR2, AI-31.2a)
 

@@ -297,6 +297,22 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 // terminal chunk was ever observed before the sentinel arrived (design.md
 // D9, spec-silent) — the caller (stream.go's run) folds it into
 // errIncompleteStream, unchanged from slice 1's own handling.
+//
+// # AI-31.1 — Matched stop-sequence recorded as deliberate absence (R-ACP-004, S-ACP-009)
+//
+// The completion carries no field naming which stop sequence fired,
+// because the wire carries no such field anywhere — U4 NEGATIVE:
+// stop_sequence → 0 hits, stop_reason → 0 hits; the chunk, choice and
+// delta schemas declare no stop-related field beyond finish_reason
+// itself; StopConfiguration states only that the returned text will
+// not contain the stop sequence. This adapter therefore CANNOT derive,
+// reconstruct or infer a matched-sequence value, and S-ACP-010 pins the
+// behaviour by proving that an extra unknown stop_sequence key on the
+// terminal chunk drains to the same completion (nothing is read, not
+// nothing was offered). The matched-sequence disposition is recorded
+// here as a deliberate and cited absence, never as a silent omission —
+// see spec R-ACP-004 in
+// openspec/changes/cachicamas-ai-provider-completion/specs/ai-provider-completion/spec.md.
 func (s *mapperState) buildCompletion() (ai.Event, error) {
 	return ai.NewCompletion(s.finishReason, s.usage)
 }

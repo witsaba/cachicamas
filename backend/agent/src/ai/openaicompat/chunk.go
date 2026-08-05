@@ -336,6 +336,37 @@ func parseHex4(b []byte) (uint16, bool) {
 // finishReasonEnum is C2's five raw wire spellings, and only those five —
 // matched byte-exactly by a plain map lookup, with no trim and no case
 // fold (D5, N-6).
+//
+// # AI-31.1 — Unreachable neutral values on this dialect (R-ACP-002, S-ACP-004)
+//
+// Three members of ai.FinishReason's seven-value closed vocabulary cannot
+// be produced from any wire finish_reason on this dialect. They are
+// enumerated here at the strict gate (the single decision point that
+// decides what reaches a completion) so a reviewer finds the unreachability
+// where the gate actually rejects, not in a doc far from the code:
+//
+//	FinishReasonRefusal  — U5 NEGATIVE: no chat finish_reason member spells
+//	                       refusal; delta.refusal (C7) is the only
+//	                       refusal-shaped channel and its companion
+//	                       finish_reason is undocumented. Reopens when the
+//	                       pinned dialect gains a refusal finish member, or
+//	                       AI-38 pins the companion value from a real
+//	                       transcript (D2 ruling (a)).
+//	FinishReasonPauseTurn — U5 NEGATIVE: no pause channel exists in chat
+//	                       scope (pause/paused hits are all fine-tuning
+//	                       endpoints). AI-31.1's pause-resume lossiness
+//	                       Note is vacuous for this adapter. Reopens when
+//	                       the pinned dialect gains a pause finish member.
+//	FinishReasonUnknown  — Unreachable by design, not by omission: the
+//	                       strict gate below rejects an out-of-enum value
+//	                       as a typed malformed response (S-ATS-039), so
+//	                       an unrecognised stop value never becomes a
+//	                       completion at all. Reopens only with a
+//	                       deliberate reversal of D1.
+//
+// See spec R-ACP-002 / S-ACP-004 in
+// openspec/changes/cachicamas-ai-provider-completion/specs/ai-provider-completion/spec.md
+// for the citation-anchored table each row above summarizes.
 var finishReasonEnum = map[string]bool{
 	"stop":           true,
 	"length":         true,
