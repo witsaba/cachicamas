@@ -77,12 +77,12 @@ Full-suite gate before each PR: `go test -race -count=1 ./...` (from `backend/ag
 
 ## Phase 2b — Slice 2b: AI-32.3 disconnects and deadlines (R-AEM-012…014 · S-AEM-046…055) — BLOCKED-ON: same gate as 2a; branches from 2a
 
-- [ ] 2b.1 RED `stream_failure_test.go`: disconnect after output → terminal event, `PartialOutput()` true, `Delivery() == ai.DeliveryMidStream`, already-emitted content byte-identical and undisturbed (S-AEM-046–048).
-- [ ] 2b.2 RED `stream_failure_test.go`: disconnect before output → pre-stream path, `PartialOutput()` false, no terminal event claims partial output (S-AEM-049–050).
-- [ ] 2b.3 RED `stream_failure_test.go`: deadline → `Timeout` retryable, cancel → `Cancellation` never retryable, mutually exclusive via `errors.Is`, independent of the `PartialOutput` axis (S-AEM-051–055).
-- [ ] 2b.4 GREEN `stream_failure.go`: `categorizeStreamError` order — `context.Canceled`→Cancellation, `context.DeadlineExceeded`→Timeout, `net.Error.Timeout()`→Timeout, decoder `Category()` sentinels→MalformedResponse, else→Unavailable (D6); one uniform `retryableFor(cat)`.
-- [ ] 2b.5 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
-- [ ] 2b.6 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions.
+- [x] 2b.1 RED `stream_failure_test.go`: disconnect after output → terminal event, `PartialOutput()` true, `Delivery() == ai.DeliveryMidStream`, already-emitted content byte-identical and undisturbed (S-AEM-046–048).
+- [x] 2b.2 RED `stream_failure_test.go`: disconnect before output → pre-stream path, `PartialOutput()` false, no terminal event claims partial output (S-AEM-049–050).
+- [x] 2b.3 RED `stream_failure_test.go`: deadline → `Timeout` retryable, cancel → `Cancellation` never retryable, mutually exclusive via `errors.Is`, independent of the `PartialOutput` axis (S-AEM-051–055).
+- [x] 2b.4 GREEN `stream_failure.go`: `categorizeStreamError` order — `context.Canceled`→Cancellation, `context.DeadlineExceeded`→Timeout, `net.Error.Timeout()`→Timeout, decoder `Category()` sentinels→MalformedResponse, else→Unavailable (D6); one uniform `retryableFor(cat)`.
+- [x] 2b.5 Zero-dependency check: `grep -c '^require' backend/agent/go.mod` reports `0`.
+- [x] 2b.6 Full-suite gate: fresh `go test -race -count=1 ./...`, zero regressions.
 
 ## Phase 2c — Slice 2c: AI-32.5 bounded, sanitized capture proofs (R-AEM-015, 016 · S-AEM-056…063) — BLOCKED-ON: 2a + 2b merged
 

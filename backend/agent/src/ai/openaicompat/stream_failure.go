@@ -20,7 +20,10 @@ package openaicompat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -121,4 +124,88 @@ func isInBandErrorFrame(data []byte) bool {
 		return false
 	}
 	return len(probe.Error) > 0
+}
+
+// categorizeStreamError maps a non-frame, transport-side failure err to
+// its AI-19 failure category (design.md D6, R-AEM-014). It is the
+// single derivation point stream-side errors reach the AI-19 vocabulary
+// through — shared with mapErrorResponse's retryableFor derivation, so
+// stage 1's stage-1 status mapping and stage 2's transport mapping
+// report the same category for the same cause shape.
+//
+// Order (design D6, recorded here verbatim so a reviewer can match
+// against the spec's S-AEM-051…055 verbatim): context.Canceled first,
+// then context.DeadlineExceeded, then net.Error.Timeout(), then the
+// decoder's own Category() sentinels, then any other error →
+// Unavailable. The "canceled checked first" note in design D6 is
+// load-bearing: *url.Error wraps context.Canceled with Timeout() set
+// inconsistently across transports, so a net.Error.Timeout() check on
+// the un-rewrapped error would classify cancellation as Timeout on
+// some transports. Sentinel checks are transport-independent.
+func categorizeStreamError(err error) (ai.FailureCategory, bool) {
+	if err == nil {
+		return 0, false
+	}
+
+	// Context-cancellation and context-deadline are sentinel checks
+	// (R-AEM-014). errors.Is traverses the wrap chain.
+	if errors.Is(err, context.Canceled) {
+		return ai.FailureCategoryCancellation, true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ai.FailureCategoryTimeout, true
+	}
+
+	// A non-context net-level timeout (a transport read deadline, a
+	// syscall EAGAIN window) — checked ONLY after the sentinel checks,
+	// because *url.Error wrapping context.DeadlineExceeded would
+	// otherwise match here too with the same shape.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return ai.FailureCategoryTimeout, true
+	}
+
+	// Decoder-sentinel-derived failures: the package-local
+	// ErrFrameTooLarge / ErrTruncated (errors.go's Category) AND the
+	// unexported wrappers (errMalformedIdentity, errIncompleteStream,
+	// errMalformedChunkJSON, the AI-28.5 row sentinels) all wrap
+	// ai.ErrMalformedResponse via %w. errors.Is matches each of those —
+	// package-local or unexported — uniformly, so the categorization
+	// stays total over every cause this producer's own run loop ever
+	// constructs. (R-AEM-010's "MalformedResponse" shape.)
+	if errors.Is(err, ai.ErrMalformedResponse) {
+		return ai.FailureCategoryMalformedResponse, true
+	}
+
+	// Default: a transport-side error we don't recognise by shape —
+	// connection reset, unexpected EOF, a broken pipe. retryableFor
+	// already maps Unavailable → true (R-AEM-003, design D6).
+	return ai.FailureCategoryUnavailable, true
+}
+
+// midStreamFailureFrom builds a mid-stream failure from a transport-side
+// error err (R-AEM-012…014), with the category derived through
+// categorizeStreamError and the cause reachable through Unwrap. The
+// returned failure's Retryable() reflects the same shared derivation
+// (failure_map.go's retryableFor) the status path already uses —
+// Retryable is a classification derived from category alone, never set
+// per-call (design D6).
+//
+// outputPreceded is supplied by the caller, exactly as
+// failureFromErrorFrame reads it.
+func midStreamFailureFrom(err error, outputPreceded bool) *ai.Failure {
+	category, _ := categorizeStreamError(err)
+	failure, constructErr := ai.MidStreamFailure(ai.FailureReport{
+		Category:  category,
+		Retryable: retryableFor(category),
+		Cause:     err,
+	}, outputPreceded)
+	if constructErr != nil {
+		// category is always a valid vocabulary member by the
+		// categorization itself, so construction cannot fail for inputs
+		// this function always supplies — the same posture every other
+		// ai.MidStreamFailure call in this package already takes.
+		return nil
+	}
+	return failure
 }
