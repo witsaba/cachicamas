@@ -60,11 +60,11 @@ Chain strategy: feature-branch-chain
 
 ## Phase 2 — Slice 2: AI-30.2 empty/zero-fragment + gated conformance turn-on (branch `feat/ai-30-2-empty-zero-fragment` from slice 1)
 
-- [ ] 2.0 **HARD GATE** (see Branch/Gate note): confirm `cachicamas-ai-conformance-tool-amendment` landed and merged before task 2.3. If absent, STOP and record a carryover.
-- [ ] 2.1 RED `tool_stream_empty_test.go`: R-ATL-007 (S-ATL-033…037) — `""`-then-content-then-`""` no-op (033), zero-accumulated-bytes end byte-equal to `ai.NewToolCall(id, name, nil)`'s `{}` (034), absent-key vs `""` key parity (035), whole call vs its 5-fragment twin byte-identical ends with differing delta counts (036), zero `ToolCallDelta` events for the zero-byte case (037).
-- [ ] 2.2 GREEN `stream_state.go`: empty/absent fragment is a no-op; zero-accumulated-bytes close routes through `ai.NewToolCall(id, name, nil)`'s own canonicalization — no bespoke `{}` literal minted in this package.
-- [ ] 2.3 GREEN (gated by 2.0): run `agenttest.RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapToolCalls)` — all four AI-23.3 cases, `CapToolCalls` is required (no Factory declaration flip, R-CNF-004).
-- [ ] 2.4 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 2.
+- [x] 2.0 **HARD GATE** (see Branch/Gate note): confirm `cachicamas-ai-conformance-tool-amendment` landed and merged before task 2.3. If absent, STOP and record a carryover. **Verified landed**: amend merge `6732b65` is on `feat/ai-28-8-d8-close-discipline`; `checkRelativeKindOrder` reachable.
+- [x] 2.1 RED `tool_stream_empty_test.go`: R-ATL-007 (S-ATL-033…037) — `""`-then-content-then-`""` no-op (033), zero-accumulated-bytes end byte-equal to `ai.NewToolCall(id, name, nil)`'s `{}` (034), absent-key vs `""` key parity (035), whole call vs its 5-fragment twin byte-identical ends with differing delta counts (036), zero `ToolCallDelta` events for the zero-byte case (037).
+- [x] 2.2 GREEN `stream_state.go`: empty/absent fragment is a no-op; zero-accumulated-bytes close routes through `ai.NewToolCall(id, name, nil)`'s own canonicalization — no bespoke `{}` literal minted in this package.
+- [x] 2.3 GREEN (gated by 2.0): run `agenttest.RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapToolCalls)` — all four AI-23.3 cases, `CapToolCalls` is required (no Factory declaration flip, R-CNF-004). **Suite reconciliation**: cases 2 (zero_delta) and 4 (mixed_text_and_tool) updated to use `requireRelativeKindOrder` (R-CNF-019 boundary case for fragmentable argument channels); bytes.Equal on `arguments` dropped per C9.6 (no per-call end signal on the wire).
+- [x] 2.4 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 2.
 
 ## Phase 3 — Slice 3: AI-30.3 argument-byte fidelity (branch `feat/ai-30-3-byte-fidelity` from slice 2)
 

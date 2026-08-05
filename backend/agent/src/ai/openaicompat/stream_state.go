@@ -376,17 +376,25 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 		s.terminalSeen = true
 	}
 
-	// Process this chunk's tool_calls elements BEFORE the text-handling
-	// path so that a single chunk carrying BOTH a content string and tool
-	// elements preserves the documented emission order (text block start
-	// precedes tool-call start; text deltas interleave with tool deltas).
-	// Each element's processing follows D3's sequence:
-	//   1. Index == nil → errToolElementMissingIndex (S-ATL-011)
-	//   2. lookup/create state (create mints block, appends to toolOpenOrder)
-	//   3. identity merge (unset→set, identical repeat no-op, differing → errToolCallIdentityMismatch)
-	//   4. if both id+name set and !started: emit start, flush pending as deltas
-	//   5. non-empty fragment → cap check, append, emit delta (or queue if !started)
-	//   6. empty/absent fragment → no-op (S-ATL-033/035)
+// Process this chunk's tool_calls elements. Before processing the first
+// tool element, if the text block is open and the chunk carries no
+// content text of its own, close the text block first — the conformance
+// case mixedTextAndToolCallCase requires TextBlockEnd to come BEFORE
+// any tool-call event (text precedes tool semantically). D4's terminal
+// close path remains: terminalSeen-set chunks still close text blocks
+// before emitting tool-block ends (S-ATL-024).
+	if len(choice.Delta.ToolCalls) > 0 && s.blockOpen {
+		_, textPresent := contentText(choice.Delta.Content)
+		if !textPresent {
+			end, err := ai.NewTextBlockEnd(textBlockIndex)
+			if err != nil {
+				return nil, err
+			}
+			events = append(events, end)
+			s.blockOpen = false
+			s.blockClosed = true
+		}
+	}
 	for _, elem := range choice.Delta.ToolCalls {
 		more, err := s.applyToolElement(elem)
 		if err != nil {

@@ -332,143 +332,23 @@ func TestConformanceBridge_StreamingText(t *testing.T) {
 	agenttest.RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapStreamingText)
 }
 
-// TestConformanceBridge_ToolCalls covers S-ATL-059 (the AI-30.1 slice's
-// own exit criterion, R-ATL-012): the CapToolCalls cases 1
-// (fragmented_interleaved_reconstructs_exactly) and 3
-// (ordinal_distinguishes_same_tool_name) pass against this bridge's
-// real *Client speaking real HTTP to a local httptest.Server. Cases 2
-// and 4 require the conformance suite's exact-kind-list assertions to be
-// converted to reconstruction-based assertions — D8's finding, AI-30.2
-// raises that suite reconciliation as its own change against
-// ai-provider-conformance-suite.
+// TestConformanceBridge_ToolCalls covers S-ATL-059 (the AI-30.2 slice's
+// exit criterion, R-ATL-012): all four CapToolCalls cases run through
+// the capability-scoped entry point against this bridge's real *Client
+// speaking real HTTP to a local httptest.Server.
 //
-// This test exercises the two passable cases directly by replaying a
-// hand-crafted Script through the bridge factory, rather than going
-// through agenttest.RunConformanceFor (which runs all four cases and
-// would fail on cases 2/4, masking this slice's exit criterion). Each
-// subtest mirrors the conformance case's own Script and assertion shape
-// so the failure modes stay identical to what the suite's own cases
-// would produce — if cases 2/4's suite reconciliation lands, the
-// bridge itself needs no change.
+// Cases 2 (zero_delta_whole_call_accepted) and 4
+// (mixed_text_and_tool_ends_on_tool_call_finish_reason) require
+// reconstruction-based assertions rather than exact drained-kind-count:
+// cachicamas-ai-conformance-tool-amendment converted those assertions
+// to requireRelativeKindOrder (R-CNF-019's boundary case for
+// fragmentable argument channels), so all four cases now pass under
+// the unscoped RunConformanceFor (no case-restricted invocation
+// needed).
 func TestConformanceBridge_ToolCalls(t *testing.T) {
 	t.Parallel()
 
-	t.Run("fragmented_interleaved_reconstructs_exactly", func(t *testing.T) {
-		t.Parallel()
-		start1, err := ai.NewToolCallStart(1, "call-1", "search")
-		if err != nil {
-			t.Fatalf("ai.NewToolCallStart: %v", err)
-		}
-		start2, err := ai.NewToolCallStart(2, "call-2", "weather")
-		if err != nil {
-			t.Fatalf("ai.NewToolCallStart: %v", err)
-		}
-		delta1a, err := ai.NewToolCallDelta(1, []byte(`{"q":`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallDelta: %v", err)
-		}
-		delta2a, err := ai.NewToolCallDelta(2, []byte(`{"city":`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallDelta: %v", err)
-		}
-		delta1b, err := ai.NewToolCallDelta(1, []byte(`"a"}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallDelta: %v", err)
-		}
-		delta2b, err := ai.NewToolCallDelta(2, []byte(`"b"}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallDelta: %v", err)
-		}
-		end1, err := ai.NewToolCallEnd(1, []byte(`{"q":"a"}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallEnd: %v", err)
-		}
-		end2, err := ai.NewToolCallEnd(2, []byte(`{"city":"b"}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallEnd: %v", err)
-		}
-
-		script := agenttest.Script{Steps: []agenttest.Step{
-			agenttest.Emit(start1), agenttest.Emit(start2),
-			agenttest.Emit(delta1a), agenttest.Emit(delta2a),
-			agenttest.Emit(delta1b), agenttest.Emit(delta2b),
-			agenttest.Emit(end1), agenttest.Emit(end2),
-		}}
-		subject := conformanceBridgeFactory().New(t, script)
-		ch, err := subject.Stream(t.Context(), bridgeMinimalRequest(t))
-		if err != nil {
-			t.Fatalf("Stream returned %v, want no failure", err)
-		}
-		rec := bridgeDrainAndRecord(t, ch)
-		bridgeRequireValidStream(t, rec)
-
-		calls := bridgeReconstructToolCalls(rec.Events())
-		call1, ok1 := calls[1]
-		call2, ok2 := calls[2]
-		if !ok1 || !call1.sawStart || !call1.sawEnd {
-			t.Fatalf("call at block 1 = %+v (found=%v), want a complete start+end", call1, ok1)
-		}
-		if !ok2 || !call2.sawStart || !call2.sawEnd {
-			t.Fatalf("call at block 2 = %+v (found=%v), want a complete start+end", call2, ok2)
-		}
-		if !bytesEqual(call1.fromDeltas, []byte(`{"q":"a"}`)) {
-			t.Errorf("call 1 fromDeltas = %q, want %q", call1.fromDeltas, `{"q":"a"}`)
-		}
-		if !bytesEqual(call2.fromDeltas, []byte(`{"city":"b"}`)) {
-			t.Errorf("call 2 fromDeltas = %q, want %q", call2.fromDeltas, `{"city":"b"}`)
-		}
-		if !bytesEqual(call1.arguments, []byte(`{"q":"a"}`)) {
-			t.Errorf("call 1 end arguments = %q, want %q", call1.arguments, `{"q":"a"}`)
-		}
-		if !bytesEqual(call2.arguments, []byte(`{"city":"b"}`)) {
-			t.Errorf("call 2 end arguments = %q, want %q", call2.arguments, `{"city":"b"}`)
-		}
-	})
-
-	t.Run("ordinal_distinguishes_same_tool_name", func(t *testing.T) {
-		t.Parallel()
-		start1, err := ai.NewToolCallStart(1, "call-1", "search")
-		if err != nil {
-			t.Fatalf("ai.NewToolCallStart: %v", err)
-		}
-		end1, err := ai.NewToolCallEnd(1, []byte(`{}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallEnd: %v", err)
-		}
-		start2, err := ai.NewToolCallStart(2, "call-2", "search")
-		if err != nil {
-			t.Fatalf("ai.NewToolCallStart: %v", err)
-		}
-		end2, err := ai.NewToolCallEnd(2, []byte(`{}`))
-		if err != nil {
-			t.Fatalf("ai.NewToolCallEnd: %v", err)
-		}
-
-		script := agenttest.Script{Steps: []agenttest.Step{
-			agenttest.Emit(start1), agenttest.Emit(end1),
-			agenttest.Emit(start2), agenttest.Emit(end2),
-		}}
-		subject := conformanceBridgeFactory().New(t, script)
-		ch, err := subject.Stream(t.Context(), bridgeMinimalRequest(t))
-		if err != nil {
-			t.Fatalf("Stream returned %v, want no failure", err)
-		}
-		rec := bridgeDrainAndRecord(t, ch)
-		bridgeRequireValidStream(t, rec)
-
-		calls := bridgeReconstructToolCalls(rec.Events())
-		call1, ok1 := calls[1]
-		call2, ok2 := calls[2]
-		if !ok1 || !ok2 {
-			t.Fatalf("calls = (%v, %v), want both found", ok1, ok2)
-		}
-		if call1.ordinal == call2.ordinal {
-			t.Errorf("both calls report ordinal %d, want distinct (S-ATL-057)", call1.ordinal)
-		}
-		if call1.ordinal >= call2.ordinal {
-			t.Errorf("call 1 ordinal %d does not precede call 2 ordinal %d", call1.ordinal, call2.ordinal)
-		}
-	})
+	agenttest.RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapToolCalls)
 }
 
 // bridgeReconstructedCall mirrors agenttest's reconstructedCall shape
