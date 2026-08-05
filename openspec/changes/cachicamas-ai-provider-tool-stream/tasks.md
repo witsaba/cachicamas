@@ -68,10 +68,10 @@ Chain strategy: feature-branch-chain
 
 ## Phase 3 — Slice 3: AI-30.3 argument-byte fidelity (branch `feat/ai-30-3-byte-fidelity` from slice 2)
 
-- [ ] 3.1 RED `tool_stream_bytefidelity_test.go`: R-ATL-008 (S-ATL-038…043) — escape sequences (`\\`, `\"`, `\n`, `é`) byte-equal (038), extreme numerics (huge integer, `1e-320`, `-0`, long-precision float) reproduced digit-for-digit, no float round-trip (039), duplicated spacing/non-alphabetical key order preserved (040), split-inside-a-JSON-escape (`\` then `u00e9"}`) reassembles intact (041), two independent comparisons neither derived from the other (042). Raw-byte fixtures per doc 0002's exotic-payload list.
-- [ ] 3.2 GREEN: expect near-zero production delta — R-ATL-001's `unquoteJSONString` reuse (D2) already provides byte preservation; if a gap surfaces, fix minimally and disclose the exact byte class that failed.
-- [ ] 3.3 Inspection S-ATL-043: grep the tool-argument path for `json.Marshal`/`json.Compact`/`json.Indent`/numeric round-trip — none present.
-- [ ] 3.4 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 3.
+- [x] 3.1 RED `tool_stream_bytefidelity_test.go`: R-ATL-008 (S-ATL-038…043) — escape sequences (`\\`, `\"`, `\n`, `é`) byte-equal (038), extreme numerics (huge integer, `1e-320`, `-0`, long-precision float) reproduced digit-for-digit, no float round-trip (039), duplicated spacing/non-alphabetical key order preserved (040), split-inside-a-JSON-escape (`\` then `u00e9"}`) reassembles intact (041), two independent comparisons neither derived from the other (042). Raw-byte fixtures per doc 0002's exotic-payload list.
+- [x] 3.2 GREEN: expect near-zero production delta — R-ATL-001's `unquoteJSONString` reuse (D2) already provides byte preservation; if a gap surfaces, fix minimally and disclose the exact byte class that failed.
+- [x] 3.3 Inspection S-ATL-043: grep the tool-argument path for `json.Marshal`/`json.Compact`/`json.Indent`/numeric round-trip — none present (verified: zero matches in stream_state.go/chunk.go).
+- [x] 3.4 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 3.
 
 ## Phase 4 — Slice 4: AI-30.4 truncation and malformation (branch `feat/ai-30-4-truncation-malformation` from slice 3)
 
