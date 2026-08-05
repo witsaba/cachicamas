@@ -83,11 +83,11 @@ Chain strategy: feature-branch-chain
 
 ## Phase 5 — Slice 5: AI-30.5 ordinal preservation + conformance re-run (branch `feat/ai-30-5-ordinal-preservation` from slice 4)
 
-- [ ] 5.1 RED `tool_stream_ordinal_test.go` (test-side only — R-ATC-012 forbids a production ordinal): R-ATL-011 (S-ATL-055…058) — first-appearance wire order `2,0,1` maps to ordinals `1,2,3`, a mapping sorting on `index` cannot reproduce (055), same mapping survives round-robin fragment interleaving (056), two calls sharing one tool name still get distinct strictly-ordered ordinals (057).
-- [ ] 5.2 GREEN: test-side ordinal derivation inside `openaicompat`'s own `_test.go` files (never `src/agenttest/`), filtering start events in emission order — the same shape `agenttest.reconstructToolCalls` already uses.
-- [ ] 5.3 Inspection S-ATL-058: grep the shipped production source for any ordinal counter/field/accessor — none exists; derivation appears only in test sources.
-- [ ] 5.4 Re-run `RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapToolCalls)` — all four cases green now that slice 2's gate has discharged.
-- [ ] 5.5 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 5.
+- [x] 5.1 RED `tool_stream_ordinal_test.go` (test-side only — R-ATC-012 forbids a production ordinal): R-ATL-011 (S-ATL-055…058) — first-appearance wire order `2,0,1` maps to ordinals `1,2,3`, a mapping sorting on `index` cannot reproduce (055), same mapping survives round-robin fragment interleaving (056), two calls sharing one tool name still get distinct strictly-ordered ordinals (057).
+- [x] 5.2 GREEN: test-side ordinal derivation inside `openaicompat`'s own `_test.go` files (never `src/agenttest/`), filtering start events in emission order — the same shape `agenttest.reconstructToolCalls` already uses.
+- [x] 5.3 Inspection S-ATL-058: grep the shipped production source for any ordinal counter/field/accessor — none exists; derivation appears only in test sources (verified: stream_state.go's only "ordinal" mentions are in doc comments citing R-ATC-012).
+- [x] 5.4 Re-run `RunConformanceFor(t, conformanceBridgeFactory(), agenttest.CapToolCalls)` — all four cases green now that slice 2's gate has discharged.
+- [x] 5.5 Evidence: `grep -c '^require'` = 0; `gofmt -l` clean; `make lint` 0 issues; `go test -race -count=1 ./...` twice; focused command per Suggested Work Units row 5.
 
 ## Phase 6 — Milestone close
 
