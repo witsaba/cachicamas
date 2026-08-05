@@ -381,6 +381,35 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					return
 				}
 
+				// R-AEM-010 (AI-32.2): an in-band error frame mid-stream
+				// terminates the stream with a typed mid-stream failure.
+				// Detected by JSON shape — a frame whose payload is the
+				// wrapped {"error": {…}} vendor body — BEFORE decoding as
+				// a chunk, so the frame's unknown object discriminator
+				// (R-ATS-017 would skip it) cannot silently swallow a
+				// terminal-error payload.
+				if isInBandErrorFrame(frame.Data) {
+					// An open block must close before the terminal error,
+					// exactly like every other mid-stream failure path
+					// (design.md D8, AI-28.7): the producer-side closure
+					// guarantee is uniform, not per-cause.
+					if blockOpen {
+						if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+							if !emit(ctx, out, stamper, end) {
+								return
+							}
+						}
+					}
+					failure := failureFromErrorFrame(frame.Data, outputPreceded)
+					if failure != nil {
+						ev, err := ai.ErrorEvent(failure)
+						if err == nil {
+							emit(ctx, out, stamper, ev)
+						}
+					}
+					return
+				}
+
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
 					emitFailure(ctx, out, stamper, errMalformedChunkJSON, outputPreceded, blockOpen)

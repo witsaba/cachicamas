@@ -72,6 +72,23 @@ var ErrFrameTooLarge = fmt.Errorf("openaicompat: frame exceeded the configured h
 // %w and stays distinct from ErrFrameTooLarge under errors.Is (R-ASD-020).
 var ErrTruncated = fmt.Errorf("openaicompat: stream ended with a partial frame pending: %w", ai.ErrMalformedResponse)
 
+// ErrInBandErrorFrame is the stable, exported identity an in-band error
+// frame's terminal failure carries in its cause chain (R-AEM-010,
+// R-AEM-011, S-AEM-040/043). The matching mid-stream failure is built by
+// stream_failure.go's failureFromErrorFrame, which attaches a
+// redacted-text cause that Unwrap-s to this sentinel — so an external
+// caller can run `errors.Is(err, openaicompat.ErrInBandErrorFrame)` to
+// distinguish an in-band-frame termination from any transport failure
+// without ever inspecting Error() text.
+//
+// This is the third exported Err-prefixed identifier in the package's
+// allowlist (S-ART-054, R-AEM-011): AI-27 contributed the two decoder
+// sentinels above; AI-32.2 contributes this one. The allowlist is the
+// only place a future reviewer sees the new addition enumerated — see
+// reasoning_refusal_test.go's TestPolicy_NoNewSentinelsExported and the
+// citation comment this entry carries.
+var ErrInBandErrorFrame = fmt.Errorf("openaicompat: stream received an in-band error frame: %w", ai.ErrMalformedResponse)
+
 // Category reports the AI-19 failure category a decoder error names, and
 // whether err is one of this package's own two sentinels at all. Both
 // ErrFrameTooLarge and ErrTruncated name ai.FailureCategoryMalformedResponse

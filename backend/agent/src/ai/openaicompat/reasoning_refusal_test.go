@@ -252,12 +252,22 @@ func TestReasoningRefusal_NamesReasoningContentAsTheUnsupportedFeature(t *testin
 func TestPolicy_NoNewSentinelsExported(t *testing.T) {
 	// AI-26's own contribution to this set is zero (S-ART-054). The two
 	// entries below are AI-27's, required exported and mutually
-	// distinguishable by the decoder spec (R-ASD-019, R-ASD-020). A
-	// future sentinel fails this scan until a spec sanctions it and this
-	// list names it.
+	// distinguishable by the decoder spec (R-ASD-019, R-ASD-020). The
+	// third entry is AI-32.2's ErrInBandErrorFrame — R-AEM-010 / R-AEM-011
+	// sanction the export so errors.Is(failure,
+	// openaicompat.ErrInBandErrorFrame) is a public error contract for
+	// external callers distinguishing in-band-frame terminations from
+	// transport failures. The order below matches the package's own
+	// declaration order in errors.go (the scan's own order — ReadDir
+	// filename order, then declaration order). A future sentinel fails
+	// this scan until a spec sanctions it and this list names it.
 	wantSentinels := []string{
 		"errors.go:ErrFrameTooLarge",
 		"errors.go:ErrTruncated",
+		// AI-32.2 — R-AEM-010/R-AEM-011 (S-AEM-040…044): in-band error
+		// frame identity, distinct from every transport failure under
+		// errors.Is. S-AEM-044.
+		"errors.go:ErrInBandErrorFrame",
 	}
 
 	entries, err := os.ReadDir(".")
