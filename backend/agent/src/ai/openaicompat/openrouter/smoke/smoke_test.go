@@ -9,13 +9,13 @@
 //   - RUN_LIVE_OPENROUTER_SMOKE = "1" — the explicit opt-in
 //
 // and one bounded-by-design test that gates the live path on those
-// env vars and SKIPS when either is missing. The CI workflow runs
-// `make test` without the env vars, so the skip path is the green
-// path: under `make test` the live test reports `--- SKIP` and the
-// suite exits 0. Under `workflow_dispatch` with both env vars set,
-// the live test makes one bounded openai/gpt-4o request against the
-// OpenRouter gateway and asserts at least one streaming chunk
-// arrived before termination.
+// env vars and SKIPS when either is missing. `make test` runs without
+// the env vars, so the skip path is the green path: under `make test`
+// the live test reports `--- SKIP` and the suite exits 0. With both
+// env vars set (in a local or future-CI environment), the live test
+// makes one bounded openai/gpt-4o request against the OpenRouter
+// gateway and asserts at least one streaming chunk arrived before
+// termination.
 //
 // # Why this is a t.Skip gate, not a build tag
 //
@@ -32,13 +32,12 @@
 // The smoke test holds no shared state across test runs. The
 // credential is constructed per-test via openaicompat.NewCredential,
 // the http.Client is built fresh, the stream is drained via
-// agenttest.DrainAndRecord with a bounded timeout. Two CI runs
-// (or two dispatches) target different physical workspaces and
-// cannot race on the same OpenRouter bearer; the workflow's
-// concurrency group serializes overlapping dispatches.
-// .github/workflows/agent-openrouter-smoke.yml is the file that
-// owns the serialization — this test creates no goroutines and
-// mutates no package-level state.
+// agenttest.DrainAndRecord with a bounded timeout. Two concurrent
+// human-driven live runs would target the same OpenRouter bearer
+// and could be rate-limited; the operator is responsible for
+// serializing them (the repo has no CI workflow per ADR 0005).
+// This test creates no goroutines and mutates no package-level
+// state.
 //
 // # TDD posture (work unit 3.1)
 //
