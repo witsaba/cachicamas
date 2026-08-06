@@ -131,3 +131,15 @@ func checkRelativeKindOrder(events []ai.Event, want []ai.EventKind) error {
 	}
 	return nil
 }
+
+// requireRelativeKindOrder fails tb, naming the discrepancy, unless events
+// contains want's kinds in relative order per checkRelativeKindOrder —
+// requireDrainedKinds' sibling for a case whose script carries a
+// fragmentable argument channel (R-CNF-019). AI-30.2 conformance cases
+// (conformance_tool_call.go lines 179, 283) consume this directly.
+func requireRelativeKindOrder(tb testing.TB, events []ai.Event, want []ai.EventKind) {
+	tb.Helper()
+	if err := checkRelativeKindOrder(events, want); err != nil {
+		tb.Fatalf("%v", err)
+	}
+}

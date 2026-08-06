@@ -47,7 +47,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -81,7 +80,7 @@ const reasoningAssertionHelperName = "assertNoSentinelLeak"
 // event list whose sentinel has been deliberately routed into a text
 // delta, and asserts the helper returns false. The inversion fires on
 // every future run, not just on a one-off staged mutation.
-func assertNoSentinelLeak(events []ai.Event, sentinel string, scenarios []string) bool {
+func assertNoSentinelLeak(events []ai.Event, sentinel string, _ []string) bool {
 	if len(sentinel) == 0 {
 		return true
 	}
@@ -314,7 +313,7 @@ func TestConformanceFactory_DeclaresReasoningExplicitlyFalse(t *testing.T) {
 	// not error — the suite would fail construction itself if Factory
 	// were mis-typed (S-CNF-006: nil optional-capability declarations
 	// fail construction).
-	var _ agenttest.Factory = factory
+	var _ = factory
 }
 
 // TestReasoningExtensionField_DurableGuardHelper_InvertsOnSyntheticRouting

@@ -35,6 +35,7 @@ package openaicompat
 
 import (
 	"context"
+	"strconv"
 	"testing"
 )
 
@@ -113,10 +114,10 @@ func TestUsage_SingleFrame_U6Shape(t *testing.T) {
 func TestUsage_MultiplePopulatedFrames_LastWinsNoFold(t *testing.T) {
 	t.Parallel()
 
-	frame := func(n int64) string {
+frame := func(n int64) string {
 		return "data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[],\"usage\":{\"prompt_tokens\":" +
-			itoa(n) +
-			",\"completion_tokens\":1,\"total_tokens\":" + itoa(n+1) + "}}\n\n"
+			strconv.FormatInt(n, 10) +
+			",\"completion_tokens\":1,\"total_tokens\":" + strconv.FormatInt(n+1, 10) + "}}\n\n"
 	}
 	transcript := "" +
 		"data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
@@ -134,28 +135,4 @@ func TestUsage_MultiplePopulatedFrames_LastWinsNoFold(t *testing.T) {
 	if v, ok := usage.Input.Count(); !ok || v != 30 {
 		t.Errorf("Input.Count() = (%d, %v), want (30, true) — last populated frame must win wholesale, NOT fold to 60 (S-ACP-019)", v, ok)
 	}
-}
-
-// itoa is a tiny strconv.FormatInt alternative kept local to this
-// file to avoid pulling strconv in for two call sites only.
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if negative {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
 }

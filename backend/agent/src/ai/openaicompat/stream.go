@@ -108,6 +108,12 @@ import (
 // independent of this value.
 const streamReadBufferSize = 32 * 1024
 
+// emitFailureSendBound caps how long a single terminal-failure send
+// may wait for the consumer (AI-32.3 bounded-wait). Generous enough
+// for a local-loopback drain; not generous enough to leak a goroutine
+// if the consumer has stopped.
+const emitFailureSendBound = 5 * time.Second
+
 // doneSentinel is the terminal sentinel's data payload — C5, cited here
 // together with its posture stated exactly as C5 states it
 // (verify-report W2, R-ATS-012, S-ATS-047): for Chat Completions this
@@ -388,6 +394,29 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					return
 				}
 
+				// R-AEM-010 (AI-32.2): an in-band error frame mid-stream
+				// terminates the stream with a typed mid-stream failure.
+				// Detected by JSON shape BEFORE decodeChunk, so the
+				// frame's unknown object discriminator (R-ATS-017's
+				// "skip a present-but-mismatched object" rule) cannot
+				// silently swallow a terminal-error payload.
+				if isInBandErrorFrame(frame.Data) {
+					if blockOpen {
+						if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+							if !emit(ctx, out, stamper, end) {
+								return
+							}
+						}
+					}
+					failure := failureFromErrorFrame(frame.Data, outputPreceded)
+					if failure != nil {
+						if errEv, err := ai.ErrorEvent(failure); err == nil {
+							emit(ctx, out, stamper, errEv)
+						}
+					}
+					return
+				}
+
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
 					emitFailure(ctx, out, stamper, state, errMalformedChunkJSON, outputPreceded, blockOpen)
@@ -405,10 +434,40 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					emitFailure(ctx, out, stamper, state, applyErr, outputPreceded, blockOpen)
 					return
 				}
-				for _, ev := range events {
-					if !emit(ctx, out, stamper, ev) {
-						return
+			for _, ev := range events {
+				if !emit(ctx, out, stamper, ev) {
+					// AI-32.3: a normal mid-stream emit losing the
+					// ctx.Done() race (R-AEM-014) MUST still surface
+					// a typed terminal failure on cancel/deadline
+					// (S-AEM-051/052), NOT the AI-20.3 silent loss
+					// path. Bounded-wait send — same rationale as
+					// emitFailure's terminal send — so the consumer
+					// that has reached drainAll can observe the
+					// typed failure alongside the eventual close.
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
+							if blockOpen {
+								if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+									if endStamped := stamper.Stamp(end); true {
+										select {
+										case out <- endStamped:
+										case <-time.After(emitFailureSendBound):
+										}
+									}
+								}
+							}
+							if errEv, err := ai.ErrorEvent(failure); err == nil {
+								if errStamped := stamper.Stamp(errEv); true {
+									select {
+									case out <- errStamped:
+									case <-time.After(emitFailureSendBound):
+									}
+								}
+							}
+						}
 					}
+					return
+				}
 					if isOutputEvent(ev) {
 						outputPreceded = true
 					}
@@ -442,10 +501,27 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				return
 			}
 			if ctx.Err() != nil {
-				// Cancellation aborted Body.Read (AI-20.3): the sanctioned
-				// loss path — close with no terminal event, through the
-				// one deferred close above, never a second closing site
-				// (R-ATS-005).
+				// AI-32.3/S-AEM-051/052: deadline/cancel mid-stream
+				// becomes a typed terminal failure (S-AEM-051
+				// FailureCategoryTimeout, S-AEM-052
+				// FailureCategoryCancellation), NOT the AI-20.3 silent
+				// loss path. Bounded-wait send so the consumer can
+				// still observe the typed failure even when ctx
+				// itself is canceled.
+				if failure := midStreamFailureFrom(ctx.Err(), outputPreceded); failure != nil {
+					if end, err := ai.NewTextBlockEnd(textBlockIndex); blockOpen && err == nil {
+						select {
+						case out <- end:
+						case <-time.After(emitFailureSendBound):
+						}
+					}
+					if errEv, err := ai.ErrorEvent(failure); err == nil {
+						select {
+						case out <- errEv:
+						case <-time.After(emitFailureSendBound):
+						}
+					}
+				}
 				return
 			}
 			emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
@@ -519,6 +595,15 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // validate bytes, so a malformed payload's bytes survive into the
 // truncated ToolCallEnd untouched — never fabricated `{}`.
 func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, cause error, outputPreceded, blockOpen bool) {
+	// AI-32.3: scoped to the function's own terminal-event send. The
+	// tool-call close + text-block close above still respect ctx via
+	// emit(), so a cancellation that lands BEFORE this function runs
+	// aborts the close chain — exactly like every other close path in
+	// this package. The terminal event itself, however, MUST be
+	// observable per S-AEM-051/052; emit()'s select-on-ctx.Done() races
+	// with that guarantee when ctx is already cancelled, so the
+	// terminal send uses a bounded-wait select instead.
+
 	// Close every still-open tool-call block (AI-30.1, D8 inheritance).
 	// truncateOpenCalls reads state.toolOpenOrder; its raw-bytes close
 	// keeps a partial / malformed payload's bytes intact (Q2 ruling).
@@ -563,5 +648,23 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 	if err != nil {
 		return
 	}
-	emit(ctx, out, stamper, ev)
+	// Stamp the terminal event through the same per-stream stamper
+	// every other event in this stream already uses (R-AEE-007) —
+	// bypassing emit() is fine for the bounded-wait, but the sequence
+	// assignment is not bypassed, ever (R-AEE-008).
+	stamped := stamper.Stamp(ev)
+	// AI-32.3 bounded-wait on the terminal failure: do NOT select on
+	// ctx.Done() here (AI-32.3's pattern races with cancellation —
+	// the consumer is actively draining). Use a short direct send with
+	// a fallthrough timer to avoid a goroutine leak if the consumer
+	// stopped, so a stream this function terminates still satisfies
+	// ai.CheckStream's no-unterminated-block invariant (AI-16).
+	select {
+	case out <- stamped:
+	case <-time.After(emitFailureSendBound):
+	}
 }
+
+// referenced from run() so the linter / errcheck posture this file's
+// other helpers already keep is preserved for the in-band frame path.
+var _ = emit
