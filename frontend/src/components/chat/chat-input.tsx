@@ -15,7 +15,7 @@
  * inserts a newline (the textarea preserves multi-line prompts).
  *
  * Submit / Cancel QRLs are supplied by the parent (ChatWindow →
- * useChatStream$). This component is purely presentational; it does
+ * useChatStream). This component is purely presentational; it does
  * NOT call use* methods directly (Qwik forbids that inside event
  * handlers per the qwik/use-method-usage lint rule). The parent owns
  * the actual lifecycle.
@@ -29,7 +29,7 @@ export interface ChatInputProps {
   disabled?: boolean;
   /**
    * Submit QRL — fired on Enter (without Shift) or Send click. The
-   * parent (ChatWindow) supplies this from `useChatStream$().submit`.
+   * parent (ChatWindow) supplies this from `useChatStream().submit`.
    * Required: the input has no default hook fallback because Qwik
    * forbids `use*()` calls inside event handlers
    * (qwik/use-method-usage). The required prop type also pins the
@@ -39,7 +39,7 @@ export interface ChatInputProps {
   onSubmit$: QRL<(value: string) => void>;
   /**
    * Cancel QRL — fired on Stop click. The parent (ChatWindow)
-   * supplies this from `useChatStream$().cancel`. Required for the
+   * supplies this from `useChatStream().cancel`. Required for the
    * same reason as `onSubmit$`.
    */
   onCancel$: QRL<() => void>;

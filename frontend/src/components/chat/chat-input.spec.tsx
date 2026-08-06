@@ -19,7 +19,7 @@
  *     turn; the input must have a stable testid for the affordance)
  *
  * QRL discipline: ChatInput requires BOTH `onSubmit$` and `onCancel$`
- * QRL props (the parent supplies them from useChatStream$). Qwik's
+ * QRL props (the parent supplies them from useChatStream). Qwik's
  * serializer rejects vi.fn refs captured inside `$()` closures, so
  * every QRL here uses module-scoped primitive counters (same
  * pattern as home-workspaces-section.spec.tsx's noopQrl).

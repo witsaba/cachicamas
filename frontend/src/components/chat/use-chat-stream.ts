@@ -269,7 +269,7 @@ export interface UseChatStreamResult {
  *     EventSource AND issues cancelTurn if a turn is still open
  *     (REQ-2 S-2.a — unmount MUST leave no orphan on the backend).
  */
-export function useChatStream$(): UseChatStreamResult {
+export function useChatStream(): UseChatStreamResult {
   const session = useStore<ChatSession>(createSession());
 
   const submitQrl = $(async (prompt: string) => {
