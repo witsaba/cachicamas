@@ -120,23 +120,16 @@ The conformance bridge SHALL run `agenttest.RunConformance` end-to-end against t
 - AND the stream does not fail
 - AND `TestReasoningExtensionField_DroppedNotLeakedNotFailed` passes.
 
-### R-OR-07 — Live smoke is opt-in via workflow dispatch and repo secret
+### R-OR-07 — Live smoke is opt-in via env vars only (no CI workflow)
 
-The live smoke (`TestOpenRouterAdapter_LiveSmoke`) SHALL be `t.Skip`-gated on the absence of `OPENROUTER_API_KEY` in the test process. The CI workflow file `.github/workflows/agent-openrouter-smoke.yml` SHALL be `workflow_dispatch` only — no `schedule`, `push`, or `pull_request` trigger. `make test` in `backend/agent/` SHALL NOT depend on OpenRouter or any network credential.
+The live smoke (`TestOpenRouterAdapter_LiveSmoke`) SHALL be `t.Skip`-gated on the absence of BOTH `OPENROUTER_API_KEY` AND `RUN_LIVE_OPENROUTER_SMOKE=1` in the test process. `make test` in `backend/agent/` SHALL NOT depend on OpenRouter or any network credential. **No CI workflow file is required by this spec** — the repository's established posture is no `.github/workflows/` (see ADR 0005 § Enforcement, doc 0002 "No CI exists"), and the live smoke is opt-in for human/local runs only.
 
-#### Scenario: Skip path exercised without the secret
+#### Scenario: Skip path exercised without the env vars
 
-- GIVEN `OPENROUTER_API_KEY` absent from the test process
+- GIVEN `OPENROUTER_API_KEY` OR `RUN_LIVE_OPENROUTER_SMOKE` absent from the test process
 - WHEN `make test` runs
 - THEN the live smoke is skipped with an attributable message
 - AND no outbound request is made.
-
-#### Scenario: Workflow file is dispatch-only
-
-- GIVEN the merged `.github/workflows/agent-openrouter-smoke.yml`
-- WHEN the workflow's triggers are enumerated
-- THEN `workflow_dispatch` is present
-- AND no `schedule`, `push`, or `pull_request` trigger is present.
 
 ### R-OR-08 — Credential redaction extends to the live smoke's logging
 
@@ -187,7 +180,7 @@ The wrapper SHALL NOT support an Anthropic native adapter, SHALL NOT widen AI-32
 | **Q2** | Layer 3 reads env, passes opaque bearer into `Config.Credential` | AI-25.2 invariant; wrapper reads nothing (memory #2432 §3) |
 | **Q3** | Wrapper placement = sibling sub-package `openaicompat/openrouter/` | AI-25.2 call-site scan scope stays clean; Engram #2571 |
 | **Q4** | Conformance bridge ships in PR #2 of this change | AI-38 first-concrete-adapter charter; doc 0002 lines 2241–2277 |
-| **Q5** | Live smoke opt-in via `workflow_dispatch` + repo secret `OPENROUTER_API_KEY` | AI-39.1 charter; doc 0002 lines 2279–2299 |
+| **Q5** | Live smoke opt-in via env vars `OPENROUTER_API_KEY` + `RUN_LIVE_OPENROUTER_SMOKE=1` (no CI workflow, consistent with ADR 0005 § Enforcement "no `.github/workflows/`") | AI-39.1 charter; doc 0002 lines 2279–2299 |
 | **Q6** | Three chained PRs under no-merge tracker | 800-line PR budget per `sdd-phase-common.md §E`; natural work-unit split |
 
 ## Traceability
