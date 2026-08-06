@@ -146,22 +146,98 @@ func (c wireChunk) hasRequiredFields() bool {
 // resolved by json.Unmarshal's own pointer-nil-on-absence behavior instead
 // of a hand-rolled decoder, since C8's prompt_tokens/completion_tokens are
 // plain JSON numbers with no byte-preservation concern like content has.
+//
+// # AI-31.2 — Two new typed detail structs (R-ACP-005, design D-A)
+//
+// C8's nested detail objects (prompt_tokens_details with cached_tokens
+// and cache_write_tokens; completion_tokens_details with reasoning_tokens)
+// join wireUsage as POINTER FIELDS, so an absent key on the parent
+// (no detail object at all) and a present parent whose leaf key is
+// absent both decode to nil on the leaf — the same absent/null/present
+// trichotomy the landed prompt_tokens/completion_tokens use, extended
+// one level deep. Leaf fields stay *int64 for the same absent-vs-zero
+// reason (S-ACP-013's CacheRead discrimination extends naturally).
+//
 // total_tokens (C8's third required field) is deliberately not decoded
-// here: ai.Usage has no corresponding field, and R-ATS-026 forbids this
-// milestone from inventing one — the two nested detail objects
-// (completion_tokens_details, prompt_tokens_details) are the same
-// out-of-charter territory (AI-31.2's full usage field mapping).
+// here: ai.Usage has no corresponding field, and AI-13.4's cost formula
+// does not want one. See the un-attested-exclusivity record on
+// usageFromWire below (R-ACP-006, D-C).
 type wireUsage struct {
-	PromptTokens     *int64 `json:"prompt_tokens"`
-	CompletionTokens *int64 `json:"completion_tokens"`
+	PromptTokens            *int64                       `json:"prompt_tokens"`
+	CompletionTokens        *int64                       `json:"completion_tokens"`
+	PromptTokensDetails     *wirePromptTokensDetails     `json:"prompt_tokens_details"`
+	CompletionTokensDetails *wireCompletionTokensDetails `json:"completion_tokens_details"`
 }
 
-// usageFromWire maps w's two mapped fields onto an ai.Usage record
-// (R-ATS-015/016, D10): present() only when the wire key was present —
+// wirePromptTokensDetails is the C8 nested object on the prompt side.
+// Every leaf is a pointer so absent-key (including absent parent) and
+// present-but-explicit-0 stay distinguishable (S-ACP-013, S-ACP-021).
+type wirePromptTokensDetails struct {
+	CachedTokens     *int64 `json:"cached_tokens"`
+	CacheWriteTokens *int64 `json:"cache_write_tokens"`
+}
+
+// wireCompletionTokensDetails is the C8 nested object on the completion
+// side. reasoning_tokens is a pointer for the same absent-vs-zero
+// discipline (S-ACP-013-style).
+type wireCompletionTokensDetails struct {
+	ReasoningTokens *int64 `json:"reasoning_tokens"`
+}
+
+// usageFromWire maps w's fields onto an ai.Usage record (R-ATS-015/016,
+// R-ACP-005…007, D10): present() only when the wire key was present —
 // including an explicit 0 — else the field stays TokenCount's absent zero
-// value. CacheRead, CacheWrite and Reasoning are never touched here: they
-// stay absent by construction for every transcript, because no wire field
-// this milestone reads maps to them (R-ATS-026's charter boundary).
+// value.
+//
+// # AI-31.2 — Three new raw mappings (R-ACP-005, design D-D)
+//
+//   - cached_tokens → CacheRead       (raw, no arithmetic)
+//   - cache_write_tokens → CacheWrite (raw, no arithmetic)
+//   - reasoning_tokens → Reasoning    (raw, no arithmetic)
+//
+// Every new mapping is RAW: the vendor's number is copied into the
+// neutral field without adjustment. The landed prompt_tokens → Input /
+// completion_tokens → Output mappings are a SEPARATE, FROZEN fact
+// (R-ACP-009, byte-identical tests) — this change touches neither.
+//
+// # AI-31.2 — Un-attested exclusivity record (R-ACP-006, S-ACP-016, design D-C)
+//
+// AI-13.4's operative sentence, quoted verbatim from
+// backend/agent/src/ai/usage.go (~L112):
+//
+//	"Input is the tokens of the request the provider processed fresh,
+//	 excluding everything counted in CacheRead and CacheWrite."
+//
+// and the immediately-following clause: "This record is exclusive, so an
+// adapter for an inclusive vendor subtracts before it fills this field
+// in."
+//
+// U1 and U2 (this change's citations.md) are SILENT on whether the
+// wire's prompt_tokens is inclusive of cached_tokens and cache_write_tokens.
+// The chat schema's only usage-arithmetic sentence (the
+// rejected_prediction_tokens description, U3) settles completion_tokens ⊇
+// reasoning_tokens and nothing else; no chat-scope prose establishes
+// prompt_tokens arithmetic. Subtracting on documented silence would be
+// inference recorded as fact (R-ATS-027), so this adapter:
+//
+//  1. maps prompt_tokens → Usage.Input as the vendor's RAW value,
+//  2. maps cached_tokens → CacheRead and cache_write_tokens → CacheWrite
+//     as the vendor's RAW values,
+//  3. performs NO arithmetic — in particular no subtraction of
+//     cached_tokens or cache_write_tokens from Input, and
+//  4. records here that THIS ADAPTER CANNOT YET ATTEST AI-13.4's
+//     exclusivity relation for Input on this dialect: a consumer
+//     summing Input + CacheRead + CacheWrite may therefore double-count
+//     on this dialect, and that limitation is named in code (this
+//     comment) and in spec (R-ACP-006) rather than papered over.
+//
+// The discharge obligation — pinning the relation against a real
+// cache-hit transcript — is routed to AI-38.2's expected-vs-generated
+// capability report, where declared-capability standing is decided.
+// S-ACP-017's impossible-arithmetic probe (prompt_tokens: 500 with
+// cached_tokens: 800 → Input = 500, CacheRead = 800 raw, no error or
+// clamp) proves the stronger claim that NO consistency arithmetic is
+// enforced anywhere on the path.
 func usageFromWire(w wireUsage) ai.Usage {
 	var u ai.Usage
 	if w.PromptTokens != nil {
@@ -169,6 +245,19 @@ func usageFromWire(w wireUsage) ai.Usage {
 	}
 	if w.CompletionTokens != nil {
 		u.Output = ai.Tokens(*w.CompletionTokens)
+	}
+	if d := w.PromptTokensDetails; d != nil {
+		if d.CachedTokens != nil {
+			u.CacheRead = ai.Tokens(*d.CachedTokens)
+		}
+		if d.CacheWriteTokens != nil {
+			u.CacheWrite = ai.Tokens(*d.CacheWriteTokens)
+		}
+	}
+	if d := w.CompletionTokensDetails; d != nil {
+		if d.ReasoningTokens != nil {
+			u.Reasoning = ai.Tokens(*d.ReasoningTokens)
+		}
 	}
 	return u
 }
@@ -381,6 +470,37 @@ func parseHex4(b []byte) (uint16, bool) {
 // finishReasonEnum is C2's five raw wire spellings, and only those five —
 // matched byte-exactly by a plain map lookup, with no trim and no case
 // fold (D5, N-6).
+//
+// # AI-31.1 — Unreachable neutral values on this dialect (R-ACP-002, S-ACP-004)
+//
+// Three members of ai.FinishReason's seven-value closed vocabulary cannot
+// be produced from any wire finish_reason on this dialect. They are
+// enumerated here at the strict gate (the single decision point that
+// decides what reaches a completion) so a reviewer finds the unreachability
+// where the gate actually rejects, not in a doc far from the code:
+//
+//	FinishReasonRefusal  — U5 NEGATIVE: no chat finish_reason member spells
+//	                       refusal; delta.refusal (C7) is the only
+//	                       refusal-shaped channel and its companion
+//	                       finish_reason is undocumented. Reopens when the
+//	                       pinned dialect gains a refusal finish member, or
+//	                       AI-38 pins the companion value from a real
+//	                       transcript (D2 ruling (a)).
+//	FinishReasonPauseTurn — U5 NEGATIVE: no pause channel exists in chat
+//	                       scope (pause/paused hits are all fine-tuning
+//	                       endpoints). AI-31.1's pause-resume lossiness
+//	                       Note is vacuous for this adapter. Reopens when
+//	                       the pinned dialect gains a pause finish member.
+//	FinishReasonUnknown  — Unreachable by design, not by omission: the
+//	                       strict gate below rejects an out-of-enum value
+//	                       as a typed malformed response (S-ATS-039), so
+//	                       an unrecognised stop value never becomes a
+//	                       completion at all. Reopens only with a
+//	                       deliberate reversal of D1.
+//
+// See spec R-ACP-002 / S-ACP-004 in
+// openspec/changes/cachicamas-ai-provider-completion/specs/ai-provider-completion/spec.md
+// for the citation-anchored table each row above summarizes.
 var finishReasonEnum = map[string]bool{
 	"stop":           true,
 	"length":         true,
