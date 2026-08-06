@@ -3,7 +3,7 @@
  *
  * Reference: openspec/changes/cachicamas-frontend-chat-layer1/design.md
  *   §3 (composes MessageBubble + ChatInput; reads signals from
- *   useChatStream$),
+ *   useChatStream),
  *   §4 (REQ-1 happy path: user message + streaming assistant bubble;
  *        REQ-4 S-4.a inline error alert when the session's last
  *        message has status='error').
@@ -23,12 +23,12 @@
  */
 import { component$ } from "@builder.io/qwik";
 
-import { useChatStream$ } from "./use-chat-stream";
+import { useChatStream } from "./use-chat-stream";
 import { ChatInput } from "./chat-input";
 import { MessageBubble } from "./message-bubble";
 
 export const ChatWindow = component$(() => {
-  const stream = useChatStream$();
+  const stream = useChatStream();
   const { session } = stream;
 
   const isIdle = session.status === "idle";

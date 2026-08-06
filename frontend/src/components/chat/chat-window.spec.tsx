@@ -6,7 +6,7 @@
  * Strict TDD target. The window is the visual surface — a scrollable
  * message list (one bubble per ChatMessage), a streaming pill for
  * pending assistant messages, and an inline <ChatInput/>. The
- * vitest spec mocks the useChatStream\$ hook (via a thin wrapper)
+ * vitest spec mocks the useChatStream hook (via a thin wrapper)
  * so we exercise the component's render behavior WITHOUT booting
  * the real EventSource.
  *
@@ -25,7 +25,7 @@ import type { ChatSession } from "~/lib/chat-types";
 
 // ---------------------------------------------------------------------------
 // Mock the hook module so we can drive session state from the spec.
-// We export a tiny fake that mimics the useChatStream\$() return
+// We export a tiny fake that mimics the useChatStream() return
 // shape (session + submit QRL + cancel QRL).
 //
 // QRL discipline: Qwik rejects non-QRL functions passed as
@@ -53,21 +53,13 @@ let mockSession: ChatSession = {
   status: "idle",
 };
 
-// Qwik's optimizer rewrites `<name>$()` call sites into `<name>Qrl`
-// lookups on the module's exports (the same convention that turns
-// `useTask$` into `useTaskQrl`, `useVisibleTask$` into
-// `useVisibleTaskQrl`, etc.). The mock factory must therefore expose
-// BOTH the public name AND the Qrl alias — otherwise the chat-window
-// component's compiled QRL resolution throws "No useChatStreamQrl
-// export" when the spec renders <ChatWindow/>.
 const useChatStreamMock = () => ({
   session: mockSession,
   submit: fakeSubmit,
   cancel: fakeCancel,
 });
 vi.mock("./use-chat-stream", () => ({
-  useChatStream$: useChatStreamMock,
-  useChatStreamQrl: useChatStreamMock,
+  useChatStream: useChatStreamMock,
 }));
 
 describe("components/chat/chat-window (REQ-1, REQ-4)", () => {

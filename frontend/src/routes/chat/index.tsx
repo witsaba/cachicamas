@@ -8,7 +8,7 @@
  *   1. Reads useSession() and decides authed-vs-anon via
  *      requireSession — REQ-3 S-3.c.
  *   2. Authed users render <ChatWindow /> which owns the streaming
- *      lifecycle (useChatStream$) + the typed-error surface
+ *      lifecycle (useChatStream) + the typed-error surface
  *      (REQ-4, REQ-5, REQ-6).
  *   3. Anon visitors render <SignInRequiredCard /> with the
  *      callbackUrl=/chat so the post-signin redirect lands here.
@@ -51,7 +51,7 @@ export default component$(() => {
   }
 
   // Authed + onboarded. Mount the chat window — it owns its own
-  // session store via useChatStream$() (REQ-1 S-1.a, REQ-7 S-7.a).
+  // session store via useChatStream() (REQ-1 S-1.a, REQ-7 S-7.a).
   // No useTask$ here: the chat's EventSource opens client-side via
   // useVisibleTask$ (browser-only global, SSR would crash).
   return (

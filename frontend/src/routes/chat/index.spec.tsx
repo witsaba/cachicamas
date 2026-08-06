@@ -89,8 +89,7 @@ const useChatStreamMock = () => ({
   cancel: fakeCancel,
 });
 vi.mock("~/components/chat/use-chat-stream", () => ({
-  useChatStream$: useChatStreamMock,
-  useChatStreamQrl: useChatStreamMock,
+  useChatStream: useChatStreamMock,
 }));
 
 describe("routes/chat (REQ-3, REQ-5, REQ-7)", () => {
