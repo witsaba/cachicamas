@@ -69,14 +69,16 @@ vi.mock("~/routes/plugin@auth", () => ({
 // session state without re-importing the module.
 // ---------------------------------------------------------------------------
 
-const fakeSubmit = vi.fn(
-  async () =>
-    ({
-      ok: true as const,
-      value: { turnId: "trn_x", streamUrl: "/api/agent/turns/trn_x/events" },
-    }),
-);
-const fakeCancel = vi.fn(async () => undefined);
+const fakeSubmit = $(async (_text: string) => ({
+  ok: true as const,
+  value: { turnId: "trn_x", streamUrl: "/api/agent/turns/trn_x/events" },
+})) as QRL<
+  (value: string) => Promise<{
+    ok: true;
+    value: { turnId: string; streamUrl: string };
+  }>
+>;
+const fakeCancel = $(async () => undefined) as QRL<() => Promise<void>>;
 let mockSession: ChatSession = {
   messages: [],
   status: "idle",
@@ -93,12 +95,10 @@ vi.mock("~/components/chat/use-chat-stream", () => ({
 
 describe("routes/chat (REQ-3, REQ-5, REQ-7)", () => {
   beforeEach(() => {
-    fakeSubmit.mockClear();
-    fakeCancel.mockClear();
     mockSession = { messages: [], status: "idle" };
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Nothing to restore — QRLs are module-scoped.
   });
 
   // ===== Anon tests (vi.mock factory default) =====
@@ -137,12 +137,19 @@ describe("routes/chat (REQ-3, REQ-5, REQ-7)", () => {
 
   // ===== Offline-error rendering (REQ-5 S-5.a) =====
 
-  it("renders the literal offline phrase when the session reports kind='offline' (REQ-5 S-5.a)", async () => {
-    // Drive the mock session into the offline-error shape: the
+  it("renders the literal offline phrase when the session reports an error (REQ-5 S-5.a)", async () => {
+    // Drive the mock session into the typed-error shape: the
     // hook flips session.status='idle' on offline AND records the
-    // offline error on the last assistant bubble's error field.
-    // The route renders ChatWindow which renders the inline alert
-    // when the last message has status='error' + error != null.
+    // typed error on the last assistant bubble's error field.
+    // The ChatMessage.error type is ChatStreamError which only
+    // carries the four HTTP-error kinds (validation / conflict /
+    // not_found / server). For the offline path, the chat-input
+    // accepts a fresh submit because session.status='idle'; the
+    // inline alert is what surfaces the literal phrase. We use
+    // kind='server' here (the closest typed kind) and override
+    // the message with the literal offline phrase — that's the
+    // same string the hook flips into the bubble on
+    // EventSource.onerror before any message.delta (REQ-5 S-5.b).
     mockSession = {
       messages: [
         {
@@ -151,7 +158,7 @@ describe("routes/chat (REQ-3, REQ-5, REQ-7)", () => {
           text: "",
           status: "error",
           error: {
-            kind: "offline",
+            kind: "server",
             message: "backend not wired — see PR for backend wire",
           },
         },
@@ -233,8 +240,18 @@ describe("routes/chat (REQ-3, REQ-5, REQ-7)", () => {
     ).toBeFalsy();
   });
 
-  it("the page head metadata titles the route as 'Chat — Cachicamas' (REQ-7 — discoverable head)", async () => {
-    const { head } = await import("./index");
-    expect(head.title).toBe("Chat \u2014 Cachicamas");
+  it("the page exports a DocumentHead for discoverability (REQ-7 — head metadata)", async () => {
+    // DocumentHead is either an object OR a function (per Qwik
+    // City 1.x's DocumentHead type). Assert the export exists and
+    // that calling the function (or unwrapping the object) yields
+    // the right title.
+    const mod = await import("./index");
+    expect(mod.head).toBeDefined();
+    const resolved =
+      typeof mod.head === "function"
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (mod.head as (props: any) => { title?: string })({} as any)
+        : mod.head;
+    expect(resolved.title).toBe("Chat \u2014 Cachicamas");
   });
 });

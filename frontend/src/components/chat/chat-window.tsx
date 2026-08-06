@@ -28,7 +28,8 @@ import { ChatInput } from "./chat-input";
 import { MessageBubble } from "./message-bubble";
 
 export const ChatWindow = component$(() => {
-  const { session } = useChatStream$();
+  const stream = useChatStream$();
+  const { session } = stream;
 
   const isIdle = session.status === "idle";
   const isStreaming = session.status === "streaming";
@@ -47,10 +48,7 @@ export const ChatWindow = component$(() => {
         >
           Chat
         </h1>
-        <p
-          data-testid="chat-subheading"
-          class="mt-1 text-sm text-slate-600"
-        >
+        <p data-testid="chat-subheading" class="mt-1 text-sm text-slate-600">
           Type a prompt and press Enter. The reply streams in below.
         </p>
       </header>
@@ -87,7 +85,7 @@ export const ChatWindow = component$(() => {
         {isStreaming ? (
           <li
             data-testid="chat-streaming-pill"
-            class="self-start rounded-md bg-slate-100 px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-700"
+            class="self-start rounded-md bg-slate-100 px-3 py-1 text-xs font-medium tracking-wide text-slate-700 uppercase"
             aria-live="polite"
           >
             Streaming…
@@ -101,12 +99,18 @@ export const ChatWindow = component$(() => {
             class="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800"
           >
             <strong class="font-semibold">Error:</strong>{" "}
-            <span data-testid="chat-error-message">{lastMessage.error.message}</span>
+            <span data-testid="chat-error-message">
+              {lastMessage.error.message}
+            </span>
           </li>
         ) : null}
       </ol>
 
-      <ChatInput disabled={!isIdle} />
+      <ChatInput
+        disabled={!isIdle}
+        onSubmit$={stream.submit}
+        onCancel$={stream.cancel}
+      />
     </section>
   );
 });

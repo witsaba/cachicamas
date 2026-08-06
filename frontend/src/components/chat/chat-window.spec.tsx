@@ -17,6 +17,7 @@
  *   - the ChatInput receives submit/cancel props from the hook
  *   - the streaming pill renders while a message is pending
  */
+import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,13 +27,27 @@ import type { ChatSession } from "~/lib/chat-types";
 // Mock the hook module so we can drive session state from the spec.
 // We export a tiny fake that mimics the useChatStream\$() return
 // shape (session + submit QRL + cancel QRL).
+//
+// QRL discipline: Qwik rejects non-QRL functions passed as
+// `onSubmit$` / `onCancel$` props at render. The mock must therefore
+// return QRLs (wrapped with $()). Qwik's serializer rejects vi.fn
+// refs captured inside closures, so the QRLs use module-scoped
+// counters instead — same pattern as chat-input.spec.tsx.
 // ---------------------------------------------------------------------------
 
-const fakeSubmit = vi.fn(async () => ({
-  ok: true as const,
-  value: { turnId: "trn_x", streamUrl: "/api/agent/turns/trn_x/events" },
-}));
-const fakeCancel = vi.fn(async () => {});
+let submitCalls = 0;
+let cancelCalls = 0;
+const fakeSubmit = $((_text: string) => {
+  submitCalls = submitCalls + 1;
+  return Promise.resolve({
+    ok: true as const,
+    value: { turnId: "trn_x", streamUrl: "/api/agent/turns/trn_x/events" },
+  });
+}) as QRL<(value: string) => Promise<{ ok: true; value: { turnId: string; streamUrl: string } }>>;
+const fakeCancel = $(() => {
+  cancelCalls = cancelCalls + 1;
+  return Promise.resolve();
+}) as QRL<() => Promise<void>>;
 let mockSession: ChatSession = {
   messages: [],
   status: "idle",
@@ -57,12 +72,12 @@ vi.mock("./use-chat-stream", () => ({
 
 describe("components/chat/chat-window (REQ-1, REQ-4)", () => {
   beforeEach(() => {
-    fakeSubmit.mockClear();
-    fakeCancel.mockClear();
+    submitCalls = 0;
+    cancelCalls = 0;
     mockSession = { messages: [], status: "idle" };
   });
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Nothing to restore — QRLs are module-scoped.
   });
 
   it("renders an empty-state when no messages exist (REQ-1)", async () => {

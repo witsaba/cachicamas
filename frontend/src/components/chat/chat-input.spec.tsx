@@ -18,20 +18,43 @@
  *   - S-2.b wiring — Stop calls the cancel QRL (cancels the in-flight
  *     turn; the input must have a stable testid for the affordance)
  *
- * The spec uses `createDOM` from `@builder.io/qwik/testing` and
- * drives `disabled` directly via props (no QRL click firings — the
- * spec is structural).
+ * QRL discipline: ChatInput requires BOTH `onSubmit$` and `onCancel$`
+ * QRL props (the parent supplies them from useChatStream$). Qwik's
+ * serializer rejects vi.fn refs captured inside `$()` closures, so
+ * every QRL here uses module-scoped primitive counters (same
+ * pattern as home-workspaces-section.spec.tsx's noopQrl).
  */
 import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { ChatInput } from "./chat-input";
+
+// Module-scoped QRL stubs — primitive counters only. Each spec
+// re-imports ChatInput (vi.resetModules not needed because the
+// stubs are module-scoped and the component does not capture them
+// in a way that would create a new binding per import).
+let submitCalls = 0;
+let cancelCalls = 0;
+const submitQrl = $((_value: string) => {
+  submitCalls = submitCalls + 1;
+  return Promise.resolve();
+}) as QRL<(value: string) => Promise<void>>;
+const cancelQrl = $(() => {
+  cancelCalls = cancelCalls + 1;
+  return Promise.resolve();
+}) as QRL<() => Promise<void>>;
 
 describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
   it("renders the textarea + Send + Stop with stable test ids (REQ-1)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput />);
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const textarea = screen.querySelector(
       '[data-testid="chat-input-textarea"]',
     );
@@ -44,7 +67,13 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
 
   it("textarea is enabled when disabled=false (REQ-1)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput disabled={false} />);
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const textarea = screen.querySelector(
       '[data-testid="chat-input-textarea"]',
     ) as HTMLTextAreaElement | null;
@@ -53,7 +82,13 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
 
   it("textarea is disabled when disabled=true (REQ-1 — disabled-during-stream)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput disabled={true} />);
+    await render(
+      <ChatInput
+        disabled={true}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const textarea = screen.querySelector(
       '[data-testid="chat-input-textarea"]',
     ) as HTMLTextAreaElement | null;
@@ -62,7 +97,13 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
 
   it("Send button is disabled when textarea is empty (REQ-1 — empty-prompt guard, NOT a session-state guard)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput disabled={false} />);
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const send = screen.querySelector(
       '[data-testid="chat-input-send"]',
     ) as HTMLButtonElement | null;
@@ -76,7 +117,13 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
 
   it("Stop button is disabled when disabled=true (REQ-2 S-2.b — Stop wired to cancel)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput disabled={true} />);
+    await render(
+      <ChatInput
+        disabled={true}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const cancel = screen.querySelector(
       '[data-testid="chat-input-cancel"]',
     ) as HTMLButtonElement | null;
@@ -86,13 +133,14 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
   });
 
   it("Stop button is enabled when disabled=false (REQ-2 S-2.b — Stop enabled during streaming... wait, REQ-1)", async () => {
-    // When session.status === "idle", `disabled=false` is passed
-    // down. The Stop affordance has no in-flight turn to cancel,
-    // but the spec asserts the disabled-mirror contract holds:
-    // Stop enabled when disabled=false. The component flips this
-    // back to disabled=true when disabled=true (see prior test).
     const { render, screen } = await createDOM();
-    await render(<ChatInput disabled={false} />);
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const cancel = screen.querySelector(
       '[data-testid="chat-input-cancel"]',
     ) as HTMLButtonElement | null;
@@ -101,12 +149,15 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
 
   it("renders inside a <form data-testid='chat-input'> for accessibility + Enter-to-submit wiring (REQ-1 Enter-to-submit)", async () => {
     const { render, screen } = await createDOM();
-    await render(<ChatInput />);
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={submitQrl}
+        onCancel$={cancelQrl}
+      />,
+    );
     const form = screen.querySelector('form[data-testid="chat-input"]');
     expect(form).toBeTruthy();
-    // Enter-to-submit is wired at the form level — the form has
-    // onSubmit$ handler. We assert structurally (form + textarea +
-    // Send type=submit) so the wiring is reviewable.
     const send = screen.querySelector(
       '[data-testid="chat-input-send"]',
     ) as HTMLButtonElement | null;
@@ -114,39 +165,38 @@ describe("components/chat/chat-input (REQ-1, REQ-7)", () => {
   });
 
   it("accepts an onSubmit$ QRL prop for test-only wiring (REQ-1 Enter-to-submit — QRL seam contract)", async () => {
-    // QRL click + keydown firings are not directly supported by
-    // createDOM. The chat-input exposes a test-only `onSubmit$` QRL
-    // seam so a consumer (the chat-window) can override the
-    // default hook-based submit path. This test pins the prop
-    // contract: a QRL of type `(value: string) => void` is
-    // accepted. We use a primitive-capturing QRL (Qwik's
-    // serializer rejects vi.fn refs captured in closures) and
-    // assert that the prop renders without erroring.
+    const { render } = await createDOM();
     let captured: string | null = null;
     const onSubmit$ = $((value: string) => {
       captured = value;
-    }) as QRL<(value: string) => void>;
-    const { render } = await createDOM();
-    await render(<ChatInput disabled={false} onSubmit$={onSubmit$} />);
-    // Captured is module-scoped (not closure-captured), so Qwik
-    // can serialize it. The prop's existence pins the QRL seam.
+      return Promise.resolve();
+    }) as QRL<(value: string) => Promise<void>>;
+    await render(
+      <ChatInput
+        disabled={false}
+        onSubmit$={onSubmit$}
+        onCancel$={cancelQrl}
+      />,
+    );
     expect(typeof onSubmit$).toBe("function");
-    // captured is still null — we did not fire the QRL, only
-    // accepted the prop. Structural wiring is the assertion.
     expect(captured).toBeNull();
   });
 
   it("accepts an onCancel$ QRL prop for test-only wiring (REQ-2 S-2.b — QRL seam contract)", async () => {
-    // Mirror of the onSubmit$ test: pins the QRL seam for the
-    // cancel button. The chat-window passes its hook-owned cancel
-    // QRL into ChatInput via this seam.
-    let cancelCalls = 0;
-    const onCancel$ = $(() => {
-      cancelCalls = cancelCalls + 1;
-    }) as QRL<() => void>;
     const { render } = await createDOM();
-    await render(<ChatInput disabled={true} onCancel$={onCancel$} />);
+    let cancelCallsLocal = 0;
+    const onCancel$ = $(() => {
+      cancelCallsLocal = cancelCallsLocal + 1;
+      return Promise.resolve();
+    }) as QRL<() => Promise<void>>;
+    await render(
+      <ChatInput
+        disabled={true}
+        onSubmit$={submitQrl}
+        onCancel$={onCancel$}
+      />,
+    );
     expect(typeof onCancel$).toBe("function");
-    expect(cancelCalls).toBe(0);
+    expect(cancelCallsLocal).toBe(0);
   });
 });
