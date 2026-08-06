@@ -358,3 +358,315 @@ describe("chat recorded SSE transcript (REQ-1, REQ-7)", () => {
     expect(parsed.map((e) => e.kind)).toEqual(["message.end"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-03 slice — typed SSE client (REQ-1, REQ-2, REQ-4, REQ-5)
+//
+// The chat's wire client. Three responsibilities:
+//   1. submitTurn() POSTs /api/agent/turns with the typed body and
+//      resolves to a typed ChatTurnResponse. Network errors are
+//      mapped to { kind: "offline", message: <literal> } (REQ-5).
+//   2. cancelTurn() DELETEs /api/agent/turns/:id with
+//      X-Requested-With: XMLHttpRequest (state-changing fetch) and
+//      keepalive: true (REQ-2 — fire-and-forget cancel).
+//   3. subscribeTurn() opens an EventSource on the returned stream
+//      URL with withCredentials: true and dispatches typed events
+//      via addEventListener('message.<x>', ...) per design §3 D1
+//      refinement. turn.end closes the EventSource exactly once
+//      (REQ-1 S-1.a). Mid-stream `event: error` surfaces as a
+//      ChatStreamError and closes the stream (REQ-4 S-4.a).
+//
+// EventSource is mocked with the FakeES pattern from
+// lib/api.sse.spec.ts:75-307 (capturing onmessage / onerror / close).
+// fetch is mocked via vi.stubGlobal.
+// ---------------------------------------------------------------------------
+
+import { afterEach, beforeEach, vi } from "vitest";
+
+describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
+  let originalEventSource: typeof EventSource | undefined;
+  let lastCreated: FakeES | null = null;
+
+  // FakeES mirrors api.sse.spec.ts:79-93. Captures addEventListener
+  // calls so subscribeTurn can dispatch typed events; mirrors the
+  // typed `EventSource.addEventListener('message.<x>', ...)` pattern
+  // that the runtime path uses (design §3 D1 refinement).
+  class FakeES {
+    url: string;
+    withCredentials = false;
+    listeners: Record<string, Array<(ev: MessageEvent<string>) => void>> = {};
+    closed = false;
+    constructor(url: string, opts?: { withCredentials?: boolean }) {
+      this.url = url;
+      this.withCredentials = opts?.withCredentials ?? false;
+      lastCreated = this;
+    }
+    addEventListener(name: string, cb: (ev: MessageEvent<string>) => void) {
+      if (!this.listeners[name]) this.listeners[name] = [];
+      this.listeners[name].push(cb);
+    }
+    removeEventListener(name: string, cb: (ev: MessageEvent<string>) => void) {
+      const arr = this.listeners[name];
+      if (!arr) return;
+      const idx = arr.indexOf(cb);
+      if (idx >= 0) arr.splice(idx, 1);
+    }
+    close() {
+      this.closed = true;
+    }
+    // Test-only helper to dispatch a typed event the way the browser would.
+    fire(name: string, data: unknown) {
+      const arr = this.listeners[name];
+      if (!arr) return;
+      for (const cb of arr) {
+        cb({ data: JSON.stringify(data) } as MessageEvent<string>);
+      }
+    }
+  }
+
+  beforeEach(() => {
+    originalEventSource = (globalThis as { EventSource?: typeof EventSource })
+      .EventSource;
+    (globalThis as { EventSource?: typeof EventSource }).EventSource =
+      FakeES as unknown as typeof EventSource;
+    lastCreated = null;
+  });
+
+  afterEach(() => {
+    if (originalEventSource === undefined) {
+      delete (globalThis as { EventSource?: typeof EventSource }).EventSource;
+    } else {
+      (globalThis as { EventSource?: typeof EventSource }).EventSource =
+        originalEventSource;
+    }
+    lastCreated = null;
+    vi.restoreAllMocks();
+  });
+
+  it("submitTurn issues POST /api/agent/turns with JSON body + CSRF header (REQ-1, REQ-2)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ turnId: "trn_1", streamUrl: "/api/agent/turns/trn_1/events" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { submitTurn } = await import("./chat-api");
+
+    const result = await submitTurn({ id: "trn_1", prompt: "hello" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.turnId).toBe("trn_1");
+      expect(result.value.streamUrl).toBe("/api/agent/turns/trn_1/events");
+    }
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/agent/turns");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ id: "trn_1", prompt: "hello" });
+    // stateChangingFetch wraps headers in a Headers instance, so use .get().
+    const headers = init.headers as Headers;
+    expect(headers.get("X-Requested-With")).toBe("XMLHttpRequest");
+    expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("submitTurn maps network errors to kind=offline with the literal phrase (REQ-5)", async () => {
+    // The literal phrase is user-locked (D4). The vitest spec asserts
+    // the EXACT substring so a future refactor that drops or rewrites
+    // the message goes red.
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { submitTurn } = await import("./chat-api");
+
+    const result = await submitTurn({ id: "trn_1", prompt: "hello" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("offline");
+      expect(result.message).toContain("backend not wired — see PR for backend wire");
+    }
+  });
+
+  it("submitTurn maps a 400 validation response to kind=validation with the typed fields (REQ-4 S-4.b)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: "validation",
+          message: "Invalid request",
+          fields: { prompt: "must not be empty" },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { submitTurn } = await import("./chat-api");
+
+    const result = await submitTurn({ id: "trn_1", prompt: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.kind === "validation") {
+      expect(result.fields.prompt).toBe("must not be empty");
+    } else {
+      throw new Error("expected validation result");
+    }
+  });
+
+  it("submitTurn maps a 409 response to kind=conflict (REQ-4 S-4.c)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "conflict", message: "Turn already in flight" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { submitTurn } = await import("./chat-api");
+
+    const result = await submitTurn({ id: "trn_1", prompt: "hello" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("conflict");
+      expect(result.message).toBe("Turn already in flight");
+    }
+  });
+
+  it("cancelTurn issues DELETE /api/agent/turns/:id with keepalive + CSRF (REQ-2)", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { cancelTurn } = await import("./chat-api");
+
+    const result = await cancelTurn({ id: "trn_1" });
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/agent/turns/trn_1");
+    expect(url.endsWith("/trn_1")).toBe(true);
+    expect(init.method).toBe("DELETE");
+    expect((init as RequestInit & { keepalive?: boolean }).keepalive).toBe(true);
+    const headers = init.headers as Headers;
+    expect(headers.get("X-Requested-With")).toBe("XMLHttpRequest");
+  });
+
+  it("cancelTurn maps network errors to kind=offline (defensive)", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { cancelTurn } = await import("./chat-api");
+
+    const result = await cancelTurn({ id: "trn_1" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("offline");
+    }
+  });
+
+  it("subscribeTurn opens an EventSource on the stream URL with withCredentials (REQ-1)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const events: ChatStreamEvent[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      (ev) => events.push(ev),
+    );
+    expect(lastCreated).not.toBeNull();
+    expect(lastCreated!.url).toContain("/api/agent/turns/trn_1/events");
+    expect(lastCreated!.withCredentials).toBe(true);
+    unsubscribe();
+  });
+
+  it("subscribeTurn dispatches typed message.start/delta/end/turn.end in order (REQ-1 S-1.a)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const events: ChatStreamEvent[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      (ev) => events.push(ev),
+    );
+    // Fire the canonical transcript frames.
+    lastCreated!.fire("message.start", { messageId: "m-1", index: 0 });
+    lastCreated!.fire("message.delta", { index: 0, delta: "Hello" });
+    lastCreated!.fire("message.end", { index: 0, finishReason: "stop" });
+    lastCreated!.fire("turn.end", { finishReason: "stop" });
+    expect(events).toEqual([
+      { kind: "message.start", messageId: "m-1", index: 0 },
+      { kind: "message.delta", index: 0, delta: "Hello" },
+      { kind: "message.end", index: 0, finishReason: "stop" },
+      { kind: "turn.end", finishReason: "stop" },
+    ]);
+    // turn.end closes the EventSource exactly once.
+    expect(lastCreated!.closed).toBe(true);
+    unsubscribe();
+  });
+
+  it("subscribeTurn closes the EventSource exactly once on turn.end (REQ-1 S-1.a)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const events: ChatStreamEvent[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      (ev) => events.push(ev),
+    );
+    lastCreated!.fire("turn.end", {});
+    expect(lastCreated!.closed).toBe(true);
+    // A second turn.end after close is a no-op for the consumer.
+    lastCreated!.fire("turn.end", {});
+    expect(events).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("subscribeTurn surfaces a mid-stream error event as the typed ChatStreamError (REQ-4 S-4.a)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const events: ChatStreamEvent[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      (ev) => events.push(ev),
+    );
+    lastCreated!.fire("error", {
+      kind: "server",
+      message: "upstream unavailable",
+    });
+    expect(events).toEqual([
+      {
+        kind: "error",
+        error: { kind: "server", message: "upstream unavailable" },
+      },
+    ]);
+    unsubscribe();
+  });
+
+  it("subscribeTurn drops frames with an unknown event name (REQ-1 S-1.b)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const events: ChatStreamEvent[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      (ev) => events.push(ev),
+    );
+    lastCreated!.fire("ping", {});
+    lastCreated!.fire("message.start", { messageId: "m-1", index: 0 });
+    expect(events.map((e) => e.kind)).toEqual(["message.start"]);
+    unsubscribe();
+  });
+
+  it("subscribeTurn treats EventSource onerror before any message as offline (REQ-5 S-5.b)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const errors: string[] = [];
+    const unsubscribe = subscribeTurn(
+      "/api/agent/turns/trn_1/events",
+      () => {
+        /* no events expected */
+      },
+      (msg) => errors.push(msg),
+    );
+    // Simulate the EventSource erroring without any prior message.
+    (lastCreated!.listeners["error"] ?? []).forEach((cb) =>
+      cb({} as MessageEvent<string>),
+    );
+    // The exact error surface from the runtime path: a literal
+    // string containing the user-locked offline phrase.
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toContain("backend not wired — see PR for backend wire");
+    unsubscribe();
+  });
+
+  it("subscribeTurn's unsubscribe closes the EventSource (REQ-1)", async () => {
+    const { subscribeTurn } = await import("./chat-api");
+    const unsubscribe = subscribeTurn("/api/agent/turns/trn_1/events", () => {});
+    unsubscribe();
+    expect(lastCreated!.closed).toBe(true);
+  });
+});
