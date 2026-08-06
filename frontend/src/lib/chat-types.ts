@@ -145,3 +145,95 @@ export interface TranscriptFixture {
 export function assertNever(x: never): never {
   throw new Error(`Non-exhaustive switch: ${JSON.stringify(x)}`);
 }
+
+/**
+ * Decode a raw SSE transcript into typed ChatStreamEvent values.
+ *
+ * This is the wire-shape mirror of the typed EventSource listeners
+ * in chat-api.ts (which register `message.<x>` event names on the
+ * browser global). The runtime path uses addEventListener for live
+ * streams; this pure helper exists so vitest can assert the
+ * recorded fixture bytes parse into the expected typed sequence
+ * WITHOUT a real EventSource (REQ-7 property-style over bytes).
+ *
+ * Wire shape (per design.md §3 D1 refinement):
+ *   frame 1: event: message.start\ndata: {"messageId":"...","index":0}\n\n
+ *   frame N: event: message.delta\ndata: {"index":0,"delta":"..."}\n\n
+ *   ...    : event: message.end\ndata: {"index":0,"finishReason":"stop"}\n\n
+ *   last   : event: turn.end\ndata: {"usage":{...},"finishReason":"stop"}\n\n
+ *
+ * S-1.b — frames with an `event:` name outside the known set are
+ * silently dropped (the buffer is unchanged for those).
+ *
+ * JSON parse errors on a data: line are also silently dropped —
+ * the parser mirrors parseSSEResponse (lib/api.ts:851-881) in
+ * treating malformed data as a no-op frame.
+ */
+export function parseTranscript(raw: string): ChatStreamEvent[] {
+  const events: ChatStreamEvent[] = [];
+  const frames = raw.split("\n\n");
+  for (const frame of frames) {
+    if (frame.length === 0) continue;
+    let eventName = "";
+    let dataLine = "";
+    let hasData = false;
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event: ")) {
+        eventName = line.slice("event: ".length).trim();
+      } else if (line.startsWith("data: ")) {
+        dataLine = line.slice("data: ".length);
+        hasData = true;
+      }
+      // comment lines (": keepalive") are ignored — they don't carry a typed event
+    }
+    if (!eventName || !hasData) continue;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(dataLine) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    switch (eventName) {
+      case "message.start":
+        events.push({
+          kind: "message.start",
+          messageId: String(payload.messageId ?? ""),
+          index: Number(payload.index ?? 0),
+        });
+        break;
+      case "message.delta":
+        events.push({
+          kind: "message.delta",
+          index: Number(payload.index ?? 0),
+          delta: String(payload.delta ?? ""),
+        });
+        break;
+      case "message.end":
+        events.push({
+          kind: "message.end",
+          index: Number(payload.index ?? 0),
+          finishReason: (payload.finishReason ?? "unknown") as ChatFinishReason,
+        });
+        break;
+      case "turn.end":
+        events.push({
+          kind: "turn.end",
+          ...(payload.usage ? { usage: payload.usage as ChatUsage } : {}),
+          ...(payload.finishReason
+            ? { finishReason: payload.finishReason as ChatFinishReason }
+            : {}),
+        });
+        break;
+      case "error":
+        events.push({
+          kind: "error",
+          error: payload as unknown as ChatStreamError,
+        });
+        break;
+      default:
+        // S-1.b — unknown event names are ignored.
+        break;
+    }
+  }
+  return events;
+}

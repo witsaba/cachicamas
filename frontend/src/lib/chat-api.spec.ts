@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertNever,
+  parseTranscript,
   type ChatFinishReason,
   type ChatMessage,
   type ChatSession,
@@ -29,6 +30,57 @@ import {
   type ChatUsage,
   type TranscriptFixture,
 } from "./chat-types";
+
+// ---------------------------------------------------------------------------
+// T-02: recorded SSE transcript fixture (REQ-1, REQ-7)
+//
+// The fixture file lives at
+//   frontend/src/components/chat/__fixtures__/single-turn.sse
+// and pins the wire envelope byte-for-byte (D7). Vitest imports it
+// via Vite's `?raw` query string, which returns the literal bytes
+// — no transformation, no JSON parsing.
+//
+// The expectedEvents constant is the typed property-style assertion:
+// the spec proves the recorded bytes decode into exactly this
+// sequence of ChatStreamEvent values. Any wire-shape drift forces
+// the fixture to change FIRST, then the typed constant, then any
+// consumer that depends on a removed field.
+//
+// Why three deltas (not five): tasks.md T-02 says three. Smaller
+// fixture = faster spec. The wire envelope (start → delta* → end →
+// terminal) is invariant.
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — vite `?raw` query is resolved at build time. The
+//   fixture file MUST exist before vitest runs; if it doesn't, the
+//   import resolves to a missing module and the spec goes red with
+//   "Failed to load url ../components/chat/__fixtures__/single-turn.sse".
+import singleTurnFixtureRaw from "../components/chat/__fixtures__/single-turn.sse?raw";
+
+export const expectedEvents: readonly ChatStreamEvent[] = [
+  { kind: "message.start", messageId: "msg-001", index: 0 },
+  { kind: "message.delta", index: 0, delta: "Hello, " },
+  { kind: "message.delta", index: 0, delta: "world" },
+  { kind: "message.delta", index: 0, delta: "!" },
+  {
+    kind: "message.end",
+    index: 0,
+    finishReason: "stop",
+  },
+  {
+    kind: "turn.end",
+    finishReason: "stop",
+    usage: { inputTokens: 12, outputTokens: 3 },
+  },
+] as const;
+
+export const singleTurnFixture: TranscriptFixture = {
+  name: "single-turn",
+  raw: singleTurnFixtureRaw,
+  expectedEvents,
+  expectTerminalClose: true,
+};
 
 // ---------------------------------------------------------------------------
 // T-01: type-only exhaustiveness assertions (REQ-1, REQ-4, REQ-6)
@@ -247,5 +299,62 @@ describe("chat-types contract surface (REQ-1, REQ-4, REQ-6)", () => {
     expect(fixture.raw).toContain("message.start");
     expect(fixture.expectedEvents).toHaveLength(1);
     expect(fixture.expectTerminalClose).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-02 slice — recorded SSE transcript
+// ---------------------------------------------------------------------------
+
+describe("chat recorded SSE transcript (REQ-1, REQ-7)", () => {
+  it("the recorded fixture parses to at least one event", () => {
+    // This is the RED step: the fixture file must exist and be
+    // parseable. The test will fail with a module-resolution error
+    // until the fixture is in place.
+    const parsed = parseTranscript(singleTurnFixtureRaw);
+    expect(parsed.length).toBeGreaterThan(0);
+  });
+
+  it("the recorded fixture parses to exactly the typed expectedEvents (REQ-7 property-style)", () => {
+    const parsed = parseTranscript(singleTurnFixtureRaw);
+    // Deep-assert: every variant's discriminator + payload matches
+    // the typed expected list. A future wire change MUST update the
+    // fixture AND expectedEvents together.
+    expect(parsed).toEqual(expectedEvents);
+  });
+
+  it("the fixture's raw bytes carry `event:` names (D7 wire envelope)", () => {
+    // Pin the wire shape: SSE frames MUST use the `event:` field
+    // for typed dispatch (mirrors design.md §3 D1 refinement).
+    expect(singleTurnFixtureRaw).toContain("event: message.start");
+    expect(singleTurnFixtureRaw).toContain("event: message.delta");
+    expect(singleTurnFixtureRaw).toContain("event: message.end");
+    expect(singleTurnFixtureRaw).toContain("event: turn.end");
+  });
+
+  it("the fixture ends with a `turn.end` terminal event (REQ-1 S-1.a close-on-terminal)", () => {
+    const parsed = parseTranscript(singleTurnFixtureRaw);
+    const last = parsed[parsed.length - 1];
+    expect(last?.kind).toBe("turn.end");
+  });
+
+  it("parseTranscript drops unknown event names (REQ-1 S-1.b)", () => {
+    const raw =
+      "event: message.start\ndata: {\"messageId\":\"m\",\"index\":0}\n\n" +
+      "event: ping\ndata: {}\n\n" +
+      "event: message.end\ndata: {\"index\":0,\"finishReason\":\"stop\"}\n\n";
+    const parsed = parseTranscript(raw);
+    expect(parsed.map((e) => e.kind)).toEqual([
+      "message.start",
+      "message.end",
+    ]);
+  });
+
+  it("parseTranscript drops frames with malformed JSON data (defensive parity with parseSSEResponse)", () => {
+    const raw =
+      "event: message.start\ndata: {not json\n\n" +
+      "event: message.end\ndata: {\"index\":0,\"finishReason\":\"stop\"}\n\n";
+    const parsed = parseTranscript(raw);
+    expect(parsed.map((e) => e.kind)).toEqual(["message.end"]);
   });
 });
