@@ -14,7 +14,7 @@
 // R-CNF-019) uses instead of a hand-rolled loop.
 //
 // cachicamas-ai-conformance-tool-amendment (AI-30 slice 2) adds
-// checkRelativeKindOrder/requireRelativeKindOrder: R-CNF-019's boundary is
+// checkRelativeKindOrder: R-CNF-019's boundary is
 // that an exact drained count is derivable only where the neutral contract
 // makes the counted quantity observable. A script carrying a fragmentable
 // argument channel (a tool call whose argument bytes a conformant subject
@@ -130,16 +130,4 @@ func checkRelativeKindOrder(events []ai.Event, want []ai.EventKind) error {
 		return fmt.Errorf("agenttest: checkRelativeKindOrder: drained window ended after %d event(s) with %v never seen, want it in relative order (R-CNF-019)", len(events), want[cursor])
 	}
 	return nil
-}
-
-// requireRelativeKindOrder fails tb, naming the discrepancy, unless events
-// contains want's kinds in relative order per checkRelativeKindOrder —
-// requireDrainedKinds' sibling for a case whose script carries a
-// fragmentable argument channel, shared rather than reimplemented per case
-// (R-CNF-019).
-func requireRelativeKindOrder(tb testing.TB, events []ai.Event, want []ai.EventKind) {
-	tb.Helper()
-	if err := checkRelativeKindOrder(events, want); err != nil {
-		tb.Fatalf("%v", err)
-	}
 }
