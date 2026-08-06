@@ -32,6 +32,19 @@ import (
 // Widening the taxonomy belongs to the taxonomy owner as its own change,
 // never to this framing-only milestone (S-ASD-068, R-ASD-021).
 //
+// # Second consumer landed — recorded, not absorbed (AI-30.1)
+//
+// AI-30.1 lands that second consumer: stream_state.go's
+// toolCallAccumulationCap (4 × DefaultMaxFrameBytes) bounds the per-call
+// argument-byte buffer across the whole stream, exactly the
+// resource-exhaustion concept this note names. The cap keeps
+// ErrFrameTooLarge's existing compromise form — the new cause
+// errToolCallOverCap reports ai.FailureCategoryMalformedResponse for an
+// over-cap payload that may itself be perfectly well-formed. The
+// taxonomy itself stays at nine members: widening ai.FailureCategory
+// remains a separate change owned by the taxonomy owner, not absorbed
+// into this mapping-only milestone (S-ATL-032).
+//
 // # Distinct from ErrTruncated under errors.Is
 //
 // ErrFrameTooLarge and ErrTruncated (below) both name the same AI-19
