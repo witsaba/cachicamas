@@ -1,7 +1,9 @@
 package openrouter
 
 import (
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
@@ -13,7 +15,7 @@ import (
 // the sense that callers may leave them zero-valued — Credential must
 // carry a non-empty bearer (openaicompat.New rejects an empty credential
 // with ai.Invalid(ai.ErrEmpty, ai.At("credential")), and HTTPClient nil
-// selects openaicompat's own bounded default client (R-APC-003,
+// selects this wrapper's own bounded default client (R-APC-003,
 // NFR-APC-F). The three attribution strings and Model default to no-op
 // values (empty strings suppress their headers; a zero Model is replaced
 // by openrouterDefaultModel at construction).
@@ -26,10 +28,12 @@ type Config struct {
 	Credential openaicompat.Credential
 
 	// HTTPClient is the *http.Client carrying outbound traffic. When nil,
-	// NewProvider builds one through openaicompat.New — whose own
-	// newDefaultHTTPClient is bounded (R-APC-009: no DefaultTransport,
-	// no ProxyFromEnvironment) and never sets a whole-request timeout
-	// (R-APC-003). When non-nil, it is used verbatim by openaicompat.New.
+	// NewProvider builds one with a fresh http.Transport whose bounds
+	// mirror openaicompat's own newDefaultHTTPClient (R-APC-003,
+	// R-APC-009: no DefaultTransport, no ProxyFromEnvironment). When
+	// non-nil, it is used verbatim — its Transport is wrapped by
+	// attributionRoundTripper; its bounds, including any whole-request
+	// timeout, are its injector's decision (R-APC-003).
 	HTTPClient *http.Client
 
 	// HTTPReferer sets the HTTP-Referer header on every outbound request
@@ -42,9 +46,9 @@ type Config struct {
 	// headers (R-OR-02 sub-scenario 2).
 	XTitle string
 
-	// XCategories sets X-OpenRouter-Categories on every outbound
-	// request when non-empty. An empty string suppresses the header
-	// (R-OR-02 sub-scenario 2).
+	// XCategories sets X-OpenRouter-Categories on every outbound request
+	// when non-empty. An empty string suppresses the header (R-OR-02
+	// sub-scenario 2).
 	XCategories string
 
 	// Model overrides the model identifier carried on the wire body's
@@ -78,13 +82,52 @@ type Config struct {
 // returned value; NewProvider is a factory (function), not a new type
 // (design § 6, design § 13).
 func NewProvider(cfg Config) (ai.ModelProvider, error) {
+	transport := attributionRoundTripper{
+		base:          baseTransport(cfg.HTTPClient),
+		referer:       cfg.HTTPReferer,
+		xTitle:        cfg.XTitle,
+		xCategories:   cfg.XCategories,
+		modelOverride: effectiveModel(cfg),
+	}
+	httpClient := &http.Client{Transport: transport}
+
 	client, err := openaicompat.New(openaicompat.Config{
 		Endpoint:   openrouterBaseURL,
 		Credential: cfg.Credential,
-		HTTPClient: cfg.HTTPClient,
+		HTTPClient: httpClient,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return client, nil
+}
+
+// baseTransport returns the http.RoundTripper attributionRoundTripper
+// wraps. When cfg.HTTPClient is nil, this wrapper builds a fresh
+// http.Transport whose bounds mirror openaicompat's own
+// newDefaultHTTPClient (R-APC-009: Proxy nil, no DefaultTransport, no
+// ProxyFromEnvironment) — see backend/agent/src/ai/openaicompat/client.go
+// for the canonical bound values. The duplication is documented here
+// because openaicompat's helper is unexported and this wrapper must
+// stay compositionally distinct from the package it composes.
+//
+// When cfg.HTTPClient is non-nil, attributionRoundTripper wraps the
+// injected client's existing Transport verbatim — its bounds are its
+// injector's decision (R-APC-003), not this wrapper's.
+func baseTransport(cfgHTTPClient *http.Client) http.RoundTripper {
+	if cfgHTTPClient != nil {
+		if t := cfgHTTPClient.Transport; t != nil {
+			return t
+		}
+		return http.DefaultTransport
+	}
+	return &http.Transport{
+		Proxy: nil,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	}
 }
