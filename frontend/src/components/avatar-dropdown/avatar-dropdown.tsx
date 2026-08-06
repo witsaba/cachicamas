@@ -156,6 +156,23 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   Workspaces
                 </MenuItem>
               </li>
+              {/*
+                2026-08-06 cachicamas-frontend-chat-layer1 (REQ-3):
+                The avatar menu is the live authenticated navigation
+                entry point for the chat. The design named
+                `components/example/example.tsx` as the sidebar but
+                the worktree has no sidebar component in the app
+                shell — the override is documented in
+                openspec/changes/cachicamas-frontend-chat-layer1/tasks.md
+                §2.1 + §3 T-09. Auth gating is inherited from the
+                dropdown's anon-render-nothing branch (top of this
+                component) + the /chat route's onRequest guard.
+              */}
+              <li>
+                <MenuItem as="a" href="/chat" testId="avatar-menu-chat">
+                  Chat
+                </MenuItem>
+              </li>
               <li>
                 <MenuItem as="a" href="/settings" testId="avatar-menu-settings">
                   Settings
