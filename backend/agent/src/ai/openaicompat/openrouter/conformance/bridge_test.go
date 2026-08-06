@@ -1,6 +1,9 @@
 // AI-38 — the OpenRouter conformance bridge: the first concrete adapter
 // for agenttest.RunConformance's whole case table (R-OR-06, design D5,
 // tasks.md § PR #2 work unit 2.1).
+
+//nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
+package openrouter_conformance
 //
 // # Bridge factory — the one seam RunConformance consumes
 //
@@ -62,8 +65,6 @@
 // — the assertions exercise the suite's own construction-time checks
 // (requireValidFactory, crossCheckDeclaredOptionalCapabilities) via
 // the only exported door that runs them.
-
-package openrouter_conformance
 
 import (
 	"bytes"

@@ -37,6 +37,7 @@
 //        LeakedNotFailed PASSes against the recorded canonical
 //        bytes.
 
+//nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
 
 import (

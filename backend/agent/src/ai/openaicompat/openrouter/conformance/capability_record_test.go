@@ -62,6 +62,7 @@
 //        per-capability drivers in 2.5 (run_for_test.go)
 //        exercise the cases the bridge CAN run.
 
+//nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
 
 import (

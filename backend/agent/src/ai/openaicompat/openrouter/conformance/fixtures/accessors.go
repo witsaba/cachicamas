@@ -1,14 +1,16 @@
-// AI-38 — fixture accessor functions.
+// Package fixtures exposes the recorded canonical byte sequences
+// (and supporting var-blocks) every conformance case in the
+// openrouter_conformance sub-package consumes.
 //
-// This file exposes every fixture var-block declared in the
-// sibling fixture files as a no-argument function returning the
-// recorded bytes / map / count. Each accessor is the single
-// consumer-side door onto the recorded canonical shape — the
-// conformance bridge's tests iterate through these functions, never
-// through the underlying var-blocks directly, so a future change to
-// the fixture storage shape (e.g., generating bytes at runtime
-// instead of storing a string literal) is local to the fixtures
-// package.
+// # What this package carries
+//
+// Each var-block is a recorded wire byte slice (or a
+// configuration map / count) the conformance bridge's tests
+// iterate over. The accessor functions (no-argument functions
+// returning the recorded shape) are the single consumer-side
+// door onto the recorded canonicals, so a future change to
+// fixture storage (e.g., generating bytes at runtime instead
+// of storing a string literal) is local to this package.
 //
 // The accessor names use the "Openrouter" prefix (matching the
 // sub-package's package name) rather than the bare fixture names
@@ -16,10 +18,9 @@
 // but a future merger with a sibling fixtures package would
 // otherwise collide. The exported shape is deliberately
 // function-shaped (returning the value) rather than a plain var
-// export so the assertions in fixtures_test.go can iterate
-// without leaking the fixture bytes through a panic or a copy
-// hazard.
-
+// export so the assertions in the parent sub-package's
+// fixtures_test.go can iterate without leaking the fixture bytes
+// through a panic or a copy hazard.
 package fixtures
 
 // OpenrouterTextStream returns the recorded OpenRouter-shaped text

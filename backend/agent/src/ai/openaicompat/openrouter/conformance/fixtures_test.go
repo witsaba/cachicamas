@@ -44,6 +44,7 @@
 // size budget is safe on authored-code terms even though raw line
 // count exceeds 800.
 
+//nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
 
 import (
