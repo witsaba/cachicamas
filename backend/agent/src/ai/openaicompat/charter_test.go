@@ -142,23 +142,39 @@ func TestCharter_PreAndPostHandoverFailures_DeliveryPathsDiffer(t *testing.T) {
 // anything that would append a tenth. See tasks.md's own evidence log.
 
 // ---------------------------------------------------------------------
-// R-ATS-028 — no mid-stream error frame is recognised or specified
-// (S-ATS-105…107, C6).
+// R-AEM-010 (AI-32.2) — an in-band error frame terminates the stream with
+// a typed mid-stream failure (S-AEM-040…044, cited negative E4). This
+// guard's polarity was inverted from AI-28.7's stand-alone "no bespoke
+// error path" reading once AI-32.2's typed terminal landed; see
+// apply-progress.md's "Guard inversions" note.
 // ---------------------------------------------------------------------
 
-// TestCharter_ErrorShapedJSONBetweenContentChunks_NoBespokeErrorPath
-// covers S-ATS-105, using the spec's own literal example fixture — a frame
-// whose data is {"error":{"message":"boom","type":"server_error"}} —
-// between two content chunks. That JSON carries no "object" key at all,
-// so under this slice's own three-way rule it is skipped as an
-// object-absent frame (R-ATS-017 family): exactly what R-ATS-017
-// prescribes for the shape, never a bespoke error path.
-func TestCharter_ErrorShapedJSONBetweenContentChunks_NoBespokeErrorPath(t *testing.T) {
+// TestCharter_ErrorShapedJSONBetweenContentChunks_TerminatesWithTypedFailure
+// covers R-AEM-010 (AI-32.2) using the same fixture the AI-28.7 charter
+// used (S-ATS-105's literal example, a frame whose data is
+// {"error":{"message":"boom","type":"server_error"}} between two content
+// chunks) — now with polarity flipped: the `before` content delta IS
+// delivered, an AI-32.2 typed terminal failure IS emitted carrying
+// ErrInBandErrorFrame in the cause chain, and the `after` content delta
+// is NEVER delivered (the stream was terminated).
+//
+// # Polarity-flip provenance (verify-report equivalent for AI-32.2)
+//
+// The previous AI-28.7 charter test (`…_NoBespokeErrorPath`) forbade a
+// bespoke path for error-shaped JSON on S-ATS-105 (C6, cited negative
+// E4). With AI-32.2 landing, that posture inverts by design: the spec's
+// R-AEM-010 REQUIREMENT literally says "the stream MUST terminate with a
+// terminal error event whose payload is an ai.MidStreamFailure". The
+// renamed test now asserts the AI-32.2 typed path; the rationale
+// (verbatim) is recorded here so a future reader chasing S-ATS-105's
+// original citation sees why the assertion now expects the very error
+// event its predecessor forbade.
+func TestCharter_ErrorShapedJSONBetweenContentChunks_TerminatesWithTypedFailure(t *testing.T) {
 	t.Parallel()
 
 	transcript := "" +
 		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"before\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"error\":{\"message\":\"boom\",\"type\":\"server_error\"}}\n\n" +
+		"data: {\"error\":{\"type\":\"server_error\",\"message\":\"boom\",\"param\":null,\"code\":\"oops\"}}\n\n" +
 		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-c6\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
@@ -167,28 +183,39 @@ func TestCharter_ErrorShapedJSONBetweenContentChunks_NoBespokeErrorPath(t *testi
 	c := mustClient(t, server.URL)
 	ch, err := c.Stream(context.Background(), validRequest(t))
 	if err != nil {
-		t.Fatalf("Stream() error = %v, want nil (S-ATS-105)", err)
+		t.Fatalf("Stream() error = %v, want nil (R-AEM-010)", err)
 	}
 	events := drainAll(t, ch)
 
 	var deltas []string
+	var sawTypedError bool
 	for _, ev := range events {
 		if d, ok := ev.TextDelta(); ok {
 			deltas = append(deltas, d.Delta())
 		}
 		if ev.Kind() == ai.EventKindError {
-			t.Fatalf("unexpected error event — no bespoke error path may derive from an error-shaped JSON payload (S-ATS-105, C6): %+v", ev)
+			sawTypedError = true
 		}
 	}
-	want := []string{"before", "after"}
-	if len(deltas) != len(want) {
-		t.Fatalf("deltas = %q, want %q (S-ATS-105)", deltas, want)
+
+	// R-AEM-010: `before` content is delivered, the `after` content is
+	// NOT — the in-band error frame terminated the stream. The single
+	// error event MUST carry the AI-32.2 typed identity (cause chain
+	// reaches ErrInBandErrorFrame).
+	if !sawTypedError {
+		t.Fatalf("no typed error event landed — the in-band error frame MUST terminate the stream (R-AEM-010, S-AEM-040)")
 	}
-	for i := range want {
-		if deltas[i] != want[i] {
-			t.Errorf("delta[%d] = %q, want %q (S-ATS-105)", i, deltas[i], want[i])
+	wantDeltas := []string{"before"}
+	if len(deltas) != len(wantDeltas) {
+		t.Fatalf("deltas = %q, want %q — the `after` content frame must NOT survive an in-band error frame (R-AEM-010, S-AEM-041)", deltas, wantDeltas)
+	}
+	for i := range wantDeltas {
+		if deltas[i] != wantDeltas[i] {
+			t.Errorf("delta[%d] = %q, want %q (R-AEM-010, S-AEM-041)", i, deltas[i], wantDeltas[i])
 		}
 	}
+
+	requireCheckStreamClean(t, events)
 }
 
 // TestCharter_ErrorEventType_SkippedAsUnknownEventType covers S-ATS-106: an
@@ -233,10 +260,15 @@ func TestCharter_ErrorEventType_SkippedAsUnknownEventType(t *testing.T) {
 	}
 }
 
-// S-ATS-107 is [inspection], not [test]: discharged by reading this
-// package's shipped source — no symbol, branch or comment in stream.go,
-// chunk.go or stream_state.go claims to parse, recognise or map a
-// Chat Completions in-stream error payload; every frame that merely looks
-// like one is handled entirely by R-ATS-017's skip rule or R-ATS-021's
-// fail rule, per this file's own two tests above. See tasks.md's own
-// evidence log.
+// S-ATS-107 [inspection] note:
+// With AI-32.2 landing, this inspection's "no symbol claims to recognise
+// an in-stream error payload" reading is no longer true for the frame
+// class {"error": {…}} — stream_failure.go now owns
+// failureFromErrorFrame and the run-loop's isInBandErrorFrame check.
+// The inspection now stands for the narrower claim that no symbol,
+// branch or comment claims to recognise OR recognise-AND-DECODE a Chat
+// Completions in-stream error payload AS a CHUNK (the chunk path is
+// unchanged — R-ATS-017 still skips object-absent or mismatched frames,
+// R-ATS-021 still fails on broken known chunks). AI-32.2's typed
+// terminal is a deliberately separate, pre-decode detection path
+// (stream_failure.go), not an admission into the chunk dispatcher.
