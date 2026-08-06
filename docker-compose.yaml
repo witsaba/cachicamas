@@ -201,6 +201,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-cachicamas_pg}
       POSTGRES_USER: ${QUEEN_USER:-queen}
       POSTGRES_PASSWORD: ${QUEEN_PASSWORD:-changeme-queen}
+      # Local dev compose runs plain Postgres (no TLS termination).
+      # database_administrator's Go default sslmode=require
+      # (backend/database_administrator/src/migration/postgres/driver.go:81)
+      # fails on a plain Postgres with `tls error: server refused TLS
+      # connection`. Override to `disable` here; production should set
+      # `require` or `verify-full` in their own env file.
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
 # OpenTelemetry
       OTEL_SERVICE_NAME: database_administrator
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
