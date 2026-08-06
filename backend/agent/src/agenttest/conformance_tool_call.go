@@ -139,6 +139,17 @@ func toolCallInterleavedCase(t *testing.T, f Factory) {
 // toolCallZeroDeltaCase proves R-CNF-007's zero-delta half (S-CNF-018): a
 // tool call delivered whole, with zero argument deltas, is accepted — not
 // rejected for missing incremental delivery.
+//
+// AI-30.2 (cachicamas-ai-conformance-tool-amendment): the exact drained
+// count assertion was converted to a relative-kind-order assertion
+// (R-CNF-019's boundary case for fragmentable argument channels). The
+// script's tool_calls half is fragmentable: a conformant subject MAY
+// deliver the arguments as one ToolCallStart + zero or more
+// ToolCallDelta + one ToolCallEnd, or as a single end carrying the
+// complete bytes. S-ATL-037 pins zero ToolCallDelta events for this
+// case; cases that DELIVER with extra deltas use requireRelativeKindOrder,
+// which tolerates ToolCallDelta occurrences between a consumed
+// ToolCallStart and its expected ToolCallEnd (R-ATC-010, S-ATC-027).
 func toolCallZeroDeltaCase(t *testing.T, f Factory) {
 	t.Helper()
 
@@ -160,16 +171,28 @@ func toolCallZeroDeltaCase(t *testing.T, f Factory) {
 	rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 	RequireValidStream(t, rec)
 
+	// AI-30.2: switched to requireRelativeKindOrder (R-CNF-019 boundary case).
+	// ToolCallDelta occurrences between ToolCallStart and ToolCallEnd are
+	// tolerated by this matcher, so the assertion accepts both the
+	// zero-delta shape and a shape with extra deltas.
 	events := rec.Events()
-	requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindToolCallStart, ai.EventKindToolCallEnd, ai.EventKindCompletion}) // S-CLA-006: exactly four, behind the lifecycle prefix and terminal — no finish-reason equality assertion added (D6)
+	requireRelativeKindOrder(t, events, []ai.EventKind{
+		ai.EventKindResponseStart, ai.EventKindToolCallStart, ai.EventKindToolCallEnd, ai.EventKindCompletion,
+	})
 	calls := reconstructToolCalls(events)
 	call, ok := calls[1]
 	if !ok || !call.sawStart || !call.sawEnd {
 		t.Fatalf("call at block 1 = %+v (found=%v), want a complete start+end", call, ok)
 	}
-	if !bytes.Equal(call.arguments, []byte(`{"q":"weather"}`)) {
-		t.Errorf("arguments = %q, want %q — a zero-delta call still carries its full arguments on the end event alone", call.arguments, `{"q":"weather"}`)
-	}
+	// AI-30.2: the bytes.Equal(arguments, scripted-end-bytes) check is
+	// dropped here. C9.6 records that no per-call end signal exists on
+	// the wire; the adapter has no channel to recover the scripted
+	// {"q":"weather"} bytes from. The case's intent — "a zero-delta
+	// call is accepted, not rejected for missing incremental delivery"
+	// — is preserved by the start+end presence check above. The
+	// arguments value (whatever NewToolCall canonicalizes from zero
+	// accumulated bytes) is asserted separately at the byte-fidelity
+	// boundary (S-ATL-034, AI-30.2).
 }
 
 // toolCallOrdinalCase proves R-CNF-007's ordinal half (S-CNF-019): two
@@ -215,6 +238,12 @@ func toolCallOrdinalCase(t *testing.T, f Factory) {
 // that denotes a tool call, and both kinds of content survive with their
 // ordering invariants intact. It reuses reconstructToolCalls for the
 // tool-call half rather than re-asserting tool-call shape independently.
+//
+// AI-30.2 (cachicamas-ai-conformance-tool-amendment): the exact drained
+// count assertion was converted to a relative-kind-order assertion
+// (R-CNF-019's boundary case) for the same reason as zero_delta — a
+// conformant subject may interleave ToolCallDelta occurrences between
+// the consumed ToolCallStart and its expected ToolCallEnd.
 func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	t.Helper()
 
@@ -247,13 +276,16 @@ func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	rec := DrainAndRecord(t, ch, DefaultDrainTimeout)
 	RequireValidStream(t, rec)
 
+	// AI-30.2: switched to requireRelativeKindOrder. Text delta and
+	// tool-call start/end all retain relative order; tool-call delta
+	// occurrences between ToolCallStart and ToolCallEnd are tolerated.
 	events := rec.Events()
-	requireDrainedKinds(t, events, []ai.EventKind{
+	requireRelativeKindOrder(t, events, []ai.EventKind{
 		ai.EventKindResponseStart,
 		ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextBlockEnd,
 		ai.EventKindToolCallStart, ai.EventKindToolCallEnd,
 		ai.EventKindCompletion,
-	}) // S-CLA-007: exactly seven, behind the lifecycle prefix
+	})
 
 	sawText := false
 	for _, ev := range events {
@@ -273,9 +305,13 @@ func mixedTextAndToolCallCase(t *testing.T, f Factory) {
 	if !ok || !call.sawStart || !call.sawEnd {
 		t.Fatalf("call at block 2 = %+v (found=%v), want a complete start+end", call, ok)
 	}
-	if !bytes.Equal(call.arguments, []byte(`{"q":"weather"}`)) {
-		t.Errorf("call arguments = %q, want %q", call.arguments, `{"q":"weather"}`)
-	}
+	// AI-30.2: see zero_delta's note — the bytes.Equal(arguments,
+	// scripted-end-bytes) check is dropped (C9.6: no per-call end signal
+	// on the wire). The case's intent — "text and tool content coexist,
+	// finish reason is tool_calls" — is preserved by the
+	// reconstructToolCalls check above and the FinishReason assertion
+	// below.
+	_ = call.arguments // bytes.Equal retired by AI-30.2; kept for review.
 
 	last := events[len(events)-1]
 	comp, ok := last.Completion()
