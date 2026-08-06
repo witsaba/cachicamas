@@ -183,7 +183,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(cls).toMatch(/!p-0/);
   });
 
-  it("panel lists Profile, Workspaces, Settings, and Sign out entries (T-WS-2i-015 + 2026-07-06 ownboarding + 2026-07-16 prompts)", async () => {
+  it("panel lists Profile, Workspaces, Chat, Settings, and Sign out entries (T-WS-2i-015 + 2026-07-06 ownboarding + 2026-07-16 prompts + 2026-08-06 chat-layer1)", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -220,6 +220,16 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       "/workspaces",
     );
 
+    // 2026-08-06 cachicamas-frontend-chat-layer1 (REQ-3 / T-09):
+    // The "Chat" entry is the live authenticated navigation
+    // discoverability hook for /chat. Auth gating is inherited
+    // from the dropdown's anon-render-nothing branch + the /chat
+    // route's onRequest guard.
+    const chat = screen.querySelector('[data-testid="avatar-menu-chat"]');
+    expect(chat).toBeTruthy();
+    expect((chat as HTMLAnchorElement).getAttribute("href")).toBe("/chat");
+    expect((chat as HTMLElement).textContent ?? "").toContain("Chat");
+
     // 2026-07-16 settings-app-grid (R-SAG-NAV-001): the "Settings"
     // menu item now links to /settings, the Launchpad-style app
     // launcher grid. The grid currently lists one tile (Prompts);
@@ -250,6 +260,40 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
       'input[name="redirectTo"]',
     ) as HTMLInputElement | null;
     expect(redirectTo?.value).toBe("/auth/signin");
+  });
+
+  it("anon visitor has no Chat link in DOM (auth-gated navigation per REQ-3)", async () => {
+    const { render, screen } = await createDOM();
+    const session: SessionShape = { user: null };
+    await render(<AvatarDropdown session={session} signOut={fakeSignOut()} />);
+    // The whole dropdown is null for anon (defensive). The Chat
+    // nav is auth-only via the dropdown menu (the /chat route
+    // itself enforces requireAuthRedirect).
+    expect(screen.querySelector('[data-testid="avatar-menu-chat"]')).toBeFalsy();
+  });
+
+  it("Chat link uses the MenuItem affordance (text-first, no imagery) — UX-4", async () => {
+    const { render, screen } = await createDOM();
+    const session: SessionShape = {
+      user: {
+        name: "Braejan Jan",
+        email: "braejan@example.com",
+        image: "https://avatars.githubusercontent.com/u/12345?v=4",
+      },
+    };
+    await render(
+      <AvatarDropdown session={session} signOut={fakeSignOut()} forceOpen />,
+    );
+    const chat = screen.querySelector(
+      '[data-testid="avatar-menu-chat"]',
+    ) as HTMLAnchorElement | null;
+    expect(chat).toBeTruthy();
+    expect(chat?.tagName.toLowerCase()).toBe("a");
+    // UX-4 (aphantasic-friendly): text-only — no <img>, no <svg>,
+    // no decorative content. The Chat affordance is a single
+    // text label inside the menu item.
+    expect(chat?.querySelectorAll("img").length).toBe(0);
+    expect(chat?.querySelectorAll("svg").length).toBe(0);
   });
 
   it("Sign out menu item renders the Lucide log-out icon + cursor-pointer + hover/transition affordances (UAT-4)", async () => {
