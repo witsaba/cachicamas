@@ -1,0 +1,135 @@
+package openaicompat
+
+import (
+	"encoding/json"
+
+	"github.com/cachicamas/backend/agent/src/ai"
+)
+
+// appendBody hand-assembles req's wire body into one contiguous byte
+// slice, in one fixed source-code order: model, messages, tools
+// (AI-26.4, present only when the request declares at least one —
+// appendToolsField, tool.go), tool_choice and the generation options
+// max_tokens/temperature/top_p/stop (AI-26.7, present only when each's
+// own presence flag is set — appendToolChoiceField/
+// appendGenerationOptionFields, option.go), stream/stream_options, and
+// this adapter's own reserved-namespace provider-extension members,
+// merged raw last (AI-26.7, R-ART-019 — appendExtensionFields, option.go;
+// present only when the request carries one) (design.md "Data Flow").
+//
+// This is deliberately NOT struct-marshalled through encoding/json — see
+// doc.go's wire-shape provenance section, claim 3: json.Marshal pipes
+// every json.Marshaler result, including json.RawMessage, through
+// encoding/json's own internal compaction and HTML-escaping
+// (encoding/json/encode.go:483-488, indent.go:51), which would silently
+// rewrite the verbatim tool-schema bytes R-ART-010 requires to pass
+// through unmodified. Every string LEAF here still goes through
+// appendJSONString (json.Marshal's deterministic escaping); only a
+// would-be json.RawMessage-shaped value is ever spliced raw, and this
+// slice introduces none.
+//
+// Field order is source order, never iteration order: ranging over a map
+// anywhere on this path would make cross-run determinism probabilistic
+// rather than structural (R-ART-003, design.md "Map discipline"), and
+// nothing below ranges over one.
+func appendBody(req ai.Request) []byte {
+	buf := make([]byte, 0, 256)
+	buf = append(buf, '{')
+	buf = appendModelField(buf, req)
+	buf = append(buf, ',')
+	buf = appendMessagesField(buf, req)
+	if tools, hasTools := req.Tools(); hasTools {
+		buf = append(buf, ',')
+		buf = appendToolsField(buf, tools)
+	}
+	if choice, hasChoice := req.ToolChoice(); hasChoice {
+		buf = append(buf, ',')
+		buf = appendToolChoiceField(buf, choice)
+	}
+	buf = appendGenerationOptionFields(buf, req)
+	buf = append(buf, ',')
+	buf = appendStreamFields(buf)
+	buf = appendExtensionFields(buf, req)
+	buf = append(buf, '}')
+	return buf
+}
+
+// appendModelField appends `"model":"<value>"`, the model identity taken
+// verbatim from req (R-ART-002).
+func appendModelField(buf []byte, req ai.Request) []byte {
+	buf = append(buf, `"model":`...)
+	return appendJSONString(buf, req.Model())
+}
+
+// appendMessagesField appends `"messages":[...]`. Each of req's
+// system-instruction segments renders first, one wire message per
+// segment (system.go's appendSystemMessageObject, AI-26.2, R-ART-005),
+// followed by one rendered object per req.Messages(), in caller order —
+// both SystemInstruction.Segments() and Messages() are already
+// caller-ordered slices, so this introduces no map (design.md "Map
+// discipline"). A request with no system instruction (S-ART-020)
+// contributes no system message at all — wrote tracks whether anything
+// has been appended yet, rather than assuming messages is the sole
+// source of entries, so the join works whether or not a system
+// instruction is present.
+//
+// This loop is also the whole of R-ART-009's "no merging" guarantee: it
+// calls appendMessageObject (message.go, AI-26.3, grown at AI-26.5) once
+// per req.Messages() element, unconditionally, with no lookahead or
+// grouping by role, so a run of consecutive same-role messages never
+// produces fewer wire objects than the ai.Message values that produced
+// them — a RoleTool message carrying more than one tool result can
+// produce MORE (appendToolResultMessages, message.go, AI-26.5), never
+// fewer. Every role and every content-part variant this phase reads is
+// message.go's own (AI-26.3, slice 5; AI-26.5, slice 6), which replaced
+// this skeleton's original one-role/one-text-part-only rendering
+// outright.
+func appendMessagesField(buf []byte, req ai.Request) []byte {
+	buf = append(buf, `"messages":[`...)
+	wrote := false
+	if system, hasSystem := req.SystemInstruction(); hasSystem {
+		for _, segment := range system.Segments() {
+			if wrote {
+				buf = append(buf, ',')
+			}
+			buf = appendSystemMessageObject(buf, segment)
+			wrote = true
+		}
+	}
+	for _, message := range req.Messages() {
+		if wrote {
+			buf = append(buf, ',')
+		}
+		buf = appendMessageObject(buf, message)
+		wrote = true
+	}
+	buf = append(buf, ']')
+	return buf
+}
+
+// appendStreamFields appends
+// `"stream":true,"stream_options":{"include_usage":true}`.
+//
+// Both are unconditional from this skeleton onward (R-ART-017). AI-24
+// §§8, 13.1 assign the total positive assertion to AI-26.7, but the bytes
+// themselves are emitted here so no later slice rewrites every earlier
+// expectation literal (design.md "Usage opt-in placement"). Neither value
+// is caller-controlled, so neither needs appendJSONString: both are fixed
+// boolean literals, not text that could need escaping.
+func appendStreamFields(buf []byte) []byte {
+	return append(buf, `"stream":true,"stream_options":{"include_usage":true}`...)
+}
+
+// appendJSONString appends s, JSON-string-encoded via json.Marshal's
+// deterministic escaping (design.md "Wire-body representation").
+//
+// The error return is unreachable for a string: json.Marshal only fails
+// for an unsupported Go type (a channel, a function, a cyclic pointer, or
+// a broken Marshaler), none of which a string value can be.
+func appendJSONString(buf []byte, s string) []byte {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		panic("openaicompat: json.Marshal(string) failed unexpectedly: " + err.Error())
+	}
+	return append(buf, encoded...)
+}

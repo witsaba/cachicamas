@@ -28,6 +28,8 @@ func init() {
 func textOrderingCase(t *testing.T, f Factory) {
 	t.Helper()
 
+	responseStart, err := ai.NewResponseStart("resp-order-contiguity", "model-order-contiguity")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	start, err := ai.NewTextBlockStart(1)
 	requireConstructed(t, err, "ai.NewTextBlockStart")
 	// "café shop" with the 2-byte UTF-8 encoding of 'é' (0xC3 0xA9) split
@@ -38,8 +40,10 @@ func textOrderingCase(t *testing.T, f Factory) {
 	requireConstructed(t, err, "ai.NewTextDelta")
 	end, err := ai.NewTextBlockEnd(1)
 	requireConstructed(t, err, "ai.NewTextBlockEnd")
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	requireConstructed(t, err, "ai.NewCompletion")
 
-	script := Script{Steps: []Step{Emit(start), Emit(delta1), Emit(delta2), Emit(end)}}
+	script := Script{Steps: []Step{Emit(responseStart), Emit(start), Emit(delta1), Emit(delta2), Emit(end), Emit(completion)}}
 	subject := f.New(t, script)
 	ch, err := subject.Stream(t.Context(), minimalRequest(t))
 	if err != nil {
@@ -50,23 +54,19 @@ func textOrderingCase(t *testing.T, f Factory) {
 	RequireValidStream(t, rec) // ai.CheckStream ordering + CheckContiguity sequencing, both delegated (R-STK-005, R-STK-006)
 
 	events := rec.Events()
-	if len(events) != 4 {
-		t.Fatalf("drained %d event(s), want 4 (start, two deltas, end) (S-CNF-012)", len(events))
-	}
-	wantKinds := []ai.EventKind{ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextDelta, ai.EventKindTextBlockEnd}
-	for i, ev := range events {
-		if ev.Kind() != wantKinds[i] {
-			t.Errorf("event %d kind = %v, want %v (S-CNF-012)", i, ev.Kind(), wantKinds[i])
-		}
+	wantKinds := []ai.EventKind{ai.EventKindResponseStart, ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextDelta, ai.EventKindTextBlockEnd, ai.EventKindCompletion}
+	requireDrainedKinds(t, events, wantKinds) // exactly six: the shipped four lacked both the prefix and the terminal (S-CLA-001, R-CNF-019)
+	if err := checkLifecyclePrefix(events, "resp-order-contiguity", "model-order-contiguity"); err != nil {
+		t.Error(err) // S-CLA-002: identity equality, not mere presence
 	}
 
-	d1, ok := events[1].TextDelta()
-	if !ok {
-		t.Fatal("event 1 carries no TextDelta payload")
-	}
-	d2, ok := events[2].TextDelta()
+	d1, ok := events[2].TextDelta()
 	if !ok {
 		t.Fatal("event 2 carries no TextDelta payload")
+	}
+	d2, ok := events[3].TextDelta()
+	if !ok {
+		t.Fatal("event 3 carries no TextDelta payload")
 	}
 	const wantText = "caf\xc3\xa9 shop"
 	if reconstructed := d1.Delta() + d2.Delta(); reconstructed != wantText {
@@ -82,10 +82,12 @@ func textOrderingCase(t *testing.T, f Factory) {
 func textEmptyCompletionCase(t *testing.T, f Factory) {
 	t.Helper()
 
+	responseStart, err := ai.NewResponseStart("resp-empty-completion", "model-empty-completion")
+	requireConstructed(t, err, "ai.NewResponseStart")
 	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
 	requireConstructed(t, err, "ai.NewCompletion")
 
-	script := Script{Steps: []Step{Emit(completion)}}
+	script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
 	subject := f.New(t, script)
 	ch, err := subject.Stream(t.Context(), minimalRequest(t))
 	if err != nil {
@@ -96,10 +98,11 @@ func textEmptyCompletionCase(t *testing.T, f Factory) {
 	RequireValidStream(t, rec) // no contiguity violation is reported for the absent text block (S-CNF-016)
 
 	events := rec.Events()
-	if len(events) != 1 {
-		t.Fatalf("drained %d event(s), want 1 (only the completion — no minimum text delta count enforced) (S-CNF-015)", len(events))
+	requireDrainedKinds(t, events, []ai.EventKind{ai.EventKindResponseStart, ai.EventKindCompletion}) // S-CLA-003: exactly two — no minimum text-content count enforced (R-CNF-006)
+	if err := checkLifecyclePrefix(events, "resp-empty-completion", "model-empty-completion"); err != nil {
+		t.Error(err) // S-CLA-004: identity equality
 	}
-	if _, ok := events[0].Completion(); !ok {
-		t.Fatal("the one drained event is not a Completion, want the terminal present and this case to pass (S-CNF-015)")
+	if _, ok := events[1].Completion(); !ok {
+		t.Fatal("event 1 is not a Completion, want the terminal present and this case to pass (S-CNF-015)")
 	}
 }

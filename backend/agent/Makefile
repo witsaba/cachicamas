@@ -54,9 +54,8 @@ help:  ## Show available targets
 #
 # There is no `install` target on purpose. This module carries ZERO requires
 # and has nothing to download. It stays that way until a milestone arrives with
-# an ADR to add a dependency: AI-24 selects a transport (its own ADR gate), and
-# AI-37 adds the OpenTelemetry API (pre-authorised by ADR 0005 section D3, and
-# by nothing else).
+# an ADR to add a dependency: AI-37 adds the OpenTelemetry API (pre-authorised
+# by ADR 0005 section D3, and by nothing else).
 
 ## tidy: clean go.mod / go.sum
 .PHONY: tidy

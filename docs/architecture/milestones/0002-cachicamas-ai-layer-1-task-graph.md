@@ -1,6 +1,6 @@
 # Layer 1 milestones and task graph — `cachicamas_ai` model adapter
 
-> **Status:** Wave 0 + Wave 1 + Wave 2 + Wave 3 complete — **24 of 41** milestones shipped. **AI-00 through AI-23 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 49 production files and 58 test files.
+> **Status:** Wave 0 + Wave 1 + Wave 2 + Wave 3 complete — **24 of 42** milestones shipped. **AI-00 through AI-23 are landed and verified.** The `backend/agent` module exists at `backend/agent/` with 49 production files and 58 test files.
 > **Single source.** This document owns milestone identity, scope and delivery sequence **as well as** the inside of each milestone — the subtask graph an implementer walks with red-green-refactor. It supersedes the plan dated 2026-07-30 that assumed seventeen shipped milestones inside `database_administrator`; see [what changed and why](#what-changed-from-the-retired-plan) for the identifier map from that plan to this one.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md) — downstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
@@ -8,6 +8,8 @@
 > **Date:** 2026-07-30.
 > **Milestone identifiers are append-only from this document forward.** AI-NN ids are contiguous in dependency order today because the plan is starting from zero and nothing yet cites them. From the first merged milestone onward the append-only rule binds: new work takes the next free number, and logical insertion points are expressed with a `Blocks:` field, never by renumbering.
 > **Node identifiers are append-only.** A node is `AI-NN.p` (subtask of milestone AI-NN) or `AI-NN.p.q` (fractal subdivision of `AI-NN.p`). Splitting a node appends children under it; it never renumbers siblings. A node discovered during implementation is appended with the next free ordinal and an edge, exactly like the milestone rule above.
+
+> **Amended 2026-08-03 (AI-24)** — milestone total ~~41~~ → **42**; `AI-41` appended per the Wave-2 carryover assignment. Shipped count unchanged at 24.
 
 > [!IMPORTANT]
 > **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures — each milestone's SDD cycle owns those. "The request", "the envelope", "the provider interface" are concept names from the architecture reference, not type names. From Wave 1 forward, this document cites shipped Layer 1 code as evidence for completed milestones, never for unshipped ones.
@@ -35,7 +37,7 @@ Every leaf is sized to be implemented test-first in one sitting, is verifiable b
 - [Wave 2 — Stream](#wave-2--stream): [AI-14](#ai-14--define-the-event-envelope-with-per-stream-sequencing) · [AI-15](#ai-15--add-response-lifecycle-events) · [AI-16](#ai-16--add-text-delta-events) · [AI-17](#ai-17--add-reasoning-delta-events) · [AI-18](#ai-18--add-tool-call-delta-events) · [AI-19](#ai-19--define-the-provider-error-taxonomy-and-the-terminal-error-event) · [AI-20](#ai-20--define-the-provider-interface)
 - [Wave 3 — Prove](#wave-3--prove): [AI-21](#ai-21--build-a-scripted-fake-provider) · [AI-22](#ai-22--build-stream-recording-and-assertion-helpers) · [AI-23](#ai-23--create-the-provider-conformance-suite)
 - [Wave 4 — Connect the vendor](#wave-4--connect-the-vendor): [AI-24](#ai-24--select-first-provider-and-transport) · [AI-25](#ai-25--provider-configuration-and-client-construction) · [AI-26](#ai-26--translate-normalized-requests-to-wire-requests) · [AI-27](#ai-27--implement-the-streaming-frame-decoder) · [AI-28](#ai-28--translate-response-lifecycle-and-text) · [AI-29](#ai-29--translate-the-reasoning-stream) · [AI-30](#ai-30--translate-the-tool-call-stream) · [AI-31](#ai-31--translate-usage-and-finish-reasons) · [AI-32](#ai-32--map-http-and-provider-failures)
-- [Wave 5 — Harden](#wave-5--harden): [AI-33](#ai-33--prove-cancellation-and-goroutine-cleanup) · [AI-34](#ai-34--lock-backpressure-and-buffer-behavior) · [AI-35](#ai-35--define-retry-and-idempotency-policy) · [AI-36](#ai-36--enforce-secret-redaction) · [AI-37](#ai-37--add-the-observability-boundary)
+- [Wave 5 — Harden](#wave-5--harden): [AI-33](#ai-33--prove-cancellation-and-goroutine-cleanup) · [AI-34](#ai-34--lock-backpressure-and-buffer-behavior) · [AI-35](#ai-35--define-retry-and-idempotency-policy) · [AI-36](#ai-36--enforce-secret-redaction) · [AI-37](#ai-37--add-the-observability-boundary) · [AI-41](#ai-41--discharge-the-wave-2-carryovers)
 - [Wave 6 — Hand off](#wave-6--hand-off): [AI-38](#ai-38--run-full-deterministic-adapter-conformance) · [AI-39](#ai-39--add-the-opt-in-live-smoke-test) · [AI-40](#ai-40--publish-the-layer-2-readiness-contract)
 - [Layer 1 completion checklist](#layer-1-completion-checklist)
 - [Explicitly deferred until after Layer 1](#explicitly-deferred-until-after-layer-1)
@@ -66,7 +68,9 @@ Each milestone below should become its **own change** unless its SDD exploration
 - Public types need stable semantics before a concrete adapter depends on them.
 - A milestone may refine later names, but it must not violate ADR 0004.
 - Each SDD must state what remains intentionally unsupported.
-- **The module stays dependency-free until a milestone has an ADR to add one.** `go.mod` carries zero requires from AI-00 until AI-24 selects a transport (its own ADR gate) and AI-37 adds the OTel API (pre-authorized by ADR 0005 § D3, and by nothing else).
+- **The module stays dependency-free until a milestone has an ADR to add one.** `go.mod` carries zero requires from AI-00 until ~~AI-24 selects a transport (its own ADR gate) and~~ AI-37 adds the OTel API (pre-authorized by ADR 0005 § D3, and by nothing else).
+
+> **Amended 2026-08-03 (AI-24)** — AI-24 selected raw `net/http`: standard library, zero `go.mod` requires. The ADR gate this bullet named resolved to a **no-op** — evaluated, and firing no obligation, because the chosen transport adds no dependency. The AI-00.3 forward guard's allowlist gained no second entry. See `decision.md` § 9.
 
 ---
 
@@ -187,7 +191,7 @@ flowchart LR
     W1 --> W2["Wave 2 — Stream<br/>AI-14 … AI-20<br/>events, errors, interface"]
     W2 --> W3["Wave 3 — Prove<br/>AI-21 · AI-22 · AI-23<br/>fake, test kit, conformance"]
     W3 --> W4["Wave 4 — Connect<br/>AI-24 … AI-32<br/>first adapter"]
-    W4 --> W5["Wave 5 — Harden<br/>AI-33 … AI-37"]
+    W4 --> W5["Wave 5 — Harden<br/>AI-33 … AI-37 · AI-41"]
     W5 --> W6["Wave 6 — Hand off<br/>AI-38 · AI-39 · AI-40"]
 
     classDef w fill:#dbeafe,stroke:#1d4ed8,color:#1f2937
@@ -209,7 +213,7 @@ One structural property is worth naming because the retired plan lacked it: **th
 | **2 — Stream** | AI-14 to AI-20 | Per-stream sequenced events for every content family, a constructible terminal error with its taxonomy, and a provider interface that exposes no vendor type. |
 | **3 — Prove** | AI-21 to AI-23 | A scripted fake, reusable stream assertions, and a conformance suite that already judges the fake. |
 | **4 — Connect the vendor** | AI-24 to AI-32 | The first adapter streams normalized text, reasoning, tools and metadata, and maps every failure into the taxonomy. |
-| **5 — Harden** | AI-33 to AI-37 | Cancellation, backpressure, retry, redaction and observability are safe and proven. |
+| **5 — Harden** | AI-33 to AI-37, AI-41 | Cancellation, backpressure, retry, redaction and observability are safe and proven, and the Wave-2 carryovers are discharged. |
 | **6 — Hand off** | AI-38 to AI-40 | The adapter passes conformance deterministically and Layer 2 can consume a frozen v1 API. |
 
 **First SDD to start: AI-00** (`cachicamas-agent-module-scaffold`). Its preconditions are satisfied — ADR 0005 and ADR 0006 are merged, and the tree is quiet because there is nothing to conflict with. Nothing else may start before it: there is no module to hold a test.
@@ -547,7 +551,9 @@ flowchart LR
   1. WHEN a reasoning part with a token is placed in a message, read back, and re-attached THEN the token is byte-identical — covering every byte class: binary, high Unicode, embedded NUL, and a token longer than any plausible buffer boundary.
   2. The property survives the copy semantics of AI-05.3: copying a message copies the token exactly, and mutating the caller's byte slice afterwards does not change it.
 - **Depends on:** AI-07.2.
-- **Out of scope:** survival through request rebuild — proven at AI-12.1 once the rebuild path exists; survival through the wire — AI-26.6 and AI-29.2.
+- **Out of scope:** survival through request rebuild — proven at AI-12.1 once the rebuild path exists; survival through the wire — AI-26.6 and ~~AI-29.2~~.
+
+> **Amended 2026-08-04 (AI-29) — re-pointed.** AI-29.2 is struck under the living-graph clause (see AI-29.2 below). The reasoning-round-trip token's wire half is not exercisable in v1; AI-26.6's refusal is the only path that touches reasoning, and the wire has no reasoning-bearing block to round-trip. Consult `openspec/changes/cachicamas-ai-provider-reasoning-stream/decision.md` §§ 4, 7, 11 for the absence verdict, its priced loss, and the AI-40.2 publication duty.
 
 #### AI-07.4 — Redacted and signature-only variants `[leaf]`
 
@@ -1240,7 +1246,9 @@ flowchart LR
 - **Test list:**
   1. A script can stream reasoning content — deltas, a round-trip token, and the terminal shape — and the drained events carry the token byte-exact.
   2. Redacted and signature-only reasoning shapes are scriptable, so Layer 2's tests can exercise them without a vendor.
-  3. Scripted reasoning never appears in text events — the fake enforces the same wall AI-29.1 requires of the real adapter.
+  3. Scripted reasoning never appears in text events — the fake enforces the same wall ~~AI-29.1~~ requires of the real adapter.
+
+> **Amended 2026-08-04 (AI-29) — re-pointed.** AI-29.1 is struck under the living-graph clause (see AI-29.1 below); the same wall the fake enforces is instead held mechanically by `refuseReasoning` (the landed absence mechanism named in this change's `decision.md` § 5 row 1) and by AI-26.6's refusal on the wire. Consult `openspec/changes/cachicamas-ai-provider-reasoning-stream/decision.md` §§ 4, 5, 7 for the absence verdict, the four landed mechanisms, and the priced loss.
 - **Depends on:** AI-21.1, AI-17.
 
 #### AI-21.8 — Sequential-call scripting `[leaf]`
@@ -1415,12 +1423,16 @@ SDD change: `cachicamas-ai-first-provider-decision` · The first milestone that 
 - **Depends on:** AI-03, AI-11, AI-12, AI-23. · **Blocks:** AI-25 … AI-32.
 - **Out of scope:** Adapter implementation.
 
+> **Amended 2026-08-03 (AI-24)** — Decided: the OpenAI-compatible Chat Completions streaming dialect, over raw `net/http`. Both verdicts, the seven-axis argument and the priced losses are recorded in `decision.md` of this milestone's SDD change. The acceptance clause's ADR condition did not fire — the chosen transport adds no `go.mod` dependency, so no ADR was required and the AI-00.3 guard's allowlist is unchanged.
+
 #### AI-24.1 — The provider decision `[decision]`
 
 - **Closing checklist:**
   1. One vendor named; rejected alternatives recorded with reasons (capability fit, streaming quality, testability, dependency weight, endpoint configurability, maintenance, credential-handling boundary).
   2. Four documented cross-provider divergences answered explicitly for the chosen vendor, because each drives a later node: how it expresses cache breakpoints or whether it caches automatically; whether tool results are a block inside a user-role message, a distinct role, or a nested object; whether an explicit output-token limit is mandatory; and whether it assigns tool-call identifiers at all.
-  3. Two further questions this graph adds: does the vendor stream tool-call arguments in fragments or whole (drives AI-30's case weighting), and does it sign reasoning blocks (drives AI-29.2)?
+  3. Two further questions this graph adds: does the vendor stream tool-call arguments in fragments or whole (drives AI-30's case weighting), and does it sign reasoning blocks (~~drives AI-29.2~~)?
+
+> **Amended 2026-08-04 (AI-29) — re-pointed.** AI-29.2 is struck under the living-graph clause (see AI-29.2 below). The answer recorded in AI-24's `decision.md` § 7 — "**No.** The dialect reports no signed reasoning content of any kind — only an opaque `reasoning_tokens` count" — is the answer the absent verdict rests on. Consult `openspec/changes/cachicamas-ai-provider-reasoning-stream/decision.md` §§ 4, 9 for the grounds (C7 closed five-property set, C8 count-not-block) and the two reopen triggers with named owners.
   4. Which optional capabilities from AI-03.1 this vendor supports, recorded as the expected capability report before AI-38.2 generates the real one.
 - **Depends on:** AI-23, AI-03.
 
@@ -1464,8 +1476,10 @@ flowchart LR
 
 #### AI-25.2 — No ambient authority `[guard]`
 
+> **Amended 2026-08-03 (AI-25.2 item 1 correction, AI-24) — the stated mechanism cannot bite.** AI-00.3 is an **import-path** scan (`go list -deps -test` against a deny-by-default allowlist) — it asserts which *packages* are imported, not which calls a file makes. The chosen transport, `net/http`, transitively imports `os`, which is already on this module's own allowlist as a legitimate transitive dependency of the standard library HTTP client. Reusing AI-00.3's mechanism here would therefore either false-positive on every legitimate use of `net/http`, or — since `os` must stay allowed — miss a narrow `os.Getenv` call inside the adapter entirely. The guard needs a **call-site** scan, not an import-path scan.
+
 - **Test list:**
-  1. The adapter package reads no environment variable, touches no filesystem, and spawns no process — proven mechanically with an AST import-and-call scan in the AI-00.3 style, not by convention.
+  1. The adapter package reads no environment variable, touches no filesystem, and spawns no process — proven mechanically with ~~an AST import-and-call scan in the AI-00.3 style~~ **a call-site scan over the adapter package's own source files**, not by convention.
   2. **Bite proof:** a scratch environment read in the adapter fails the guard; recorded, dropped.
 - **Depends on:** AI-25.1.
 
@@ -1513,6 +1527,8 @@ flowchart TB
 
 #### AI-26.2 — System segments and cache markers `[leaf]`
 
+> **Amended 2026-08-03 (AI-24) — item 3's branch has no subject for this adapter.** AI-24.1 recorded that the chosen vendor caches **automatically**; there is no vendor-side cap to enforce, so item 3's translation-refusal branch never fires. Item 2's "dropped whole" branch is the one this adapter takes, exercising AI-11.3's advisory contract in full. Item 3's text stays in force for a future adapter whose vendor requires explicit cache annotation with its own cap.
+
 - **Test list:**
   1. Ordered system segments render into the vendor's system shape preserving order and content.
   2. Cache-boundary markers render into the vendor's cache annotation at the marked positions, respecting the tools → system → messages hierarchy — or are dropped whole if AI-24.1 recorded an auto-caching vendor, which is the advisory contract of AI-11.3 exercised.
@@ -1537,6 +1553,8 @@ flowchart TB
 
 #### AI-26.5 — Tool results and identifiers `[leaf]`
 
+> **Amended 2026-08-03 (AI-24) — item 2's branch has no subject for this adapter.** AI-24.1 recorded that the chosen vendor **does assign** tool-call identifiers, on the call's opening delta. Item 2's synthetic-minting branch therefore never fires for this adapter and is marked **not-applicable**, not silently skipped; the requirement text stays in force for a future adapter whose vendor assigns none. This adapter's conformance exercises only the vendor-assigns branch.
+
 - **Test list:**
   1. Tool results translate into the vendor's result shape — block inside a user-role message, distinct role, or nested object, whichever AI-24.1 recorded.
   2. IF the vendor assigns no tool-call identifiers THEN synthetic identifiers are minted here, deterministically, and the mapping is **exposed** so a session can persist it — the Layer 3 half is out of scope, the mint-and-expose half is this node.
@@ -1553,6 +1571,8 @@ flowchart TB
 - **Depends on:** AI-26.3, AI-07.
 
 #### AI-26.7 — Options, limits and the escape hatch `[leaf]`
+
+> **Amended 2026-08-03 (AI-24) — item 2 is a deliberate no-op for this vendor.** AI-24.1 recorded that this vendor's output-token limit is **optional**, not mandatory. Item 2's IF-guard therefore never fires for this adapter, recorded per this node's own instruction rather than left unmentioned. The text stays in force for a future adapter whose vendor does mandate a limit.
 
 - **Test list:**
   1. Every neutral generation option maps to its vendor field; unsupported combinations fail explicitly.
@@ -1734,45 +1754,58 @@ SDD change: `cachicamas-ai-provider-reasoning-stream`.
 
 - **Goal:** Implement the chosen reasoning behavior for the first provider.
 - **Deliverable:** A mapping, or a documented capability absence.
-- **Acceptance:** Provider reasoning never leaks into text events; the round-trip token is captured byte-exact and replays through AI-26.6 unchanged.
+- **Acceptance:** ~~the round-trip token is captured byte-exact and replays through AI-26.6 unchanged.~~ No reasoning event is ever emitted by this adapter for any reasoning-bearing request at any position in the stream, and no reasoning-bearing request is ever replayed — the adapter's only path that touches reasoning is AI-26.6's refusal, which fails before any byte reaches the wire.
+
+> **Amended 2026-08-04 (AI-29) — absence branch taken.** The deliverable resolves to the documented-capability-absence branch; acceptance is restated in absence terms above. The AI-29.1, AI-29.2 and AI-29.3 leaves are struck (see below, B3); the AI-29 mermaid graph below relabels the three struck leaves with `(struck)` markers (B7). AI-29.0's closing checklist is answered by `decision.md` of this change, naming the grounds (C7/C8), the four already-landed absence mechanisms, the deadlock-and-basis routing to AI-38.2, and the two reopen triggers with named owners.
+
 - **Depends on:** AI-07, AI-17, AI-28. **Parallel with:** AI-30, AI-31.
 - **Out of scope:** Deciding whether reasoning is worth emitting at all — AI-29.0 owns that, and AI-03.1 already made it optional.
 
 ```mermaid
 flowchart LR
-    X0["AI-29.0<br/>emission policy"] --> X1["AI-29.1<br/>reasoning is never text"]
-    X1 --> X2["AI-29.2<br/>token capture, byte-exact"]
-    X1 --> X3["AI-29.3<br/>redacted + signature-only"]
+    X0["AI-29.0<br/>emission policy"] --> X1["AI-29.1 (struck)<br/>reasoning is never text"]
+    X1 --> X2["AI-29.2 (struck)<br/>token capture, byte-exact"]
+    X1 --> X3["AI-29.3 (struck)<br/>redacted + signature-only"]
     classDef d fill:#dbeafe,stroke:#1d4ed8,color:#1f2937
     class X0 d
 ```
 
 #### AI-29.0 — Reasoning emission policy `[decision]`
 
+> **Amended 2026-08-03 (AI-24) — a note, not a verdict.** AI-24.1 answers § 7 of `decision.md`: this vendor signs no reasoning blocks, only an opaque `reasoning_tokens` count. That **strongly indicates** absence, but the emit-versus-absence decision remains this node's, made against the exact backend chosen for AI-38/AI-39 — some servers sharing this dialect emit a non-standard `reasoning_content`-style extension field that is no part of the shared dialect itself. This amendment does not resolve this node's checklist and does not strike it.
+
+> **Amended 2026-08-04 (AI-29) — checklist closed with absence.** The 2026-08-03 (AI-24) note's `strongly indicates` is upgraded to a verdict by this node, the node that owns the decision. The against-the-exact-backend clause is recorded as unsatisfiable as written — doc 0002 line 2221 makes AI-38 depend on AI-29 (a dependency edge), so waiting for a backend named by a downstream node deadlocks the graph. The decision is therefore made against the **pinned dialect**, the only artifact that exists at decision time; confirmation is routed forward to **AI-38.2**'s expected-versus-generated capability comparison, where "a difference in either direction is a finding" (AI-24 § 8). Both reopen triggers are named as observable conditions with owners — trigger #1 is AI-38.2's comparison (a generated `CAP-O-01 = satisfied` is a finding, not a silent pass), trigger #2 is a future dialect re-pin naming a reasoning field. The verdict, its grounds, the four already-landed absence mechanisms, and the un-strike procedure are recorded in `decision.md` of this change.
+
 - **Closing checklist:**
   1. Record whether v1 emits reasoning events for the first provider or documents a capability absence — AI-03.1 makes both legal, and every sibling node below assumes emission.
   2. If absence wins: AI-29.1 … AI-29.3 are struck under the living-graph clause and AI-23.8 records "absent" as this adapter's capability outcome, which is a result rather than a gap.
-- **Depends on:** AI-24.1.
+- **Depends on:** AI-24.1. **Unblocked by AI-29:** AI-38 (the capability comparison is now decidable against the expected outcome), and through AI-38, AI-39 and AI-40.
 
 #### AI-29.1 — Reasoning is never text `[leaf]`
 
 - **Test list:**
-  1. WHEN a transcript interleaves reasoning and text blocks THEN reasoning content appears only in reasoning-typed events and never leaks into text events — including several reasoning blocks per response at arbitrary positions.
+  1. ~~WHEN a transcript interleaves reasoning and text blocks THEN reasoning content appears only in reasoning-typed events and never leaks into text events — including several reasoning blocks per response at arbitrary positions.~~
 - **Depends on:** AI-28, AI-29.0.
+
+> **Amended 2026-08-04 (AI-29) — struck under the living-graph clause.** No subject for this adapter; the pinned dialect's delta schema (C7) carries no reasoning field. The test list stays legible above for a future adapter against a signing dialect. Un-strike condition: either § 9 trigger in this change's `decision.md` fires — trigger #1 is AI-38.2 observing a generated `CAP-O-01 = satisfied`, trigger #2 is a future dialect re-pin naming a reasoning field — and a new dated amendment removes this strikethrough under the AI-29 heading.
 
 #### AI-29.2 — Token capture, byte-exact `[leaf]`
 
 - **Test list:**
-  1. WHEN the vendor streams a reasoning signature THEN it is captured into the round-trip token **byte-exactly** and survives capture → normalized content → re-translation (AI-26.6) unchanged — the full-circle property, proven in one test.
-  2. The signature attaches to its own block even when it arrives as that block's only content.
+  1. ~~WHEN the vendor streams a reasoning signature THEN it is captured into the round-trip token **byte-exactly** and survives capture → normalized content → re-translation (AI-26.6) unchanged — the full-circle property, proven in one test.~~
+  2. ~~The signature attaches to its own block even when it arrives as that block's only content.~~
 - **Depends on:** AI-29.1, AI-07.
+
+> **Amended 2026-08-04 (AI-29) — struck under the living-graph clause.** No subject for this adapter; the dialect reports only an opaque `reasoning_tokens` count inside `usage` (C8), which is a count, not a block — there is no signature on the wire to capture, and AI-26.6's refusal is the only path that touches reasoning. The test list stays legible above for a future adapter against a signing dialect. Un-strike condition: either § 9 trigger in this change's `decision.md` fires, identical to AI-29.1.
 
 #### AI-29.3 — Redacted and signature-only blocks `[leaf]`
 
 - **Test list:**
-  1. Redacted reasoning blocks normalize to the redacted state with their opaque payload preserved verbatim — invisible in tests unless deliberately exercised, and unrecoverable in production if dropped.
-  2. A block with a signature and no reasoning text normalizes to valid empty-text reasoning (AI-07.4's shape, now from wire data).
+  1. ~~Redacted reasoning blocks normalize to the redacted state with their opaque payload preserved verbatim — invisible in tests unless deliberately exercised, and unrecoverable in production if dropped.~~
+  2. ~~A block with a signature and no reasoning text normalizes to valid empty-text reasoning (AI-07.4's shape, now from wire data).~~
 - **Depends on:** AI-29.1.
+
+> **Amended 2026-08-04 (AI-29) — struck under the living-graph clause.** No subject for this adapter; no v1 adapter exercises redacted or signature-only blocks because the dialect carries no reasoning block of any kind (C7, C8). The test list stays legible above for a future adapter against a signing dialect. Un-strike condition: either § 9 trigger in this change's `decision.md` fires, identical to AI-29.1.
 
 ### AI-30 — Translate the tool-call stream
 
@@ -1841,6 +1874,7 @@ SDD change: `cachicamas-ai-provider-completion`.
 - **Goal:** Complete terminal metadata mapping for the first provider.
 - **Deliverable:** Usage mapping, finish-reason mapping, unknown-value handling and partial-metadata handling.
 - **Acceptance:** Terminal events contain every available normalized field and never invent an unavailable one; refusal and pause map to their own values rather than to unknown.
+  > **AI-31 dated amendment (2026-08-04, S-ACP-029 site 5):** the clause "refusal and pause map to their own values rather than to unknown" is **unsatisfiable-and-unviolated** on this dialect per `U5` and ruling **D2 (a)**: no chat `finish_reason` member spells refusal or pause, so nothing maps to those values here, and nothing maps them to `unknown` either. The remaining acceptance obligation ("terminal events contain every available normalized field and never invent an unavailable one") is carried by `R-ACP-005` … `R-ACP-008` in `specs/ai-provider-completion/spec.md` and discharges against AI-38.2's real-backend evidence. The original wording remains visible above for traceability.
 - **Depends on:** AI-13, AI-28. **Parallel with:** AI-29, AI-30.
 
 ```mermaid
@@ -1853,11 +1887,22 @@ flowchart LR
 
 - **Test list:**
   1. Every vendor stop value maps to its normalized reason — including refusal and pause to their own AI-13.1 values, never to unknown.
+     > **AI-31 dated amendment (2026-08-04, S-ACP-029 site 1):** the refusal/pause clause is **vacuous for this dialect** per `U5` and ruling **D2 (a)**: no wire `finish_reason` spells refusal or pause, so nothing maps to those values here and nothing maps them to `unknown` either. The item's surviving obligation is the five-value table of `R-ACP-001` (pinned by `TestFinishReason_FiveWireValues_MapTable`, row count asserted = 5). The original wording remains visible above for traceability.
   2. A novel vendor stop value maps to unknown without error, with the raw label preserved (the normalizer-crash bug class, pinned).
+     > **AI-31 dated amendment (2026-08-04, S-ACP-028):** this item discharges via a three-part split:
+     >
+     > 1. **Normalizer-crash discipline** is discharged at `ai.NormalizeFinishReason`, which is total over every input string and returns `FinishReasonUnknown` for an unrecognised spelling without panicking — proven at AI-13. The bug class the item names (normalizer panic on novel input) is therefore closed at the neutral layer.
+     > 2. **Dialect-adapter strict gate** (`rawStrictFinishReason` / `S-ATS-039` / `S-ACP-006`) keeps byte-exact rejection at this adapter: a value outside C2's five-member enum — including a case or whitespace variant of a legal member (`"STOP"`, `" stop"`, `"halted"`) — is rejected as a typed malformed response, not absorbed as `FinishReasonUnknown`. Pinning fixture: `TestFinishReason_NovelValue_TypedMalformed`. A dialect adapter receiving an out-of-dialect value is talking to something that is not the pinned dialect, and an honest typed failure beats silent absorption (ruling **D1**).
+     > 3. **"The raw label preserved" has no neutral home.** `ai.Completion` carries `reason` and `usage` and nothing else; widening AI-13 to add a raw-label field is out of charter for AI-31. The raw label instead survives in the malformed failure's diagnostic chain (`errUnrecognizedFinishReason`'s message), where a reviewer finds it on stream failure — and never on a completion event.
+     >
+     > The original wording remains visible above for traceability.
   3. Refusal after partial output and refusal before any output both normalize with the right reason and the right partial-output posture — AI-19.4's discriminator applies to refusals too.
+     > **AI-31 dated amendment (2026-08-04, S-ACP-029 site 3):** this item is **unexercisable on this dialect** per `U5` and ruling **D2 (a)**: no wire `finish_reason` spells refusal, so neither the after-partial-output branch nor the before-any-output branch can arise here. AI-19.4's discriminator (which lives at Layer 2 and decides what to do with a refusal outcome when one occurs) is untouched and still applies wherever a refusal outcome *can* arise; it simply cannot arise on this dialect in v1. The reopen trigger is R-ACP-002's refusal row (the pinned dialect gains a refusal finish member, or AI-38 pins the companion value from a real transcript). The original wording remains visible above for traceability.
   4. WHEN generation ends on a stop-sequence match THEN the matched value's disposition is pinned by test: captured, or its absence from the neutral surface recorded as deliberate. Callers running several stop sequences cannot branch without it.
+     > **AI-31 dated amendment (2026-08-04):** this dialect's wire carries no field reporting which stop sequence fired (`U4 NEGATIVE`: `stop_sequence` → 0 hits, `stop_reason` → 0 hits; `StopConfiguration` states only that "the returned text will not contain the stop sequence"). The matched-sequence disposition is therefore **recorded deliberate absence**, not captured. Pinning fixture: `TestStopSequence_NothingIdentifiesMatch` (S-ACP-010), which proves the absence holds because nothing is read — a transcript whose terminal chunk carries an extra unknown `stop_sequence` key drains to the same completion, so callers running several stop sequences cannot branch on the matched value here; they receive only `finish_reason: "stop"` and that is the entire fact. See `R-ACP-004` in `specs/ai-provider-completion/spec.md`.
 - **Depends on:** AI-28, AI-13.
 - **Note:** pause-style finishes resume by replaying received content verbatim (AI-13.2's obligation). If a paused response can contain block types normalization skips (AI-28.4), resume is lossy — the AI-24 decision records whether v1 excludes the features that produce such blocks or carries them opaquely.
+  > **AI-31 dated amendment (2026-08-04, S-ACP-029 site 4):** this Note is **vacuous for this adapter** per `U5`: no pause channel exists in chat scope (`pause`/`paused` hits are all fine-tuning job endpoints), so no paused response can arrive and no skipped block can be replayed wrong here. AI-13.2's pause-resume obligation still applies wherever a paused response *can* arrive (a Layer-2 consumer that talks to a dialect with a pause finish value); it simply has no surface on this dialect in v1. This restates `R-ACP-002`'s own unreachability finding (`FinishReasonPauseTurn`) at the site that raises the concern, so the two do not disagree. The original wording remains visible above for traceability.
 
 #### AI-31.2 — Usage mapping `[leaf]`
 
@@ -2089,6 +2134,8 @@ SDD change: `cachicamas-ai-redaction` · Adversarial by design: every test plant
 - **Acceptance:** Sentinel secrets appear in no error, log field, fixture, event metadatum, or test-failure output.
 - **Depends on:** AI-25, AI-32. **Parallel with:** AI-33 … AI-35. · **Blocks:** AI-37.
 
+> **Amended 2026-08-03 (AI-24) — mirrors AI-41's edge.** AI-41 (Wave 5, appended by this amendment) declares `Blocks: AI-36`: its adversarial sweep must not run against the provider-failure payload while that payload is still missing its redacting formatting method. The authoritative edge lives on AI-41's `Blocks:` field, per the append-only rule; this blockquote exists only so a reader of this charter sees it. This node's own `Depends on:` line above is unchanged.
+
 #### AI-36.1 — Sentinel sweep `[leaf]`
 
 - **Test list:**
@@ -2160,6 +2207,32 @@ flowchart LR
 - **Test list:**
   1. WHEN no tracer is configured THEN streaming behaves identically — drained event sequences with and without tracing are equal — and nothing panics; the API's no-op default suffices without adapter-side nil checks.
 - **Depends on:** AI-37.2.
+
+### AI-41 — Discharge the Wave-2 carryovers
+
+> **Amended 2026-08-03 (AI-24)** — appended, next free milestone ordinal, per the Wave-2 carryover assignment `decision.md` § 13.3 records. Two Wave-2 carryovers — the testkit's emission-boundary check's fourth-rule failure-path coverage gap, and the missing redacting formatting method on the provider-failure payload — went unassigned through Wave 2 and Wave 3; a third silent pass is the failure mode this assignment exists to stop. Neither carryover blocks any Wave-4 node (AI-24 … AI-32 touch neither), and Wave 4 already forecasts 20,000–25,000 changed lines against a 5,000-line review budget, so the assignment lands now and the work lands in Wave 5. This append forces four navigational surfaces to agree on a milestone total of **42**: the header `> **Status:**` line, the Quick-navigation line below, the mermaid Wave 5 label, and the Delivery-sequence Wave 5 row.
+
+SDD change: `cachicamas-ai-wave2-carryovers` · Scheduled Wave 5: neither carryover blocks a Wave-4 node, and Wave 4 is already over its review-load forecast.
+
+**Charter**
+
+- **Goal:** Discharge the two Wave-2 carryovers recorded at `openspec/specs/ai-stream-testkit/spec.md`.
+- **Deliverable:** The emission-boundary checker's fourth-rule failure path proven directly, and a redacting alternate-verb formatting method on the provider-failure payload.
+- **Acceptance:** The testkit spec's carryover status line names this milestone as owner; both items close; the provider-failure payload's redacting formatting method matches the pattern its sibling payloads already carry.
+- **Depends on:** AI-14, AI-19. · **Blocks:** AI-36.
+- **Out of scope:** Any other redaction or emission-boundary behavior already proven; AI-36's adversarial sweep, which consumes this milestone's result rather than repeating it.
+
+#### AI-41.1 — Emission-boundary failure path `[leaf]`
+
+- **Test list:**
+  1. WHEN an event the testkit's emission-boundary check's fourth rule itself rejects is exercised THEN that rule's failure path is proven directly — the gap AI-21 parked and Wave 2 and Wave 3 both left open.
+- **Depends on:** AI-14.
+
+#### AI-41.2 — Redacting failure-payload formatting `[leaf]`
+
+- **Test list:**
+  1. The provider-failure payload gains a redacting alternate-verb formatting method, matching the pattern its sibling payloads already carry, so a caller formatting the failure payload cannot fall back to reflection over unexported fields and leak one.
+- **Depends on:** AI-19.
 
 ---
 
@@ -2258,6 +2331,8 @@ flowchart LR
   2. The supported-capability matrix from AI-38.2 is published in the package documentation.
 - **Depends on:** AI-38.
 
+> **Amended 2026-08-04 (AI-29) — inherited publication duty.** This node publishes completion-checklist item 6's wire clause as **not exercisable in v1** alongside the Layer-2-strips-reasoning duty it already carries. The cause is named: AI-26.6 landed as a refusal and AI-29.2 is struck by AI-29 — no reasoning exists on this wire to round-trip, so no v1 node can close the wire half. The clause is restated here as an obligation on this node (a reader arriving at AI-40.2 sees the obligation without walking back to AI-29's `decision.md` §§ 7, 11). The stream half of item 6, already closed by AI-17 (`R-ARE-009`/`R-ARE-010`), is unaffected and is **not** reopened by this amendment.
+
 #### AI-40.3 — Compatibility statement `[decision]`
 
 - **Closing checklist:**
@@ -2300,7 +2375,7 @@ Layer 1 is complete when every box holds. The [traceability spine](#completion-c
 >
 > **Item 12 (bounded, lossless backpressure) deliberately stays open.** AI-20's `R-AMP-012` states the contract — one sanctioned loss path, on cancellation with a saturated buffer, with the contract naming the consumer as the party in error — but the spine maps this item to **AI-34**, which locks buffer sizing and the behaviour itself. Stating the rule is not the same as locking it; the box moves when AI-34 lands.
 >
-> **Item 6 also stays open**, unchanged: its wire half is AI-26.6 / AI-29.2. AI-17 closed the *stream* half of the reasoning round-trip token (`R-ARE-009`/`R-ARE-010`), and that is recorded on the **G12(b)** spine row rather than here, because item 6's own text names the wire.
+> **Item 6 also stays open**, unchanged: ~~its wire half is AI-26.6 / AI-29.2.~~ Item 6's wire half is **not exercisable in v1**: AI-26.6 landed as a refusal and AI-29.2 is struck by AI-29 — there is no reasoning on this wire to round-trip. The clause is restated as not-exercisable-in-v1 and **published through AI-40.2 — Capability matrix and examples** as an obligation on that node (Layer-2-strips-reasoning already lives there; AI-29's wire-half clause sits beside it, not in place of it). AI-17 closed the *stream* half of the reasoning round-trip token (`R-ARE-009`/`R-ARE-010`), and that closure is recorded on the **G12(b)** spine row rather than here, because item 6's own text names the wire — AI-17's closure is unaffected and is **not** struck by this amendment.
 
 > **Amended 2026-08-03 — Wave 3 close.** One item moved to checked; one item's node set is only half satisfied and stays open.
 >
@@ -2355,7 +2430,7 @@ Two-way coverage: every defect class, gap and completion-checklist item maps to 
 | **G8** — partial-output discriminator and typed taxonomy | **Layer 1 half closed.** AI-19.2 … AI-19.5 landed: the discriminator is a single boolean, perpendicular to the delivery path, with the two-axis collapse prohibited by `R-AIP-012`. **Suite case AI-23.4 landed** (Wave 3) — all nine categories iterated exhaustively against the shipped enumerator, on both delivery paths. Remaining: AI-32.2, AI-32.3, AI-35.1 (Wave 4). |
 | **G9** — per-request options and escape hatch | **Closed.** AI-12.1 … AI-12.4 landed. Rendering by AI-26.7 (Wave 4). |
 | **G12(a)** — delta-optional tool calls | **Layer 1 half closed.** AI-18.2 landed — a zero-delta call is legal and complete, and is indistinguishable after reconstruction from its fragmented equivalent. **AI-21.2 (fake) and AI-23.3 (suite) landed** (Wave 3) — the zero-delta shape is scriptable and the suite asserts it is mandatory to support. Remaining: AI-30.2 (Wave 4, wire). |
-| **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild; **AI-17.2** carries it across the event boundary byte-exactly, whole on block-end only. Wire-proven by AI-29.2 and AI-26.6 (Wave 4). |
+| **G12(b)** — reasoning round-trip token | **Layer 1 half closed.** AI-07.2 … AI-07.4 landed; AI-12.1 extends with rebuild; **AI-17.2** carries it across the event boundary byte-exactly, whole on block-end only. ~~Wire-proven by AI-29.2 and AI-26.6 (Wave 4).~~ The wire half is not exercisable in v1: AI-29.2 is struck by AI-29 and AI-26.6 landed as a refusal. The clause is restated as not-exercisable-in-v1 and published through **AI-40.2 — Capability matrix and examples** (alongside the Layer-2-strips-reasoning duty that node already carries); no new milestone or leaf identifier is appended because the path has no v1 consumer. |
 | **G12(c)** — refusal and pause finish reasons | **Closed.** AI-13.1, AI-13.2 landed with all seven values, and **AI-15.2** delivers them on the stream — the completion event embeds AI-13's `FinishReason` and `Usage` by value, so a refusal or pause reaches a consumer as a terminal event rather than only as a constructible part. Mapped from vendor stop values by AI-31.1 (Wave 4). |
 | **G13** — stream carrier | **Closed.** AI-02.1 decided it; **AI-20.4** pins it mechanically — an AST walk asserting a receive-only channel of `Event`, with the declaring file's imports allowlisted to exactly `{"context"}`, proven to bite on both a vendor stand-in and a changed carrier. Ergonomics remain AI-22.5. |
 | Leakage register rows 1–9 | row 1 = G12(a) above · row 2 = G12(b) above · row 3 = G12(c) above · row 4 AI-26.5 · row 5 AI-26.3 · row 6 AI-26.7 · row 7 AI-26.5 · row 8 **Layer 1 half closed** by AI-10.2 · row 9 **Layer 1 half closed** by AI-11.3 (wire rendering AI-26.2, Wave 2) |
@@ -2368,7 +2443,7 @@ Two-way coverage: every defect class, gap and completion-checklist item maps to 
 
 ### Completion checklist → nodes
 
-Each of [the completion checklist](#layer-1-completion-checklist)'s eighteen items, in order: (1) module exists, `src/tools/` untouched — AI-00.1 · (2) both directions guarded and biting — AI-00.3, AI-00.4 · (3) neutral contracts documented and tested — AI-05 … AI-10 · (4) parts readable and sealed — AI-06.2, AI-06.3, AI-10.5 · (5) breakpoints, options, rebuild — AI-11, AI-12 · (6) round-trip tokens byte-exact — AI-07.3, AI-12.1, AI-26.6, AI-29.2 · (7) order and per-stream sequence — AI-14.2, AI-14.4, AI-22.3 · (8) every kind constructible — AI-14.1, AI-19.1 · (9) typed, inspectable taxonomy with the discriminator — AI-19 · (10) no vendor type, optional capabilities discovered — AI-20.1, AI-20.4, AI-20.5 · (11) cancellation leak-free — AI-33 · (12) bounded, lossless backpressure — AI-34 · (13) fake provider — AI-21 · (14) reusable conformance — AI-23, AI-38.1 · (15) first adapter passes — AI-38 · (16) secrets absent — AI-36, suite case AI-23.7 · (17) live test optional and unreachable — AI-39.1 · (18) handoff example and frozen surface — AI-40.1, AI-40.3.
+Each of [the completion checklist](#layer-1-completion-checklist)'s eighteen items, in order: (1) module exists, `src/tools/` untouched — AI-00.1 · (2) both directions guarded and biting — AI-00.3, AI-00.4 · (3) neutral contracts documented and tested — AI-05 … AI-10 · (4) parts readable and sealed — AI-06.2, AI-06.3, AI-10.5 · (5) breakpoints, options, rebuild — AI-11, AI-12 · (6) round-trip tokens byte-exact — AI-07.3, AI-12.1, AI-26.6, ~~AI-29.2~~ · (7) order and per-stream sequence — AI-14.2, AI-14.4, AI-22.3 · (8) every kind constructible — AI-14.1, AI-19.1 · (9) typed, inspectable taxonomy with the discriminator — AI-19 · (10) no vendor type, optional capabilities discovered — AI-20.1, AI-20.4, AI-20.5 · (11) cancellation leak-free — AI-33 · (12) bounded, lossless backpressure — AI-34 · (13) fake provider — AI-21 · (14) reusable conformance — AI-23, AI-38.1 · (15) first adapter passes — AI-38 · (16) secrets absent — AI-36, suite case AI-23.7 · (17) live test optional and unreachable — AI-39.1 · (18) handoff example and frozen surface — AI-40.1, AI-40.3. Item 6's mapping: AI-29.2 is struck by AI-29 (see AI-29.2 below); the wire half is restated as not-exercisable-in-v1 and published through **AI-40.2 — Capability matrix and examples**; AI-26.6 (refusal) and AI-07.3, AI-12.1, AI-17 (stream half) remain on item 6's node list as the closure for the parts of the round-trip this adapter can exercise.
 
 ## Method sources
 

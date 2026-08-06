@@ -5,8 +5,10 @@
 // importing a vendor SDK or seeing a wire type. Concretely, this package will own
 // the normalized request, the content and tool vocabulary that crosses the model
 // API, the streaming event contracts, the provider interface and its stream
-// lifecycle, the provider and transport error taxonomy, the concrete vendor
-// adapters, and the conformance tests and deterministic fakes that prove them.
+// lifecycle, and the provider and transport error taxonomy. Concrete vendor
+// adapters live in their own subpackages instead — openaicompat is the first —
+// and this package owns the conformance tests and deterministic fakes that prove
+// them against its contracts.
 //
 // It is empty today by design. The contract text grows one milestone at a time,
 // and each milestone's documentation paragraph is guarded where it makes a
@@ -43,9 +45,8 @@
 // guard in import_boundary_test.go, so a dependency nobody thought to forbid by
 // name still fails.
 //
-// The module carries zero dependencies today. Two milestones may change that,
-// and each needs its own ADR: one selects a transport, one adds the
-// OpenTelemetry API.
+// The module carries zero dependencies today. One milestone may change that,
+// and it needs its own ADR: AI-37 adds the OpenTelemetry API.
 //
 // # What comes back
 //
@@ -69,6 +70,6 @@
 // in v1, discovered only by asserting the value against it — never a
 // widening of [ModelProvider] itself, mechanically pinned by the signature
 // guard in src/agenttest. Concrete vendor adapters implementing
-// [ModelProvider] arrive from AI-24 onward; this package owns the
+// [ModelProvider] arrive from AI-25 onward; this package owns the
 // contract, never a vendor's satisfaction of it.
 package ai
