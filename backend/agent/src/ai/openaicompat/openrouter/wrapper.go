@@ -156,14 +156,27 @@ func NewProvider(cfg Config) (ai.ModelProvider, error) {
 //
 // When cfg.HTTPClient is non-nil, attributionRoundTripper wraps the
 // injected client's existing Transport verbatim — its bounds are its
-// injector's decision (R-APC-003), not this wrapper's.
+// injector's decision (R-APC-003), not this wrapper's. When the
+// injected client's Transport is itself nil (the http.Client default
+// is http.DefaultTransport, which would silently adopt a proxy from
+// the environment), this wrapper substitutes the same bounded
+// default it would build for the nil-HTTPClient case — R-APC-009
+// applies regardless of who owns the http.Client.
 func baseTransport(cfgHTTPClient *http.Client) http.RoundTripper {
 	if cfgHTTPClient != nil {
 		if t := cfgHTTPClient.Transport; t != nil {
 			return t
 		}
-		return http.DefaultTransport
 	}
+	return defaultBoundedTransport()
+}
+
+// defaultBoundedTransport returns a fresh *http.Transport with the
+// canonical openaicompat-mirroring bounds (R-APC-009). Extracted so
+// baseTransport and any future call site share one source-code
+// location for the bound values — drift between two copies of these
+// numbers is the maintenance hazard the extraction closes.
+func defaultBoundedTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: nil,
 		DialContext: (&net.Dialer{

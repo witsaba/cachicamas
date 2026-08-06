@@ -116,7 +116,7 @@ func TestAttributionRoundTripper_AllEmptyHeaders_AllSuppressed(t *testing.T) {
 		"X-Title",
 		"X-OpenRouter-Categories",
 	} {
-		if got, present := outbound.Header[name]; present {
+		if got, present := outbound.Header[http.CanonicalHeaderKey(name)]; present {
 			t.Errorf("%s present on outbound header = %v, want absent (R-OR-02 sub-scenario 2)", name, got)
 		}
 	}
@@ -252,7 +252,7 @@ func TestAttributionRoundTripper_PartialEmptyHeaders_OnlyNonEmptySet(t *testing.
 	}
 	outbound := base.requests[0]
 
-	if got, present := outbound.Header["HTTP-Referer"]; present {
+	if got, present := outbound.Header[http.CanonicalHeaderKey("HTTP-Referer")]; present {
 		t.Errorf("HTTP-Referer present = %v, want absent (empty referer)", got)
 	}
 	if got := outbound.Header.Get("X-OpenRouter-Title"); got != "nonempty" {
@@ -261,7 +261,7 @@ func TestAttributionRoundTripper_PartialEmptyHeaders_OnlyNonEmptySet(t *testing.
 	if got := outbound.Header.Get("X-Title"); got != "nonempty" {
 		t.Errorf("X-Title = %q, want %q", got, "nonempty")
 	}
-	if got, present := outbound.Header["X-OpenRouter-Categories"]; present {
+	if got, present := outbound.Header[http.CanonicalHeaderKey("X-OpenRouter-Categories")]; present {
 		t.Errorf("X-OpenRouter-Categories present = %v, want absent (empty categories)", got)
 	}
 }

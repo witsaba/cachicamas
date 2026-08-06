@@ -74,10 +74,10 @@ func TestNewProvider_ProviderValueDoesNotLeakCredentialViaDefaultFormatting(t *t
 
 	const token = "sk-super-secret-openrouter-token-shape"
 
-	cap := &captureTransport{}
+	capT := &captureTransport{}
 	provider, err := NewProvider(Config{
 		Credential: openaicompat.NewCredential(token),
-		HTTPClient: &http.Client{Transport: cap},
+		HTTPClient: &http.Client{Transport: capT},
 	})
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v, want nil", err)
@@ -121,10 +121,10 @@ func TestNewProvider_ProviderValueThroughStreamDoesNotLeakCredentialInEventError
 	// empty body, which openaicompat treats as a malformed response.
 	// This test instead drives a fresh stream through the wrapper and
 	// asserts no event's rendered text contains the token.
-	cap := &captureTransport{}
+	capT := &captureTransport{}
 	provider, err := NewProvider(Config{
 		Credential: openaicompat.NewCredential(token),
-		HTTPClient: &http.Client{Transport: cap},
+		HTTPClient: &http.Client{Transport: capT},
 	})
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v, want nil", err)
@@ -137,11 +137,10 @@ func TestNewProvider_ProviderValueThroughStreamDoesNotLeakCredentialInEventError
 		}
 		return
 	}
-	defer func() {
-		// drain in case the test forgot — never let a producer leak.
-		for range ch {
-		}
-	}()
+	// No defensive drain — the test's own for-range loop below drains
+	// the channel; an early exit from this body would surface as a
+	// t.Fatal that already names the leak vector.
+	_ = ch
 	for ev := range ch {
 		// Every event's default rendering is observed through its
 		// fields. None carries a credential-shaped string; the assertion

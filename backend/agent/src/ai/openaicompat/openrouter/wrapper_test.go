@@ -118,15 +118,15 @@ func drainWrapperStream(t *testing.T, ch <-chan ai.Event) []ai.Event {
 // test can snapshot what the wrapper actually sent downstream.
 func newWrapperWithStub(t *testing.T, cfg Config) (ai.ModelProvider, *captureTransport) {
 	t.Helper()
-	cap := &captureTransport{}
+	capT := &captureTransport{}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Transport: cap}
+		cfg.HTTPClient = &http.Client{Transport: capT}
 	}
 	provider, err := NewProvider(cfg)
 	if err != nil {
 		t.Fatalf("NewProvider() error = %v, want nil", err)
 	}
-	return provider, cap
+	return provider, capT
 }
 
 // TestNewProvider_DefaultModelOnWireBodyIsOpenaiGpt4o covers R-OR-03
@@ -138,7 +138,7 @@ func newWrapperWithStub(t *testing.T, cfg Config) (ai.ModelProvider, *captureTra
 func TestNewProvider_DefaultModelOnWireBodyIsOpenaiGpt4o(t *testing.T) {
 	t.Parallel()
 
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential("default-model-token"),
 		// Model deliberately omitted — zero value, defaults to
 		// openrouterDefaultModel via effectiveModel.
@@ -150,7 +150,7 @@ func TestNewProvider_DefaultModelOnWireBodyIsOpenaiGpt4o(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, _, body := cap.snapshot(t)
+	_, _, body := capT.snapshot(t)
 	got := bodyModel(t, body)
 	if got != openrouterDefaultModel {
 		t.Errorf("wire body model = %q, want %q (R-OR-03 default)", got, openrouterDefaultModel)
@@ -168,7 +168,7 @@ func TestNewProvider_ConfigModelOverridesDefaultOnWireBody(t *testing.T) {
 	t.Parallel()
 
 	const wantModel = "anthropic/claude-3-5-sonnet"
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential("explicit-model-token"),
 		Model:      wantModel,
 	})
@@ -179,7 +179,7 @@ func TestNewProvider_ConfigModelOverridesDefaultOnWireBody(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, _, body := cap.snapshot(t)
+	_, _, body := capT.snapshot(t)
 	got := bodyModel(t, body)
 	if got != wantModel {
 		t.Errorf("wire body model = %q, want %q (R-OR-03 explicit override)", got, wantModel)
@@ -193,7 +193,7 @@ func TestNewProvider_ConfigModelOverridesDefaultOnWireBody(t *testing.T) {
 func TestNewProvider_StreamOptionsIncludeUsageIsTrue(t *testing.T) {
 	t.Parallel()
 
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential("stream-options-token"),
 	})
 
@@ -203,7 +203,7 @@ func TestNewProvider_StreamOptionsIncludeUsageIsTrue(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, _, body := cap.snapshot(t)
+	_, _, body := capT.snapshot(t)
 	if !bytesContain(body, []byte(`"stream_options":{"include_usage":true}`)) {
 		t.Errorf("wire body missing stream_options.include_usage=true (R-OR-04): %s", body)
 	}
@@ -221,7 +221,7 @@ func TestNewProvider_AttributionHeadersObservedEndToEnd(t *testing.T) {
 		wantXTitle    = "cachicamas-ai-cli"
 		wantXCategory = "productivity,coding"
 	)
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential:  openaicompat.NewCredential("attribution-token"),
 		HTTPReferer: wantReferer,
 		XTitle:      wantXTitle,
@@ -234,7 +234,7 @@ func TestNewProvider_AttributionHeadersObservedEndToEnd(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, header, _ := cap.snapshot(t)
+	_, header, _ := capT.snapshot(t)
 	if got := header.Get("HTTP-Referer"); got != wantReferer {
 		t.Errorf("HTTP-Referer = %q, want %q (R-OR-02 end-to-end)", got, wantReferer)
 	}
@@ -255,7 +255,7 @@ func TestNewProvider_AttributionHeadersObservedEndToEnd(t *testing.T) {
 func TestNewProvider_EmptyAttributionStringsSuppressAllHeaders(t *testing.T) {
 	t.Parallel()
 
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential("empty-attr-token"),
 		// HTTPReferer, XTitle, XCategories all zero — empty.
 	})
@@ -266,7 +266,7 @@ func TestNewProvider_EmptyAttributionStringsSuppressAllHeaders(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, header, _ := cap.snapshot(t)
+	_, header, _ := capT.snapshot(t)
 	for _, name := range []string{
 		"HTTP-Referer",
 		"X-OpenRouter-Title",
@@ -287,7 +287,7 @@ func TestNewProvider_AuthorizationHeaderCarriesCredential(t *testing.T) {
 	t.Parallel()
 
 	const token = "auth-bearer-token-shape"
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential(token),
 	})
 
@@ -297,7 +297,7 @@ func TestNewProvider_AuthorizationHeaderCarriesCredential(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	_, header, _ := cap.snapshot(t)
+	_, header, _ := capT.snapshot(t)
 	const wantAuth = "Bearer " + token
 	if got := header.Get("Authorization"); got != wantAuth {
 		t.Errorf("Authorization = %q, want %q (R-APC-001 end-to-end)", got, wantAuth)
@@ -313,10 +313,10 @@ func TestNewProvider_AuthorizationHeaderCarriesCredential(t *testing.T) {
 func TestNewProvider_RejectsEmptyCredential(t *testing.T) {
 	t.Parallel()
 
-	cap := &captureTransport{}
+	capT := &captureTransport{}
 	_, err := NewProvider(Config{
 		Credential: openaicompat.NewCredential(""), // empty — openaicompat rejects
-		HTTPClient: &http.Client{Transport: cap},
+		HTTPClient: &http.Client{Transport: capT},
 	})
 	if err == nil {
 		t.Fatal("NewProvider() error = nil, want a typed violation for empty credential (R-OR-01, R-APC-002)")
@@ -332,7 +332,7 @@ func TestNewProvider_RejectsEmptyCredential(t *testing.T) {
 func TestNewProvider_RequestsTheConfiguredEndpoint(t *testing.T) {
 	t.Parallel()
 
-	provider, cap := newWrapperWithStub(t, Config{
+	provider, capT := newWrapperWithStub(t, Config{
 		Credential: openaicompat.NewCredential("endpoint-token"),
 	})
 
@@ -342,9 +342,30 @@ func TestNewProvider_RequestsTheConfiguredEndpoint(t *testing.T) {
 	}
 	drainWrapperStream(t, ch)
 
-	url, _, _ := cap.snapshot(t)
+	url, _, _ := capT.snapshot(t)
 	if want := "https://openrouter.ai/api/v1/chat/completions"; url != want {
 		t.Errorf("outbound URL = %q, want %q (R-OR-01)", url, want)
+	}
+}
+
+// TestOpenRouterAdapter_DefaultModelChangeFailsUntilSpecAmendment
+// covers R-OR-05 sub-scenario 2: the wrapper's openrouterDefaultModel
+// const is pinned at "openai/gpt-4o", and a silent edit of that
+// constant — without an explicit ADR AND a spec amendment that
+// reopens AI-29's struck verdict under trigger #1 — fails this
+// guard. The test exists as a build-time gate so the only path that
+// changes the default model goes through review, not a casual
+// edit. Companion to the runtime observable
+// TestNewProvider_DefaultModelOnWireBodyIsOpenaiGpt4o above — that
+// test pins the runtime behavior (the wire body's "model" field
+// equals openrouterDefaultModel); this test pins the constant
+// itself.
+func TestOpenRouterAdapter_DefaultModelChangeFailsUntilSpecAmendment(t *testing.T) {
+	t.Parallel()
+
+	const want = "openai/gpt-4o"
+	if openrouterDefaultModel != want {
+		t.Errorf("openrouterDefaultModel = %q, want %q (R-OR-05 sub-scenario 2 — a silent default swap requires an explicit ADR AND a spec amendment that reopens AI-29 trigger #1, never a casual edit of this constant)", openrouterDefaultModel, want)
 	}
 }
 

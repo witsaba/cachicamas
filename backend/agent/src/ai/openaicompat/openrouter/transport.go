@@ -140,7 +140,12 @@ func overrideBodyModel(body []byte, override string) []byte {
 		return body
 	}
 
-	out := make([]byte, 0, len(body)-(valEnd-valStart-1)+len(encoded))
+	// old-value-with-quotes span is valEnd+1-valStart bytes
+	// (the opening quote at valStart through the closing quote at
+	// valEnd, inclusive); the new-value-with-quotes span is
+	// len(encoded). Capacity = body size - old span + new span.
+	oldSpan := valEnd + 1 - valStart
+	out := make([]byte, 0, len(body)-oldSpan+len(encoded))
 	out = append(out, body[:valStart]...)
 	out = append(out, encoded...)
 	out = append(out, body[valEnd+1:]...)
