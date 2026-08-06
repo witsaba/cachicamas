@@ -201,8 +201,53 @@ func (c wireChoice) hasValidIndex() bool {
 // decoded as json.RawMessage rather than a plain string, so this file — not
 // encoding/json's own string decode — decides how an invalid-UTF-8
 // fragment is handled.
+//
+// ToolCalls (AI-30.1, R-ATL-001, C9.1) is the streaming tool-call element
+// array. Its element is ChatCompletionMessageToolCallChunk: index (the
+// ONLY required field, C9.1), id, and function{name, arguments}. type is
+// the single-member enum "function" (C9.4) and carries no mapping decision,
+// so wireDelta declares no Type field — the spec's own "decoded to nothing
+// else" reading of C9.1 (design D2).
+//
+// The deprecated streaming function_call delta (C9.5, C7) is a recorded
+// skip (R-ATL-013): no FunctionCall field is declared here, so
+// encoding/json's own unknown-field tolerance (R-ATS-017) silently drops
+// it; the disposition is "tolerated, ignored, never mapped" — never a
+// silent defect. Reopen trigger (R-ATL-013 / S-ATL-064): if a real backend
+// is proven to emit function_call exclusively with no tool_calls array,
+// this disposition is reopened as its own change, never patched in
+// silently here.
 type wireDelta struct {
-	Content json.RawMessage `json:"content"`
+	Content   json.RawMessage       `json:"content"`
+	ToolCalls []wireToolCallElement `json:"tool_calls"`
+}
+
+// wireToolCallElement is one item of choice 0's tool_calls array
+// (R-ATL-001, C9.1: ChatCompletionMessageToolCallChunk). Index is a
+// pointer so an absent key decodes to nil (a C9.1 required-list violation,
+// S-ATL-011) — distinguishable from an explicit zero, which the spec
+// treats as a legal wire value (S-ATL-008).
+//
+// ID, Function.Name and Function.Arguments are all json.RawMessage
+// rather than plain Go strings: every byte a non-empty wire value carries
+// must round-trip through NewToolCallStart and the per-call byte buffer
+// byte-exact (R-ATL-001, R-ATL-003), and encoding/json's own string decode
+// substitutes U+FFFD for non-UTF-8 sequences — the same reasoning D2
+// already applied to delta.content. unquoteJSONString (below) is the one
+// decoder — reused, never a second (S-ATL-005).
+type wireToolCallElement struct {
+	Index    *int                  `json:"index"`
+	ID       json.RawMessage       `json:"id"`
+	Function *wireToolCallFunction `json:"function"`
+}
+
+// wireToolCallFunction is the nested {"function":{...}} half of a tool-call
+// element (C9.1). Both Name and Arguments are json.RawMessage so neither
+// is touched by encoding/json's own string decode — D2's byte preservation
+// applies here too.
+type wireToolCallFunction struct {
+	Name      json.RawMessage `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 // decodeChunk parses data as one wireChunk. A JSON syntax error is

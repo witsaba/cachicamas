@@ -215,6 +215,29 @@
 // the two milestone chains merged. Any future sentinel fails the scan
 // until a spec sanctions it and the want-list names it.
 //
+// # R-ATS-026's tool-call clause and S-ATS-100's tool-call half are discharged (AI-30, R-ATL-014)
+//
+// R-ATS-026 (sibling change cachicamas-ai-provider-text-stream, archived
+// 2026-08-04) reads: "This milestone MUST NOT map `tool_calls` or
+// `function_call` deltas in either direction (AI-30)." That is a charter
+// boundary scoped to AI-28's shipped slice; it names AI-30 as the owner
+// of the deferred behavior. This package discharges it for `tool_calls`
+// at this milestone (R-ATL-001…006 land the response half of tool
+// calling) and `function_call` (R-ATL-013's recorded skip: tolerated,
+// ignored, never mapped — cite C9.5 + C7's deprecation).
+//
+// The reasoning half of R-ATS-026 / S-ATS-100 is NOT discharged here:
+// AI-29 owns reasoning content and makes its own, disjoint statement.
+// The two MUST NOT both rewrite one shared clause, or the chain
+// conflicts (this file's "Living-graph reopen trigger — not a hedge"
+// posture, restated). S-ATS-100 remains an inspection scenario with no
+// executable guard (verified: no test in this package asserts the
+// absence of tool-call emission) — nothing flips as S-APC-030/031 did.
+// R-ATL-015 holds: src/ai and src/agenttest were not modified by this
+// change (S-ATL-067…070), go.mod is byte-identical (S-ATL-067), no new
+// exported sentinel (S-ATL-068, S-ART-054 allowlist untouched), no
+// widened ai.FailureCategory (S-ATL-068, taxonomy at nine).
+//
 // # Reasoning replay refuses; Layer 2 must strip first (AI-26.6, R-ART-015)
 //
 // A neutral request whose assistant message carries a reasoning content

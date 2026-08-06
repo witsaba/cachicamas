@@ -351,6 +351,13 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 	// run's own copy, updated only once emit actually confirms a send,
 	// is the one true account of what the CARRIER has observed.
 	blockOpen := false
+	// toolBlocksOpen counts the open tool-call blocks as observed by the
+	// carrier (AI-30.1, design.md D8 inheritance): the count rises with
+	// each ToolCallStart emit-confirmed and falls with each
+	// ToolCallEnd. The mapper's own toolOpenOrder is the source of truth
+	// for which blocks to close on a failure path (D7/D8), but run
+	// tracks the count independently — same reasoning blockOpen uses.
+	toolBlocksOpen := 0
 
 	buf := make([]byte, streamReadBufferSize)
 	for {
@@ -374,7 +381,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
-						emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
+						emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 						return
 					}
 					emit(ctx, out, stamper, completion)
@@ -383,7 +390,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
-					emitFailure(ctx, out, stamper, errMalformedChunkJSON, outputPreceded, blockOpen)
+					emitFailure(ctx, out, stamper, state, errMalformedChunkJSON, outputPreceded, blockOpen)
 					return
 				}
 				if !chunk.isChunk() {
@@ -395,7 +402,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				events, applyErr := state.applyChunk(chunk)
 				if applyErr != nil {
-					emitFailure(ctx, out, stamper, applyErr, outputPreceded, blockOpen)
+					emitFailure(ctx, out, stamper, state, applyErr, outputPreceded, blockOpen)
 					return
 				}
 				for _, ev := range events {
@@ -410,24 +417,28 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 						blockOpen = true
 					case ai.EventKindTextBlockEnd:
 						blockOpen = false
+					case ai.EventKindToolCallStart:
+						toolBlocksOpen++
+					case ai.EventKindToolCallEnd:
+						toolBlocksOpen--
 					}
 				}
 			}
 			if feedErr != nil {
-				emitFailure(ctx, out, stamper, feedErr, outputPreceded, blockOpen)
+				emitFailure(ctx, out, stamper, state, feedErr, outputPreceded, blockOpen)
 				return
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				if finishErr := decoder.Finish(); finishErr != nil {
-					emitFailure(ctx, out, stamper, finishErr, outputPreceded, blockOpen)
+					emitFailure(ctx, out, stamper, state, finishErr, outputPreceded, blockOpen)
 					return
 				}
 				// Clean SSE framing, but the sentinel was never observed
 				// — design.md D9's sibling case at the transport-EOF edge
 				// rather than the [DONE]-with-no-terminal-chunk edge.
-				emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
+				emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 				return
 			}
 			if ctx.Err() != nil {
@@ -437,7 +448,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				// (R-ATS-005).
 				return
 			}
-			emitFailure(ctx, out, stamper, errIncompleteStream, outputPreceded, blockOpen)
+			emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 			return
 		}
 	}
@@ -447,9 +458,15 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 // discriminator (design.md D7): every text-block-scoped kind counts;
 // ResponseStart never does (S-ATS-050) — it is not a normalized output
 // event, only the announcement that one may follow.
+//
+// AI-30.1 widens the set to include the three tool-call kinds (Start,
+// Delta, End) so a stream that emitted a tool-call event before a
+// mid-stream failure reports PartialOutput() = true (R-ATL-009,
+// S-ATL-044). ResponseStart still never counts.
 func isOutputEvent(ev ai.Event) bool {
 	switch ev.Kind() {
-	case ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextBlockEnd:
+	case ai.EventKindTextBlockStart, ai.EventKindTextDelta, ai.EventKindTextBlockEnd,
+		ai.EventKindToolCallStart, ai.EventKindToolCallDelta, ai.EventKindToolCallEnd:
 		return true
 	default:
 		return false
@@ -495,7 +512,27 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // returns immediately without attempting the ErrorEvent send either — the
 // same "cancellation wins, nothing further is observable" posture every
 // other emit call in this package already keeps.
-func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, cause error, outputPreceded, blockOpen bool) {
+//
+// state is the mapper state — its toolOpenOrder is read to close any
+// still-open tool-call blocks with raw accumulated bytes (AI-30.1,
+// D7/D8 inheritance, Q2 coordinator ruling). NewToolCallEnd does not
+// validate bytes, so a malformed payload's bytes survive into the
+// truncated ToolCallEnd untouched — never fabricated `{}`.
+func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, cause error, outputPreceded, blockOpen bool) {
+	// Close every still-open tool-call block (AI-30.1, D8 inheritance).
+	// truncateOpenCalls reads state.toolOpenOrder; its raw-bytes close
+	// keeps a partial / malformed payload's bytes intact (Q2 ruling).
+	if state != nil {
+		toolEnds, terr := state.truncateOpenCalls()
+		if terr == nil {
+			for _, end := range toolEnds {
+				if !emit(ctx, out, stamper, end) {
+					return
+				}
+			}
+		}
+	}
+
 	if blockOpen {
 		// textBlockIndex is this package's own nonzero constant — the
 		// only rule NewTextBlockEnd checks — so this can never actually
