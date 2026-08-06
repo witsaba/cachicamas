@@ -1,6 +1,7 @@
 package openrouter
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"time"
@@ -58,12 +59,54 @@ type Config struct {
 	Model string
 }
 
+// redactedProvider is the wrapper-private type NewProvider returns
+// (R-OR-08, R-APC-014). It satisfies ai.ModelProvider by delegating to
+// an embedded *openaicompat.Client, and it carries its own String and
+// GoString methods that render a fixed non-leaking label — without them,
+// Go's default formatter on the underlying *openaicompat.Client would
+// expose the credential's unexported token field through %+v and %#v
+// (Credential.String() and Credential.GoString() already redact, but
+// Client itself has no custom formatter, so default formatting
+// reaches the field). The embedding is a deliberate Go-idiomatic
+// forwarder for the Stream method, not a documented exported type —
+// callers see ai.ModelProvider, not this struct.
+//
+// redactedProvider is intentionally unexported (lowercase) so the
+// wrapper exposes no new public type — design § 6's "the wrapper is a
+// factory (function), not a new type" guidance reads as "no new
+// exported type", not "no internal helper type".
+type redactedProvider struct {
+	*openaicompat.Client
+}
+
+// Stream forwards to the embedded openaicompat.Client (AI-20, R-AMP-001
+// — the interface signature is preserved verbatim).
+func (p redactedProvider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+	return p.Client.Stream(ctx, req)
+}
+
+// String renders a fixed label that names neither the underlying type
+// nor any credential-shaped string (R-OR-08, R-APC-014, S-APC-053).
+func (p redactedProvider) String() string {
+	return "<openrouter provider>"
+}
+
+// GoString renders the same fixed label — Go-syntax representation
+// that never reproduces the bearer token. Credential.GoString() already
+// renders "<redacted>" (S-APC-053); this layer's role is to prevent Go's
+// default %#v from descending into the embedded *openaicompat.Client's
+// unexported fields.
+func (p redactedProvider) GoString() string {
+	return "<openrouter provider>"
+}
+
 // NewProvider returns an ai.ModelProvider that speaks the OpenAI-compatible
 // Chat Completions dialect to OpenRouter, composing (not re-implementing)
-// the shipped openaicompat package. The returned value is an
-// *openaicompat.Client whose outbound transport is wrapped by a
-// wrapper-owned http.RoundTripper (transport.go) that injects the three
-// attribution headers and overrides the wire body's model identifier.
+// the shipped openaicompat package. The returned value is a
+// redactedProvider wrapping an *openaicompat.Client whose outbound
+// transport is wrapped by a wrapper-owned http.RoundTripper
+// (transport.go) that injects the three attribution headers and
+// overrides the wire body's model identifier.
 //
 // Construction is injection-only: NewProvider reads no environment
 // variable, touches no filesystem path and spawns no process
@@ -78,9 +121,9 @@ type Config struct {
 // ai.ErrEmpty, ai.At("credential")) for the same reason.
 //
 // NewProvider returns ai.ModelProvider, the one interface every concrete
-// adapter satisfies (AI-20). The underlying *openaicompat.Client is the
-// returned value; NewProvider is a factory (function), not a new type
-// (design § 6, design § 13).
+// adapter satisfies (AI-20). The wrapper is a factory (function), not
+// a new exported type (design § 6, design § 13); redactedProvider is an
+// internal helper type whose only purpose is the redaction posture.
 func NewProvider(cfg Config) (ai.ModelProvider, error) {
 	transport := attributionRoundTripper{
 		base:          baseTransport(cfg.HTTPClient),
@@ -99,7 +142,7 @@ func NewProvider(cfg Config) (ai.ModelProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client, nil
+	return redactedProvider{Client: client}, nil
 }
 
 // baseTransport returns the http.RoundTripper attributionRoundTripper
