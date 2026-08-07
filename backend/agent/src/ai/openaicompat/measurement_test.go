@@ -189,13 +189,6 @@ func measurementConsumer(ch <-chan ai.Event, gap time.Duration) []ai.Event {
 	}
 }
 
-// measurementPauseResumeConsumer reads nothing for `pause`, then drains
-// to close (the third profile doc 0002 § 6 names).
-func measurementPauseResumeConsumer(ch <-chan ai.Event, pause time.Duration) []ai.Event {
-	time.Sleep(pause)
-	return measurementConsumer(ch, 0)
-}
-
 // ---------------------------------------------------------------------------
 // M1 / M2 helpers — per-run capture over the real producer.
 // ---------------------------------------------------------------------------
