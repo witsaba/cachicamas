@@ -1,8 +1,0 @@
-=== RUN   TestAI33_4_TextStream_CancelAfterCompletion
---- PASS: TestAI33_4_TextStream_CancelAfterCompletion (0.11s)
-=== RUN   TestAI33_4_ToolCallStream_CancelAfterCompletion
---- PASS: TestAI33_4_ToolCallStream_CancelAfterCompletion (0.11s)
-=== RUN   TestAI33_4_RaceCancelConcurrentWithFinalReceive
---- PASS: TestAI33_4_RaceCancelConcurrentWithFinalReceive (0.09s)
-PASS
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.753s

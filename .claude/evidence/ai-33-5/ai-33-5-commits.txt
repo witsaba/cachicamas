@@ -1,2 +1,0 @@
-83eef31 test(openaicompat): add AI-33.5 full-package leak check over every exit path (R-AIS-038)
-99fef5a fix(openaicompat): add drain-before-close to run() defer chain (R-AIS-033)
