@@ -122,6 +122,20 @@ import (
 // independent of this value.
 const streamReadBufferSize = 32 * 1024
 
+// streamCarrierBuffer sizes the event carrier the producer hands back to
+// the caller (R-AIS-031, R-AIS-039). The value is frozen by
+// `openspec/changes/2026-08-07-cachicamas-ai-backpressure/decision.md` —
+// AI-34.1's M1 / M2 / M3 measurements, with doc 0002 § 6 line 432's
+// "prefer the smaller" tie-break applied. The chosen N is `0` (rendezvous):
+// the unbuffered carrier minimises on every axis the measurements name
+// (M1 high-water = 0, M2 bursty p99 collapses to 0 only if buffered —
+// that collapse is the hidden-latency the tie-break warns against, M3
+// per-stream heap is dominated by setup overhead, not by the carrier).
+// Mirrors `streamReadBufferSize` and `emitFailureSendBound` as a
+// package-private constant; no `Config.BufferCapacity` field (design D1,
+// proposal Q3).
+const streamCarrierBuffer = 0
+
 // emitFailureSendBound caps how long a single terminal-failure send
 // may wait for the consumer (AI-32.3 bounded-wait). Generous enough
 // for a local-loopback drain; not generous enough to leak a goroutine
@@ -220,7 +234,7 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 		return nil, refuseNonStreamContentType(resp)
 	}
 
-	out := make(chan ai.Event)
+	out := make(chan ai.Event, streamCarrierBuffer)
 	go run(ctx, resp, out)
 	return out, nil
 }
