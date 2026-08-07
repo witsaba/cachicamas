@@ -88,6 +88,20 @@
 // a block open a few instructions before the corresponding event is ever
 // handed to emit — see run's own blockOpen local and emitFailure's own doc
 // comment.
+//
+// # Body drain-before-close (AI-33.5, R-AIS-033, design.md "Where the drain goes")
+//
+// run's defer chain closes resp.Body without draining (stream.go:345 in
+// slice 1). capture.go:117–122 already proves the drain-before-close
+// idiom is safe and bounded on the failure-capture path; extending it
+// into run's defer chain lets the transport return the keep-alive
+// connection to its idle pool on every exit path — completion, terminal
+// error, each cancellation moment. The drain is silent (any error from
+// io.Copy is the network's concern, not a Layer 1 contract concern), runs
+// INSIDE the existing producer goroutine's defer chain (R-ATS-003's
+// single-producer model is preserved: no second persistent goroutine), and
+// adds no helper, no signature change, and no new top-level Go
+// dependency (R-STK-009).
 
 package openaicompat
 
@@ -342,7 +356,10 @@ func refuseNonStreamContentType(resp *http.Response) error {
 // but constructs no completion event of its own.
 func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 	defer close(out)
-	defer func() { _ = resp.Body.Close() }()
+	// AI-33.5 (R-AIS-033): drain-before-close — see header. Silent
+	// (network errors ignored), runs inside the producer goroutine's
+	// existing defer chain (R-ATS-003 preserved: no second goroutine).
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
 
 	stamper := &ai.Stamper{}
 	decoder := NewDecoder(0)
