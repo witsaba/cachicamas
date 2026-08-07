@@ -52,6 +52,15 @@ type WitnessPayload struct {
 	// construction path; non-nil only for an event built through
 	// [NewRejectingWitnessEvent].
 	rejectWith *Violation
+
+	// plantedAt points to rejectWith's own position as planted, captured at
+	// construction, so validate can re-derive the surfaced position from its
+	// at argument on every call rather than compounding a prefix onto an
+	// already-prefixed path. A pointer rather than a Path keeps
+	// WitnessPayload comparable — the wrong-kind accessor test compares a
+	// payload against the zero WitnessPayload{}. Non-nil exactly when
+	// rejectWith is.
+	plantedAt *Path
 }
 
 // kind reports this payload's registered kind.
@@ -67,16 +76,23 @@ func (w WitnessPayload) blockIndex() BlockIndex { return w.block }
 // not a type switch over an unexported type.
 func (w WitnessPayload) BlockIndex() BlockIndex { return w.block }
 
-// validate reports the payload's first broken rule, or nil: rejectWith
-// itself, returned verbatim (AI-41.1, R-AEE-021). A witness built through
-// [NewWitnessEvent] or [NewTestEvent] carries no rule of its own —
-// rejectWith is nil, so validate keeps passing — and only
-// [NewRejectingWitnessEvent] plants one. The position parameter is unused
-// for that reason: the surfaced violation is the planted one, unchanged,
-// carrying its own position rather than one derived from where validate was
-// called — named _ rather than removed, since eventPayload's signature
-// requires it.
-func (w WitnessPayload) validate(_ Path) *Violation { return w.rejectWith }
+// validate reports the payload's first broken rule at the given position, or
+// nil (AI-41.1, R-AEE-021). A witness built through [NewWitnessEvent] or
+// [NewTestEvent] carries no rule of its own — rejectWith is nil, so validate
+// keeps passing — and only [NewRejectingWitnessEvent] plants one. When one
+// is planted, the same *Violation value is returned — never a copy, so a
+// caller's pointer-identity and sentinel assertions hold — but its position
+// is rewritten to the planted position under at, mirroring how a production
+// payload derives its violation's position from the position it was handed
+// (provider_failure.go's validate: under(at, ...)). Discarding at instead
+// would leave [CheckEmit]'s positional prefix proven by nothing.
+func (w WitnessPayload) validate(at Path) *Violation {
+	if w.rejectWith == nil {
+		return nil
+	}
+	w.rejectWith.at = under(at, *w.plantedAt...)
+	return w.rejectWith
+}
 
 // init registers KindTestWitness once, at package-test-load time, before any
 // test can observe an incomplete registry. It is the only writer of this
@@ -107,13 +123,19 @@ func (e Event) WitnessPayload() (WitnessPayload, bool) {
 }
 
 // NewRejectingWitnessEvent constructs an event of kind [KindTestWitness]
-// carrying block, whose payload reports reject verbatim from validate — the
-// controllable failure mode AI-41.1's rule-4 proof needs (R-AEE-021). A nil
-// reject behaves exactly like [NewWitnessEvent]; every other construction
-// path (NewWitnessEvent, NewTestEvent) never reaches this constructor and so
+// carrying block, whose payload reports reject from validate — the same
+// value, repositioned under the caller's position — the controllable failure
+// mode AI-41.1's rule-4 proof needs (R-AEE-021). A nil reject behaves
+// exactly like [NewWitnessEvent]; every other construction path
+// (NewWitnessEvent, NewTestEvent) never reaches this constructor and so
 // never carries a non-nil rejectWith.
 func NewRejectingWitnessEvent(block BlockIndex, reject *Violation) Event {
-	return Event{payload: WitnessPayload{k: KindTestWitness, block: block, rejectWith: reject}}
+	p := WitnessPayload{k: KindTestWitness, block: block, rejectWith: reject}
+	if reject != nil {
+		planted := reject.Path()
+		p.plantedAt = &planted
+	}
+	return Event{payload: p}
 }
 
 // RegisterTestKind appends a new test-only kind with descriptor d, returning

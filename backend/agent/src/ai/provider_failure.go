@@ -355,19 +355,29 @@ func (f *Failure) Error() string {
 
 // GoString renders the failure for the %#v verb (R-AIP-016).
 //
-// Without it, %#v falls back to reflection and prints every unexported
-// field — including the wrapped cause, which may carry raw provider body
-// text or credential-adjacent material — which would make the redaction
-// posture a property of which verb someone reached for rather than a
-// property of the type (event.go's [Event.GoString], content_part.go's
-// [Part.GoString]: the same delegate-don't-reflect posture, restated for a
-// type that is itself an error). It delegates to the already-redacted,
-// already-nil-safe [Failure.Error] rather than duplicating a second
-// renderer that would need keeping in sync — including its nil-receiver
-// case: fmt invokes GoString on a typed-nil *Failure because the GoStringer
-// assertion succeeds for the pointer method set, and Error already returns
-// [noProviderFailure] for that case, so no second nil check is needed here
-// (NFR-AIP-B).
+// Without it, %#v on a *Failure falls back to reflection and prints every
+// unexported field — including the wrapped cause, which may carry raw
+// provider body text or credential-adjacent material (event.go's
+// [Event.GoString], content_part.go's [Part.GoString]: the same
+// delegate-don't-reflect posture, restated for a type that is itself an
+// error). It delegates to the already-redacted, already-nil-safe
+// [Failure.Error] rather than duplicating a second renderer that would need
+// keeping in sync — including its nil-receiver case: fmt invokes GoString on
+// a typed-nil *Failure because the GoStringer assertion succeeds for the
+// pointer method set, and Error already returns [noProviderFailure] for that
+// case, so no second nil check is needed here (NFR-AIP-B).
+//
+// What this covers is exactly *Failure — the form every constructor returns
+// and every in-repo call site holds. A copied Failure value is outside it:
+// GoString, Error, Unwrap and Is are all pointer-receiver, so a copied value
+// is neither a fmt.GoStringer nor an error, and %#v on one still reflects
+// over every unexported field, cause included. The receiver stays a pointer
+// even so, deliberately: a value receiver would extend coverage to copies,
+// but fmt would then reach GoString on a typed-nil *Failure by dereferencing
+// it to make the value copy — a nil-dereference panic where Error's
+// pointer-receiver nil check returns [noProviderFailure] today — trading
+// NFR-AIP-B's nil totality for a form no call site uses. The comprehensive
+// value-form sweep belongs to AI-36's hardening pass.
 func (f *Failure) GoString() string { return f.Error() }
 
 // Unwrap returns the wrapped cause, reachable by errors.Is/errors.As through

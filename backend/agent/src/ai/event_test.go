@@ -210,9 +210,10 @@ func TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange(
 }
 
 // R-AEE-021 — CheckEmit's own rule 4 (design.md D4): the payload's own
-// validation rule is surfaced unchanged when it reports a violation — same
-// failure value, same landed sentinel, same position — never substituted for
-// a verdict of CheckEmit's own (S-AEE-071). Rules 1-3 are structurally
+// validation rule is surfaced when it reports a violation — same failure
+// value, same landed sentinel, its planted position surfaced under the
+// "event" prefix rule 4 supplies — never substituted for a verdict of
+// CheckEmit's own (S-AEE-071). Rules 1-3 are structurally
 // satisfied first: a registered kind (KindTestWitness), a stamped sequence,
 // and a BlockRoleNone descriptor that makes rule 3 exit early with nil
 // (export_test.go's init, event.go's CheckEmit) — so only rule 4 can be
@@ -250,8 +251,17 @@ func TestCheckEmit_PayloadReportsOwnViolation_SurfacedAsRule4(t *testing.T) {
 	if !errors.Is(err, sentinelRule) {
 		t.Errorf("errors.Is(err, sentinelRule) = false, want the planted rule class to survive unchanged through the boundary")
 	}
-	if !reflect.DeepEqual(violation.Path(), planted.Path()) {
-		t.Errorf("violation.Path() = %v, want %v (the planted position, unchanged)", violation.Path(), planted.Path())
+	// The surfaced position proves rule 4 handed the payload its own
+	// positional prefix: CheckEmit calls validate(Path{At("event")})
+	// (event.go), and the witness derives its violation's position from that
+	// argument, so the planted position must surface under "event". Comparing
+	// against an independently constructed Path — never violation.Path()
+	// against a clone of itself — makes this fail if CheckEmit stops passing
+	// the prefix (e.g. validate(nil)), which would silently strip "event"
+	// from every production payload's violation position.
+	wantPath := ai.Path{ai.At("event"), ai.At("witness_rule")}
+	if !reflect.DeepEqual(violation.Path(), wantPath) {
+		t.Errorf("violation.Path() = %v, want %v (the planted position under CheckEmit's own \"event\" prefix)", violation.Path(), wantPath)
 	}
 	if errors.Is(err, ai.ErrNotInVocabulary) {
 		t.Error("errors.Is(err, ai.ErrNotInVocabulary) = true, want rule 1 to not have fired — only the payload's own rule is responsible")

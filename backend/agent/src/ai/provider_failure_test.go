@@ -1300,7 +1300,7 @@ func TestFailure_GoString_RedactsLikeError(t *testing.T) {
 	t.Run("no verb reproduces a planted canary (S-AIP-056)", func(t *testing.T) {
 		t.Parallel()
 
-		for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+		for _, verb := range []string{"%v", "%s", "%+v", "%#v", "%q"} {
 			rendered := fmt.Sprintf(verb, f)
 			for _, canary := range []string{canaryRawLabel, canaryRequestID, canaryCauseText} {
 				if strings.Contains(rendered, canary) {
@@ -1334,11 +1334,12 @@ func TestFailure_GoString_NilReceiver_TotalByDelegation(t *testing.T) {
 		t.Run(verb, func(t *testing.T) {
 			t.Parallel()
 
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) panicked: %v", verb, recovered)
-				}
-			}()
+			// No recover guard: fmt installs its own panic catcher around a
+			// GoString/Error method call (handleMethods' catchPanic), so a
+			// panicking method never escapes Sprintf — it renders as a
+			// "%!verb(PANIC=...)" marker instead. The equality assertion
+			// below is therefore what enforces nil totality: a panic would
+			// surface as that marker and fail the comparison.
 			if got := fmt.Sprintf(verb, (*ai.Failure)(nil)); got != want {
 				t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) = %q, want %q", verb, got, want)
 			}
