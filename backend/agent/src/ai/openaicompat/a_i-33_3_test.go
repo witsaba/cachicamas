@@ -25,7 +25,7 @@
 //
 // # Why the observation must never read before emitFailureSendBound expires
 //
-// `out` is unbuffered (stream.go:209), so a consumer that never reads leaves
+// `out` is unbuffered (stream.go:223, carrier construction), so a consumer that never reads leaves
 // the producer blocked on its very first send. Cancellation makes emit lose
 // the `out <- stamped` vs `<-ctx.Done()` race (stream.go:557–565) and return
 // false, at which point AI-32.3's bounded-wait branch (stream.go:437–470,
