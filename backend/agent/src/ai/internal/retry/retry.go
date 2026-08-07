@@ -71,10 +71,6 @@ func Loop(
 	executeOnce func(ctx context.Context, body []byte) (*http.Response, error),
 ) (*http.Response, error) {
 	cfg = applyDefaults(cfg)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
 	jitter := newJitter(cfg.JitterSeed, cfg.NowFunc())
 	var lastFailure *ai.Failure
 	totalAttempts := cfg.MaxAttempts + 1
