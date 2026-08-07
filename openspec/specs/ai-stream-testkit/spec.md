@@ -36,7 +36,7 @@ This spec constrains what the `V-PRV-11` stream test kit MUST guarantee: that a 
 
 **Explicitly not absorbed here**, and recorded so it reads as decided rather than forgotten:
 
-- **W1/W2, the two Wave-2 carryovers AI-21 parked** (the `CheckEmit` rule 4 failure-path gap, the missing redacting `GoString()` on the failure payload). **Assigned 2026-08-03 (AI-24):** doc 0002 appends **AI-41 — Discharge the Wave-2 carryovers** (Wave 5) as owner; AI-22 still assigns neither.
+- **W1/W2, the two Wave-2 carryovers AI-21 parked** (the `CheckEmit` rule 4 failure-path gap, the missing redacting `GoString()` on the failure payload). **Assigned 2026-08-03 (AI-24):** doc 0002 appends **AI-41 — Discharge the Wave-2 carryovers** (Wave 5) as owner; AI-22 still assigns neither. **Discharged 2026-08-07 (AI-41)** by `cachicamas-ai-wave2-carryovers`: both are closed — the emission boundary's payload-validation rule now carries a direct, attributable failure-path proof (`R-AEE-021`), and the provider-failure payload's redaction is a property of the payload rather than of the caller's formatting verb (`R-AIP-016`). This entry now reads **discharged by AI-41**, not *assigned to AI-41*.
 - **Migration of the two existing ad hoc drain helpers** (`requireClosedWithin` in `ai/provider_test.go`, `drainFake` in `agenttest/fake_text_test.go`). This change is **additive tooling, not a refactor** of already-shipped, already-verified AI-21 and AI-20 test files. Both local helpers stay exactly where they are. Migration is a later tidy-up.
 - **A third-party leak detector.** See `R-STK-009`: rejected here as this change's own recorded decision, not forbidden forever.
 
