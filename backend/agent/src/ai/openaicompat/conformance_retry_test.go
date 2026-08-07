@@ -5,13 +5,21 @@
 // factory pattern only builds ai.ModelProvider, but CapRetry
 // needs HTTP-level scripting to assert request count and body
 // byte-equality across attempts). The case body registers into
-// the agenttest registry via its exported RegisterConformanceCase;
-// the OpenRouter wrapper inherits the helper transparently and
-// AI-38 will reuse the same case body for its own bridge.
-package openaicompat
+// the agenttest registry via its exported RegisterConformanceCase
+// during the openaicompat test binary's init phase; the OpenRouter
+// wrapper inherits the helper transparently and AI-38 will reuse
+// the same case body for its own bridge.
+//
+// The test binary that exercises this case body is the openaicompat
+// test binary; the included TestRetryCaseBody_RunsDirectly drives
+// every sub-test of the case against a Factory whose Retry
+// declaration is true, with a real *openaicompat.Client speaking
+// real HTTP to a scripted httptest.NewServer.
+package openaicompat_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -23,6 +31,7 @@ import (
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
+	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 )
 
 // retryDefaultMaxAttempts mirrors internal/retry.DefaultMaxAttempts so
@@ -40,6 +49,38 @@ func init() {
 		retryAutoRetryUpToBoundCase,
 	)
 }
+
+// TestRetryCaseBody_RunsDirectly is the white-box test that drives
+// the CapRetry case body against a Factory whose Retry declaration
+// is true. It exists because the case body's init() registration
+// fires only when the openaicompat test binary is built, and the
+// agenttest test binary (which owns the public suite runner)
+// cannot import the case body directly without creating an import
+// cycle. This direct call proves every sub-test inside the case
+// body holds against an in-process Factory + a real
+// *openaicompat.Client speaking real HTTP.
+func TestRetryCaseBody_RunsDirectly(t *testing.T) {
+	retryOffered := true
+	factory := agenttest.Factory{
+		New: func(_ testing.TB, _ ...agenttest.Script) ai.ModelProvider {
+			// The case body bypasses f.New; it constructs its own
+			// subject (design.md D11). Returning nil keeps the
+			// Factory's contract total (New must be set) without
+			// injecting a fake the case body would never use.
+			return nil
+		},
+		Reasoning:     boolPtrFor(false),
+		TokenCounting: boolPtrFor(false),
+		CacheBoundary: boolPtrFor(false),
+		Retry:         &retryOffered,
+	}
+	// Drive the case body directly; the body is a t.Run block of
+	// sub-tests, so this is effectively an explicit invocation of
+	// the sub-tests S-CNF-069..075.
+	retryAutoRetryUpToBoundCase(t, factory)
+}
+
+func boolPtrFor(b bool) *bool { return &b }
 
 func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 	t.Helper()
@@ -63,17 +104,18 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 			}))
 			defer server.Close()
 
-			client, err := New(Config{
+			client, err := openaicompat.New(openaicompat.Config{
 				Endpoint:   server.URL,
-				Credential: NewCredential("conformance-retry-token"),
+				Credential: openaicompat.NewCredential("conformance-retry-token"),
 			})
 			if err != nil {
 				t.Fatalf("New error = %v, want nil", err)
 			}
-			_, streamErr := client.Stream(t.Context(), confRetryRequest(t))
+			ch, streamErr := client.Stream(t.Context(), confRetryRequest(t))
 			if streamErr != nil {
 				t.Fatalf("Stream error = %v, want nil", streamErr)
 			}
+			confRetryDrainAll(t, ch)
 			if got, want := requests.Load(), int32(retryDefaultMaxAttempts+1); got != want {
 				t.Fatalf("wire requests = %d, want %d", got, want)
 			}
@@ -92,9 +134,9 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 		}))
 		defer server.Close()
 
-		client, err := New(Config{
+		client, err := openaicompat.New(openaicompat.Config{
 			Endpoint:   server.URL,
-			Credential: NewCredential("conformance-retry-token"),
+			Credential: openaicompat.NewCredential("conformance-retry-token"),
 		})
 		if err != nil {
 			t.Fatalf("New error = %v, want nil", err)
@@ -130,9 +172,9 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 		}))
 		defer server.Close()
 
-		client, err := New(Config{
+		client, err := openaicompat.New(openaicompat.Config{
 			Endpoint:   server.URL,
-			Credential: NewCredential("conformance-retry-token"),
+			Credential: openaicompat.NewCredential("conformance-retry-token"),
 		})
 		if err != nil {
 			t.Fatalf("New error = %v, want nil", err)
@@ -183,15 +225,15 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 			}))
 			defer server.Close()
 
-			client, err := New(Config{
+			client, err := openaicompat.New(openaicompat.Config{
 				Endpoint:   server.URL,
-				Credential: NewCredential("conformance-retry-token"),
+				Credential: openaicompat.NewCredential("conformance-retry-token"),
 			})
 			if err != nil {
 				t.Fatalf("New error = %v, want nil", err)
 			}
 			request := confRetryRequest(t)
-			original, translateErr := Translate(request)
+			original, translateErr := openaicompat.Translate(request)
 			if translateErr != nil {
 				t.Fatalf("Translate error = %v, want nil", translateErr)
 			}
@@ -232,9 +274,9 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 		}))
 		defer server.Close()
 
-		client, err := New(Config{
+		client, err := openaicompat.New(openaicompat.Config{
 			Endpoint:   server.URL,
-			Credential: NewCredential("conformance-retry-token"),
+			Credential: openaicompat.NewCredential("conformance-retry-token"),
 		})
 		if err != nil {
 			t.Fatalf("New error = %v, want nil", err)
@@ -278,9 +320,6 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 	})
 
 	t.Run("factory_nil_retry_defect", func(t *testing.T) {
-		// factoryDefect is a pure function: we can call it without
-		// running the suite. A factory whose Retry is nil must
-		// surface the defect at construction.
 		got := agenttest.FactoryDefectForTest(f)
 		if f.Retry == nil && got == "" {
 			t.Fatal("FactoryDefectForTest returned empty against a nil Retry declaration; want a defect naming CapRetry (R-CNF-002, S-CNF-006)")
@@ -290,6 +329,8 @@ func retryAutoRetryUpToBoundCase(t *testing.T, f agenttest.Factory) {
 
 func confRetryStreamOK(t *testing.T, w http.ResponseWriter) {
 	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-conf-retry\",\"model\":\"m\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
 	_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-conf-retry\",\"model\":\"m\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
 	_, _ = io.WriteString(w, "data: [DONE]\n\n")
@@ -329,3 +370,5 @@ func confRetryDrainAll(t *testing.T, ch <-chan ai.Event) []ai.Event {
 		}
 	}
 }
+
+var _ = context.TODO
