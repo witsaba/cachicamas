@@ -2078,11 +2078,25 @@ SDD change: `cachicamas-ai-backpressure`.
 
 SDD change: `cachicamas-ai-retry-policy` · One sentence promoted to structure: **the partial-output case is never retried at Layer 1.**
 
+> **Amended 2026-08-07 — AI-35 policy decision adopted (auto-retry, in-adapter loop factored into a shared helper).**
+>
+> Resolves AI-35.0 ahead of the SDD explore phase. The decision:
+>
+> - **Auto-retry over no-auto-retry.** Evidence: AG-15.2 (Layer 2, doc 0003) explicitly tests the *composed* bound "harness attempts × Layer 1 attempts", which only exists if Layer 1 actually retries; the Layer 2 test for that composed bound cannot be designed without a concrete Layer 1 mechanism; pre-stream retryable failures are the cheap, safe class that auto-retry serves without ambiguity; the partial-output rule (the milestone's load-bearing sentence) is invariant under either choice.
+> - **In-adapter loop, factored into a shared helper.** AI-32 already maps wire failures to the typed taxonomy at the adapter edge; AI-33's per-response drain discipline already lives there; bytes-identical replay is trivial when the marshaled body is in-process. A wrapping component would re-create body re-issuance and per-attempt drain as adapter-external seams (rebuild-callback + drain-callback), which adds API surface without removing coupling. The loop itself — bounded attempts, context-aware backoff, retry-after handling, composed-bound visibility — is extracted into a helper invoked by the adapter's "execute-once" function, so future adapters (Anthropic, Gemini, ...) reuse it without re-implementing the discipline.
+>
+> Consequences:
+>
+> - AI-35.0 closes with the decision artifact (`decision.md`) merged.
+> - AI-35.2 and AI-35.3 proceed (the living-graph strike path is dead).
+> - The `Deliverable` and `Acceptance` clauses of this charter are updated below.
+> - Review budget raised to **1000 changed lines** for this milestone (per orchestrator decision 2026-08-07); the natural forecast is well under that, but the composed-bound test in AG-15.2 plus replayability tests justify the headroom.
+
 **Charter**
 
 - **Goal:** Decide and implement only retries that cannot duplicate a partially observed response.
-- **Deliverable:** Explicit pre-stream retry conditions, backoff bounds and retry-after handling — or a documented no-auto-retry v1 policy.
-- **Acceptance:** No automatic retry occurs after any semantic event has been emitted, and the acceptance states what *does* happen: the typed error with its discriminator is handed up and the harness decides.
+- **Deliverable:** Pre-stream auto-retry with bounded attempts, retry-after handling, byte-identical replay, and per-attempt drain; the in-adapter loop lives in a shared helper (see AI-35.0 amendment 2026-08-07).
+- **Acceptance:** Auto-retry executes **only** on retryable-flagged failures that occur before any semantic event is emitted; after any semantic event, the typed error with its partial-output discriminator is handed up and the harness decides. The wire-level attempt bound is documented and composed with Layer 2's bound at AG-15.2.
 - **Depends on:** AI-32, AI-33. · **Blocks:** AI-38.
 - **Out of scope:** Agent-turn retries and model failover — both Layer 2's (v2 § 6 seams 7 and 8).
 - **Note:** a stream that dies after emitting output is the single most common real-world failure, and the naive retry predicate — "retry if nothing completed" — is precisely the one that gets it wrong.
@@ -2099,9 +2113,9 @@ flowchart LR
 #### AI-35.0 — Retry policy and seam `[decision]`
 
 - **Closing checklist:**
-  1. Auto-retry versus a documented **no-auto-retry v1 policy**, decided with rationale. Presupposing an executor forecloses a decision that should stay open until the evidence exists.
-  2. If auto-retry: where the mechanism lives — inside the adapter, or a wrapping component — because AI-35.1's first test cannot be written without that seam.
-  3. If no-auto-retry: AI-35.2 and AI-35.3 are struck under the living-graph clause, AI-35.1 shrinks to its never-retry assertions, and the documented policy is the milestone's deliverable.
+  1. ~~Auto-retry versus a documented **no-auto-retry v1 policy**, decided with rationale. Presupposing an executor forecloses a decision that should stay open until the evidence exists.~~ **Decided 2026-08-07: auto-retry.** Rationale lives in the milestone amendment above; the `decision.md` artifact records it verbatim for the explore/propose/spec phases to consume.
+  2. ~~If auto-retry: where the mechanism lives — inside the adapter, or a wrapping component — because AI-35.1's first test cannot be written without that seam.~~ **Decided 2026-08-07: in-adapter loop, factored into a shared helper invoked by the adapter's "execute-once" function.** Rationale in the milestone amendment above; AI-35.1's first test (the partial-output boundary) is now writable directly against the helper.
+  3. ~~If no-auto-retry: AI-35.2 and AI-35.3 are struck under the living-graph clause, AI-35.1 shrinks to its never-retry assertions, and the documented policy is the milestone's deliverable.~~ **Struck 2026-08-07** under the living-graph clause — superseded by items 1 and 2 above.
 - **Depends on:** AI-32, AI-33.
 
 #### AI-35.1 — The retry predicate `[leaf]`
