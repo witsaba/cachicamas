@@ -237,15 +237,18 @@ The suite MUST cover `CAP-O-03` through the declared capability expectation of `
 
 ### R-CNF-017 — The record is total over both closed lists, with standing taken from AI-03
 
-The emitted record MUST identify its subject and its run, and MUST carry **exactly one entry per capability** in `CAP-R-01…05` and `CAP-O-01…03` — eight entries, always. Each entry's **standing** MUST be taken from AI-03 § 5 and § 6, never from the run. Each entry's **outcome** MUST come from the closed four-value set — `satisfied`, `absent`, `failed`, `not exercised` — with `absent` legal for **optional entries only**. A capability with no entry MUST be a defect in the run, not an absence. The record MUST carry no capability-specific detail, no model content, no credential and no raw provider text.
+The emitted record MUST identify its subject and its run, and MUST carry **exactly one entry per capability** in `CAP-R-01…05` and `CAP-O-01…04` — **nine entries, always**. Each entry's **standing** MUST be taken from AI-03 § 5 and § 6, never from the run. Each entry's **outcome** MUST come from the closed four-value set — `satisfied`, `absent`, `failed`, `not exercised` — with `absent` legal for **optional entries only**. A capability with no entry MUST be a defect in the run, not an absence. The record MUST carry no capability-specific detail, no model content, no credential and no raw provider text.
+
+> **Amended 2026-08-07 (AI-35)** by `cachicamas-ai-retry-policy`: previously "eight entries, always" over `CAP-R-01…05` and `CAP-O-01…03`. AI-35 adds `CapRetry` as `CAP-O-04`, the ninth entry and fourth optional capability; S-CNF-047 and S-CNF-048 are restated accordingly and S-CNF-076 is added.
 
 #### Scenarios
 
-- **S-CNF-047** — Given any completed run, when the record is read, then it carries exactly eight entries, one per capability in the two closed lists, each naming its capability, standing and outcome.
-- **S-CNF-048** — Given a run whose subject offers no optional capability, when the record is read, then the three optional entries are `absent` and no entry is `not exercised`.
+- **S-CNF-047** *(modified 2026-08-07, AI-35)* — Given any completed run, when the record is read, then it carries exactly **nine** entries, one per capability in the two closed lists (including `CAP-O-04(retry)`), each naming its capability, standing and outcome.
+- **S-CNF-048** *(modified 2026-08-07, AI-35)* — Given a run whose subject offers no optional capability, when the record is read, then the **four** optional entries (`CAP-O-01…04`) are `absent` and no entry is `not exercised`.
 - **S-CNF-049** — Given a run in which a required capability's cases failed, when the record is read, then that entry is `failed` — never `absent`, for which required standing has no legal value.
 - **S-CNF-050** — Given a run that recorded a required capability as optional, when the record is validated, then it fails: standing is not the run's to supply.
 - **S-CNF-051** — Given a published record, when it is inspected for capability-specific detail, model content or credentials, then it carries none.
+- **S-CNF-076** *(added 2026-08-07, AI-35; pin: `R-CNF-003`, `R-CNF-018`)* — Given the capability closed lists and their enumerator, when a reviewer inspects them, then the closed list is `CAP-R-01…05` and `CAP-O-01…04` (nine entries, in declaration order), AND the none-marker stays deliberately excluded from the enumerator (unchanged from the eight-member rule), AND the retry capability is declared last so the enumerator's contiguous range grows by exactly one.
 
 ### R-CNF-018 — The verdict rule: `not exercised` is inconclusive, and a failed required entry cannot pass
 
@@ -327,3 +330,60 @@ Every test-list item of AI-23.1 … AI-23.8 MUST be taken red → green → refa
 `R-CNF-001`'s factory and `R-CNF-002`'s capability-expectation value travel together as one `Factory` struct: `New func(testing.TB, ...Script) ai.ModelProvider` plus `Reasoning`, `TokenCounting`, `CacheBoundary *bool`. **The `*bool` choice was itself a correction, not the original design.** The first design pass used bare `bool` fields, which cannot distinguish "declared not offered" (must record `absent`) from "never declared" (spec's `S-CNF-006` requires this to fail construction loudly) — a bare bool's zero value is `false` either way. This was caught during `sdd-tasks`, before apply, and fixed in `design.md`: `nil` fails construction naming the undeclared capability; non-nil `false` records `absent`; non-nil `true` is cross-checked against askable discovery (only `CAP-O-02` is askable, via `ai.TokenCounter`) and records `satisfied` or `failed`.
 
 `R-CNF-003`'s marking and `R-CNF-017`'s totality are mechanical by construction: an 8-member `Capability` enum with an exhaustive enumerator, entries initialized to `OutcomeNotExercised` in a fixed `[8]`-element array that cannot be appended to. `R-CNF-016`'s finish-reason drift guard hand-lists the seven values and probes `ai.FinishReason(n).String()` upward to the first `"invalid"`, failing if the count diverges — proving exhaustiveness behaviorally against a vocabulary `src/ai` exports no enumerator for, the same technique AI-22's `R-STK-004` established for event kinds. `R-CNF-013`'s sentinel travels on the factory's own configuration (`Factory.Sentinel`); the fake's factory adapter plants it into `Failure.Cause` and `Failure.RequestID` (deliberately not `RawLabel`, whose bounded head is sanctioned rendering, not a leak) — zero new AI-21 surface, exactly as the proposal predicted.
+
+> **Amended 2026-08-07 (AI-35)** by `cachicamas-ai-retry-policy` (AI-35, Wave 5 — Harden). One optional capability `CapRetry` (CAP-O-04) added to the conformance suite's closed list; the `Capability` enum grows from `[8]` to `[9]`; `R-CNF-017` totality rebuild is mechanical (one new line). One requirement `R-CNF-019` added: every adapter claiming `CapRetry` auto-retries retryable pre-stream failures up to the documented Layer 1 bound, never retries terminal-category failures regardless of position, re-issues with byte-identical wire body across attempts, and exposes the attempt count and final cause via the cause chain.
+
+### R-CNF-019 (added 2026-08-07) — Every adapter claiming `CapRetry` auto-retries retryable pre-stream failures up to a documented bound
+
+An adapter that declares `CapRetry` (CAP-O-04) MUST satisfy all of the following:
+
+1. **Every retryable-flagged pre-stream failure is retried up to the documented Layer 1 bound** (per `R-AIS-044`, meaning up to `N+1` wire requests per logical call, where `N` is documented as 3).
+2. **Terminal-category failures — authentication, invalid request — are NEVER retried**, regardless of position.
+3. **The per-attempt wire body is byte-identical to the original** across attempts (per `R-AIS-043` / S-1).
+4. **The attempt count and the final cause are reachable from the returned error chain** via the cause-chain accessor (per `R-AIS-043` / S-2).
+
+An adapter that does **not** declare `CapRetry` is not bound by `R-CNF-019` but MUST still satisfy `R-CNF-001` … `R-CNF-018`. The `CapRetry` declaration is mandatory input to the run (extending `R-CNF-002`: a factory whose `CapRetry` declaration field is `nil` fails construction per `S-CNF-006`).
+
+#### Scenario: R-CNF-019 / S-CNF-069 — Retryable pre-stream failure is retried up to the documented bound *(pin: `R-AIS-041` / S-1, `R-AIS-042` / S-4, `R-AIS-044`)*
+
+- **GIVEN** a scripted transport that returns rate-limit (429) with retry-after 0, repeated for up to `N+1` attempts, then a 2xx text-stream
+- **WHEN** the suite runs the `CapRetry` case against an adapter that declares `CapRetry`
+- **THEN** the case asserts every retryable-flagged pre-stream failure was retried up to the documented bound, AND the final stream is the `N+1`-th attempt's 2xx stream, AND the typed failure (if returned) carries the attempt count via the cause chain
+
+#### Scenario: R-CNF-019 / S-CNF-070 — Terminal-category failure is never retried *(pin: `R-AIS-041` / S-2, `R-AEM-008`, `R-AEM-009`)*
+
+- **GIVEN** a scripted transport that returns authentication failure on a single attempt
+- **WHEN** the suite runs the `CapRetry` case
+- **THEN** the case asserts no retry occurred (wire request count == 1, instrumented), AND the typed failure is returned with retryability marked false, AND no second wire request follows
+
+#### Scenario: R-CNF-019 / S-CNF-071 — No retry after partial output *(pin: `R-AIS-043` / S-4, `R-AIP-010`, `R-AIP-011`, `V-FAIL-15`, `AG-15.1`)*
+
+- **GIVEN** a scripted transport that returns one 2xx text-stream frame, then a retryable-flagged failure mid-stream
+- **WHEN** the suite runs the `CapRetry` case
+- **THEN** the case asserts wire request count == 1 (no automatic retry after a semantic event has been emitted), AND the typed failure reaches the consumer via the terminal error event with partial output marked true
+
+#### Scenario: R-CNF-019 / S-CNF-072 — Byte-identical replay across attempts *(pin: `R-AIS-043` / S-1, `R-ART-010`)*
+
+- **GIVEN** a scripted transport that records every request body's bytes, and a request the helper retries `N+1` times
+- **WHEN** the suite runs the `CapRetry` case
+- **THEN** the case asserts every recorded body is byte-identical to every other (no drift, no re-encoding), AND the recorded request bodies match the original request's bytes verbatim
+
+#### Scenario: R-CNF-019 / S-CNF-073 — Attempt count and final cause reachable from error chain *(pin: `R-AIS-043` / S-2, `V-FAIL-15`)*
+
+- **GIVEN** the helper has exhausted its attempt budget
+- **WHEN** the suite reads the returned error via the cause-chain accessor
+- **THEN** the attempt count equals `N+1` and the final cause is reachable as a typed failure carrying the original failure's category and delivery classification
+
+#### Scenario: R-CNF-019 / S-CNF-074 — CapRetry absent is reported, not silent *(pin: `R-CNF-002`, `R-CNF-004`)*
+
+- **GIVEN** an adapter whose factory carries the `CapRetry` declaration field as false (declared not offered)
+- **WHEN** the suite runs against it
+- **THEN** the record carries `CapRetry` = `absent` per `R-CNF-004` (skipped optional case reported, never silent), AND the run is not inconclusive on that entry, AND the adapter still satisfies `R-CNF-001` … `R-CNF-018`
+
+#### Scenario: R-CNF-019 / S-CNF-075 — Factory nil Retry fails construction *(pin: `R-CNF-002`, `S-CNF-006`)*
+
+- **GIVEN** a factory whose `CapRetry` declaration field is `nil` (undeclared)
+- **WHEN** the suite runs
+- **THEN** it fails at construction naming the undeclared capability, per `R-CNF-002` / `S-CNF-006` — the same nil-disallowed discipline `Reasoning`, `TokenCounting`, `CacheBoundary` already enforce
+
+---
