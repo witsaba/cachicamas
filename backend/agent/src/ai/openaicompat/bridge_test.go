@@ -58,11 +58,11 @@ import (
 // conformanceBridgeFactory builds the agenttest.Factory this milestone's
 // bridge exposes (design.md D11): New renders every given Script eagerly,
 // on the caller's own goroutine, then serves the rendered transcripts, in
-// queue order, from a real httptest.Server behind a real *Client. All three
+// queue order, from a real httptest.Server behind a real *Client. All four
 // optional capabilities are declared non-nil false (W-2): this bridge
-// offers none of them.
+// offers none of them today.
 func conformanceBridgeFactory() agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := false, false, false
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, false
 	return agenttest.Factory{
 		New: func(tb testing.TB, scripts ...agenttest.Script) ai.ModelProvider {
 			tb.Helper()
@@ -88,6 +88,7 @@ func conformanceBridgeFactory() agenttest.Factory {
 		Reasoning:     &reasoningOffered,
 		TokenCounting: &tokenCountingOffered,
 		CacheBoundary: &cacheBoundaryOffered,
+		Retry:         &retryOffered,
 	}
 }
 

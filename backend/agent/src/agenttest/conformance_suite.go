@@ -31,8 +31,8 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// Capability identifies one of AI-03's eight capabilities in its two closed
-// lists (CAP-R-01…05, CAP-O-01…03), plus [CapNone] for a case that
+// Capability identifies one of AI-03's nine capabilities in its two closed
+// lists (CAP-R-01…05, CAP-O-01…04), plus [CapNone] for a case that
 // exercises none of them. The zero value is not a member — this package's
 // zero-names-nothing idiom, restated: a [conformanceCase] whose author
 // forgot to set its capability field is caught as a registration defect
@@ -74,18 +74,22 @@ const (
 	// optional.
 	CapCacheBoundary
 
+	// CapRetry is CAP-O-04: auto-retry of retryable pre-stream failures,
+	// optional.
+	CapRetry
+
 	// CapNone marks a conformance case that exercises no capability in
 	// either closed list — a structural or lifecycle case (AI-03 §5's
 	// closing note: exactly-one-terminal and redaction are both required
 	// "by the default", never by a record entry). It is deliberately
-	// declared after the eight real capabilities, outside
+	// declared after the nine real capabilities, outside
 	// [capabilityFirst]…[capabilityEnd]'s range, so it can never be mistaken
 	// for one of them and never receives a capability-record entry
 	// (R-CNF-017's totality is over the two closed lists only).
 	CapNone
 
 	capabilityFirst = CapStreamingText
-	capabilityEnd   = CapCacheBoundary + 1
+	capabilityEnd   = CapRetry + 1
 )
 
 // capabilityNames is the stable string form of each capability, named with
@@ -99,6 +103,7 @@ var capabilityNames = [...]string{
 	CapReasoningContent:   "CAP-O-01(reasoning_content)",
 	CapTokenCounting:      "CAP-O-02(token_counting)",
 	CapCacheBoundary:      "CAP-O-03(cache_boundary)",
+	CapRetry:              "CAP-O-04(retry)",
 	CapNone:               "no_listed_capability",
 }
 
@@ -111,8 +116,8 @@ func (c Capability) String() string {
 	return fmt.Sprintf("capability(%d)", uint8(c))
 }
 
-// Capabilities returns AI-03's eight-member closed-list union — CAP-R-01…05
-// then CAP-O-01…03, in declaration order — the enumerator [CapabilityRecord]
+// Capabilities returns AI-03's nine-member closed-list union — CAP-R-01…05
+// then CAP-O-01…04, in declaration order — the enumerator [CapabilityRecord]
 // totality is built from. [CapNone] is deliberately excluded: it is not a
 // member of either closed list. The result is a fresh slice on every call —
 // this package's own closed-vocabulary idiom (EventKinds, FailureCategories).
@@ -124,13 +129,13 @@ func Capabilities() []Capability {
 	return out
 }
 
-// Optional reports whether c is one of CAP-O-01…03 — AI-03 §11's marking
+// Optional reports whether c is one of CAP-O-01…04 — AI-03 §11's marking
 // rule, applied mechanically: every other value, including [CapNone], the
 // zero value and a value outside this vocabulary entirely, is required by
 // the same default.
 func (c Capability) Optional() bool {
 	switch c {
-	case CapReasoningContent, CapTokenCounting, CapCacheBoundary:
+	case CapReasoningContent, CapTokenCounting, CapCacheBoundary, CapRetry:
 		return true
 	default:
 		return false
@@ -163,19 +168,19 @@ type Factory struct {
 	// AI-21's own Script/Step/Emit/Hold/Gate vocabulary.
 	New func(tb testing.TB, scripts ...Script) ai.ModelProvider
 
-	// Reasoning, TokenCounting and CacheBoundary are the factory's declared
-	// expectation for CAP-O-01, CAP-O-02 and CAP-O-03 respectively
-	// (R-CNF-002). nil means undeclared: the suite fails construction,
-	// naming the undeclared capability (S-CNF-006). Non-nil false means
-	// declared not offered: the suite records the entry absent and skips
-	// its cases, reported rather than silent (R-CNF-004). Non-nil true
-	// means declared offered: the suite runs the capability's cases
+	// Reasoning, TokenCounting, CacheBoundary and Retry are the factory's
+	// declared expectation for CAP-O-01, CAP-O-02, CAP-O-03 and CAP-O-04
+	// respectively (R-CNF-002). nil means undeclared: the suite fails
+	// construction, naming the undeclared capability (S-CNF-006). Non-nil
+	// false means declared not offered: the suite records the entry absent
+	// and skips its cases, reported rather than silent (R-CNF-004). Non-nil
+	// true means declared offered: the suite runs the capability's cases
 	// normally, and for CAP-O-02 — the only askable optional contract,
 	// R-AMP-017 — additionally cross-checks the declaration against the
 	// subject's own ai.TokenCounter discovery (design.md D6): a mismatch in
 	// either direction fails the entry rather than trusting either side
 	// silently.
-	Reasoning, TokenCounting, CacheBoundary *bool
+	Reasoning, TokenCounting, CacheBoundary, Retry *bool
 
 	// Sentinel is the redaction canary AI-23.7's cases plant into a
 	// subject's failure-report fields. "" selects the suite's own default
@@ -184,13 +189,13 @@ type Factory struct {
 }
 
 // FakeFactory wraps AI-21's [Provider] as a reference subject: New returns a
-// fresh scripted [Provider] per case, and all three optional capabilities
-// are explicitly declared — Reasoning offered, TokenCounting and
-// CacheBoundary not — so a full suite run against it exercises both the
-// satisfied and the absent optional outcomes (S-CNF-056) and never trips
-// S-CNF-006's undeclared-capability construction failure.
+// fresh scripted [Provider] per case, and all four optional capabilities
+// are explicitly declared — Reasoning offered, TokenCounting,
+// CacheBoundary, and Retry not — so a full suite run against it exercises
+// both the satisfied and the absent optional outcomes (S-CNF-056) and never
+// trips S-CNF-006's undeclared-capability construction failure.
 func FakeFactory() Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := true, false, false
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := true, false, false, false
 	return Factory{
 		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
 			return NewProvider(scripts...)
@@ -198,6 +203,7 @@ func FakeFactory() Factory {
 		Reasoning:     &reasoningOffered,
 		TokenCounting: &tokenCountingOffered,
 		CacheBoundary: &cacheBoundaryOffered,
+		Retry:         &retryOffered,
 	}
 }
 
@@ -224,6 +230,18 @@ var conformanceRegistry []conformanceCase
 // called only from a conformance_*.go leaf's own init() function.
 func registerConformanceCase(name string, capability Capability, run func(t *testing.T, f Factory)) {
 	conformanceRegistry = append(conformanceRegistry, conformanceCase{name: name, capability: capability, run: run})
+}
+
+// RegisterConformanceCase is the exported twin of [registerConformanceCase]
+// used by external test packages (notably [openaicompat.conformance_retry])
+// to register conformance cases from outside the agenttest tree. The
+// unexported sibling stays in place so the package-internal conformance
+// leaves keep their self-registration pattern; the exported twin is
+// reserved for adapter-specific cases whose test code lives in the
+// adapter's own package (which already imports [agenttest] for the
+// stream test kit).
+func RegisterConformanceCase(name string, capability Capability, run func(t *testing.T, f Factory)) {
+	registerConformanceCase(name, capability, run)
 }
 
 // RunConformance runs the suite's whole registered case table against the
@@ -276,6 +294,9 @@ func factoryDefect(f Factory) string {
 	if f.CacheBoundary == nil {
 		return fmt.Sprintf("agenttest: RunConformance given a Factory that never declared %v (nil *bool) — want an explicit true/false declaration (R-CNF-002, S-CNF-006)", CapCacheBoundary)
 	}
+	if f.Retry == nil {
+		return fmt.Sprintf("agenttest: RunConformance given a Factory that never declared %v (nil *bool) — want an explicit true/false declaration (R-CNF-002, S-CNF-006)", CapRetry)
+	}
 	return ""
 }
 
@@ -292,6 +313,16 @@ func requireValidFactory(tb testing.TB, f Factory) {
 	}
 }
 
+// FactoryDefectForTest is the exported twin of [factoryDefect], used by
+// external test packages (notably [openaicompat.conformance_retry]) that
+// need to assert on the exact defect message without driving a real
+// *testing.T subtest. Its semantics are identical to the unexported
+// sibling; the only difference is the export, reserved for adapter-
+// specific conformance cases whose test code lives in another package.
+func FactoryDefectForTest(f Factory) string {
+	return factoryDefect(f)
+}
+
 // declaredOffered reports whether f declares c offered — true only for a
 // non-nil, true *bool. Called only after requireValidFactory has already
 // confirmed every optional capability's *bool is non-nil, so dereferencing
@@ -306,6 +337,8 @@ func declaredOffered(f Factory, c Capability) bool {
 		return f.TokenCounting != nil && *f.TokenCounting
 	case CapCacheBoundary:
 		return f.CacheBoundary != nil && *f.CacheBoundary
+	case CapRetry:
+		return f.Retry != nil && *f.Retry
 	default:
 		return false
 	}

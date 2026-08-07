@@ -108,7 +108,7 @@ func (e CapabilityRecordEntry) String() string {
 
 // CapabilityRecord is AI-03 §10's capability record as this suite emits it:
 // a subject identifier and exactly one entry per capability in AI-03's two
-// closed lists — eight entries, always (R-CNF-017). It carries no
+// closed lists — nine entries, always (R-CNF-017). It carries no
 // capability-specific detail, no model content, no credential and no raw
 // provider text: the entries are its entire content. The array is built
 // once by newCapabilityRecord and mutated only through the record's own
@@ -116,7 +116,7 @@ func (e CapabilityRecordEntry) String() string {
 // from the enumerator, never appended ad hoc.
 type CapabilityRecord struct {
 	subject string
-	entries [8]CapabilityRecordEntry
+	entries [9]CapabilityRecordEntry
 }
 
 // newCapabilityRecord builds a record for subject with exactly one entry
@@ -133,10 +133,19 @@ func newCapabilityRecord(subject string) CapabilityRecord {
 	return r
 }
 
+// NewCapabilityRecordForTest is the exported twin of [newCapabilityRecord],
+// used by external test packages (notably [openaicompat.conformance_retry])
+// that need a total CapabilityRecord without driving the full suite.
+// The two constructors are identical; the export is reserved for
+// adapter-specific conformance cases.
+func NewCapabilityRecordForTest(subject string) CapabilityRecord {
+	return newCapabilityRecord(subject)
+}
+
 // Subject reports which subject produced this record.
 func (r CapabilityRecord) Subject() string { return r.subject }
 
-// Entries returns a fresh copy of the record's eight entries, in
+// Entries returns a fresh copy of the record's nine entries, in
 // Capabilities()' order (R-CNF-017 totality). Every call allocates a new
 // slice, so a caller that mutates what it received cannot alter the record.
 func (r CapabilityRecord) Entries() []CapabilityRecordEntry {
@@ -214,6 +223,15 @@ func (r *CapabilityRecord) recordCaseResult(c Capability, passed bool) {
 	} else {
 		r.setOutcome(c, OutcomeFailed)
 	}
+}
+
+// SetOutcomeForTest is the exported twin of [setOutcome], used by
+// external test packages (notably [openaicompat.conformance_retry]) that
+// need to mutate a record's outcome for assertions without driving a
+// full suite run. The two functions are identical; the export is
+// reserved for adapter-specific conformance cases.
+func (r *CapabilityRecord) SetOutcomeForTest(c Capability, o Outcome) {
+	r.setOutcome(c, o)
 }
 
 // Verdict is the suite's own three-way reading of AI-03 §10's four-value
