@@ -173,19 +173,33 @@ func TestErrorEvent_TerminalExclusivity_NeverBothCompletionAndError(t *testing.T
 		}
 	})
 
-	// No accessor may let a category be read off a completion, or a finish
-	// reason off a failure — proven by an exhaustive method-set comparison,
-	// not a sample, so an accessor added later that happens to collide fails
-	// this test by name rather than by luck.
-	t.Run("Failure and Completion export no accessor of the same name (S-AIP-008)", func(t *testing.T) {
+	// No data accessor may let a category be read off a completion, or a
+	// finish reason off a failure — proven by an exhaustive method-set
+	// comparison, not a sample, so an accessor added later that happens to
+	// collide fails this test by name rather than by luck.
+	//
+	// diagnosticRenderers is a narrow, explicit exemption (AI-41.2,
+	// R-AIP-016): Error/String/GoString each render a fixed diagnostic
+	// string — "completion", or "provider failure: <category>" — never the
+	// other type's data, so a shared name among these three does not violate
+	// this scenario's own text ("... in a way that lets a consumer read a
+	// category off a completion or a finish reason off a failure"). Every
+	// other exported name, including one added later, is still checked with
+	// zero exemption — the two data-accessor assertions below are unchanged.
+	t.Run("Failure and Completion export no data accessor of the same name (S-AIP-008)", func(t *testing.T) {
 		t.Parallel()
+
+		diagnosticRenderers := map[string]bool{"Error": true, "String": true, "GoString": true}
 
 		completionMethods := exportedMethodNames(reflect.TypeOf(ai.Completion{}))
 		failureMethods := exportedMethodNames(reflect.TypeOf(&ai.Failure{}))
 
 		for name := range completionMethods {
+			if diagnosticRenderers[name] {
+				continue
+			}
 			if failureMethods[name] {
-				t.Errorf("both ai.Completion and ai.Failure export an accessor named %q, want terminal exclusivity with no shared accessor name", name)
+				t.Errorf("both ai.Completion and ai.Failure export a non-diagnostic accessor named %q, want terminal exclusivity with no shared accessor name", name)
 			}
 		}
 		if !completionMethods["FinishReason"] {
@@ -1237,6 +1251,93 @@ func TestFailure_Error_ExcludesTheCauseAndBoundedMetadata_UnwrapStillExposesThem
 			t.Errorf("bare.RequestID() = %q, want empty", got)
 		}
 	})
+}
+
+// canaryCause is a test-local, value-kind error used only to plant a canary
+// in [FailureReport.Cause] for TestFailure_GoString_RedactsLikeError.
+//
+// It is deliberately value-kind (a defined string type), not a pointer
+// wrapping errors.New(...): fmt's reflective %#v walk prints an unexported
+// pointer field's target as a bare hex address (CanInterface is false for a
+// field reached through an unexported struct field, so the pointer's own
+// Error() method is never consulted), which would make a canary planted only
+// there pass today, before GoString exists — a vacuous RED (design.md D4).
+// A value-kind cause has no such escape: its contents are reflected
+// verbatim, which is exactly what makes today's %#v rendering unsafe.
+type canaryCause string
+
+// Error implements the error interface for canaryCause.
+func (c canaryCause) Error() string { return string(c) }
+
+// R-AIP-016 — redaction is a property of the failure payload, not of the
+// caller's formatting verb: %#v must render exactly Error()'s text, the same
+// as %v/%s/%+v, and must never reflect over the cause or any other
+// unexported field. Proven with three planted canaries — content_part_test.go
+// TestPart_String_CarriesNoPayload's adversarial-verb-loop shape, restated
+// for *Failure and %#v specifically (D-4).
+func TestFailure_GoString_RedactsLikeError(t *testing.T) {
+	t.Parallel()
+
+	const (
+		canaryRawLabel  = "raw-label-CANARY-77f3"
+		canaryRequestID = "request-id-CANARY-88e1"
+		canaryCauseText = "cause-CANARY-99a2"
+	)
+
+	f := mustPreStreamFailureReport(t, ai.FailureReport{
+		Category:  ai.FailureCategoryUnknown,
+		RawLabel:  canaryRawLabel,
+		RequestID: canaryRequestID,
+		Cause:     canaryCause(canaryCauseText),
+	})
+
+	t.Run("no verb reproduces a planted canary (S-AIP-056)", func(t *testing.T) {
+		t.Parallel()
+
+		for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+			rendered := fmt.Sprintf(verb, f)
+			for _, canary := range []string{canaryRawLabel, canaryRequestID, canaryCauseText} {
+				if strings.Contains(rendered, canary) {
+					t.Errorf("fmt.Sprintf(%q, f) = %q, contains the planted canary %q, want it excluded", verb, rendered, canary)
+				}
+			}
+		}
+	})
+
+	t.Run("%#v is byte-for-byte identical to Error() (S-AIP-057)", func(t *testing.T) {
+		t.Parallel()
+
+		want := f.Error()
+		if got := fmt.Sprintf("%#v", f); got != want {
+			t.Errorf("fmt.Sprintf(\"%%#v\", f) = %q, want %q (Error()'s own text, unchanged)", got, want)
+		}
+	})
+}
+
+// NFR-AIP-B — totality: %#v on a nil *Failure must never panic, and must
+// agree with (*ai.Failure)(nil).Error() rather than a hard-coded string
+// literal, so the assertion cannot silently drift from noProviderFailure's
+// actual text (D-5: GoString delegates to Error(), which already has the one
+// nil check).
+func TestFailure_GoString_NilReceiver_TotalByDelegation(t *testing.T) {
+	t.Parallel()
+
+	want := (*ai.Failure)(nil).Error()
+
+	for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) panicked: %v", verb, recovered)
+				}
+			}()
+			if got := fmt.Sprintf(verb, (*ai.Failure)(nil)); got != want {
+				t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) = %q, want %q", verb, got, want)
+			}
+		})
+	}
 }
 
 // mustPreStreamFailureReport constructs a pre-stream failure from a full
