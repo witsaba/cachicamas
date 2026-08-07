@@ -205,6 +205,27 @@ The structural form forecloses all three, because each is a *shape* — a second
 
 AI-20.1 (documentation), AI-20.3 (proof), AI-21 (the fake obeys it), AI-24 onward (every adapter's internal fan-in rule), doc 0003 AG-01.1 item 4 (the agent-level mirror).
 
+> **Amended 2026-08-07** by `cachicamas-ai-cancellation` (AI-33, Wave 5 — Harden). One behavior-only requirement added: **R-AIS-033** (body lifecycle: drain-before-close on every exit path). The delta's archived form carries the implementation vocabulary; this contract states only behavior.
+
+### R-AIS-033 (added 2026-08-07) — Body lifecycle: drain-before-close on every exit path
+
+> **Behavior.** When a stream ends for any reason — completion, terminal error, or any cancellation moment — the underlying transport connection MUST be cleanly released: the response body MUST be drained (any unread bytes discarded) before the producer's close fires. The drain MUST be part of the producer's existing single-defer ownership (no second closing site, no second goroutine — `R-ATS-003`). The drain MUST be silent — any error is the network's concern, not a Layer 1 contract concern. The drain MUST complete before the close returns.
+
+#### Scenario: R-AIS-033 / S-1 — Drain fires on normal completion *(pin: `R-CNF-005`, `R-CNF-009`)*
+- **GIVEN** a transport that delivers more bytes than the consumer reads before the terminal event lands
+- **WHEN** the producer reaches the terminal event and exits normally
+- **THEN** the response body is drained before the close, AND a subsequent request against the same transport succeeds without waiting on the prior connection's unread bytes
+
+#### Scenario: R-AIS-033 / S-2 — Drain fires on terminal-error paths *(pin: `R-CNF-009`, `R-AEM-010`, `R-AEM-022`)*
+- **GIVEN** the producer takes a terminal-error branch (in-band error or malformed frame)
+- **WHEN** the terminal-error branch exits
+- **THEN** the response body is drained before the close, AND the stream closes exactly once, AND the connection pool is not poisoned
+
+#### Scenario: R-AIS-033 / S-3 — Drain fires on every cancellation moment *(pin: `R-CNF-011`, `R-CNF-012`, `R-STK-028`, `R-STK-029`)*
+- **GIVEN** the consumer's context is cancelled at any point (pre-headers, between frames, blocked-send abandonment, or after completion)
+- **WHEN** the producer exits via that cancellation path
+- **THEN** the response body is drained before the close (or no body existed in the pre-headers case), AND the stream closes exactly once, AND no goroutine outlives the call
+
 ---
 
 ## 5. Decision 3 — cancellation, and abandonment
@@ -257,6 +278,103 @@ Marking each obligation testable or statable is the second half. The failure thi
 ### Who inherits it
 
 AI-20.1, AI-20.2 (a context already cancelled at call time — see § 7), AI-20.3, AI-21.5, AI-22.4, AI-33, AI-40.3.
+
+> **Amended 2026-08-07** by `cachicamas-ai-cancellation` (AI-33, Wave 5 — Harden). Five behavior-only requirements added: **R-AIS-034**, **R-AIS-035**, **R-AIS-036**, **R-AIS-037**, **R-AIS-038**. They restate the four cancellation moments and the full-package leak check in behavioral form, with text and tool-call variants each as a separate scenario per the milestone's charter (doc 0002 line 1989).
+
+### R-AIS-034 (added 2026-08-07) — Cancellation before headers is reported without producing a stream
+
+> **Behavior.** When the consumer's context is cancelled before the producer's transport call returns a response — equivalently, before any response byte crosses the wire — the call MUST return a typed cancellation failure carrying the pre-stream delivery classification. No stream MUST be returned. No producer MUST be spawned. No transport response MUST be opened.
+
+#### Scenario: R-AIS-034 / S-1 — Text stream, cancellation before any response byte *(pin: `R-CNF-011`, `R-ATS-002`)*
+- **GIVEN** a real transport client and a test server whose handler hangs before headers
+- **WHEN** the caller invokes the stream operation with a context already cancelled at call time
+- **THEN** the call returns a typed cancellation failure with the pre-stream delivery classification, AND no stream is returned, AND no goroutine was spawned, AND no goroutine growth is observed
+
+#### Scenario: R-AIS-034 / S-2 — Tool-call stream, same conditions *(pin: `R-CNF-011`, `R-ATS-002`)*
+- **GIVEN** the same setup with a tool-call request
+- **WHEN** the caller invokes the stream operation with a cancelled context
+- **THEN** the same observable outcome as R-AIS-034 / S-1
+
+#### Scenario: R-AIS-034 / S-3 — Race: cancellation while the transport call is in flight *(pin: `R-CNF-011`, `R-ATS-002`)*
+- **GIVEN** a server whose handler accepts the connection but never writes a status line
+- **WHEN** the caller invokes the stream operation and cancels the context during the transport call
+- **THEN** the same observable outcome as R-AIS-034 / S-1 — typed failure, no stream, no goroutine, no growth
+
+### R-AIS-035 (added 2026-08-07) — Cancellation between frames closes the stream within bounded time and frees the connection
+
+> **Behavior.** When the consumer's context is cancelled while the producer is blocked waiting for the next frame from the transport, the producer MUST exit within the bounded drain deadline plus a safety margin, the stream MUST close exactly once, the response body MUST be closed (so a stalled server cannot pin the connection), and no goroutine MUST outlive the call.
+
+#### Scenario: R-AIS-035 / S-1 — Text stream, cancel while idle between frames *(pin: `R-CNF-011`, `R-STK-028`)*
+- **GIVEN** a server that emits one frame and then stalls
+- **WHEN** the caller receives the first event and then cancels the context
+- **THEN** the producer exits within the bounded deadline, the channel closes exactly once, the response body is closed, AND no goroutine growth is observed
+
+#### Scenario: R-AIS-035 / S-2 — Tool-call stream, same conditions *(pin: `R-CNF-011`, `R-STK-028`)*
+- **GIVEN** the same setup with a tool-call transcript
+- **WHEN** the caller receives the first tool-call event and cancels the context
+- **THEN** the same observable outcome as R-AIS-035 / S-1
+
+#### Scenario: R-AIS-035 / S-3 — Connection freed: subsequent request against the same transport succeeds *(pin: `R-CNF-011`)*
+- **GIVEN** the stalling-server setup and a transport that reuses connections
+- **WHEN** scenario R-AIS-035 / S-1 completes and a second request is issued
+- **THEN** the second request completes promptly without waiting on the first connection's stale keep-alive slot
+
+### R-AIS-036 (added 2026-08-07) — Truly-abandoned consumer + cancellation drops cleanly with no terminal invented
+
+> **Behavior.** Pinned to the conformance assertion for the abandoned-then-cancelled path (verbatim wording). When the consumer has stopped reading, the producer is blocked mid-send, and the context is cancelled, the stream MUST close bare — no terminal event of any kind observed, no undelivered event forced through, no goroutine leak. The bounded-wait cap on the typed terminal IS the bounded close; the abandonment is what makes the bounded-wait terminal fail to land.
+
+#### Scenario: R-AIS-036 / S-1 — Text stream, truly abandoned, then cancel *(pin: `R-CNF-012`, `R-STK-029`)*
+- **GIVEN** a server serving a text transcript
+- **WHEN** the caller invokes the stream operation, never reads from the channel, and immediately cancels the context
+- **THEN** the stream closes bare within the bounded-wait cap plus safety, no completion and no error event is observed, AND no goroutine growth is observed
+
+#### Scenario: R-AIS-036 / S-2 — Tool-call stream, same conditions *(pin: `R-CNF-012`, `R-STK-029`)*
+- **GIVEN** the same setup with a tool-call transcript
+- **WHEN** the caller invokes the stream operation, never reads, and cancels
+- **THEN** the same observable outcome as R-AIS-036 / S-1
+
+#### Scenario: R-AIS-036 / S-3 — Abandoned-never-cancelled path is not asserted *(pin: `R-CNF-012` narrowing, `R-STK-010`)*
+- **GIVEN** the AI-33 test files
+- **WHEN** a reviewer looks for an abandoned-never-cancelled test
+- **THEN** none exists, AND the absence is recorded on the contract
+
+### R-AIS-037 (added 2026-08-07) — Cancellation after completion is a no-op; close happens exactly once
+
+> **Behavior.** When the consumer's context is cancelled after the producer has emitted the terminal event and exited, the call MUST be a no-op: the stream was already closed (or closes cleanly with no further events), the close happened exactly once, no consumer-side interleaving panic occurs, and no goroutine outlives the call.
+
+#### Scenario: R-AIS-037 / S-1 — Text stream, cancel after completion *(pin: `R-CNF-009`, `R-CNF-011`)*
+- **GIVEN** a short text transcript that ends with a terminal event
+- **WHEN** the caller drains the stream to close, then cancels the context
+- **THEN** the channel was closed exactly once, the recorded events carry exactly one terminal, AND no panic occurs across many repeats
+
+#### Scenario: R-AIS-037 / S-2 — Tool-call stream, same conditions *(pin: `R-CNF-009`, `R-CNF-011`)*
+- **GIVEN** the same setup with a tool-call transcript
+- **WHEN** the caller drains to close, then cancels
+- **THEN** the same observable outcome as R-AIS-037 / S-1
+
+#### Scenario: R-AIS-037 / S-3 — Race: cancel and final receive interleave *(pin: `R-CNF-009`, `R-CNF-011`)*
+- **GIVEN** the text-transcript setup
+- **WHEN** the caller issues the cancel concurrently with the final receive, across many repeats
+- **THEN** no panic occurs, AND exactly one terminal is observed, AND the channel is closed exactly once
+
+### R-AIS-038 (added 2026-08-07) — Full-package leak check covers every exit path on both stream kinds
+
+> **Behavior.** A single serial test suite MUST run every AI-33 exit path — completion, terminal error, each cancellation moment — across both text and tool-call streams, using the canonical leak-check helper. The suite MUST NOT use parallel test execution. The helper's standard-library-only posture MUST be preserved (no new top-level dependency).
+
+#### Scenario: R-AIS-038 / S-1 — Full-package serial leak check passes *(pin: `R-STK-007`, `R-STK-008`, `R-STK-009`)*
+- **GIVEN** the AI-33 test files for every subnode
+- **WHEN** a single serial test wraps each scenario in the leak-check helper
+- **THEN** no goroutine growth beyond the helper's tolerance is observed on any path, AND no parallel test execution is used
+
+#### Scenario: R-AIS-038 / S-2 — Both stream kinds covered per scenario *(pin: `R-CNF-005`, `R-CNF-007`)*
+- **GIVEN** the AI-33 test files
+- **WHEN** a reviewer enumerates the scenarios per subnode
+- **THEN** each subnode has at least one text-stream scenario AND at least one tool-call-stream scenario
+
+#### Scenario: R-AIS-038 / S-3 — Module dependency unchanged *(pin: `R-STK-009`, `NFR-CNF-A`)*
+- **GIVEN** the dependency file at base and after this delta
+- **WHEN** a reviewer diffs the dependency file
+- **THEN** no new require is added
 
 ---
 
@@ -694,6 +812,19 @@ Every Layer 1 noun used by this contract MUST resolve to a register row. A noun 
 - **S-AIS-040** — Given this file, when a reviewer scans for a single-token camel-case name, a package path, or a method-shaped name, then none is found; every term is a noun phrase with spaces, and language and standard-library shapes are named descriptively.
 - **S-AIS-041** — Given the diff of any change that states or amends this contract, when a reviewer inspects it, then it contains only markdown under `openspec/`, adds nothing under `backend/`, and modifies no build, module or infrastructure file.
 
+### R-AIS-033 through R-AIS-038 (added 2026-08-07) — AI-33 cancellation proof and resource discipline
+
+> **Amended 2026-08-07** by `cachicamas-ai-cancellation` (AI-33, Wave 5 — Harden). Six behavior-only requirements added: **R-AIS-033** (body lifecycle: drain-before-close on every exit path, under § 4) and **R-AIS-034** through **R-AIS-038** (the four cancellation moments and the full-package leak check, under § 5). The full requirement text and scenarios are inline under § 4 and § 5 above; this canonical list exists for discovery and cross-reference.
+
+#### Cross-reference
+
+- **R-AIS-033** — Body lifecycle: drain-before-close on every exit path. Defined inline at § 4 (after the `### Who inherits it` block). Scenarios S-1, S-2, S-3 cover normal completion, terminal-error paths, and every cancellation moment. Pins `R-CNF-005`, `R-CNF-009`, `R-CNF-011`, `R-CNF-012`, `R-AEM-010`, `R-AEM-022`, `R-ATS-003`, `R-STK-028`, `R-STK-029`.
+- **R-AIS-034** — Cancellation before headers is reported without producing a stream. Defined inline at § 5. Three scenarios (text, tool-call, race). Pins `R-CNF-011`, `R-ATS-002`.
+- **R-AIS-035** — Cancellation between frames closes the stream within bounded time and frees the connection. Defined inline at § 5. Three scenarios (text, tool-call, connection-freed). Pins `R-CNF-011`, `R-STK-028`.
+- **R-AIS-036** — Truly-abandoned consumer + cancellation drops cleanly with no terminal invented. Defined inline at § 5. Three scenarios (text, tool-call, abandoned-never-cancelled not asserted). Pins `R-CNF-012`, `R-STK-029`, `R-STK-010`.
+- **R-AIS-037** — Cancellation after completion is a no-op; close happens exactly once. Defined inline at § 5. Three scenarios (text, tool-call, race). Pins `R-CNF-009`, `R-CNF-011`.
+- **R-AIS-038** — Full-package leak check covers every exit path on both stream kinds. Defined inline at § 5. Three scenarios (full-package serial, both stream kinds, dependency unchanged). Pins `R-STK-007`, `R-STK-008`, `R-STK-009`, `R-CNF-005`, `R-CNF-007`, `NFR-CNF-A`.
+
 ---
 
 ## Acceptance criteria
@@ -707,3 +838,8 @@ The contract holds when:
 5. AI-34.1 has a starting capacity, three measurements, a direction per result, and a tie-break rule — an experiment rather than a constant to overturn.
 
 Criteria 1 through 5 were verified at AI-02.1's merge and recorded in the archived `verify-report.md`, which returned **PASS** on all five closing-checklist items with 35 of 35 register citations resolving.
+
+> **Amended 2026-08-07** — AI-33 acceptance criteria (added):
+> 6. `R-AIS-033` through `R-AIS-038` hold, each verified by its scenarios inline under § 4 and § 5 above. The cross-reference list at § Requirements enumerates each requirement's scenarios and conformance pins.
+> 7. AI-33's verify-report (archived at `openspec/changes/archive/2026-08-07-cachicamas-ai-cancellation/verify-report.md`) returned **PASS** on all six requirements (R-AIS-033 through R-AIS-038), 22 of 22 scenarios, with 0 CRITICAL findings. The eight recorded deviations are acknowledged in the archive-report, none are blockers.
+> 8. No Go identifier appears anywhere in this file — verified by reading the file directly; the AI-33 amendment restates the implementation-vocabulary delta in behavior-only form per § 11 rule 4.
