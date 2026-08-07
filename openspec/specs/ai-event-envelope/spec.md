@@ -270,6 +270,19 @@ A kind registered with `blockRole: delta` MUST carry an index and only the new f
 - **S-AEE-064** — Given the landed package surface, when a reviewer enumerates its exported identifiers, then none accumulates, joins or reconstructs a block's deltas.
 - **S-AEE-065** — Given the documented steps for registering a `delta` kind, when a reader follows them, then they state that the payload carries only the new fragment and that a snapshot is forbidden.
 
+### R-AEE-021 — The emission boundary surfaces the offered payload's own rejection, proven directly
+
+As its final rule, the producer's emission-boundary check MUST consult the offered event's payload's own validation and MUST surface that payload's rejection **unchanged** — the same failure value, the same landed sentinel, and the same position the payload itself produced, at the event's own position. The boundary MUST NOT substitute a rejection of its own, MUST NOT introduce a new sentinel (`NFR-AEE-C`), and MUST NOT swallow the payload's rejection into a generic verdict.
+
+This rule MUST be **proven directly** by a failure-path test rather than recorded as deliberately unreachable defence. The capability MUST therefore make a rejecting payload constructible from test-support code only. That construction MUST be additive: it MUST NOT widen any exported surface, MUST NOT reach a non-test build (`S-AEE-013`, `S-AEE-017`), and MUST leave every pre-existing construction path producing a payload that reports success, so that no already-landed behavior changes.
+
+The proof MUST be **attributable**. The offered event MUST satisfy every earlier rule of the boundary check by construction, so that the payload-validation rule is the only rule that can be responsible for the rejection, and the assertion MUST match the surfaced rejection by identity against the planted one — never merely by observing that some rejection occurred.
+
+#### Scenarios
+
+- **S-AEE-071** — Given a stamped event whose test-only payload is configured to report a distinct, planted rejection, when the event is offered at the producer's emission boundary, then the boundary rejects it, and the returned failure **is that exact planted rejection** — matched by identity against the planted value, carrying its sentinel and its position unchanged — not merely a non-empty verdict.
+- **S-AEE-072** — Given that same event, when a reviewer walks the boundary check's earlier rules against it, then each is satisfied by construction — the event carries a payload, it is stamped with a legal non-sentinel sequence (`R-AEE-010`), and its kind's descriptor declares no block role, so the block-scoped rule exits without a verdict — and therefore only the payload-validation rule can have produced `S-AEE-071`'s rejection; and given the same event with its payload left in its default state, when it is offered at the same boundary, then it is accepted.
+
 ---
 
 ## Non-functional requirements
@@ -322,3 +335,5 @@ Every test-list item of AI-14.1 … AI-14.4 MUST be taken red → green → refa
 ## Carried forward
 
 One coverage gap left this milestone and was **not** discharged inside Wave 2. `CheckEmit`'s fourth rule — the payload's own `validate()` — has no failure-path test, because the only payload AI-14 can construct is the test witness, whose `validate()` returns `nil` unconditionally. AI-14 deferred the coverage to "AI-15+", and AI-18's design gate then replaced the construction model that deferral depended on: AI-15 … AI-19 all validate eagerly in their constructors and return `(Event, error)`, so an `Event` carrying a payload that fails its own `validate` is unconstructible through the public API. The receiver of the deferral ceased to exist without anyone connecting the two. Recorded as `W1` in the Wave 2 verify report and owned by Wave 3, either by giving the witness payload a controllable failure mode or by recording rule 4 as deliberately unreachable defence.
+
+> **Discharged 2026-08-07 (AI-41)** by `cachicamas-ai-wave2-carryovers` (AI-41.1). `W1` is closed by the **first** of the two resolutions this section offers: the test-only witness payload gains a controllable rejection, so the emission boundary's payload-validation rule is proven **directly** rather than recorded as deliberately unreachable defence. The behavior is pinned by `R-AEE-021` (`S-AEE-071`, `S-AEE-072`). This gap is no longer carried forward.

@@ -232,6 +232,22 @@ A caller that **only ever** inspects the returned pre-stream error, and a caller
 - **S-AIP-049** — Given a consumer that reads only terminal error event payloads, when it is exercised over every charter category, then it classifies all of them, including reading retryability, retry-after and the raw label.
 - **S-AIP-050** — Given the accessor set reachable on each path, when the two sets are compared, then they are identical, and no accessor is available on one path only.
 
+### R-AIP-016 — Redaction is a property of the failure payload, not of the caller's formatting verb
+
+The provider-failure payload MUST render redacted output under **every** formatting verb a caller can reach, including the Go-syntax verb. Specifically:
+
+1. A caller requesting a Go-syntax representation MUST NOT receive a representation derived by reflection over the payload's internal state, and MUST NOT through it reach the **wrapped underlying cause** — the one field that may carry raw provider response text, provider-body fragments, or credential-adjacent material.
+2. The Go-syntax rendering MUST agree with the payload's already-redacted textual rendering, so redaction cannot drift between the two as either evolves.
+3. No content excluded from the textual rendering MAY become reachable through any other verb. Redaction MUST NOT be reachable-or-not depending on the caller's formatting choice.
+4. The obligation MUST hold **totally**: an absent failure payload MUST format under every one of those verbs without panicking, returning the contract's defined absent-failure rendering (`NFR-AIP-B`).
+
+This requirement adds no accessor and no second failure type; it constrains rendering only, and therefore leaves `R-AIP-013`'s single-type rule and `R-AIP-015`'s accessor parity untouched.
+
+#### Scenarios
+
+- **S-AIP-056** — Given a failure payload wrapping a cause that carries a planted sentinel string standing in for raw provider text, when the payload is formatted with each of the plain, string, extended and Go-syntax verbs, then the planted sentinel appears in **none** of the four outputs, and no other fragment of the wrapped cause appears in the Go-syntax output.
+- **S-AIP-057** — Given that same failure payload, when its Go-syntax rendering is compared byte-for-byte with its redacted textual rendering, then the two are identical; and given an **absent** failure payload, when it is formatted under each of those same four verbs, then each yields the contract's defined absent-failure rendering and none panics (`NFR-AIP-B`, `S-AIP-052`).
+
 ---
 
 ## Non-functional requirements

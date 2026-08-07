@@ -209,6 +209,73 @@ func TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange(
 	})
 }
 
+// R-AEE-021 — CheckEmit's own rule 4 (design.md D4): the payload's own
+// validation rule is surfaced when it reports a violation — same failure
+// value, same landed sentinel, its planted position surfaced under the
+// "event" prefix rule 4 supplies — never substituted for a verdict of
+// CheckEmit's own (S-AEE-071). Rules 1-3 are structurally
+// satisfied first: a registered kind (KindTestWitness), a stamped sequence,
+// and a BlockRoleNone descriptor that makes rule 3 exit early with nil
+// (export_test.go's init, event.go's CheckEmit) — so only rule 4 can be
+// responsible for the rejection, and the same event built with a
+// default-state payload must still be accepted (S-AEE-072).
+//
+// t.Parallel(): registers no test kind, unlike
+// TestCheckEmit_BlockScopedEventWithZeroBlockIndex_RejectedWithErrOutOfRange
+// above. KindTestWitness is registered once at package-test-load time by
+// export_test.go's init(); this test's failure mode is carried per-instance
+// on the payload value via NewRejectingWitnessEvent, so there is no shared
+// eventRegistry mutation to race with another parallel test (export_test.go's
+// file comment).
+func TestCheckEmit_PayloadReportsOwnViolation_SurfacedAsRule4(t *testing.T) {
+	t.Parallel()
+
+	sentinelRule := ai.ErrMalformed
+	planted := ai.Invalid(sentinelRule, ai.At("witness_rule"))
+
+	var s ai.Stamper
+	rejecting := s.Stamp(ai.NewRejectingWitnessEvent(1, planted))
+
+	err := ai.CheckEmit(rejecting)
+	if err == nil {
+		t.Fatal("ai.CheckEmit(rejecting) = nil, want the planted violation surfaced — validate still returns nil unconditionally")
+	}
+
+	var violation *ai.Violation
+	if !errors.As(err, &violation) {
+		t.Fatalf("errors.As(err, &violation) = false, want ai.CheckEmit to surface a *ai.Violation, got %v", err)
+	}
+	if violation != planted {
+		t.Errorf("errors.As surfaced %p, want the planted violation %p (same value, not merely an equal one)", violation, planted)
+	}
+	if !errors.Is(err, sentinelRule) {
+		t.Errorf("errors.Is(err, sentinelRule) = false, want the planted rule class to survive unchanged through the boundary")
+	}
+	// The surfaced position proves rule 4 handed the payload its own
+	// positional prefix: CheckEmit calls validate(Path{At("event")})
+	// (event.go), and the witness derives its violation's position from that
+	// argument, so the planted position must surface under "event". Comparing
+	// against an independently constructed Path — never violation.Path()
+	// against a clone of itself — makes this fail if CheckEmit stops passing
+	// the prefix (e.g. validate(nil)), which would silently strip "event"
+	// from every production payload's violation position.
+	wantPath := ai.Path{ai.At("event"), ai.At("witness_rule")}
+	if !reflect.DeepEqual(violation.Path(), wantPath) {
+		t.Errorf("violation.Path() = %v, want %v (the planted position under CheckEmit's own \"event\" prefix)", violation.Path(), wantPath)
+	}
+	if errors.Is(err, ai.ErrNotInVocabulary) {
+		t.Error("errors.Is(err, ai.ErrNotInVocabulary) = true, want rule 1 to not have fired — only the payload's own rule is responsible")
+	}
+	if errors.Is(err, ai.ErrOutOfRange) {
+		t.Error("errors.Is(err, ai.ErrOutOfRange) = true, want rules 2-3 to not have fired — only the payload's own rule is responsible")
+	}
+
+	accepted := s.Stamp(ai.NewWitnessEvent(1))
+	if err := ai.CheckEmit(accepted); err != nil {
+		t.Errorf("ai.CheckEmit(accepted) = %v, want nil — a default-state witness payload (rejectWith nil) must still pass (zero-regression)", err)
+	}
+}
+
 // NFR-AEE-B, S-AEE-067 — totality: no exported function or method panics for
 // the zero Event, the zero Sequence, a nil/empty recorded stream, an
 // all-unstamped stream, or a wrong-kind accessor. Mirrors
