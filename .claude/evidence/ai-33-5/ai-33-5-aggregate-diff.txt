@@ -1,0 +1,8 @@
+ backend/agent/src/ai/openaicompat/a_i-33_1_test.go | 226 +++++++++++
+ backend/agent/src/ai/openaicompat/a_i-33_2_test.go | 390 +++++++++++++++++++
+ backend/agent/src/ai/openaicompat/a_i-33_3_test.go | 279 ++++++++++++++
+ backend/agent/src/ai/openaicompat/a_i-33_4_test.go | 322 ++++++++++++++++
+ .../agent/src/ai/openaicompat/a_i-33_5a_test.go    | 423 +++++++++++++++++++++
+ .../agent/src/ai/openaicompat/a_i-33_5b_test.go    | 260 +++++++++++++
+ backend/agent/src/ai/openaicompat/stream.go        |  19 +-
+ 7 files changed, 1918 insertions(+), 1 deletion(-)

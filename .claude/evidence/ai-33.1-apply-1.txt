@@ -1,0 +1,59 @@
+# AI-33.1 Apply Evidence — `cachicamas-ai-cancellation`
+
+## Commit
+- SHA: 07e4d0c2a680583362c66dc60d2ebf843fe66d75
+- Subject: test(openaicompat): add AI-33.1 real-HTTP cancel-before-headers proof
+- Files: +226 / -0 (test file only)
+
+## Focused test command (per tasks.md AI-33.1 row 40)
+
+$ cd backend/agent && go test -race -v -run 'TestAI33_1' ./src/ai/openaicompat/...
+
+=== RUN   TestAI33_1_TextStream_CancelBeforeDo
+--- PASS: TestAI33_1_TextStream_CancelBeforeDo (0.06s)
+=== RUN   TestAI33_1_ToolCallStream_CancelBeforeDo
+--- PASS: TestAI33_1_ToolCallStream_CancelBeforeDo (0.06s)
+=== RUN   TestAI33_1_RaceCancelMidDo
+--- PASS: TestAI33_1_RaceCancelMidDo (0.06s)
+PASS
+ok      github.com/cachicamas/backend/agent/src/ai/openaicompat     2.044s
+
+## Runtime harness — full suite
+
+$ cd backend/agent && make test
+
+ok      github.com/cachicamas/backend/agent/src/agenttest            2.246s
+ok      github.com/cachicamas/backend/agent/src/ai                    3.642s
+ok      github.com/cachicamas/backend/agent/src/ai/openaicompat       8.408s
+ok      github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter         (cached)
+ok      github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance  (cached)
+ok      github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/smoke          (cached)
+
+(2,304 PASS, 0 FAIL across all packages)
+
+$ cd backend/agent && make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+
+## Mutation evidence — tests catch real regressions
+
+A throwaway mutation replaced
+    Category: ai.FailureCategoryCancellation,
+with
+    Category: ai.FailureCategoryUnavailable,
+in stream.go. Every AI-33.1 test failed with the right reason:
+
+    a_i-33_1_test.go:67: Category() = unavailable, want FailureCategoryCancellation (R-AIS-034 / S-1, R-ATS-002)
+
+Mutation reverted; stream.go is back to pristine (git diff clean).
+
+## Rollback boundary
+
+Single commit: revert with
+
+    git revert 07e4d0c2a680583362c66dc60d2ebf843fe66d75 --no-edit
+
+removes only a_i-33_1_test.go. Production code (stream.go) is
+untouched; no conformance assertion is rewritten. R-STK-008 holds:
+no t.Parallel() call in the file.

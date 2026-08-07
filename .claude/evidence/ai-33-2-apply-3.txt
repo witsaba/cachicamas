@@ -1,0 +1,155 @@
+# AI-33.2 — Cancel between frames — evidence
+
+> **Subnode**: AI-33.2 (R-AIS-035 / S-1, S-2, S-3)
+> **Branch / worktree**: `feat/ai-33-cancellation` / `cachicamas-worktrees/ai-33`
+> **Base**: `main` @ `e9a8054`
+> **Commit**: `4ff662f test(openaicompat): add AI-33.2 real-HTTP cancel-between-frames proof`
+> **Mode**: Strict TDD (RED-first, decision observed, no GREEN forced)
+> **Date**: 2026-08-06
+
+## Outcome
+
+RED was GREEN on first try. The empirical answer to AI-33.2 is positive:
+HTTP/1.1 + `httptest.NewServer` + Go 1.26's transport tears down the
+connection when the caller's context is cancelled, so `Body.Read`
+returns with a ctx-tagged error within `DefaultDrainTimeout + 1s` and
+`run()` walks its `ctx.Err() != nil` branch (`stream.go:503–526`). No
+production change is forced.
+
+## Files changed
+
+| File | Action | Lines | What |
+| --- | --- | --- | --- |
+| `backend/agent/src/ai/openaicompat/a_i-33_2_test.go` | Created | +390 / -0 | Test-only. Three scenarios + three helpers. No production code touched. |
+| `backend/agent/src/ai/openaicompat/stream.go` | Untouched | 0 / 0 | RED was GREEN — no code change forced. |
+| `backend/agent/go.mod` | Untouched | 0 / 0 | R-STK-009 preserved. |
+| `backend/agent/go.sum` | Untouched | 0 / 0 | No deps added. |
+
+## Focused test command and exact result
+
+```
+cd backend/agent && go test -race -v -run "TestAI33_2" ./src/ai/openaicompat/
+```
+
+```
+=== RUN   TestAI33_2_TextStream_CancelBetweenFrames
+--- PASS: TestAI33_2_TextStream_CancelBetweenFrames (0.09s)
+=== RUN   TestAI33_2_ToolCallStream_CancelBetweenFrames
+--- PASS: TestAI33_2_ToolCallStream_CancelBetweenFrames (0.09s)
+=== RUN   TestAI33_2_ConnectionFreedForNextRequest
+--- PASS: TestAI33_2_ConnectionFreedForNextRequest (0.09s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.816s
+```
+
+Exit code: 0.
+
+## Runtime harness (full AI-33 suite)
+
+```
+cd backend/agent && go test -race -v -run "TestAI33" ./src/ai/openaicompat/
+```
+
+```
+=== RUN   TestAI33_1_TextStream_CancelBeforeDo
+--- PASS: TestAI33_1_TextStream_CancelBeforeDo (0.06s)
+=== RUN   TestAI33_1_ToolCallStream_CancelBeforeDo
+--- PASS: TestAI33_1_ToolCallStream_CancelBeforeDo (0.06s)
+=== RUN   TestAI33_1_RaceCancelMidDo
+--- PASS: TestAI33_1_RaceCancelMidDo (0.06s)
+=== RUN   TestAI33_2_TextStream_CancelBetweenFrames
+--- PASS: TestAI33_2_TextStream_CancelBetweenFrames (0.10s)
+=== RUN   TestAI33_2_ToolCallStream_CancelBetweenFrames
+--- PASS: TestAI33_2_ToolCallStream_CancelBetweenFrames (0.10s)
+=== RUN   TestAI33_2_ConnectionFreedForNextRequest
+--- PASS: TestAI33_2_ConnectionFreedForNextRequest (0.09s)
+=== RUN   TestAI33_4_TextStream_CancelAfterCompletion
+--- PASS: TestAI33_4_TextStream_CancelAfterCompletion (0.09s)
+=== RUN   TestAI33_4_ToolCallStream_CancelAfterCompletion
+--- PASS: TestAI33_4_ToolCallStream_CancelAfterCompletion (0.10s)
+=== RUN   TestAI33_4_RaceCancelConcurrentWithFinalReceive
+--- PASS: TestAI33_4_RaceCancelConcurrentWithFinalReceive (0.09s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	2.065s
+```
+
+## Lint
+
+```
+cd backend/agent && make lint
+```
+
+```
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+```
+
+## TDD Cycle Evidence
+
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 33.2.1 | `a_i-33_2_test.go` | Integration (real HTTP) | ✅ 33.1 + 33.4 green | ✅ Written — observed PASS (empirical GREEN) | ✅ Passed — `Body.Read` unblocks via HTTP/1.1 transport ctx propagation within `DefaultDrainTimeout + 1s` | ✅ 3 cases (text S-1 + tool-call S-2 + connection-freed S-3) | ✅ Clean — `make lint` 0 issues |
+| 33.2.2 | (decision only) | — | — | — | ✅ Decision: skip 33.2.3 — empirical answer positive, no production change | — | — |
+| 33.2.3 | (skipped) | — | — | — | — | — | — |
+| 33.2.4 | `a_i-33_2_test.go` | — | — | — | — | — | ✅ Doc comment cites R-CNF-011, R-STK-028, R-STK-008, R-ATS-003; `make lint` 0 issues; helpers documented |
+
+### Test Summary
+
+- **Total tests written**: 3
+- **Total tests passing**: 3
+- **Layers used**: Integration (real HTTP via `httptest.NewServer` + `*http.Client`)
+- **Approval tests** (refactoring): None — no refactoring tasks (33.2.4 folded into the RED commit; nothing further to tidy).
+- **Pure functions created**: 0 (the helpers `ai33StallHandler`, `ai33FirstEvent`, `ai33DrainUntilClosed` are test scaffolding, not production logic).
+
+## Decision (33.2.2)
+
+RED was GREEN. Skipped 33.2.3 — no production change forced.
+
+The producer's read loop (`stream.go:369–530`) is NOT directly
+ctx-aware (it does not select on `ctx.Done()` inside the loop), but
+the HTTP/1.1 transport in Go 1.26 tears down the connection when the
+caller's context is cancelled, so `Body.Read` returns with a
+ctx-tagged error within `DefaultDrainTimeout + 1s`. The producer then
+walks its `ctx.Err() != nil` branch (`stream.go:503–526`) and exits
+through the unique `defer close(out)` (`stream.go:344`) and the
+existing `defer resp.Body.Close()` (`stream.go:345`).
+
+Both design options (A: `Body.Close()` watcher goroutine on
+`ctx.Done()`; B: ctx-aware wrapper around `resp.Body`) are
+**unnecessary** — the existing defer chain handles the cancellation
+path correctly under the empirical harness. R-ATS-003's single-producer
+model is preserved; no persistent second goroutine is introduced. The
+`RequireNoGoroutineLeak` × 50 repeats confirm the leak posture across
+the scenario.
+
+Doc 0002 is **not** amended — no `[decision]` shape was forced, no
+R-ATS-003 change, no leak arithmetic shift.
+
+## Deviations from design
+
+1. **Helper name**: design.md / tasks.md name `newDripHandler(2, stallInterval)` (`timeout_test.go:20`) as the fixture, but `newDripHandler` writes plain text rather than SSE frames, so it does not produce an event the consumer can observe before stalling. The file inlines `ai33StallHandler` (a small SSE-parameterized variant) instead. Explore § 5.5 already notes a single-purpose helper is the readable form here; not a refactor of the existing plain-text drip handler. Behavior identical to the design intent.
+
+2. **Forecast vs actual line count**: tasks.md forecast ~200 lines; actual 390 lines (+190). The additional lines are inline helper bodies (`ai33StallHandler`, `ai33FirstEvent`, `ai33DrainUntilClosed`) and a fuller S-3 handler that counts requests on the server side. All test-only; under the 400-line PR review budget.
+
+## Issues Found
+
+None. The empirical answer was positive on first try.
+
+## Rollback boundary
+
+Delete `backend/agent/src/ai/openaicompat/a_i-33_2_test.go`; revert
+the `4ff662f` commit. Production code (`backend/agent/src/ai/openaicompat/stream.go`)
+is unchanged. `backend/agent/go.mod` is unchanged. No other files affected.
+
+## Pins
+
+- `R-CNF-011` (conformance bounded-close invariant — conformance suite unchanged; this file's tests ride alongside)
+- `R-STK-028` (between-frames cancellation bounded close)
+- `R-STK-008` (serial-only leak check; no `t.Parallel()` anywhere)
+- `R-ATS-003` (single-producer model preserved — no persistent second goroutine introduced)
+
+## Next steps for the orchestrator
+
+- AI-33.2 complete; tasks.md checkbox marked `[x]` (untracked in the worktree, matching the AI-33.1 / AI-33.4 pattern).
+- Next subnode: AI-33.3 — cancel during blocked send (truly-abandoned consumer, R-CNF-012 verbatim).
