@@ -21,7 +21,7 @@ AI-35 (Layer 1 retry and idempotency policy) is archived. All 21/21 scenarios PA
 | **Spec (delta)** | PASS | #2644 | Engram `sdd/cachicamas-ai-retry-policy/spec` |
 | **Design** | PASS | #2645 | Engram `sdd/cachicamas-ai-retry-policy/design` |
 | **Tasks** | PASS | #2646 | Engram `sdd/cachicamas-ai-retry-policy/tasks` |
-| **Apply-progress** | PASS | (inline in worktree) | `openspec/changes/cachicamas-ai-retry-policy/apply-progress.md` |
+| **Apply-progress** | PASS | (inline in worktree) | `openspec/changes/archive/2026-08-07-cachicamas-ai-retry-policy/apply-progress.md` |
 | **Verify-report** | PASS | #2650 | Engram `sdd/cachicamas-ai-retry-policy/verify-report` |
 | **Archive-report** | ACTIVE | (this document) | `openspec/changes/archive/2026-08-07-cachicamas-ai-retry-policy/archive-report.md` |
 
@@ -143,17 +143,19 @@ Both delta specs merged into canonical specs following the amendment-blockquote 
 
 ### Lines changed in canonical specs
 
-**`openspec/specs/ai-stream-lifecycle/spec.md`**:
-- Lines 517–520: Amendment blockquote added after § 7 "Who inherits it"
-- Lines 829–844: New requirement cross-reference section "R-AIS-041 through R-AIS-044"
-- Lines 848–850: Acceptance criteria items 9–11 added (AI-35)
-- Total net: +25 lines
+**`openspec/specs/ai-stream-lifecycle/spec.md`** (+141 lines):
+- § 7: dated amendment blockquote followed by the FULL inline promotion of R-AIS-041..044 — each requirement's behavior-only text plus all 14 scenarios (`R-AIS-041/S-1..4`, `R-AIS-042/S-1..4`, `R-AIS-043/S-1..4`, `R-AIS-044/S-1..2`)
+- End of file: discovery cross-reference entry for R-AIS-041..044 (AI-33 precedent) and acceptance-criteria amendment
 
-**`openspec/specs/ai-provider-conformance-suite/spec.md`**:
-- Lines 330–334: Amendment blockquote added after "What design resolved" section
-- Total net: +4 lines
+**`openspec/specs/ai-provider-conformance-suite/spec.md`** (+66/−15 lines after the bounded review correction):
+- Full inline promotion of R-CNF-019 with scenarios S-CNF-069..075
+- R-CNF-017 modified IN PLACE to the nine-entry totality (`CAP-R-01…05` + `CAP-O-01…04`) with a dated amendment blockquote; S-CNF-047/048 restated to nine entries / four optional; S-CNF-076 added to the scenario list
 
-**Amendment blockquotes** both cite the archived delta specs at `openspec/changes/archive/2026-08-07-cachicamas-ai-retry-policy/specs/` for full requirement text and scenarios. Canonical specs pin the high-level change summary and cross-references only.
+**Promotion form**: full inline requirement text per the AI-33 precedent — the canonical specs are self-contained; the archived delta specs remain the historical record. The initial pointer-style promotion was corrected during the receipt-driven review of this candidate (lineage `review-54b7ebae544151ef`: two blockers — duplicate contradicting R-CNF-017 blocks and dropped S-CNF-047/048 restatements — resolved via the sanctioned single correction transaction).
+
+## Post-archive review correction (final state)
+
+The branch-wide receipt-driven review (lineage `review-f4919443506d5930`, 27 files / 4554 lines, reliability lens) found one BLOCKER after this report was first written: transport-level pre-stream failures (dial error, reset, EOF) were constructed without the `Retryable` flag and bypassed the retry loop after one wire request. Fixed in commit `0800869` (`preStreamTransportFailure` now derives `Retryable` via `retryableFor(category)`; new `TestAI35_1_TransportLevelFailure_RetriesUpToBound` proves the full attempt bound red→green). Final aggregate code diff: **+1301/−62 across 15 files**; ten commits total on the branch. `make test` PASS (`-race`), `make lint` 0 issues at the corrected candidate. Delivery: issue #131, PR #132 (https://github.com/witsaba/cachicamas/pull/132), terminal receipt approved, pre-pr gate allow.
 
 ---
 
