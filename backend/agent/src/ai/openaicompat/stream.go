@@ -263,7 +263,7 @@ func preStreamTransportFailure(ctx context.Context, cause error) error {
 	if ctx.Err() != nil {
 		category = ai.FailureCategoryCancellation
 	}
-	failure, err := ai.PreStreamFailure(ai.FailureReport{Category: category, Cause: cause})
+	failure, err := ai.PreStreamFailure(ai.FailureReport{Category: category, Cause: cause, Retryable: retryableFor(category)})
 	if err != nil {
 		return err
 	}

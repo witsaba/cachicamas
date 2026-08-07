@@ -8,6 +8,7 @@ package openaicompat
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -33,6 +34,41 @@ func TestAI35_1_RetryablePreStream_RetriesUpToBound(t *testing.T) {
 	}
 	if got, want := requests.Load(), int32(retry.DefaultMaxAttempts+1); got != want {
 		t.Fatalf("wire requests = %d, want %d", got, want)
+	}
+}
+
+func TestAI35_1_TransportLevelFailure_RetriesUpToBound(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var accepts atomic.Int32
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepts.Add(1)
+			_ = conn.Close()
+		}
+	}()
+
+	_, err = mustClient(t, "http://"+ln.Addr().String()).Stream(t.Context(), validRequest(t))
+	if err == nil {
+		t.Fatal("Stream() error = nil, want exhausted transport retry failure")
+	}
+	if got, want := accepts.Load(), int32(retry.DefaultMaxAttempts+1); got != want {
+		t.Fatalf("transport attempts = %d, want %d", got, want)
+	}
+	var failure *ai.Failure
+	if !errors.As(err, &failure) {
+		t.Fatalf("errors.As(%T) did not find *ai.Failure", err)
+	}
+	if failure.Category() != ai.FailureCategoryUnavailable || !failure.Retryable() {
+		t.Fatalf("failure = (%v, retryable=%v), want unavailable/retryable", failure.Category(), failure.Retryable())
 	}
 }
 
