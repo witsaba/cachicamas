@@ -45,6 +45,13 @@ const KindTestWitness EventKind = eventKindEnd
 type WitnessPayload struct {
 	k     EventKind
 	block BlockIndex
+
+	// rejectWith is the witness's own per-instance failure mode (AI-41.1,
+	// R-AEE-021): nil for every event built through [NewWitnessEvent] or
+	// [NewTestEvent], so validate keeps passing for every existing
+	// construction path; non-nil only for an event built through
+	// [NewRejectingWitnessEvent].
+	rejectWith *Violation
 }
 
 // kind reports this payload's registered kind.
@@ -60,12 +67,16 @@ func (w WitnessPayload) blockIndex() BlockIndex { return w.block }
 // not a type switch over an unexported type.
 func (w WitnessPayload) BlockIndex() BlockIndex { return w.block }
 
-// validate reports the payload's first broken rule, or nil. The witness
-// carries no rule of its own at this milestone's envelope-skeleton stage; a
-// rule is added once a test needs one to fail (see sequence_test.go's
-// R-AEE-010 coverage). The position parameter is unused for that reason —
-// named _ rather than removed, since eventPayload's signature requires it.
-func (w WitnessPayload) validate(_ Path) *Violation { return nil }
+// validate reports the payload's first broken rule, or nil: rejectWith
+// itself, returned verbatim (AI-41.1, R-AEE-021). A witness built through
+// [NewWitnessEvent] or [NewTestEvent] carries no rule of its own —
+// rejectWith is nil, so validate keeps passing — and only
+// [NewRejectingWitnessEvent] plants one. The position parameter is unused
+// for that reason: the surfaced violation is the planted one, unchanged,
+// carrying its own position rather than one derived from where validate was
+// called — named _ rather than removed, since eventPayload's signature
+// requires it.
+func (w WitnessPayload) validate(_ Path) *Violation { return w.rejectWith }
 
 // init registers KindTestWitness once, at package-test-load time, before any
 // test can observe an incomplete registry. It is the only writer of this
@@ -93,6 +104,16 @@ func NewWitnessEvent(block BlockIndex) Event {
 func (e Event) WitnessPayload() (WitnessPayload, bool) {
 	w, ok := e.payload.(WitnessPayload)
 	return w, ok
+}
+
+// NewRejectingWitnessEvent constructs an event of kind [KindTestWitness]
+// carrying block, whose payload reports reject verbatim from validate — the
+// controllable failure mode AI-41.1's rule-4 proof needs (R-AEE-021). A nil
+// reject behaves exactly like [NewWitnessEvent]; every other construction
+// path (NewWitnessEvent, NewTestEvent) never reaches this constructor and so
+// never carries a non-nil rejectWith.
+func NewRejectingWitnessEvent(block BlockIndex, reject *Violation) Event {
+	return Event{payload: WitnessPayload{k: KindTestWitness, block: block, rejectWith: reject}}
 }
 
 // RegisterTestKind appends a new test-only kind with descriptor d, returning
