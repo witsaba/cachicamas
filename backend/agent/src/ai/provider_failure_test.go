@@ -178,18 +178,24 @@ func TestErrorEvent_TerminalExclusivity_NeverBothCompletionAndError(t *testing.T
 	// comparison, not a sample, so an accessor added later that happens to
 	// collide fails this test by name rather than by luck.
 	//
-	// diagnosticRenderers is a narrow, explicit exemption (AI-41.2,
-	// R-AIP-016): Error/String/GoString each render a fixed diagnostic
-	// string — "completion", or "provider failure: <category>" — never the
-	// other type's data, so a shared name among these three does not violate
-	// this scenario's own text ("... in a way that lets a consumer read a
-	// category off a completion or a finish reason off a failure"). Every
-	// other exported name, including one added later, is still checked with
-	// zero exemption — the two data-accessor assertions below are unchanged.
+	// diagnosticRenderers exempts exactly the one name that both terminal
+	// payloads now share (AI-41.2, R-AIP-016): GoString renders a fixed
+	// diagnostic string on each — "completion", or "provider failure:
+	// <category>" — never the other type's data, so sharing it does not
+	// violate this scenario's own text ("... in a way that lets a consumer
+	// read a category off a completion or a finish reason off a failure").
+	//
+	// The exemption is deliberately one name, not the three renderers of Go's
+	// formatting protocol. Completion exports no Error, so exempting it would
+	// be unreachable; exempting String would pre-emptively disable a real
+	// signal, as a String() on *Failure reporting a finish reason would then
+	// pass this guard silently. Every other exported name, present or added
+	// later, is still checked with zero exemption — the data-accessor
+	// assertions below are unchanged.
 	t.Run("Failure and Completion export no data accessor of the same name (S-AIP-008)", func(t *testing.T) {
 		t.Parallel()
 
-		diagnosticRenderers := map[string]bool{"Error": true, "String": true, "GoString": true}
+		diagnosticRenderers := map[string]bool{"GoString": true}
 
 		completionMethods := exportedMethodNames(reflect.TypeOf(ai.Completion{}))
 		failureMethods := exportedMethodNames(reflect.TypeOf(&ai.Failure{}))
