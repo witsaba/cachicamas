@@ -114,6 +114,7 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
+	"github.com/cachicamas/backend/agent/src/ai/internal/retry"
 )
 
 // streamReadBufferSize bounds one Body.Read call's buffer in the producer's
@@ -210,23 +211,14 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 		return nil, preStreamCancellation(ctxErr)
 	}
 
-	httpReq, err := c.newRequest(ctx, body, "chat", "completions")
+	resp, err := retry.Loop(ctx, body, retry.Config{}, c.executeOnce)
 	if err != nil {
-		return nil, preStreamTransportFailure(ctx, err)
+		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, preStreamTransportFailure(ctx, err)
-	}
-
-	// R-ATS-024: a failure status routes to AI-32's own failure mapping
-	// before any byte reaches the decoder. mapResponse returns nil for a
-	// 2xx response without touching resp.Body, so a success response falls
-	// through to the content-type check below untouched.
-	if failure := mapResponse(resp, time.Now()); failure != nil {
-		return nil, failure
-	}
+	// R-ATS-024: a success response falls through to the content-type check
+	// untouched. Retryable failures were handled before the carrier exists;
+	// terminal failures return without a carrier or producer goroutine.
 
 	// R-ATS-023: a success response whose Content-Type is not the
 	// streaming media type is refused before any byte reaches the decoder.
