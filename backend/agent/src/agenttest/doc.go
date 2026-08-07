@@ -25,13 +25,18 @@
 //     package's own conformance_*.go files: [RunConformance] (the one
 //     exported entry point — a caller-supplied [Factory] in, AI-03 §10's
 //     [CapabilityRecord] out, with zero copied assertions), [Capability]
-//     and [Capabilities] (AI-03 §5/§6's closed eight-member list), and
+//     and [Capabilities] (AI-03 §5/§6's closed nine-member list), and
 //     [CapabilityRecord.Verdict] (the pass/fail/inconclusive summary AI-03
 //     §10's rule computes mechanically). Every case delegates its
 //     mechanics to the fake and the kit — none reimplements a drain, a
 //     diff, an ordering check, a contiguity check or a leak detector
 //     (NFR-CNF-D) — and every Layer 2 agent-loop test is built on all
-//     three: the fake, the kit and the suite.
+//     three: the fake, the kit and the suite. AI-35 extends the suite
+//     with the CapRetry capability (CAP-O-04) and an httptest-driven
+//     conformance case body that targets the *openaicompat.Client
+//     directly; the case body's openaicompat import is recorded here
+//     because the case body is adapter-specific (the suite's other
+//     cases stay adapter-agnostic against the scripted fake).
 //
 // # Dependency-free (R-STK-009)
 //

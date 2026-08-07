@@ -394,7 +394,7 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 //     receives its absent entry at suite start, before any case runs
 //     (S-CNF-004).
 func conformanceBridgeFactory() agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := false, false, false
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, false
 	return agenttest.Factory{
 		New: func(tb testing.TB, scripts ...agenttest.Script) ai.ModelProvider {
 			tb.Helper()
@@ -428,6 +428,7 @@ func conformanceBridgeFactory() agenttest.Factory {
 		Reasoning:     &reasoningOffered,
 		TokenCounting: &tokenCountingOffered,
 		CacheBoundary: &cacheBoundaryOffered,
+		Retry:         &retryOffered,
 	}
 }
 

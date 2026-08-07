@@ -104,8 +104,8 @@ func TestConformanceSkeleton_EmptyCaseTable_RunsToCompletionRecordTotal(t *testi
 	record := runConformanceCases(t, FakeFactory(), nil)
 
 	entries := record.Entries()
-	if len(entries) != 8 {
-		t.Fatalf("len(record.Entries()) = %d, want 8 (R-CNF-017 totality over both closed lists)", len(entries))
+	if len(entries) != 9 {
+		t.Fatalf("len(record.Entries()) = %d, want 9 (R-CNF-017 totality over both closed lists)", len(entries))
 	}
 	for _, e := range entries {
 		if e.Capability.Optional() {
@@ -122,8 +122,8 @@ func TestConformanceSkeleton_EmptyCaseTable_RunsToCompletionRecordTotal(t *testi
 // table this package builds via init() registration.
 func TestRunConformance_PublicEntryPoint_AgainstFakeFactory(t *testing.T) {
 	record := RunConformance(t, FakeFactory())
-	if len(record.Entries()) != 8 {
-		t.Fatalf("len(record.Entries()) = %d, want 8", len(record.Entries()))
+	if len(record.Entries()) != 9 {
+		t.Fatalf("len(record.Entries()) = %d, want 9", len(record.Entries()))
 	}
 }
 
@@ -302,6 +302,7 @@ func TestConformanceSkeleton_UndeclaredOptionalCapability_FailsConstructionNamin
 				Reasoning:     nil,
 				TokenCounting: boolPtr(false),
 				CacheBoundary: boolPtr(false),
+				Retry:         boolPtr(false),
 			},
 			want: CapReasoningContent,
 		},
@@ -312,6 +313,7 @@ func TestConformanceSkeleton_UndeclaredOptionalCapability_FailsConstructionNamin
 				Reasoning:     boolPtr(false),
 				TokenCounting: nil,
 				CacheBoundary: boolPtr(false),
+				Retry:         boolPtr(false),
 			},
 			want: CapTokenCounting,
 		},
@@ -322,8 +324,20 @@ func TestConformanceSkeleton_UndeclaredOptionalCapability_FailsConstructionNamin
 				Reasoning:     boolPtr(false),
 				TokenCounting: boolPtr(false),
 				CacheBoundary: nil,
+				Retry:         boolPtr(false),
 			},
 			want: CapCacheBoundary,
+		},
+		{
+			name: "nil Retry",
+			f: Factory{
+				New:           func(_ testing.TB, scripts ...Script) ai.ModelProvider { return NewProvider(scripts...) },
+				Reasoning:     boolPtr(false),
+				TokenCounting: boolPtr(false),
+				CacheBoundary: boolPtr(false),
+				Retry:         nil,
+			},
+			want: CapRetry,
 		},
 	}
 
@@ -508,8 +522,8 @@ func TestConformanceSkeleton_ExtremeInputs_FailAttributablyNeverPanic(t *testing
 	t.Run("empty case selection", func(t *testing.T) {
 		defer requireNoPanicHere(t)
 		record := runConformanceCases(t, FakeFactory(), []conformanceCase{})
-		if len(record.Entries()) != 8 {
-			t.Errorf("an empty case selection must still return a total record; got %d entries, want 8", len(record.Entries()))
+		if len(record.Entries()) != 9 {
+			t.Errorf("an empty case selection must still return a total record; got %d entries, want 9", len(record.Entries()))
 		}
 	})
 
@@ -1148,16 +1162,16 @@ func TestConformanceCapabilities_UsageAbsentVsZeroCase_PassesAgainstFakeFactory(
 
 // === AI-23.6 — the capability record: totality, verdict, comparison (R-CNF-017, R-CNF-018) ===
 
-// S-CNF-047 — any completed run's record carries exactly eight entries,
+// S-CNF-047 — any completed run's record carries exactly nine entries,
 // one per capability in the two closed lists, each naming its capability,
 // standing and outcome.
-func TestCapabilityRecord_Totality_ExactlyEightEntriesEachNamingAllThreeFields(t *testing.T) {
+func TestCapabilityRecord_Totality_ExactlyNineEntriesEachNamingAllThreeFields(t *testing.T) {
 	record := runConformanceCases(t, FakeFactory(), nil)
 	entries := record.Entries()
-	if len(entries) != 8 {
-		t.Fatalf("len(entries) = %d, want 8 (S-CNF-047)", len(entries))
+	if len(entries) != 9 {
+		t.Fatalf("len(entries) = %d, want 9 (S-CNF-047)", len(entries))
 	}
-	seen := make(map[Capability]bool, 8)
+	seen := make(map[Capability]bool, 9)
 	for _, e := range entries {
 		if seen[e.Capability] {
 			t.Errorf("capability %v appears more than once in the record, want exactly one entry each", e.Capability)
@@ -1179,15 +1193,16 @@ func TestCapabilityRecord_Totality_ExactlyEightEntriesEachNamingAllThreeFields(t
 
 // S-CNF-048 — a run whose subject offers no optional capability: the three
 // optional entries are absent, none not-exercised.
-func TestCapabilityRecord_NoOptionalCapabilityOffered_ThreeAbsentNoneNotExercised(t *testing.T) {
+func TestCapabilityRecord_NoOptionalCapabilityOffered_FourAbsentNoneNotExercised(t *testing.T) {
 	f := Factory{
 		New:           func(_ testing.TB, scripts ...Script) ai.ModelProvider { return NewProvider(scripts...) },
 		Reasoning:     boolPtr(false),
 		TokenCounting: boolPtr(false),
 		CacheBoundary: boolPtr(false),
+		Retry:         boolPtr(false),
 	}
 	record := runConformanceCases(t, f, nil)
-	for _, c := range []Capability{CapReasoningContent, CapTokenCounting, CapCacheBoundary} {
+	for _, c := range []Capability{CapReasoningContent, CapTokenCounting, CapCacheBoundary, CapRetry} {
 		entry, ok := record.Entry(c)
 		if !ok || entry.Outcome != OutcomeAbsent {
 			t.Errorf("%v entry = %+v (ok=%v), want Outcome=%v (S-CNF-048)", c, entry, ok, OutcomeAbsent)
@@ -1260,6 +1275,7 @@ func TestCapabilityRecord_Verdict_AllRequiredSatisfiedOptionalSatisfiedOrAbsent_
 		Reasoning:     boolPtr(true),
 		TokenCounting: boolPtr(false),
 		CacheBoundary: boolPtr(false),
+		Retry:         boolPtr(false),
 	}
 	var cases []conformanceCase
 	for _, c := range Capabilities() {
@@ -1286,6 +1302,7 @@ func TestCapabilityRecord_Verdict_OneNotExercised_Inconclusive(t *testing.T) {
 		Reasoning:     boolPtr(false),
 		TokenCounting: boolPtr(false),
 		CacheBoundary: boolPtr(false),
+		Retry:         boolPtr(false),
 	}
 	// No cases registered for any required capability: every required
 	// entry stays not-exercised; every optional entry is absent.
@@ -1365,9 +1382,10 @@ func TestRunConformance_FakeFactoryEndToEnd_VerdictPassEveryRequiredSatisfied(t 
 			t.Errorf("required capability %v outcome = %v, want %v", e.Capability, e.Outcome, OutcomeSatisfied)
 		}
 	}
-	// FakeFactory declares Reasoning offered, TokenCounting and
-	// CacheBoundary not — so the record exercises both optional outcomes
-	// (design.md's own stated purpose for FakeFactory's declarations).
+	// FakeFactory declares Reasoning offered, TokenCounting,
+	// CacheBoundary, and Retry not — so the record exercises both
+	// optional outcomes (design.md's own stated purpose for
+	// FakeFactory's declarations).
 	if entry, ok := record.Entry(CapReasoningContent); !ok || entry.Outcome != OutcomeSatisfied {
 		t.Errorf("CapReasoningContent entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeSatisfied)
 	}
@@ -1376,6 +1394,9 @@ func TestRunConformance_FakeFactoryEndToEnd_VerdictPassEveryRequiredSatisfied(t 
 	}
 	if entry, ok := record.Entry(CapCacheBoundary); !ok || entry.Outcome != OutcomeAbsent {
 		t.Errorf("CapCacheBoundary entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeAbsent)
+	}
+	if entry, ok := record.Entry(CapRetry); !ok || entry.Outcome != OutcomeAbsent {
+		t.Errorf("CapRetry entry = %+v (ok=%v), want Outcome=%v", entry, ok, OutcomeAbsent)
 	}
 }
 
