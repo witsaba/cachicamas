@@ -37,7 +37,7 @@ func TestApplyDefaults_SubstitutesZeroValues(t *testing.T) {
 	if cfg.MaxAttempts != DefaultMaxAttempts {
 		t.Fatalf("MaxAttempts = %d, want %d", cfg.MaxAttempts, DefaultMaxAttempts)
 	}
-	if cfg.NowFunc == nil || cfg.SleepFunc == nil || cfg.RetryAfterReader == nil {
+	if cfg.NowFunc == nil || cfg.SleepFunc == nil || cfg.AfterReader == nil {
 		t.Fatal("applyDefaults left a timing or Retry-After function nil")
 	}
 	if cfg.BaseDelay <= 0 || cfg.MaxDelay <= cfg.BaseDelay {

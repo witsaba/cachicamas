@@ -29,8 +29,8 @@ type NowFunc func() time.Time
 // return promptly when ctx is cancelled.
 type SleepFunc func(ctx context.Context, delay time.Duration) error
 
-// RetryAfterReader reads a presence-typed Retry-After hint from a failure.
-type RetryAfterReader func(*ai.Failure) (time.Duration, bool)
+// AfterReader reads a presence-typed Retry-After hint from a failure.
+type AfterReader func(*ai.Failure) (time.Duration, bool)
 
 // Config controls one Loop invocation. MaxAttempts is the retry budget, not
 // the initial request; zero values select the package defaults.
@@ -38,7 +38,7 @@ type Config struct {
 	MaxAttempts      int
 	NowFunc          NowFunc
 	SleepFunc        SleepFunc
-	RetryAfterReader RetryAfterReader
+	AfterReader AfterReader
 	BaseDelay        time.Duration
 	MaxDelay         time.Duration
 	JitterSeed       int64
@@ -94,7 +94,7 @@ func Loop(
 		}
 
 		delay := computeBackoff(attempt, cfg, jitter)
-		if hinted, ok := cfg.RetryAfterReader(failure); ok {
+		if hinted, ok := cfg.AfterReader(failure); ok {
 			if hinted < 0 {
 				hinted = 0
 			}
@@ -140,8 +140,8 @@ func applyDefaults(cfg Config) Config {
 	if cfg.SleepFunc == nil {
 		cfg.SleepFunc = defaultSleep
 	}
-	if cfg.RetryAfterReader == nil {
-		cfg.RetryAfterReader = defaultRetryAfterReader
+	if cfg.AfterReader == nil {
+		cfg.AfterReader = defaultAfterReader
 	}
 	if cfg.BaseDelay <= 0 {
 		cfg.BaseDelay = defaultBaseDelay
@@ -201,6 +201,6 @@ func defaultSleep(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func defaultRetryAfterReader(failure *ai.Failure) (time.Duration, bool) {
+func defaultAfterReader(failure *ai.Failure) (time.Duration, bool) {
 	return failure.RetryAfter()
 }
