@@ -384,7 +384,7 @@ AI-20.1, AI-20.2 (a context already cancelled at call time — see § 7), AI-20.
 
 ### Decision
 
-The buffer between producer and consumer (`V-STR-08`) is **bounded**, with a **starting capacity of 64 events**.
+The buffer between producer and consumer (`V-STR-08`) is **bounded**, with a **starting capacity of 0 events** *(measured by AI-34.1 against the workload recorded in `openspec/changes/archive/2026-08-07-cachicamas-ai-backpressure/decision.md`; tie-break per doc 0002:432 applied — "prefer the smaller; backpressure observable is worth more than latency that was hidden")*. Runtime behaviour at `N=0` is identical to the prior unbuffered carrier (`make(chan T, 0) == make(chan T)`) but the named constant + the explicit buffer argument are now part of the contract that R-AIS-031 and R-AIS-039 lock down.
 
 **Backpressure** (`V-STR-23`) means **waiting, never dropping**: when the buffer is full the producer waits — and that wait, like every send, also waits on cancellation (§ 5), so a full buffer never makes a stream uncancellable.
 
