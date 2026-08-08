@@ -106,6 +106,7 @@
 package openaicompat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -223,7 +224,7 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 	// R-ATS-023: a success response whose Content-Type is not the
 	// streaming media type is refused before any byte reaches the decoder.
 	if !isStreamContentType(resp.Header.Get("Content-Type")) {
-		return nil, refuseNonStreamContentType(resp)
+		return nil, refuseNonStreamContentType(resp, c.credential)
 	}
 
 	out := make(chan ai.Event, streamCarrierBuffer)
@@ -301,10 +302,25 @@ func isStreamContentType(contentType string) bool {
 // (R-AIP-009), so this cause is what a caller unwraps to reach it. The
 // excerpt is bounded by capture.go's own captureLimit (captureBody, below —
 // AI-32.1's bounded-capture machinery, reused rather than a second,
-// independent bound, S-ATS-089). This type never reads the request's own
-// credential — it is built solely from the response's Content-Type header
-// and body — so it cannot reproduce one (R-ATS-023's "MUST NOT reproduce
-// credential material").
+// independent bound, S-ATS-089).
+//
+// # AI-36 (WU-2, D-4) — a hostile provider CAN echo the caller's own
+// credential into this excerpt
+//
+// This type is built solely from the response's Content-Type header and
+// body, never from the request directly — but a provider that echoes the
+// request's own Authorization header (or its body) back into a
+// non-streaming response makes that credential reachable through the
+// response body all the same. AI-36's adversarial hostile-server case
+// (a_i-36_1_test.go) proved this bites: refuseNonStreamContentType now
+// redacts the caller's own credential out of the captured excerpt before
+// it ever reaches this type (redactCredential, below), so Error() still
+// never reproduces credential material (R-ATS-023's own "MUST NOT
+// reproduce credential material") while the excerpt itself stays present
+// and readable (R-ATS-023's visibility requirement, unchanged). A
+// provider echoing the caller's own prompt content is a separate, named
+// residual (R-AEM-019 item 4): suppressing it would defeat this excerpt's
+// diagnostic purpose, since the excerpt IS the provider's own response.
 //
 // Credential-scan posture (S-ATS-089 rev 4): the credential-scan guard's
 // designed scope is external-package (`package openaicompat_test`) test
@@ -327,15 +343,51 @@ func (e *nonStreamContentType) Error() string {
 	return fmt.Sprintf("openaicompat: response content type %q is not the streaming media type %q; body excerpt: %s", e.contentType, streamContentType, e.excerpt)
 }
 
+// credentialRedactedPlaceholder replaces a caller's own credential
+// wherever redactCredential finds it echoed back inside a captured excerpt
+// (AI-36, D-4) — the same fixed placeholder text Credential's own
+// String/GoString already render (credential.go), so a redacted excerpt
+// reads consistently with every other redacted credential rendering in
+// this module.
+const credentialRedactedPlaceholder = "<redacted>"
+
+// redactCredential returns a copy of excerpt with every occurrence of
+// cred's bearer-header form, then every occurrence of cred's raw token,
+// replaced with credentialRedactedPlaceholder (D-4, R-AEM-019 item 1). The
+// bearer form is replaced first so a caller reading the redacted excerpt
+// never sees a dangling "Bearer " left behind by a token-only replacement.
+// An empty credential (isEmpty) has nothing to redact and is returned
+// unchanged.
+//
+// Replacement never grows the excerpt: this module's own credential-shape
+// convention (credential_scan_test.go) treats a bearer token under 20
+// bytes as not credential-shaped at all, and credentialRedactedPlaceholder
+// is 11 bytes — so a real replacement only ever shrinks or holds the
+// excerpt's length, never grows it past AI-32.5's existing size bound
+// (captureLimit, capture.go), which already applied at capture time,
+// strictly before this substitution ever runs.
+func redactCredential(excerpt []byte, cred Credential) []byte {
+	if cred.isEmpty() {
+		return excerpt
+	}
+	redacted := bytes.ReplaceAll(excerpt, []byte(cred.bearer()), []byte(credentialRedactedPlaceholder))
+	redacted = bytes.ReplaceAll(redacted, []byte(cred.token), []byte(credentialRedactedPlaceholder))
+	return redacted
+}
+
 // refuseNonStreamContentType builds R-ATS-023's pre-handover failure for a
 // success response whose Content-Type is not the streaming media type,
 // capturing a bounded excerpt of resp's body through capture.go's own
-// captureBody — which also closes the body, so no byte reaches the decoder.
-func refuseNonStreamContentType(resp *http.Response) error {
+// captureBody — which also closes the body, so no byte reaches the
+// decoder — and redacting cred (the client's own credential) out of that
+// excerpt before it ever reaches nonStreamContentType (AI-36, D-4): a
+// hostile provider that echoes the caller's own Authorization header into
+// its response body must not be able to make this excerpt reproduce it.
+func refuseNonStreamContentType(resp *http.Response, cred Credential) error {
 	captured := captureBody(resp.Body)
 	failure, err := ai.PreStreamFailure(ai.FailureReport{
 		Category: ai.FailureCategoryMalformedResponse,
-		Cause:    &nonStreamContentType{contentType: resp.Header.Get("Content-Type"), excerpt: captured.bytes()},
+		Cause:    &nonStreamContentType{contentType: resp.Header.Get("Content-Type"), excerpt: redactCredential(captured.bytes(), cred)},
 	})
 	if err != nil {
 		// FailureCategoryMalformedResponse is always a member of the
