@@ -94,6 +94,15 @@ func (p *Provider) Started() int {
 	return len(p.spans)
 }
 
+// Spans returns a copy of every span p has produced, in start order — the
+// per-span accessor AI-37's attribute-mapping proof reads (Provider.Corpus
+// gives a single flattened denylist-shaped corpus, not per-span structure).
+func (p *Provider) Spans() []*Span {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.spans)
+}
+
 // Ended returns the number of retained spans whose End has been called at
 // least once.
 func (p *Provider) Ended() int {
@@ -324,6 +333,26 @@ func (s *Span) Name() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.name
+}
+
+// Attributes returns a copy of every attribute SetAttributes has recorded
+// on s (including those supplied via trace.WithAttributes at Start,
+// tracer.Start above), in recording order — a test-support accessor, not
+// part of trace.Span. AI-37's per-key attribute-mapping proof needs typed,
+// per-key reads; Corpus() alone gives only a flattened, denylist-shaped
+// string.
+func (s *Span) Attributes() []attribute.KeyValue {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.attrs)
+}
+
+// Status returns s's current status code and description — a test-support
+// accessor, not part of trace.Span.
+func (s *Span) Status() (codes.Code, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.statusCode, s.statusDesc
 }
 
 // writeCorpus appends every field the tracing API lets a caller set on s to
