@@ -384,6 +384,61 @@ func TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode(t *testing.T) 
 	}
 }
 
+// TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode is Judgment
+// Day round 2's own falsifier for R-AOB-006 bullet 2's general clause
+// (S-AOB-041). A POST-handover (mid-stream) terminal failure has the
+// exact same "a response WAS obtained before the failure was recognized"
+// shape the content-type-refusal exit above already covers -- run is
+// only ever launched after a successful, content-type-accepted response
+// (finalizeSpan's own doc comment, trace.go, cites resp.StatusCode as
+// always in hand there), so http.response.status_code MUST be recorded
+// on this exit too, exactly as the success path and the content-type
+// refusal already record it -- not omitted the way the pre-handover
+// retry.Loop-error exit correctly omits it (TestAI37_Attributes_
+// TerminalFailureOmitsStatusCode above, a structurally different exit
+// with no *http.Response at all). Before this round, finalizeSpan's
+// failure branch returned before ever recording it, and no scenario
+// asserted either its presence or its absence here -- which is why the
+// divergence between the landed spec text and the shipped code went
+// unnoticed.
+func TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode(t *testing.T) {
+	t.Parallel()
+
+	provider := tracetest.NewProvider()
+	// The in-band-error-frame shape: a real HTTP 200 response is obtained
+	// and its Content-Type accepted (run is launched), and the stream
+	// itself then terminates on a provider error frame -- a
+	// deterministic, non-racy mid-stream failure that needs no
+	// cancellation and is independent of the round-2 CRITICAL fix above
+	// (this fixture opens no text block, so blockOpen stays false).
+	server := ai37SSEServer(t, "data: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad request\"}}\n\n")
+	c := ai37MustClient(t, server.URL, provider)
+
+	ch, err := c.Stream(context.Background(), ai37ValidRequest(t))
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want nil", err)
+	}
+	ai37DrainAllPlain(t, ch)
+
+	spans := provider.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("provider recorded %d span(s), want 1", len(spans))
+	}
+	attrs := spans[0].Attributes()
+
+	if _, ok := ai37AttrByKey(attrs, "error.type"); !ok {
+		t.Fatal("error.type absent on a mid-stream failure, want present -- this row's own control that the failure branch actually ran")
+	}
+
+	v, ok := ai37AttrByKey(attrs, "http.response.status_code")
+	if !ok {
+		t.Fatal("http.response.status_code absent on a post-handover (mid-stream) terminal failure, want present -- a response WAS obtained before the in-band error frame terminated the stream (R-AOB-006 bullet 2, S-AOB-041)")
+	}
+	if v.AsInt64() != http.StatusOK {
+		t.Errorf("http.response.status_code = %d, want %d (the exact response run was launched with)", v.AsInt64(), http.StatusOK)
+	}
+}
+
 // TestAI37_Attributes_CrossVendorSystemEquality covers S-AOB-018: two
 // adapters constructed against two different vendor endpoints record the
 // same gen_ai.system value — the dialect, not a vendor-derived one.

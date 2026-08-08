@@ -155,6 +155,18 @@ type spanOutcome struct {
 // split).
 func finalizeSpan(span trace.Span, statusCode int, outcome *spanOutcome) {
 	span.SetAttributes(attribute.Int(streamEventCountKey, outcome.eventCount))
+	// AI-37 Judgment Day round 2 (R-AOB-006 bullet 2, S-AOB-041): statusCode
+	// is always resp.StatusCode -- the one winning response run itself is
+	// only ever launched with (see this function's own doc comment above)
+	// -- so it is genuinely "in hand" on every post-handover exit this
+	// finalizer renders, failure or success alike, exactly like the
+	// pre-handover content-type-refusal exit already records it
+	// (endSpanPreHandover, S-AOB-040). Recorded unconditionally, before
+	// branching on outcome.failure, so the failure branch below no longer
+	// omits a value that was never actually in doubt: the round-1 spec
+	// amendment's own general clause already said as much, the code just
+	// had not carried it through to this branch.
+	span.SetAttributes(attribute.Int(statusCodeKey, statusCode))
 
 	if outcome.failure != nil {
 		category := outcome.failure.Category().String()
@@ -164,7 +176,6 @@ func finalizeSpan(span trace.Span, statusCode int, outcome *spanOutcome) {
 		return
 	}
 
-	span.SetAttributes(attribute.Int(statusCodeKey, statusCode))
 	if outcome.haveCompletion {
 		span.SetAttributes(terminalCompletionAttributes(outcome.completion)...)
 	}

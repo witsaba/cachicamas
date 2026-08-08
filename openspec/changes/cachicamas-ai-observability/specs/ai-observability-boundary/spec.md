@@ -14,7 +14,7 @@
 | Field | Value |
 | --- | --- |
 | **Capability** | `ai-observability-boundary` |
-| **Type** | New full spec — nine requirements `R-AOB-001` … `R-AOB-009`, scenarios `S-AOB-001` … `S-AOB-039` |
+| **Type** | New full spec — nine requirements `R-AOB-001` … `R-AOB-009`, scenarios `S-AOB-001` … `S-AOB-041` |
 | **Numbering** | Prefix re-verified at spec time across the whole `openspec/` tree — canonical specs, active changes and archived change deltas alike. `AOB` occurs nowhere except this change's own `proposal.md`. |
 | **Charter coverage** | AI-37.1 → `R-AOB-001`, `R-AOB-002` · AI-37.2 → `R-AOB-003` … `R-AOB-006` · AI-37.3 → `R-AOB-007`, `R-AOB-008` · AI-37.4 → `R-AOB-009` |
 
@@ -127,7 +127,7 @@ A streaming span MUST NOT end before the stream's terminal event has been produc
 Where an allowlisted key has no exact source of truth, the milestone MUST narrow its own claim rather than record an approximate value under a precise key. This capability's terminal-failure exits do not all share one shape, and the requirement below is deliberately split rather than stated as one blanket rule for every terminal-failure path:
 
 - On a terminal-failure path where the retry mechanism itself fails before any response is ever obtained — a retry-budget-exhausted or a non-retryable terminal failure — only the status *class* ever existed, never the exact code, so `http.response.status_code` MUST be **omitted** on that path.
-- On a terminal-failure path where a response WAS obtained before the failure was recognized — the non-streaming-content-type refusal, whose exact code is in hand from that same response — `http.response.status_code` MUST be **recorded**, exactly as the success path records it. Omitting a value that is genuinely in hand would itself be the falsehood this requirement exists to prevent: narrowing a claim past what is actually available is not the same discipline as narrowing it to what is available.
+- On a terminal-failure path where a response WAS obtained before the failure was recognized — the non-streaming-content-type refusal, whose exact code is in hand from that same response, **and** every post-handover (mid-stream) terminal failure, which this capability only ever begins producing after that one response has already been obtained — `http.response.status_code` MUST be **recorded**, exactly as the success path records it. Omitting a value that is genuinely in hand would itself be the falsehood this requirement exists to prevent: narrowing a claim past what is actually available is not the same discipline as narrowing it to what is available.
 
 The omission MUST be an explicit clause of this requirement and MUST be recorded at the omission site in source. It MUST NOT be left implicit, and the class MUST NOT be recorded under the exact-code key: that key means the code, and writing a class where a consumer expects a code is a falsehood in a contract whose whole point is that a rename breaks consumers.
 
@@ -140,6 +140,7 @@ A follow-up MUST be recorded naming the capability that owns an exact terminal s
 - **S-AOB-024** *(review)* — Given this change's landed artefacts, when a reader looks for the owner of an exact terminal status code, then a follow-up is recorded naming the capability that owns it.
 - **S-AOB-025** — Given that same terminal-failure span, when its attributes are inspected, then `error.type` is present and its value is a member of the landed closed nine-member failure vocabulary.
 - **S-AOB-040** *(review)* — Given a traced request that ends in a non-streaming-content-type refusal — a terminal failure for which a response WAS obtained before the refusal was recognized — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it.
+- **S-AOB-041** — Given a traced request that ends in a post-handover (mid-stream) terminal failure — a failure recognized after the stream's one response was already obtained, at any of this capability's own mid-stream terminal paths — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it, alongside `error.type`.
 
 ### R-AOB-007 — The content denylist is absolute and is proven by absence over a run that used everything it denies
 
@@ -226,4 +227,4 @@ Each attribute key MUST be spelled in exactly one place and referenced from ever
 
 ## Acceptance criteria
 
-The capability holds when every scenario `S-AOB-001` … `S-AOB-039` has recorded evidence, the two bites of `R-AOB-002` and the overlay RED of `R-AOB-008` item 4 are recorded red then green, and `make test` under race detection, `make lint` and `make build` are green in the module with a clean working tree.
+The capability holds when every scenario `S-AOB-001` … `S-AOB-041` has recorded evidence, the two bites of `R-AOB-002` and the overlay RED of `R-AOB-008` item 4 are recorded red then green, and `make test` under race detection, `make lint` and `make build` are green in the module with a clean working tree.
