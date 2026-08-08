@@ -124,7 +124,10 @@ A streaming span MUST NOT end before the stream's terminal event has been produc
 
 ### R-AOB-006 — Every allowlisted key deliberately left unrecorded carries a stated justification and a recorded follow-up
 
-Where an allowlisted key has no exact source of truth, the milestone MUST narrow its own claim rather than record an approximate value under a precise key. Specifically: on the **terminal-failure** path only the status *class* survives, not the exact code, so `http.response.status_code` MUST be **omitted** on that path.
+Where an allowlisted key has no exact source of truth, the milestone MUST narrow its own claim rather than record an approximate value under a precise key. This capability's terminal-failure exits do not all share one shape, and the requirement below is deliberately split rather than stated as one blanket rule for every terminal-failure path:
+
+- On a terminal-failure path where the retry mechanism itself fails before any response is ever obtained — a retry-budget-exhausted or a non-retryable terminal failure — only the status *class* ever existed, never the exact code, so `http.response.status_code` MUST be **omitted** on that path.
+- On a terminal-failure path where a response WAS obtained before the failure was recognized — the non-streaming-content-type refusal, whose exact code is in hand from that same response — `http.response.status_code` MUST be **recorded**, exactly as the success path records it. Omitting a value that is genuinely in hand would itself be the falsehood this requirement exists to prevent: narrowing a claim past what is actually available is not the same discipline as narrowing it to what is available.
 
 The omission MUST be an explicit clause of this requirement and MUST be recorded at the omission site in source. It MUST NOT be left implicit, and the class MUST NOT be recorded under the exact-code key: that key means the code, and writing a class where a consumer expects a code is a falsehood in a contract whose whole point is that a rename breaks consumers.
 
@@ -132,10 +135,11 @@ A follow-up MUST be recorded naming the capability that owns an exact terminal s
 
 #### Scenarios
 
-- **S-AOB-022** — Given a traced request that ends in a terminal provider failure, when the span's attribute keys are enumerated, then `http.response.status_code` is absent, and a note at the omission site in source states why.
+- **S-AOB-022** — Given a traced request whose retry mechanism itself fails with no response ever obtained — a retry-budget-exhausted or a non-retryable terminal failure — when the span's attribute keys are enumerated, then `http.response.status_code` is absent, and a note at the omission site in source states why.
 - **S-AOB-023** — Given that same span, when every recorded value is inspected, then no status *class* value appears under `http.response.status_code` or under any other allowlisted key.
 - **S-AOB-024** *(review)* — Given this change's landed artefacts, when a reader looks for the owner of an exact terminal status code, then a follow-up is recorded naming the capability that owns it.
 - **S-AOB-025** — Given that same terminal-failure span, when its attributes are inspected, then `error.type` is present and its value is a member of the landed closed nine-member failure vocabulary.
+- **S-AOB-040** *(review)* — Given a traced request that ends in a non-streaming-content-type refusal — a terminal failure for which a response WAS obtained before the refusal was recognized — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it.
 
 ### R-AOB-007 — The content denylist is absolute and is proven by absence over a run that used everything it denies
 
@@ -162,7 +166,7 @@ An absence assertion is the single easiest test in this repository to write vacu
 
 1. **Positive control** — the shared sweep's self-test MUST run before every clean scan and MUST fail the suite if any needle fails to bite.
 2. **Corpus-non-empty guard** — the corpus length MUST be asserted greater than zero, the recorded span count at least one, and the recorded attribute count at least the expected allowlist cardinality. The scanner returns *not found* for an empty corpus by construction, so without this guard the whole absence claim passes on a run that recorded nothing.
-3. **Event-coverage guard** — the drained recording MUST be asserted to have contained text, reasoning, tool-call, completion and error events, so that the absence was asserted over a run that used all of them rather than over a run that used none.
+3. **Event-coverage guard** — the drained recording MUST be asserted to have contained every event kind this adapter can structurally produce during normal operation — text, tool-call, completion and error events — so that the absence was asserted over a run that used all of them rather than over a run that used none. This adapter's own wire decoding drops any reasoning-content field before a Go value exists to carry it, so it can never construct a reasoning *event* on any real transcript; asserting event-coverage for a kind that cannot exist is not a claim this guard can make truthfully. A reasoning-content canary is still planted and still scanned by `R-AOB-007`'s absence proof — its absence from the corpus is guaranteed by the wire-decode drop, not demonstrated by this coverage guard, and it is retained for documentation value rather than as additional coverage evidence.
 4. **Recorded RED** — with a deliberately leaking attribute mapping substituted at build time **without modifying the working tree**, `R-AOB-007`'s test MUST fail and name the leaking vector. The red output MUST be recorded, the substitution dropped, and the suite re-run green.
 
 The recorder MUST additionally assert that its own captured-field count matches the tracing API surface it implements, so that a value set through a path the corpus builder does not walk fails the suite rather than escaping it.
@@ -171,7 +175,7 @@ The recorder MUST additionally assert that its own captured-field count matches 
 
 - **S-AOB-030** — Given the denylist test, when it runs, then the sweep's self-test runs before the clean scan; and given a needle deliberately made not to bite, when the self-test runs, then the suite fails.
 - **S-AOB-031** — Given a traced run that recorded nothing, when the denylist test runs against it, then the **corpus-non-empty guard** fails; and given the real traced run, when the guard runs, then corpus length is greater than zero, span count is at least one, and attribute count is at least the expected allowlist cardinality.
-- **S-AOB-032** — Given the drained recording of the denylist run, when its event kinds are enumerated, then text, reasoning, tool-call, completion and error events are each present; and given a run that omitted one kind, when this guard runs, then it fails and names the missing kind.
+- **S-AOB-032** — Given the drained recording of the denylist run, when its event kinds are enumerated, then text, tool-call, completion and error events — the four kinds this adapter can structurally produce — are each present; and given a run that omitted one of those four kinds, when this guard runs, then it fails and names the missing kind. This scenario does not assert a reasoning *event*, because no run of this adapter can ever populate one; `R-AOB-007`'s own absence scan covers the reasoning-content canary independently.
 - **S-AOB-033** — Given an attribute mapping deliberately altered to copy message text into a span attribute, substituted at build time without modifying the working tree, when `R-AOB-007`'s test runs, then it FAILS and names the leaking vector; the red output is recorded, the substitution is dropped, and the suite is re-run green with that output recorded alongside.
 - **S-AOB-034** — Given the recording tracer, when the count of fields it captures is compared against the count of fields the tracing API allows a caller to set on a span, then they are equal — a newly settable field cannot be recorded and then skipped by the corpus builder.
 - **S-AOB-035** — Given the denylist test's own source, when the sweep scans this repository's sources, then it does not flag that source — every needle is assembled at runtime and no denied marker appears as a contiguous literal.

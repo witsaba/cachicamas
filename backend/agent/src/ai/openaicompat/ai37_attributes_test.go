@@ -323,6 +323,67 @@ func TestAI37_Attributes_TerminalFailureOmitsStatusCode(t *testing.T) {
 	}
 }
 
+// TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode covers the
+// content-type-refusal half of R-AOB-006's split (D-3b, Judgment Day
+// remediation, S-AOB-040). Unlike
+// TestAI37_Attributes_TerminalFailureOmitsStatusCode above (whose
+// retry.Loop-error exit never obtains a *http.Response at all), a
+// response IS in hand on this exit -- stream.go's own content-type
+// refusal branch has resp.StatusCode before it ever calls
+// endSpanPreHandover -- so the exact code MUST be recorded, exactly as
+// the success path records it, not omitted. Before this remediation no
+// test asserted this row; the spec text itself claimed the opposite
+// (blanket omission on every terminal-failure path), which is the
+// accuracy defect this round also corrects.
+func TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode(t *testing.T) {
+	t.Parallel()
+
+	provider := tracetest.NewProvider()
+	// A 2xx status is required to reach the content-type check at all:
+	// retry.Loop's own status mapping (failure_map.go's mapResponse)
+	// hands back a *http.Response with a nil error only for a 2xx
+	// response -- any other status is classified and returned as an
+	// error from retry.Loop itself, taking the OTHER pre-handover exit
+	// (the one TestAI37_Attributes_TerminalFailureOmitsStatusCode
+	// covers). http.StatusAccepted is deliberately distinct from the
+	// http.StatusOK used elsewhere in this milestone's own fixtures, so
+	// this assertion cannot be satisfied by a coincidental default.
+	const refusalStatus = http.StatusAccepted
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(refusalStatus)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(server.Close)
+	c := ai37MustClient(t, server.URL, provider)
+
+	_, err := c.Stream(context.Background(), ai37ValidRequest(t))
+	if err == nil {
+		t.Fatal("Stream() error = nil, want a non-streaming content-type refusal")
+	}
+	var failure *ai.Failure
+	if !errors.As(err, &failure) {
+		t.Fatalf("errors.As(err, *ai.Failure) = false; err = %v", err)
+	}
+	if failure.Category() != ai.FailureCategoryMalformedResponse {
+		t.Errorf("Category() = %v, want FailureCategoryMalformedResponse", failure.Category())
+	}
+
+	spans := provider.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("provider recorded %d span(s), want 1", len(spans))
+	}
+	attrs := spans[0].Attributes()
+
+	v, ok := ai37AttrByKey(attrs, "http.response.status_code")
+	if !ok {
+		t.Fatal("http.response.status_code absent on the content-type-refusal exit, want present -- a response WAS in hand on this exit (R-AOB-006 D-3b split, S-AOB-040)")
+	}
+	if v.AsInt64() != refusalStatus {
+		t.Errorf("http.response.status_code = %d, want %d (the exact refusal response's own code)", v.AsInt64(), refusalStatus)
+	}
+}
+
 // TestAI37_Attributes_CrossVendorSystemEquality covers S-AOB-018: two
 // adapters constructed against two different vendor endpoints record the
 // same gen_ai.system value — the dialect, not a vendor-derived one.
