@@ -174,3 +174,9 @@ Chain strategy: size-exception
 | AI-37.4 | 8 | no-op equivalence |
 
 All 9 `R-AOB-*`, both `NFR-AOB-*`, all 4 touched `R-AGM-*`, all 3 touched `R-APC-*`, and all 4 milestone subnodes are covered by at least one task. No uncovered requirement.
+
+---
+
+## Remediation round (sdd-verify, 2026-08-08)
+
+`sdd-verify` returned FAIL on CRITICAL `C-1` (`retry.count` recorded but effectively unasserted — `S-AOB-015` UNTESTED, `S-AOB-009` PARTIAL) plus warning `W-3` (no-tracer table 14/15 rows). Both fixed, test-only, commit `3a61e46d`: `backend/agent/src/ai/openaicompat/ai37_retry_count_test.go` (new — a fail-then-succeed fixture and a 5-row `retry.count` table; both of verify's whole-module overlay defeats now fail it non-vacuously) and `ai37_noop_equivalence_test.go` (added the missing `pre_handover_cancelled_in_loop` row, now 15/15). `S-6` was evaluated and explicitly skipped (would require a production-code change to `run`'s producer goroutine). Full RED-proof evidence, the per-row construction table, and the corrected final diff stat (`W-6`) are recorded in `apply-progress.md`'s own "Remediation round" section — read that first. `W-1`, `W-2`, `W-4`, `W-5`, `S-1`…`S-5` remain orchestrator-owned archive-time items, not touched by this round.

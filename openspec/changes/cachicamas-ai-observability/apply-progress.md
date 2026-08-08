@@ -71,3 +71,79 @@ Full RED/GREEN evidence, exact captured failure messages, and every deviation ar
 - The ~1.9× forecast overrun (pre-approved via `size:exception`, auto-raising) is the largest single fact a reviewer should expect going in — it is not a surprise this document is hiding, it is stated up front.
 - Deviation 9 (reasoning event-coverage) is a genuine, load-bearing interpretive call, not a mechanical one. It is evidence-backed (three independent landed mechanisms in `decision.md`) but is the one place this apply phase exercised judgment about what a scenario's literal text must mean when it collides with an already-decided, already-shipped fact about this specific adapter. Flagged for `sdd-verify`'s and the maintainer's own attention.
 - Two follow-ups already recorded in the landed spec (not new): an exact terminal-failure status code belongs to `ai-provider-errors` (R-AOB-006's own recorded follow-up); AI-38's expected-vs-generated capability comparison is where `CAP-O-01`'s reasoning-absence verdict gets its next real confirmation opportunity (decision.md § 9/§ 10, unrelated to this milestone's own scope but adjacent to deviation 9 above).
+
+## Remediation round (sdd-verify findings, 2026-08-08)
+
+`sdd-verify` returned **FAIL** on one CRITICAL (`C-1`) plus warnings after the 21/21-task apply above. This round fixes exactly `C-1`, `W-3` and `W-6`, and evaluates `S-6`; every other warning/suggestion (`W-1`, `W-2`, `W-4`, `W-5`, `S-1`…`S-5`) is an archive-time record correction the orchestrator owns and this round does not touch.
+
+### Commits
+
+| # | SHA | Subject |
+|---|---|---|
+| 8 | `3a61e46d` | test(ai): prove retry.count on every retry-loop exit, complete the no-tracer table (AI-37 remediation) |
+| 9 | *(this commit)* | docs(ai): correct the AI-37 apply-progress diff stat, record the remediation round |
+
+### C-1 (CRITICAL) — `retry.count` present-but-unasserted on 4 of 5 `S-AOB-015` rows
+
+**Root cause**: production code was already correct (`stream.go:230,244,247`; `trace.go:104-106,122-123`; `retry.Loop`'s own return value proven by `TestLoop_RetryCountOnEveryExit`) — only the span-attribute assertion was missing. This is a test-only fix; no production code changed.
+
+**Added**: `backend/agent/src/ai/openaicompat/ai37_retry_count_test.go` — a fail-then-succeed `httptest` fixture (`ai37RetryTwiceThenSucceedServer`) plus `TestAI37_RetryCount_PresentOnEveryExit`, a 5-row table asserting `retry.count`'s exact value on every row `S-AOB-015` names:
+
+| Row | Construction | Asserted `retry.count` |
+|---|---|---|
+| `unretried_success` | single 200 | `0` |
+| `retried_twice_then_success` | 503, 503, 200 | `2` (also discharges `S-AOB-009`: exactly one span, ended once, across a retried-then-succeeded attempt) |
+| `non_retryable_terminal` | 401 (always) | `0` |
+| `budget_exhausted` | 503 (always) | `retry.DefaultMaxAttempts` (`3`) |
+| `cancelled` | 503 once, then `ctx` cancelled from a channel-synchronized watcher goroutine the instant the first response is written server-side | `0` — deterministic by construction: both of `retry.Loop`'s cancellation exits (`ctx.Err()` check, `SleepFunc` error) return `attempt-1` with `attempt` still `1` at that point, and a racing transport-level cancellation is categorized `Unavailable`/retryable and caught by that same `ctx.Err()` check before a second attempt is ever issued |
+
+**RED proof #1** (`recordRetryCount` hard-wired to `attribute.Int(retryCountKey, 0)`, loaded via `go test -overlay`, worktree never mutated):
+```
+ai37_retry_count_test.go:125: retry.count = 0, want 2   (retried_twice_then_success)
+ai37_retry_count_test.go:151: retry.count = 0, want 3   (budget_exhausted)
+--- FAIL: TestAI37_RetryCount_PresentOnEveryExit (2/5 rows failed)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.336s
+go test exit code: 1
+```
+
+**RED proof #2** (`recordRetryCount(span, retries)` call deleted from `endSpanPreHandover`, loaded via `go test -overlay`, worktree never mutated):
+```
+ai37_retry_count_test.go:189: retry.count absent, want present on every exit of the retry mechanism (cancelled)
+ai37_retry_count_test.go:138: retry.count absent, want present on every exit of the retry mechanism (non_retryable_terminal)
+ai37_retry_count_test.go:151: retry.count absent, want present on every exit of the retry mechanism (budget_exhausted)
+--- FAIL: TestAI37_RetryCount_PresentOnEveryExit (3/5 rows failed)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.470s
+go test exit code: 1
+```
+
+`git status --porcelain` stayed empty in the worktree throughout both overlay runs (aside from this remediation's own not-yet-committed files) — neither `trace.go` nor any other tracked file was ever touched. Baseline (no overlay) run: all 5 rows `PASS` against the real, unmodified code.
+
+### W-3 — no-tracer table now covers 15 of 15 terminal shapes
+
+Added the missing `pre_handover_cancelled_in_loop` row to `TestAI37_NoopEquivalence_NoTracerConfigured_NoPanicAcrossTerminalPaths`'s `cases` table (`ai37_noop_equivalence_test.go`), mirroring `ai37_span_lifecycle_test.go`'s own identically-named case with `mustNoTracerClient` in place of `ai37MustClient`. The file's own doc comment already claimed 15 shapes (that part was already correct); the table now actually carries 15 — confirmed empirically: 15 `--- PASS` lines, 0 `FAIL`, for this one subtest alone.
+
+### S-6 (optional) — evaluated, skipped
+
+`runNoPanic`'s `recover()` (`ai37_noop_equivalence_test.go`) only covers the calling goroutine, not `run`'s own producer goroutine spawned inside `Stream()` (`go run(ctx, resp, out, span)`, `stream.go`). Closing this gap would require `run` itself (production code) to install its own `recover()` plus some mechanism to report a caught panic back to the test — a real production-code behavioral change (recovering from a panic changes what the program does, not merely what a test observes), and no test-only injection point exists to wrap a goroutine that production code spawns internally. Out of scope for a test-only diagnostic improvement; skipped, not attempted, per the instruction to skip and say so when a "cheap" fix would actually perturb the paths being exercised.
+
+### Gates (post-remediation, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — 9/9 packages `ok`, 0 `FAIL` lines |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint`) | **PASS** — `0 issues.` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0 |
+| Working tree | `git status --porcelain` | clean except this remediation's own commits |
+
+### W-6 — this section is itself the fix
+
+The stat this document recorded before this round (`29 files changed, 4503 insertions(+), 147 deletions(-)`) was stale — it did not count its own prior commit. Final three-dot diff, re-run **after** this remediation's own commits land (so the number left here is the actual final one, not a pre-commit estimate):
+
+```
+git diff --stat origin/main...HEAD
+31 files changed, 4879 insertions(+), 147 deletions(-)
+```
+
+### Out of scope (orchestrator-owned, untouched by this round)
+
+`W-1`, `W-2`, `W-4`, `W-5`, `S-1`, `S-2`, `S-3`, `S-4`, `S-5` — archive-time record corrections (a spec-site declination note, an evidentiary-framing correction, recorded-evidence carry-forward from verify into the archive record, an unassertable-duration scenario narrowing, spec index arithmetic, and a pre-existing `go.work` version drift owned by `agent-module-scaffold`, not by this change). Not edited here; `go.work` itself was not touched.
