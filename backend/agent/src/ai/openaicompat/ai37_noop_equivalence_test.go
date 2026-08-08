@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/agenttest/tracetest"
@@ -215,6 +216,35 @@ func TestAI37_NoopEquivalence_NoTracerConfigured_NoPanicAcrossTerminalPaths(t *t
 			c := mustNoTracerClient(t, ai37AlwaysStatusServer(t, 401).URL)
 			if _, err := c.Stream(context.Background(), ai37ValidRequest(t)); err == nil {
 				t.Fatal("Stream() error = nil, want a non-retryable failure")
+			}
+		}},
+		{"pre_handover_cancelled_in_loop", func(t *testing.T) {
+			// W-3 remediation (sdd-verify): this cancellation shape was
+			// the one row missing from this table -- the file's own doc
+			// comment already claimed 15, matching
+			// ai37_span_lifecycle_test.go's own identically-named case,
+			// which this mirrors with mustNoTracerClient in place of
+			// ai37MustClient (S-AOB-037: no tracer configured).
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = io.WriteString(w, `{"error":{"type":"scripted_failure"}}`)
+			}))
+			t.Cleanup(server.Close)
+			c := mustNoTracerClient(t, server.URL)
+			ctx, cancel := context.WithCancel(context.Background())
+			// The server always answers retryably; cancelling shortly
+			// after Stream starts lands inside retry.Loop's own
+			// ctx.Err() check between attempts, well before its real
+			// backoff budget would otherwise exhaust (avoiding a
+			// multi-second real sleep in this test) -- the same timing
+			// rationale ai37_span_lifecycle_test.go's own
+			// pre_handover_cancelled_in_loop case uses.
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				cancel()
+			}()
+			if _, err := c.Stream(ctx, ai37ValidRequest(t)); err == nil {
+				t.Fatal("Stream() error = nil, want the last observed failure")
 			}
 		}},
 		{"pre_handover_content_type_refusal", func(t *testing.T) {
