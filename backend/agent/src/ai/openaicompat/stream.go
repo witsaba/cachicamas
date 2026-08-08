@@ -212,10 +212,15 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 		return nil, preStreamCancellation(ctxErr)
 	}
 
-	resp, err := retry.Loop(ctx, body, retry.Config{}, c.executeOnce)
+	resp, retries, err := retry.Loop(ctx, body, retry.Config{}, c.executeOnce)
 	if err != nil {
 		return nil, err
 	}
+	// retries is wired into the span's retry.count attribute by AI-37's
+	// span seam (WU-4, a later commit in this same PR) — retained as a
+	// named value here rather than discarded so that commit's diff is a
+	// pure addition around this line, not a second signature change.
+	_ = retries
 
 	// R-ATS-024: a success response falls through to the content-type check
 	// untouched. Retryable failures were handled before the carrier exists;

@@ -64,12 +64,17 @@ func (r *AttemptReport) Unwrap() error { return r.FinalCause }
 // up to cfg.MaxAttempts retries. The executeOnce callback rebuilds any
 // request body for each attempt, so callers can provide a fresh reader over
 // the same immutable byte slice.
+//
+// The returned int is AI-37's retry-count carrier (proposal D-3c, design.md
+// AD-6): the number of retries actually performed — attempt-1 against the
+// 1-based attempt counter below — valid on every one of Loop's six return
+// sites, not only on success. An unretried success reports 0.
 func Loop(
 	ctx context.Context,
 	body []byte,
 	cfg Config,
 	executeOnce func(ctx context.Context, body []byte) (*http.Response, error),
-) (*http.Response, error) {
+) (*http.Response, int, error) {
 	cfg = applyDefaults(cfg)
 	jitter := newJitter(cfg.JitterSeed, cfg.NowFunc())
 	var lastFailure *ai.Failure
@@ -78,19 +83,19 @@ func Loop(
 	for attempt := 1; attempt <= totalAttempts; attempt++ {
 		resp, err := executeOnce(ctx, body)
 		if err == nil && resp != nil {
-			return resp, nil
+			return resp, attempt - 1, nil
 		}
 
 		failure := failureFromResult(err)
 		lastFailure = failure
 		if !failure.Retryable() {
-			return nil, failure
+			return nil, attempt - 1, failure
 		}
 		if attempt == totalAttempts {
-			return nil, &AttemptReport{Attempts: attempt, FinalCause: failure}
+			return nil, attempt - 1, &AttemptReport{Attempts: attempt, FinalCause: failure}
 		}
 		if ctx.Err() != nil {
-			return nil, lastFailure
+			return nil, attempt - 1, lastFailure
 		}
 
 		delay := computeBackoff(attempt, cfg, jitter)
@@ -104,11 +109,11 @@ func Loop(
 			delay = hinted
 		}
 		if err := cfg.SleepFunc(ctx, delay); err != nil {
-			return nil, lastFailure
+			return nil, attempt - 1, lastFailure
 		}
 	}
 
-	return nil, &AttemptReport{Attempts: totalAttempts, FinalCause: lastFailure}
+	return nil, totalAttempts - 1, &AttemptReport{Attempts: totalAttempts, FinalCause: lastFailure}
 }
 
 func failureFromResult(err error) *ai.Failure {

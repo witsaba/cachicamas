@@ -34,7 +34,7 @@ func TestAI35_2_RetryAfterHint_OverridesComputedBackoff(t *testing.T) {
 		t.Fatalf("Translate() error = %v, want nil", err)
 	}
 	var delays []time.Duration
-	got, err := retry.Loop(t.Context(), body, retry.Config{
+	got, _, err := retry.Loop(t.Context(), body, retry.Config{
 		MaxAttempts: 2,
 		MaxDelay:    time.Minute,
 		SleepFunc: func(_ context.Context, delay time.Duration) error {
@@ -70,7 +70,7 @@ func TestAI35_2_ComputedBackoff_BoundedWithSeededJitter(t *testing.T) {
 	fixedNow := func() time.Time { return time.Unix(1700000000, 0) }
 	collect := func() []time.Duration {
 		var delays []time.Duration
-		_, loopErr := retry.Loop(t.Context(), body, retry.Config{
+		_, _, loopErr := retry.Loop(t.Context(), body, retry.Config{
 			MaxAttempts: 3,
 			BaseDelay:   10 * time.Millisecond,
 			MaxDelay:    200 * time.Millisecond,
@@ -123,7 +123,7 @@ func TestAI35_2_Backoff_CtxCancellationAbortsImmediately(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	_, err = retry.Loop(ctx, body, retry.Config{
+	_, _, err = retry.Loop(ctx, body, retry.Config{
 		SleepFunc: func(context.Context, time.Duration) error {
 			cancel()
 			return context.Canceled
@@ -162,7 +162,7 @@ func TestAI35_2_BoundedAttemptCount_ExactlyNPlusOneWireRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Translate() error = %v, want nil", err)
 	}
-	_, err = retry.Loop(t.Context(), body, retry.Config{
+	_, _, err = retry.Loop(t.Context(), body, retry.Config{
 		SleepFunc: func(context.Context, time.Duration) error { return nil },
 	}, client.executeOnce)
 	if err == nil {
