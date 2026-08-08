@@ -23,10 +23,12 @@
 // # The two assertions (R-OR-09)
 //
 //  1. backend/agent/go.mod declares exactly wantGoModRequireLines
-//     `require` lines (2, as of AI-37). This pin exists because
-//     go.mod is the source of truth for what the module declares as
-//     a dependency; the guard against an unauthorized require is
-//     the module's own invariant, not the test's.
+//     required modules (3, as of AI-37: the block form's two direct
+//     OpenTelemetry entries, plus the single-line indirect xxhash
+//     entry). This pin exists because go.mod is the source of truth
+//     for what the module declares as a dependency; the guard against
+//     an unauthorized require is the module's own invariant, not the
+//     test's.
 //
 //  2. allowedNonStdlibPrefixes in import_boundary_test.go holds
 //     exactly wantAllowedNonStdlibPrefixes' entries, in order. A
@@ -68,16 +70,19 @@ const openrouterModulePath = "github.com/cachicamas/backend/agent"
 
 // goModPath is the relative path from this sub-package's directory
 // to the module's go.mod. The test reads this file as raw bytes
-// and counts require lines.
+// and counts required modules.
 const goModPath = "../../../../go.mod"
 
-// wantGoModRequireLines is the exact require-line count AI-37 (ADR 0005
-// § D3, D-6) authorises: the "require (" block opener (the two direct
-// OpenTelemetry requires) plus the single-line indirect xxhash require.
-// Any further require line is either a later ADR-gated addition — which
-// must update this constant in the same commit — or an unauthorized
-// dependency.
-const wantGoModRequireLines = 2
+// wantGoModRequireLines is the exact required-module count AI-37 (ADR
+// 0005 § D3, D-6) authorises: the two direct OpenTelemetry entries
+// inside the "require ( ... )" block, plus the single-line indirect
+// xxhash require — 3 total, counted by countGoModRequireLines's own
+// module-entry walk (Judgment Day remediation: this counts entries, not
+// "require"-prefixed lines, so an addition inside the block is no
+// longer invisible). Any further required module is either a later
+// ADR-gated addition — which must update this constant in the same
+// commit — or an unauthorized dependency.
+const wantGoModRequireLines = 3
 
 // wantAllowedNonStdlibPrefixes is the exact, ordered
 // allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus
@@ -323,28 +328,109 @@ func unquoteStringLiteral(lit string) (string, error) {
 	return b.String(), nil
 }
 
-// countGoModRequireLines counts lines in raw that are go.mod
-// `require` lines (R-OR-09, AI-00.3). go.mod syntax has three
-// require-directive shapes:
+// countGoModRequireLines counts the MODULE ENTRIES a go.mod's require
+// directives declare (R-OR-09, AI-00.3, Judgment Day remediation): every
+// non-empty, non-comment line inside a `require ( ... )` block, plus
+// every single-line `require <path> <version>` directive. go.mod syntax
+// has two require-directive shapes:
 //
 //   - `require ( ... )`  — a block form; individual entries inside
-//     the block are indented.
+//     the block are indented, one module per line.
 //   - `require <path> <version>` — a single-line form.
 //
-// Both shapes fail this guard by design: a single require is the
-// regression R-OR-09 exists to catch. Comment lines (`//`) and the
-// `module` / `go` directives are not require lines.
+// This is deliberately a count of MODULE ENTRIES, not a count of how
+// many times the literal word "require" opens a directive. An earlier
+// version of this function counted only lines whose trimmed text
+// started with "require", so a dependency appended INSIDE an existing
+// require( ... ) block introduced no new "require"-prefixed line and
+// left the count unchanged -- an unauthorized addition inside the block
+// was invisible to this guard (Judgment Day round 1, finding 6;
+// TestCountGoModRequireLines_DetectsInBlockAddition, below, is the
+// falsifier). Comment lines (`//`), blank lines and the `module` / `go`
+// directives are not counted.
 func countGoModRequireLines(raw []byte) int {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	count := 0
+	inBlock := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "//") {
+		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		if strings.HasPrefix(line, "require") {
+		if inBlock {
+			if line == ")" {
+				inBlock = false
+				continue
+			}
 			count++
+			continue
+		}
+		if line == "require (" {
+			inBlock = true
+			continue
+		}
+		if strings.HasPrefix(line, "require ") {
+			count++
+			continue
 		}
 	}
 	return count
+}
+
+// ai37AuthorizedGoMod is a byte-identical shape to the AI-37-authorized
+// backend/agent/go.mod (block form, two direct requires, one single-line
+// indirect require) -- the baseline this test's mutation is compared
+// against. Kept in-memory so this proof never touches the real go.mod
+// file (Judgment Day remediation: no overlay is needed for a pure
+// []byte -> int function).
+var ai37AuthorizedGoMod = []byte(`module github.com/cachicamas/backend/agent
+
+go 1.26.3
+
+require (
+	go.opentelemetry.io/otel v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
+)
+
+require github.com/cespare/xxhash/v2 v2.3.0 // indirect
+`)
+
+// ai37GoModWithInBlockAddition is the exact same go.mod, with one
+// additional, unauthorized module appended INSIDE the existing
+// require( ... ) block -- the precise shape Judgment Day round 1 named:
+// a dependency added inside the block introduces no new line starting
+// with the literal word "require".
+var ai37GoModWithInBlockAddition = []byte(`module github.com/cachicamas/backend/agent
+
+go 1.26.3
+
+require (
+	go.opentelemetry.io/otel v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
+	github.com/evil/unauthorized v1.0.0
+)
+
+require github.com/cespare/xxhash/v2 v2.3.0 // indirect
+`)
+
+// TestCountGoModRequireLines_DetectsInBlockAddition is the falsifier for
+// R-OR-09's own guard function: a dependency appended INSIDE the
+// existing require( ... ) block MUST change what this function reports,
+// so the guard actually bites an addition there instead of passing it
+// through silently. Before the Judgment Day fix, both go.mod shapes
+// above counted identically (2: the "require (" line and the
+// single-line indirect require), because neither counting pass ever
+// looks at the block's own interior lines.
+func TestCountGoModRequireLines_DetectsInBlockAddition(t *testing.T) {
+	t.Parallel()
+
+	authorized := countGoModRequireLines(ai37AuthorizedGoMod)
+	withAddition := countGoModRequireLines(ai37GoModWithInBlockAddition)
+
+	if withAddition == authorized {
+		t.Errorf("countGoModRequireLines() = %d for both the authorized go.mod and one with an unauthorized module appended INSIDE the require( ... ) block, want different counts -- an in-block addition must not be invisible to this guard (Judgment Day round 1, finding 6)", authorized)
+	}
+	if withAddition != authorized+1 {
+		t.Errorf("countGoModRequireLines(with one extra in-block module) = %d, want exactly %d (authorized %d + 1)", withAddition, authorized+1, authorized)
+	}
 }

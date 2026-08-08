@@ -156,6 +156,102 @@ func TestCorpus_EmptyProviderReportsEmptyCorpus(t *testing.T) {
 	}
 }
 
+// TestProvider_StartCapturesLinkOption is a Judgment Day remediation:
+// Corpus()'s own doc comment claims it returns "every field the tracing
+// API allows a caller to set on any span", but tracer.Start retained
+// cfg.Attributes() while discarding cfg.Links() entirely -- a link
+// supplied at Start (trace.WithLinks), as opposed to one attached later
+// via Span.AddLink, was invisible to Corpus() even though
+// trace.SpanConfig.Links() is part of the same Start-option surface
+// Attributes() is. This is the falsifier for that gap.
+func TestProvider_StartCapturesLinkOption(t *testing.T) {
+	t.Parallel()
+
+	p := tracetest.NewProvider()
+	tracer := p.Tracer("test-tracer")
+	_, span := tracer.Start(context.Background(), "span-with-start-link",
+		trace.WithLinks(trace.Link{Attributes: []attribute.KeyValue{attribute.String("link.attr.key", "start-link-value-SENTINEL")}}))
+	span.End()
+
+	corpus := string(p.Corpus())
+	if !strings.Contains(corpus, "start-link-value-SENTINEL") {
+		t.Error("Corpus() does not contain a link supplied via trace.WithLinks at Start -- tracer.Start must capture cfg.Links(), not only cfg.Attributes() (Corpus()'s own doc comment claims every settable field is captured)")
+	}
+}
+
+// spanStartContentBearingOptions enumerates trace.SpanConfig's own
+// exported accessor methods -- the Start-option surface tracer.Start
+// reads via trace.NewSpanStartConfig(opts...) -- and marks which carry
+// caller-supplied content a leak could travel through. This is AD-4's
+// same discipline (spanContentBearingMethods, above) applied to the
+// Start-option surface: a version bump that adds a SpanConfig accessor
+// forces a reviewer to revisit this table via the count pin below,
+// rather than silently escaping the corpus walk.
+var spanStartContentBearingOptions = map[string]bool{
+	"Attributes": true,  // attribute key/value pairs supplied at Start
+	"Links":      true,  // link attributes supplied at Start
+	"Timestamp":  false, // a time value, not caller content
+	"StackTrace": false, // a bool flag, not caller content
+	"NewRoot":    false, // a bool flag, not caller content
+	"SpanKind":   false, // an enum value, not caller-suppliable string content
+}
+
+// TestSpanConfig_AccessorCountMatchesAPISurface is spanStartContentBearingOptions'
+// own AD-4-style pin: trace.SpanConfig's exported accessor count must
+// equal the table's own entry count, so a version bump that adds an
+// accessor fails this test loudly instead of silently leaving the new
+// accessor unreviewed.
+func TestSpanConfig_AccessorCountMatchesAPISurface(t *testing.T) {
+	t.Parallel()
+
+	got := reflect.TypeOf((*trace.SpanConfig)(nil)).NumMethod()
+	if got != len(spanStartContentBearingOptions) {
+		t.Fatalf("trace.SpanConfig has %d exported accessor(s), but spanStartContentBearingOptions enumerates %d — update the table", got, len(spanStartContentBearingOptions))
+	}
+}
+
+// TestCorpus_CapturedStartOptionsMatchesConfigSurface covers the
+// Start-option half of S-AOB-034: driving one span through every
+// content-bearing SpanConfig accessor at Start time (not via a later
+// Span method call) proves Corpus() captures all of them — the same
+// non-vacuity discipline TestCorpus_CapturedFieldCountMatchesAPISurface
+// already applies to Span's own methods, extended so the Start-option
+// surface is inside the proof rather than outside it (Judgment Day
+// remediation).
+func TestCorpus_CapturedStartOptionsMatchesConfigSurface(t *testing.T) {
+	t.Parallel()
+
+	wantContentBearing := 0
+	for _, carries := range spanStartContentBearingOptions {
+		if carries {
+			wantContentBearing++
+		}
+	}
+
+	p := tracetest.NewProvider()
+	sentinels := map[string]string{
+		"Attributes": "CFC-STARTATTRIBUTES-SENTINEL",
+		"Links":      "CFC-STARTLINKS-SENTINEL",
+	}
+	_, span := p.Tracer("t").Start(context.Background(), "span-with-start-options",
+		trace.WithAttributes(attribute.String("k", sentinels["Attributes"])),
+		trace.WithLinks(trace.Link{Attributes: []attribute.KeyValue{attribute.String("k", sentinels["Links"])}}))
+	span.End()
+
+	corpus := string(p.Corpus())
+	captured := 0
+	for option, sentinel := range sentinels {
+		if strings.Contains(corpus, sentinel) {
+			captured++
+		} else {
+			t.Errorf("Corpus() does not contain the Start-option %s sentinel %q", option, sentinel)
+		}
+	}
+	if captured != wantContentBearing {
+		t.Errorf("Corpus() captured %d of the %d content-bearing Start options, want all %d", captured, wantContentBearing, wantContentBearing)
+	}
+}
+
 // TestSpanInterface_MethodCounts is AD-4's pin: a version bump that adds a
 // method to trace.Span, trace.Tracer or trace.TracerProvider must fail this
 // test loudly rather than silently no-oping through the embedded noop

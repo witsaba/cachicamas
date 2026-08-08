@@ -858,16 +858,25 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 				// itself is canceled.
 				if failure := midStreamFailureFrom(ctx.Err(), outputPreceded); failure != nil {
 					outcome.failure = failure
+					// Judgment Day fix (pre-existing, predates AI-37 --
+					// confirmed unchanged against origin/main): both sends
+					// below must go through stamper.Stamp before hitting
+					// the carrier, exactly like every sibling terminal
+					// send in this file, so a terminal event that follows
+					// earlier stamped events never carries sequence 0
+					// (R-AEE-007/R-AEE-008).
 					if end, err := ai.NewTextBlockEnd(textBlockIndex); blockOpen && err == nil {
+						endStamped := stamper.Stamp(end)
 						select {
-						case out <- end:
+						case out <- endStamped:
 							outcome.eventCount++
 						case <-time.After(emitFailureSendBound):
 						}
 					}
 					if errEv, err := ai.ErrorEvent(failure); err == nil {
+						errStamped := stamper.Stamp(errEv)
 						select {
-						case out <- errEv:
+						case out <- errStamped:
 							outcome.eventCount++
 						case <-time.After(emitFailureSendBound):
 						}

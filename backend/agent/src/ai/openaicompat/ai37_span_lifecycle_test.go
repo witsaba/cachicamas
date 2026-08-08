@@ -399,9 +399,15 @@ func TestAI37_SpanLifecycle(t *testing.T) {
 	t.Run("pre_handover_cancelled_in_loop", func(t *testing.T) {
 		t.Parallel()
 		provider := tracetest.NewProvider()
-		var hits int
+		// Judgment Day remediation: this row previously kept an
+		// unsynchronized `var hits int` incremented inside the handler
+		// (potentially served across retry attempts by different
+		// goroutines) and never read anywhere -- both racy under -race
+		// and dead. Deleted rather than made atomic: this row's own
+		// sibling in ai37_noop_equivalence_test.go's no-tracer table
+		// never carried a counter for the identical fixture shape, and
+		// nothing in this row's assertions needs a request count.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			hits++
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, `{"error":{"type":"scripted_failure"}}`)
 		}))
@@ -447,4 +453,47 @@ func TestAI37_SpanLifecycle(t *testing.T) {
 		}
 		ai37AssertOneSpanEndedOnce(t, provider)
 	})
+}
+
+// TestAI37_TerminalEvents_AlwaysStamped is a Judgment Day remediation for
+// a defect this milestone did not introduce but did carry forward
+// unchanged (confirmed against origin/main): the mid-stream
+// ctx-cancellation exit's own TextBlockEnd/ErrorEvent recovery sends the
+// raw ai.Event value out <- end / out <- errEv directly onto the
+// carrier, bypassing stamper.Stamp -- so a terminal event that follows
+// earlier stamped events (sequence 1..n) itself carries sequence 0,
+// breaking R-AEE-007/R-AEE-008's contiguous per-stream sequence. Every
+// sibling terminal-send path in this file stamps first (the events
+// loop's own recovery; emitFailure, whose own comment says the sequence
+// assignment "is not bypassed, ever (R-AEE-008)"). This reproduces the
+// same mid-stream-cancellation shape the "mid_stream_ctx_cancellation"
+// row above drives, and additionally asserts every drained event's
+// Sequence() is contiguous from 1.
+func TestAI37_TerminalEvents_AlwaysStamped(t *testing.T) {
+	t.Parallel()
+
+	provider := tracetest.NewProvider()
+	server, release := ai37SlowSSEServer(t, "data: {\"id\":\"c\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n")
+	_ = release
+	c := ai37MustClient(t, server.URL, provider)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := c.Stream(ctx, ai37ValidRequest(t))
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want nil", err)
+	}
+
+	first := <-ch // the one event the slow server delivers before blocking
+	cancel()
+	rest := ai37DrainAll(t, ch)
+
+	events := append([]ai.Event{first}, rest...)
+	if len(events) < 2 {
+		t.Fatalf("drained %d event(s), want at least 2 (the pre-cancellation event plus a terminal error) -- the sequence check below needs a stamped predecessor to compare against", len(events))
+	}
+	for i, ev := range events {
+		want := ai.Sequence(i + 1)
+		if ev.Sequence() != want {
+			t.Errorf("event %d (kind %v) has Sequence() = %d, want %d -- every send on this carrier MUST go through the per-stream Stamper (R-AEE-007/R-AEE-008)", i, ev.Kind(), ev.Sequence(), want)
+		}
+	}
 }

@@ -1,9 +1,12 @@
 // AI-37 (WU-9, no-op equivalence) — R-AOB-009 (S-AOB-036…039), NFR-AOB-001.
 // With no tracer provider injected, behavior is byte-identical to a traced
 // run, nothing panics, and no adapter-side nil check on a tracing value
-// exists anywhere in Layer 1 — the structural claim that distinguishes
+// exists anywhere in this package — the structural claim that distinguishes
 // "the API's no-op default suffices" (doc 0002:2234) from "every call site
-// was guarded".
+// was guarded". (Judgment Day remediation: this file's own claim was
+// previously "anywhere in Layer 1", wider than what the scan below proves;
+// narrowed to match trace.go's own package-level doc comment, which makes
+// the identical claim at package scope.)
 package openaicompat_test
 
 import (
@@ -330,13 +333,43 @@ func itoaAI37(n int) string {
 	return string(buf[i:])
 }
 
-// TestAI37_NoopEquivalence_NoNilCheckOnTracingValues covers S-AOB-038: the
-// shipped client.go, stream.go and trace.go carry no nil check guarding a
+// ai37IsPackageSourceFile reports whether name is a non-test Go source
+// file this scan admits: a ".go" file that is not a "_test.go" file.
+// This is the same file-selection rule
+// ambient_authority_test.go's own isAdapterSourceFile establishes,
+// restated here because that helper lives in package openaicompat
+// (internal test) and this file is package openaicompat_test
+// (external) — the two packages share no unexported symbols.
+func ai37IsPackageSourceFile(name string) bool {
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+}
+
+// TestAI37_NoopEquivalence_NoNilCheckOnTracingValues covers S-AOB-038: no
+// non-test source file in this package carries a nil check guarding a
 // span or a tracer value.
+//
+// Judgment Day remediation: the pre-remediation scan named exactly three
+// files (client.go, stream.go, trace.go) — narrower than both this
+// package's own trace.go doc comment ("no adapter-side nil check on a
+// tracing value exists anywhere in this package") and this file's own
+// header comment (previously "anywhere in Layer 1", now narrowed to
+// match). Every non-test source file in the package directory is
+// scanned now, not a hardcoded list, so a file this milestone's authors
+// did not anticipate is covered without a guard update.
 func TestAI37_NoopEquivalence_NoNilCheckOnTracingValues(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"client.go", "stream.go", "trace.go"} {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("os.ReadDir(\".\") error = %v, want nil", err)
+	}
+	scanned := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !ai37IsPackageSourceFile(name) {
+			continue
+		}
+		scanned++
 		raw, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("os.ReadFile(%q) error = %v, want nil", name, err)
@@ -345,6 +378,17 @@ func TestAI37_NoopEquivalence_NoNilCheckOnTracingValues(t *testing.T) {
 		for _, h := range hits {
 			t.Errorf("nil check on a tracing value: %s (R-AOB-009/S-AOB-038 forbids this)", h)
 		}
+	}
+	// Non-vacuity floor for the WIDENING itself (distinct from
+	// scanTracingNilChecks's own falsifiability, already proven by
+	// TestAI37_NoopEquivalence_NilCheckScan_DetectsStagedMutation below):
+	// this package carries over twenty non-test .go files today,
+	// comfortably above this conservative floor, so a directory-listing
+	// regression that silently narrowed the scan back down would trip
+	// this assertion rather than pass unnoticed.
+	const wantMinScannedFiles = 10
+	if scanned < wantMinScannedFiles {
+		t.Fatalf("scanned %d non-test source file(s), want at least %d — the package-wide claim would be vacuous if the directory listing came back empty or over-filtered", scanned, wantMinScannedFiles)
 	}
 }
 

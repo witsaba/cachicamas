@@ -186,6 +186,14 @@ func (t *tracer) Start(ctx context.Context, spanName string, opts ...trace.SpanS
 		name:     spanName,
 		kind:     cfg.SpanKind(),
 		attrs:    slices.Clone(cfg.Attributes()),
+		// Judgment Day remediation: cfg.Links() is captured alongside
+		// cfg.Attributes() so a link supplied via trace.WithLinks at
+		// Start is inside Corpus()'s walk, not only a link attached
+		// later via Span.AddLink — Corpus()'s own doc comment claims
+		// "every field the tracing API allows a caller to set on any
+		// span", and this was the one Start-option field that claim
+		// did not yet hold for.
+		links: slices.Clone(cfg.Links()),
 	}
 	t.provider.record(span)
 	return trace.ContextWithSpan(ctx, span), span
