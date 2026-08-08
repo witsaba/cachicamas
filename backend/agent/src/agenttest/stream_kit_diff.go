@@ -91,7 +91,12 @@ const summaryRuneCap = 32
 var summaryTable = map[ai.EventKind]func(ai.Event) string{
 	ai.EventKindResponseStart: func(ev ai.Event) string {
 		p, _ := ev.ResponseStart()
-		return fmt.Sprintf("responsestart(id=%q model=%q)", p.ResponseID(), p.ServedModel())
+		// AI-36 (WU-4, S-STK-049): id/model are caller/provider-supplied
+		// strings with no length bound of their own — TestRequireSameEvents_BoundHoldsForEveryEventKind
+		// proved an over-bound value here rendered whole (%q) before this
+		// fix. boundedFragment is now applied to both, matching every
+		// other free-form field in this table.
+		return fmt.Sprintf("responsestart(id=%s model=%s)", boundedFragment(p.ResponseID()), boundedFragment(p.ServedModel()))
 	},
 	ai.EventKindCompletion: func(ev ai.Event) string {
 		p, _ := ev.Completion()
@@ -127,7 +132,10 @@ var summaryTable = map[ai.EventKind]func(ai.Event) string{
 	},
 	ai.EventKindToolCallStart: func(ev ai.Event) string {
 		p, _ := ev.ToolCallStart()
-		return fmt.Sprintf("tool_call_start(block=%d id=%q name=%q)", p.BlockIndex(), p.ID(), p.Name())
+		// AI-36 (WU-4, S-STK-049): id/name are caller/provider-supplied
+		// strings with no length bound of their own — same fix and same
+		// proof as EventKindResponseStart above.
+		return fmt.Sprintf("tool_call_start(block=%d id=%s name=%s)", p.BlockIndex(), boundedFragment(p.ID()), boundedFragment(p.Name()))
 	},
 	ai.EventKindToolCallDelta: func(ev ai.Event) string {
 		p, _ := ev.ToolCallDelta()
