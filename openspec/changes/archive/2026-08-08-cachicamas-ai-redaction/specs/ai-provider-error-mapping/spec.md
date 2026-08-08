@@ -1,8 +1,10 @@
 # Delta for `ai-provider-error-mapping` — LANDED (trigger fired empirically)
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 (doc 0002:2163–2170) · **Node**: AI-36.1 item 2 · **Wave 5 — Harden**
-> **Status**: **LANDED DELTA.** Amends [`openspec/specs/ai-provider-error-mapping/spec.md`](../../../../specs/ai-provider-error-mapping/spec.md). The trigger below fired empirically during `sdd-apply` (WU-2, task 2.3/2.4a) — see the resolution note immediately below.
+> **Status**: **LANDED DELTA.** Amends [`openspec/specs/ai-provider-error-mapping/spec.md`](../../../../../specs/ai-provider-error-mapping/spec.md). The trigger below fired empirically during `sdd-apply` (WU-2, task 2.3/2.4a) — see the resolution note immediately below.
 > **Sources**: [proposal.md](../../proposal.md) § 4 D-4 · [explore.md](../../explore.md) § 1, § 4
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close as **binding, not contingent**. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. The canonical spec additionally records item 4's named residual and two informational limitations of the removal step found during review.
 
 ---
 

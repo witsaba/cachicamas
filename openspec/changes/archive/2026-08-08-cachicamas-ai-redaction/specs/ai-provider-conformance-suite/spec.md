@@ -1,9 +1,11 @@
 # Delta for `ai-provider-conformance-suite` — AI-36.1 sentinel sweep
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 (doc 0002:2150–2184) · **Node**: AI-36.1 · **Wave 5 — Harden**
-> **Status**: **delta** — amends [`openspec/specs/ai-provider-conformance-suite/spec.md`](../../../../specs/ai-provider-conformance-suite/spec.md): one `ADDED` requirement appended after `R-CNF-019`
+> **Status**: **delta** — amends [`openspec/specs/ai-provider-conformance-suite/spec.md`](../../../../../specs/ai-provider-conformance-suite/spec.md): one `ADDED` requirement appended after `R-CNF-019`
 > **Format**: RFC 2119 + Given/When/Then, matching the canonical spec's `R-CNF-*` / `S-CNF-*` grammar
 > **Sources**: [proposal.md](../../proposal.md) § 4 D-2/D-4, § 8 · [explore.md](../../explore.md) § 4, § 5
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. This file is the historical delta; the canonical home of `R-CNF-027` is the live spec linked above.
 
 ---
 

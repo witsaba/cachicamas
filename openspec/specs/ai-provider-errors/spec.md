@@ -150,6 +150,8 @@ The rendered string of a failure MUST be built **only** from the category's own 
 
 > **Carried forward.** `R-AIP-009`'s guarantee covers `%v`, `%s` and `%+v`, which were reproduced clean. `*Failure` is the only Wave 2 payload without a `GoString()`, so `%#v` falls back to reflection and reproduces two provider-supplied fields — the sanitized, bounded `rawLabel` and `requestID`. The wrapped cause's text does **not** leak (it renders as a pointer address), so `R-AIP-009`'s literal claim holds; but the inconsistency with the wave's own four-verb rendering convention is real. Recorded as `W2` in the Wave 2 verify report and owned by Wave 3. The fix is one `GoString()` method plus one four-verb canary test.
 
+> **Discharged, then scoped — read this entry as closed.** `W2` was **discharged 2026-08-07 (AI-41)** by `cachicamas-ai-wave2-carryovers`, which landed `R-AIP-016`: redaction became a property of the payload rather than of the caller's formatting verb, total across all four verbs. AI-41's own close then recorded that the new guarantee is **scoped** to the payload as callers receive it, and assigned the residual to AI-36. That residual is **discharged 2026-08-08 (AI-36)** by `cachicamas-ai-redaction`, which landed `R-AIP-017`: the scope is stated on the record, the copied value form's actual rendering is recorded rather than assumed, and the shape that escapes the scope is proven unreachable through the module's published surface. Both entries above are historical; neither is an open item.
+
 ---
 
 ## AI-19.4 — Partial-output discriminator
@@ -247,6 +249,32 @@ This requirement adds no accessor and no second failure type; it constrains rend
 
 - **S-AIP-056** — Given a failure payload wrapping a cause that carries a planted sentinel string standing in for raw provider text, when the payload is formatted with each of the plain, string, extended and Go-syntax verbs, then the planted sentinel appears in **none** of the four outputs, and no other fragment of the wrapped cause appears in the Go-syntax output.
 - **S-AIP-057** — Given that same failure payload, when its Go-syntax rendering is compared byte-for-byte with its redacted textual rendering, then the two are identical; and given an **absent** failure payload, when it is formatted under each of those same four verbs, then each yields the contract's defined absent-failure rendering and none panics (`NFR-AIP-B`, `S-AIP-052`).
+
+### R-AIP-017 (added 2026-08-08) — The failure payload's redaction scope is stated, and the shape that escapes it is unreachable
+
+> **Added 2026-08-08 (AI-36)** by [`cachicamas-ai-redaction`](../../changes/archive/2026-08-08-cachicamas-ai-redaction/) (AI-36 — Enforce secret redaction, Wave 5 — Harden), **discharging the follow-up AI-41 recorded against itself at its own close**. `R-AIP-016` made redaction total over the **verb** surface for the payload as callers receive it. AI-41's close recorded, explicitly and in writing, that the guarantee is **scoped**: a copied value form of the payload is neither an error value nor a Go-syntax renderer, so a verbose rendering of it walks its internal state by reflection, wrapped cause included.
+>
+> The discharge chosen is **not** to widen the guarantee by adding a value-shaped rendering. That rendering would also enter the pointer form's rendering set and would re-open `NFR-AIP-B`'s landed total nil-safety, to cover a shape no constructor produces. This requirement instead states the scope, proves the leaking shape unreachable, and guards that proof. `R-AIP-016` and `NFR-AIP-B` are **not** modified; `R-AIP-001` … `R-AIP-016` and `NFR-AIP-A` … `NFR-AIP-E` all stand unchanged.
+
+The redaction `R-AIP-016` guarantees MUST be stated as scoped, and the shape outside that scope MUST be provably unreachable through the module's published surface. Specifically:
+
+1. The guarantee is scoped to the payload **as callers receive it**. A copied value form of the payload is outside that scope and MUST NOT be reachable through any published surface of the module.
+2. No published function, method or field of the module MAY return or store the failure payload by value. A guard MUST fail if that ever stops being true, naming the offending shape.
+3. The **actual** rendering of the copied value form MUST be recorded rather than assumed, and MUST be recorded using a **value-shaped** wrapped cause. A recording that uses a pointer-shaped cause does not satisfy this item, because such a cause discloses only a machine address at nesting depth and therefore proves nothing either way.
+4. The recording MUST ship a positive control establishing that the placement used can bite.
+5. The scope MUST be stated in prose carried alongside the payload itself, so a later reader learns the boundary from the payload rather than from this spec.
+6. No rendering behavior MAY be added to the payload's published set. `R-AIP-016` and `NFR-AIP-B` MUST remain satisfied unchanged.
+
+#### Scenarios
+
+- **S-AIP-058** — Given a copied value form of the failure payload whose wrapped cause is **value-shaped** and carries a planted canary, when it is rendered under the extended and Go-syntax verbs, then the resulting renderings are recorded and compared against the payload's redacted textual rendering, so any disclosure of the canary is visible on the record rather than assumed absent.
+- **S-AIP-059** — Given that same construction with a **pointer-shaped** wrapped cause instead, when it is rendered under the same verbs, then the canary does not surface — establishing that the pointer-shaped placement is vacuous and that `S-AIP-058`'s value-shaped placement is the one that can bite.
+- **S-AIP-060** — Given the shipped module, when every published function, method and field is examined, then none returns or stores the failure payload by value; and given a published shape deliberately introduced that does, when the guard runs, then it fails and names that shape.
+- **S-AIP-061** — Given this change applied, when the payload's published rendering set is compared with the set `R-AIP-016` landed, then the two are identical; and when an absent payload is rendered under the plain, string, extended and Go-syntax verbs, then each yields the contract's defined absent-payload rendering and none panics (`NFR-AIP-B`, `S-AIP-052`, `S-AIP-057`).
+
+> **Item 3's required recording, made at AI-36's close (2026-08-08).** The copied value form **does** disclose the canary under both the extended and the Go-syntax verbs when the wrapped cause is value-shaped. That is the real, known, accepted leak this requirement scopes around rather than denies — it is recorded, not assumed absent. `S-AIP-059`'s pointer-shaped contrast is what proves the recording non-vacuous: under the identical construction with a pointer-shaped cause the canary does **not** surface, so a proof built on that placement would have gone green for the wrong reason. Item 2's structural guard was likewise proven by deliberate violation, and the shipped tree carries no offending shape. The residual is therefore bounded exactly as item 1 states: the disclosing shape exists only if a consumer copies a payload it can only obtain by reference, and no published surface hands one over by value.
+>
+> **Recorded limitation of item 2's guard (informational, for AI-37).** The guard covers exported function and method signatures and exported struct fields. It does **not** cover composite shapes or package-level variable shapes that could carry the payload by value. Both are absent from the shipped tree today; neither is asserted against by a control. This is recorded as a known coverage boundary, not as an open defect.
 
 ---
 

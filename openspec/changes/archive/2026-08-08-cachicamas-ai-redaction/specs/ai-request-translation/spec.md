@@ -1,9 +1,11 @@
 # Delta for `ai-request-translation` — AI-36.3.2 widened credential scan
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 (doc 0002:2179–2184) · **Node**: AI-36.3 item 2 · **Wave 5 — Harden**
-> **Status**: **delta** — amends [`openspec/specs/ai-request-translation/spec.md`](../../../../specs/ai-request-translation/spec.md): one `ADDED` requirement appended after `R-ART-021`, amending `R-ART-004` **append-only**
+> **Status**: **delta** — amends [`openspec/specs/ai-request-translation/spec.md`](../../../../../specs/ai-request-translation/spec.md): one `ADDED` requirement appended after `R-ART-021`, amending `R-ART-004` **append-only**
 > **Format**: RFC 2119 + Given/When/Then, matching the canonical spec's `R-ART-*` / `S-ART-*` grammar
 > **Sources**: [proposal.md](../../proposal.md) § 4 D-3 · [explore.md](../../explore.md) § 5
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. `R-ART-004` was confirmed **not edited** in the canonical spec — its text and `S-ART-013` … `S-ART-017` stand verbatim, and all five were re-run green under the widened rule.
 
 ---
 

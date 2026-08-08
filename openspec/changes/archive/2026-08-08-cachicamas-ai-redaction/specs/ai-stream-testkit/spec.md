@@ -1,9 +1,11 @@
 # Delta for `ai-stream-testkit` — AI-36.3.1 failure-output hygiene
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 (doc 0002:2179–2184) · **Node**: AI-36.3 item 1 · **Wave 5 — Harden**
-> **Status**: **delta** — amends [`openspec/specs/ai-stream-testkit/spec.md`](../../../../specs/ai-stream-testkit/spec.md): one `ADDED` requirement appended after `R-STK-013`
+> **Status**: **delta** — amends [`openspec/specs/ai-stream-testkit/spec.md`](../../../../../specs/ai-stream-testkit/spec.md): one `ADDED` requirement appended after `R-STK-013`
 > **Format**: RFC 2119 + Given/When/Then, matching the canonical spec's `R-STK-*` / `S-STK-*` grammar
 > **Sources**: [proposal.md](../../proposal.md) § 2 WU-4, § 5 · [explore.md](../../explore.md) § 4
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. Item 2 was **not** already satisfied: the per-kind sweep found two registered kinds rendering identity fields unbounded, and the canonical spec records that outcome beneath `S-STK-049`.
 
 ---
 

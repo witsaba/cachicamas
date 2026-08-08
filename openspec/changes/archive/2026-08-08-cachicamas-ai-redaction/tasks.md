@@ -2,6 +2,8 @@
 
 > Design: Engram `sdd/cachicamas-ai-redaction/design` (id 2684) · Spec: Engram `sdd/cachicamas-ai-redaction/spec` (id 2682) · Strict TDD active. All paths under `backend/agent/src/`.
 
+> **Archive-time annotation (2026-08-08, `sdd-archive`).** All 43 tasks were already `[x]` when this file was archived; no checkbox was reconciled by the archive phase. Two counts in this file were true when written and are superseded at close: the binding scenario total is **23**, not 21, because the contingent `S-AEM-071`/`S-AEM-072` pair landed (task 2.4a fired); and work continued past task 7.6 in three later commits (`9e2c149d`, `dfcc1663`, `8e7caa31`) covering verify's W-1/W-2 and two Judgment Day rounds, which this file predates. Body preserved as authored.
+
 ## Verification note (discrepancy recorded, not silently fixed)
 
 The spec index and the launch brief both state "22 binding scenarios." Direct enumeration of the five binding scenario ranges (`S-CNF-077…081`=5, `S-APC-077…080`=4, `S-ART-090…094`=5, `S-STK-047…049`=3, `S-AIP-058…061`=4) sums to **21**, not 22. The traceability table below covers all 21 actual scenario IDs; the "22" total in upstream artifacts is a one-off arithmetic error, carried here as a flagged discrepancy rather than silently corrected in those artifacts.

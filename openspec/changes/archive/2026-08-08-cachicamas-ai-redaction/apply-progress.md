@@ -3,6 +3,14 @@
 > Worktree: `cachicamas-worktrees/ai-36-redaction`. Branch `feat/ai-36-redaction` on `origin/main@1103769`.
 > Strict TDD. Single PR, `size:exception` pre-granted, budget 1600 — **SEE THE SIZE RISK SECTION BELOW: this exceeded the ~1900 stop-and-report threshold.**
 
+> **Archive-time annotation (2026-08-08, `sdd-archive`) — this file is an INTERMEDIATE SNAPSHOT, written at HEAD `8e7fdc97`.** Three of its statements were true when written and are superseded at close:
+>
+> 1. **The `status: partial` handback is RESOLVED.** The size overrun described below was accepted: the maintainer had granted `size:exception` for this milestone up front and authorized automatic raising. It is recorded at close as an accepted, non-blocking deviation, not an open decision.
+> 2. **The commit list below is incomplete.** Four further commits landed after this snapshot: `8e7fdc97` (this file), `9e2c149d` (falsifiable header/unwrap guards, closing verify's W-1 and W-2), `dfcc1663` (Judgment Day round 1), `8e7caa31` (Judgment Day round 2 — final HEAD). Ten commits total.
+> 3. **The final aggregate diff is larger than the figure below** — **36 files, +4997/−130** against `origin/main`, because of the two review rounds and the archive artifacts. The 2045-line code figure below describes this snapshot only.
+>
+> Body preserved as authored. See `archive-report.md` for the state at close.
+
 ## Status: 43/43 tasks complete, all four verification gates green, but the size budget was exceeded past the stop-and-report line. See "Size / budget outcome" for the decision this hands back.
 
 ---

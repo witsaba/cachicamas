@@ -4,6 +4,8 @@
 > **Delivery**: single PR with maintainer-accepted `size:exception`, budget raised to **1600 changed lines**. The proposal's two-PR chain recommendation is **overruled by the maintainer** and is not planned.
 > **Strict TDD**: active. **Dependencies**: none added — `go.mod`/`go.sum` stay byte-identical.
 
+> **Archive-time annotation (2026-08-08, `sdd-archive`).** The contingent row below **resolved to LANDED**: D-4's hostile-server case fired the credential branch, so `R-AEM-019` is binding, not conditional. The final closed totals are therefore **6 binding requirements / 23 binding scenarios**, not the 5/21 stated below. The body of this file is preserved as authored at spec time; only this annotation is added. See `archive-report.md` § "Specification Amendment Summary".
+
 This file is an index. The binding delta specs are the per-capability files under `specs/`, per this repo's OpenSpec layout (`openspec/AGENTS.md` § "SDD artifact layout").
 
 ## Deltas
@@ -39,6 +41,8 @@ Every prefix was re-grepped at spec time across the **whole** `openspec/` tree, 
 | `S-AEM` | 070 | 070 | 071+ | contingent |
 
 > **Standing hazard for later milestones.** The canonical `ai-provider-conformance-suite` spec has never absorbed `R-CNF-020` … `R-CNF-026`, yet other canonical specs already cite `R-CNF-023` and `R-CNF-024` as binding dependencies. Any future author grepping only `openspec/specs/` will re-derive the same wrong maximum. This is a promotion gap in the archive step, not in this change; it is recorded here rather than fixed here.
+
+> **Archive-time confirmation (2026-08-08).** The hazard above was re-verified at close and **remains open by design**. `sdd-archive` promoted `R-CNF-027` and deliberately did **not** renumber or backfill `R-CNF-020` … `R-CNF-026`. An identifier note explaining the gap was added to the canonical conformance spec so a future author reads it in place; closing the gap remains a separate, recorded repository defect.
 
 ## Cross-cutting disciplines these deltas encode
 

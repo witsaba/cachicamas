@@ -432,3 +432,25 @@ exhaustively at verify time, but unprotected against regression), W-2 (a dead
 unwrap-chain guard), and W-3 (the D-4 prompt-body residual, properly recorded in the
 binding spec but a narrowing of the charter's Goal prose that warrants explicit
 maintainer acknowledgement before archive).
+
+---
+
+## Archive-time annotation (2026-08-08, `sdd-archive`) — appended, nothing above modified
+
+This report is an **intermediate snapshot** taken at HEAD `8e7fdc97`. Its verdict
+(PASS WITH WARNINGS, 0 CRITICAL, 6/6 requirements, 23/23 scenarios) stands and is the
+verdict of record. Three of its claims are superseded by work that landed afterwards:
+
+| Snapshot claim | State at close (final HEAD `8e7caa31`) |
+|---|---|
+| **W-1 — S-APC-080's tautological header guard** | **RESOLVED** in commit `9e2c149d`, which replaced the literal-restating sub-test with a falsifiable structural guard, exactly as W-1's own recommended fix and SUGGESTION S-3 proposed. Not outstanding. |
+| **W-2 — dead unwrap-chain guard** | **RESOLVED** in the same commit `9e2c149d`. Not outstanding. |
+| **W-3 — the prompt-body residual narrows the charter's Goal** | **STILL OPEN — this is the one warning that survives to close.** It is recorded as an accepted, maintainer-visible residual awaiting explicit sign-off, exactly as this report recommends. It is spec-anticipated (`S-CNF-081` item 2, `R-AEM-019` items 2 and 4, `S-AEM-072`) and the *credential's* absence is proven, not assumed. |
+| **Test count 2462 PASS / 13 SKIP** | Superseded: **2472 PASS / 13 SKIP / 0 FAIL** at final HEAD, re-run independently by the orchestrator. The delta is the tests added by the three later commits. |
+| **Size: 2045 changed lines** | Superseded: aggregate diff at close is **36 files, +4997/−130** against `origin/main`, driven by two Judgment Day review rounds and the archive artifacts. `size:exception` was granted up front; not a verification finding either way. |
+
+**Work that landed after this snapshot**, none of which reopened a CRITICAL: `9e2c149d`
+(falsifiable header/unwrap guards — closes W-1 and W-2), `dfcc1663` (Judgment Day round 1
+corrections), `8e7caa31` (Judgment Day round 2 corrections, final HEAD). Judgment Day
+reached terminal state **APPROVED** with no SEVERE from either judge in round 2. Full
+detail in `archive-report.md`.

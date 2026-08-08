@@ -1,9 +1,11 @@
 # Delta for `ai-provider-errors` — AI-36 discharges the AI-41-inherited follow-up
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 · **Inherited from**: AI-41 close, doc 0002 line 22 · **Wave 5 — Harden**
-> **Status**: **delta** — amends [`openspec/specs/ai-provider-errors/spec.md`](../../../../specs/ai-provider-errors/spec.md): one `ADDED` requirement appended after `R-AIP-016`, before § "Non-functional requirements"
+> **Status**: **delta** — amends [`openspec/specs/ai-provider-errors/spec.md`](../../../../../specs/ai-provider-errors/spec.md): one `ADDED` requirement appended after `R-AIP-016`, before § "Non-functional requirements"
 > **Format**: RFC 2119 + Given/When/Then, matching the canonical spec's `R-AIP-*` / `S-AIP-*` grammar
 > **Sources**: [proposal.md](../../proposal.md) § 4 D-1 · [explore.md](../../explore.md) § 2
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. Item 3's required recording — **the copied value form does disclose the canary under a value-shaped cause, and does not under a pointer-shaped one** — is recorded in the canonical spec beneath `S-AIP-061`. The canonical spec's "Carried forward" `W2` entry was additionally amended append-only to read discharged (AI-41 for the verb surface, AI-36 for the scope residual).
 
 ---
 

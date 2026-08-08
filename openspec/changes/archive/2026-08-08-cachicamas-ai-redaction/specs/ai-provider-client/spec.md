@@ -1,9 +1,11 @@
 # Delta for `ai-provider-client` — AI-36.2 header and configuration redaction
 
 > **Change**: `cachicamas-ai-redaction` · **Milestone**: AI-36 (doc 0002:2172–2177) · **Node**: AI-36.2 · **Wave 5 — Harden**
-> **Status**: **delta** — amends [`openspec/specs/ai-provider-client/spec.md`](../../../../specs/ai-provider-client/spec.md): one `ADDED` requirement appended after `R-APC-014`
+> **Status**: **delta** — amends [`openspec/specs/ai-provider-client/spec.md`](../../../../../specs/ai-provider-client/spec.md): one `ADDED` requirement appended after `R-APC-014`
 > **Format**: RFC 2119 + Given/When/Then, matching the canonical spec's `R-APC-*` / `S-APC-*` grammar
 > **Sources**: [proposal.md](../../proposal.md) § 4 D-5/D-6 · [explore.md](../../explore.md) § 1, § 2, § 3
+
+> **Archive-time note (2026-08-08).** Promoted into the canonical spec at close. Relative links in this file were re-resolved from four levels to **five** to match the archived location; nothing else was changed. Item 2's required empirical outcome — **the behavior did not already hold; it was newly established** — is recorded in the canonical spec beneath `S-APC-078`.
 
 ---
 
