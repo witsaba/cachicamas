@@ -391,3 +391,56 @@ Re-run **after** this round's own commits landed, including this document's own 
 - Judge A's nil-check-scan SUGGESTION (above) — explicitly deferred, not fixed, per the review order for this final round.
 - `S-AOB-040`'s own `*(review)*` tag looks like a pre-existing round-1 mislabel (it is backed by a real, running, red→green-evidenced test, not a prose-only review obligation) — not one of this round's three assigned items, left untouched; `S-AOB-041` (this round's own sibling scenario) was deliberately written without that tag for the reason stated in item 2 above.
 - All residuals disclosed in the round-1 section above (`S-AOB-038`, and items W-1/W-2/W-4/W-5/S-1..S-5 from the original `sdd-verify` report) remain untouched — out of scope for this round, which was limited to the three items plus the one record-only SUGGESTION the orchestrator named.
+
+## Final documentation reconciliation (post `verify-report-final.md`, doc-only, 2026-08-08)
+
+Closes the completeness-gate FAIL recorded in `verify-report-final.md` (Engram obs #2744): 0 CRITICAL, 0 blockers, no code defect, but 8/80 scenarios PARTIAL and two shipped spec sentences false about the code. **Scope: spec/doc text only — zero `.go` files touched, verified by `git status`/`git diff` below.** This is documentation reconciliation, not a third Judgment Day round; both correction rounds above are unchanged and unreopened.
+
+### Amended scenarios (8) + 2 mislabels + 1 index recount
+
+| # | ID | File : line (pre-edit) | What changed |
+|---|---|---|---|
+| 1 | `S-AGM-020` | `specs/agent-module-scaffold/spec.md:57` | `go.work` version `1.26.3` → **`1.26.5`** (verified by direct read of the shipped `go.work:1`, and independently by `git diff origin/main...HEAD -- go.work` returning empty — the file is byte-unchanged by AI-37; the false sentence was a pre-existing drift restated verbatim by this milestone's `MODIFIED` block). Regrades PARTIAL → COMPLIANT; `R-AGM-003` complete. |
+| 2 | `S-AOB-038` | `specs/ai-observability-boundary/spec.md:194` | Narrowed "Layer 1 sources" to the guard's actual scan scope — the implementing package's own directory (`os.ReadDir(".")` in `ai37_noop_equivalence_test.go:362`, confirmed by direct read). The broader Layer-1-wide claim was independently re-verified true this round (zero hits for all four nil-check patterns across all non-test `.go` files under `src/ai/`, including `openrouter/wrapper.go`'s new `TracerProvider` field) but is not proven by this guard; recorded as a follow-up (see below), not performed — no Go guard was widened. Regrades PARTIAL → COMPLIANT; `R-AOB-009` complete. |
+| 3 | `S-AOB-040` mislabel | `specs/ai-observability-boundary/spec.md:142` | Removed the `*(review)*` tag. The scenario is backed by a real, running, red→green test (`TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode`); `(review)` means "no red phase" in this repo's own convention and under-claims the evidence. Disclosed by Judgment Day round 2 but left unfixed (out of that round's assigned scope). |
+| 4 | `S-APC-085` mislabel | `specs/ai-provider-client/spec.md:91` | Removed the `*(review)*` tag — **the second instance round 2 did not notice.** Backed by `TestNewProvider_InjectedTracerProviderRecordsTheSpan` (`openrouter/tracer_test.go:23`, PASS, independently re-read this round). Grepped `specs/**/spec.md` for every remaining `*(review)*` occurrence after both fixes: exactly one instance left, `S-AOB-024`, which is genuinely review-only (a prose/artefact check with no executable red phase) — no further mislabels exist. |
+| 5 | `S-AOB-003` | `specs/ai-observability-boundary/spec.md:55` | Narrowed to the declination rationale the guard's comment (`import_boundary_test.go:99-107`) currently states verbatim — that Layer 1 takes a tracer provider only by injection — instead of the closure/`auto/sdk` rationale the scenario previously claimed was recorded there. That second rationale is real and independently true but is not yet in the comment; recorded as a follow-up (see below). Regrades PARTIAL → COMPLIANT. |
+| 6 | `S-AOB-009` | `specs/ai-observability-boundary/spec.md:79` | Dropped the unassertable "recorded duration encloses every attempt" clause — `tracetest.Span` records no timestamps (confirmed: `tracetest.go`'s read surface is `Started()`/`Ended()`/`AssertAllEndedOnce()`/`Corpus()`, no time field). Replaced with the structurally-provable claim: the span starts immediately before the retry mechanism's first attempt in source (`stream.go:222` `startSpan(...)`, immediately before `stream.go:224` `retry.Loop(...)`, verified by direct read), so every attempt necessarily falls inside its lifetime. Regrades PARTIAL → COMPLIANT. |
+| 7 | `R-AOB-007` + `S-AOB-029` | `specs/ai-observability-boundary/spec.md:155`, `:162` | Narrowed "names the vector, the span and the attribute key" to "names the vector" in both the requirement clause and the scenario — the shipped failure message (`ai37_denylist_test.go:270`) names only the vector, because `sweep.Scan` returns no location and `Corpus()` is a flattened byte string with no positional metadata. Giving the scan a location-carrying result is recorded as a follow-up (see below). Regrades PARTIAL → COMPLIANT; `R-AOB-007` complete. |
+| 8 | `S-AOB-027` | `specs/ai-observability-boundary/spec.md:160` | Reframed: `attribute.Value` is a closed set of typed constructors (string/int/int64/float64/bool + slices) with no pointer-shaped variant, so the AI-41 "bare hex address" failure mode is excluded structurally — there is no live pointer-shaped field to plant a counter-example canary in. Recorded the accessor substitution explicitly: the API's `Value.Emit()` this rule was originally written against is deprecated at v1.44.0; the shipped code calls `Value.String()` (confirmed: zero `.Emit()` call sites, multiple `.String()` call sites in `trace.go`/`tracetest.go`; `tracetest.go`'s own doc comment already records this substitution). Mirrored into `design.md:89` and `design.md:207`, whose corpus-builder-walk description still cited the deprecated `Value.Emit()` (design docs are not promoted at archive but were left inconsistent with the shipped code otherwise). Regrades PARTIAL → COMPLIANT. |
+| 9 | `S-AOB-028` | `specs/ai-observability-boundary/spec.md:161` | Reframed "satisfied by construction": Layer 1's construction surface and its deny-by-default import guard together admit no configuration input, flag, build tag or environment-derived switch at all — the enumeration this scenario names is the empty set, so there is no content-capture opt-in for any test to exercise on or off. The property holds because the surface was never built, not because a built switch was driven both ways. Regrades PARTIAL → COMPLIANT. |
+| 10 | `S-APC-083` | `specs/ai-provider-client/spec.md:89` | Reframed "satisfied by construction": independently re-grepped `otel\.GetTracerProvider\|otel\.SetTracerProvider\|"go.opentelemetry.io/otel"` across `backend/agent/src/` — exactly one hit, `import_boundary_test.go:180`, a `require`-table literal, not a package import. `R-AOB-001`'s import boundary and `R-AGM-008`'s closure pin together entail no ambient registry exists to install a provider into, so this scenario's own Given clause cannot be constructed as a discriminating test; the property follows by entailment from those two already-proven guards. Regrades PARTIAL → COMPLIANT. |
+| 11 | Index recount | `spec.md:14,16,18`; `specs/ai-provider-client/spec.md:17` | Recounted directly from the three delta files (not carried forward from any prior count): 18 requirements (11 new [9 `R-AOB-*` + 2 `NFR-AOB-*`] + 2 added [`R-AGM-008`, `R-APC-016`] + 5 modified [`R-AGM-001`,`R-AGM-003`,`R-AGM-005`,`R-APC-001`,`R-APC-003`]); 80 scenarios (52 new [41 AOB + 6 AGM + 5 APC] + 28 restated [17 AGM + 11 APC]). Fixed the index's stale `S-AOB-001…039` → `…041`, `S-APC-081…084` → `…085`, the "14 requirements"/"49 new"/"29 restated" arithmetic → "18"/"52 new"/"28 restated", and the `ai-provider-client` delta's own Identity row, which omitted `S-APC-085` from its new-scenario range. |
+
+### Follow-ups recorded, not fixed (added to `specs/ai-observability-boundary/spec.md`'s "Out of scope" table)
+
+1. **`S-AOB-003`** — add the closure/`auto/sdk` declination reason to `import_boundary_test.go`'s own comment, alongside the injection reason already there. Owner: a later round that edits that Go test file (doc-only rounds cannot).
+2. **`S-AOB-038`** — widen the nil-check-absence guard's directory scan from the implementing package to all of Layer 1 (`src/ai/...`), so the automated guard proves what the scenario now only narrates as independently-verified-by-hand. Owner: a later round that edits `ai37_noop_equivalence_test.go`.
+3. **`S-AOB-029`/`R-AOB-007`** — give the denylist scan a location-carrying result (span + attribute key), not only a vector, so a leak's failure message can name all three. Owner: a later round that edits `ai37_denylist_test.go` and the shared sweep.
+
+None of the three follow-ups block any scenario's COMPLIANT grade after this round's narrowing — each narrowed scenario now states exactly what the shipped instrument proves.
+
+### Validator probe (dry run, no persistence)
+
+Built a scratch candidate (never written into the worktree) carrying the corrected counts and re-ran `gentle-ai sdd-verify-validate --input <scratch> --requirements 18 --scenarios 80`:
+
+```json
+{"valid": true, "verdict": "pass_with_warnings", "evidence_revision": "sha256:6658c86e38d94d78732c49ebedd1b75f70ed1db5232ddeebd3c9bf08ddb3fc7d"}
+```
+
+Confirms the envelope is admissible at 18/18 requirements and 80/80 scenarios — the same combination `verify-report-final.md` itself predicted would flip admission from `fail` to `pass_with_warnings`. The orchestrator, not this round, owns issuing that superseding report.
+
+### Gates re-run after all edits above (whole module, un-piped exit codes)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — exit 0, 9/9 packages `ok`, 0 `FAIL` lines, `test_output_hash` byte-identical to `verify-report-final.md`'s (`sha256:f310184620a5f75ba7df78d541d2f83424e6c7020a4b4421b01b9f6041b70b70`) |
+| Lint | `cd backend/agent && make lint` | **PASS** — exit 0, `0 issues.` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0, `build_output_hash` byte-identical to `verify-report-final.md`'s (`sha256:617ff8b581dc1493b2d85d998e6171f774f2328ec65dc7264829b71cc7238495`) |
+| Working tree (pre-commit) | `git status --porcelain` | 5 `M` (the 5 spec/design files edited), plus the orchestrator-owned untracked `verify-report-final.md`, left alone |
+
+The byte-identical test/build hashes are independent, direct confirmation that this round changed zero code behavior — expected, since zero `.go` files were touched, but confirmed rather than assumed per instruction.
+
+### Scope discipline
+
+`git diff --stat HEAD` (pre-commit, this round only) touched exactly 5 files, all `.md`: `spec.md`, `design.md`, `specs/agent-module-scaffold/spec.md`, `specs/ai-observability-boundary/spec.md`, `specs/ai-provider-client/spec.md` — 20 insertions(+), 17 deletions(-). No `.go` file appears in this round's diff.
