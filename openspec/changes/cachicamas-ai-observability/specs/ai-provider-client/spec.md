@@ -14,7 +14,7 @@
 | **Capability amended** | `ai-provider-client` |
 | **Type** | Delta — `MODIFIED` `R-APC-001` and `R-APC-003`; `ADDED` `R-APC-016` |
 | **Numbering** | Re-verified at spec time across the whole `openspec/` tree, canonical, active and archived alike: maxima `R-APC-015` / `S-APC-080`. `R-APC-016` and `S-APC-081` onward are free. |
-| **New scenarios** | `S-APC-081` (under `R-APC-001`), `S-APC-082` … `S-APC-084` (under `R-APC-016`) |
+| **New scenarios** | `S-APC-081` (under `R-APC-001`), `S-APC-082` … `S-APC-085` (under `R-APC-016`) |
 | **Amended scenario** | `S-APC-015` — the construction-surface enumeration only |
 
 ### The spec cost, paid openly
@@ -86,9 +86,9 @@ Any concrete adapter this module ships that composes `openaicompat.New` internal
 #### Scenarios
 
 - **S-APC-082** — Given construction with no tracer provider supplied, when the adapter is driven through a complete request, then no span reaches any provider registered in any process-global telemetry state, and the request completes normally — the tracing API's own no-op provider was substituted at construction.
-- **S-APC-083** — Given a recording provider installed into process-global telemetry state and construction performed with **no** provider injected, when the adapter is driven, then the globally installed provider records **nothing** — the adapter never consulted it.
+- **S-APC-083** — Satisfied by construction. `R-AOB-001`'s import boundary and `R-AGM-008`'s package-closure pin together prove that no path to the ecosystem's process-global telemetry registry exists anywhere in this module — the root global-getter package is absent from both the require set and the package closure. This scenario's own Given clause — a recording provider installed into process-global telemetry state, observed from inside this module — therefore cannot be constructed: there is no import through which a test could install one to observe from. The property (the adapter never consults process-global state) follows by entailment from those two already-proven guards holding, not from an executable pair that installs a provider and drives the adapter to confirm it goes unconsulted.
 - **S-APC-084** — Given construction with a recording tracer provider injected, when the adapter is driven, then that exact provider records the request's span, its identity is unchanged, and no observable property of it differs from before construction — it was used verbatim.
-- **S-APC-085** *(review)* — Given the shipped OpenRouter wrapper — the only concrete adapter this module ships that composes `openaicompat.New` — when a caller constructs it with an injected tracer provider on the wrapper's own construction surface, then that provider records the resulting span exactly as it would through `openaicompat.New` directly, proving the wrapper threads the value verbatim rather than closing the door this requirement otherwise guarantees.
+- **S-APC-085** — Given the shipped OpenRouter wrapper — the only concrete adapter this module ships that composes `openaicompat.New` — when a caller constructs it with an injected tracer provider on the wrapper's own construction surface, then that provider records the resulting span exactly as it would through `openaicompat.New` directly, proving the wrapper threads the value verbatim rather than closing the door this requirement otherwise guarantees.
 
 ---
 

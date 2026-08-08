@@ -86,7 +86,7 @@ type Span interface {
 
 `tracetest` contracts: `Span.IsRecording()` returns true until ended; `Span.TracerProvider()` returns the owning `*Provider` (never nil — a working provider, per `span.go:75-77`); `Tracer.Start` mirrors `noop.Tracer.Start`'s context wiring via `trace.ContextWithSpan`; `RecordError` renders `err.Error()` **at record time** into a recorded event (`span.go:47-51`: it records an exception *event* and does not change status — which is exactly why the corpus must walk events). `Provider` is mutex-guarded; `Started()`, `Ended()`, `AssertAllEndedOnce(tb)`, and `Corpus() []byte` are the read surface.
 
-**Corpus builder walk** (risk 7.6): for every started span — name; status code + description; every attribute key and `Value.Emit()` (`attribute@v1.44.0/value.go:368`); every event name, every event-attribute key and `Emit()`; every `RecordError` string; every `AddLink`'s link-attribute keys and `Emit()` values. **Never `%#v`, never `%v` over recorder structs** — the AI-41 lesson: a canary in a pointer-shaped field renders under `%#v` as a bare hex address and proves nothing (doc 0002:22).
+**Corpus builder walk** (risk 7.6): for every started span — name; status code + description; every attribute key and `Value.String()`; every event name, every event-attribute key and `String()`; every `RecordError` string; every `AddLink`'s link-attribute keys and `String()` values. **Never `%#v`, never `%v` over recorder structs** — the AI-41 lesson: a canary in a pointer-shaped field renders under `%#v` as a bare hex address and proves nothing (doc 0002:22). (Accessor substitution, recorded at apply time: `Value.Emit()` — this design's original citation, `attribute@v1.44.0/value.go:368` — is deprecated at v1.44.0; the shipped code calls `Value.String()` instead, the API's current accessor. Both render through the API's own accessor rather than a struct dump, so the substitution changes no property this design relies on.)
 
 ## Attribute construction table (twelve § D3 attributes, `docs/adr/0005-…:246-250`)
 
@@ -204,7 +204,7 @@ Code total ~1,660 (band 1,400–2,100 holds). `size:exception` pre-granted, auto
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | go.work version drift: `go get` lands something other than v1.44.0, or a later sibling bump moves the workspace | AD-1 pins `@v1.44.0` explicitly; AD-2's require-set pin reads `go.mod` via `go mod edit -json` (workspace-immune) while the closure pin reads the workspace build — a divergence between the two fails one of the two assertions loudly |
-| R2 | Vacuous absence (the milestone's characteristic failure) | D-4's four guards; canaries only in string-valued carriers; corpus rendered via `Value.Emit()` only |
+| R2 | Vacuous absence (the milestone's characteristic failure) | D-4's four guards; canaries only in string-valued carriers; corpus rendered via `Value.String()` only (substituted for the deprecated `Value.Emit()`; see the note above) |
 | R3 | Closure pin fragility surprises a future bump | Stated intentional (AD-2) + written update procedure in guard source |
 | R4 | Recorder misses a leak path (links, status description, future methods) | Corpus walks links and status description explicitly; AD-4 method-count pin turns interface growth into a build-of-trust failure |
 | R5 | Span leak / double-end on an unenumerated exit path | AD-5's single-finalizer topology + 15-path table + `AssertAllEndedOnce`; finalizer-before-close ordering removes the test race |

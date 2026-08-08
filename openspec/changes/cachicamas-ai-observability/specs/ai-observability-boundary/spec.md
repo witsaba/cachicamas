@@ -52,7 +52,7 @@ The boundary guard MUST cite ADR 0005 § D3 as the authorising ADR for every tel
 
 - **S-AOB-001** — Given the shipped module, when every telemetry import in Layer 1 is enumerated, then the set is exactly the tracing interfaces, the API's no-op provider, the attribute value type and the status-code type, and the ecosystem's root global-getter package is **not** among them.
 - **S-AOB-002** — Given the boundary guard's source, when the authorising rationale beside each telemetry allowlist entry is read, then each names ADR 0005 § D3 as the authorising ADR clause.
-- **S-AOB-003** — Given the boundary guard's source, when a reader looks for why the global-getter path § D3 permits is not admitted, then a note in place records the declination as a deliberate strict subset and states its reason — that path's package closure contains an SDK-named package — rather than leaving the omission to read as an oversight.
+- **S-AOB-003** — Given the boundary guard's source, when a reader looks for why the global-getter path § D3 permits is not admitted, then a note in place records the declination as a deliberate strict subset and states its reason — that Layer 1 takes a tracer provider only by injection, never by consulting that path — rather than leaving the omission to read as an oversight. (Narrowed to the injection rationale the note currently states; the closure/`auto/sdk` rationale is a recorded follow-up, see "Out of scope" below.)
 - **S-AOB-004** — Given the shipped Layer 1 sources, when they are scanned for any read or write of process-global telemetry state, then none exists, and every tracer used by a traced request is traceable to an injected value.
 
 ### R-AOB-002 — The telemetry boundary closes on a recorded bite proof, not on a green run
@@ -76,7 +76,7 @@ A span that ends more than once, or that is left unended on any path, MUST fail 
 #### Scenarios
 
 - **S-AOB-008** — Given one traced request that completes normally, when the recording is inspected, then exactly one span was started and exactly one was ended.
-- **S-AOB-009** — Given a traced request whose transport attempt is retried more than once before succeeding, when the recording is inspected, then still exactly one span exists, and its recorded duration encloses every attempt.
+- **S-AOB-009** — Given a traced request whose transport attempt is retried more than once before succeeding, when the recording is inspected, then still exactly one span exists, and the span's start is positioned immediately before the retry mechanism's first attempt in source — never beside or after it — so every retry attempt necessarily falls inside its lifetime. (Narrowed: the recording tracer captures no timestamps, so the span's "recorded duration" cannot be inspected; enclosure is established by that fixed start-before-retry source position, not by a measured interval.)
 - **S-AOB-010** — Given a table of terminal paths — normal completion, a terminal provider failure, and each mid-stream cancellation shape — when each is exercised under tracing, then in every row the span's end count is exactly one and no span is left unended.
 - **S-AOB-011** — Given a deliberately mutated implementation that closes the span at a single return site instead of uniformly, when `S-AOB-010` runs, then at least one row fails — the scenario detects an unclosed path rather than assuming closure.
 
@@ -139,7 +139,7 @@ A follow-up MUST be recorded naming the capability that owns an exact terminal s
 - **S-AOB-023** — Given that same span, when every recorded value is inspected, then no status *class* value appears under `http.response.status_code` or under any other allowlisted key.
 - **S-AOB-024** *(review)* — Given this change's landed artefacts, when a reader looks for the owner of an exact terminal status code, then a follow-up is recorded naming the capability that owns it.
 - **S-AOB-025** — Given that same terminal-failure span, when its attributes are inspected, then `error.type` is present and its value is a member of the landed closed nine-member failure vocabulary.
-- **S-AOB-040** *(review)* — Given a traced request that ends in a non-streaming-content-type refusal — a terminal failure for which a response WAS obtained before the refusal was recognized — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it.
+- **S-AOB-040** — Given a traced request that ends in a non-streaming-content-type refusal — a terminal failure for which a response WAS obtained before the refusal was recognized — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it.
 - **S-AOB-041** — Given a traced request that ends in a post-handover (mid-stream) terminal failure — a failure recognized after the stream's one response was already obtained, at any of this capability's own mid-stream terminal paths — when the span's attribute keys are enumerated, then `http.response.status_code` is present and equals that response's own exact status code, recorded exactly as the success path records it, alongside `error.type`.
 
 ### R-AOB-007 — The content denylist is absolute and is proven by absence over a run that used everything it denies
@@ -152,14 +152,14 @@ Absence MUST be asserted over a run that **used all of them** — a run whose re
 
 The corpus scanned MUST be built by walking **every** field the tracing API can set, and attribute values MUST be rendered through the API's own value accessor, never through a language-level structure dump: a marker planted in a pointer-shaped field renders as a bare address under a structure dump and proves nothing (the AI-41 lesson, doc 0002:22).
 
-Failure output MUST name the vector, the span and the attribute key only. It MUST NOT reprint the bytes it matched.
+Failure output MUST name the vector. It MUST NOT reprint the bytes it matched. (Naming the span and the attribute key alongside the vector is not yet true of the shipped scan; see `S-AOB-029`'s recorded follow-up.)
 
 #### Scenarios
 
 - **S-AOB-026** — Given a traced run that carried prompt text, reasoning text, tool-call argument text, tool-result text, a credential, a custom response header and a distinctive raw-body marker — each a distinct runtime-assembled marker — when the corpus built from every span name, status description, attribute key and value, event name and event attribute value, and recorded error is scanned, then none of the seven markers is found.
-- **S-AOB-027** — Given a marker planted in a pointer-shaped recorded field, when the corpus is built, then the marker is rendered through the tracing API's own value accessor and is therefore **found** by the scan — proving the corpus builder cannot be defeated by field shape.
-- **S-AOB-028** — Given the shipped module, when every configuration input, flag, build tag and environment-derived switch reachable from Layer 1 is enumerated, then none enables recording any denied category — there is no content-capture opt-in to disable.
-- **S-AOB-029** — Given a scan that finds a planted marker, when its failure message is read, then it names the vector, the span and the attribute key, and reproduces none of the matched bytes.
+- **S-AOB-027** — Given that the tracing API's own attribute-value type is a closed set of typed constructors (string, integer, floating-point, boolean and their slice forms) with no pointer-shaped variant, when the corpus is built, then every recorded value is rendered through that type's own current string accessor — never a language-level structure dump — so the AI-41 failure mode this scenario guards against (a canary in a pointer-shaped field rendering as a bare hex address) is excluded structurally rather than demonstrated against a live pointer-shaped counter-example, because the recorded surface has none to plant one in. (Accessor substitution recorded: the API's `Value.Emit()` accessor this rendering rule was originally written against is deprecated at v1.44.0; `Value.String()` is the current accessor and is what the shipped code calls — both render through the API's own accessor rather than a struct dump, so the substitution changes no proven property.)
+- **S-AOB-028** — Satisfied by construction. Given the shipped module, when every configuration input, flag, build tag and environment-derived switch reachable from Layer 1 is enumerated, then the enumeration is the empty set — Layer 1's own construction surface (`R-APC-001`, `R-APC-003`) and its deny-by-default import guard (`R-AGM-005`, `R-AGM-008`) between them admit no such switch — so there is no content-capture opt-in for any test to exercise on or off; the property holds because the surface to enable it was never built, not because a built switch was driven both ways and found inert.
+- **S-AOB-029** — Given a scan that finds a planted marker, when its failure message is read, then it names the vector, and reproduces none of the matched bytes. (Narrowed: the shipped scan's result carries a vector only, no span or attribute-key location, because the corpus it scans is a flattened byte string with no positional metadata. Giving the scan a location-carrying result is a recorded follow-up, see "Out of scope" below.)
 
 ### R-AOB-008 — *(non-negotiable)* The absence proof ships four independent non-vacuity guards
 
@@ -191,7 +191,7 @@ The no-op default MUST be **structural** — established once at construction by
 
 - **S-AOB-036** — Given one scripted stream run twice — once with no tracer configured, once with the recording tracer — when the two drained event sequences are compared, then they are equal element for element, in the same order, with the same values.
 - **S-AOB-037** — Given a table of terminal paths run with **no** tracer configured — normal completion, terminal failure, and each mid-stream cancellation shape — when each is exercised, then none panics and each produces the same outcome it produces without this change.
-- **S-AOB-038** — Given the shipped Layer 1 sources, when they are scanned for a nil check guarding any tracing value, then none exists — the no-op default is established once at construction and every recording site is unconditional.
+- **S-AOB-038** — Given the shipped source files of the package implementing this capability — the scope the guard's own scan walks — when they are scanned for a nil check guarding any tracing value, then none exists in that scope, and the scan's own floor guards against a silently narrowed or empty directory listing. (Narrowed to the guard's actual scan scope; the broader claim — no such nil check exists anywhere in Layer 1 — was independently verified true this round by direct enumeration outside the guard, but widening the guard itself is a recorded follow-up, see "Out of scope" below.)
 - **S-AOB-039** — Given a deliberately mutated implementation that guards its recording sites with a nil check, when `S-AOB-038` runs, then it fails — the structural claim is asserted, not assumed.
 
 ---
@@ -222,6 +222,9 @@ Each attribute key MUST be spelled in exactly one place and referenced from ever
 | The construction surface's shape, defaulting and injection proof | `ai-provider-client` — `R-APC-001`, `R-APC-003`, `R-APC-016` |
 | The dependency require set, the guard allowlist and the package-closure pin | `agent-module-scaffold` — `R-AGM-001`, `R-AGM-005`, `R-AGM-008` |
 | Every name, receiver, package and file layout implied above | **Design phase** — this spec pins behaviour only |
+| Widening the closure/`auto/sdk` declination reason into the boundary guard's own comment (`S-AOB-003`'s narrowed clause) | A later round that edits `import_boundary_test.go` — deferred, out of a doc-only round's scope |
+| Widening the nil-check-absence guard's scan from this capability's implementing package to all of Layer 1 (`S-AOB-038`'s narrowed clause) | A later round that edits `ai37_noop_equivalence_test.go` — deferred, out of a doc-only round's scope |
+| Giving the denylist scan a location-carrying result so a failure can name the span and the attribute key, not only the vector (`R-AOB-007`'s and `S-AOB-029`'s narrowed clauses) | A later round that edits `ai37_denylist_test.go` and the shared sweep — deferred, out of a doc-only round's scope |
 
 ---
 

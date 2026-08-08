@@ -11,11 +11,11 @@ This file is an index. The binding delta specs are the per-capability files unde
 
 | # | Capability | Type | Requirements | Scenarios | Charter leaf | Delta file |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `ai-observability-boundary` | **New full spec** | `R-AOB-001` … `R-AOB-009` | `S-AOB-001` … `S-AOB-039` | AI-37.1 – AI-37.4 | [`specs/ai-observability-boundary/spec.md`](specs/ai-observability-boundary/spec.md) |
+| 1 | `ai-observability-boundary` | **New full spec** | `R-AOB-001` … `R-AOB-009` | `S-AOB-001` … `S-AOB-041` | AI-37.1 – AI-37.4 | [`specs/ai-observability-boundary/spec.md`](specs/ai-observability-boundary/spec.md) |
 | 2 | `agent-module-scaffold` | Delta — 3 `MODIFIED`, 1 `ADDED` | `R-AGM-001`, `R-AGM-003`, `R-AGM-005` modified; `R-AGM-008` added | `S-AGM-068` … `S-AGM-073` new; `S-AGM-001` … `S-AGM-004`, `S-AGM-020` … `S-AGM-023`, `S-AGM-040` … `S-AGM-048` restated | AI-37.1 t1 | [`specs/agent-module-scaffold/spec.md`](specs/agent-module-scaffold/spec.md) |
-| 3 | `ai-provider-client` | Delta — 2 `MODIFIED`, 1 `ADDED` | `R-APC-001`, `R-APC-003` modified; `R-APC-016` added | `S-APC-081` … `S-APC-084` new; `S-APC-001` … `S-APC-016` restated | AI-37.1 (D-1), AI-37.4 | [`specs/ai-provider-client/spec.md`](specs/ai-provider-client/spec.md) |
+| 3 | `ai-provider-client` | Delta — 2 `MODIFIED`, 1 `ADDED` | `R-APC-001`, `R-APC-003` modified; `R-APC-016` added | `S-APC-081` … `S-APC-085` new; `S-APC-001` … `S-APC-016` restated | AI-37.1 (D-1), AI-37.4 | [`specs/ai-provider-client/spec.md`](specs/ai-provider-client/spec.md) |
 
-**Totals**: 14 requirements touched — 9 new (`R-AOB-*`), 2 added (`R-AGM-008`, `R-APC-016`), 5 modified. **49 new scenarios** (39 + 6 + 4); 29 landed scenarios restated verbatim-or-amended so the archive step loses none.
+**Totals**: 18 requirements touched — 11 new (9 `R-AOB-*` + 2 `NFR-AOB-*`), 2 added (`R-AGM-008`, `R-APC-016`), 5 modified (`R-AGM-001`, `R-AGM-003`, `R-AGM-005`, `R-APC-001`, `R-APC-003`). **52 new scenarios** (41 + 6 + 5); 28 landed scenarios restated verbatim-or-amended so the archive step loses none. Recounted directly from the three delta files at this round, not carried forward from any earlier count.
 
 ## Numbering — re-verified at spec time
 
