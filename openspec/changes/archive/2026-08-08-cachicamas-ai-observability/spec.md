@@ -62,3 +62,7 @@ Every prefix was re-grepped across the **whole** `openspec/` tree at spec time: 
 ## Next
 
 `sdd-design` (parallel with this phase) owns five open deliverables: the measured require set, versions and package closure under the workspace; the recording tracer's interface-satisfaction strategy; the precise uniform span-closing site proven against every terminal exit; the corpus builder's field walk and the recorder's captured-field-count assertion; and the shape of `R-AOB-008` item 4's build-time substitution. Then `sdd-tasks`.
+
+---
+
+> **Archive-time reconciliation note (2026-08-08).** `verify-report-final.md` found this index's own arithmetic stale (the "Totals" line above and the two prefix-range rows in "Deltas") after two Judgment Day correction rounds added `S-AOB-040`, `S-AOB-041` and `S-APC-085`. The counts stated above (18 requirements — 11 new + 2 added + 5 modified; 52 new scenarios [41+6+5]; 28 restated) are the **corrected, final** counts, recounted directly from the three delta files during the doc-only reconciliation round that preceded this archive. They supersede any earlier count this file itself carried during the correction rounds. See `verify-report-final.md` Part 3 for the full arithmetic audit.

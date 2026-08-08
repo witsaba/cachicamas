@@ -39,7 +39,7 @@ This report **supersedes** the historical `verify-report.md` (verdict FAIL, comm
 | Commits | 23 |
 | Working tree | clean (`git status --porcelain` empty) |
 
-`grep -c '^- \[x\]' tasks.md` → 21 · `grep -c '\[ \]' tasks.md` → **0**. Task state matches code state: every phase C1…C9 has a landed commit, and the two remediation rounds plus both Judgment Day rounds are recorded in `apply-progress.md` §§ "Remediation round", "Judgment Day round 1", "Judgment Day round 2".
+`grep -c '^- \[x\]' tasks.md` → 21 · `grep -c '\[ \]' tasks.md` → **0**. Task state matches code state: every phase C1…C9 has a landed commit, and the two remediation rounds plus both Judgment Day rounds are recorded in `apply-progress.md`'s §§ "Remediation round", "Judgment Day round 1", "Judgment Day round 2".
 
 **Scenario total moved 77 → 80** since the historical report: `S-AOB-040` (round 1), `S-AOB-041` and `S-APC-085` (round 2). Requirement total is unchanged at 18 — no correction round added a requirement.
 
@@ -349,3 +349,7 @@ The change is behaviourally sound and delivery-ready. It is not yet *archivable*
 Edits 1 and 2 move the counts to **14/18 requirements, 74/80 scenarios**. The remaining six PARTIALs are structural, not fixable by editing: `S-AOB-009`'s duration clause needs timestamps `tracetest.Span` does not record; `S-AOB-027`, `S-AOB-028` and `S-APC-083` are satisfied-by-construction and unconstructible once the root global getter is excluded; `S-AOB-003` and `S-AOB-029` need prose and failure-message work (SUGGESTIONs S-2 and S-1). If the maintainer accepts those six as satisfied-by-construction and amends their scenario text accordingly, the counts reach 18/18 and 80/80 and this report re-runs as `pass_with_warnings`.
 
 **Next phase: `sdd-apply`, doc-only scope — the four edits above, no Go source, no new tests.** This is emphatically **not** grounds for a third Judgment Day round: two rounds are complete, the last permitted correction round has been consumed, no adversarial finding remains open, and nothing here is a code defect.
+
+---
+
+> **Archive-time closing note (2026-08-08).** The four doc-only edits this report requested for archivability were performed in a subsequent doc-only round (recorded in `apply-progress.md`'s "Final documentation reconciliation" section) and promoted into the canonical specs at archive time. Post-edit counts: 18/18 requirements, 80/80 scenarios; a validator dry run against the corrected counts returned `{"valid": true, "verdict": "pass_with_warnings"}`. This file is preserved verbatim as the terminal FAIL-on-completeness-gate record; the archive report (`archive-report.md`) records the reconciled final state per the archive skill's Final-State Authority hierarchy.

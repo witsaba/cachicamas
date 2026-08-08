@@ -493,3 +493,14 @@ exits without a single test failing. Everything else in this change is exception
 8/8 denylist corpus channels, all four non-vacuity guards, all 15 span-lifecycle terminal paths, and
 all four dependency-guard bites were independently defeated during verification. The remediation is
 one additive test table and touches no production code.
+
+---
+
+> **Historical record — superseded.** This report's FAIL verdict, and CRITICAL C-1 specifically, are
+> superseded by `verify-report-final.md`. C-1 was fixed test-only in commit `3a61e46d` (the
+> remediation round documented in `apply-progress.md`); both Judgment Day correction rounds then
+> found and fixed two further CRITICALs (a structurally identical lost-send defect on two terminal
+> paths) that this report's own defeat D did not surface, because defeat D asked whether `End()` is
+> called, not whether the outcome classification feeding `finalizeSpan` is correct. This file is
+> preserved verbatim as the audit-trail record of the pre-remediation state; it is not evidence of
+> the change's final state. See `verify-report-final.md` for the archived, superseding verdict.

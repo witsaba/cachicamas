@@ -1,11 +1,12 @@
 # Spec — `ai-observability-boundary` (AI-37, Add the observability boundary)
 
-> **Change**: `cachicamas-ai-observability` · **Milestone**: AI-37 (doc 0002:2188–2235) · **Wave 5 — Harden**
-> **Status**: **new capability** — this file is a full spec, not a delta. It has no predecessor under `openspec/specs/`.
-> **Governing ADR**: [ADR 0005 § D3](../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) — the import table, the twelve-attribute allowlist and the absolute content denylist
+> **Milestone**: AI-37 — Add the observability boundary (doc 0002:2188–2235) · **Wave 5 — Harden**
+> **Introduced by**: `openspec/changes/archive/2026-08-08-cachicamas-ai-observability/`, landed on branch `feat/ai-37-observability`, final HEAD `66e12147`
+> **Status**: **live** — the invariants below hold for the lifetime of the module, not only at the moment AI-37 merged
+> **Governing ADR**: [ADR 0005 § D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) — the import table, the twelve-attribute allowlist and the absolute content denylist
 > **Format**: RFC 2119 + Given/When/Then, matching this repository's `R-*` / `S-*` grammar
 > **Identifier convention**: requirements `R-AOB-0NN`, scenarios `S-AOB-0NN`. Append-only.
-> **Sources**: [proposal.md](../../proposal.md) § 4 D-1 … D-6 · [explore.md](../../explore.md) § 3 … § 9
+> **Sources**: [proposal.md](../../changes/archive/2026-08-08-cachicamas-ai-observability/proposal.md) § 4 D-1 … D-6 · [explore.md](../../changes/archive/2026-08-08-cachicamas-ai-observability/explore.md) § 3 … § 9
 
 ---
 
@@ -14,9 +15,15 @@
 | Field | Value |
 | --- | --- |
 | **Capability** | `ai-observability-boundary` |
-| **Type** | New full spec — nine requirements `R-AOB-001` … `R-AOB-009`, scenarios `S-AOB-001` … `S-AOB-041` |
-| **Numbering** | Prefix re-verified at spec time across the whole `openspec/` tree — canonical specs, active changes and archived change deltas alike. `AOB` occurs nowhere except this change's own `proposal.md`. |
+| **Type** | Full spec — nine requirements `R-AOB-001` … `R-AOB-009`, scenarios `S-AOB-001` … `S-AOB-041` |
+| **Numbering** | Prefix re-verified at spec time across the whole `openspec/` tree — canonical specs, active changes and archived change deltas alike. `AOB` occurred nowhere before this change's own `proposal.md`. |
 | **Charter coverage** | AI-37.1 → `R-AOB-001`, `R-AOB-002` · AI-37.2 → `R-AOB-003` … `R-AOB-006` · AI-37.3 → `R-AOB-007`, `R-AOB-008` · AI-37.4 → `R-AOB-009` |
+
+## Status — this file is the canonical home of the contract
+
+`openspec/AGENTS.md` calls `openspec/specs/` the *source of truth (main specs)*. This capability's contract therefore lives here. The archived change folder at [`openspec/changes/archive/2026-08-08-cachicamas-ai-observability/`](../../changes/archive/2026-08-08-cachicamas-ai-observability/) is the historical record of how AI-37 was explored, proposed, designed, applied and verified — including the two recorded dependency-guard bites, the two Judgment Day correction rounds, and the doc-only reconciliation round that closed the completeness gate before archive.
+
+A later milestone that needs to change one of these invariants amends **this file**, in the same pull request, under its own ADR gate.
 
 ## Purpose
 
@@ -126,7 +133,7 @@ A streaming span MUST NOT end before the stream's terminal event has been produc
 
 Where an allowlisted key has no exact source of truth, the milestone MUST narrow its own claim rather than record an approximate value under a precise key. This capability's terminal-failure exits do not all share one shape, and the requirement below is deliberately split rather than stated as one blanket rule for every terminal-failure path:
 
-- On a terminal-failure path where the retry mechanism itself fails before any response is ever obtained — a retry-budget-exhausted or a non-retryable terminal failure — only the status *class* ever existed, never the exact code, so `http.response.status_code` MUST be **omitted** on that path.
+- On a terminal-failure path where the retry mechanism itself fails before any response value survives to the recording site — a retry-budget-exhausted or a non-retryable terminal failure — `http.response.status_code` MUST be **omitted** on that path.
 - On a terminal-failure path where a response WAS obtained before the failure was recognized — the non-streaming-content-type refusal, whose exact code is in hand from that same response, **and** every post-handover (mid-stream) terminal failure, which this capability only ever begins producing after that one response has already been obtained — `http.response.status_code` MUST be **recorded**, exactly as the success path records it. Omitting a value that is genuinely in hand would itself be the falsehood this requirement exists to prevent: narrowing a claim past what is actually available is not the same discipline as narrowing it to what is available.
 
 The omission MUST be an explicit clause of this requirement and MUST be recorded at the omission site in source. It MUST NOT be left implicit, and the class MUST NOT be recorded under the exact-code key: that key means the code, and writing a class where a consumer expects a code is a falsehood in a contract whose whole point is that a rename breaks consumers.
@@ -135,7 +142,7 @@ A follow-up MUST be recorded naming the capability that owns an exact terminal s
 
 #### Scenarios
 
-- **S-AOB-022** — Given a traced request whose retry mechanism itself fails with no response ever obtained — a retry-budget-exhausted or a non-retryable terminal failure — when the span's attribute keys are enumerated, then `http.response.status_code` is absent, and a note at the omission site in source states why.
+- **S-AOB-022** — Given a traced request whose retry mechanism itself fails with no response value surviving to the recording site — a retry-budget-exhausted or a non-retryable terminal failure — when the span's attribute keys are enumerated, then `http.response.status_code` is absent, and a note at the omission site in source states why.
 - **S-AOB-023** — Given that same span, when every recorded value is inspected, then no status *class* value appears under `http.response.status_code` or under any other allowlisted key.
 - **S-AOB-024** *(review)* — Given this change's landed artefacts, when a reader looks for the owner of an exact terminal status code, then a follow-up is recorded naming the capability that owns it.
 - **S-AOB-025** — Given that same terminal-failure span, when its attributes are inspected, then `error.type` is present and its value is a member of the landed closed nine-member failure vocabulary.
@@ -222,12 +229,14 @@ Each attribute key MUST be spelled in exactly one place and referenced from ever
 | The construction surface's shape, defaulting and injection proof | `ai-provider-client` — `R-APC-001`, `R-APC-003`, `R-APC-016` |
 | The dependency require set, the guard allowlist and the package-closure pin | `agent-module-scaffold` — `R-AGM-001`, `R-AGM-005`, `R-AGM-008` |
 | Every name, receiver, package and file layout implied above | **Design phase** — this spec pins behaviour only |
-| Widening the closure/`auto/sdk` declination reason into the boundary guard's own comment (`S-AOB-003`'s narrowed clause) | A later round that edits `import_boundary_test.go` — deferred, out of a doc-only round's scope |
-| Widening the nil-check-absence guard's scan from this capability's implementing package to all of Layer 1 (`S-AOB-038`'s narrowed clause) | A later round that edits `ai37_noop_equivalence_test.go` — deferred, out of a doc-only round's scope |
-| Giving the denylist scan a location-carrying result so a failure can name the span and the attribute key, not only the vector (`R-AOB-007`'s and `S-AOB-029`'s narrowed clauses) | A later round that edits `ai37_denylist_test.go` and the shared sweep — deferred, out of a doc-only round's scope |
+| Widening the closure/`auto/sdk` declination reason into the boundary guard's own comment (`S-AOB-003`'s narrowed clause) | A later round that edits `import_boundary_test.go` — deferred at archive |
+| Widening the nil-check-absence guard's scan from this capability's implementing package to all of Layer 1 (`S-AOB-038`'s narrowed clause) | A later round that edits `ai37_noop_equivalence_test.go` — deferred at archive |
+| Giving the denylist scan a location-carrying result so a failure can name the span and the attribute key, not only the vector (`R-AOB-007`'s and `S-AOB-029`'s narrowed clauses) | A later round that edits `ai37_denylist_test.go` and the shared sweep — deferred at archive |
 
 ---
 
 ## Acceptance criteria
 
 The capability holds when every scenario `S-AOB-001` … `S-AOB-041` has recorded evidence, the two bites of `R-AOB-002` and the overlay RED of `R-AOB-008` item 4 are recorded red then green, and `make test` under race detection, `make lint` and `make build` are green in the module with a clean working tree.
+
+Verified at archive time (2026-08-08): `verify-report-final.md` recorded 0 CRITICAL, 0 blockers, 72/80 scenarios COMPLIANT and 8 PARTIAL (each PARTIAL narrowed to what its shipped instrument actually proves, per the scenario texts above); Judgment Day reached terminal state **APPROVED** after two correction rounds. The eight narrowed scenarios and their three recorded follow-ups (`S-AOB-003`, `S-AOB-038`, `S-AOB-029`/`R-AOB-007`) are the honest, final state of this capability's proof — not a gap awaiting a third round.

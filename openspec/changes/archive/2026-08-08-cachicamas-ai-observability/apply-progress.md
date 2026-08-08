@@ -444,3 +444,7 @@ The byte-identical test/build hashes are independent, direct confirmation that t
 ### Scope discipline
 
 `git diff --stat HEAD` (pre-commit, this round only) touched exactly 5 files, all `.md`: `spec.md`, `design.md`, `specs/agent-module-scaffold/spec.md`, `specs/ai-observability-boundary/spec.md`, `specs/ai-provider-client/spec.md` — 20 insertions(+), 17 deletions(-). No `.go` file appears in this round's diff.
+
+---
+
+> **Archive-time close (2026-08-08).** After this reconciliation round, the orchestrator committed two further artifacts not covered by any round above: `verify-report.md` (the historical, pre-reconciliation FAIL report, committed at `0b1fbd61` as the audit-trail record of the pre-remediation state) and `verify-report-final.md` (the superseding verdict, committed at final HEAD `66e12147`). Final branch state: 26 commits, `git diff --stat origin/main...HEAD` = `35 files changed, 6551 insertions(+), 163 deletions(-)`, tree clean. Judgment Day terminal state: **APPROVED**. See `verify-report-final.md` and the archive report for the complete final-state accounting.

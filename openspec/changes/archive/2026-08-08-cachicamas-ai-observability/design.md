@@ -219,3 +219,7 @@ No migration. Rollback per proposal § 10; C1 reverts as one commit.
 ## Open Questions
 
 None blocking. `sdd-tasks` decides only test-file naming granularity within the `ai37_*_test.go` convention.
+
+---
+
+> **Post-apply reconciliation note (2026-08-08, doc-only round).** Two textual substitutions were mirrored into this design document to keep it consistent with the shipped code and `tracetest.go`'s own doc comment, which already had them right: the corpus-builder walk (§ Interfaces / Contracts) and the attribute construction table's `http.response.status_code` disposition both cite `Value.String()` — `Value.Emit()` was deprecated at v1.44.0 (the API's accessor substitution recorded in `verify-report-final.md`'s W-A/S-2 and `apply-progress.md`'s final documentation-reconciliation section). Design documents are not archive-promoted, so this note records the divergence rather than silently rewriting history; the substitution changes no property this design relied on. Two Judgment Day correction rounds landed after this design's own commit-plan table was written: `finalizeSpan` was widened to record `http.response.status_code` on every post-handover failure (not only the success path this table's row 9 states), and `emitFailure`'s failure-construction-before-send reordering was extended to the in-band error-frame branch. Both are recorded in `apply-progress.md`'s Judgment Day sections and promoted into `openspec/specs/ai-observability-boundary/spec.md`'s `R-AOB-006`.
