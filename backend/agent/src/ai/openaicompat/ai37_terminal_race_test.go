@@ -1,4 +1,4 @@
-// AI-37 Judgment Day remediation (item 1, CRITICAL) — R-AOB-005.
+// AI-37 Judgment Day remediation (round 1 item 1, CRITICAL) — R-AOB-005.
 //
 // Both blind judges independently found the same defect: on the `[DONE]`
 // terminal-sentinel path, run set outcome.completion/haveCompletion
@@ -18,6 +18,18 @@
 // This file is the deterministic repro both judges converged on: a
 // transcript ending in `data: [DONE]` where the caller reads exactly the
 // ResponseStart event, cancels, and never reads again.
+//
+// # Round 2: the same shape on a second, sibling terminal path
+//
+// Judge B's round-2 finding: run's isInBandErrorFrame branch has the
+// IDENTICAL defect shape on a different path — when a text block is
+// open, its own block-closing sendEvent(end) call precedes
+// outcome.failure's assignment, so a lost close send (a bare `return`
+// nested inside `if blockOpen`) skips that assignment too, on a stream
+// that terminated on a genuine provider error frame rather than a lost
+// completion. TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure
+// below is this round's own falsifier, in the same file because it is
+// the same class of defect on a sibling path, not a new one.
 package openaicompat_test
 
 import (
@@ -107,5 +119,93 @@ func TestAI37_TerminalCompletionSend_LosingTheRaceRecordsFailure(t *testing.T) {
 	}
 	if _, ok := ai37AttrByKey(attrs, "error.type"); !ok {
 		t.Error("error.type absent, want present -- the span must report the terminal-send failure through the same failure branch every other cancellation path uses")
+	}
+}
+
+// ai37InBandRaceTranscript carries one content-delta chunk — opening the
+// text block, so applyChunk's own return for a first chunk carrying
+// content is ResponseStart, TextBlockStart, TextDelta, in that order
+// (stream_state.go) — followed by an in-band vendor error frame. The
+// "in_band_error" row in ai37_span_lifecycle_test.go covers the same
+// branch cleanly drained, but its own fixture opens no text block
+// (blockOpen stays false there), which never exercises the block-closing
+// send this round's own CRITICAL is about. This transcript deliberately
+// opens one first.
+const ai37InBandRaceTranscript = "data: {\"id\":\"c\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\ndata: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad request\"}}\n\n"
+
+// TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure is
+// Judgment Day round 2's own falsifier for the CRITICAL: the caller
+// reads exactly the three events that open the text block (ResponseStart,
+// TextBlockStart, TextDelta), then cancels and stops draining. The
+// carrier is unbuffered, so run's very next send — the isInBandErrorFrame
+// branch's own TextBlockEnd close, since blockOpen is now true — blocks
+// until either a reader arrives (none will) or ctx.Done() wins, exactly
+// the same deterministic mechanism the round-1 fixture above uses on the
+// completion send.
+func TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure(t *testing.T) {
+	t.Parallel()
+
+	provider := tracetest.NewProvider()
+	server := ai37SSEServer(t, ai37InBandRaceTranscript)
+	c := ai37MustClient(t, server.URL, provider)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := c.Stream(ctx, ai37ValidRequest(t))
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want nil", err)
+	}
+
+	wantKinds := []ai.EventKind{ai.EventKindResponseStart, ai.EventKindTextBlockStart, ai.EventKindTextDelta}
+	for i, want := range wantKinds {
+		ev, ok := <-ch
+		if !ok {
+			t.Fatalf("channel closed after %d event(s), want at least %d (through the block-opening TextDelta)", i, len(wantKinds))
+		}
+		if ev.Kind() != want {
+			t.Fatalf("event %d kind = %v, want %v -- the fixture's own block-opening shape did not land as expected", i, ev.Kind(), want)
+		}
+	}
+
+	// Deliberately stop draining here -- never read ch again -- then
+	// cancel. The next send run attempts is the in-band-error branch's
+	// own TextBlockEnd close (blockOpen is now true), which must lose
+	// this race the same deterministic way the round-1 fixture's
+	// completion send loses its own.
+	cancel()
+
+	// No one drains ch from here on, so if the branch under test still
+	// attempted a bounded-wait recovery send it would cost up to
+	// emitFailureSendBound before finalizeSpan could run -- this poll's
+	// own deadline is generous for that either way, matching the round-1
+	// fixture's own margin above ai37DrainTimeout.
+	const ai37InBandRacePollTimeout = 10 * time.Second
+	deadline := time.Now().Add(ai37InBandRacePollTimeout)
+	for {
+		if err := provider.AssertAllEndedOnce(); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the span to end")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	spans := provider.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("provider recorded %d span(s), want 1", len(spans))
+	}
+	code, _ := spans[0].Status()
+	if code == codes.Ok {
+		t.Error("span status = codes.Ok, want codes.Error -- the stream terminated on a provider error frame, so finalizeSpan must not take the success branch (R-AOB-005, Judgment Day round 2 CRITICAL)")
+	}
+
+	attrs := spans[0].Attributes()
+	if _, ok := ai37AttrByKey(attrs, "gen_ai.response.finish_reasons"); ok {
+		t.Error("gen_ai.response.finish_reasons present, want absent -- this stream never completed; it terminated on an in-band error frame")
+	}
+	if v, ok := ai37AttrByKey(attrs, "error.type"); !ok {
+		t.Error("error.type absent, want present -- the span must report the in-band error frame's own failure category, not fall through to the success branch")
+	} else if v.AsString() == "" {
+		t.Error("error.type present but empty, want a member of the closed failure vocabulary")
 	}
 }

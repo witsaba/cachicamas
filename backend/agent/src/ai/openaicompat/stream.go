@@ -745,6 +745,26 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 				// "skip a present-but-mismatched object" rule) cannot
 				// silently swallow a terminal-error payload.
 				if isInBandErrorFrame(frame.Data) {
+					// AI-37 Judgment Day round 2 CRITICAL fix (R-AOB-005):
+					// build and assign the failure BEFORE the
+					// block-closing send below, not after it — the same
+					// reordering emitFailure's own doc comment already
+					// documents and applies ("building the failure value
+					// first ... is a reordering with no observable
+					// behavior change"). The carrier is unbuffered, so a
+					// caller that cancels and stops draining can lose the
+					// TextBlockEnd send below exactly the way the [DONE]
+					// path's own completion send could lose its send
+					// (round 1, above); with the assignment AFTER that
+					// send, the block-open branch's own bare `return`
+					// skipped it entirely, leaving outcome.failure nil and
+					// finalizeSpan's success branch recording codes.Ok for
+					// a stream that actually terminated on a provider
+					// error frame. Construction here is pure and depends
+					// on nothing the sends below could alter, so this
+					// reordering changes no other observable behavior.
+					failure := failureFromErrorFrame(frame.Data, outputPreceded)
+					outcome.failure = failure
 					if blockOpen {
 						if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
 							if !sendEvent(end) {
@@ -752,8 +772,6 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 							}
 						}
 					}
-					failure := failureFromErrorFrame(frame.Data, outputPreceded)
-					outcome.failure = failure
 					if failure != nil {
 						if errEv, err := ai.ErrorEvent(failure); err == nil {
 							sendEvent(errEv)
