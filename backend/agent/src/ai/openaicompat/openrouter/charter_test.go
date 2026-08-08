@@ -3,7 +3,9 @@
 // AI-32 to map OpenRouter's `error_type` discriminator, SHALL NOT
 // emit a `reasoning_content` (or `reasoning` / `reasoning_details`)
 // extension field as `ai.EventKindReasoningDelta`, and SHALL NOT
-// introduce any new `go.mod` require.
+// introduce any `go.mod` require beyond AI-37's own ADR-gated
+// OpenTelemetry API exception (ADR 0005 § D3; wantGoModRequireLines,
+// zero_requires_test.go).
 //
 // Each negative SHALL has its own mechanical check; a future change
 // that crosses any one of them fails this guard with a specific
@@ -38,8 +40,9 @@ const openrouterPackagePath = "."
 // TestOpenRouterAdapter_NegativeShallsFenceFails is the umbrella
 // guard (R-OR-10): the new sub-package's non-test sources carry no
 // `*anthropic*` filename, no `"error_type"` literal, no
-// `ai.EventKindReasoningDelta` reference, and `go.mod` still has
-// zero `require` lines. Each sub-check fires independently; a
+// `ai.EventKindReasoningDelta` reference, and `go.mod` carries no
+// require line beyond AI-37's own ADR-gated exception
+// (wantGoModRequireLines). Each sub-check fires independently; a
 // single negative SHALL violation in any of them fails the guard.
 func TestOpenRouterAdapter_NegativeShallsFenceFails(t *testing.T) {
 	t.Parallel()
@@ -93,14 +96,14 @@ func TestOpenRouterAdapter_NegativeShallsFenceFails(t *testing.T) {
 		}
 	})
 
-	t.Run("go_mod_has_zero_require_lines", func(t *testing.T) {
+	t.Run("go_mod_matches_ai37_authorized_require_lines", func(t *testing.T) {
 		t.Parallel()
 		raw, err := os.ReadFile(goModPath)
 		if err != nil {
 			t.Fatalf("os.ReadFile(%q) error = %v, want nil", goModPath, err)
 		}
-		if got := countGoModRequireLines(raw); got != 0 {
-			t.Errorf("%s declares %d require line(s), want exactly 0 — R-OR-10 negative SHALL: no new top-level Go dependency (NFR-APC-A, AI-00.3)", goModPath, got)
+		if got := countGoModRequireLines(raw); got != wantGoModRequireLines {
+			t.Errorf("%s declares %d require line(s), want exactly %d — R-OR-10 negative SHALL still holds for every dependency OTHER than AI-37's own ADR-gated OpenTelemetry API (NFR-APC-A, AI-37 D-6)", goModPath, got, wantGoModRequireLines)
 		}
 	})
 }

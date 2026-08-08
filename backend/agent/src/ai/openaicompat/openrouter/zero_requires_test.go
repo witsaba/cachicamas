@@ -1,14 +1,13 @@
 // R-OR-09's defense-in-depth regression test (design §8, AI-00.3
 // invariant): the AI-00.3 forward-guard's allowlist,
 // `allowedNonStdlibPrefixes` in backend/agent/src/ai/import_boundary_test.go,
-// holds exactly one entry — this module's own path
-// (`github.com/cachicamas/backend/agent`). A second entry would
-// either be the AI-37 OpenTelemetry API path (pre-authorised by
-// ADR 0005 § D3 and not yet landed) or an unauthorized new
-// top-level dependency. Both shapes must be reviewed in the same
-// commit as the entry addition; this test fires whenever the
-// allowlist shape drifts from one entry without an explicit update
-// to this file.
+// holds exactly the entries AI-37 (ADR 0005 § D3, D-6) authorises: this
+// module's own path plus the five OpenTelemetry tracing-API prefixes.
+// Before AI-37 this test pinned exactly one entry; AI-37 is the
+// documented, ADR-gated exception, landed in the same commit as this
+// file's update — any FURTHER entry, beyond the ones AI-37 adds, is
+// either a later ADR-gated addition (which must update this file
+// alongside it) or an unauthorized new top-level dependency.
 //
 // # Why this is defense-in-depth, not the primary guard
 //
@@ -23,17 +22,19 @@
 //
 // # The two assertions (R-OR-09)
 //
-//  1. backend/agent/go.mod declares zero `require` lines. This
-//     pin exists because go.mod is the source of truth for what
-//     the module declares as a dependency; the guard against new
-//     requires is the module's own invariant, not the test's.
+//  1. backend/agent/go.mod declares exactly wantGoModRequireLines
+//     `require` lines (2, as of AI-37). This pin exists because
+//     go.mod is the source of truth for what the module declares as
+//     a dependency; the guard against an unauthorized require is
+//     the module's own invariant, not the test's.
 //
 //  2. allowedNonStdlibPrefixes in import_boundary_test.go holds
-//     exactly one entry, and that entry equals this module's
-//     import path. The second half pins the value: a future change
-//     that grows the list to two and adds a non-module entry is a
-//     regression on the same surface as a go.mod require, and this
-//     test fails it before CI runs the deeper guard.
+//     exactly wantAllowedNonStdlibPrefixes' entries, in order. A
+//     future change that grows the list beyond what AI-37 landed,
+//     without updating this file in the same commit, is a
+//     regression on the same surface as an unreviewed go.mod
+//     require, and this test fails it before CI runs the deeper
+//     guard.
 //
 // # Why go/parser instead of a narrower text scan
 //
@@ -56,15 +57,13 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// openrouterModulePath is the only non-stdlib prefix the allowlist
-// admits today. This module's own import path — any future change
-// that adds a second entry here must also land the entry's
-// rationale in the import_boundary_test.go header comment and in
-// an ADR.
+// openrouterModulePath is this module's own import path — always the
+// allowlist's first entry.
 const openrouterModulePath = "github.com/cachicamas/backend/agent"
 
 // goModPath is the relative path from this sub-package's directory
@@ -72,20 +71,43 @@ const openrouterModulePath = "github.com/cachicamas/backend/agent"
 // and counts require lines.
 const goModPath = "../../../../go.mod"
 
+// wantGoModRequireLines is the exact require-line count AI-37 (ADR 0005
+// § D3, D-6) authorises: the "require (" block opener (the two direct
+// OpenTelemetry requires) plus the single-line indirect xxhash require.
+// Any further require line is either a later ADR-gated addition — which
+// must update this constant in the same commit — or an unauthorized
+// dependency.
+const wantGoModRequireLines = 2
+
+// wantAllowedNonStdlibPrefixes is the exact, ordered
+// allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus
+// the five OpenTelemetry tracing-API prefixes import_boundary_test.go
+// adds, each citing ADR 0005 § D3.
+var wantAllowedNonStdlibPrefixes = []string{
+	openrouterModulePath,
+	"go.opentelemetry.io/otel/trace",
+	"go.opentelemetry.io/otel/attribute",
+	"go.opentelemetry.io/otel/codes",
+	"go.opentelemetry.io/otel/semconv",
+	"github.com/cespare/xxhash/v2",
+}
+
 // importBoundaryTestPath is the relative path from this
 // sub-package's directory to the AI-00.3 forward-guard test. The
 // test parses this file with go/parser and walks the AST to
 // locate the allowedNonStdlibPrefixes variable.
 const importBoundaryTestPath = "../../import_boundary_test.go"
 
-// TestOpenRouterAdapter_ZeroRequiresGuard asserts the go.mod is
-// the empty-dependency pin (R-OR-09). A `require` line in
-// go.mod — of any kind — fails this test. The AI-00.3 forward
-// guard's primary assertion (TestLayer1_ModuleHasNoDependencies_
-// ZeroRequires, import_boundary_test.go:147) carries the same
-// property through the dependency-closure walk; this test pins it
-// at the source-of-truth file for faster, more focused feedback.
-func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
+// TestOpenRouterAdapter_RequireLinesMatchAI37Authorization asserts
+// go.mod carries exactly wantGoModRequireLines `require` lines — no
+// more (R-OR-09). Before AI-37 this test pinned zero; AI-37 (ADR 0005
+// § D3) is the one, ADR-gated milestone permitted to change that. The
+// AI-00.3 forward guard's primary assertion
+// (TestLayer1_DependencySet_ExactRequiresAndClosure,
+// import_boundary_test.go) carries the same property through the
+// dependency-closure walk; this test pins it at the source-of-truth
+// file for faster, more focused feedback.
+func TestOpenRouterAdapter_RequireLinesMatchAI37Authorization(t *testing.T) {
 	t.Parallel()
 
 	raw, err := os.ReadFile(goModPath)
@@ -94,19 +116,20 @@ func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
 	}
 
 	requireLines := countGoModRequireLines(raw)
-	if requireLines != 0 {
-		t.Errorf("backend/agent/go.mod declares %d require line(s), want exactly 0 (R-OR-09, AI-00.3, NFR-APC-A):\n%s", requireLines, raw)
+	if requireLines != wantGoModRequireLines {
+		t.Errorf("backend/agent/go.mod declares %d require line(s), want exactly %d (R-OR-09, AI-37 D-6, NFR-APC-A):\n%s", requireLines, wantGoModRequireLines, raw)
 	}
 }
 
-// TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry
-// asserts the AI-00.3 allowlist holds exactly one entry, and that
-// entry is this module's own import path (R-OR-09, defense-in-depth
-// copy of import_boundary_test.go's load-bearing guard). A second
-// entry — even a benign-looking one — fails this test, by design:
-// the second-entry path requires an ADR and a
-// import_boundary_test.go header comment update alongside the
-// entry, not a silent addition.
+// TestOpenRouterAdapter_AllowedNonStdlibPrefixesMatchesAI37Authorization
+// asserts the AI-00.3 allowlist holds exactly wantAllowedNonStdlibPrefixes'
+// entries, in order (R-OR-09, defense-in-depth copy of
+// import_boundary_test.go's load-bearing guard). Before AI-37 this test
+// pinned exactly one entry (this module's own path); AI-37 is the
+// documented, ADR-gated exception. Any entry beyond what AI-37 landed —
+// even a benign-looking one — fails this test, by design: a further
+// entry requires an ADR and an import_boundary_test.go header comment
+// update alongside it, not a silent addition.
 //
 // The parse uses go/parser + go/ast: the import_boundary_test.go
 // file is parsed as Go, the package-level variable declaration
@@ -115,7 +138,7 @@ func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
 // value by following const declarations in the same file (the
 // canonical pattern this package's own const modulePath uses) or,
 // for a literal string, by reading the literal directly.
-func TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry(t *testing.T) {
+func TestOpenRouterAdapter_AllowedNonStdlibPrefixesMatchesAI37Authorization(t *testing.T) {
 	t.Parallel()
 
 	entries, err := parseAllowedNonStdlibPrefixes(importBoundaryTestPath, openrouterModulePath)
@@ -123,11 +146,8 @@ func TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry(t *testi
 		t.Fatalf("parseAllowedNonStdlibPrefixes(%q) error = %v, want nil", importBoundaryTestPath, err)
 	}
 
-	if len(entries) != 1 {
-		t.Errorf("allowedNonStdlibPrefixes has %d entries = %v, want exactly 1 (R-OR-09; the only admitted non-stdlib prefix is this module's own path)", len(entries), entries)
-	}
-	if len(entries) > 0 && entries[0] != openrouterModulePath {
-		t.Errorf("allowedNonStdlibPrefixes first entry = %q, want %q (R-OR-09)", entries[0], openrouterModulePath)
+	if !slices.Equal(entries, wantAllowedNonStdlibPrefixes) {
+		t.Errorf("allowedNonStdlibPrefixes = %v, want %v, in order (R-OR-09, AI-37 D-6)", entries, wantAllowedNonStdlibPrefixes)
 	}
 }
 
@@ -178,22 +198,38 @@ func parseAllowedNonStdlibPrefixes(path, _ string) ([]string, error) {
 						continue
 					}
 					for _, elt := range lit.Elts {
-						ident, ok := elt.(*ast.Ident)
-						if !ok {
-							continue
+						switch e := elt.(type) {
+						case *ast.Ident:
+							if v, ok := constValues[e.Name]; ok {
+								entries = append(entries, v)
+								continue
+							}
+							// Unknown identifier — it could be a
+							// const declared in another file (not
+							// visible to this parse). Surface that
+							// as an empty entry so the assertion
+							// above fails with a clear mismatch
+							// message rather than passing silently.
+							entries = append(entries, "")
+						case *ast.BasicLit:
+							// AI-37's entries are literal strings
+							// (import_boundary_test.go's own table,
+							// each carrying its own ADR-citing
+							// comment) — the literal-string half
+							// this function's own doc comment
+							// already promised, and the only half
+							// that was actually implemented before
+							// AI-37 exercised it.
+							if e.Kind == token.STRING {
+								if v, unquoteErr := unquoteStringLiteral(e.Value); unquoteErr == nil {
+									entries = append(entries, v)
+									continue
+								}
+							}
+							entries = append(entries, "")
+						default:
+							entries = append(entries, "")
 						}
-						if v, ok := constValues[ident.Name]; ok {
-							entries = append(entries, v)
-							continue
-						}
-						// Unknown identifier — it could be a
-						// const declared in another file (not
-						// visible to this parse). Surface that as
-						// an empty entry so the assertion above
-						// fails with a clear "not equal to
-						// openrouterModulePath" message rather
-						// than passing silently.
-						entries = append(entries, "")
 					}
 				}
 			}
