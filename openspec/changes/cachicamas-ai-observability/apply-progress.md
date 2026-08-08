@@ -286,3 +286,106 @@ tracetest_test.go:251: Corpus() captured 1 of the 2 content-bearing Start option
 
 - `S-AOB-038` still says "Layer 1 sources"; item 8's widened scan proves package scope, not the full Layer-1 tree (`ai/`, `ai/internal/retry/`, `ai/openaicompat/openrouter/` were not all walked by one scan). A future round can either widen further or narrow that one spec line.
 - Items W-1, W-2, W-4, W-5, S-1..S-5 from the original `sdd-verify` report remain untouched (archive-time record corrections, as recorded in the prior remediation-round section above) — this Judgment Day round did not revisit them; only the nine items the orchestrator named for this round were in scope.
+
+## Judgment Day round 2 (final correction round, 2026-08-08)
+
+Two blind judges independently re-reviewed the round-1 correction delta `c70750b5..2e7503dc` (13 files, +818/-38). Judge B found one new CRITICAL (the same lost-send defect shape on a second, sibling terminal path) plus two WARNINGs; Judge A corroborated one of those two WARNINGs from a different angle and added one SUGGESTION. Full ledger: Engram `sdd/cachicamas-ai-observability/judgment-day-round2`, obs #2735. This is the last permitted correction round — the SUGGESTION is recorded below, not fixed, per the review order.
+
+### Commits
+
+| # | SHA | Subject |
+|---|---|---|
+| 14 | `8a257a4b` | fix(ai): set outcome.failure before the in-band-error block-close send |
+| 15 | `01340d1b` | fix(ai): record the exact status code on every post-handover failure |
+| 16 | `fd38cc2b` | docs(ai): justify keeping the terminal-race recovery send |
+
+### 1. CRITICAL — the same lost-send defect on the in-band error-frame path (`stream.go`, commit `8a257a4b`)
+
+**Root cause**: `run`'s `isInBandErrorFrame` branch built `failure := failureFromErrorFrame(...)` and assigned `outcome.failure = failure` **after** attempting the block-closing `TextBlockEnd` send (`if blockOpen { if !sendEvent(end) { return } }`). The carrier is unbuffered, so a caller that cancels and stops draining loses that send deterministically; the bare `return` nested inside `if blockOpen` skipped the assignment below it entirely, leaving `outcome.failure` nil. `finalizeSpan`'s deferred call then took the **success** branch — `codes.Ok`, no `error.type` — for a stream that had actually terminated on a genuine provider error frame. Structurally identical to the round-1 `[DONE]`-path CRITICAL (same file, same `outcome.failure`-after-send-attempt shape); the round-1 correction fixed that one occurrence and did not touch this sibling.
+
+**Fix**: hoist the failure construction and `outcome.failure` assignment to **before** the block-closing send, mirroring `emitFailure`'s own already-documented reordering elsewhere in this same file ("building the failure value first ... is a reordering with no observable behavior change: construction is pure, depends on nothing the sends below could alter"). No other behavior changes: when the close send succeeds, the function proceeds exactly as before; when it loses the race, `outcome.failure` is now always correct.
+
+**RED** (new test `TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure`, `ai37_terminal_race_test.go` — drives a text-delta chunk first so `blockOpen` is true, reads exactly the three block-opening events, cancels, and never reads again; proven via `go test -overlay` substituting the pre-fix `stream.go` from `git show HEAD:...` at build time, worktree never mutated):
+```
+ai37_terminal_race_test.go:199: span status = codes.Ok, want codes.Error -- the stream terminated on a provider error frame, so finalizeSpan must not take the success branch (R-AOB-005, Judgment Day round 2 CRITICAL)
+ai37_terminal_race_test.go:207: error.type absent, want present -- the span must report the in-band error frame's own failure category, not fall through to the success branch
+--- FAIL: TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure (0.00s)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.514s
+go test exit code: 1
+```
+`git status --porcelain` stayed empty throughout (only the scratchpad copy was overlaid). **GREEN**: same test passes against the real, fixed tree, 5x under `-race` (~0.00-0.01s each — no bounded-wait delay on this specific branch, since this fix does not add one; see item 3 below for the sibling branch that does).
+
+**Full enumeration of `run`'s terminal paths (the "grep for every remaining site" request)**: `run` has exactly **11 named terminal-return shapes**, matching the 11 post-handover rows `ai37_span_lifecycle_test.go`'s own `TestAI37_SpanLifecycle` table already drives (confirmed by direct correlation, not assumed). For each: whether a lost/failed send on that path leaves `outcome.failure` correctly set.
+
+| # | Named shape (test row) | Trigger | Lost-send mechanism | `outcome.failure` on lost send |
+|---|---|---|---|---|
+| 1 | `success_done` | `[DONE]`, completion built + `sendEvent(completion)` | `sendEvent` loses `ctx.Done()` race | **Correct** (round-1 fix): derives `midStreamFailureFrom(ctx.Err(), ...)` before the shared `return` — `ctx.Err()` is provably non-nil whenever `emit` returns false (the only way `emit`'s select can pick the `ctx.Done()` case), so the derivation never sees a nil error. |
+| 2 | `completion_build_failure` | `[DONE]`, `state.buildCompletion()` fails | N/A (no send attempted; error not send-related) | **Correct**: routed through `emitFailure`, which always returns the constructed `*ai.Failure` on every one of its own internal exits, including a losing-race exit, before any send is attempted. |
+| 3 | `in_band_error` | vendor error frame, `blockOpen` may be true | block-closing `sendEvent(end)` loses `ctx.Done()` race | **Was INCORRECT — this round's CRITICAL, now fixed** (item 1 above): failure is now built and assigned before the send is attempted. |
+| 4 | `malformed_chunk_json` | `decodeChunk` fails | N/A | **Correct**: `emitFailure`-routed, same guarantee as #2. |
+| 5 | `applychunk_failure_malformed_identity` | `state.applyChunk` fails | N/A | **Correct**: `emitFailure`-routed. |
+| 6 | `emit_race_cancellation` | events loop, `sendEvent(ev)` loses race | `sendEvent` loses `ctx.Done()` race | **Correct** (pre-existing, AI-32.3, predates AI-37): derives `midStreamFailureFrom(ctx.Err(), ...)` before the shared `return`, same non-nil guarantee as #1. |
+| 7 | `feed_error_frame_too_large` | `decoder.Feed` returns `feedErr` | N/A | **Correct**: `emitFailure`-routed. |
+| 8 | `eof_finish_error_truncated` | `decoder.Finish()` fails at EOF | N/A | **Correct**: `emitFailure`-routed. |
+| 9 | `eof_incomplete_no_sentinel` | clean EOF, `[DONE]` never seen | N/A | **Correct**: `emitFailure`-routed. |
+| 10 | `mid_stream_ctx_cancellation` | `resp.Body.Read` fails, `ctx.Err() != nil` | N/A (triggered directly by `ctx.Err()`, not by a prior lost send) | **Correct**: derives `midStreamFailureFrom(ctx.Err(), ...)` directly from the already-confirmed non-nil `ctx.Err()`. |
+| 11 | `read_error_abrupt_close` | generic read error, `ctx` still live | N/A | **Correct**: `emitFailure`-routed. |
+
+Confirmed exhaustive by `grep -n "sendEvent(\|emit(ctx\|outcome\.failure" stream.go` cross-checked against every `return` statement in `run`, and by `grep -rn "outcome\.failure\|chan ai\.Event\|spanOutcome"` across the whole `openaicompat` package (including `openrouter/`) — the only two non-test files that reference `outcome.failure`/`spanOutcome`/the event-carrier channel type are `stream.go` and `trace.go`; `openrouter/wrapper.go`'s own `(<-chan ai.Event, error)` match is a pass-through `ai.ModelProvider` method signature with no producer logic of its own. **10 of 11 paths were already correct; 1 of 11 (`in_band_error`) was not, and is fixed by this round.**
+
+### 2. WARNING — the round-1 `R-AOB-006` amendment overshot (`spec.md`, `trace.go`, commit `01340d1b`)
+
+**Root cause**: round 1 widened `R-AOB-006` bullet 2 to a general clause — "on a terminal-failure path where a response WAS obtained before the failure was recognized ... `http.response.status_code` MUST be recorded" — citing the content-type-refusal exit as its example. But `finalizeSpan`'s failure branch (`trace.go`) returned before ever recording the status code, and `run` is only ever launched after a successful, content-type-accepted response (`finalizeSpan`'s own doc comment: "`resp.StatusCode` ... is always the success code here"), so the exact code is genuinely in hand on **every one of `run`'s own 11 post-handover terminal paths** — not only the pre-handover content-type-refusal exit. The general clause, taken literally, already required this; the code had not been carried through to match it. No scenario asserted presence or absence on a mid-stream failure span, which is why the divergence went unnoticed.
+
+**Decision (widen the code, not narrow the spec) — justification**: the two options were (a) narrow bullet 2 to name only the content-type-refusal exit, leaving mid-stream failures to omit the code, or (b) widen `finalizeSpan` to record the code unconditionally, matching the clause as already written. Chose (b):
+- **No ambiguity about "the" response** on a mid-stream failure: `run` is launched with exactly one winning `*http.Response` (post-retry, post-content-type-check), same as the content-type-refusal exit — unlike the retry.Loop-error exit's own omission, which is justified specifically because *multiple* responses can exist across retries with no single one being "the" response (S-AOB-023's own class-not-code rule targets that ambiguity, not this case).
+- **Recording both facts is not a contradiction**: `http.response.status_code=200` alongside `error.type=malformed_response` states two true, independent facts — the HTTP transport succeeded, the stream/decode layer failed afterward — the same non-contradictory shape as an HTTP 200 carrying an application-level error elsewhere in common practice. Omitting a value genuinely in hand is the literal falsehood R-AOB-006's own text says it exists to prevent.
+- **Directly useful**: an operator debugging a mid-stream failure currently cannot tell from the span alone whether a response was ever obtained at all; recording it removes that blind spot for exactly zero cost (the value already exists as `finalizeSpan`'s own parameter).
+
+**Fix**: moved the `statusCodeKey` attribute-set in `finalizeSpan` to run unconditionally, before the `outcome.failure != nil` branch, instead of only in the success branch. Spec: broadened `R-AOB-006` bullet 2's appositive to name post-handover (mid-stream) failures explicitly alongside the content-type refusal, added scenario `S-AOB-041` (left **without** the `*(review)*` tag its sibling `S-AOB-040` carries, since `S-AOB-041` has a real red→green test cycle backing it — a genuine review obligation has no red phase, per this repository's own documented convention in `ai-request-translation`/`ai-provider-client`'s spec format lines; `S-AOB-040`'s own `*(review)*` tag looks like a pre-existing round-1 mislabel, since it too is test-backed, but that is not one of this round's three assigned items and was left untouched). Corrected the Identity table's and Acceptance criteria's scenario-count references (`S-AOB-001…S-AOB-039` had already gone stale at round 1 — it never accounted for round 1's own `S-AOB-040` — now `S-AOB-001…S-AOB-041`, closing both gaps together since they live in the same two lines this edit touched anyway).
+
+**RED** (new test `TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode`, `ai37_attributes_test.go` — an in-band-error-frame run, no cancellation needed, run against the **real, unfixed** source; no overlay required because the omission was genuinely still present):
+```
+ai37_attributes_test.go:435: http.response.status_code absent on a post-handover (mid-stream) terminal failure, want present -- a response WAS obtained before the in-band error frame terminated the stream (R-AOB-006 bullet 2, S-AOB-041)
+--- FAIL: TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode (0.00s)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.488s
+go test exit code: 1
+```
+**GREEN**: same test passes; `TestAI37_Attributes_TerminalFailureOmitsStatusCode` (the pre-handover retry.Loop-error exit — a structurally different case with no `*http.Response` at all) still passes unchanged, confirming the two exits' opposite postures both hold correctly side by side.
+
+### 3. WARNING — the round-1 fix burns a Stamper sequence (`stream.go`, commit `fd38cc2b`, doc-only)
+
+**Root cause**: `emit` stamps `ev` **before** its own `select`, so on the `[DONE]`-path's completion-send race (round 1's own fix), the lost completion still consumes sequence N — burned, never delivered to any consumer — and the recovery's own `TextBlockEnd`/`ErrorEvent` sends stamp N+1 (and N+2 when a block is open), skipping over the burned sequence. A consumer that somehow observed events on both sides of the gap would see a break in `sequence.go`'s own documented "1-based and contiguous within one stream" (R-AEE-007). Separately, Judge A flagged that the same recovery's bounded `emitFailureSendBound` (5s, ~10s with a block open) wait runs **before** `finalizeSpan`, the body drain and `close(out)` — all three wait behind it, on a path that previously returned immediately once the completion send itself lost its race.
+
+**Decision (keep the recovery sends) — justification**: weighed dropping them (closes the gap, removes the delay, simpler) against keeping them (consistency with the events-loop sibling, compliance with a pre-existing requirement). Kept them:
+- **Not a new defect**: the events-loop recovery already carries the identical stamp-then-burn-then-recover shape for an ordinary lost mid-stream send — this is the same construct, not a new one round 1 introduced.
+- **No shipped assertion can fail on it**: `ai.CheckStream` (`stream_check.go`) deliberately does not check 1..N sequence contiguity — that is AI-22.3's own charter (design.md D10) — confirmed by direct source read, not assumed.
+- **Dropping would violate a pre-existing requirement**: `S-AEM-051/052` (AI-32.3, predates AI-37) requires that a normal mid-stream send losing the `ctx.Done()` race "MUST still surface a typed terminal failure on cancel/deadline" — because a caller using a *deadline* rather than an explicit cancel, and still draining afterward (this package's own established drain-before-close convention, AI-33.5), can genuinely still receive the bounded-wait send. Dropping the recovery only for this one path would mean such a caller observes a typed `ErrorEvent` for every OTHER mid-stream failure shape except this one — an asymmetry with no principled justification, not merely a stylistic inconsistency.
+- Setting `outcome.failure` alone (which the round-1 fix already does unconditionally, before any of these sends are attempted) is what fixes the CRITICAL; the recovery sends are a separate, additional best-effort delivery concern, and dropping them would not have improved the CRITICAL fix itself.
+
+**Implementation**: no behavior change. Extended the existing round-1 comment at the recovery site with the sequence-gap explanation, the "same shape as the events-loop sibling" cross-reference, the `ai.CheckStream` non-contiguity citation, and the explicit keep-vs-drop tradeoff with its resolution — so a future reader debugging a sequence gap finds the reasoning in place rather than an unexplained contradiction.
+
+### Also recorded (Judge A SUGGESTION, NOT fixed this round)
+
+Judge A's SUGGESTION: the widened nil-check scan (`ai37_noop_equivalence_test.go`, round-1 item 8) is still a four-literal substring table (`span == nil`, `span != nil`, `tracer == nil`, `tracer != nil`), so a guard spelled with a renamed local (e.g. `if s := span; s == nil`) would evade it. This is the last permitted correction round, and this finding was explicitly named as record-only — **not fixed**. Follow-up for a future change: widen the scan from a literal-substring table to something that tracks identifier bindings (a lightweight AST walk, or at minimum a broader token-pattern set), or accept and document the residual risk explicitly in `trace.go`'s own "no adapter-side nil check" claim.
+
+### Gates (post-round-2, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — exit 0, 9/9 packages `ok`, 0 `FAIL` lines |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint run --config=.golangci.yml`) | **PASS** — exit 0, `0 issues.` |
+| Build | `cd backend/agent && make build` (`go build -trimpath ./...`) | **PASS** — exit 0 |
+| Working tree | `git status --porcelain` | clean except this round's own commits (`verify-report.md` left untouched, orchestrator-owned, per instruction) |
+
+### Final diff (three-dot, `git diff --stat origin/main...HEAD`)
+
+```
+34 files changed, 5895 insertions(+), 163 deletions(-)
+```
+
+### Residuals disclosed for archive-time attention (round 2 additions)
+
+- Judge A's nil-check-scan SUGGESTION (above) — explicitly deferred, not fixed, per the review order for this final round.
+- `S-AOB-040`'s own `*(review)*` tag looks like a pre-existing round-1 mislabel (it is backed by a real, running, red→green-evidenced test, not a prose-only review obligation) — not one of this round's three assigned items, left untouched; `S-AOB-041` (this round's own sibling scenario) was deliberately written without that tag for the reason stated in item 2 above.
+- All residuals disclosed in the round-1 section above (`S-AOB-038`, and items W-1/W-2/W-4/W-5/S-1..S-5 from the original `sdd-verify` report) remain untouched — out of scope for this round, which was limited to the three items plus the one record-only SUGGESTION the orchestrator named.
