@@ -1,0 +1,450 @@
+# Apply progress: Add the observability boundary (AI-37)
+
+> `sdd-apply` execution record. Branch `feat/ai-37-observability`, base `origin/main@ff28240a`. Worktree `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/ai-37-observability`. Strict TDD throughout. All 9 work units complete (21/21 tasks `[x]` in `tasks.md`).
+
+## Commits (in order)
+
+| # | SHA | Subject |
+|---|---|---|
+| 1 | `dbbb4e69` | feat(ai): add the OpenTelemetry tracing API dependency and its guard (AI-37 C1) |
+| — | *(no commit)* | C2 — recorded bite proof, evidence only |
+| 2 | `5ccfa8d4` | feat(ai): retry.Loop returns the retry count on every exit (AI-37 C4) |
+| 3 | `48be52a6` | feat(ai): add the AI-37 span seam -- one span per request, closed once (C5) |
+| 4 | `4a6d50fa` | feat(ai): map the twelve AI-37 span attributes and the event-count carrier (C6) |
+| 5 | `782e8c6b` | test(ai): prove the AI-37 content denylist by absence, with four non-vacuity guards (C7) |
+| 6 | `4f4d13a7` | test(ai): prove AI-37 no-op equivalence with no tracer configured (C8) |
+| 7 | `66954f80` | docs(ai): commit the AI-37 SDD planning artifacts (C9) |
+
+## Final gate results (post-C9, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — 9/9 packages `ok` |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint run --config=.golangci.yml`) | **PASS** — `0 issues` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0 |
+| Sibling modules | `cd backend/database_administrator && go build ./...`; `cd backend/workspace_syncer && go build ./...` | **PASS** — both build independently (R-AGM-003, S-AGM-021) |
+| Working tree | `git status --porcelain` (repo root) | **PASS** — empty |
+
+## Final diff (three-dot, `git diff --stat origin/main...HEAD`)
+
+```
+29 files changed, 4503 insertions(+), 147 deletions(-)
+```
+
+Breakdown:
+- **Authored code** (Go + `.gitignore`, excluding generated sum files and OpenSpec docs): **~3,232 lines** (across 20 Go files + `.gitignore`) — forecast was ~1,660 (band 1,400–2,100); `size:exception` was pre-granted and auto-raising for this milestone specifically, so this overrun (≈1.9×) needed no mid-apply decision. Comparable in shape to AI-35's overrun, well under AI-36's ≈3.8×.
+- **Generated** (`backend/agent/go.sum` + `go.work.sum`): 80 lines — excluded from the review-budget count per `sdd-phase-common.md` § E.
+- **OpenSpec planning docs** (`proposal.md`, `design.md`, `tasks.md`, `spec.md`, `specs/**`, `explore.md`): 1,338 lines — already authored during `sdd-spec`/`sdd-design`, committed (not re-written) in C9.
+
+## Per-phase summary
+
+Full RED/GREEN evidence, exact captured failure messages, and every deviation are recorded inline in `tasks.md` (each phase carries its own `[x]` task notes and, where applicable, a `> DEVIATION recorded by sdd-apply` block). Summary:
+
+| Phase | WU | Commit | RED mechanism | Result |
+|---|---|---|---|---|
+| 1 | WU-1+2 (+7 merged) | C1 | Guard: real pre-`go get` failure. Tracetest: real pre-source build failure. | otel v1.44.0 pinned; exact require-set + closure-equality guard; recording tracer package; 4 pre-existing zero-requires pins updated; `.gitignore` fix. |
+| 2 | WU-3 | *(no commit)* | 3 recorded bites (SDK, exporter, deny-by-default re-proof), each reverted via `git checkout --`. | Evidence only, zero persisted diff. |
+| 3 | WU-7 | *(merged into C1)* | — | Recording tracer — see Phase 1. |
+| 4 | WU-6c | C4 | Real pre-signature-change compile failure (7 call sites). | `retry.Loop` returns `(*http.Response, int, error)`. |
+| 5 | WU-4 | C5 | **`git stash`**-proved RED (justified deviation from the overlay default — see below). | Span seam: start before `retry.Loop`, ends exactly once on all 15 terminal paths. |
+| 6 | WU-5+6a/b | C6 | Real pre-implementation assertion failures (11 rows). | Full 12-key § D3 attribute table + `stream.event_count`. |
+| 7 | WU-8 | C7 | **`go test -overlay`**-proved RED (the orchestrator-mandated mechanism, used here). | Denylist absence + all 4 non-vacuity guards. |
+| 8 | WU-9 | C8 | Isolated `t.TempDir()` staged-mutation RED (lexical-scan claim, not behavioral). | No-op equivalence, nil-check-absence, falsifiability. |
+| 9 | WU-10 | C9 | — | OpenSpec artifacts committed; final full-suite verification. |
+
+## Deviations (full detail in `tasks.md`; summarized here)
+
+1. **C1/C3 structurally merged.** `go get` with no real importer of the four allowlisted packages leaves `go.mod` over-broad (pulls `go-logr`, `auto/sdk`, `otel/metric`); `go mod tidy` with no real importer prunes to zero — both verified empirically. `tracetest.go` is the minimal real importer the exact require/closure pins need to prune against, so WU-7 landed in the same commit as WU-1/WU-2. The working `go get → write importer → go mod tidy (bumps to v1.45.0) → go get @v1.44.0 again → go mod tidy again` sequence is recorded in `tasks.md` Phase 1 so a future dependency bump does not rediscover it.
+2. **Four pre-existing "zero requires" pins** outside the primary guard (`openaicompat/charter_boundary_test.go`, two in `openrouter/zero_requires_test.go`, one in `openrouter/charter_test.go`) needed updating to the AI-37-authorized state — each one's own doc comment already anticipated this "in the same commit." Also fixed a real pre-existing bug in `parseAllowedNonStdlibPrefixes` (never actually handled literal-string slice elements, only const references, despite its own doc comment claiming otherwise).
+3. **Root `.gitignore` excluded `go.work.sum`**, contradicting the already-landed `R-AGM-003`/`S-AGM-023` and blocking the new `S-AGM-068`. Fixed.
+4. **`retry.Loop`'s "one production caller" framing is production-code-true, not test-true** — `a_i-35_2_test.go` (pre-existing, AI-35.2) calls it directly at 4 more sites; all updated.
+5. **C5's RED used `git stash`, not `go test -overlay`.** Rationale recorded in `tasks.md`: the standing overlay mandate targets "prove a defect variant a test should catch without mutating the worktree" (the exact shape used correctly at C7); C5's claim is the structurally different "this field does not exist yet in the pre-commit tree", which `git stash`/`git stash pop` — git's own atomic, tested mechanism — proves without any hand-computed restore path (the specific failure mode the standing instruction's edit-run-restore warning is about). Verified byte-identical restore via immediate green `make test`/`make lint`/`make build` and clean `git status` after `git stash pop`.
+6. **C5, `-race`-only timing**: the `feed_error_frame_too_large` row needs ~8s under `-race` instrumentation (isolated probe, deleted after use) — a dedicated 20s timeout was added for that one row.
+7. **C5**: `genAISystem` and `spanOutcome.eventCount` deferred to C6 (would be dead code / `unused`-lint failures in C5, since their only consumers land in C6).
+8. **C6**: `tracetest.go` gained three small read-only accessors (`Provider.Spans`, `Span.Attributes`, `Span.Status`) — needed for typed per-key assertions that `Corpus()`'s flattened string deliberately cannot give. No import-set or recording-behavior change.
+9. **C7 — the load-bearing one**: R-AOB-008 item 3's literal wording ("drained recording contained text, reasoning, tool-call, completion and error events") cannot be satisfied for this adapter. `openaicompat/decision.md` (AI-29.0, already landed, three independent mechanisms) proves this adapter can never construct an `ai.EventKindReasoningDelta` event on any real transcript — `wireDelta` has no `reasoning_content` field and `decodeChunk`'s plain `json.Unmarshal` silently drops it before any Go value exists to carry it. **Resolution**: the event-coverage guard asserts the four event kinds this adapter can produce (text, tool-call, completion, error) across a two-run exercise (completion and error are mutually exclusive within one span). The reasoning **canary vector** stays fully planted and R-AOB-007's absence scan still proves it absent from the corpus — a strictly stronger claim than an event-kind check, since the value never reaches any Go struct field at all. Documented in the test file's own header comment, in `tasks.md`, and here.
+10. **C7, mechanical**: tool-call `arguments` must be well-formed JSON (`ai.NewToolCall` validates it on the clean-close path) — the tool-args canary is embedded as a JSON string value, not a bare literal (found via an isolated, deleted probe).
+11. **C8**: S-AOB-039's mutation-detection proof uses an isolated `t.TempDir()` staged mutation (matching `openrouter/charter_test.go`'s own established precedent for this guard shape), not `go test -overlay` — the claim is a pure lexical scan over `[]byte`, not compiled/runtime behavior, so a real-file mutation would add worktree risk for zero additional evidentiary value.
+
+## Risks / residual items (none blocking)
+
+- The ~1.9× forecast overrun (pre-approved via `size:exception`, auto-raising) is the largest single fact a reviewer should expect going in — it is not a surprise this document is hiding, it is stated up front.
+- Deviation 9 (reasoning event-coverage) is a genuine, load-bearing interpretive call, not a mechanical one. It is evidence-backed (three independent landed mechanisms in `decision.md`) but is the one place this apply phase exercised judgment about what a scenario's literal text must mean when it collides with an already-decided, already-shipped fact about this specific adapter. Flagged for `sdd-verify`'s and the maintainer's own attention.
+- Two follow-ups already recorded in the landed spec (not new): an exact terminal-failure status code belongs to `ai-provider-errors` (R-AOB-006's own recorded follow-up); AI-38's expected-vs-generated capability comparison is where `CAP-O-01`'s reasoning-absence verdict gets its next real confirmation opportunity (decision.md § 9/§ 10, unrelated to this milestone's own scope but adjacent to deviation 9 above).
+
+## Remediation round (sdd-verify findings, 2026-08-08)
+
+`sdd-verify` returned **FAIL** on one CRITICAL (`C-1`) plus warnings after the 21/21-task apply above. This round fixes exactly `C-1`, `W-3` and `W-6`, and evaluates `S-6`; every other warning/suggestion (`W-1`, `W-2`, `W-4`, `W-5`, `S-1`…`S-5`) is an archive-time record correction the orchestrator owns and this round does not touch.
+
+### Commits
+
+| # | SHA | Subject |
+|---|---|---|
+| 8 | `3a61e46d` | test(ai): prove retry.count on every retry-loop exit, complete the no-tracer table (AI-37 remediation) |
+| 9 | *(this commit)* | docs(ai): correct the AI-37 apply-progress diff stat, record the remediation round |
+
+### C-1 (CRITICAL) — `retry.count` present-but-unasserted on 4 of 5 `S-AOB-015` rows
+
+**Root cause**: production code was already correct (`stream.go:230,244,247`; `trace.go:104-106,122-123`; `retry.Loop`'s own return value proven by `TestLoop_RetryCountOnEveryExit`) — only the span-attribute assertion was missing. This is a test-only fix; no production code changed.
+
+**Added**: `backend/agent/src/ai/openaicompat/ai37_retry_count_test.go` — a fail-then-succeed `httptest` fixture (`ai37RetryTwiceThenSucceedServer`) plus `TestAI37_RetryCount_PresentOnEveryExit`, a 5-row table asserting `retry.count`'s exact value on every row `S-AOB-015` names:
+
+| Row | Construction | Asserted `retry.count` |
+|---|---|---|
+| `unretried_success` | single 200 | `0` |
+| `retried_twice_then_success` | 503, 503, 200 | `2` (also discharges `S-AOB-009`: exactly one span, ended once, across a retried-then-succeeded attempt) |
+| `non_retryable_terminal` | 401 (always) | `0` |
+| `budget_exhausted` | 503 (always) | `retry.DefaultMaxAttempts` (`3`) |
+| `cancelled` | 503 once, then `ctx` cancelled from a channel-synchronized watcher goroutine the instant the first response is written server-side | `0` — deterministic by construction: both of `retry.Loop`'s cancellation exits (`ctx.Err()` check, `SleepFunc` error) return `attempt-1` with `attempt` still `1` at that point, and a racing transport-level cancellation is categorized `Unavailable`/retryable and caught by that same `ctx.Err()` check before a second attempt is ever issued |
+
+**RED proof #1** (`recordRetryCount` hard-wired to `attribute.Int(retryCountKey, 0)`, loaded via `go test -overlay`, worktree never mutated):
+```
+ai37_retry_count_test.go:125: retry.count = 0, want 2   (retried_twice_then_success)
+ai37_retry_count_test.go:151: retry.count = 0, want 3   (budget_exhausted)
+--- FAIL: TestAI37_RetryCount_PresentOnEveryExit (2/5 rows failed)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.336s
+go test exit code: 1
+```
+
+**RED proof #2** (`recordRetryCount(span, retries)` call deleted from `endSpanPreHandover`, loaded via `go test -overlay`, worktree never mutated):
+```
+ai37_retry_count_test.go:189: retry.count absent, want present on every exit of the retry mechanism (cancelled)
+ai37_retry_count_test.go:138: retry.count absent, want present on every exit of the retry mechanism (non_retryable_terminal)
+ai37_retry_count_test.go:151: retry.count absent, want present on every exit of the retry mechanism (budget_exhausted)
+--- FAIL: TestAI37_RetryCount_PresentOnEveryExit (3/5 rows failed)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	1.470s
+go test exit code: 1
+```
+
+`git status --porcelain` stayed empty in the worktree throughout both overlay runs (aside from this remediation's own not-yet-committed files) — neither `trace.go` nor any other tracked file was ever touched. Baseline (no overlay) run: all 5 rows `PASS` against the real, unmodified code.
+
+### W-3 — no-tracer table now covers 15 of 15 terminal shapes
+
+Added the missing `pre_handover_cancelled_in_loop` row to `TestAI37_NoopEquivalence_NoTracerConfigured_NoPanicAcrossTerminalPaths`'s `cases` table (`ai37_noop_equivalence_test.go`), mirroring `ai37_span_lifecycle_test.go`'s own identically-named case with `mustNoTracerClient` in place of `ai37MustClient`. The file's own doc comment already claimed 15 shapes (that part was already correct); the table now actually carries 15 — confirmed empirically: 15 `--- PASS` lines, 0 `FAIL`, for this one subtest alone.
+
+### S-6 (optional) — evaluated, skipped
+
+`runNoPanic`'s `recover()` (`ai37_noop_equivalence_test.go`) only covers the calling goroutine, not `run`'s own producer goroutine spawned inside `Stream()` (`go run(ctx, resp, out, span)`, `stream.go`). Closing this gap would require `run` itself (production code) to install its own `recover()` plus some mechanism to report a caught panic back to the test — a real production-code behavioral change (recovering from a panic changes what the program does, not merely what a test observes), and no test-only injection point exists to wrap a goroutine that production code spawns internally. Out of scope for a test-only diagnostic improvement; skipped, not attempted, per the instruction to skip and say so when a "cheap" fix would actually perturb the paths being exercised.
+
+### Gates (post-remediation, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — 9/9 packages `ok`, 0 `FAIL` lines |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint`) | **PASS** — `0 issues.` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0 |
+| Working tree | `git status --porcelain` | clean except this remediation's own commits |
+
+### W-6 — this section is itself the fix
+
+The stat this document recorded before this round (`29 files changed, 4503 insertions(+), 147 deletions(-)`) was stale — it did not count its own prior commit. Final three-dot diff, re-run **after** this remediation's own commits land (so the number left here is the actual final one, not a pre-commit estimate):
+
+```
+git diff --stat origin/main...HEAD
+31 files changed, 4879 insertions(+), 147 deletions(-)
+```
+
+### Out of scope (orchestrator-owned, untouched by this round)
+
+`W-1`, `W-2`, `W-4`, `W-5`, `S-1`, `S-2`, `S-3`, `S-4`, `S-5` — archive-time record corrections (a spec-site declination note, an evidentiary-framing correction, recorded-evidence carry-forward from verify into the archive record, an unassertable-duration scenario narrowing, spec index arithmetic, and a pre-existing `go.work` version drift owned by `agent-module-scaffold`, not by this change). Not edited here; `go.work` itself was not touched.
+
+## Judgment Day correction round (2026-08-08)
+
+Two blind adversarial judges independently reviewed `feat/ai-37-observability` @ frozen HEAD `c70750b5` and both returned the **same CRITICAL** (Engram `sdd/cachicamas-ai-observability/judgment-day-round1`, obs #2731), plus seven disjoint single-judge warnings. The maintainer chose the widest correction scope: the CRITICAL, all seven warnings, and the OpenRouter tracer door — all nine items below, fixed in four commits.
+
+### Commits
+
+| # | SHA | Subject |
+|---|---|---|
+| 10 | `a38ea388` | fix(ai): honor the completion send's own race result in the span finalizer |
+| 11 | `a34fb64f` | feat(ai): thread an injectable tracer provider through the OpenRouter wrapper |
+| 12 | `fcbbd1c9` | docs(ai): correct two overreaching R-AOB claims, prove the status-code split |
+| 13 | `efaf9e38` | test(ai): harden four guards and prove their own non-vacuity |
+
+### 1. CRITICAL — the terminal-send race (`stream.go`, commit `a38ea388`)
+
+**Root cause**: on the `[DONE]` path, `run` set `outcome.completion`/`haveCompletion` before calling `sendEvent(completion)` and discarded the send's own bool. The carrier is unbuffered, so a caller that cancels and stops draining deterministically loses the completion; `outcome.failure` stayed nil, so `finalizeSpan` took the success branch (`codes.Ok` + every usage attribute) for a request whose consumer received nothing (R-AOB-005).
+
+**Fix**: mirror the events loop's own recovery (`stream.go:757-781`, the correctly-stamped sibling) — on a losing race, derive a typed cancellation failure via `midStreamFailureFrom(ctx.Err(), outputPreceded)`, set `outcome.failure`, and attempt a best-effort bounded-wait stamped `ErrorEvent`.
+
+**RED** (new file `ai37_terminal_race_test.go`, `TestAI37_TerminalCompletionSend_LosingTheRaceRecordsFailure` — read exactly the `ResponseStart` event, cancel, never read again):
+```
+ai37_terminal_race_test.go:94: span status = codes.Ok, want codes.Error -- the stream consumer never received the completion...
+ai37_terminal_race_test.go:99: gen_ai.response.finish_reasons present, want absent...
+ai37_terminal_race_test.go:102: error.type absent, want present...
+--- FAIL: TestAI37_TerminalCompletionSend_LosingTheRaceRecordsFailure (0.00s)
+```
+**GREEN**: same test passes deterministically (5x under `-race`, ~5.00s each — bounded by `emitFailureSendBound`, matching the sibling's own bounded-wait cost).
+
+### 2. The OpenRouter tracer door (`openrouter/wrapper.go`, commit `a34fb64f`)
+
+**Root cause**: `openrouter.Config` had no `TracerProvider` field; `NewProvider` left `openaicompat.Config`'s own field zero. The only shipped concrete provider was permanently untraceable, even though `client.go`'s own doc comment calls that field "the only door a tracer reaches Layer 1 through."
+
+**Fix**: add `Config.TracerProvider trace.TracerProvider`, thread it to `openaicompat.New` verbatim.
+
+**RED** (new file `openrouter/tracer_test.go`) — `go vet`, before the field existed:
+```
+vet: src/ai/openaicompat/openrouter/tracer_test.go:35:3: unknown field TracerProvider in struct literal of type Config
+```
+**GREEN**: `TestNewProvider_InjectedTracerProviderRecordsTheSpan`, `TestNewProvider_TwoWrappersDiscriminateInjectedProviders`, `TestNewProvider_NoTracerProviderInjected_UsesNoOpDefault` all PASS.
+
+**Spec**: `ai-provider-client` delta, `R-APC-016` gains a clause requiring every composing wrapper to expose the same door; new scenario `S-APC-085` (contiguous with this change's own `S-APC-081..084`).
+
+### 3. Content-type-refusal status-code split — spec accuracy (commit `fcbbd1c9`)
+
+**Root cause**: `R-AOB-006`/`S-AOB-022` stated a blanket rule ("terminal-failure path only the status class survives") that is false for the content-type-refusal exit, which has a real `*http.Response` in hand and already records the exact code (`stream.go`, `endSpanPreHandover(span, retries, true, resp.StatusCode, refusal)`). The design's D-3b split was already correct in source and design.md; the spec text was the defect.
+
+**Fix**: split `R-AOB-006`/`S-AOB-022` explicitly (retry.Loop-error exit omits; content-type-refusal exit records), add `S-AOB-040` for the previously-undescribed row, and add the missing test.
+
+**RED** (non-vacuity by mutation, since the production code was already correct — `go test -overlay` swapping `stream.go` for a variant hard-coding `endSpanPreHandover(span, retries, false, 0, refusal)` on the refusal exit):
+```
+ai37_attributes_test.go:380: http.response.status_code absent on the content-type-refusal exit, want present...
+--- FAIL: TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode (0.00s)
+```
+`git status --porcelain` stayed empty throughout (only the scratchpad copy was overlaid). **GREEN**: same test PASSes against the real, unmodified tree.
+
+### 4. Event-coverage claim (five kinds vs four) — spec accuracy (commit `fcbbd1c9`)
+
+**Root cause**: `R-AOB-008` item 3/`S-AOB-032` mandated five event kinds including reasoning; `ai37_denylist_test.go`'s guard asserts four. Independently re-verified (`decision.md`, three mechanisms): `wireDelta` declares no `reasoning_content` field and `decodeChunk`'s plain `json.Unmarshal` drops it before a Go value exists — this adapter can never construct a reasoning event on any real transcript. The code was already correct; the spec overreached.
+
+**Fix**: spec-only. Narrowed item 3/S-AOB-032 to the four structurally-achievable kinds, and stated plainly that the reasoning canary is retained in the absence scan for documentation value, not coverage evidence — replacing the prior "strictly stronger" framing (flagged as inflated by both verify and Judgment Day). No test change: the shipped guard already matches the corrected claim.
+
+### 5. Unstamped terminal sends, pre-existing (`stream.go:828,835`, commit `efaf9e38`)
+
+**Provenance check**: `git show origin/main:.../stream.go` carries the identical unstamped `out <- end` / `out <- errEv` shape at the same logical site — confirmed pre-existing, not introduced by AI-37, but carried forward unchanged. Fixed anyway per instruction, labeled here as an out-of-scope-for-AI-37 pre-existing defect (AI-41 precedent).
+
+**Fix**: stamp both sends via `stamper.Stamp(...)` before hitting the carrier, matching every sibling terminal-send path.
+
+**RED** (new test `TestAI37_TerminalEvents_AlwaysStamped`, driven through the existing `mid_stream_ctx_cancellation` fixture shape):
+```
+ai37_span_lifecycle_test.go:490: event 1 (kind error) has Sequence() = 0, want 2 -- every send on this carrier MUST go through the per-stream Stamper (R-AEE-007/R-AEE-008)
+--- FAIL: TestAI37_TerminalEvents_AlwaysStamped (0.00s)
+```
+**GREEN**: passes reliably (3x under `-race`).
+
+### 6. `countGoModRequireLines` blind spot (`openrouter/zero_requires_test.go`, commit `efaf9e38`)
+
+**Root cause**: counted lines whose trimmed text *starts with* `require`, so a dependency appended inside the existing `require ( ... )` block added no new "require"-prefixed line and passed silently.
+
+**Fix**: rewritten to count module entries (block-interior lines + single-line requires); `wantGoModRequireLines` moves from 2 to 3 under the new semantics. Also updated the two stale doc-comment blocks describing pre-AI-37 zero-pin behavior.
+
+**RED** (`TestCountGoModRequireLines_DetectsInBlockAddition`, pure in-memory `[]byte` comparison — no overlay used or usable here: `-overlay` substitutes build-time source, not the bytes a running test reads back via `os.ReadFile`, so a runtime file-content guard needs an in-memory falsifier instead):
+```
+zero_requires_test.go:403: countGoModRequireLines() = 2 for both the authorized go.mod and one with an unauthorized module appended INSIDE the require( ... ) block, want different counts...
+zero_requires_test.go:406: countGoModRequireLines(with one extra in-block module) = 2, want exactly 3...
+--- FAIL: TestCountGoModRequireLines_DetectsInBlockAddition (0.00s)
+```
+**GREEN**: passes; `TestOpenRouterAdapter_RequireLinesMatchAI37Authorization` and `charter_test.go`'s own `go_mod_matches_ai37_authorized_require_lines` subtest (same shared constant/function) both still PASS under the new value.
+
+### 7. `tracetest` discards span-start links (`tracetest.go`, commit `efaf9e38`)
+
+**Root cause**: `tracer.Start` retained `cfg.Attributes()` but never read `cfg.Links()`, while `Corpus()`'s own doc comment claims it captures "every field the tracing API allows a caller to set on any span."
+
+**Fix (preferred option taken)**: capture `cfg.Links()` at `Start`, so the corpus claim becomes true. Extended the captured-field-count guard with a new `spanStartContentBearingOptions` table over `trace.SpanConfig`'s own 6 exported accessors (the same AD-4 discipline already applied to `Span`'s methods) plus a `NumMethod()` count pin, so the Start-option surface is inside the proof.
+
+**RED** (`TestProvider_StartCapturesLinkOption`, `TestCorpus_CapturedStartOptionsMatchesConfigSurface`):
+```
+tracetest_test.go:178: Corpus() does not contain a link supplied via trace.WithLinks at Start...
+tracetest_test.go:247: Corpus() does not contain the Start-option Links sentinel "CFC-STARTLINKS-SENTINEL"
+tracetest_test.go:251: Corpus() captured 1 of the 2 content-bearing Start options, want all 2
+--- FAIL (both tests)
+```
+**GREEN**: both PASS, alongside the existing `TestSpanInterface_MethodCounts`/`TestCorpus_CapturedFieldCountMatchesAPISurface`.
+
+### 8. Nil-check scan scope overclaim (`ai37_noop_equivalence_test.go`, commit `efaf9e38`)
+
+**Root cause**: the scan named exactly three hardcoded files (`client.go`, `stream.go`, `trace.go`), narrower than both `trace.go`'s own doc comment ("anywhere in this package") and this file's own header comment ("anywhere in Layer 1").
+
+**Fix (preferred option taken — widen to package scope)**: pre-checked via `grep -rnE "span == nil|span != nil|tracer == nil|tracer != nil"` over every non-test `.go` file in the package — zero hits outside the original three, so widening was safe. Rewrote the scan to walk every non-test source file via `os.ReadDir(".")` (reusing the same file-selection rule `ambient_authority_test.go`'s `isAdapterSourceFile` already establishes, restated locally since that helper lives in the internal test package and this file is external), with a `scanned >= 10` non-vacuity floor. Narrowed this file's own header comment from "Layer 1" to "this package" to match what is now actually proven — `trace.go`'s own comment needed no change, since package-wide scope now makes it true. **Residual, disclosed**: `S-AOB-038` in `spec.md` still says "Layer 1 sources"; this round only widened to package scope (the smaller of the two options the remediation instructions offered) and did not touch that spec line — flagged for archive-time reconciliation.
+
+**Non-vacuity for the widening itself**: since `-overlay` cannot defeat a runtime `os.ReadFile`/`os.ReadDir` read (it only substitutes build-time compiled source, not a running binary's own file I/O), the widening's own falsifier is the `scanned >= 10` structural floor rather than a mutation proof; `scanTracingNilChecks`'s own detection logic was already separately proven non-vacuous by the pre-existing `TestAI37_NoopEquivalence_NilCheckScan_DetectsStagedMutation`.
+
+**GREEN**: `TestAI37_NoopEquivalence_NoNilCheckOnTracingValues` PASSes, scanning 20+ files, zero violations found.
+
+### 9. Racy dead counter (`ai37_span_lifecycle_test.go`, commit `efaf9e38`)
+
+**Root cause**: `var hits int` incremented inside an `httptest` handler across retry attempts (potentially different goroutines), never read anywhere.
+
+**Fix**: deleted (its own sibling row in `ai37_noop_equivalence_test.go`'s no-tracer table never carried a counter for the identical fixture shape) rather than made atomic, since it was genuinely unused.
+
+### Gates (post-Judgment-Day-round, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — 9/9 packages `ok`, 0 `FAIL` lines |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint`) | **PASS** — `0 issues.` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0 |
+| Working tree | `git status --porcelain` | clean except this round's own commits (`verify-report.md` left untouched, orchestrator-owned) |
+
+### Final diff (three-dot, `git diff --stat origin/main...HEAD`)
+
+```
+34 files changed, 5674 insertions(+), 162 deletions(-)
+```
+
+### Residuals disclosed for archive-time attention
+
+- `S-AOB-038` still says "Layer 1 sources"; item 8's widened scan proves package scope, not the full Layer-1 tree (`ai/`, `ai/internal/retry/`, `ai/openaicompat/openrouter/` were not all walked by one scan). A future round can either widen further or narrow that one spec line.
+- Items W-1, W-2, W-4, W-5, S-1..S-5 from the original `sdd-verify` report remain untouched (archive-time record corrections, as recorded in the prior remediation-round section above) — this Judgment Day round did not revisit them; only the nine items the orchestrator named for this round were in scope.
+
+## Judgment Day round 2 (final correction round, 2026-08-08)
+
+Two blind judges independently re-reviewed the round-1 correction delta `c70750b5..2e7503dc` (13 files, +818/-38). Judge B found one new CRITICAL (the same lost-send defect shape on a second, sibling terminal path) plus two WARNINGs; Judge A corroborated one of those two WARNINGs from a different angle and added one SUGGESTION. Full ledger: Engram `sdd/cachicamas-ai-observability/judgment-day-round2`, obs #2735. This is the last permitted correction round — the SUGGESTION is recorded below, not fixed, per the review order.
+
+### Commits
+
+| # | SHA | Subject |
+|---|---|---|
+| 14 | `8a257a4b` | fix(ai): set outcome.failure before the in-band-error block-close send |
+| 15 | `01340d1b` | fix(ai): record the exact status code on every post-handover failure |
+| 16 | `fd38cc2b` | docs(ai): justify keeping the terminal-race recovery send |
+
+### 1. CRITICAL — the same lost-send defect on the in-band error-frame path (`stream.go`, commit `8a257a4b`)
+
+**Root cause**: `run`'s `isInBandErrorFrame` branch built `failure := failureFromErrorFrame(...)` and assigned `outcome.failure = failure` **after** attempting the block-closing `TextBlockEnd` send (`if blockOpen { if !sendEvent(end) { return } }`). The carrier is unbuffered, so a caller that cancels and stops draining loses that send deterministically; the bare `return` nested inside `if blockOpen` skipped the assignment below it entirely, leaving `outcome.failure` nil. `finalizeSpan`'s deferred call then took the **success** branch — `codes.Ok`, no `error.type` — for a stream that had actually terminated on a genuine provider error frame. Structurally identical to the round-1 `[DONE]`-path CRITICAL (same file, same `outcome.failure`-after-send-attempt shape); the round-1 correction fixed that one occurrence and did not touch this sibling.
+
+**Fix**: hoist the failure construction and `outcome.failure` assignment to **before** the block-closing send, mirroring `emitFailure`'s own already-documented reordering elsewhere in this same file ("building the failure value first ... is a reordering with no observable behavior change: construction is pure, depends on nothing the sends below could alter"). No other behavior changes: when the close send succeeds, the function proceeds exactly as before; when it loses the race, `outcome.failure` is now always correct.
+
+**RED** (new test `TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure`, `ai37_terminal_race_test.go` — drives a text-delta chunk first so `blockOpen` is true, reads exactly the three block-opening events, cancels, and never reads again; proven via `go test -overlay` substituting the pre-fix `stream.go` from `git show HEAD:...` at build time, worktree never mutated):
+```
+ai37_terminal_race_test.go:199: span status = codes.Ok, want codes.Error -- the stream terminated on a provider error frame, so finalizeSpan must not take the success branch (R-AOB-005, Judgment Day round 2 CRITICAL)
+ai37_terminal_race_test.go:207: error.type absent, want present -- the span must report the in-band error frame's own failure category, not fall through to the success branch
+--- FAIL: TestAI37_InBandErrorFrame_LosingTheBlockCloseRaceRecordsFailure (0.00s)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.514s
+go test exit code: 1
+```
+`git status --porcelain` stayed empty throughout (only the scratchpad copy was overlaid). **GREEN**: same test passes against the real, fixed tree, 5x under `-race` (~0.00-0.01s each — no bounded-wait delay on this specific branch, since this fix does not add one; see item 3 below for the sibling branch that does).
+
+**Full enumeration of `run`'s terminal paths (the "grep for every remaining site" request)**: `run` has exactly **11 named terminal-return shapes**, matching the 11 post-handover rows `ai37_span_lifecycle_test.go`'s own `TestAI37_SpanLifecycle` table already drives (confirmed by direct correlation, not assumed). For each: whether a lost/failed send on that path leaves `outcome.failure` correctly set.
+
+| # | Named shape (test row) | Trigger | Lost-send mechanism | `outcome.failure` on lost send |
+|---|---|---|---|---|
+| 1 | `success_done` | `[DONE]`, completion built + `sendEvent(completion)` | `sendEvent` loses `ctx.Done()` race | **Correct** (round-1 fix): derives `midStreamFailureFrom(ctx.Err(), ...)` before the shared `return` — `ctx.Err()` is provably non-nil whenever `emit` returns false (the only way `emit`'s select can pick the `ctx.Done()` case), so the derivation never sees a nil error. |
+| 2 | `completion_build_failure` | `[DONE]`, `state.buildCompletion()` fails | N/A (no send attempted; error not send-related) | **Correct**: routed through `emitFailure`, which always returns the constructed `*ai.Failure` on every one of its own internal exits, including a losing-race exit, before any send is attempted. |
+| 3 | `in_band_error` | vendor error frame, `blockOpen` may be true | block-closing `sendEvent(end)` loses `ctx.Done()` race | **Was INCORRECT — this round's CRITICAL, now fixed** (item 1 above): failure is now built and assigned before the send is attempted. |
+| 4 | `malformed_chunk_json` | `decodeChunk` fails | N/A | **Correct**: `emitFailure`-routed, same guarantee as #2. |
+| 5 | `applychunk_failure_malformed_identity` | `state.applyChunk` fails | N/A | **Correct**: `emitFailure`-routed. |
+| 6 | `emit_race_cancellation` | events loop, `sendEvent(ev)` loses race | `sendEvent` loses `ctx.Done()` race | **Correct** (pre-existing, AI-32.3, predates AI-37): derives `midStreamFailureFrom(ctx.Err(), ...)` before the shared `return`, same non-nil guarantee as #1. |
+| 7 | `feed_error_frame_too_large` | `decoder.Feed` returns `feedErr` | N/A | **Correct**: `emitFailure`-routed. |
+| 8 | `eof_finish_error_truncated` | `decoder.Finish()` fails at EOF | N/A | **Correct**: `emitFailure`-routed. |
+| 9 | `eof_incomplete_no_sentinel` | clean EOF, `[DONE]` never seen | N/A | **Correct**: `emitFailure`-routed. |
+| 10 | `mid_stream_ctx_cancellation` | `resp.Body.Read` fails, `ctx.Err() != nil` | N/A (triggered directly by `ctx.Err()`, not by a prior lost send) | **Correct**: derives `midStreamFailureFrom(ctx.Err(), ...)` directly from the already-confirmed non-nil `ctx.Err()`. |
+| 11 | `read_error_abrupt_close` | generic read error, `ctx` still live | N/A | **Correct**: `emitFailure`-routed. |
+
+Confirmed exhaustive by `grep -n "sendEvent(\|emit(ctx\|outcome\.failure" stream.go` cross-checked against every `return` statement in `run`, and by `grep -rn "outcome\.failure\|chan ai\.Event\|spanOutcome"` across the whole `openaicompat` package (including `openrouter/`) — the only two non-test files that reference `outcome.failure`/`spanOutcome`/the event-carrier channel type are `stream.go` and `trace.go`; `openrouter/wrapper.go`'s own `(<-chan ai.Event, error)` match is a pass-through `ai.ModelProvider` method signature with no producer logic of its own. **10 of 11 paths were already correct; 1 of 11 (`in_band_error`) was not, and is fixed by this round.**
+
+### 2. WARNING — the round-1 `R-AOB-006` amendment overshot (`spec.md`, `trace.go`, commit `01340d1b`)
+
+**Root cause**: round 1 widened `R-AOB-006` bullet 2 to a general clause — "on a terminal-failure path where a response WAS obtained before the failure was recognized ... `http.response.status_code` MUST be recorded" — citing the content-type-refusal exit as its example. But `finalizeSpan`'s failure branch (`trace.go`) returned before ever recording the status code, and `run` is only ever launched after a successful, content-type-accepted response (`finalizeSpan`'s own doc comment: "`resp.StatusCode` ... is always the success code here"), so the exact code is genuinely in hand on **every one of `run`'s own 11 post-handover terminal paths** — not only the pre-handover content-type-refusal exit. The general clause, taken literally, already required this; the code had not been carried through to match it. No scenario asserted presence or absence on a mid-stream failure span, which is why the divergence went unnoticed.
+
+**Decision (widen the code, not narrow the spec) — justification**: the two options were (a) narrow bullet 2 to name only the content-type-refusal exit, leaving mid-stream failures to omit the code, or (b) widen `finalizeSpan` to record the code unconditionally, matching the clause as already written. Chose (b):
+- **No ambiguity about "the" response** on a mid-stream failure: `run` is launched with exactly one winning `*http.Response` (post-retry, post-content-type-check), same as the content-type-refusal exit — unlike the retry.Loop-error exit's own omission, which is justified specifically because *multiple* responses can exist across retries with no single one being "the" response (S-AOB-023's own class-not-code rule targets that ambiguity, not this case).
+- **Recording both facts is not a contradiction**: `http.response.status_code=200` alongside `error.type=malformed_response` states two true, independent facts — the HTTP transport succeeded, the stream/decode layer failed afterward — the same non-contradictory shape as an HTTP 200 carrying an application-level error elsewhere in common practice. Omitting a value genuinely in hand is the literal falsehood R-AOB-006's own text says it exists to prevent.
+- **Directly useful**: an operator debugging a mid-stream failure currently cannot tell from the span alone whether a response was ever obtained at all; recording it removes that blind spot for exactly zero cost (the value already exists as `finalizeSpan`'s own parameter).
+
+**Fix**: moved the `statusCodeKey` attribute-set in `finalizeSpan` to run unconditionally, before the `outcome.failure != nil` branch, instead of only in the success branch. Spec: broadened `R-AOB-006` bullet 2's appositive to name post-handover (mid-stream) failures explicitly alongside the content-type refusal, added scenario `S-AOB-041` (left **without** the `*(review)*` tag its sibling `S-AOB-040` carries, since `S-AOB-041` has a real red→green test cycle backing it — a genuine review obligation has no red phase, per this repository's own documented convention in `ai-request-translation`/`ai-provider-client`'s spec format lines; `S-AOB-040`'s own `*(review)*` tag looks like a pre-existing round-1 mislabel, since it too is test-backed, but that is not one of this round's three assigned items and was left untouched). Corrected the Identity table's and Acceptance criteria's scenario-count references (`S-AOB-001…S-AOB-039` had already gone stale at round 1 — it never accounted for round 1's own `S-AOB-040` — now `S-AOB-001…S-AOB-041`, closing both gaps together since they live in the same two lines this edit touched anyway).
+
+**RED** (new test `TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode`, `ai37_attributes_test.go` — an in-band-error-frame run, no cancellation needed, run against the **real, unfixed** source; no overlay required because the omission was genuinely still present):
+```
+ai37_attributes_test.go:435: http.response.status_code absent on a post-handover (mid-stream) terminal failure, want present -- a response WAS obtained before the in-band error frame terminated the stream (R-AOB-006 bullet 2, S-AOB-041)
+--- FAIL: TestAI37_Attributes_MidStreamFailureRecordsExactStatusCode (0.00s)
+FAIL	github.com/cachicamas/backend/agent/src/ai/openaicompat	0.488s
+go test exit code: 1
+```
+**GREEN**: same test passes; `TestAI37_Attributes_TerminalFailureOmitsStatusCode` (the pre-handover retry.Loop-error exit — a structurally different case with no `*http.Response` at all) still passes unchanged, confirming the two exits' opposite postures both hold correctly side by side.
+
+### 3. WARNING — the round-1 fix burns a Stamper sequence (`stream.go`, commit `fd38cc2b`, doc-only)
+
+**Root cause**: `emit` stamps `ev` **before** its own `select`, so on the `[DONE]`-path's completion-send race (round 1's own fix), the lost completion still consumes sequence N — burned, never delivered to any consumer — and the recovery's own `TextBlockEnd`/`ErrorEvent` sends stamp N+1 (and N+2 when a block is open), skipping over the burned sequence. A consumer that somehow observed events on both sides of the gap would see a break in `sequence.go`'s own documented "1-based and contiguous within one stream" (R-AEE-007). Separately, Judge A flagged that the same recovery's bounded `emitFailureSendBound` (5s, ~10s with a block open) wait runs **before** `finalizeSpan`, the body drain and `close(out)` — all three wait behind it, on a path that previously returned immediately once the completion send itself lost its race.
+
+**Decision (keep the recovery sends) — justification**: weighed dropping them (closes the gap, removes the delay, simpler) against keeping them (consistency with the events-loop sibling, compliance with a pre-existing requirement). Kept them:
+- **Not a new defect**: the events-loop recovery already carries the identical stamp-then-burn-then-recover shape for an ordinary lost mid-stream send — this is the same construct, not a new one round 1 introduced.
+- **No shipped assertion can fail on it**: `ai.CheckStream` (`stream_check.go`) deliberately does not check 1..N sequence contiguity — that is AI-22.3's own charter (design.md D10) — confirmed by direct source read, not assumed.
+- **Dropping would violate a pre-existing requirement**: `S-AEM-051/052` (AI-32.3, predates AI-37) requires that a normal mid-stream send losing the `ctx.Done()` race "MUST still surface a typed terminal failure on cancel/deadline" — because a caller using a *deadline* rather than an explicit cancel, and still draining afterward (this package's own established drain-before-close convention, AI-33.5), can genuinely still receive the bounded-wait send. Dropping the recovery only for this one path would mean such a caller observes a typed `ErrorEvent` for every OTHER mid-stream failure shape except this one — an asymmetry with no principled justification, not merely a stylistic inconsistency.
+- Setting `outcome.failure` alone (which the round-1 fix already does unconditionally, before any of these sends are attempted) is what fixes the CRITICAL; the recovery sends are a separate, additional best-effort delivery concern, and dropping them would not have improved the CRITICAL fix itself.
+
+**Implementation**: no behavior change. Extended the existing round-1 comment at the recovery site with the sequence-gap explanation, the "same shape as the events-loop sibling" cross-reference, the `ai.CheckStream` non-contiguity citation, and the explicit keep-vs-drop tradeoff with its resolution — so a future reader debugging a sequence gap finds the reasoning in place rather than an unexplained contradiction.
+
+### Also recorded (Judge A SUGGESTION, NOT fixed this round)
+
+Judge A's SUGGESTION: the widened nil-check scan (`ai37_noop_equivalence_test.go`, round-1 item 8) is still a four-literal substring table (`span == nil`, `span != nil`, `tracer == nil`, `tracer != nil`), so a guard spelled with a renamed local (e.g. `if s := span; s == nil`) would evade it. This is the last permitted correction round, and this finding was explicitly named as record-only — **not fixed**. Follow-up for a future change: widen the scan from a literal-substring table to something that tracks identifier bindings (a lightweight AST walk, or at minimum a broader token-pattern set), or accept and document the residual risk explicitly in `trace.go`'s own "no adapter-side nil check" claim.
+
+### Gates (post-round-2, whole module)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — exit 0, 9/9 packages `ok`, 0 `FAIL` lines |
+| Lint | `cd backend/agent && make lint` (`go vet` + `golangci-lint run --config=.golangci.yml`) | **PASS** — exit 0, `0 issues.` |
+| Build | `cd backend/agent && make build` (`go build -trimpath ./...`) | **PASS** — exit 0 |
+| Working tree | `git status --porcelain` | clean except this round's own commits (`verify-report.md` left untouched, orchestrator-owned, per instruction) |
+
+### Final diff (three-dot, `git diff --stat origin/main...HEAD`)
+
+Re-run **after** this round's own commits landed, including this document's own commit (avoiding the same self-reference gap the prior remediation round's `W-6` caught — see that section above): this replacement is a same-line-count edit (still 3 lines: fence, number, fence), so it does not itself change the total this line reports.
+
+```
+34 files changed, 6000 insertions(+), 163 deletions(-)
+```
+
+### Residuals disclosed for archive-time attention (round 2 additions)
+
+- Judge A's nil-check-scan SUGGESTION (above) — explicitly deferred, not fixed, per the review order for this final round.
+- `S-AOB-040`'s own `*(review)*` tag looks like a pre-existing round-1 mislabel (it is backed by a real, running, red→green-evidenced test, not a prose-only review obligation) — not one of this round's three assigned items, left untouched; `S-AOB-041` (this round's own sibling scenario) was deliberately written without that tag for the reason stated in item 2 above.
+- All residuals disclosed in the round-1 section above (`S-AOB-038`, and items W-1/W-2/W-4/W-5/S-1..S-5 from the original `sdd-verify` report) remain untouched — out of scope for this round, which was limited to the three items plus the one record-only SUGGESTION the orchestrator named.
+
+## Final documentation reconciliation (post `verify-report-final.md`, doc-only, 2026-08-08)
+
+Closes the completeness-gate FAIL recorded in `verify-report-final.md` (Engram obs #2744): 0 CRITICAL, 0 blockers, no code defect, but 8/80 scenarios PARTIAL and two shipped spec sentences false about the code. **Scope: spec/doc text only — zero `.go` files touched, verified by `git status`/`git diff` below.** This is documentation reconciliation, not a third Judgment Day round; both correction rounds above are unchanged and unreopened.
+
+### Amended scenarios (8) + 2 mislabels + 1 index recount
+
+| # | ID | File : line (pre-edit) | What changed |
+|---|---|---|---|
+| 1 | `S-AGM-020` | `specs/agent-module-scaffold/spec.md:57` | `go.work` version `1.26.3` → **`1.26.5`** (verified by direct read of the shipped `go.work:1`, and independently by `git diff origin/main...HEAD -- go.work` returning empty — the file is byte-unchanged by AI-37; the false sentence was a pre-existing drift restated verbatim by this milestone's `MODIFIED` block). Regrades PARTIAL → COMPLIANT; `R-AGM-003` complete. |
+| 2 | `S-AOB-038` | `specs/ai-observability-boundary/spec.md:194` | Narrowed "Layer 1 sources" to the guard's actual scan scope — the implementing package's own directory (`os.ReadDir(".")` in `ai37_noop_equivalence_test.go:362`, confirmed by direct read). The broader Layer-1-wide claim was independently re-verified true this round (zero hits for all four nil-check patterns across all non-test `.go` files under `src/ai/`, including `openrouter/wrapper.go`'s new `TracerProvider` field) but is not proven by this guard; recorded as a follow-up (see below), not performed — no Go guard was widened. Regrades PARTIAL → COMPLIANT; `R-AOB-009` complete. |
+| 3 | `S-AOB-040` mislabel | `specs/ai-observability-boundary/spec.md:142` | Removed the `*(review)*` tag. The scenario is backed by a real, running, red→green test (`TestAI37_Attributes_ContentTypeRefusalRecordsExactStatusCode`); `(review)` means "no red phase" in this repo's own convention and under-claims the evidence. Disclosed by Judgment Day round 2 but left unfixed (out of that round's assigned scope). |
+| 4 | `S-APC-085` mislabel | `specs/ai-provider-client/spec.md:91` | Removed the `*(review)*` tag — **the second instance round 2 did not notice.** Backed by `TestNewProvider_InjectedTracerProviderRecordsTheSpan` (`openrouter/tracer_test.go:23`, PASS, independently re-read this round). Grepped `specs/**/spec.md` for every remaining `*(review)*` occurrence after both fixes: exactly one instance left, `S-AOB-024`, which is genuinely review-only (a prose/artefact check with no executable red phase) — no further mislabels exist. |
+| 5 | `S-AOB-003` | `specs/ai-observability-boundary/spec.md:55` | Narrowed to the declination rationale the guard's comment (`import_boundary_test.go:99-107`) currently states verbatim — that Layer 1 takes a tracer provider only by injection — instead of the closure/`auto/sdk` rationale the scenario previously claimed was recorded there. That second rationale is real and independently true but is not yet in the comment; recorded as a follow-up (see below). Regrades PARTIAL → COMPLIANT. |
+| 6 | `S-AOB-009` | `specs/ai-observability-boundary/spec.md:79` | Dropped the unassertable "recorded duration encloses every attempt" clause — `tracetest.Span` records no timestamps (confirmed: `tracetest.go`'s read surface is `Started()`/`Ended()`/`AssertAllEndedOnce()`/`Corpus()`, no time field). Replaced with the structurally-provable claim: the span starts immediately before the retry mechanism's first attempt in source (`stream.go:222` `startSpan(...)`, immediately before `stream.go:224` `retry.Loop(...)`, verified by direct read), so every attempt necessarily falls inside its lifetime. Regrades PARTIAL → COMPLIANT. |
+| 7 | `R-AOB-007` + `S-AOB-029` | `specs/ai-observability-boundary/spec.md:155`, `:162` | Narrowed "names the vector, the span and the attribute key" to "names the vector" in both the requirement clause and the scenario — the shipped failure message (`ai37_denylist_test.go:270`) names only the vector, because `sweep.Scan` returns no location and `Corpus()` is a flattened byte string with no positional metadata. Giving the scan a location-carrying result is recorded as a follow-up (see below). Regrades PARTIAL → COMPLIANT; `R-AOB-007` complete. |
+| 8 | `S-AOB-027` | `specs/ai-observability-boundary/spec.md:160` | Reframed: `attribute.Value` is a closed set of typed constructors (string/int/int64/float64/bool + slices) with no pointer-shaped variant, so the AI-41 "bare hex address" failure mode is excluded structurally — there is no live pointer-shaped field to plant a counter-example canary in. Recorded the accessor substitution explicitly: the API's `Value.Emit()` this rule was originally written against is deprecated at v1.44.0; the shipped code calls `Value.String()` (confirmed: zero `.Emit()` call sites, multiple `.String()` call sites in `trace.go`/`tracetest.go`; `tracetest.go`'s own doc comment already records this substitution). Mirrored into `design.md:89` and `design.md:207`, whose corpus-builder-walk description still cited the deprecated `Value.Emit()` (design docs are not promoted at archive but were left inconsistent with the shipped code otherwise). Regrades PARTIAL → COMPLIANT. |
+| 9 | `S-AOB-028` | `specs/ai-observability-boundary/spec.md:161` | Reframed "satisfied by construction": Layer 1's construction surface and its deny-by-default import guard together admit no configuration input, flag, build tag or environment-derived switch at all — the enumeration this scenario names is the empty set, so there is no content-capture opt-in for any test to exercise on or off. The property holds because the surface was never built, not because a built switch was driven both ways. Regrades PARTIAL → COMPLIANT. |
+| 10 | `S-APC-083` | `specs/ai-provider-client/spec.md:89` | Reframed "satisfied by construction": independently re-grepped `otel\.GetTracerProvider\|otel\.SetTracerProvider\|"go.opentelemetry.io/otel"` across `backend/agent/src/` — exactly one hit, `import_boundary_test.go:180`, a `require`-table literal, not a package import. `R-AOB-001`'s import boundary and `R-AGM-008`'s closure pin together entail no ambient registry exists to install a provider into, so this scenario's own Given clause cannot be constructed as a discriminating test; the property follows by entailment from those two already-proven guards. Regrades PARTIAL → COMPLIANT. |
+| 11 | Index recount | `spec.md:14,16,18`; `specs/ai-provider-client/spec.md:17` | Recounted directly from the three delta files (not carried forward from any prior count): 18 requirements (11 new [9 `R-AOB-*` + 2 `NFR-AOB-*`] + 2 added [`R-AGM-008`, `R-APC-016`] + 5 modified [`R-AGM-001`,`R-AGM-003`,`R-AGM-005`,`R-APC-001`,`R-APC-003`]); 80 scenarios (52 new [41 AOB + 6 AGM + 5 APC] + 28 restated [17 AGM + 11 APC]). Fixed the index's stale `S-AOB-001…039` → `…041`, `S-APC-081…084` → `…085`, the "14 requirements"/"49 new"/"29 restated" arithmetic → "18"/"52 new"/"28 restated", and the `ai-provider-client` delta's own Identity row, which omitted `S-APC-085` from its new-scenario range. |
+
+### Follow-ups recorded, not fixed (added to `specs/ai-observability-boundary/spec.md`'s "Out of scope" table)
+
+1. **`S-AOB-003`** — add the closure/`auto/sdk` declination reason to `import_boundary_test.go`'s own comment, alongside the injection reason already there. Owner: a later round that edits that Go test file (doc-only rounds cannot).
+2. **`S-AOB-038`** — widen the nil-check-absence guard's directory scan from the implementing package to all of Layer 1 (`src/ai/...`), so the automated guard proves what the scenario now only narrates as independently-verified-by-hand. Owner: a later round that edits `ai37_noop_equivalence_test.go`.
+3. **`S-AOB-029`/`R-AOB-007`** — give the denylist scan a location-carrying result (span + attribute key), not only a vector, so a leak's failure message can name all three. Owner: a later round that edits `ai37_denylist_test.go` and the shared sweep.
+
+None of the three follow-ups block any scenario's COMPLIANT grade after this round's narrowing — each narrowed scenario now states exactly what the shipped instrument proves.
+
+### Validator probe (dry run, no persistence)
+
+Built a scratch candidate (never written into the worktree) carrying the corrected counts and re-ran `gentle-ai sdd-verify-validate --input <scratch> --requirements 18 --scenarios 80`:
+
+```json
+{"valid": true, "verdict": "pass_with_warnings", "evidence_revision": "sha256:6658c86e38d94d78732c49ebedd1b75f70ed1db5232ddeebd3c9bf08ddb3fc7d"}
+```
+
+Confirms the envelope is admissible at 18/18 requirements and 80/80 scenarios — the same combination `verify-report-final.md` itself predicted would flip admission from `fail` to `pass_with_warnings`. The orchestrator, not this round, owns issuing that superseding report.
+
+### Gates re-run after all edits above (whole module, un-piped exit codes)
+
+| Gate | Command | Result |
+|---|---|---|
+| Test | `cd backend/agent && make test` (`go test -race -v ./...`) | **PASS** — exit 0, 9/9 packages `ok`, 0 `FAIL` lines, `test_output_hash` byte-identical to `verify-report-final.md`'s (`sha256:f310184620a5f75ba7df78d541d2f83424e6c7020a4b4421b01b9f6041b70b70`) |
+| Lint | `cd backend/agent && make lint` | **PASS** — exit 0, `0 issues.` |
+| Build | `cd backend/agent && make build` | **PASS** — exit 0, `build_output_hash` byte-identical to `verify-report-final.md`'s (`sha256:617ff8b581dc1493b2d85d998e6171f774f2328ec65dc7264829b71cc7238495`) |
+| Working tree (pre-commit) | `git status --porcelain` | 5 `M` (the 5 spec/design files edited), plus the orchestrator-owned untracked `verify-report-final.md`, left alone |
+
+The byte-identical test/build hashes are independent, direct confirmation that this round changed zero code behavior — expected, since zero `.go` files were touched, but confirmed rather than assumed per instruction.
+
+### Scope discipline
+
+`git diff --stat HEAD` (pre-commit, this round only) touched exactly 5 files, all `.md`: `spec.md`, `design.md`, `specs/agent-module-scaffold/spec.md`, `specs/ai-observability-boundary/spec.md`, `specs/ai-provider-client/spec.md` — 20 insertions(+), 17 deletions(-). No `.go` file appears in this round's diff.
+
+---
+
+> **Archive-time close (2026-08-08).** After this reconciliation round, the orchestrator committed two further artifacts not covered by any round above: `verify-report.md` (the historical, pre-reconciliation FAIL report, committed at `0b1fbd61` as the audit-trail record of the pre-remediation state) and `verify-report-final.md` (the superseding verdict, committed at final HEAD `66e12147`). Final branch state: 26 commits, `git diff --stat origin/main...HEAD` = `35 files changed, 6551 insertions(+), 163 deletions(-)`, tree clean. Judgment Day terminal state: **APPROVED**. See `verify-report-final.md` and the archive report for the complete final-state accounting.

@@ -1,14 +1,13 @@
 // R-OR-09's defense-in-depth regression test (design §8, AI-00.3
 // invariant): the AI-00.3 forward-guard's allowlist,
 // `allowedNonStdlibPrefixes` in backend/agent/src/ai/import_boundary_test.go,
-// holds exactly one entry — this module's own path
-// (`github.com/cachicamas/backend/agent`). A second entry would
-// either be the AI-37 OpenTelemetry API path (pre-authorised by
-// ADR 0005 § D3 and not yet landed) or an unauthorized new
-// top-level dependency. Both shapes must be reviewed in the same
-// commit as the entry addition; this test fires whenever the
-// allowlist shape drifts from one entry without an explicit update
-// to this file.
+// holds exactly the entries AI-37 (ADR 0005 § D3, D-6) authorises: this
+// module's own path plus the five OpenTelemetry tracing-API prefixes.
+// Before AI-37 this test pinned exactly one entry; AI-37 is the
+// documented, ADR-gated exception, landed in the same commit as this
+// file's update — any FURTHER entry, beyond the ones AI-37 adds, is
+// either a later ADR-gated addition (which must update this file
+// alongside it) or an unauthorized new top-level dependency.
 //
 // # Why this is defense-in-depth, not the primary guard
 //
@@ -23,17 +22,21 @@
 //
 // # The two assertions (R-OR-09)
 //
-//  1. backend/agent/go.mod declares zero `require` lines. This
-//     pin exists because go.mod is the source of truth for what
-//     the module declares as a dependency; the guard against new
-//     requires is the module's own invariant, not the test's.
+//  1. backend/agent/go.mod declares exactly wantGoModRequireLines
+//     required modules (3, as of AI-37: the block form's two direct
+//     OpenTelemetry entries, plus the single-line indirect xxhash
+//     entry). This pin exists because go.mod is the source of truth
+//     for what the module declares as a dependency; the guard against
+//     an unauthorized require is the module's own invariant, not the
+//     test's.
 //
 //  2. allowedNonStdlibPrefixes in import_boundary_test.go holds
-//     exactly one entry, and that entry equals this module's
-//     import path. The second half pins the value: a future change
-//     that grows the list to two and adds a non-module entry is a
-//     regression on the same surface as a go.mod require, and this
-//     test fails it before CI runs the deeper guard.
+//     exactly wantAllowedNonStdlibPrefixes' entries, in order. A
+//     future change that grows the list beyond what AI-37 landed,
+//     without updating this file in the same commit, is a
+//     regression on the same surface as an unreviewed go.mod
+//     require, and this test fails it before CI runs the deeper
+//     guard.
 //
 // # Why go/parser instead of a narrower text scan
 //
@@ -56,21 +59,43 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// openrouterModulePath is the only non-stdlib prefix the allowlist
-// admits today. This module's own import path — any future change
-// that adds a second entry here must also land the entry's
-// rationale in the import_boundary_test.go header comment and in
-// an ADR.
+// openrouterModulePath is this module's own import path — always the
+// allowlist's first entry.
 const openrouterModulePath = "github.com/cachicamas/backend/agent"
 
 // goModPath is the relative path from this sub-package's directory
 // to the module's go.mod. The test reads this file as raw bytes
-// and counts require lines.
+// and counts required modules.
 const goModPath = "../../../../go.mod"
+
+// wantGoModRequireLines is the exact required-module count AI-37 (ADR
+// 0005 § D3, D-6) authorises: the two direct OpenTelemetry entries
+// inside the "require ( ... )" block, plus the single-line indirect
+// xxhash require — 3 total, counted by countGoModRequireLines's own
+// module-entry walk (Judgment Day remediation: this counts entries, not
+// "require"-prefixed lines, so an addition inside the block is no
+// longer invisible). Any further required module is either a later
+// ADR-gated addition — which must update this constant in the same
+// commit — or an unauthorized dependency.
+const wantGoModRequireLines = 3
+
+// wantAllowedNonStdlibPrefixes is the exact, ordered
+// allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus
+// the five OpenTelemetry tracing-API prefixes import_boundary_test.go
+// adds, each citing ADR 0005 § D3.
+var wantAllowedNonStdlibPrefixes = []string{
+	openrouterModulePath,
+	"go.opentelemetry.io/otel/trace",
+	"go.opentelemetry.io/otel/attribute",
+	"go.opentelemetry.io/otel/codes",
+	"go.opentelemetry.io/otel/semconv",
+	"github.com/cespare/xxhash/v2",
+}
 
 // importBoundaryTestPath is the relative path from this
 // sub-package's directory to the AI-00.3 forward-guard test. The
@@ -78,14 +103,16 @@ const goModPath = "../../../../go.mod"
 // locate the allowedNonStdlibPrefixes variable.
 const importBoundaryTestPath = "../../import_boundary_test.go"
 
-// TestOpenRouterAdapter_ZeroRequiresGuard asserts the go.mod is
-// the empty-dependency pin (R-OR-09). A `require` line in
-// go.mod — of any kind — fails this test. The AI-00.3 forward
-// guard's primary assertion (TestLayer1_ModuleHasNoDependencies_
-// ZeroRequires, import_boundary_test.go:147) carries the same
-// property through the dependency-closure walk; this test pins it
-// at the source-of-truth file for faster, more focused feedback.
-func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
+// TestOpenRouterAdapter_RequireLinesMatchAI37Authorization asserts
+// go.mod carries exactly wantGoModRequireLines `require` lines — no
+// more (R-OR-09). Before AI-37 this test pinned zero; AI-37 (ADR 0005
+// § D3) is the one, ADR-gated milestone permitted to change that. The
+// AI-00.3 forward guard's primary assertion
+// (TestLayer1_DependencySet_ExactRequiresAndClosure,
+// import_boundary_test.go) carries the same property through the
+// dependency-closure walk; this test pins it at the source-of-truth
+// file for faster, more focused feedback.
+func TestOpenRouterAdapter_RequireLinesMatchAI37Authorization(t *testing.T) {
 	t.Parallel()
 
 	raw, err := os.ReadFile(goModPath)
@@ -94,19 +121,20 @@ func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
 	}
 
 	requireLines := countGoModRequireLines(raw)
-	if requireLines != 0 {
-		t.Errorf("backend/agent/go.mod declares %d require line(s), want exactly 0 (R-OR-09, AI-00.3, NFR-APC-A):\n%s", requireLines, raw)
+	if requireLines != wantGoModRequireLines {
+		t.Errorf("backend/agent/go.mod declares %d require line(s), want exactly %d (R-OR-09, AI-37 D-6, NFR-APC-A):\n%s", requireLines, wantGoModRequireLines, raw)
 	}
 }
 
-// TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry
-// asserts the AI-00.3 allowlist holds exactly one entry, and that
-// entry is this module's own import path (R-OR-09, defense-in-depth
-// copy of import_boundary_test.go's load-bearing guard). A second
-// entry — even a benign-looking one — fails this test, by design:
-// the second-entry path requires an ADR and a
-// import_boundary_test.go header comment update alongside the
-// entry, not a silent addition.
+// TestOpenRouterAdapter_AllowedNonStdlibPrefixesMatchesAI37Authorization
+// asserts the AI-00.3 allowlist holds exactly wantAllowedNonStdlibPrefixes'
+// entries, in order (R-OR-09, defense-in-depth copy of
+// import_boundary_test.go's load-bearing guard). Before AI-37 this test
+// pinned exactly one entry (this module's own path); AI-37 is the
+// documented, ADR-gated exception. Any entry beyond what AI-37 landed —
+// even a benign-looking one — fails this test, by design: a further
+// entry requires an ADR and an import_boundary_test.go header comment
+// update alongside it, not a silent addition.
 //
 // The parse uses go/parser + go/ast: the import_boundary_test.go
 // file is parsed as Go, the package-level variable declaration
@@ -115,7 +143,7 @@ func TestOpenRouterAdapter_ZeroRequiresGuard(t *testing.T) {
 // value by following const declarations in the same file (the
 // canonical pattern this package's own const modulePath uses) or,
 // for a literal string, by reading the literal directly.
-func TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry(t *testing.T) {
+func TestOpenRouterAdapter_AllowedNonStdlibPrefixesMatchesAI37Authorization(t *testing.T) {
 	t.Parallel()
 
 	entries, err := parseAllowedNonStdlibPrefixes(importBoundaryTestPath, openrouterModulePath)
@@ -123,11 +151,8 @@ func TestOpenRouterAdapter_AllowedNonStdlibPrefixesHoldsExactlyOneEntry(t *testi
 		t.Fatalf("parseAllowedNonStdlibPrefixes(%q) error = %v, want nil", importBoundaryTestPath, err)
 	}
 
-	if len(entries) != 1 {
-		t.Errorf("allowedNonStdlibPrefixes has %d entries = %v, want exactly 1 (R-OR-09; the only admitted non-stdlib prefix is this module's own path)", len(entries), entries)
-	}
-	if len(entries) > 0 && entries[0] != openrouterModulePath {
-		t.Errorf("allowedNonStdlibPrefixes first entry = %q, want %q (R-OR-09)", entries[0], openrouterModulePath)
+	if !slices.Equal(entries, wantAllowedNonStdlibPrefixes) {
+		t.Errorf("allowedNonStdlibPrefixes = %v, want %v, in order (R-OR-09, AI-37 D-6)", entries, wantAllowedNonStdlibPrefixes)
 	}
 }
 
@@ -178,22 +203,38 @@ func parseAllowedNonStdlibPrefixes(path, _ string) ([]string, error) {
 						continue
 					}
 					for _, elt := range lit.Elts {
-						ident, ok := elt.(*ast.Ident)
-						if !ok {
-							continue
+						switch e := elt.(type) {
+						case *ast.Ident:
+							if v, ok := constValues[e.Name]; ok {
+								entries = append(entries, v)
+								continue
+							}
+							// Unknown identifier — it could be a
+							// const declared in another file (not
+							// visible to this parse). Surface that
+							// as an empty entry so the assertion
+							// above fails with a clear mismatch
+							// message rather than passing silently.
+							entries = append(entries, "")
+						case *ast.BasicLit:
+							// AI-37's entries are literal strings
+							// (import_boundary_test.go's own table,
+							// each carrying its own ADR-citing
+							// comment) — the literal-string half
+							// this function's own doc comment
+							// already promised, and the only half
+							// that was actually implemented before
+							// AI-37 exercised it.
+							if e.Kind == token.STRING {
+								if v, unquoteErr := unquoteStringLiteral(e.Value); unquoteErr == nil {
+									entries = append(entries, v)
+									continue
+								}
+							}
+							entries = append(entries, "")
+						default:
+							entries = append(entries, "")
 						}
-						if v, ok := constValues[ident.Name]; ok {
-							entries = append(entries, v)
-							continue
-						}
-						// Unknown identifier — it could be a
-						// const declared in another file (not
-						// visible to this parse). Surface that as
-						// an empty entry so the assertion above
-						// fails with a clear "not equal to
-						// openrouterModulePath" message rather
-						// than passing silently.
-						entries = append(entries, "")
 					}
 				}
 			}
@@ -287,28 +328,109 @@ func unquoteStringLiteral(lit string) (string, error) {
 	return b.String(), nil
 }
 
-// countGoModRequireLines counts lines in raw that are go.mod
-// `require` lines (R-OR-09, AI-00.3). go.mod syntax has three
-// require-directive shapes:
+// countGoModRequireLines counts the MODULE ENTRIES a go.mod's require
+// directives declare (R-OR-09, AI-00.3, Judgment Day remediation): every
+// non-empty, non-comment line inside a `require ( ... )` block, plus
+// every single-line `require <path> <version>` directive. go.mod syntax
+// has two require-directive shapes:
 //
 //   - `require ( ... )`  — a block form; individual entries inside
-//     the block are indented.
+//     the block are indented, one module per line.
 //   - `require <path> <version>` — a single-line form.
 //
-// Both shapes fail this guard by design: a single require is the
-// regression R-OR-09 exists to catch. Comment lines (`//`) and the
-// `module` / `go` directives are not require lines.
+// This is deliberately a count of MODULE ENTRIES, not a count of how
+// many times the literal word "require" opens a directive. An earlier
+// version of this function counted only lines whose trimmed text
+// started with "require", so a dependency appended INSIDE an existing
+// require( ... ) block introduced no new "require"-prefixed line and
+// left the count unchanged -- an unauthorized addition inside the block
+// was invisible to this guard (Judgment Day round 1, finding 6;
+// TestCountGoModRequireLines_DetectsInBlockAddition, below, is the
+// falsifier). Comment lines (`//`), blank lines and the `module` / `go`
+// directives are not counted.
 func countGoModRequireLines(raw []byte) int {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	count := 0
+	inBlock := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "//") {
+		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		if strings.HasPrefix(line, "require") {
+		if inBlock {
+			if line == ")" {
+				inBlock = false
+				continue
+			}
 			count++
+			continue
+		}
+		if line == "require (" {
+			inBlock = true
+			continue
+		}
+		if strings.HasPrefix(line, "require ") {
+			count++
+			continue
 		}
 	}
 	return count
+}
+
+// ai37AuthorizedGoMod is a byte-identical shape to the AI-37-authorized
+// backend/agent/go.mod (block form, two direct requires, one single-line
+// indirect require) -- the baseline this test's mutation is compared
+// against. Kept in-memory so this proof never touches the real go.mod
+// file (Judgment Day remediation: no overlay is needed for a pure
+// []byte -> int function).
+var ai37AuthorizedGoMod = []byte(`module github.com/cachicamas/backend/agent
+
+go 1.26.3
+
+require (
+	go.opentelemetry.io/otel v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
+)
+
+require github.com/cespare/xxhash/v2 v2.3.0 // indirect
+`)
+
+// ai37GoModWithInBlockAddition is the exact same go.mod, with one
+// additional, unauthorized module appended INSIDE the existing
+// require( ... ) block -- the precise shape Judgment Day round 1 named:
+// a dependency added inside the block introduces no new line starting
+// with the literal word "require".
+var ai37GoModWithInBlockAddition = []byte(`module github.com/cachicamas/backend/agent
+
+go 1.26.3
+
+require (
+	go.opentelemetry.io/otel v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
+	github.com/evil/unauthorized v1.0.0
+)
+
+require github.com/cespare/xxhash/v2 v2.3.0 // indirect
+`)
+
+// TestCountGoModRequireLines_DetectsInBlockAddition is the falsifier for
+// R-OR-09's own guard function: a dependency appended INSIDE the
+// existing require( ... ) block MUST change what this function reports,
+// so the guard actually bites an addition there instead of passing it
+// through silently. Before the Judgment Day fix, both go.mod shapes
+// above counted identically (2: the "require (" line and the
+// single-line indirect require), because neither counting pass ever
+// looks at the block's own interior lines.
+func TestCountGoModRequireLines_DetectsInBlockAddition(t *testing.T) {
+	t.Parallel()
+
+	authorized := countGoModRequireLines(ai37AuthorizedGoMod)
+	withAddition := countGoModRequireLines(ai37GoModWithInBlockAddition)
+
+	if withAddition == authorized {
+		t.Errorf("countGoModRequireLines() = %d for both the authorized go.mod and one with an unauthorized module appended INSIDE the require( ... ) block, want different counts -- an in-block addition must not be invisible to this guard (Judgment Day round 1, finding 6)", authorized)
+	}
+	if withAddition != authorized+1 {
+		t.Errorf("countGoModRequireLines(with one extra in-block module) = %d, want exactly %d (authorized %d + 1)", withAddition, authorized+1, authorized)
+	}
 }

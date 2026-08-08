@@ -6,6 +6,9 @@ import (
 	"net/url"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -55,15 +58,29 @@ type Config struct {
 	// mutated — its bounds, including any whole-request timeout, are its
 	// injector's decision (R-APC-003).
 	HTTPClient *http.Client
+
+	// TracerProvider is optional (AI-37, R-APC-016). When nil, New
+	// substitutes the tracing API's own no-op provider — established once
+	// at construction, so every span call site downstream is
+	// unconditional and no adapter-side nil check on a tracing value
+	// exists anywhere in this package (R-AOB-009). When non-nil, it is
+	// used verbatim and is never wrapped, mutated or replaced by a
+	// process-global value (R-APC-016). Layer 1 never reads or writes any
+	// process-global telemetry registry (R-AOB-001) — this field is the
+	// only door a tracer reaches Layer 1 through.
+	TracerProvider trace.TracerProvider
 }
 
 // Client is a configured value for the OpenAI-compatible dialect. At AI-25
 // it does nothing but hold configuration; it acquires streaming behaviour
-// at AI-28.
+// at AI-28. AI-37 adds tracer: derived once in New (AD-8) from the
+// injected or defaulted TracerProvider, stored here so Stream never reads
+// anything but this field.
 type Client struct {
 	base       *url.URL
 	credential Credential
 	httpClient *http.Client
+	tracer     trace.Tracer
 }
 
 // clientRedactedLabel is the fixed, non-leaking label Client's own
@@ -117,10 +134,16 @@ func New(cfg Config) (*Client, error) {
 		httpClient = newDefaultHTTPClient()
 	}
 
+	tracerProvider := cfg.TracerProvider
+	if tracerProvider == nil {
+		tracerProvider = noop.NewTracerProvider()
+	}
+
 	return &Client{
 		base:       base,
 		credential: cfg.Credential,
 		httpClient: httpClient,
+		tracer:     tracerProvider.Tracer(tracerInstrumentationName),
 	}, nil
 }
 

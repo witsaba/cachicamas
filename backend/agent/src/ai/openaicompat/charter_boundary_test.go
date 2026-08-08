@@ -1,9 +1,13 @@
 // AI-32 — the charter boundary (R-AEM-017, S-AEM-064…066). This milestone
 // exports no backoff policy, attempt counter or failover identifier
 // (retryability is a flag; AI-35 owns acting on it), does not widen
-// ai.FailureCategory past nine members, and keeps backend/agent/go.mod at
-// zero require lines. Internal package, matching design.md's Testing
-// Strategy table for slice 1.
+// ai.FailureCategory past nine members, and — as of AI-32 itself — kept
+// backend/agent/go.mod at zero require lines. AI-37 (ADR 0005 § D3) is the
+// later, ADR-gated exception to that last clause; see
+// TestCharterBoundary_GoModRequireLinesMatchAI37Authorization, below,
+// which is updated in the same commit as AI-37's dependency landing.
+// Internal package, matching design.md's Testing Strategy table for
+// slice 1.
 package openaicompat
 
 import (
@@ -101,23 +105,30 @@ func TestCharterBoundary_FailureCategoriesHasNineMembers(t *testing.T) {
 	}
 }
 
-// TestCharterBoundary_GoModHasZeroRequireLines proves S-AEM-066:
-// backend/agent/go.mod carries zero lines beginning "require" — this
-// milestone adds no dependency. Three directories up from this package
+// TestCharterBoundary_GoModRequireLinesMatchAI37Authorization restates
+// S-AEM-066 under AI-37's ADR-gated exception (AI-37, ADR 0005 § D3, D-6).
+// AI-32 itself added no dependency, and go.mod stayed at zero require
+// lines from AI-32 through AI-36; AI-37 is the one later milestone
+// permitted to change that. import_boundary_test.go's own
+// TestLayer1_DependencySet_ExactRequiresAndClosure is the primary,
+// load-bearing pin on the exact require set — this defense-in-depth copy
+// is updated alongside it, in the same commit, per this package's own
+// charter discipline (R-AEM-017). Three directories up from this package
 // (src/ai/openaicompat -> src/ai -> src -> agent).
-func TestCharterBoundary_GoModHasZeroRequireLines(t *testing.T) {
+func TestCharterBoundary_GoModRequireLinesMatchAI37Authorization(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "go.mod")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)
 	}
+	const wantRequireLines = 2 // the "require (" block opener + the xxhash "// indirect" single-line require
 	count := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "require") {
 			count++
 		}
 	}
-	if count != 0 {
-		t.Fatalf("%s has %d line(s) beginning \"require\", want 0 (R-AEM-017)", path, count)
+	if count != wantRequireLines {
+		t.Fatalf("%s has %d line(s) beginning \"require\", want exactly %d — AI-37's ADR-gated OpenTelemetry API dependency (R-AEM-017, AI-37 D-6)", path, count, wantRequireLines)
 	}
 }

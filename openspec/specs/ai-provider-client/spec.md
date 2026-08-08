@@ -56,7 +56,13 @@ Per the precedent set by `ai-fake-provider` `NFR-AFP-E` and `ai-stream-testkit` 
 
 ### R-APC-001 — Every injected value is used, and "accepted then ignored" is a detectable failure
 
-Construction MUST accept the endpoint, the credential and (optionally) the HTTP client from its caller. Each value the caller does supply MUST be demonstrably **used** by the constructed value. Use MUST be observable through a stub transport at the round-trip boundary — that is, by what the adapter would send — and MUST NOT be asserted by reading a stored field, because a stored-but-unused value passes a field assertion and fails in production.
+*(MODIFIED 2026-08-08 by AI-37 — restates the entire requirement, including every unchanged scenario, so `S-APC-001`…`S-APC-005` survive the archive step exactly as landed. Adds a second, narrowly bounded proof shape for an injectable whose effect does not reach the wire.)*
+
+Construction MUST accept the endpoint, the credential, (optionally) the HTTP client and (optionally) a tracer provider from its caller. Each value the caller does supply MUST be demonstrably **used** by the constructed value.
+
+For every injectable whose effect **reaches the wire**, use MUST be observable through a stub transport at the round-trip boundary — that is, by what the adapter would send — and MUST NOT be asserted by reading a stored field, because a stored-but-unused value passes a field assertion and fails in production.
+
+For an injectable whose effect **does not reach the wire**, that proof shape is unavailable, and substituting a field read would reintroduce exactly the failure this requirement exists to detect. Such an injectable MUST instead be proven used by **discriminating observation at its own boundary**: two adapters constructed with two different recording substitutes, each driven once, each substitute observing exactly its own adapter's effect and neither observing the other's. This is the same discrimination `S-APC-004` performs at the transport boundary, moved to the boundary where the value's effect is actually visible. A field read remains forbidden on both shapes. (Previously: the requirement admitted only the round-trip-boundary proof shape, because every injectable then in the construction surface reached the wire.)
 
 #### Scenarios
 
@@ -65,6 +71,7 @@ Construction MUST accept the endpoint, the credential and (optionally) the HTTP 
 - **S-APC-003** — Given that same observation, when the observed request's headers are inspected, then the injected credential is present on it.
 - **S-APC-004** — Given two adapters constructed with two **different** stubbed clients, when each is driven once, then each stub observes exactly its own adapter's request and neither observes the other's — proving no shared or cached client is substituted.
 - **S-APC-005** — Given a deliberately mutated implementation that stores an injected value without using it, when this requirement's tests run, then at least one fails — the assertions detect ignoring, not merely storing.
+- **S-APC-081** — Given two adapters constructed with two **different** recording tracer providers, when each is driven once, then each provider records exactly its own adapter's span and neither records the other's; and given a deliberately mutated implementation that stores the injected provider but derives its tracer from another source, when this scenario runs, then it fails — the injected provider's use is proven by discrimination at its own boundary, never by reading a stored field.
 
 ### R-APC-002 — A configuration fault fails at construction, typed, before any request exists
 
@@ -82,6 +89,8 @@ The configuration faults are **exactly these two**. An absent HTTP client is **n
 
 ### R-APC-003 — Defaults are safe and fixed, and no shared, global or injected client is mutated
 
+*(MODIFIED 2026-08-08 by AI-37 — restates the entire requirement, including every unchanged scenario, so `S-APC-011`…`S-APC-016` survive the archive step exactly as landed. `S-APC-015`'s enumeration gains a fourth injectable.)*
+
 There MUST be no default endpoint that could cause an unconfigured or partially configured adapter to reach a real provider — in particular, from a test.
 
 **The HTTP client is optional, and which party owns the bounds follows from that.** The obligation is scoped in two halves, and conflating them is what makes the naive reading incoherent — an adapter cannot both *fix* bounds on a client and *not mutate* that client:
@@ -91,13 +100,15 @@ There MUST be no default endpoint that could cause an unconfigured or partially 
 
 Construction MUST NOT mutate any process-wide or package-level HTTP client or transport on **either** path.
 
+The construction surface admits a **fourth** injectable, a tracer provider, which is likewise optional and likewise used verbatim; its own defaulting rule is `R-APC-016`. It carries no timeout, no deadline and no bound, so the qualifier restated in `S-APC-015` below is unaffected by its addition. (Previously: the construction surface was enumerated as exactly three inputs — the endpoint, the credential and an optional HTTP client.)
+
 #### Scenarios
 
 - **S-APC-011** — Given construction attempted with no endpoint supplied, when it runs, then it fails per `R-APC-002` rather than substituting a vendor endpoint, and no outbound request is possible.
 - **S-APC-012** — Given the observable configuration of the process-wide default HTTP client and default transport captured before construction, when construction runs on **both** the injected and the adapter-built path and the same observations are repeated, then every observed value is unchanged and the identities are the same values as before.
 - **S-APC-013** — Given one HTTP client value used to construct two adapters, when the second construction completes, then the first adapter's observable outbound behaviour is unchanged and every observable field of the shared client is what it was before either construction — an injected client is used verbatim, never reconfigured.
 - **S-APC-014** — Given a deliberately mutated implementation that assigns a bound onto the process-wide default transport, when `S-APC-012` runs, then it fails — the scenario detects global mutation rather than assuming its absence.
-- **S-APC-015** — Given the landed construction surface, when a caller enumerates what it may supply, then it is the endpoint, the credential and an **optional** HTTP client, and **no** timeout, deadline or bound value appears among them.
+- **S-APC-015** — Given the landed construction surface, when a caller enumerates what it may supply, then it is the endpoint, the credential, an **optional** HTTP client and an **optional** tracer provider, and **no** timeout, deadline or bound value appears among them.
 - **S-APC-016** — Given construction with no client supplied, when the resulting client is compared against the process-wide default client and the process-wide default transport, then it is neither of them — the adapter built a fresh one rather than adopting a shared value it could not bound without mutating.
 
 ### R-APC-004 — *(non-negotiable)* No whole-request cap exists, proven behaviourally
@@ -279,6 +290,25 @@ Redaction MUST be a property of the adapter's own values, not of which value the
 - **S-APC-080** — Given the shipped module, when every diagnostic that reads headers is enumerated, then none captures the whole header set, each reads only through an explicit admission list, and a header newly present on a response is absent from every diagnostic until it is explicitly admitted.
 
 > **`S-APC-078`'s required recording, made at AI-36's close (2026-08-08).** Item 2's empirical run came back **negative**: the behavior did **not** already hold. The bare, unwrapped configured client value disclosed the raw credential under all four rendering verbs, in **both** the referenced and the copied form. The cause is structural rather than incidental — a value reached through a field the package does not publish cannot dispatch to the redacting renderings its own type would otherwise supply, so the fallback walks its internal state and reproduces the credential. It was closed by giving the configured client value redacting renderings that the copied form itself carries, mirroring the wrapping provider's landed precedent. The outcome is therefore recorded as **behavior newly established**, not as behavior already holding — item 2's alternative disposition did not apply, and is recorded here so a later reader does not have to re-derive which branch fired. Item 1's configuration-value run, by contrast, was green on first execution and is pinned against regression.
+
+> **Amended 2026-08-08 (AI-37)** by [`cachicamas-ai-observability`](../../changes/archive/2026-08-08-cachicamas-ai-observability/) (AI-37 — Add the observability boundary, Wave 5 — Harden). Two requirements amended in place — `R-APC-001` (a narrowly bounded second proof shape for an injectable whose effect does not reach the wire) and `R-APC-003` (`S-APC-015`'s enumeration gains a fourth injectable) — and one requirement added, `R-APC-016` (an absent tracer provider defaults to the tracing API's own no-op, never a process-global one). New scenarios `S-APC-081` (under `R-APC-001`) and `S-APC-082`…`S-APC-085` (under `R-APC-016`). `R-APC-002`, `R-APC-004`…`R-APC-014` and `NFR-APC-A`…`NFR-APC-G` stand unchanged.
+
+### R-APC-016 (added 2026-08-08) — An absent tracer provider defaults to the tracing API's own no-op, never to a process-global one
+
+WHEN no tracer provider is injected, construction MUST substitute the tracing API's **own no-op provider**, established once at construction, and MUST NOT consult any process-global telemetry registry, getter or setter for a substitute. A process-global registry is configuration set by whichever caller reached it first; adopting it would be configuration that did not arrive by injection, which `R-APC-008` forbids in terms and which its call-site scan cannot detect.
+
+The substitution MUST be **structural**: because the API's no-op provider is a real, non-nil value whose spans are genuine no-ops, every recording site downstream is unconditional and **no nil check on a tracing value may exist**. That structural clause is separately assertable and is the difference between satisfying doc 0002:2234 and merely appearing to.
+
+WHEN a tracer provider **is** injected, it MUST be used **verbatim**: never wrapped in a way an observer could detect, never mutated, and never replaced by a global value.
+
+Any concrete adapter this module ships that composes `openaicompat.New` internally — the wrapper pattern this module uses — MUST expose the identical optional tracer-provider door on its own construction surface and thread it to `openaicompat.New` verbatim. A composing wrapper's construction surface MUST NOT be narrower than the door it wraps: closing that door at the wrapper boundary would make this requirement's own injection guarantee unreachable for that adapter's own callers, leaving the only shipped concrete provider permanently untraceable.
+
+#### Scenarios
+
+- **S-APC-082** — Given construction with no tracer provider supplied, when the adapter is driven through a complete request, then no span reaches any provider registered in any process-global telemetry state, and the request completes normally — the tracing API's own no-op provider was substituted at construction.
+- **S-APC-083** — Satisfied by construction. `R-AOB-001`'s import boundary and `R-AGM-008`'s package-closure pin together prove that no path to the ecosystem's process-global telemetry registry exists anywhere in this module — the root global-getter package is absent from both the require set and the package closure. This scenario's own Given clause — a recording provider installed into process-global telemetry state, observed from inside this module — therefore cannot be constructed: there is no import through which a test could install one to observe from. The property (the adapter never consults process-global state) follows by entailment from those two already-proven guards holding, not from an executable pair that installs a provider and drives the adapter to confirm it goes unconsulted.
+- **S-APC-084** — Given construction with a recording tracer provider injected, when the adapter is driven, then that exact provider records the request's span, its identity is unchanged, and no observable property of it differs from before construction — it was used verbatim.
+- **S-APC-085** — Given the shipped OpenRouter wrapper — the only concrete adapter this module ships that composes `openaicompat.New` — when a caller constructs it with an injected tracer provider on the wrapper's own construction surface, then that provider records the resulting span exactly as it would through `openaicompat.New` directly, proving the wrapper threads the value verbatim rather than closing the door this requirement otherwise guarantees.
 
 ## Non-functional requirements
 

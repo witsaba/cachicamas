@@ -363,21 +363,25 @@ func TestNew_SharedInjectedClientNotMutatedAcrossTwoConstructions(t *testing.T) 
 	}
 }
 
-// TestConfig_SurfaceIsEndpointCredentialAndOptionalClient covers S-APC-015:
-// the construction surface is exactly the endpoint, the credential and an
-// optional HTTP client — no timeout, deadline or bound value among them.
+// TestConfig_SurfaceIsEndpointCredentialAndOptionalClient covers S-APC-015,
+// amended by AI-37 (R-APC-003, D-1): the construction surface is exactly
+// the endpoint, the credential, an optional HTTP client and — as of AI-37
+// — an optional tracer provider. The qualifier survives unchanged: no
+// timeout, deadline or bound value among them, and a tracer provider is
+// none of those.
 func TestConfig_SurfaceIsEndpointCredentialAndOptionalClient(t *testing.T) {
 	t.Parallel()
 
 	typ := reflect.TypeOf(Config{})
-	if typ.NumField() != 3 {
-		t.Fatalf("Config has %d fields, want exactly 3 (S-APC-015)", typ.NumField())
+	if typ.NumField() != 4 {
+		t.Fatalf("Config has %d fields, want exactly 4 (S-APC-015, AI-37)", typ.NumField())
 	}
 
 	wantKinds := map[string]reflect.Kind{
-		"Endpoint":   reflect.String,
-		"Credential": reflect.Struct,
-		"HTTPClient": reflect.Ptr,
+		"Endpoint":       reflect.String,
+		"Credential":     reflect.Struct,
+		"HTTPClient":     reflect.Ptr,
+		"TracerProvider": reflect.Interface,
 	}
 	for name, wantKind := range wantKinds {
 		field, ok := typ.FieldByName(name)
