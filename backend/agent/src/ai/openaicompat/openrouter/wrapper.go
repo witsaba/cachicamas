@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 )
@@ -57,6 +59,18 @@ type Config struct {
 	// openrouterDefaultModel at construction so the wire never sees a
 	// zero-value model — see endpoint.go's effectiveModel (R-OR-03).
 	Model string
+
+	// TracerProvider is optional (AI-37 Judgment Day remediation,
+	// R-APC-016/S-APC-085). When nil, the underlying openaicompat.Client
+	// substitutes the tracing API's own no-op provider (R-APC-016) — this
+	// wrapper adds no default of its own. When non-nil, it is threaded to
+	// openaicompat.New verbatim, exactly as every other injectable on
+	// this Config already is: this field is this wrapper's own door onto
+	// the same injection-only path client.go's own Config.TracerProvider
+	// documents as "the only door a tracer reaches Layer 1 through" — a
+	// caller composing this wrapper (the only shipped concrete provider)
+	// had no way to open that door before this field existed.
+	TracerProvider trace.TracerProvider
 }
 
 // redactedProvider is the wrapper-private type NewProvider returns
@@ -135,9 +149,10 @@ func NewProvider(cfg Config) (ai.ModelProvider, error) {
 	httpClient := &http.Client{Transport: transport}
 
 	client, err := openaicompat.New(openaicompat.Config{
-		Endpoint:   openrouterBaseURL,
-		Credential: cfg.Credential,
-		HTTPClient: httpClient,
+		Endpoint:       openrouterBaseURL,
+		Credential:     cfg.Credential,
+		HTTPClient:     httpClient,
+		TracerProvider: cfg.TracerProvider,
 	})
 	if err != nil {
 		return nil, err

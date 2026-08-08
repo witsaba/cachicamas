@@ -81,11 +81,14 @@ The substitution MUST be **structural**: because the API's no-op provider is a r
 
 WHEN a tracer provider **is** injected, it MUST be used **verbatim**: never wrapped in a way an observer could detect, never mutated, and never replaced by a global value.
 
+Any concrete adapter this module ships that composes `openaicompat.New` internally — the wrapper pattern this module uses — MUST expose the identical optional tracer-provider door on its own construction surface and thread it to `openaicompat.New` verbatim. A composing wrapper's construction surface MUST NOT be narrower than the door it wraps: closing that door at the wrapper boundary would make this requirement's own injection guarantee unreachable for that adapter's own callers, leaving the only shipped concrete provider permanently untraceable.
+
 #### Scenarios
 
 - **S-APC-082** — Given construction with no tracer provider supplied, when the adapter is driven through a complete request, then no span reaches any provider registered in any process-global telemetry state, and the request completes normally — the tracing API's own no-op provider was substituted at construction.
 - **S-APC-083** — Given a recording provider installed into process-global telemetry state and construction performed with **no** provider injected, when the adapter is driven, then the globally installed provider records **nothing** — the adapter never consulted it.
 - **S-APC-084** — Given construction with a recording tracer provider injected, when the adapter is driven, then that exact provider records the request's span, its identity is unchanged, and no observable property of it differs from before construction — it was used verbatim.
+- **S-APC-085** *(review)* — Given the shipped OpenRouter wrapper — the only concrete adapter this module ships that composes `openaicompat.New` — when a caller constructs it with an injected tracer provider on the wrapper's own construction surface, then that provider records the resulting span exactly as it would through `openaicompat.New` directly, proving the wrapper threads the value verbatim rather than closing the door this requirement otherwise guarantees.
 
 ---
 
