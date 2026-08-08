@@ -378,6 +378,16 @@ func (f *Failure) Error() string {
 // pointer-receiver nil check returns [noProviderFailure] today — trading
 // NFR-AIP-B's nil totality for a form no call site uses. The comprehensive
 // value-form sweep belongs to AI-36's hardening pass.
+//
+// Pinned by AI-36 (R-AIP-017): the scope above is now a proven, guarded
+// property, not just a stated intent. TestFailure_CopiedValue_ValueShapedCause_RendersCanary
+// records that a copied value form's reflective rendering does reach a
+// value-shaped wrapped cause — the leak this comment always described —
+// and TestNoPublishedSurfaceReturnsFailureByValue is a structural guard
+// proving no exported function, method or field of this module returns or
+// stores a Failure by value; either test failing means this scope
+// statement no longer holds and must be re-argued in the open, exactly as
+// the paragraph above already commits to.
 func (f *Failure) GoString() string { return f.Error() }
 
 // Unwrap returns the wrapped cause, reachable by errors.Is/errors.As through
