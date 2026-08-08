@@ -52,6 +52,12 @@
 //        gate-decision tests pass; the live test reports SKIP
 //        under `make test` (no env vars) and asserts the stream
 //        produced at least one chunk when both env vars are set.
+//
+// credential-scan:deliberate-plant — plants "sk-prove-stages-of-gate-are-not-collapsed"
+// to prove the live smoke's two-stage gate (key first, then run-flag) does
+// not leak the credential into a skip decision (R-OR-07). Declared here per
+// AI-36's recursive credential scan (D-3, R-ART-022); enumerated in
+// credential_scan_test.go's deliberatePlantAllowlist.
 package smoke_test
 
 import (

@@ -57,6 +57,14 @@
 //        runtime needle construction. All eight tests pass. The
 //        scan's error message never reproduces the credential once
 //        the helper is in place.
+//
+// credential-scan:deliberate-plant — plants three OpenAI-style/bearer
+// secret-shaped literals ("Bearer sk-aa-bb-cc-dd-ee-ff-gg",
+// "sk-aa-supersecret-leaked-shape-zz-9999",
+// "sk-deliberate-leaked-shape-bb-cc-dd-ee") as the R-OR-08 staged-mutation
+// bite-proofs. Declared here per AI-36's recursive credential scan (D-3,
+// R-ART-022); enumerated in credential_scan_test.go's
+// deliberatePlantAllowlist.
 package smoke_test
 
 import (

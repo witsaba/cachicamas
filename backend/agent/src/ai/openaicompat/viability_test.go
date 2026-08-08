@@ -1,3 +1,8 @@
+// credential-scan:deliberate-plant — plants "Bearer viability-proxy-token"
+// (a 21-char bearer-class literal) to assert the proxy Authorization header
+// still carries the real credential despite a poisoned proxy environment
+// (S-APC-052). Declared here per AI-36's recursive credential scan (D-3,
+// R-ART-022); enumerated in credential_scan_test.go's deliberatePlantAllowlist.
 package openaicompat
 
 import (
