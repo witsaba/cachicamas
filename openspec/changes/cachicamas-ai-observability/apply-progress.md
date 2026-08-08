@@ -380,8 +380,10 @@ Judge A's SUGGESTION: the widened nil-check scan (`ai37_noop_equivalence_test.go
 
 ### Final diff (three-dot, `git diff --stat origin/main...HEAD`)
 
+Re-run **after** this round's own commits landed, including this document's own commit (avoiding the same self-reference gap the prior remediation round's `W-6` caught — see that section above): this replacement is a same-line-count edit (still 3 lines: fence, number, fence), so it does not itself change the total this line reports.
+
 ```
-34 files changed, 5895 insertions(+), 163 deletions(-)
+34 files changed, 5998 insertions(+), 163 deletions(-)
 ```
 
 ### Residuals disclosed for archive-time attention (round 2 additions)
