@@ -45,6 +45,26 @@ func hostileEchoServer(t *testing.T) *httptest.Server {
 	return server
 }
 
+// hostileContentTypeEchoServer answers every request with 200 and a
+// Content-Type header whose PARAMETER echoes the caller's own
+// Authorization header verbatim — the judgment-day variant of the
+// hostile shape above: the media type is still application/json, so
+// isStreamContentType refuses on the media type alone, while the
+// parameter survives inside the raw header value the refusal stores.
+// Before the fix, nonStreamContentType.Error() interpolated that raw
+// value with %q and reproduced the credential (AI-36 JD round 1,
+// finding 1).
+func hostileContentTypeEchoServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", `application/json; echo="`+r.Header.Get("Authorization")+`"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 // mustSentinelPromptRequest builds a minimal valid ai.Request whose sole
 // message carries the sentinel prompt text.
 func mustSentinelPromptRequest(t *testing.T, sentinelPrompt string) ai.Request {
@@ -175,4 +195,80 @@ func TestHostileServer_EchoesAuthorizationAndBody_CredentialNeverSurfacesInAnyRe
 		}
 	}
 	t.Logf("named residual (S-CNF-081 item 2, D-4 item 4): prompt-body echo observed in a rendering = %v — the excerpt is the provider's own response; suppressing its echo of the caller's own content would defeat R-ATS-023's diagnostic purpose, so this is recorded, not fixed", promptLeaked)
+}
+
+// TestHostileServer_EchoesAuthorizationIntoContentTypeParameter_CredentialNeverSurfaces
+// is the judgment-day round-1 finding-1 pin: a provider that echoes the
+// caller's own Authorization value into a Content-Type PARAMETER (not the
+// body) must not be able to make the refusal's rendered text reproduce
+// it. isStreamContentType compares only the parsed media type, so the
+// parameter rides along in the raw header value; the stored content type
+// must therefore be redacted exactly as the body excerpt is, while the
+// offending media type itself stays visible (R-ATS-023).
+func TestHostileServer_EchoesAuthorizationIntoContentTypeParameter_CredentialNeverSurfaces(t *testing.T) {
+	t.Parallel()
+
+	const sentinelCredential = "AI36-JD1-CT-PARAM-CANARY-5e9d2b"
+
+	server := hostileContentTypeEchoServer(t)
+
+	client, err := openaicompat.New(openaicompat.Config{
+		Endpoint:   server.URL,
+		Credential: openaicompat.NewCredential(sentinelCredential),
+		HTTPClient: server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("openaicompat.New() error = %v, want nil", err)
+	}
+
+	ch, streamErr := client.Stream(context.Background(), mustSentinelPromptRequest(t, "AI36-JD1-CT-PARAM-PROMPT-8a3c1f"))
+	if streamErr == nil {
+		t.Fatal("Stream() error = nil, want a non-streaming content-type refusal (the hostile server never answers text/event-stream)")
+	}
+	if ch != nil {
+		t.Error("Stream() returned a non-nil channel alongside a non-nil error, want no carrier on a pre-handover refusal")
+	}
+
+	var failure *ai.Failure
+	if !errors.As(streamErr, &failure) {
+		t.Fatalf("errors.As(err, *ai.Failure) = false; err = %v, want a typed provider failure", streamErr)
+	}
+	if failure.Category() != ai.FailureCategoryMalformedResponse {
+		t.Errorf("failure.Category() = %v, want %v (R-ATS-023's own content-type refusal category)", failure.Category(), ai.FailureCategoryMalformedResponse)
+	}
+
+	credentialDeny := []sweep.Entry{
+		{Vector: "sentinel credential", Needle: []byte(sentinelCredential)},
+		{Vector: "bearer-prefixed sentinel credential", Needle: []byte("Bearer " + sentinelCredential)},
+	}
+	if selfTestErr := sweep.SelfTest(credentialDeny); selfTestErr != nil {
+		t.Fatalf("sweep.SelfTest(credential deny list) = %v, want nil (AD-2 positive control)", selfTestErr)
+	}
+
+	renderings := renderEveryVerbAndUnwrapChain(streamErr)
+	walkedToDepthOne := false
+	for label := range renderings {
+		if strings.HasPrefix(label, "unwrap-depth-1 ") {
+			walkedToDepthOne = true
+			break
+		}
+	}
+	if !walkedToDepthOne {
+		t.Fatalf("renderEveryVerbAndUnwrapChain produced no unwrap-depth-1 rendering out of %d — the Unwrap chain was not walked, so the scan below never reaches the depth the content-type leak lives at", len(renderings))
+	}
+
+	sawOffendingMediaType := false
+	for label, rendered := range renderings {
+		if vector, found := sweep.Scan([]byte(rendered), credentialDeny); found {
+			t.Errorf("rendering %q leaked the caller's own credential (vector=%q) via the hostile Content-Type parameter echo (JD round 1, finding 1)", label, vector)
+		}
+		if strings.Contains(rendered, "application/json") {
+			sawOffendingMediaType = true
+		}
+	}
+	// R-ATS-023 requires the refusal to name the offending type: redaction
+	// must remove only the credential occurrences, never the media type.
+	if !sawOffendingMediaType {
+		t.Error("no rendering names the offending media type application/json — redaction must strip only the credential, not the content type's diagnostic value (R-ATS-023)")
+	}
 }

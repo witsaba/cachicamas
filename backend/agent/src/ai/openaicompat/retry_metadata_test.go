@@ -226,6 +226,12 @@ func TestHeaderDiagnostics_NoneCaptureWholeHeaderSet(t *testing.T) {
 			case "Values":
 				t.Errorf("%s:%d calls Header.Values(%s), want Header.Get through the explicit admission list (S-APC-080): Values captures every repetition of a header, which is not what this package's reviewed capture surface covers", site.file, site.line, site.name)
 				continue
+			case "index":
+				t.Errorf("%s:%d indexes the header map directly (reading %q), want Header.Get through the explicit admission list (S-APC-080): direct indexing bypasses canonical-key handling and is not the reviewed read shape (JD round 1, finding 4)", site.file, site.line, site.name)
+				continue
+			case "clone", "copy":
+				t.Errorf("%s:%d captures the whole header set (%s of %s), want reads only through the explicit admission list (S-APC-080): a whole-set copy admits every header a provider chooses to send, including a credential-bearing one nobody reviewed (JD round 1, finding 4)", site.file, site.line, site.kind, site.name)
+				continue
 			}
 			if _, admitted := productionHeaderReadPin[site.name]; !admitted {
 				t.Errorf("%s:%d reads header %q, which is not in productionHeaderReadPin (S-APC-080). A newly captured header must first be reviewed for credential-bearing content — a credential can ride any header a provider chooses — and only then added to this pin deliberately, together with the assertions proving its value never reaches a rendering", site.file, site.line, site.name)
@@ -299,23 +305,39 @@ type headerReadSite struct {
 
 // scanProductionHeaderReads parses every non-test .go file directly in dir
 // and returns each site that READS an HTTP header: a Get or Values call on
-// a header-named receiver, or a range over one. Writes (Set/Add/Del) are
-// deliberately out of scope — this pin covers what comes off the wire and
-// can reach a diagnostic, not what this package puts on the wire.
+// a header-like operand, an index expression into one, a Clone of one, a
+// Copy/Clone call taking one as an argument, or a range over one. Writes
+// (Set/Add/Del) are deliberately out of scope — this pin covers what comes
+// off the wire and can reach a diagnostic, not what this package puts on
+// the wire.
 //
-// Two deliberate simplifications keep the guard small and fail-closed:
+// Deliberate simplifications keep the guard small and fail-closed:
 //
 //   - Header names are resolved textually, not by type checking: a string
 //     literal argument is unquoted and an identifier is looked up in the
 //     package's own string const declarations (that is how the
 //     headerRateLimit* names resolve). Anything else is returned verbatim
 //     inside "<unresolved: …>", so it fails the pin instead of passing.
-//   - Receivers are matched by name: any expression whose source text
-//     contains "header" case-insensitively counts, which catches both
-//     resp.Header.Get and the bare header.Get of a http.Header parameter.
-//     It over-matches rather than under-matches — the safe direction for a
-//     guard, since a false positive is a visible failure and a false
-//     negative is a silent leak.
+//   - Operands are matched syntactically, not through go/types: an
+//     expression is header-like when its source text contains "header"
+//     case-insensitively (resp.Header, a parameter named header), OR when
+//     it is an identifier the file DECLARES with a type whose source text
+//     contains "header" (func telemetryFrom(h http.Header) — the receiver
+//     name alone says nothing), OR an identifier ASSIGNED from a non-call
+//     expression whose source text contains "header" (hs := resp.Header).
+//
+// What this cannot catch, stated rather than claimed away (AI-36 JD
+// round 1, finding 4 — the previous comment claimed the matcher
+// over-matches, which was false): full closure is structurally impossible
+// for a syntactic scan. A header set that arrives through an interface, a
+// call RESULT aliased to a bland name (h := f(resp) where neither f's
+// name nor its arguments mention a header), or anything reached via
+// reflection stays invisible; closing those would require type-checking
+// the package with go/types, deliberately not added here. Within the
+// syntactic domain the matcher does over-match (any "header"-bearing
+// source text counts, plus the declared-type and alias tracking above),
+// and productionHeaderReadPin turns every visible read into a reviewed
+// admission or a loud failure.
 func scanProductionHeaderReads(t *testing.T, dir string) []headerReadSite {
 	t.Helper()
 
@@ -379,28 +401,131 @@ func scanProductionHeaderReads(t *testing.T, dir string) []headerReadSite {
 		source := func(node ast.Node) string {
 			return string(file.src[fset.Position(node.Pos()).Offset:fset.Position(node.End()).Offset])
 		}
+
+		// Pass 1 — collect the file's header-like identifiers (JD round 1,
+		// finding 4): names DECLARED with a type whose source text contains
+		// "header" (func params, results, receivers, struct fields, var
+		// specs), and names ASSIGNED from a non-call expression whose
+		// source text contains "header" (hs := resp.Header). A call result
+		// is deliberately excluded from alias tracking: derived values
+		// (header.Get returns a string) are not the set, and a whole-set
+		// copy through a call (Clone, maps.Copy/maps.Clone) is recorded at
+		// the call itself below.
+		headerTyped := map[string]bool{}
+		containsHeader := func(node ast.Node) bool {
+			return strings.Contains(strings.ToLower(source(node)), "header")
+		}
+		markIdent := func(expr ast.Expr) {
+			if ident, ok := expr.(*ast.Ident); ok && ident.Name != "_" {
+				headerTyped[ident.Name] = true
+			}
+		}
+		ast.Inspect(file.ast, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.Field:
+				if typed.Type != nil && containsHeader(typed.Type) {
+					for _, name := range typed.Names {
+						markIdent(name)
+					}
+				}
+			case *ast.ValueSpec:
+				if typed.Type != nil && containsHeader(typed.Type) {
+					for _, name := range typed.Names {
+						markIdent(name)
+					}
+				}
+				for i, value := range typed.Values {
+					if _, isCall := value.(*ast.CallExpr); !isCall && containsHeader(value) && i < len(typed.Names) {
+						markIdent(typed.Names[i])
+					}
+				}
+			case *ast.AssignStmt:
+				for i, lhs := range typed.Lhs {
+					rhs := typed.Rhs[0]
+					if len(typed.Rhs) == len(typed.Lhs) {
+						rhs = typed.Rhs[i]
+					}
+					if _, isCall := rhs.(*ast.CallExpr); !isCall && containsHeader(rhs) {
+						markIdent(lhs)
+					}
+				}
+			}
+			return true
+		})
+		headerLike := func(expr ast.Expr) bool {
+			if containsHeader(expr) {
+				return true
+			}
+			ident, ok := expr.(*ast.Ident)
+			return ok && headerTyped[ident.Name]
+		}
+
+		// Pass 2 — record every read/capture site against those operands.
 		ast.Inspect(file.ast, func(node ast.Node) bool {
 			switch typed := node.(type) {
 			case *ast.CallExpr:
 				selector, ok := typed.Fun.(*ast.SelectorExpr)
-				if !ok || (selector.Sel.Name != "Get" && selector.Sel.Name != "Values") {
+				if !ok {
 					return true
 				}
-				if !strings.Contains(strings.ToLower(source(selector.X)), "header") {
-					return true
+				switch selector.Sel.Name {
+				case "Get", "Values":
+					if !headerLike(selector.X) {
+						return true
+					}
+					name := "<unresolved: no single argument>"
+					if len(typed.Args) == 1 {
+						name = resolveHeaderName(typed.Args[0], consts, source)
+					}
+					sites = append(sites, headerReadSite{
+						file: file.name,
+						line: fset.Position(typed.Pos()).Line,
+						kind: selector.Sel.Name,
+						name: name,
+					})
+				case "Clone":
+					// Whole-set capture through the method form
+					// (resp.Header.Clone()).
+					if headerLike(selector.X) {
+						sites = append(sites, headerReadSite{
+							file: file.name,
+							line: fset.Position(typed.Pos()).Line,
+							kind: "clone",
+							name: source(selector.X),
+						})
+					}
 				}
-				name := "<unresolved: no single argument>"
-				if len(typed.Args) == 1 {
-					name = resolveHeaderName(typed.Args[0], consts, source)
+				// Whole-set capture through a copying function taking the
+				// set as an argument (maps.Copy(dst, resp.Header),
+				// maps.Clone(resp.Header)). The callee name is matched, not
+				// the maps package specifically — any Copy/Clone taking a
+				// header-like argument is a capture worth surfacing.
+				if selector.Sel.Name == "Copy" || selector.Sel.Name == "Clone" {
+					for _, arg := range typed.Args {
+						if headerLike(arg) {
+							sites = append(sites, headerReadSite{
+								file: file.name,
+								line: fset.Position(typed.Pos()).Line,
+								kind: "copy",
+								name: source(arg),
+							})
+							break
+						}
+					}
 				}
-				sites = append(sites, headerReadSite{
-					file: file.name,
-					line: fset.Position(typed.Pos()).Line,
-					kind: selector.Sel.Name,
-					name: name,
-				})
+			case *ast.IndexExpr:
+				// Direct map indexing (resp.Header["Authorization"]) reads
+				// a header value with no Get call at all.
+				if headerLike(typed.X) {
+					sites = append(sites, headerReadSite{
+						file: file.name,
+						line: fset.Position(typed.Pos()).Line,
+						kind: "index",
+						name: resolveHeaderName(typed.Index, consts, source),
+					})
+				}
 			case *ast.RangeStmt:
-				if !strings.Contains(strings.ToLower(source(typed.X)), "header") {
+				if !headerLike(typed.X) {
 					return true
 				}
 				sites = append(sites, headerReadSite{
@@ -444,6 +569,89 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 	return text, true
+}
+
+// TestScanProductionHeaderReads_SeesEvasionShapes is the judgment-day
+// round-1 finding-4 pin: the pre-fix scanner under-matched — a Get through
+// a receiver whose source text lacks "header" (func telemetryFrom(h
+// http.Header)), a direct index read (resp.Header["Authorization"]), a
+// whole-set Clone, and a whole-set maps.Copy were all invisible, while the
+// doc comment claimed the guard over-matches. Each shape is planted in a
+// synthetic production file inside a temp dir and must come back as a
+// recorded site; a shape the scanner cannot see is a silent hole in
+// S-APC-080's "never the whole header set" assertion.
+func TestScanProductionHeaderReads_SeesEvasionShapes(t *testing.T) {
+	t.Parallel()
+
+	const synthetic = `package synthetic
+
+import (
+	"maps"
+	"net/http"
+)
+
+// telemetryFrom reads through a receiver whose source text lacks "header":
+// only its DECLARED TYPE names http.Header.
+func telemetryFrom(h http.Header) string {
+	return h.Get("Authorization")
+}
+
+// indexRead reaches the header value without calling Get at all.
+func indexRead(resp *http.Response) []string {
+	return resp.Header["Authorization"]
+}
+
+// wholeSetClone captures the entire header set through the Clone method.
+func wholeSetClone(resp *http.Response) http.Header {
+	return resp.Header.Clone()
+}
+
+// wholeSetCopy captures the entire header set through maps.Copy.
+func wholeSetCopy(resp *http.Response, dst map[string][]string) {
+	maps.Copy(dst, resp.Header)
+}
+
+// aliasedRange iterates the whole set through a bland alias.
+func aliasedRange(resp *http.Response) int {
+	hs := resp.Header
+	n := 0
+	for range hs {
+		n++
+	}
+	return n
+}
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "synthetic.go"), []byte(synthetic), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(synthetic.go) error = %v, want nil", err)
+	}
+
+	sites := scanProductionHeaderReads(t, dir)
+
+	type wantSite struct {
+		kind string
+		name string // "" means any
+		why  string
+	}
+	wants := []wantSite{
+		{kind: "Get", name: "Authorization", why: "a Get through a receiver named h, declared http.Header — receiver-name matching alone cannot see it"},
+		{kind: "index", name: "Authorization", why: `resp.Header["Authorization"] reads a header value with no Get call at all`},
+		{kind: "clone", why: "resp.Header.Clone() captures the whole header set"},
+		{kind: "copy", why: "maps.Copy(dst, resp.Header) captures the whole header set"},
+		{kind: "range", why: "a range over an alias assigned from resp.Header iterates the whole set"},
+	}
+	for _, want := range wants {
+		found := false
+		for _, site := range sites {
+			if site.kind == want.kind && (want.name == "" || site.name == want.name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("scanProductionHeaderReads missed the %q shape (name %q): %s — an invisible shape is a silent hole in S-APC-080's guard (JD round 1, finding 4); got sites: %+v", want.kind, want.name, want.why, sites)
+		}
+	}
 }
 
 // TestRetryMetadata_FailureErrorTextIsFixedAndClean proves S-AEM-039:
