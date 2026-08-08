@@ -139,8 +139,21 @@ func TestHostileServer_EchoesAuthorizationAndBody_CredentialNeverSurfacesInAnyRe
 	}
 
 	renderings := renderEveryVerbAndUnwrapChain(streamErr)
-	if len(renderings) < 4 {
-		t.Fatalf("renderEveryVerbAndUnwrapChain returned %d rendering(s), want at least the 4 top-level verbs — the Unwrap chain may not have been walked", len(renderings))
+	// The chain must actually have been walked: D-4's leak lived at unwrap
+	// depth 1 (nonStreamContentType's captured excerpt), so a rendering set
+	// holding only the four top-level verbs would scan past the one place
+	// that matters and still report clean. Requiring a depth-1 key is that
+	// property; a length check is not, because the map is built with
+	// exactly four literal entries before the walk begins.
+	walkedToDepthOne := false
+	for label := range renderings {
+		if strings.HasPrefix(label, "unwrap-depth-1 ") {
+			walkedToDepthOne = true
+			break
+		}
+	}
+	if !walkedToDepthOne {
+		t.Fatalf("renderEveryVerbAndUnwrapChain produced no unwrap-depth-1 rendering out of %d — the Unwrap chain was not walked, so the scan below never reaches the depth D-4's credential leak lived at (S-CNF-081)", len(renderings))
 	}
 
 	for label, rendered := range renderings {
