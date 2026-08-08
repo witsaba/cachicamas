@@ -114,6 +114,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/internal/retry"
 )
@@ -212,15 +214,18 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 		return nil, preStreamCancellation(ctxErr)
 	}
 
+	// AI-37 (R-AOB-003): the span starts here, immediately before the first
+	// transport attempt — after the R-ATS-002 validation gate above, whose
+	// contract says nothing is observable before validation clears, and a
+	// span is an observable side effect under a recording provider. Every
+	// retry attempt therefore falls inside this one span, never beside it.
+	ctx, span := startSpan(ctx, c.tracer)
+
 	resp, retries, err := retry.Loop(ctx, body, retry.Config{}, c.executeOnce)
 	if err != nil {
+		endSpanPreHandover(span, retries, err)
 		return nil, err
 	}
-	// retries is wired into the span's retry.count attribute by AI-37's
-	// span seam (WU-4, a later commit in this same PR) — retained as a
-	// named value here rather than discarded so that commit's diff is a
-	// pure addition around this line, not a second signature change.
-	_ = retries
 
 	// R-ATS-024: a success response falls through to the content-type check
 	// untouched. Retryable failures were handled before the carrier exists;
@@ -229,11 +234,14 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 	// R-ATS-023: a success response whose Content-Type is not the
 	// streaming media type is refused before any byte reaches the decoder.
 	if !isStreamContentType(resp.Header.Get("Content-Type")) {
-		return nil, refuseNonStreamContentType(resp, c.credential)
+		refusal := refuseNonStreamContentType(resp, c.credential)
+		endSpanPreHandover(span, retries, refusal)
+		return nil, refusal
 	}
+	recordRetryCount(span, retries)
 
 	out := make(chan ai.Event, streamCarrierBuffer)
-	go run(ctx, resp, out)
+	go run(ctx, resp, out, span)
 	return out, nil
 }
 
@@ -608,12 +616,20 @@ func refuseNonStreamContentType(resp *http.Response, cred Credential) error {
 // separately, only at the sentinel (design.md D4/D9):
 // the mapper accumulates identity and finish-reason state across chunks,
 // but constructs no completion event of its own.
-func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
+func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span trace.Span) {
 	defer close(out)
 	// AI-33.5 (R-AIS-033): drain-before-close — see header. Silent
 	// (network errors ignored), runs inside the producer goroutine's
 	// existing defer chain (R-ATS-003 preserved: no second goroutine).
 	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
+
+	// AI-37 (AD-5): the span finalizer is registered AFTER the two defers
+	// above, so LIFO runs it FIRST — finalizer, then drain, then
+	// close(out) — meaning the span has already ended by the time a
+	// consumer observes the channel close. outcome is filled in by every
+	// terminal path below.
+	var outcome spanOutcome
+	defer finalizeSpan(span, &outcome)
 
 	stamper := &ai.Stamper{}
 	decoder := NewDecoder(0)
@@ -658,8 +674,11 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
-						emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
+						outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 						return
+					}
+					if payload, ok := completion.Completion(); ok {
+						outcome.completion, outcome.haveCompletion = payload, true
 					}
 					emit(ctx, out, stamper, completion)
 					return
@@ -680,6 +699,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 						}
 					}
 					failure := failureFromErrorFrame(frame.Data, outputPreceded)
+					outcome.failure = failure
 					if failure != nil {
 						if errEv, err := ai.ErrorEvent(failure); err == nil {
 							emit(ctx, out, stamper, errEv)
@@ -690,7 +710,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
-					emitFailure(ctx, out, stamper, state, errMalformedChunkJSON, outputPreceded, blockOpen)
+					outcome.failure = emitFailure(ctx, out, stamper, state, errMalformedChunkJSON, outputPreceded, blockOpen)
 					return
 				}
 				if !chunk.isChunk() {
@@ -702,7 +722,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 
 				events, applyErr := state.applyChunk(chunk)
 				if applyErr != nil {
-					emitFailure(ctx, out, stamper, state, applyErr, outputPreceded, blockOpen)
+					outcome.failure = emitFailure(ctx, out, stamper, state, applyErr, outputPreceded, blockOpen)
 					return
 				}
 			for _, ev := range events {
@@ -717,6 +737,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 					// typed failure alongside the eventual close.
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
+							outcome.failure = failure
 							if blockOpen {
 								if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
 									if endStamped := stamper.Stamp(end); true {
@@ -755,20 +776,20 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				}
 			}
 			if feedErr != nil {
-				emitFailure(ctx, out, stamper, state, feedErr, outputPreceded, blockOpen)
+				outcome.failure = emitFailure(ctx, out, stamper, state, feedErr, outputPreceded, blockOpen)
 				return
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				if finishErr := decoder.Finish(); finishErr != nil {
-					emitFailure(ctx, out, stamper, state, finishErr, outputPreceded, blockOpen)
+					outcome.failure = emitFailure(ctx, out, stamper, state, finishErr, outputPreceded, blockOpen)
 					return
 				}
 				// Clean SSE framing, but the sentinel was never observed
 				// — design.md D9's sibling case at the transport-EOF edge
 				// rather than the [DONE]-with-no-terminal-chunk edge.
-				emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
+				outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 				return
 			}
 			if ctx.Err() != nil {
@@ -780,6 +801,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				// still observe the typed failure even when ctx
 				// itself is canceled.
 				if failure := midStreamFailureFrom(ctx.Err(), outputPreceded); failure != nil {
+					outcome.failure = failure
 					if end, err := ai.NewTextBlockEnd(textBlockIndex); blockOpen && err == nil {
 						select {
 						case out <- end:
@@ -795,7 +817,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event) {
 				}
 				return
 			}
-			emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
+			outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen)
 			return
 		}
 	}
@@ -865,15 +887,35 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // D7/D8 inheritance, Q2 coordinator ruling). NewToolCallEnd does not
 // validate bytes, so a malformed payload's bytes survive into the
 // truncated ToolCallEnd untouched — never fabricated `{}`.
-func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, cause error, outputPreceded, blockOpen bool) {
+//
+// AI-37 (AD-5): emitFailure now RETURNS the *ai.Failure it constructs, on
+// every exit path including an early return caused by a losing send race
+// — the span finalizer needs to know what failed even on a path where the
+// consumer never observed the terminal event. Building the failure value
+// first (before any of the close-sends below) is a reordering with no
+// observable behavior change: category/failure construction is pure,
+// depends on nothing the sends below could alter, and every send's own
+// order and cancellation posture is unchanged.
+func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, cause error, outputPreceded, blockOpen bool) *ai.Failure {
 	// AI-32.3: scoped to the function's own terminal-event send. The
-	// tool-call close + text-block close above still respect ctx via
+	// tool-call close + text-block close below still respect ctx via
 	// emit(), so a cancellation that lands BEFORE this function runs
 	// aborts the close chain — exactly like every other close path in
 	// this package. The terminal event itself, however, MUST be
 	// observable per S-AEM-051/052; emit()'s select-on-ctx.Done() races
 	// with that guarantee when ctx is already cancelled, so the
 	// terminal send uses a bounded-wait select instead.
+
+	category, ok := Category(cause)
+	if !ok {
+		category = ai.FailureCategoryMalformedResponse
+	}
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category, Cause: cause}, outputPreceded)
+	if err != nil {
+		// category is always a valid member here, so this can never
+		// actually fail — handled rather than ignored (errcheck).
+		return nil
+	}
 
 	// Close every still-open tool-call block (AI-30.1, D8 inheritance).
 	// truncateOpenCalls reads state.toolOpenOrder; its raw-bytes close
@@ -883,7 +925,7 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 		if terr == nil {
 			for _, end := range toolEnds {
 				if !emit(ctx, out, stamper, end) {
-					return
+					return failure
 				}
 			}
 		}
@@ -900,24 +942,14 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 		// actually fail to construct.
 		if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
 			if !emit(ctx, out, stamper, end) {
-				return
+				return failure
 			}
 		}
 	}
 
-	category, ok := Category(cause)
-	if !ok {
-		category = ai.FailureCategoryMalformedResponse
-	}
-	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category, Cause: cause}, outputPreceded)
-	if err != nil {
-		// category is always a valid member here, so this can never
-		// actually fail — handled rather than ignored (errcheck).
-		return
-	}
 	ev, err := ai.ErrorEvent(failure)
 	if err != nil {
-		return
+		return failure
 	}
 	// Stamp the terminal event through the same per-stream stamper
 	// every other event in this stream already uses (R-AEE-007) —
@@ -934,6 +966,7 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 	case out <- stamped:
 	case <-time.After(emitFailureSendBound):
 	}
+	return failure
 }
 
 // referenced from run() so the linter / errcheck posture this file's
