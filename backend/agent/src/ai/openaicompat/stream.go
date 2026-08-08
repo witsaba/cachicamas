@@ -700,17 +700,52 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 						outcome.completion, outcome.haveCompletion = payload, true
 					}
 					if !sendEvent(completion) {
-						// AI-37 Judgment Day CRITICAL fix (R-AOB-005): honor
-						// sendEvent's result on this terminal path exactly
-						// like the events loop's own recovery below
-						// (:757-781) instead of discarding it. The carrier
-						// is unbuffered (streamCarrierBuffer == 0), so a
-						// caller that cancels and stops draining
+						// AI-37 Judgment Day round 1 CRITICAL fix
+						// (R-AOB-005): honor sendEvent's result on this
+						// terminal path exactly like the events loop's own
+						// recovery below instead of discarding it. The
+						// carrier is unbuffered (streamCarrierBuffer ==
+						// 0), so a caller that cancels and stops draining
 						// deterministically loses this send; without this
 						// branch outcome.failure stayed nil and
 						// finalizeSpan's success branch recorded codes.Ok
 						// plus usage for a completion the consumer never
 						// received.
+						//
+						// Judgment Day round 2 (WARNING, weighed and
+						// kept): the completion send above already called
+						// stamper.Stamp before losing this race (emit
+						// stamps before its own select, below), so that
+						// sequence is burned -- never delivered to any
+						// consumer -- and the recovery sends below stamp
+						// the next sequence(s) after it, leaving a gap a
+						// consumer that somehow observed events on both
+						// sides of it would see (sequence.go's own
+						// R-AEE-007 documents "contiguous"). This is the
+						// SAME shape the events loop's own recovery
+						// further below already carries for an ordinary
+						// lost mid-stream send (also stamp-then-burn-
+						// then-recover) -- not a new defect introduced
+						// here -- and no shipped assertion can fail on
+						// it: ai.CheckStream deliberately does not check
+						// 1..N contiguity (stream_check.go, design.md
+						// D10, AI-22.3's own charter). Dropping the
+						// recovery sends instead would close the gap and
+						// remove the bounded emitFailureSendBound wait
+						// they add before finalizeSpan, the body drain
+						// and close(out) can run (a sibling WARNING) --
+						// but a caller using a deadline rather than an
+						// explicit cancel, and still draining afterward
+						// per this package's own drain-before-close
+						// convention (AI-33.5), would then see a typed
+						// ErrorEvent for every OTHER mid-stream failure
+						// shape except this one, contradicting
+						// S-AEM-051/052's "MUST still surface a typed
+						// terminal failure on cancel/deadline". Consistency
+						// with every sibling recovery in this file, and
+						// with that pre-existing requirement, is judged to
+						// outweigh the bounded cost -- the recovery sends
+						// stay, and this comment is that gap's own record.
 						if ctxErr := ctx.Err(); ctxErr != nil {
 							if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
 								outcome.failure = failure
