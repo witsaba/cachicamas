@@ -279,7 +279,7 @@ tracetest_test.go:251: Corpus() captured 1 of the 2 content-bearing Start option
 ### Final diff (three-dot, `git diff --stat origin/main...HEAD`)
 
 ```
-34 files changed, 5535 insertions(+), 162 deletions(-)
+34 files changed, 5674 insertions(+), 162 deletions(-)
 ```
 
 ### Residuals disclosed for archive-time attention
