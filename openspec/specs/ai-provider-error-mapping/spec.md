@@ -33,9 +33,11 @@ Three further distinctions shape every requirement below and are stated once her
 
 **A flag, never a retry.** Retryability is a classification (R-AIP-007). AI-35 owns acting on it. This milestone exports no backoff, attempt counter or failover identifier, and does not widen `ai.FailureCategory` — the vocabulary stays closed at nine members.
 
-Requirement count: **18** (`R-AEM-001` … `R-AEM-018`). Scenario count: **70** (`S-AEM-001` … `S-AEM-070`) — **65 [test]**, **5 [inspection]**.
+Requirement count: **19** (`R-AEM-001` … `R-AEM-019`). Scenario count: **72** (`S-AEM-001` … `S-AEM-072`) — **67 [test]**, **5 [inspection]**.
 
 *Counted mechanically over the scenario bullets, not estimated. The five `[inspection]` scenarios are `S-AEM-045`, `S-AEM-067`, `S-AEM-068`, `S-AEM-069`, `S-AEM-070`. A reconciliation that finds a different split is reading a stale revision.*
+
+*(Counts updated 2026-08-08 by AI-36, which appended `R-AEM-019` and its two `[test]` scenarios `S-AEM-071`/`S-AEM-072`. AI-32's own counts — 18 requirements, 70 scenarios, 65 `[test]` — are unchanged as a statement about AI-32; the totals above are for this file as it now stands.)*
 
 ## Requirement ownership by node and stage
 
@@ -321,6 +323,31 @@ Every statement in this spec, and in the implementation's own documentation, abo
 
 ---
 
+## Credential disclosure through the bounded excerpt · added by AI-36
+
+> **Amended 2026-08-08 (AI-36)** by [`cachicamas-ai-redaction`](../../changes/archive/2026-08-08-cachicamas-ai-redaction/) (AI-36 — Enforce secret redaction, Wave 5 — Harden). One requirement `R-AEM-019` added. No requirement is modified, removed or renamed — `R-AEM-001` … `R-AEM-018` stand unchanged, and in particular `R-AEM-015`'s capture limit and truncation marker are untouched: this requirement concerns **disclosure**, never size.
+>
+> **This requirement was contingent, and its trigger FIRED empirically. It is LANDED and binding, not conditional.** `R-AEM-019` was specified to become binding if and only if the hostile-server case required by `S-CNF-081` showed that the caller's **own credential** is reproduced inside the bounded response excerpt a non-streaming content-type refusal interpolates into its rendered text. It was. A provider driven to echo the caller's authorization value and request body back inside a non-streaming response reproduced that credential **verbatim, byte for byte**, in the refusal's rendered text and in the cause reachable one unwrap beneath it, under all four rendering verbs — observed as the failing phase of the test, before any production change existed. The removal step was then landed and the same case re-run green; it now stands as the regression pin for both scenarios below.
+
+### R-AEM-019 (added 2026-08-08) — A bounded response excerpt never reproduces the caller's own credential
+
+A refusal that reproduces a bounded excerpt of the provider's response into its rendered text MUST NOT reproduce the caller's own credential within that excerpt. Specifically:
+
+1. Any occurrence of the caller's credential inside a captured response excerpt MUST be removed before that excerpt becomes reachable through a rendering.
+2. The excerpt MUST remain present and readable to the caller reading the terminal failure's rendered text. Removal MUST be of the credential occurrences only — suppressing the excerpt would defeat its diagnostic purpose and would violate the landed obligation that the caller can see it.
+3. The excerpt's existing size bound MUST be unchanged. This requirement concerns disclosure, never size.
+4. A provider echoing the caller's own **content** back in its response is a **named residual**, not a defect, and MUST be recorded in writing rather than suppressed.
+5. The absence claim MUST ship a positive control.
+
+#### Scenarios
+
+- **S-AEM-071** *[test]* — Given a provider that echoes the caller's authorization value into a non-streaming response carrying an unexpected content type, when the resulting refusal is rendered, then the bounded excerpt is present and readable but the credential appears nowhere in the rendered text; and given the same case with the removal step disabled, when the check runs, then it fails — proving the claim is falsifiable.
+- **S-AEM-072** *[test]* — Given that same refusal, when its excerpt is measured against the previously landed size bound, then the bound is unchanged and the excerpt remains reachable to a caller reading the terminal failure's rendered text; and given a provider echoing the caller's own content rather than the credential, when the milestone closes, then that outcome is recorded in writing as a named residual.
+
+> **Item 4's and `S-AEM-072`'s required recording, made at AI-36's close (2026-08-08).** The caller's own prompt content **was** observed echoed into the excerpt on the same run that exposed the credential, and it is **deliberately left unsuppressed**. Suppressing a provider's replay of the caller's own content would defeat item 2 — the excerpt exists to be read, and an excerpt scrubbed of everything the caller sent is not diagnostic. It is therefore recorded here, and in [`ai-provider-conformance-suite`](../ai-provider-conformance-suite/spec.md)'s `S-CNF-081`, as an accepted, maintainer-visible **named residual**. The distinction that makes this safe is exact: the **credential's** absence is proven, not assumed — that guard was empirically defeated and restored — while the **content's** presence is intended behaviour.
+>
+> **Recorded limitations of the removal step (informational, for AI-37).** Two are known and deliberately not closed here. First, removal is non-overlapping, so an interior credential prefix that is not itself a whole occurrence can survive a match at another position. Second, the credential can be bisected by the capture layer's fixed truncation offset, leaving an attacker-chosen prefix that whole-occurrence removal cannot match; this was found and narrowed during review, and the truncation-edge handling is deliberately **not** applied to the content-type header, because doing so could erase the very media type item 2 requires the refusal to name.
+
 ## doc 0002 test-list coverage map
 
 Every item of every AI-32 node's test list maps to at least one scenario.
@@ -344,7 +371,7 @@ Every item of every AI-32 node's test list maps to at least one scenario.
 
 ## The spec holds when
 
-1. `R-AEM-001` … `R-AEM-018` hold, each verified by its scenarios.
+1. `R-AEM-001` … `R-AEM-018` hold, each verified by its scenarios; and `R-AEM-019`, appended 2026-08-08 by AI-36, holds likewise.
 2. Every row of `R-AEM-002` is replayed by a pinning fixture and labelled dialect-conventional.
 3. Every `E1` … `E6` reference resolves at the pinned commit.
 4. No promoted spec is amended and `ai.FailureCategory` still has nine members.

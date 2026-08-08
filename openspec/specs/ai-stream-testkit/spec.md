@@ -26,7 +26,7 @@ This spec constrains what the `V-PRV-11` stream test kit MUST guarantee: that a 
 
 ## Status — this file is the canonical home of the contract
 
-`openspec/AGENTS.md` calls `openspec/specs/` the *source of truth (main specs)*. The stream test kit's thirteen requirements — the deadline-bounded drain, the first-divergence diff, the new contiguity assertion `ai.CheckStream` deliberately excludes, the serial-only leak helper, and the carrier view — therefore live here, not only as a pointer into the archive. The archived change folder at [`openspec/changes/archive/2026-08-03-cachicamas-ai-stream-testkit/`](../../changes/archive/2026-08-03-cachicamas-ai-stream-testkit/) is the historical record of how AI-22 was explored, proposed, designed, applied and verified.
+`openspec/AGENTS.md` calls `openspec/specs/` the *source of truth (main specs)*. The stream test kit's fourteen requirements — the deadline-bounded drain, the first-divergence diff, the new contiguity assertion `ai.CheckStream` deliberately excludes, the serial-only leak helper, the carrier view, and the redaction discipline over the helpers' own failure output (`R-STK-014`, added 2026-08-08 by AI-36) — therefore live here, not only as a pointer into the archive. The archived change folder at [`openspec/changes/archive/2026-08-03-cachicamas-ai-stream-testkit/`](../../changes/archive/2026-08-03-cachicamas-ai-stream-testkit/) is the historical record of how AI-22 was explored, proposed, designed, applied and verified.
 
 **`R-STK-008` carries the most weight against erosion.** It is the *(non-negotiable)* rule that the leak helper is serial-only and says so on its own surface — a later contributor "fixing" it to support `t.Parallel()` would silently widen its tolerance into uselessness, since a process-wide goroutine count cannot attribute goroutines to one test under parallel execution.
 
@@ -199,6 +199,25 @@ The carrier view MUST live in the test-kit package, not in the provider's own pa
 - **S-STK-037** — Given the merged change, when the signature guard runs, then it passes and still observes the single decided method with its decided carrier result.
 
 ---
+
+> **Amended 2026-08-08 (AI-36)** by [`cachicamas-ai-redaction`](../../changes/archive/2026-08-08-cachicamas-ai-redaction/) (AI-36 — Enforce secret redaction, Wave 5 — Harden). One requirement `R-STK-014` added: the assertion helpers' **own failure output** is brought under the module's redaction discipline and proven sentinel-free with a control. No requirement is modified, removed or renamed — `R-STK-001` … `R-STK-013` and `NFR-STK-A` … `NFR-STK-G` stand unchanged. `R-STK-004`'s bounded-rendering rule is the pin this requirement proves adversarially; the bound itself is **AI-22.2's and is reused, not re-litigated**.
+
+### R-STK-014 (added 2026-08-08) — The assertion helpers' own failure output is proven sentinel-free, with a control
+
+When an assertion helper reports a divergence, its report is itself a diagnostic surface and MUST obey the module's redaction discipline. Specifically:
+
+1. A divergence report MUST summarize the diverging payload within the established bounded-excerpt rule and MUST NOT reproduce a sentinel credential or a sentinel content body planted in that payload.
+2. The bound MUST hold for **every** event kind. No kind MAY render its payload in full, and no sentinel longer than the bound MAY be reconstructible from the report.
+3. The report MUST remain useful: it MUST still locate the first divergence by position and name the diverging kind.
+4. The proof MUST ship a **positive control** demonstrating the check can fail. An absence claim over failure output that cannot fail does not satisfy this requirement.
+
+#### Scenarios
+
+- **S-STK-047** — Given two recordings that diverge in a payload carrying a planted sentinel credential and a planted sentinel content body, when the assertion helper reports the divergence, then the report names the first diverging position and kind and contains neither sentinel.
+- **S-STK-048** — Given a report deliberately constructed to reproduce one of those sentinels, when the same check runs, then it fails and names the vector — proving `S-STK-047`'s absence claim is falsifiable.
+- **S-STK-049** — Given a divergence in each event kind in turn, with a sentinel longer than the established bound planted in each payload, when each report is produced, then every kind renders a bounded summary, none renders its payload in full, and the planted sentinel is not reconstructible from any report.
+
+> **Recorded outcome (2026-08-08, AI-36) — item 2 was not already satisfied.** `S-STK-049`'s per-kind sweep found a real gap rather than confirming an existing property: two registered kinds rendered their identity fields **whole**, so an over-bound sentinel planted in either was reconstructible in full from the report. Free-form fragment fields were already bounded and passed on first run; the identity fields were not, and were brought under the same bound. `S-STK-048`'s control is what makes `S-STK-047`'s absence claim non-vacuous, and it is deliberately a **length** control, not a redaction one: the established bound truncates, it does not scrub, so a sentinel shorter than the bound is reproduced by design and item 2's claim is precisely and only about what exceeds it.
 
 ## Non-functional requirements
 

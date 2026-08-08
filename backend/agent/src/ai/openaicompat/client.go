@@ -66,6 +66,36 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// clientRedactedLabel is the fixed, non-leaking label Client's own
+// String/GoString render (AI-36, D-5, S-APC-078) — the same fixed-label
+// posture openrouter's redactedProvider.String/GoString already use for
+// the identical reason (wrapper.go:90-101).
+const clientRedactedLabel = "<openaicompat client>"
+
+// String renders a fixed label that names neither the underlying type nor
+// any credential-shaped string (R-APC-015, D-5).
+//
+// Without it, Go's default formatter on a bare Client value reaches the
+// unexported credential field by raw reflection: reflect.Value.CanInterface
+// is false for a value read through an unexported struct field, so fmt
+// cannot dispatch to Credential's own redacting String/GoString — it falls
+// back to printing the field's raw underlying value instead, which is
+// exactly how the bearer token would otherwise leak (proven empirically by
+// TestClient_BareUnwrapped_NeverRendersCredential before this method
+// existed). Value receiver, mirroring openrouter's redactedProvider
+// (wrapper.go:90-101), so both the pointer and value forms redact.
+func (c Client) String() string {
+	return clientRedactedLabel
+}
+
+// GoString renders the same fixed label for the %#v verb — Credential's
+// own GoString already redacts the token (credential.go); this layer's
+// job is to stop Go's default %#v from reflecting past Client's own
+// unexported fields to reach it (D-5, same reasoning as String above).
+func (c Client) GoString() string {
+	return clientRedactedLabel
+}
+
 // New returns a configured Client from cfg.
 //
 // A malformed endpoint or an empty credential fails construction with an

@@ -106,6 +106,7 @@
 package openaicompat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -223,7 +224,7 @@ func (c *Client) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, e
 	// R-ATS-023: a success response whose Content-Type is not the
 	// streaming media type is refused before any byte reaches the decoder.
 	if !isStreamContentType(resp.Header.Get("Content-Type")) {
-		return nil, refuseNonStreamContentType(resp)
+		return nil, refuseNonStreamContentType(resp, c.credential)
 	}
 
 	out := make(chan ai.Event, streamCarrierBuffer)
@@ -301,10 +302,25 @@ func isStreamContentType(contentType string) bool {
 // (R-AIP-009), so this cause is what a caller unwraps to reach it. The
 // excerpt is bounded by capture.go's own captureLimit (captureBody, below —
 // AI-32.1's bounded-capture machinery, reused rather than a second,
-// independent bound, S-ATS-089). This type never reads the request's own
-// credential — it is built solely from the response's Content-Type header
-// and body — so it cannot reproduce one (R-ATS-023's "MUST NOT reproduce
-// credential material").
+// independent bound, S-ATS-089).
+//
+// # AI-36 (WU-2, D-4) — a hostile provider CAN echo the caller's own
+// credential into this excerpt
+//
+// This type is built solely from the response's Content-Type header and
+// body, never from the request directly — but a provider that echoes the
+// request's own Authorization header (or its body) back into a
+// non-streaming response makes that credential reachable through the
+// response body all the same. AI-36's adversarial hostile-server case
+// (a_i-36_1_test.go) proved this bites: refuseNonStreamContentType now
+// redacts the caller's own credential out of the captured excerpt before
+// it ever reaches this type (redactCredential, below), so Error() still
+// never reproduces credential material (R-ATS-023's own "MUST NOT
+// reproduce credential material") while the excerpt itself stays present
+// and readable (R-ATS-023's visibility requirement, unchanged). A
+// provider echoing the caller's own prompt content is a separate, named
+// residual (R-AEM-019 item 4): suppressing it would defeat this excerpt's
+// diagnostic purpose, since the excerpt IS the provider's own response.
 //
 // Credential-scan posture (S-ATS-089 rev 4): the credential-scan guard's
 // designed scope is external-package (`package openaicompat_test`) test
@@ -327,15 +343,242 @@ func (e *nonStreamContentType) Error() string {
 	return fmt.Sprintf("openaicompat: response content type %q is not the streaming media type %q; body excerpt: %s", e.contentType, streamContentType, e.excerpt)
 }
 
+// credentialRedactedPlaceholder replaces a caller's own credential
+// wherever redactCredential finds it echoed back inside a captured excerpt
+// (AI-36, D-4) — the same fixed placeholder text Credential's own
+// String/GoString already render (credential.go), so a redacted excerpt
+// reads consistently with every other redacted credential rendering in
+// this module.
+const credentialRedactedPlaceholder = "<redacted>"
+
+// redactCredential returns excerpt with every fold-equal occurrence of
+// cred's bearer-header form, then of cred's raw token, replaced with
+// credentialRedactedPlaceholder (D-4, R-AEM-019 item 1), and with any
+// truncation-edge fragment of either handled by
+// redactCredentialTailFragment (below). The bearer form is replaced first
+// so a caller reading the redacted excerpt never sees a dangling scheme
+// keyword left behind by a token-only replacement. An empty credential
+// (isEmpty) has nothing to redact and is returned unchanged.
+//
+// Size bound (AI-36 JD round 1, finding 5): credentialRedactedPlaceholder
+// is 10 bytes, and nothing constrains a live Credential's length beyond
+// non-empty (client.go's New) — credential_scan_test.go's under-20-bytes
+// convention is a test-only pattern table and binds no production value.
+// A token shorter than the placeholder therefore CAN grow the payload
+// under substitution (worst case: a 1-byte token rewriting every byte of
+// a captureLimit-sized payload to ~10x its length). The bound is enforced
+// rather than assumed: after substitution the payload is re-capped to
+// captureLimit, so the result never exceeds captureLimit +
+// len(truncationMarker) — exactly the largest capture AI-32.5's own path
+// (captureBody, capture.go) can emit.
+//
+// The re-cap marks its own cut (AI-36 JD round 2, finding A). capture.go
+// documents truncationMarker as present on no capture that did not hit
+// captureLimit, so a reader is entitled to read "no marker" as
+// "complete". Substitution can push a payload that arrived complete past
+// the limit — a credential shorter than the placeholder grows the body —
+// and re-attaching the marker only when the ORIGINAL excerpt already
+// carried one would leave that cut invisible. The marker is therefore
+// appended whenever the re-cap actually truncates, whether or not the
+// capture layer had already truncated: "no marker" keeps meaning
+// "complete", and the result is still at most captureLimit +
+// len(truncationMarker) because the marker is appended to a payload
+// already cut to captureLimit.
+func redactCredential(excerpt []byte, cred Credential) []byte {
+	if cred.isEmpty() {
+		return excerpt
+	}
+	// Whole-needle replacement runs on the payload only: when the excerpt
+	// carries capture.go's truncation marker (present iff the body
+	// overflowed captureLimit, so the payload is exactly captureLimit
+	// bytes), the marker is fixed constant bytes appended AFTER the cut —
+	// no credential byte can span into it, and the truncation-edge check
+	// below must look at the payload's real tail, not the marker's.
+	payload := excerpt
+	var marker []byte
+	if len(excerpt) == captureLimit+len(truncationMarker) && bytes.HasSuffix(excerpt, []byte(truncationMarker)) {
+		payload = excerpt[:captureLimit]
+		marker = excerpt[captureLimit:]
+	}
+	redacted := redactCredentialOccurrences(payload, cred)
+	redacted = redactCredentialTailFragment(redacted, cred)
+	// Enforce the size bound substitution can otherwise break (see the
+	// doc comment above): the payload never exceeds captureLimit, so the
+	// whole result never exceeds captureLimit + len(truncationMarker).
+	truncatedHere := false
+	if len(redacted) > captureLimit {
+		redacted = trimPartialPlaceholderSuffix(redacted[:captureLimit])
+		truncatedHere = true
+	}
+	if truncatedHere || marker != nil {
+		// One fixed marker either way: marker, when present, IS
+		// truncationMarker's bytes (it was matched as that suffix above),
+		// so a payload cut twice still carries exactly one.
+		redacted = append(append([]byte(nil), redacted...), truncationMarker...)
+	}
+	return redacted
+}
+
+// redactCredentialOccurrences returns s with every fold-equal WHOLE
+// occurrence of cred's bearer-header form, then of cred's raw token,
+// replaced with credentialRedactedPlaceholder (D-4, R-AEM-019 item 1).
+// The bearer form is replaced first so a caller reading the redacted text
+// never sees a dangling scheme keyword left behind by a token-only
+// replacement. An empty credential (isEmpty) has nothing to redact.
+//
+// This is the whole-occurrence half of redactCredential, split out (AI-36
+// JD round 2, finding B) so a caller can apply it WITHOUT the two
+// body-specific steps around it: redactCredentialTailFragment and the
+// captureLimit re-cap. Both of those exist only for capture.go's bounded
+// body excerpts. A header value never passes through captureBody, so it
+// has no truncation edge and no size cap, and running the tail heuristic
+// on one is actively destructive: the heuristic replaces any suffix of at
+// least minCredentialFragment bytes that is a proper prefix of the
+// credential, so a credential beginning "json" turns the whole
+// Content-Type "application/json" into "application/<redacted>" and
+// erases the offending media type R-ATS-023's refusal is required to
+// name.
+//
+// Disclosed, deliberately not fixed here (AI-36 JD round 2): the tail
+// heuristic also runs the BEARER needle, whose first four bytes are the
+// constant "Bear" for every credential. Any body excerpt whose final 4–7
+// bytes are "Bear"/"Beare"/"Bearer" is therefore redacted regardless of
+// which credential is configured — a credential-independent false
+// positive. It stays: on body excerpts the cost is one placeholder's
+// worth of diagnostics at the very tail, and narrowing it would weaken
+// the truncation-edge guarantee that the same tail check exists for.
+func redactCredentialOccurrences(s []byte, cred Credential) []byte {
+	if cred.isEmpty() {
+		return s
+	}
+	return foldReplaceAll(foldReplaceAll(s, []byte(cred.bearer())), []byte(cred.token))
+}
+
+// trimPartialPlaceholderSuffix drops a trailing PROPER prefix of
+// credentialRedactedPlaceholder, so the re-cap above cannot leave a
+// half-written "<redacte" that a reader would take for body content
+// (AI-36 JD round 2, finding A). A partial placeholder carries no secret
+// bytes, so this is a legibility fix, not a disclosure one.
+//
+// It is deliberately blind to how the suffix got there: bytes that merely
+// LOOK like a placeholder prefix ("<" alone qualifies) are trimmed too.
+// The cost is at most len(credentialRedactedPlaceholder)-1 bytes of
+// diagnostics at a tail that was already cut mid-content; the benefit is
+// that no cut tail can be mistaken for a placeholder or for content.
+func trimPartialPlaceholderSuffix(b []byte) []byte {
+	for n := len(credentialRedactedPlaceholder) - 1; n >= 1; n-- {
+		if n <= len(b) && bytes.HasSuffix(b, []byte(credentialRedactedPlaceholder[:n])) {
+			return b[:len(b)-n]
+		}
+	}
+	return b
+}
+
+// foldReplaceAll returns s with every fold-equal occurrence of needle
+// replaced by credentialRedactedPlaceholder. Matching is case-insensitive
+// (AI-36 JD round 1, finding 3): a hostile server chooses its own casing
+// for the echo, RFC 7235 already defines the scheme keyword ("Bearer") as
+// case-insensitive, and an echo whose only transformation is ASCII case
+// still discloses the secret in trivially recoverable form. The boundary
+// chosen here: MATCHING folds, the credential itself is never
+// case-normalized anywhere — cred.bearer() puts the exact original bytes
+// on the wire, and replacing body bytes that merely fold-equal the secret
+// is over-matching in the safe direction (a false positive costs one
+// placeholder's worth of diagnostics; a false negative is a leak). A
+// fold-equal variant of a DIFFERENT byte length (Unicode multi-byte fold
+// pairs) is not matched by this fixed-window scan — that is a
+// re-encoding of the secret, the same disclosed residual class as a
+// base64-transformed echo, which no byte-level scan can close.
+func foldReplaceAll(s, needle []byte) []byte {
+	if len(needle) == 0 || len(needle) > len(s) {
+		return s
+	}
+	var out []byte
+	i := 0
+	for i+len(needle) <= len(s) {
+		if bytes.EqualFold(s[i:i+len(needle)], needle) {
+			out = append(out, credentialRedactedPlaceholder...)
+			i += len(needle)
+			continue
+		}
+		out = append(out, s[i])
+		i++
+	}
+	return append(out, s[i:]...)
+}
+
+// minCredentialFragment is the shortest credential prefix the
+// truncation-edge check below treats as credential material: 4 bytes,
+// matching the module's existing prefix doctrine — the openrouter smoke
+// sweep makes the secret's 4-character prefix its own deny-list vector
+// (openrouter/smoke/sentinel_sweep.go), and ai/completion.go states the
+// principle outright: a prefix of a secret is still a secret. Fragments
+// of 1–3 bytes are below that established threshold and indistinguishable
+// from ordinary body bytes.
+const minCredentialFragment = 4
+
+// redactCredentialTailFragment closes the truncation-edge gap (AI-36 JD
+// round 1, finding 2): captureBody cuts the body at a fixed byte offset
+// with no credential awareness, and capture runs BEFORE redaction — so a
+// hostile server can position its Authorization echo across that boundary
+// and leave an attacker-chosen proper PREFIX of the credential (or of its
+// bearer-header form) at the payload's tail, where whole-needle
+// replacement cannot match it. The full body is unavailable by design
+// (capture bounds while reading), so the tail is checked directly: the
+// longest payload suffix that is a proper prefix of the bearer form, then
+// of the raw token, of at least minCredentialFragment bytes, is replaced
+// with the placeholder. The check runs on every payload, not only marked
+// ones — a short read or a connection cut mid-echo produces the same
+// fragment shape without ever reaching captureLimit.
+func redactCredentialTailFragment(payload []byte, cred Credential) []byte {
+	needles := [][]byte{[]byte(cred.bearer()), []byte(cred.token)}
+	for _, needle := range needles {
+		longest := len(needle) - 1 // proper prefix only: the whole needle was already replaced above
+		if longest > len(payload) {
+			longest = len(payload)
+		}
+		for n := longest; n >= minCredentialFragment; n-- {
+			// Fold-equal, same as foldReplaceAll: a case-folded echo
+			// truncated at the edge is still credential material.
+			if bytes.EqualFold(payload[len(payload)-n:], needle[:n]) {
+				out := append([]byte(nil), payload[:len(payload)-n]...)
+				return append(out, credentialRedactedPlaceholder...)
+			}
+		}
+	}
+	return payload
+}
+
 // refuseNonStreamContentType builds R-ATS-023's pre-handover failure for a
 // success response whose Content-Type is not the streaming media type,
 // capturing a bounded excerpt of resp's body through capture.go's own
-// captureBody — which also closes the body, so no byte reaches the decoder.
-func refuseNonStreamContentType(resp *http.Response) error {
+// captureBody — which also closes the body, so no byte reaches the
+// decoder — and redacting cred (the client's own credential) out of that
+// excerpt before it ever reaches nonStreamContentType (AI-36, D-4): a
+// hostile provider that echoes the caller's own Authorization header into
+// its response body must not be able to make this excerpt reproduce it.
+//
+// The stored content type gets the same redaction (AI-36 JD round 1,
+// finding 1): isStreamContentType compares only the parsed media type, so
+// a hostile provider can echo the caller's own Authorization value into a
+// Content-Type PARAMETER — or into an unparseable value rendered whole —
+// and nonStreamContentType.Error() would reproduce it verbatim. Redacting
+// only the credential occurrences keeps the offending type itself visible,
+// which R-ATS-023's refusal text requires — so the header value goes
+// through redactCredentialOccurrences, NOT the full redactCredential
+// (AI-36 JD round 2, finding B): the latter's truncation-edge heuristic
+// and captureLimit re-cap are body-only steps, and the tail heuristic in
+// particular erases the media type whenever a credential happens to begin
+// with the type's own last four bytes. See redactCredentialOccurrences'
+// own comment for the full reasoning.
+func refuseNonStreamContentType(resp *http.Response, cred Credential) error {
 	captured := captureBody(resp.Body)
 	failure, err := ai.PreStreamFailure(ai.FailureReport{
 		Category: ai.FailureCategoryMalformedResponse,
-		Cause:    &nonStreamContentType{contentType: resp.Header.Get("Content-Type"), excerpt: captured.bytes()},
+		Cause: &nonStreamContentType{
+			contentType: string(redactCredentialOccurrences([]byte(resp.Header.Get("Content-Type")), cred)),
+			excerpt:     redactCredential(captured.bytes(), cred),
+		},
 	})
 	if err != nil {
 		// FailureCategoryMalformedResponse is always a member of the

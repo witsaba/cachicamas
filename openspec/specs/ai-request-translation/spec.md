@@ -360,6 +360,31 @@ The policy MUST grow **automatically** with the inventory: the walk MUST be driv
 
 ---
 
+> **Amended 2026-08-08 (AI-36)** by [`cachicamas-ai-redaction`](../../changes/archive/2026-08-08-cachicamas-ai-redaction/) (AI-36 — Enforce secret redaction, Wave 5 — Harden). One requirement `R-ART-022` added: the credential scan's surface widens from one directory to the whole adapter tree, and the silent category exemption `R-ART-004` relied on is replaced by a declared, enumerated, asserted list.
+>
+> **`R-ART-004` is amended append-only and is NOT edited.** Its text stands verbatim and its scenarios `S-ART-013` … `S-ART-017` stand unmodified; `R-ART-022` item 6 and `S-ART-094` bind them to keep holding under the widened rule, and they were re-run green at AI-36's close. What changed is not the obligation but how it is discharged: the exclusion of package-internal test files — a whole **category**, which made an *accidental* real credential in any of those files invisible — is now satisfied by the per-file declaration rule instead. Widening the scan therefore **increases** coverage rather than relocating the hole, and adding an exemption becomes a diff a reviewer must approve.
+
+### R-ART-022 (added 2026-08-08) — The scan covers the whole adapter tree, and every unswept file is declared and enumerated
+
+The credential scan's surface MUST extend over the whole adapter tree, and no file MAY be unswept without a declaration a reviewer can see. Specifically:
+
+1. The scan MUST cover, recursively, every test file and every fixture file under the adapter tree — including its nested provider, live-smoke, conformance and fixture directories — not a single directory.
+2. A file MAY be exempt from the scan **only** if it carries an explicit in-file declaration that it plants a credential-shaped value deliberately. No exemption by package kind, directory, naming convention or file extension is permitted.
+3. The set of declaration-bearing files MUST match a **committed, enumerated list**, and that match MUST itself be asserted. Adding a declaration to a file absent from the list, or removing one from a listed file, MUST fail until the list is updated.
+4. The scan's own patterns, the declaration text and the committed list MUST be assembled at run time rather than appearing as contiguous literals, so the scan does not report its own sources.
+5. No scan failure output MAY reproduce the value it matched; it MUST name the file and the vector only.
+6. `R-ART-004`'s existing obligations and its scenarios `S-ART-013` … `S-ART-017` MUST continue to hold under the widened rule.
+
+#### Scenarios
+
+- **S-ART-090** — Given a credential-shaped value planted in a nested directory of the adapter tree that the previous scan never read, when the scan runs, then it reports that file — proving the widening, and proving the scan can fail.
+- **S-ART-091** — Given a file carrying the explicit deliberate-plant declaration, when the scan runs, then that file is not reported; and given the identical content with the declaration removed, when the scan runs again, then it is reported.
+- **S-ART-092** — Given the shipped tree, when the set of declaration-bearing files is compared with the committed enumerated list, then the two match exactly; and given a declaration added to a file absent from that list, when the comparison runs, then it fails and names the offending file.
+- **S-ART-093** — Given a scan run that reports a match, when its output is inspected, then it names the file and the vector and reproduces none of the matched value; and given the scan's own sources, the declaration text and the committed list, when the scan runs over them, then none is reported.
+- **S-ART-094** — Given the widened scan in place, when `R-ART-004`'s existing scenarios `S-ART-013` … `S-ART-017` are re-run, then all five still pass, and the obligation previously satisfied by excluding package-internal test files is now satisfied by the declaration rule instead.
+
+> **Recorded granularity note (2026-08-08, AI-36).** Item 2's exemption is **file-scoped by design**, as its own wording states: a declaration exempts the file that carries it, not one named plant inside it. A reviewer should read the residual honestly — a declared file's *other* credential-shaped values are exempt alongside the deliberate one it was declared for. This is not a deviation from item 2; it is the granularity item 2 specifies, and items 3 and 5 are what keep it reviewable, since the declared set is enumerated, asserted in both directions, and any drift fails until the committed list is updated. Narrowing the exemption from per-file to per-plant is recorded as available future work for **AI-37**, not as an open defect here.
+
 ## Non-functional requirements
 
 ### NFR-ART-A — Dependency purity

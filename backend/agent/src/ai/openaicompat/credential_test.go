@@ -1,3 +1,7 @@
+// credential-scan:deliberate-plant — plants an OpenAI-style secret-key-shaped
+// literal (S-APC-053) to prove Credential.String/GoString never render the
+// raw token. Declared here per AI-36's recursive credential scan (D-3,
+// R-ART-022); enumerated in credential_scan_test.go's deliberatePlantAllowlist.
 package openaicompat
 
 import (

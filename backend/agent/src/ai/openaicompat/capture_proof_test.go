@@ -19,6 +19,12 @@
 // can never see it; that posture is load-bearing and called out in
 // the S-ART-054 allowlist's own comment (stream_failure.go's
 // ErrInBandErrorFrame allowlist entry cites the same posture).
+//
+// credential-scan:deliberate-plant — plants sAEM060Sentinel
+// ("sk-AEM060-planted-in-body-only", S-AEM-060) to prove a body-only
+// credential-shaped sentinel never reaches a typed error's rendered text.
+// Declared here per AI-36's recursive credential scan (D-3, R-ART-022);
+// enumerated in credential_scan_test.go's deliberatePlantAllowlist.
 
 package openaicompat
 

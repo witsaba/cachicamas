@@ -1,3 +1,9 @@
+// credential-scan:deliberate-plant — plants an OpenAI-style secret-key-shaped
+// literal ("sk-super-secret-openrouter-token-shape") three times to prove
+// the wrapper's redaction posture at the Config, provider-value and
+// stream-error-path levels (R-OR-08). Declared here per AI-36's recursive
+// credential scan (D-3, R-ART-022); enumerated in
+// credential_scan_test.go's deliberatePlantAllowlist.
 package openrouter
 
 import (

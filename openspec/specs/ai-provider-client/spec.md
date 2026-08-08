@@ -259,6 +259,27 @@ The probe MUST NOT be routed through an environment-derived proxy. This is not t
 
 ---
 
+> **Amended 2026-08-08 (AI-36)** by [`cachicamas-ai-redaction`](../../changes/archive/2026-08-08-cachicamas-ai-redaction/) (AI-36 — Enforce secret redaction, Wave 5 — Harden). One requirement `R-APC-015` added: redaction becomes a property of the adapter's **own** values rather than of a wrapper standing in front of them, and header-capturing diagnostics are made admission-listed. No requirement is modified, removed or renamed — `R-APC-001` … `R-APC-014` and `NFR-APC-A` … `NFR-APC-G` stand unchanged. `R-APC-014`'s scoping is honoured, not weakened: this requirement still asserts nothing about the wire, and `S-APC-053`'s type-shape opacity assertion is the precedent it extends from the credential value to the two values that hold it.
+
+### R-APC-015 (added 2026-08-08) — The credential is redacted by the values that hold it, and header-capturing diagnostics reproduce no header
+
+Redaction MUST be a property of the adapter's own values, not of which value the caller happened to render, and not of a wrapper standing in front of them. Specifically:
+
+1. Rendering the adapter's **configuration value** MUST NOT disclose the credential under any rendering a caller can reach — the plain, string, extended and Go-syntax verbs, and the structured-serialization form.
+2. Rendering the adapter's **configured client value** MUST NOT disclose the credential under any of those same renderings, **whether or not** it is wrapped. This is an invariant of the value; whether it already holds or requires added rendering behavior MUST be established empirically and the outcome recorded.
+3. Any diagnostic that captures request or response headers MUST reproduce only header names admitted by an explicit admission list. Credential-bearing headers MUST be excluded **by default**; admission MUST be the explicit act, never exclusion.
+4. No diagnostic in the module MAY capture the whole header set.
+5. Each absence claim above MUST ship a positive control proving the assertion can fail.
+
+#### Scenarios
+
+- **S-APC-077** — Given an adapter configuration value built with a sentinel credential, when it is rendered under the plain, string, extended and Go-syntax verbs and under structured serialization, then the sentinel appears in none of the five outputs; and given an unredacted stand-in carrying the same sentinel, when the same check runs, then it fails, proving the assertion bites.
+- **S-APC-078** — Given a **bare, unwrapped** configured client value built with a sentinel credential, when it is rendered under those same five forms, then the sentinel appears in none of them; and given the run that establishes this, when the milestone closes, then its outcome is recorded — either as behavior already holding and pinned against regression, or as behavior newly established.
+- **S-APC-079** — Given a response carrying a credential-bearing header alongside a sentinel header value, when the header-capturing diagnostic is rendered, then it reproduces no header name and no header value from that response; and given a rendering deliberately built to reproduce one, when the same check runs, then it fails.
+- **S-APC-080** — Given the shipped module, when every diagnostic that reads headers is enumerated, then none captures the whole header set, each reads only through an explicit admission list, and a header newly present on a response is absent from every diagnostic until it is explicitly admitted.
+
+> **`S-APC-078`'s required recording, made at AI-36's close (2026-08-08).** Item 2's empirical run came back **negative**: the behavior did **not** already hold. The bare, unwrapped configured client value disclosed the raw credential under all four rendering verbs, in **both** the referenced and the copied form. The cause is structural rather than incidental — a value reached through a field the package does not publish cannot dispatch to the redacting renderings its own type would otherwise supply, so the fallback walks its internal state and reproduces the credential. It was closed by giving the configured client value redacting renderings that the copied form itself carries, mirroring the wrapping provider's landed precedent. The outcome is therefore recorded as **behavior newly established**, not as behavior already holding — item 2's alternative disposition did not apply, and is recorded here so a later reader does not have to re-derive which branch fired. Item 1's configuration-value run, by contrast, was green on first execution and is pinned against regression.
+
 ## Non-functional requirements
 
 ### NFR-APC-A — Dependency purity

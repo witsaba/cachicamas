@@ -17,6 +17,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -1344,6 +1346,304 @@ func TestFailure_GoString_NilReceiver_TotalByDelegation(t *testing.T) {
 				t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) = %q, want %q", verb, got, want)
 			}
 		})
+	}
+}
+
+// valueShapedCause is a test-local, value-kind error used to plant a
+// canary in FailureReport.Cause for the copied-value hazard proofs below
+// (AI-36, WU-6, D-1, R-AIP-017). It is deliberately value-kind with a
+// VALUE receiver Error() — stored AS A VALUE in the cause chain — so a
+// copied Failure's reflective rendering reaches it directly, unlike a
+// pointer-shaped cause (contrast: TestFailure_CopiedValue_PointerShapedCause_DoesNotSurfaceCanary).
+type valueShapedCause struct{ Detail string }
+
+// Error implements the error interface for valueShapedCause.
+func (c valueShapedCause) Error() string { return c.Detail }
+
+// TestFailure_CopiedValue_ValueShapedCause_RendersCanary is the mechanism
+// pin (S-AIP-058): it demonstrates a REAL, KNOWN leak — not a defect to
+// fix, per R-AIP-017's own chosen discharge (D-1: prove the shape
+// unreachable and guard it, never widen GoString's coverage to copies,
+// which would re-open NFR-AIP-B for a shape no constructor produces).
+// Expected GREEN: this records the scope R-AIP-017 states; it is not a
+// RED-first behavior change.
+//
+// Acceptance condition (explicit, not a comment): the cause MUST be
+// value-shaped, not pointer-shaped. Under Go-syntax rendering at nesting
+// depth greater than zero, a pointer-shaped cause renders as a machine
+// address rather than its text, so a canary planted only in a
+// pointer-shaped cause would not surface even if the mechanism were
+// unsafe — the assertion would pass vacuously. See the contrast pin
+// immediately below for the proof that this placement is the one that
+// bites.
+func TestFailure_CopiedValue_ValueShapedCause_RendersCanary(t *testing.T) {
+	t.Parallel()
+
+	canary := "AI36-D1-VALUESHAPED-CANARY-" + "e4b7c1"
+
+	failure, err := ai.MidStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryUnavailable,
+		Cause:    valueShapedCause{Detail: canary},
+	}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure returned %v, want no failure", err)
+	}
+
+	// The AI-41-deferred shape: a copied value form of the payload, not
+	// *ai.Failure. GoString/Error/Unwrap/Is are all pointer-receiver, so
+	// this value is neither a fmt.GoStringer nor an error — its rendering
+	// falls back to raw reflection over every field, cause included.
+	copied := *failure
+
+	for _, verb := range []string{"%#v", "%v", "%+v"} {
+		rendered := fmt.Sprintf(verb, copied)
+		if !strings.Contains(rendered, canary) {
+			t.Fatalf("fmt.Sprintf(%q, copied) = %q, want it to contain the canary %q — a copied Failure value is outside GoString's pointer-receiver coverage (R-AIP-017 item 1); if this ever stops leaking, a value-receiver method was added and NFR-AIP-B's tradeoff must be re-argued in the open (design.md AD-3)", verb, rendered, canary)
+		}
+	}
+}
+
+// TestFailure_CopiedValue_PointerShapedCause_DoesNotSurfaceCanary is the
+// depth-hazard contrast pin (S-AIP-059): identical construction with a
+// POINTER-shaped cause (errors.New, an *errorString) does NOT surface the
+// canary under the same verbs — documenting, in-test, why the
+// value-shaped plant above is mandatory: under Go-syntax rendering at
+// nesting depth greater than zero, fmt renders a pointer-typed field as a
+// machine address, never its text, so a canary planted only in a
+// pointer-shaped cause would pass "absent" vacuously even if the
+// underlying mechanism were unsafe.
+func TestFailure_CopiedValue_PointerShapedCause_DoesNotSurfaceCanary(t *testing.T) {
+	t.Parallel()
+
+	canary := "AI36-D1-POINTERSHAPED-CANARY-" + "9f2a6d"
+
+	failure, err := ai.MidStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryUnavailable,
+		Cause:    errors.New("upstream: " + canary),
+	}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure returned %v, want no failure", err)
+	}
+
+	copied := *failure
+
+	for _, verb := range []string{"%#v", "%v", "%+v"} {
+		rendered := fmt.Sprintf(verb, copied)
+		if strings.Contains(rendered, canary) {
+			t.Errorf("fmt.Sprintf(%q, copied) = %q, unexpectedly contains the pointer-shaped canary — want it absent, establishing that the pointer-shaped placement is vacuous and the value-shaped placement above is the one that can bite (S-AIP-059, design.md AD-3)", verb, rendered)
+		}
+	}
+}
+
+// isFailureByValueType reports whether t (a parsed field/parameter/result
+// type expression) names the failure payload BY VALUE: the bare
+// identifier Failure when parsing a file that is itself package ai, or
+// any qualified <pkg>.Failure selector from any other package (AI-36,
+// WU-6, R-AIP-017 item 2). A pointer form is never matched here — callers
+// pass field.Type directly, and *ast.StarExpr falls through to the
+// default case, which is exactly the point: the guard flags only the
+// by-value shape.
+func isFailureByValueType(t ast.Expr, inAIPackage bool) bool {
+	switch e := t.(type) {
+	case *ast.Ident:
+		return inAIPackage && e.Name == "Failure"
+	case *ast.SelectorExpr:
+		return e.Sel.Name == "Failure"
+	default:
+		return false
+	}
+}
+
+// embeddedFieldName derives the field name Go assigns to an embedded
+// (anonymous) struct field from its type expression — the tail
+// identifier, dereferencing one leading pointer if present.
+func embeddedFieldName(t ast.Expr) string {
+	switch e := t.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return e.Sel.Name
+	case *ast.StarExpr:
+		return embeddedFieldName(e.X)
+	default:
+		return ""
+	}
+}
+
+// findingsInFile inspects one parsed file's declarations for an exported
+// function/method signature or an exported struct field that carries the
+// failure payload by value (R-AIP-017 item 2), returning one finding per
+// offending declaration naming its position and shape — never any
+// payload content, since a Go identifier is not a secret.
+func findingsInFile(fset *token.FileSet, file *ast.File) []string {
+	var findings []string
+	inAI := file.Name.Name == "ai"
+
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if !d.Name.IsExported() {
+				continue
+			}
+			if d.Type.Params != nil {
+				for _, field := range d.Type.Params.List {
+					if isFailureByValueType(field.Type, inAI) {
+						findings = append(findings, fmt.Sprintf("%s: func %s: a parameter carries the failure payload by value", fset.Position(d.Pos()), d.Name.Name))
+					}
+				}
+			}
+			if d.Type.Results != nil {
+				for _, field := range d.Type.Results.List {
+					if isFailureByValueType(field.Type, inAI) {
+						findings = append(findings, fmt.Sprintf("%s: func %s: a return value carries the failure payload by value", fset.Position(d.Pos()), d.Name.Name))
+					}
+				}
+			}
+		case *ast.GenDecl:
+			if d.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range d.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || !ts.Name.IsExported() {
+					continue
+				}
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok || st.Fields == nil {
+					continue
+				}
+				for _, field := range st.Fields.List {
+					if len(field.Names) == 0 {
+						name := embeddedFieldName(field.Type)
+						if name != "" && ast.IsExported(name) && isFailureByValueType(field.Type, inAI) {
+							findings = append(findings, fmt.Sprintf("%s: struct %s: embedded field %s carries the failure payload by value", fset.Position(field.Pos()), ts.Name.Name, name))
+						}
+						continue
+					}
+					for _, name := range field.Names {
+						if name.IsExported() && isFailureByValueType(field.Type, inAI) {
+							findings = append(findings, fmt.Sprintf("%s: struct %s: field %s carries the failure payload by value", fset.Position(field.Pos()), ts.Name.Name, name.Name))
+						}
+					}
+				}
+			}
+		}
+	}
+	return findings
+}
+
+// scanModuleForByValueFailure walks every non-test .go file under root
+// (this module's whole source tree) and reports every finding
+// findingsInFile produces (R-AIP-017 item 2's structural guard,
+// S-AIP-060). testdata directories are skipped, matching the Go
+// toolchain's own convention: nothing under testdata/ is part of the
+// module's published (importable, buildable) surface.
+func scanModuleForByValueFailure(root string) ([]string, error) {
+	var findings []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			return perr
+		}
+		findings = append(findings, findingsInFile(fset, file)...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return findings, nil
+}
+
+// TestNoPublishedSurfaceReturnsFailureByValue is the AST escape guard
+// (S-AIP-060, R-AIP-017 item 2): a go/parser walk over every non-test .go
+// file in this module flags any exported function/method signature or
+// exported struct field that carries the failure payload by value. The
+// current tree is clean.
+//
+// ".." is this module's whole source tree (src/, both src/ai and
+// src/agenttest) from this test's own working directory (src/ai) — go
+// test always sets the working directory to the package under test, the
+// same convention this file's other go/parser-based guards already rely
+// on (e.g. parser.ParseFile(fset, "provider_failure.go", nil, 0) above).
+func TestNoPublishedSurfaceReturnsFailureByValue(t *testing.T) {
+	t.Parallel()
+
+	findings, err := scanModuleForByValueFailure("..")
+	if err != nil {
+		t.Fatalf("scanModuleForByValueFailure: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("found %d published shape(s) carrying the failure payload by value, want 0 (R-AIP-017 item 2): %v", len(findings), findings)
+	}
+}
+
+// TestNoPublishedSurfaceReturnsFailureByValue_PositiveControl proves the
+// guard is falsifiable (S-AIP-060's own control): an in-memory synthetic
+// source declaring a published function that returns the failure payload
+// by value MUST be flagged.
+func TestNoPublishedSurfaceReturnsFailureByValue_PositiveControl(t *testing.T) {
+	t.Parallel()
+
+	const syntheticLeakSource = `package synthetic
+
+import "github.com/cachicamas/backend/agent/src/ai"
+
+func Leak() ai.Failure { return ai.Failure{} }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "synthetic_leak.go", syntheticLeakSource, 0)
+	if err != nil {
+		t.Fatalf("parser.ParseFile: %v", err)
+	}
+
+	findings := findingsInFile(fset, file)
+	if len(findings) == 0 {
+		t.Fatal("findingsInFile did not flag func Leak() ai.Failure, want the guard to catch it — an escape guard that can never fail is not a proof (S-AIP-060)")
+	}
+}
+
+// TestFailure_PublishedRenderingSetUnchanged_AbsentPayloadTotality is the
+// regression pin (S-AIP-061): R-AIP-017 changes no rendering behavior —
+// the payload's published rendering set (String is not exported on
+// *Failure; Error and GoString are) is identical to what R-AIP-016
+// landed, and every absent-payload (nil *Failure) rendering under all
+// four verbs still yields the contract's defined rendering and never
+// panics (NFR-AIP-B, S-AIP-052, S-AIP-057).
+func TestFailure_PublishedRenderingSetUnchanged_AbsentPayloadTotality(t *testing.T) {
+	t.Parallel()
+
+	failureMethods := exportedMethodNames(reflect.TypeOf(&ai.Failure{}))
+	wantRenderingMethods := map[string]bool{"Error": true, "GoString": true}
+	for name := range wantRenderingMethods {
+		if !failureMethods[name] {
+			t.Errorf("*ai.Failure no longer exports %s, want the rendering set R-AIP-016 landed unchanged", name)
+		}
+	}
+	// String is deliberately NOT part of the published rendering set —
+	// R-AIP-016 never added one, and R-AIP-017 item 6 forbids adding any
+	// new rendering behavior to the payload's published set.
+	if failureMethods["String"] {
+		t.Error("*ai.Failure now exports String, want the rendering set unchanged from R-AIP-016 (R-AIP-017 item 6)")
+	}
+
+	want := (*ai.Failure)(nil).Error()
+	for _, verb := range []string{"%v", "%s", "%+v", "%#v"} {
+		if got := fmt.Sprintf(verb, (*ai.Failure)(nil)); got != want {
+			t.Errorf("fmt.Sprintf(%q, (*ai.Failure)(nil)) = %q, want %q (NFR-AIP-B, S-AIP-052, S-AIP-057)", verb, got, want)
+		}
 	}
 }
 
