@@ -699,7 +699,42 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 					if payload, ok := completion.Completion(); ok {
 						outcome.completion, outcome.haveCompletion = payload, true
 					}
-					sendEvent(completion)
+					if !sendEvent(completion) {
+						// AI-37 Judgment Day CRITICAL fix (R-AOB-005): honor
+						// sendEvent's result on this terminal path exactly
+						// like the events loop's own recovery below
+						// (:757-781) instead of discarding it. The carrier
+						// is unbuffered (streamCarrierBuffer == 0), so a
+						// caller that cancels and stops draining
+						// deterministically loses this send; without this
+						// branch outcome.failure stayed nil and
+						// finalizeSpan's success branch recorded codes.Ok
+						// plus usage for a completion the consumer never
+						// received.
+						if ctxErr := ctx.Err(); ctxErr != nil {
+							if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
+								outcome.failure = failure
+								if blockOpen {
+									if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+										endStamped := stamper.Stamp(end)
+										select {
+										case out <- endStamped:
+											outcome.eventCount++
+										case <-time.After(emitFailureSendBound):
+										}
+									}
+								}
+								if errEv, err := ai.ErrorEvent(failure); err == nil {
+									errStamped := stamper.Stamp(errEv)
+									select {
+									case out <- errStamped:
+										outcome.eventCount++
+									case <-time.After(emitFailureSendBound):
+									}
+								}
+							}
+						}
+					}
 					return
 				}
 
