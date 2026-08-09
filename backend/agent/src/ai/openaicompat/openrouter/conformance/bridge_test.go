@@ -78,6 +78,14 @@ import (
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
+
+	// Blank import: conformancetest's init() registers the CapRetry case
+	// (retry/auto_retry_up_to_documented_bound) into the shared agenttest
+	// registry this binary's unscoped TestOpenRouterAdapter_FullConformance
+	// run consumes — see conformanceBridgeFactory's own doc comment and
+	// conformancetest's package doc for why this import must be here
+	// (design D2, R-ACR-006).
+	_ "github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest"
 )
 
 // conformanceBridgeChunkCreated and conformanceBridgeObjectDiscriminator
@@ -504,8 +512,16 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 // (construct, stream, drain) before the next New call is ever made — and
 // registers exactly one tb.Cleanup, closing whichever server is current
 // when the whole test ends.
+//
+// Retry is declared true (AI-38 design D2, R-ACR-006, locked decision 2):
+// the client auto-retries per AI-35, and openaicompat/bridge_test.go's
+// own conformance factory declares it identically. CAP-O-04 is exercised
+// in THIS binary specifically because of the blank import of
+// conformancetest below (design D2): without it, the retry case's init()
+// registration would never fire here, and an unscoped run would report
+// CAP-O-04 structurally NotExercised despite the true declaration.
 func conformanceBridgeFactory() agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, false
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, true
 
 	var mu sync.Mutex
 	var current *httptest.Server

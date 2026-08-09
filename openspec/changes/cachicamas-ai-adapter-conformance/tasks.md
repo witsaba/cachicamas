@@ -94,9 +94,13 @@ Chain strategy: size-exception
 
 ## Phase 5: Retry Parity (WU6)
 
-- [ ] 5.1 New pkg `openaicompat/conformancetest/`: move `retryAutoRetryUpToBoundCase` + helpers, register via `agenttest.RegisterConformanceCase` in `init()`; verify `import_boundary_test.go` admits it (fallback: duplicate + drift test). Maps R-ACR-006.
-- [ ] 5.2 `openaicompat/conformance_retry_test.go`: shrink to thin `TestRetryCaseBody_RunsDirectly` importing `conformancetest`.
-- [ ] 5.3 `openaicompat/bridge_test.go` + `openrouter/conformance/bridge_test.go`: flip `Retry` → `&true` both factories; blank-import `conformancetest` in OpenRouter binary. RED: factory disagreement/CAP-O-04 NotExercised → GREEN: identical declarations, CAP-O-04 exercised. Maps R-ACR-006/S-ACR-017-018.
+- [x] 5.1 New pkg `openaicompat/conformancetest/`: move `retryAutoRetryUpToBoundCase` + helpers, register via `agenttest.RegisterConformanceCase` in `init()`; verify `import_boundary_test.go` admits it (fallback: duplicate + drift test). Maps R-ACR-006.
+- [x] 5.2 `openaicompat/conformance_retry_test.go`: shrink to thin `TestRetryCaseBody_RunsDirectly` importing `conformancetest`.
+- [x] 5.3 `openaicompat/bridge_test.go` + `openrouter/conformance/bridge_test.go`: flip `Retry` → `&true` both factories; blank-import `conformancetest` in OpenRouter binary. RED: factory disagreement/CAP-O-04 NotExercised → GREEN: identical declarations, CAP-O-04 exercised. Maps R-ACR-006/S-ACR-017-018.
+
+  **Evidence**: Approval-tested move (5.1/5.2) — baseline `go test ./.../openaicompat/... -run TestRetryCaseBody_RunsDirectly -race -v` PASS before the move; identical PASS after relocating the case body into `openaicompat/conformancetest/retry.go` (exported `RetryAutoRetryUpToBoundCase`) and shrinking `conformance_retry_test.go` to a thin driver. Import boundary guard admits the new package with NO fallback needed: `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` / `TestLayer1_DependencySet_ExactRequiresAndClosure` both PASS unchanged — `conformancetest` matches the existing `modulePath` allowlist entry by construction (only stdlib + this module's own packages imported; zero new `go.mod` requires, zero closure drift).
+
+  5.3 RED→GREEN: before the blank import, `retry/auto_retry_up_to_documented_bound` was never registered in the `openrouter_conformance` binary at all (case absent from the run, not merely skipped) — CAP-O-04 would read `NotExercised`. After flipping `Retry: &true` on both bridge factories and adding the blank import, `go test ./.../conformance/... -run TestOpenRouterAdapter_FullConformance -race -v` shows `retry/auto_retry_up_to_documented_bound` executing all six sub-tests for real over the live HTTP bridge (5 PASS, 1 SKIP for the declared-offered-so-absent-scenario-untested leaf, as expected) — ad hoc probe confirmed the generated record's `CAP-O-04` entry reads `outcome = satisfied, standing = optional`. Full unscoped run still PASS. Safety net: `go test ./src/ai/openaicompat/... -run TestRetryCaseBody_RunsDirectly -race` still green.
 
 ## Phase 6: Capability Record (WU7)
 
