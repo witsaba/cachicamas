@@ -61,8 +61,8 @@
 package smoke_test
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -70,9 +70,11 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agenttest/sweep"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
+	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke"
 )
 
 // liveSmokeEnvVarName is the env-var name the live smoke reads. It
@@ -265,8 +267,8 @@ func TestLiveSmokeGate_BothSet_DoesNotSkip(t *testing.T) {
 // prompt marker the sentinel sweep's third deny-list entry keys
 // off (R-OR-08) — the marker is a non-secret string the test uses
 // to verify the sweep would catch a leak of the prompt bytes.
-func buildLiveSmokeRequest(t *testing.T) (ai.Request, error) {
-	t.Helper()
+func buildLiveSmokeRequest(tb testing.TB) (ai.Request, error) {
+	tb.Helper()
 	part, err := ai.NewText("reply with the single word OK and stop")
 	if err != nil {
 		return ai.Request{}, fmt.Errorf("ai.NewText: %w", err)
@@ -291,22 +293,23 @@ func buildLiveSmokeRequest(t *testing.T) (ai.Request, error) {
 	return ai.NewRequest("openai/gpt-4o", []ai.Message{msg, plantedMsg})
 }
 
-// TestOpenRouterAdapter_LiveSmoke covers R-OR-07 sub-scenario 1
-// (skip path exercised without the secret) and the spec's
-// "at least one streaming chunk before terminating" assertion
-// (R-OR-07 acceptance: the live smoke must produce at least one
-// streaming chunk).
+// TestOpenRouterAdapter_LiveSmoke covers the full ai-live-smoke contract
+// (R-LSM-001…R-LSM-008) and its vendor-side anchor R-OR-07/R-OR-08.
 //
-// Under `make test` (no env vars), the test reports SKIP and
-// exits — no outbound request, no real money. The workflow
-// passes OPENROUTER_API_KEY from the repo secret and sets
-// RUN_LIVE_OPENROUTER_SMOKE=1 only when the dispatch input is
-// true. Only then does the test proceed to the live dispatch.
+// Under `make test` (no env vars), the test reports SKIP and exits — no
+// outbound request, no real money. A human operator sets both
+// OPENROUTER_API_KEY and RUN_LIVE_OPENROUTER_SMOKE=1 locally (see
+// README.md in this directory) to exercise the live path; no CI workflow
+// sets them (ADR 0005 § Enforcement — the repository has no
+// .github/workflows/ directory).
 //
-// The stream is bounded by context.WithTimeout (60 s) and
-// drained via agenttest.DrainAndRecord with the same 60 s
-// deadline — the latter fails the test if the producer never
-// closes the channel.
+// The whole live path — dispatch, drain, and the R-LSM-003 shape
+// invariants — runs behind evaluateSweepGate's capture funnel
+// (design.md D3): the positive control passes before any request is
+// sent, every diagnostic runLiveSmoke produces is captured rather than
+// logged directly, the sweep gates the capture before release on every
+// path (success or failure), and only a clean sweep's output ever
+// reaches t.Log (R-LSM-004).
 func TestOpenRouterAdapter_LiveSmoke(t *testing.T) {
 	d := decideLiveSmoke(liveSmokeEnvAdapter)
 	if d.Skip {
@@ -316,81 +319,16 @@ func TestOpenRouterAdapter_LiveSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), liveSmokeRequestTimeout)
 	defer cancel()
 
-	provider, err := openrouter.NewProvider(openrouter.Config{
-		Credential: openaicompat.NewCredential(os.Getenv(liveSmokeEnvVarName)),
-	})
+	key := os.Getenv(liveSmokeEnvVarName)
+	deny := smoke.BuildDenyList(liveSmokeEnvVarName, key[:min(4, len(key))], liveSmokePromptMarker)
+
+	release, err := evaluateSweepGate(ctx, deny, runLiveSmoke)
+	if release != "" {
+		t.Logf("%s", release)
+	}
 	if err != nil {
-		t.Fatalf("openrouter.NewProvider() error = %v, want nil", err)
+		t.Fatal(err)
 	}
-
-	req, err := buildLiveSmokeRequest(t)
-	if err != nil {
-		t.Fatalf("buildLiveSmokeRequest() error = %v, want nil", err)
-	}
-
-	ch, err := provider.Stream(ctx, req)
-	if err != nil {
-		t.Fatalf("Stream() error = %v, want nil", err)
-	}
-
-	rec := agenttest.DrainAndRecord(t, ch, liveSmokeRequestTimeout)
-	events := rec.Events()
-
-	if len(events) == 0 {
-		t.Fatal("live smoke produced 0 events; the OpenRouter gateway responded but the stream produced no chunks (R-OR-07)")
-	}
-
-	// Spec asserts "at least one streaming chunk". A live OpenRouter
-	// response always carries a ResponseStart + ≥1 TextDelta +
-	// Completion; the assertion below accepts the realistic
-	// OpenRouter shape and admits any other model that emits at
-	// least one chunk of any kind.
-	if !hasAnyChunk(events) {
-		names := make([]string, len(events))
-		for i, ev := range events {
-			names[i] = ev.Kind().String()
-		}
-		t.Errorf("live smoke produced %d event(s) of kinds %v, but none of the expected streaming chunks (R-OR-07)\n  want at least one of: ResponseStart, TextDelta, ToolCallStart, ToolCallDelta, or Completion",
-			len(events), names)
-	}
-
-	// The streaming shape must reach a terminal, not hang bare.
-	// A bare close is legal (R-OR-07's contract leaves the terminal
-	// shape to the spec family); here we record what we got.
-	t.Logf("live smoke produced %d event(s); final-kind-diagnostic only, not an assertion", len(events))
-
-	// Avoid producing a JSON-shaped diagnostic that could be mistaken
-	// for raw credential formatting in CI logs.
-	if testing.Verbose() {
-		kindReport := make(map[string]int, len(events))
-		for _, ev := range events {
-			kindReport[ev.Kind().String()]++
-		}
-		out, _ := json.Marshal(kindReport)
-		t.Logf("event-kind histogram: %s", out)
-	}
-}
-
-// hasAnyChunk reports whether events contains at least one event
-// the live smoke accepts as a "streaming chunk". The smoke test
-// does not assert a specific lifecycle shape (R-OR-07 leaves the
-// chunk shape to the OpenRouter dialect); it accepts any event
-// whose Kind is one of the streaming deltas or the lifecycle
-// frames. A stream that produced only the channel-close signal
-// (which `DrainAndRecord` does not emit as an event) would fail
-// here.
-func hasAnyChunk(events []ai.Event) bool {
-	for _, ev := range events {
-		switch ev.Kind() {
-		case ai.EventKindResponseStart,
-			ai.EventKindTextDelta,
-			ai.EventKindToolCallStart,
-			ai.EventKindToolCallDelta,
-			ai.EventKindCompletion:
-			return true
-		}
-	}
-	return false
 }
 
 // streamShapeReport is the result of the three independent stream-shape
@@ -467,6 +405,259 @@ func checkExactlyOneTerminal(events []ai.Event) error {
 		return fmt.Errorf("stream shape: terminal-exclusivity: no terminal event observed (R-LSM-003, S-LSM-009)")
 	}
 	return nil
+}
+
+// captureTB is a local testing.TB double (design.md D3) that routes every
+// message a TB-taking helper (agenttest.DrainAndRecord) would otherwise
+// send straight to the real *testing.T into sink instead, so nothing
+// reaches the test log before the sentinel sweep has run over it
+// (R-LSM-004).
+//
+// The embedded testing.TB is deliberately never assigned a real value:
+// every method a call site actually reaches (Helper, Logf, Errorf,
+// Fatalf) is overridden below, following this module's existing fakeTB
+// idiom (src/agenttest/stream_kit_record_test.go). A call that fell
+// through to the nil embedded interface would panic — the intended,
+// loud failure mode for a method this double was supposed to override
+// but did not.
+//
+// Fatalf deliberately does NOT call the real FailNow/runtime.Goexit path:
+// it only records and marks failed, then returns normally. This is safe
+// because every TB-taking helper this double is passed to (verified:
+// agenttest.DrainAndRecord) places an explicit return statement
+// immediately after each Fatalf call, so control flow after a captured
+// Fatalf is exactly what the caller already wrote for the "test failed,
+// stop now" case — DrainAndRecord's timeout branch already returns
+// Recording{events: got} right after tb.Fatalf(...).
+type captureTB struct {
+	testing.TB
+	sink   *bytes.Buffer
+	failed bool
+}
+
+// Helper is a no-op: captureTB carries no real *testing.T call stack to
+// mark, so there is nothing for it to record.
+func (c *captureTB) Helper() {}
+
+// Logf records an informational message into the sink without marking
+// captureTB failed.
+func (c *captureTB) Logf(format string, args ...any) {
+	fmt.Fprintf(c.sink, format+"\n", args...)
+}
+
+// Errorf records a failure message into the sink and marks captureTB
+// failed. Unlike the real testing.T.Errorf, it does not abort the
+// calling goroutine.
+func (c *captureTB) Errorf(format string, args ...any) {
+	fmt.Fprintf(c.sink, format+"\n", args...)
+	c.failed = true
+}
+
+// Fatalf records a failure message into the sink and marks captureTB
+// failed. It deliberately does NOT call runtime.Goexit() (see the type's
+// doc comment) — every call site this double is passed to already
+// returns immediately after calling Fatalf.
+func (c *captureTB) Fatalf(format string, args ...any) {
+	fmt.Fprintf(c.sink, format+"\n", args...)
+	c.failed = true
+}
+
+// The blank assignment below pins runLiveSmoke's exact call shape against
+// what evaluateSweepGate's run parameter expects — (ctx, &sink) error —
+// as a standalone, dedicated compile-time assertion, never invoked (a
+// live dispatch has no place in a unit test). The real call site
+// (TestOpenRouterAdapter_LiveSmoke, below) enforces the identical
+// constraint by passing runLiveSmoke as an argument; this pin catches a
+// signature drift even if that call site is ever refactored away from a
+// direct reference.
+var _ func(context.Context, *bytes.Buffer) error = runLiveSmoke
+
+// evaluateSweepGate is the D3 capture-funnel sequence (R-LSM-004): the
+// positive control MUST pass before any dispatch is trusted — no spend
+// on a broken sweep (S-LSM-014) — then run is invoked with a fresh sink,
+// then the sweep gates every byte run wrote before any of it is
+// released, on every path run may take, success or failure alike
+// (S-LSM-011, S-LSM-012).
+//
+// A sweep match returns ("", err): err names only the offending vector
+// and states the output was withheld; the matched bytes are never
+// reproduced (S-LSM-013). A clean sweep returns the full captured output
+// for release regardless of whether run itself failed — the caller
+// learns run's own failure only through the returned error, after the
+// diagnostics are already proven safe to log (S-LSM-012, S-LSM-015).
+func evaluateSweepGate(ctx context.Context, deny []smoke.DenyEntry, run func(context.Context, *bytes.Buffer) error) (release string, err error) {
+	if selfTestErr := sweep.SelfTest(deny); selfTestErr != nil {
+		return "", fmt.Errorf("sweep positive control failed, refusing to trust a clean result: %w", selfTestErr)
+	}
+
+	var sink bytes.Buffer
+	runErr := run(ctx, &sink)
+	if runErr != nil {
+		fmt.Fprintf(&sink, "live smoke failed: %v\n", runErr)
+	}
+
+	if scanErr := smoke.Scan(sink.Bytes(), deny); scanErr != nil {
+		return "", fmt.Errorf("%v — captured output withheld", scanErr)
+	}
+
+	if runErr != nil {
+		return sink.String(), fmt.Errorf("live smoke failed; swept diagnostics released above: %w", runErr)
+	}
+	return sink.String(), nil
+}
+
+// runLiveSmoke performs the one bounded live dispatch (R-LSM-002):
+// provider construction, request build, Stream, drain (via a local
+// captureTB so nothing reaches a real *testing.T before the sweep,
+// R-LSM-004), sequence contiguity, and the three R-LSM-003 stream-shape
+// invariants. Every failure path returns an error into sink rather than
+// calling a real t.Fatal, so evaluateSweepGate always gets the last word
+// on what is safe to release.
+func runLiveSmoke(ctx context.Context, sink *bytes.Buffer) error {
+	provider, err := openrouter.NewProvider(openrouter.Config{
+		Credential: openaicompat.NewCredential(os.Getenv(liveSmokeEnvVarName)),
+	})
+	if err != nil {
+		return fmt.Errorf("openrouter.NewProvider: %w", err)
+	}
+
+	tb := &captureTB{sink: sink}
+	req, err := buildLiveSmokeRequest(tb)
+	if err != nil {
+		return fmt.Errorf("buildLiveSmokeRequest: %w", err)
+	}
+
+	ch, err := provider.Stream(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Stream: %w", err)
+	}
+
+	rec := agenttest.DrainAndRecord(tb, ch, liveSmokeRequestTimeout)
+	if tb.failed {
+		return fmt.Errorf("drain failed to close within the bound")
+	}
+	events := rec.Events()
+
+	if contiguityErr := agenttest.CheckContiguity(events); contiguityErr != nil {
+		return fmt.Errorf("stream shape: %w", contiguityErr)
+	}
+
+	report := checkStreamShape(events)
+	if report.responseStartErr != nil {
+		return report.responseStartErr
+	}
+	if report.contentErr != nil {
+		return report.contentErr
+	}
+	if report.terminalErr != nil {
+		return report.terminalErr
+	}
+	return nil
+}
+
+// TestEvaluateSweepGate covers R-LSM-004's capture-sink funnel (design.md
+// D3) in isolation from any real dispatch: run is injected so each case
+// controls exactly what lands in the sink and whether run itself fails,
+// without ever opening a network connection.
+func TestEvaluateSweepGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a planted leak fails naming only the vector, output withheld", func(t *testing.T) {
+		t.Parallel()
+
+		const secret = "sk-planted-gate-leak-do-not-reprint"
+		deny := []smoke.DenyEntry{{Vector: "secret prefix", Needle: []byte(secret[:4])}}
+		run := func(_ context.Context, sink *bytes.Buffer) error {
+			fmt.Fprintf(sink, "diagnostic: leaked %s by mistake\n", secret)
+			return nil
+		}
+
+		release, err := evaluateSweepGate(t.Context(), deny, run)
+
+		if err == nil {
+			t.Fatal("err = nil, want non-nil: the planted leak must fail the gate (S-LSM-013)")
+		}
+		if release != "" {
+			t.Errorf("release = %q, want empty — a swept match must never be released (S-LSM-013)", release)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error reprints the credential: %q (S-LSM-013)", err.Error())
+		}
+		if !strings.Contains(err.Error(), "secret prefix") {
+			t.Errorf("error = %q, want it to name the vector 'secret prefix'", err.Error())
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "withheld") {
+			t.Errorf("error = %q, want it to state output was withheld (R-LSM-004)", err.Error())
+		}
+	})
+
+	t.Run("a clean sweep releases the full captured diagnostics", func(t *testing.T) {
+		t.Parallel()
+
+		deny := smoke.BuildDenyList("UNRELATED_ENV_VAR", "zzzz", "unrelated-planted-prompt")
+		run := func(_ context.Context, sink *bytes.Buffer) error {
+			fmt.Fprintf(sink, "ordinary diagnostic, nothing sensitive\n")
+			return nil
+		}
+
+		release, err := evaluateSweepGate(t.Context(), deny, run)
+
+		if err != nil {
+			t.Fatalf("err = %v, want nil on a clean sweep (S-LSM-015)", err)
+		}
+		if !strings.Contains(release, "ordinary diagnostic, nothing sensitive") {
+			t.Errorf("release = %q, want the full captured buffer released (S-LSM-015)", release)
+		}
+	})
+
+	t.Run("the positive control forced to fail fails the run before any dispatch", func(t *testing.T) {
+		t.Parallel()
+
+		// An entry with an empty Needle can never bite its own self-test
+		// corpus (agenttest/sweep.SelfTest) — the deliberate way to force
+		// the positive control to fail (S-LSM-014).
+		deny := []smoke.DenyEntry{{Vector: "broken-vector", Needle: nil}}
+		dispatched := false
+		run := func(_ context.Context, sink *bytes.Buffer) error {
+			dispatched = true
+			fmt.Fprintf(sink, "should never run")
+			return nil
+		}
+
+		release, err := evaluateSweepGate(t.Context(), deny, run)
+
+		if err == nil {
+			t.Fatal("err = nil, want non-nil: a broken positive control must fail the run rather than report clean (S-LSM-014)")
+		}
+		if release != "" {
+			t.Errorf("release = %q, want empty — nothing is trustworthy before the positive control passes", release)
+		}
+		if dispatched {
+			t.Error("run was dispatched despite the positive control failing, want no spend on a broken sweep (design.md D3)")
+		}
+	})
+
+	t.Run("a run failure is still swept and released before the run is reported failed", func(t *testing.T) {
+		t.Parallel()
+
+		deny := smoke.BuildDenyList("UNRELATED_ENV_VAR", "zzzz", "unrelated-planted-prompt")
+		run := func(_ context.Context, sink *bytes.Buffer) error {
+			fmt.Fprintf(sink, "request attempted, no leak here\n")
+			return fmt.Errorf("simulated dispatch failure")
+		}
+
+		release, err := evaluateSweepGate(t.Context(), deny, run)
+
+		if err == nil {
+			t.Fatal("err = nil, want non-nil: a run failure must still fail the gate (S-LSM-012)")
+		}
+		if !strings.Contains(release, "request attempted, no leak here") {
+			t.Errorf("release = %q, want the swept diagnostics released even on a run failure (S-LSM-012, S-LSM-015)", release)
+		}
+		if !strings.Contains(err.Error(), "simulated dispatch failure") {
+			t.Errorf("error = %v, want it to surface the run failure", err)
+		}
+	})
 }
 
 // mustEvent fails t immediately if constructing a synthetic test event
@@ -562,4 +753,82 @@ func TestStreamShape(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCaptureTB covers work unit C task 2's captureTB double: it records
+// every message into its sink, marks itself failed on Errorf/Fatalf (but
+// not on Logf), and — critically — its Fatalf must NOT call the real
+// runtime.Goexit()-driven FailNow path, so a caller that keeps going
+// after tb.Fatalf(...) (as DrainAndRecord does, design.md D3) observes
+// ordinary control flow, not an aborted goroutine.
+func TestCaptureTB(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Logf records without marking failed", func(t *testing.T) {
+		t.Parallel()
+
+		var sink bytes.Buffer
+		tb := &captureTB{sink: &sink}
+		tb.Helper()
+		tb.Logf("informational: %s", "hello")
+
+		if !strings.Contains(sink.String(), "informational: hello") {
+			t.Errorf("sink = %q, want it to contain the Logf message", sink.String())
+		}
+		if tb.failed {
+			t.Error("failed = true after Logf, want false — Logf must not mark failure")
+		}
+	})
+
+	t.Run("Errorf records and marks failed", func(t *testing.T) {
+		t.Parallel()
+
+		var sink bytes.Buffer
+		tb := &captureTB{sink: &sink}
+		tb.Errorf("problem: %s", "boom")
+
+		if !strings.Contains(sink.String(), "problem: boom") {
+			t.Errorf("sink = %q, want it to contain the Errorf message", sink.String())
+		}
+		if !tb.failed {
+			t.Error("failed = false after Errorf, want true")
+		}
+	})
+
+	t.Run("Fatalf records, marks failed, and returns control to the caller", func(t *testing.T) {
+		t.Parallel()
+
+		var sink bytes.Buffer
+		tb := &captureTB{sink: &sink}
+		tb.Fatalf("fatal: %s", "kaboom")
+		// Reaching this line at all is part of the proof: a real
+		// testing.T.Fatalf calls runtime.Goexit() and this line would
+		// never execute (design.md D3 — "verified safe: DrainAndRecord
+		// returns after Fatalf").
+
+		if !strings.Contains(sink.String(), "fatal: kaboom") {
+			t.Errorf("sink = %q, want it to contain the Fatalf message", sink.String())
+		}
+		if !tb.failed {
+			t.Error("failed = false after Fatalf, want true")
+		}
+	})
+
+	t.Run("forwards nothing to a real testing.TB", func(t *testing.T) {
+		t.Parallel()
+
+		// The embedded testing.TB is left at its zero value (nil): every
+		// method captureTB is actually exercised through here (Helper,
+		// Logf, Errorf, Fatalf) is overridden below. If any call fell
+		// through to the nil embedded interface, this subtest would
+		// panic on a nil-interface method call — the negative-space
+		// proof that captureTB forwards nothing to a real *testing.T.
+		var sink bytes.Buffer
+		tb := &captureTB{sink: &sink}
+		tb.Helper()
+		tb.Logf("a")
+		tb.Errorf("b")
+		tb.Fatalf("c")
+		// No panic reaching here is the assertion.
+	})
 }
