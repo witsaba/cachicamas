@@ -63,12 +63,17 @@ func TestOpenRouterAdapter_ToolCalls(t *testing.T) {
 // suite's whole registered case table — every required capability,
 // including CapCompletionMetadata, CapCancellation and CapTerminal, which
 // the now-removed per-capability drivers used to skip — against the real
-// *openaicompat.Client speaking real HTTP to a local httptest.Server.
+// *openaicompat.Client speaking real HTTP to a local httptest.Server. The
+// generated CapabilityRecord is then asserted against the committed
+// nine-entry expectation (design D7, R-ACR-004, tasks.md Phase 6 WU7):
+// see capability_record_test.go's expectedOpenRouterRecord and
+// requireOpenRouterCapabilityRecord.
 //
 // This is Phase 0's RED baseline (tasks.md WU1): the failing case names
 // this run reports are the binding evidence Phases 2-6 resolve against,
 // each on a named side, with a recorded rationale (R-ACR-002). No
 // t.Parallel(): see file header.
 func TestOpenRouterAdapter_FullConformance(t *testing.T) {
-	agenttest.RunConformance(t, conformanceBridgeFactory())
+	record := agenttest.RunConformance(t, conformanceBridgeFactory())
+	requireOpenRouterCapabilityRecord(t, record)
 }

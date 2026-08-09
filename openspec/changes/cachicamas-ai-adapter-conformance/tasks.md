@@ -104,8 +104,12 @@ Chain strategy: size-exception
 
 ## Phase 6: Capability Record (WU7)
 
-- [ ] 6.1 `openrouter/conformance/capability_record_test.go`: `expectedOpenRouterRecord()` (CAP-R-01-05 Satisfied, CAP-O-01/02/03 Absent, CAP-O-04 Satisfied); assert nil diffs + `Verdict()==VerdictPass`; shrink pointer checks to factory-shape sanity. RED: no generated-record assertion at Phase 0 → GREEN: full-run record matches. Maps R-ACR-004/S-ACR-010-013; R-OR-05/06.
-- [ ] 6.2 Force a temporary `CAP-O-01=Satisfied` stub to prove the block fires naming the AI-29 trigger, then revert. Maps S-ACR-013.
+- [x] 6.1 `openrouter/conformance/capability_record_test.go`: `expectedOpenRouterRecord()` (CAP-R-01-05 Satisfied, CAP-O-01/02/03 Absent, CAP-O-04 Satisfied); assert nil diffs + `Verdict()==VerdictPass`; shrink pointer checks to factory-shape sanity. RED: no generated-record assertion at Phase 0 → GREEN: full-run record matches. Maps R-ACR-004/S-ACR-010-013; R-OR-05/06.
+- [x] 6.2 Force a temporary `CAP-O-01=Satisfied` stub to prove the block fires naming the AI-29 trigger, then revert. Maps S-ACR-013.
+
+  **Evidence**: GREEN — `go test ./.../conformance/... -run TestOpenRouterAdapter_FullConformance -race -count=1`, exit 0: the real unscoped run's generated record now compared entry-by-entry (`agenttest.CompareCapabilityRecords`) against `expectedOpenRouterRecord()` AND asserted `Verdict()==VerdictPass`, both hold. `TestOpenRouterAdapter_CapabilityRecordMatchesAI24` shrunk to factory-shape sanity (three declared-absent pointers + non-nil `New`); the generated-record comparison is what R-ACR-004 requires and now lives in `requireOpenRouterCapabilityRecord`, called from `run_for_test.go`.
+
+  6.2 proof: a throwaway probe (`probeTB` double) built a hand-constructed "got" record with `CapReasoningContent` forced `Satisfied` from its `NotExercised` starting point (built independently of `expectedOpenRouterRecord()` — its `SetOutcomeForTest` merge rule makes `OutcomeAbsent` sticky against a later `Satisfied` call, so deriving from the expectation would have silently no-op'd), ran `requireOpenRouterCapabilityRecord` against it, confirmed the captured message explicitly names "AI-29 reopen trigger #1" — then the probe file was deleted. Safety net: `go test ./src/agenttest/...` and `./.../openrouter/...` both green after revert.
 
 ## Phase 7: Boundary Sweep (WU8)
 
