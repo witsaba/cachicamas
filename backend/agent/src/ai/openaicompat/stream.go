@@ -530,7 +530,7 @@ func foldReplaceAll(s, needle []byte) []byte {
 // truncation-edge check below treats as credential material: 4 bytes,
 // matching the module's existing prefix doctrine — the openrouter smoke
 // sweep makes the secret's 4-character prefix its own deny-list vector
-// (openrouter/smoke/sentinel_sweep.go), and ai/completion.go states the
+// (openrouter/internal/smoke/sentinel_sweep.go), and ai/completion.go states the
 // principle outright: a prefix of a secret is still a secret. Fragments
 // of 1–3 bytes are below that established threshold and indistinguishable
 // from ordinary body bytes.
