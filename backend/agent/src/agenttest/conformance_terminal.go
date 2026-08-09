@@ -176,16 +176,46 @@ func requireFailureCategoryCoverage(exercised map[ai.FailureCategory]bool) error
 	return nil
 }
 
+// wantMidStreamFailureCategory returns the category
+// terminalFailureCategoryExhaustivenessCase's mid-stream half expects for
+// scripted, given f's declared Dialect (design D5, AI-38): scripted itself
+// when no collapse is declared (S-CNF-087: a dialect that CAN express the
+// category still classifies it as itself), or the declared collapse value
+// for every category when one is (S-CNF-024's dialect-aware collapse).
+// Pure — no testing.TB involved — so this package's own tests can prove
+// both branches without driving a real subtest.
+func wantMidStreamFailureCategory(f Factory, scripted ai.FailureCategory) ai.FailureCategory {
+	if f.Dialect != nil && f.Dialect.MidStreamCategoryCollapse != nil {
+		return *f.Dialect.MidStreamCategoryCollapse
+	}
+	return scripted
+}
+
 // terminalFailureCategoryExhaustivenessCase proves R-CNF-010 (CAP-R-05):
 // every member ai.FailureCategories() enumerates — never a hand-written
 // list — is expressible and classifiable on both delivery paths
 // (S-CNF-024). requireFailureCategoryCoverage's mechanical check, not
 // reviewer vigilance, is what would catch a future upstream addition.
+//
+// When f declares a Dialect with a non-nil MidStreamCategoryCollapse
+// (design D5, AI-38), the mid-stream half's expectation narrows: every
+// category's scripted terminal must still arrive as exactly one typed
+// terminal, but that terminal's Category() is expected to equal the
+// declared collapse value rather than the scripted category — a
+// dialect-aware collapse, recorded as such, never a skip and never a pass
+// of the original category (S-CNF-024 restated, S-CNF-087's anti-escape:
+// a subject that produces anything OTHER than the declared collapse still
+// fails, naming both). A nil Dialect (or nil MidStreamCategoryCollapse)
+// leaves this branch inert — today's exact-category assertion, unchanged.
+// The pre-stream half below is pure construction and is never affected by
+// a dialect's wire-level collapse.
 func terminalFailureCategoryExhaustivenessCase(t *testing.T, f Factory) {
 	t.Helper()
 
 	exercised := make(map[ai.FailureCategory]bool)
 	for _, category := range ai.FailureCategories() {
+		wantMidStreamCategory := wantMidStreamFailureCategory(f, category)
+
 		midOK := t.Run(category.String()+"/mid_stream", func(t *testing.T) {
 			failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category}, false)
 			requireConstructed(t, err, "ai.MidStreamFailure")
@@ -201,8 +231,22 @@ func terminalFailureCategoryExhaustivenessCase(t *testing.T, f Factory) {
 			RequireValidStream(t, rec)
 			events := rec.Events()
 			payload, ok := events[len(events)-1].ErrorPayload()
-			if !ok || payload.Category() != category {
-				t.Errorf("category = %v (ok=%v), want %v (S-CNF-024)", payload.Category(), ok, category)
+			if !ok || payload.Category() != wantMidStreamCategory {
+				t.Errorf("category = %v (ok=%v), want %v (S-CNF-024, dialect-aware collapse=%v)", payload.Category(), ok, wantMidStreamCategory, wantMidStreamCategory != category)
+				return
+			}
+
+			// R-CNF-010 requires a collapse be "recorded ... naming both
+			// the category and the dialect" and "MUST NOT read as ... a
+			// pass of the original category": without this, a collapsed
+			// case read as a bare --- PASS indistinguishable from an
+			// ordinary exact-category match (AI-38 WU10 WARNING
+			// remediation, verify-report.md WARN-1). Logged only when a
+			// collapse is actually in effect — an ordinary exact-category
+			// match (nil Dialect, or a dialect that can express category
+			// itself) stays silent, exactly as before.
+			if wantMidStreamCategory != category {
+				t.Logf("agenttest: category %v recorded as a dialect-aware collapse to %v, never a pass of the original category (R-CNF-010, S-CNF-024): the declared dialect's mid-stream wire cannot preserve %v", category, wantMidStreamCategory, category)
 			}
 		})
 

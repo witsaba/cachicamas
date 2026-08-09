@@ -42,16 +42,30 @@
 // the stream still reaches its normal completion (R-OR-06
 // sub-scenario 2, R-ARS-015).
 
+// # Not recorder-eligible (permanent, not a Phase 5 dependency)
+//
+// This fixture's storage moved to go:embed (task 1.3) but, unlike
+// text_stream.go and tool_call.go, it is never wired into
+// recorder_test.go's round-trip: reasoning_details and reasoning are
+// vendor wire-extension fields with no corresponding ai.Event —
+// bridgeRenderScript has no script vocabulary that produces them (that is
+// the whole point: the decoder's tolerant unknown-field handling drops
+// them, R-ATS-017). This is a hand-authored fixture describing a
+// hypothetical vendor response shape, not a captured rendering of an
+// agenttest.Script, so it is permanently outside the recorder's
+// applicability rather than blocked on a later phase.
+
 package fixtures
 
+import _ "embed"
+
 // openrouterReasoningExtensionStream is the recorded reasoning-
-// extension canonical byte sequence — see this file's package
-// doc for the shape.
-var openrouterReasoningExtensionStream = "" +
-	"data: {\"id\":\"chatcmpl-or-rsn\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"alpha\",\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"OR-RSN-SENTINEL-7f3a\"}]},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-rsn\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"omega\",\"reasoning\":\"OR-RSN-SENTINEL-7f3a\"},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-rsn\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
-	"data: [DONE]\n\n"
+// extension canonical byte sequence, embedded from
+// testdata/reasoning_extension.sse — see this file's package doc for
+// the shape and why it stays outside the recorder round-trip.
+//
+//go:embed testdata/reasoning_extension.sse
+var openrouterReasoningExtensionStream string
 
 // OpenrouterReasoningExtensionSentinel is the distinctive byte
 // sequence the renamed-field fixtures carry inside the undeclared

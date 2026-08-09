@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-or-text","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-text","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"alpha"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-text","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" beta"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-text","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" gamma"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-text","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

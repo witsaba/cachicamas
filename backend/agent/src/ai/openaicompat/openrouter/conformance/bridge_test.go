@@ -4,6 +4,7 @@
 
 //nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
+
 //
 // # Bridge factory — the one seam RunConformance consumes
 //
@@ -78,6 +79,20 @@ import (
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
+
+	// Named, not blank: conformancetest's init() still registers the
+	// CapRetry case (retry/auto_retry_up_to_documented_bound) into the
+	// shared agenttest registry this binary's unscoped
+	// TestOpenRouterAdapter_FullConformance run consumes — a named import
+	// runs init() exactly the same way a blank one does — but this file
+	// also reads conformancetest.RetryOffered by name (AI-38 WU10
+	// CRITICAL-1 remediation, R-ACR-006): the single declared source of
+	// truth conformanceBridgeFactoryServing's Retry declaration and
+	// TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource
+	// both consume, so this factory's declaration and openaicompat's own
+	// (parity-checked separately, see openaicompat/retry_parity_test.go)
+	// cannot silently drift apart (design D2, verify-report.md Defeat #7).
+	"github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest"
 )
 
 // conformanceBridgeChunkCreated and conformanceBridgeObjectDiscriminator
@@ -90,7 +105,7 @@ import (
 // is not "chat.completion.chunk" (R-ATS-017 / D3) and treats a zero
 // created as a malformed identity chunk (R-ATS-021 / S-ATS-081).
 const (
-	conformanceBridgeChunkCreated      = 1700000000
+	conformanceBridgeChunkCreated        = 1700000000
 	conformanceBridgeObjectDiscriminator = "chat.completion.chunk"
 )
 
@@ -105,8 +120,8 @@ const (
 // openrouter's own suppression rule (R-OR-02 sub-scenario 2). No
 // header is ever set with an empty value.
 type bridgeAttributionRoundTripper struct {
-	base                            http.RoundTripper
-	referer, xTitle, xCategories    string
+	base                         http.RoundTripper
+	referer, xTitle, xCategories string
 }
 
 // RoundTrip clones the request's headers, applies the three
@@ -154,6 +169,38 @@ func bridgeServeTranscripts(transcripts [][]byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(transcripts[idx])
+	}
+}
+
+// bridgeServeTranscriptsSplit is bridgeServeTranscripts' boundary-sweep
+// twin (design D8 tier 2): serves transcripts[n] to the (n+1)th inbound
+// request, in arrival order — identical to bridgeServeTranscripts except
+// each transcript is written in two parts, transcript[:offsets[n]] then
+// transcript[offsets[n]:], with a real Flush between them so the
+// client's TCP read genuinely observes two separate reads at the split
+// boundary. len(offsets) MUST equal len(transcripts); offsets[n] MUST be
+// in [0, len(transcripts[n])].
+func bridgeServeTranscriptsSplit(transcripts [][]byte, offsets []int) http.HandlerFunc {
+	var mu sync.Mutex
+	next := 0
+	return func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		idx := next
+		next++
+		mu.Unlock()
+
+		if idx >= len(transcripts) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		offset := offsets[idx]
+		_, _ = w.Write(transcripts[idx][:offset])
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		_, _ = w.Write(transcripts[idx][offset:])
 	}
 }
 
@@ -230,11 +277,97 @@ func bridgeWriteTextDeltaChunk(buf *bytes.Buffer, id, model, content string) {
 
 // bridgeWriteTerminalChunk appends one SSE data frame carrying choice
 // 0's terminal finish_reason with an empty delta (C2's own
-// convention). The object discriminator is set the same way
-// bridgeWriteTextDeltaChunk sets it.
-func bridgeWriteTerminalChunk(buf *bytes.Buffer, id, model string, reason ai.FinishReason) {
-	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]}\n\n",
-		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), conformanceBridgeChunkCreated, conformanceBridgeObjectDiscriminator, bridgeQuoteJSONString(reason.String()))
+// convention) and, when usage carries at least one present count, a
+// top-level "usage" member rendering PRESENT FIELDS ONLY (design D6):
+// an absent ai.TokenCount omits its wire key entirely; a count
+// reported as zero still emits 0, distinguishable from absence by the
+// key's mere presence — resolving usage/absent_vs_zero_distinguishable
+// (R-CNF-016, S-CNF-045). Every existing case scripts ai.Usage{} (all
+// five counts absent) and keeps rendering with no "usage" key at all —
+// byte-identical to before this change. The object discriminator is
+// set the same way bridgeWriteTextDeltaChunk sets it.
+func bridgeWriteTerminalChunk(buf *bytes.Buffer, id, model string, reason ai.FinishReason, usage ai.Usage) {
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]%s}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), conformanceBridgeChunkCreated, conformanceBridgeObjectDiscriminator, bridgeQuoteJSONString(reason.String()), bridgeUsageSuffix(usage))
+}
+
+// bridgeUsageSuffix renders a leading-comma "usage" member — matching
+// openaicompat/chunk.go's wireUsage field names exactly (prompt_tokens,
+// completion_tokens, prompt_tokens_details{cached_tokens,
+// cache_write_tokens}, completion_tokens_details{reasoning_tokens}) — for
+// usage's present fields only, or "" when every count is absent (design
+// D6's present-fields-only rule).
+func bridgeUsageSuffix(usage ai.Usage) string {
+	var fields []string
+	if n, present := usage.Input.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"prompt_tokens\":%d", n))
+	}
+	if n, present := usage.Output.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"completion_tokens\":%d", n))
+	}
+	if detail := bridgePromptTokensDetails(usage); detail != "" {
+		fields = append(fields, "\"prompt_tokens_details\":{"+detail+"}")
+	}
+	if n, present := usage.Reasoning.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"completion_tokens_details\":{\"reasoning_tokens\":%d}", n))
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	return ",\"usage\":{" + strings.Join(fields, ",") + "}"
+}
+
+// bridgePromptTokensDetails renders usage's CacheRead/CacheWrite present
+// fields as prompt_tokens_details' inner members, or "" when both are
+// absent — the same present-fields-only rule bridgeUsageSuffix applies at
+// the top level.
+func bridgePromptTokensDetails(usage ai.Usage) string {
+	var fields []string
+	if n, present := usage.CacheRead.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"cached_tokens\":%d", n))
+	}
+	if n, present := usage.CacheWrite.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"cache_write_tokens\":%d", n))
+	}
+	return strings.Join(fields, ",")
+}
+
+// bridgeErrorFrameLabel returns the fixed, category-derived label this
+// bridge renders into an in-band error frame's "type" field (design D6).
+// Deterministic and safe by construction: it depends only on the
+// scripted ai.Failure's OWN Category() — never on anything a script could
+// plant a sentinel into (Cause, RequestID) — so every one of the nine
+// categories gets a distinct, non-secret label (conformance_redaction.go's
+// own file header: RawLabel is the sanctioned rendering channel, not
+// Cause/RequestID).
+func bridgeErrorFrameLabel(category ai.FailureCategory) string {
+	return "conformance_" + category.String() + "_error"
+}
+
+// bridgeWriteErrorFrame appends one in-band error frame — the wire shape
+// isInBandErrorFrame/failureFromErrorFrame (openaicompat/stream_failure.go)
+// decode: {"error":{"type":<fixed-label-per-category>,"message":<...>}}
+// (design D6). The message carries payload's UNWRAPPED cause text,
+// followed by its request id when present — verbatim, deliberately:
+// whatever a script planted there (including a redaction sentinel) lands
+// on the wire on purpose, because the redaction case exists to test the
+// ADAPTER's own redaction paths against real leaking input, not this test
+// bridge (R-CNF-013, R-CNF-027). "type" never carries either — only the
+// fixed, category-derived label above.
+func bridgeWriteErrorFrame(buf *bytes.Buffer, payload *ai.Failure) {
+	var message strings.Builder
+	if cause := payload.Unwrap(); cause != nil {
+		message.WriteString(cause.Error())
+	}
+	if reqID := payload.RequestID(); reqID != "" {
+		if message.Len() > 0 {
+			message.WriteByte(' ')
+		}
+		message.WriteString("request_id=")
+		message.WriteString(reqID)
+	}
+	fmt.Fprintf(buf, "data: {\"error\":{\"type\":%s,\"message\":%s}}\n\n",
+		bridgeQuoteJSONString(bridgeErrorFrameLabel(payload.Category())), bridgeQuoteJSONString(message.String()))
 }
 
 // bridgeWriteToolStartChunk appends one SSE data frame carrying a
@@ -330,8 +463,15 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 			bridgeWriteTextDeltaChunk(&buf, id, model, delta.Delta())
 		case ai.EventKindCompletion:
 			completion, _ := ev.Completion()
-			bridgeWriteTerminalChunk(&buf, id, model, completion.FinishReason())
+			bridgeWriteTerminalChunk(&buf, id, model, completion.FinishReason(), completion.Usage())
 			buf.WriteString("data: [DONE]\n\n")
+		case ai.EventKindError:
+			// D6: an in-band error frame is this dialect's own terminal
+			// (R-AEM-010) — render it and stop, matching the real
+			// adapter's contract that nothing follows a terminal.
+			payload, _ := ev.ErrorPayload()
+			bridgeWriteErrorFrame(&buf, payload)
+			return buf.Bytes()
 		case ai.EventKindToolCallStart:
 			s, _ := ev.ToolCallStart()
 			idx, ok := toolWireIndex[s.BlockIndex()]
@@ -367,7 +507,7 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 	// never produces a clean completion event (the conformance cases
 	// carry neither, by their own design).
 	if toolCallsSeen {
-		bridgeWriteTerminalChunk(&buf, id, model, ai.FinishReasonToolCalls)
+		bridgeWriteTerminalChunk(&buf, id, model, ai.FinishReasonToolCalls, ai.Usage{})
 		buf.WriteString("data: [DONE]\n\n")
 	}
 
@@ -393,8 +533,77 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 //     applyDeclaredAbsences keys off, so every optional capability
 //     receives its absent entry at suite start, before any case runs
 //     (S-CNF-004).
+//
+// # Prior-server eager close (AI-38 WU3 discovery)
+//
+// Every New call spins up a fresh, real httptest.Server (a real TCP
+// listener plus its Serve goroutine). agenttest.RequireNoGoroutineLeak
+// calls a scenario — which calls New — up to 50 times against the SAME
+// tb, and tb.Cleanup callbacks all run at the end of that one test, not
+// incrementally: relying on tb.Cleanup alone would leave up to 50
+// concurrently-open servers alive at RequireNoGoroutineLeak's own
+// goroutine-count measurement, which is a test-harness artifact, not a
+// production leak (AI-21's in-process FakeFactory has no such cost, so
+// this was never observable before AI-38 exercises a real HTTP factory
+// through the same helper). New instead closes the PREVIOUS server it
+// built, under this closure's own mutex, before returning the new one —
+// safe because every conformance case's scenario is fully synchronous
+// (construct, stream, drain) before the next New call is ever made — and
+// registers exactly one tb.Cleanup, closing whichever server is current
+// when the whole test ends.
+//
+// Retry is declared from conformancetest.RetryOffered, not a local
+// literal (AI-38 design D2, R-ACR-006, AI-38 WU10 CRITICAL-1
+// remediation, locked decision 2): the client auto-retries per AI-35,
+// and openaicompat/bridge_test.go's own conformance factory declares it
+// identically — parity-checked separately there, since Go's import
+// cycle rules keep that file from importing conformancetest directly
+// (see openaicompat/retry_parity_test.go). CAP-O-04 is exercised in
+// THIS binary specifically because of the import of conformancetest
+// below (design D2): without it, the retry case's init() registration
+// would never fire here, and an unscoped run would report CAP-O-04
+// structurally NotExercised despite the true declaration.
 func conformanceBridgeFactory() agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, false
+	return conformanceBridgeFactoryServing(bridgeServeTranscripts)
+}
+
+// conformanceBridgeFactorySplitAt is a boundary-sweep variant of
+// conformanceBridgeFactory (design D8, R-ACR-005, tasks.md Phase 7 WU8
+// tier 2): identical Factory declarations, but EVERY transcript any case
+// in the suite constructs is served split into two writes — at
+// offsetFn(len(transcript)) — with a real Flush between them, instead of
+// written whole. Used with offsetFn = "1", "len/2" and "len-1" to prove
+// the generated CapabilityRecord survives adversarial fragmentation at
+// three representative relative positions, applied globally across one
+// full unscoped run each — not per curated boundary-sweep fixture (see
+// boundary_sweep_test.go's own header comment for the reconciliation
+// between design D8's literal "sampled offsets" choice and tasks.md
+// 7.2's measure-first phrasing).
+func conformanceBridgeFactorySplitAt(offsetFn func(transcriptLen int) int) agenttest.Factory {
+	return conformanceBridgeFactoryServing(func(transcripts [][]byte) http.HandlerFunc {
+		offsets := make([]int, len(transcripts))
+		for i, transcript := range transcripts {
+			offsets[i] = offsetFn(len(transcript))
+		}
+		return bridgeServeTranscriptsSplit(transcripts, offsets)
+	})
+}
+
+// conformanceBridgeFactoryServing builds the agenttest.Factory both
+// conformanceBridgeFactory and conformanceBridgeFactorySplitAt share,
+// parameterized only over serveFunc — the http.HandlerFunc builder that
+// turns a New call's rendered transcripts into a response-serving
+// handler. Everything else (prior-server eager close, the attribution
+// round-tripper, the declared capabilities and Dialect) is identical
+// between the two callers.
+func conformanceBridgeFactoryServing(serveFunc func(transcripts [][]byte) http.HandlerFunc) agenttest.Factory {
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := false, false, false
+	retryOffered := conformancetest.RetryOffered
+
+	var mu sync.Mutex
+	var current *httptest.Server
+	cleanupRegistered := false
+
 	return agenttest.Factory{
 		New: func(tb testing.TB, scripts ...agenttest.Script) ai.ModelProvider {
 			tb.Helper()
@@ -404,14 +613,33 @@ func conformanceBridgeFactory() agenttest.Factory {
 				transcripts[i] = bridgeRenderScript(tb, script)
 			}
 
-			server := httptest.NewServer(bridgeServeTranscripts(transcripts))
-			tb.Cleanup(server.Close)
+			server := httptest.NewServer(serveFunc(transcripts))
+
+			mu.Lock()
+			previous := current
+			current = server
+			needsCleanup := !cleanupRegistered
+			cleanupRegistered = true
+			mu.Unlock()
+
+			if previous != nil {
+				previous.Close()
+			}
+			if needsCleanup {
+				tb.Cleanup(func() {
+					mu.Lock()
+					defer mu.Unlock()
+					if current != nil {
+						current.Close()
+					}
+				})
+			}
 
 			transport := bridgeAttributionRoundTripper{
-				base:         server.Client().Transport,
-				referer:      "https://app.cachicamas.test/openrouter-conformance",
-				xTitle:       "cachicamas-conformance-bridge",
-				xCategories:  "test,conformance",
+				base:        server.Client().Transport,
+				referer:     "https://app.cachicamas.test/openrouter-conformance",
+				xTitle:      "cachicamas-conformance-bridge",
+				xCategories: "test,conformance",
 			}
 			httpClient := &http.Client{Transport: transport}
 
@@ -429,6 +657,35 @@ func conformanceBridgeFactory() agenttest.Factory {
 		TokenCounting: &tokenCountingOffered,
 		CacheBoundary: &cacheBoundaryOffered,
 		Retry:         &retryOffered,
+		Dialect:       conformanceBridgeDialect(),
+	}
+}
+
+// conformanceBridgeMidStreamCollapse is the single category
+// failureFromErrorFrame (openaicompat/stream_failure.go) hardcodes for
+// every in-band error frame, regardless of the vendor's real category —
+// the dialect carries no discriminator that could preserve it, only the
+// vendor's own RawLabel. conformanceBridgeDialect declares this openly
+// (design D5) rather than leaving the mid-stream half of
+// terminalFailureCategoryExhaustivenessCase to fail against it.
+var conformanceBridgeMidStreamCollapse = ai.FailureCategoryUnknown
+
+// conformanceBridgeDialect declares this bridge's wire-dialect
+// expressiveness limits (design D5, AI-38, locked decision 4 — no
+// R-ACP-002 reopen): Refusal, PauseTurn and Unknown are unreachable finish
+// reasons on a normally-finished stream (openaicompat's chunk.go strict
+// gate rejects them as typed malformed responses, R-ACP-002, S-ACP-004),
+// and every mid-stream failure category collapses to Unknown
+// (conformanceBridgeMidStreamCollapse, matching failureFromErrorFrame's
+// shipped hardcoded category exactly).
+func conformanceBridgeDialect() *agenttest.DialectConstraints {
+	return &agenttest.DialectConstraints{
+		UnreachableFinishReasons: []ai.FinishReason{
+			ai.FinishReasonRefusal,
+			ai.FinishReasonPauseTurn,
+			ai.FinishReasonUnknown,
+		},
+		MidStreamCategoryCollapse: &conformanceBridgeMidStreamCollapse,
 	}
 }
 
@@ -467,5 +724,32 @@ func TestConformanceBridgeFactory_DeclaresAllThreeOptionalCapabilities(t *testin
 	}
 	if *factory.CacheBoundary != false {
 		t.Errorf("factory.CacheBoundary = %v, want false (R-CNF-004 absent declaration — bridge declares CAP-O-03 not offered)", *factory.CacheBoundary)
+	}
+}
+
+// TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource
+// proves R-ACR-006's parity requirement holds for this package's own
+// factory (AI-38 WU10 CRITICAL-1 remediation): its constructed Retry
+// pointer dereferences to exactly conformancetest.RetryOffered, the
+// single declared source every conformance factory wrapping
+// *openaicompat.Client must agree with. openaicompat's own factory is
+// parity-checked separately (openaicompat/retry_parity_test.go, a
+// raw-bytes scan — Go's import cycle rules keep that internal test file
+// from importing conformancetest directly); together the two guards
+// close the gap verify-report.md's Defeat #7 found: mutating one
+// factory's declaration away from the shared source used to make
+// neither package's tests fail. A local override that bypassed
+// conformancetest.RetryOffered here would now fail, naming the
+// mismatch.
+func TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource(t *testing.T) {
+	t.Parallel()
+
+	factory := conformanceBridgeFactory()
+
+	if factory.Retry == nil {
+		t.Fatal("conformanceBridgeFactory().Retry is nil (R-CNF-002, S-CNF-006) — declaration is by omission")
+	}
+	if *factory.Retry != conformancetest.RetryOffered {
+		t.Errorf("conformanceBridgeFactory().Retry = %v, want %v (conformancetest.RetryOffered) — every conformance factory wrapping *openaicompat.Client must declare retry identically (R-ACR-006)", *factory.Retry, conformancetest.RetryOffered)
 	}
 }

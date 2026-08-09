@@ -186,6 +186,40 @@ type Factory struct {
 	// subject's failure-report fields. "" selects the suite's own default
 	// (conformance_redaction.go).
 	Sentinel string
+
+	// Dialect declares wire-dialect expressiveness limits this subject's
+	// factory asserts (design D5, AI-38): nil means fully expressive — the
+	// suite's default reading, and where FakeFactory leaves it — so every
+	// existing factory is unaffected by this field's addition. A
+	// declaration here is proven by the amended case it narrows
+	// (finishReasonExhaustivenessCase, terminalFailureCategoryExhaustivenessCase),
+	// never trusted at face value: a value the dialect CAN express, or
+	// produces as something other than the declared collapse, still fails
+	// (S-CNF-084, S-CNF-087).
+	Dialect *DialectConstraints
+}
+
+// DialectConstraints declares wire-dialect expressiveness limits a
+// subject's Factory MAY assert (design D5, AI-38). The zero value declares
+// nothing unreachable and no mid-stream collapse — identical to a nil
+// *DialectConstraints for every case that reads it.
+type DialectConstraints struct {
+	// UnreachableFinishReasons lists finish reasons finishReasonExhaustivenessCase
+	// must NOT expect reachable on this subject's normally-finished stream.
+	// Each listed value instead asserts the negative: scripting it yields
+	// exactly one typed failure terminal and no Completion — unsatisfiable
+	// and unviolated (R-CNF-016, S-CNF-043). MUST be a subset of
+	// handListedFinishReasons; the drift guard and the hand-list itself
+	// are untouched by this field.
+	UnreachableFinishReasons []ai.FinishReason
+
+	// MidStreamCategoryCollapse, when non-nil, is the single failure
+	// category terminalFailureCategoryExhaustivenessCase's mid-stream half
+	// must observe for EVERY scripted category on this subject — a
+	// dialect-aware collapse, recorded as such and never read as a skip or
+	// as a pass of the original category (R-CNF-010, S-CNF-024). The
+	// pre-stream half (pure construction, no wire involved) is unaffected.
+	MidStreamCategoryCollapse *ai.FailureCategory
 }
 
 // FakeFactory wraps AI-21's [Provider] as a reference subject: New returns a
