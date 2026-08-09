@@ -96,8 +96,8 @@ the committed nine-entry expectation. Asserting the factory's declared capabilit
 substitute for that comparison. Every one of the nine entries MUST be asserted; none may be left
 unchecked. `CAP-O-04` (retry) MUST be recorded `satisfied` for this subject. `CAP-O-01` (reasoning)
 MUST remain `absent` under the default non-reasoning model; a generated `satisfied` for `CAP-O-01`
-MUST block the change and escalate as an AI-29 reopen trigger, and MUST NOT be absorbed by updating
-the expectation.
+MUST block the change and escalate as an AI-29 reopen trigger, and MUST NOT be absorbed by
+updating the expectation.
 
 #### Scenarios
 

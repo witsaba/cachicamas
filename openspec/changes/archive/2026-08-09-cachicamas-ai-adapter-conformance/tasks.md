@@ -253,3 +253,41 @@ own independently revertible unit; commands are run from `backend/agent/`.
 | Focused test command (9.4) | `go test -race -count=1 -v ./src/ai/openaicompat/openrouter/conformance/ -run TestRecordTranscript_RegeneratesEveryFixture` → `text_stream`/`tool_call`/`with_usage` all PASS byte-identical; hand-corrupting one byte of `with_usage.sse` and re-running makes the guard FAIL naming the file, then reverting restores byte-identical (`git diff --stat` empty) and GREEN |
 | Runtime harness (all 9.x) | `TestOpenRouterAdapter_FullConformance` (real bridge, real `*openaicompat.Client`, real HTTP) re-run PASS after every 9.x edit; final `make test`/`make lint`/`make build` exit codes recorded at the end of this phase |
 | Rollback boundary | 9.1: `conformancetest/retry.go`, `conformancetest/retry_declaration_test.go`, `openaicompat/retry_parity_test.go`, `openaicompat/bridge_test.go`, `openrouter/conformance/bridge_test.go` (retry-declaration hunks only). 9.2: `agenttest/conformance_scoped_test.go` (one added test + import). 9.3: `agenttest/conformance_capabilities.go`, `agenttest/conformance_terminal.go`, `agenttest/conformance_suite_test.go` (`probeTB.Logf` only). 9.4: `openrouter/conformance/recorder_test.go`, `openrouter/conformance/fixtures/with_usage.go` (doc only). 9.5/9.6: `openspec/changes/cachicamas-ai-adapter-conformance/specs/ai-adapter-conformance-run/spec.md`, this file's Phase 8/9 text. Each is revertible independently without touching the others — no shared production code was modified (test-only + doc-only throughout, matching design.md's own "Threat matrix: N/A" scope). |
+
+---
+
+## Archive-time appended note: WU11 (Round-2 remediation), not part of the original task checklist above
+
+Everything above this line is the tasks.md content as it stood when `sdd-apply`/WU10 left it, with
+every checkbox already `[x]`. This section is appended by the archive phase to summarize the one
+remaining remediation round `verify-report.md` records — WU11 — none of which reopened any checkbox
+above; it is narrative record, not a new set of tracked tasks.
+
+`verify-report.md` **Round 2** (HEAD `ef3359f7`) found 0 CRITICAL but a completeness-gate FAIL: three
+PARTIAL scenarios (`S-ACR-007`, the `R-OR-06` transcript-regenerability scenario, `S-CNF-086`) and one
+carried WARNING (WARN-A, a third, unguarded retry-declaration site). Two commits closed all four:
+
+- **`f93b800a`** (`fix(agent)`) — **WARN-A closed**: `openaicompat/conformance_retry_test.go`'s own
+  local `retryOffered` literal (line 32) sat outside the R-ACR-006 parity guard entirely; flipping it
+  to `false` had exited 0 while silently flipping 5 of 7 retry sub-cases from PASS to SKIP.
+  `retryCaseBodyDriverFactory()` now reads `conformancetest.RetryOffered` directly; a direct parity
+  self-test plus a negative raw-bytes scan (`TestConformanceRetryTestDriver_DoesNotReintroduceALocalLiteral`)
+  guard against regressing back to a bare literal. Same commit — **`S-CNF-086` closed (PARTIAL →
+  PASS)**: the "never cited as conformance evidence" citation existed only as prose; a new
+  `scoped_run_citation_test.go` asserts the citation's content, its byte-offset precedence over both
+  scoped drivers, and the three governed signatures, with two bite-proofs (removal, misplacement) and
+  a path-resolution pin.
+- **`a619dc69`** (`docs(agent)`, zero code change) — **`S-ACR-007` / `R-OR-06` transcript scenarios
+  closed (PARTIAL → PASS)**: the delta specs' literal "every conformance transcript" claim cannot be
+  satisfied by `reasoning_extension.sse`, a hand-authored vendor wire-extension fixture with no
+  `ai.Event` preimage to render from. Rather than silently narrow the code's own scope, the spec text
+  itself was corrected — audited for honesty, not convenience, per `verify-report.md`'s own Round 3
+  assessment — to "every transcript **with a neutral-event preimage**", naming the excluded fixture,
+  adding a positive obligation (the exclusion must be named in the recorder test, discharged at
+  `recorder_test.go:202-210`), and carrying a `(Previously: …)` clause.
+
+Defeat evidence for both commits is recorded in `verify-report.md` Round 3 § "Round 3 defeat
+evidence" (Defeats F, F′, G — real-edit-and-revert and overlay probes, `BEFORE_SHA==AFTER_SHA`
+confirmed both sides). See `verify-report.md` (Engram `sdd/cachicamas-ai-adapter-conformance/verify-report`,
+observation **#2773**) for the full three-round verification trajectory and the final **PASS** verdict
+(14/14 requirements, 47/47 scenarios, 0 CRITICAL).
