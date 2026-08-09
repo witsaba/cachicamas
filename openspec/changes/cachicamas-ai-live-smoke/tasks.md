@@ -86,6 +86,36 @@ Commit message: `docs(openspec): add AI-39 live-smoke delta specs`
 - [x] F.1 Stage `openspec/changes/cachicamas-ai-live-smoke/{proposal.md,design.md,tasks.md,specs/ai-live-smoke/spec.md,specs/ai-openrouter-first-provider/spec.md}` (already authored in prior SDD phases; no further edits here). Also stages `explore.md` (present in the change directory, not individually named in this task, but part of the same already-authored artifact set).
 - [x] F.2 Verify: scenario-ID/requirement-ID prefixes (`R-LSM-`, `S-LSM-`) remain unique across `openspec/specs/` and `openspec/changes/`; delta spec touches only `R-OR-07`/`R-OR-08`.
 
+## Work Unit H (remediation) — Reconcile deadline sharing, retry-cost and dependency-clause text with shipped behavior
+
+Commit message: `fix(smoke): reconcile deadline sharing, retry-cost and dependency-clause text with shipped behavior`
+
+Scoped remediation against exactly three `verify-report.md` findings (WARNING-2, WARNING-3, and the
+S-LSM-028 archive-blocker section) — no other scope touched. Full finding→fix mapping and gate
+evidence recorded in apply-progress (`sdd/cachicamas-ai-live-smoke/apply-progress`).
+
+- [x] H.1 (WARNING-2, S-LSM-004): code fix, not a spec amendment — extracted `drainBoundFromContext`
+      in `internal/smoke/smoke_test.go` so the stream drain's timeout derives from the request
+      context's actual remaining time (`ctx.Deadline()` / `time.Until`) instead of an independent
+      fresh 60 s timer starting at drain time. RED-first: `TestDrainBoundFromContext` (4 subtests)
+      failed to compile before the helper existed; GREEN after. Triangulated with a scratch-only
+      overlay-defeat proof (reverting the helper to ignore `ctx` fails 3 of 4 subtests). `README.md`'s
+      Timeout row reworded to describe the derived, truly-shared deadline.
+- [x] H.2 (WARNING-3, R-LSM-002 / S-LSM-006): text-only — reworded `specs/ai-live-smoke/spec.md`
+      R-LSM-002's title/body, S-LSM-004, S-LSM-006, and acceptance criterion 2 from "exactly one
+      request" to "exactly one `provider.Stream` invocation, which the adapter's ratified retry policy
+      may expand to at most four HTTP attempts" (adapter untouched, per R-LSM-008). `README.md`'s cost
+      and "Requests per run" rows reworded to state the ~4x best-case cost bound.
+- [x] H.3 (S-LSM-028, R-LSM-008): text-only — reworded `specs/ai-live-smoke/spec.md` R-LSM-008's body,
+      S-LSM-028, and acceptance criterion 8 from "zero `require` lines" (false as authored — `go.mod`
+      already carries 3 pre-existing, AI-37-introduced lines) to "zero NEW `require` lines; the
+      dependency set stays byte-identical to `origin/main`" (confirmed:
+      `git diff --stat origin/main..HEAD -- go.mod go.sum` is empty). `go.mod` untouched. G.1's own
+      wording is deliberately left unchanged here — its doc-0002-side reconciliation stays an
+      archive-time task.
+- [x] H.4 Gates: `make test`, `make lint`, `make build` green; `git status --porcelain` clean after
+      the commit.
+
 ## Archive-time tasks
 
 - [ ] G.1 AI-38-owed file-count reconciliation: `find backend/agent/src -type f -name '*.go' ! -name '*_test.go' | wc -l` and `find backend/agent/src -type f -name '*_test.go' | wc -l`, against the pre-AI-38 baseline and the merged AI-39 state; record both counts and the delta in the archive report. Also verify zero `require` lines: `grep -c '^require' backend/agent/go.mod` (expect no matches — R-LSM-008, S-LSM-028).

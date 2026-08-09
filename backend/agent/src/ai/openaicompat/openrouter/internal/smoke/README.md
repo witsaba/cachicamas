@@ -34,9 +34,9 @@ immediately and makes no outbound request.
 
 | | |
 |---|---|
-| Timeout | 60 seconds, shared by the request context and the stream drain |
-| Approximate cost | ~1¢ (US) per run — one short `openai/gpt-4o` completion via OpenRouter |
-| Requests per run | Exactly one — no retry, no loop |
+| Timeout | 60 seconds total. The request context carries this deadline; the stream drain derives its own bound from whatever remains of that same deadline when the drain starts, so both stages are cut off by one shared hard deadline — never two independent 60-second timers. |
+| Approximate cost | ~1¢ (US) best case per run — one short `openai/gpt-4o` completion via OpenRouter. Up to ~4x that if a retryable transport failure triggers the adapter's own retry policy (see "Requests per run" below). |
+| Requests per run | Exactly one `provider.Stream` invocation from this test — no retry or loop in the smoke's own code. The OpenRouter adapter underneath carries its own ratified HTTP-layer retry policy (unmodified by this change), which may issue up to 4 billed HTTP attempts on a retryable transport failure. |
 
 ## What is asserted
 

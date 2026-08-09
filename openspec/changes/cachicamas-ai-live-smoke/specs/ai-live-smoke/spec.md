@@ -52,23 +52,28 @@ under the race detector, with neither variable set, and MUST NOT be modified to 
 - **S-LSM-003** — Given both stages open, when the gate is evaluated, then it reports open and the
   live path is entered.
 
-### R-LSM-002 — The live run issues exactly one request, bounded by a hard timeout it cannot outlive
+### R-LSM-002 — The live run issues exactly one `provider.Stream` invocation, bounded by a hard timeout it cannot outlive
 
-The live run MUST issue exactly one provider request per execution. That request and the drain of its
-stream MUST both be bounded by the same hard deadline, so a hung or slow provider fails the test
-rather than hanging the suite. The deadline and the approximate per-run cost MUST be stated in the
-package's shipped instructions. The live run MUST NOT retry, loop, or issue a second request to
-obtain a pass.
+The live run MUST issue exactly one `provider.Stream` invocation per execution; it MUST NOT itself
+retry, loop, or issue a second invocation to obtain a pass. That invocation's underlying adapter
+carries its own already-ratified HTTP-layer retry policy (AI-35, `retry.Loop`, default
+`MaxAttempts = 3`), which this change MUST NOT modify (R-LSM-008): a single live run's one invocation
+may therefore still result in up to four billed HTTP attempts on a retryable transport failure. The
+request context and the drain of its stream MUST both be bounded by the same hard deadline, so a hung
+or slow provider fails the test rather than hanging the suite. The deadline, the approximate per-run
+cost, and the retry-driven cost multiplier MUST be stated in the package's shipped instructions.
 
 #### Scenarios
 
-- **S-LSM-004** — Given an open gate, when the live run executes, then exactly one provider request is
-  issued and both the request context and the stream drain carry the same hard deadline.
+- **S-LSM-004** — Given an open gate, when the live run executes, then exactly one `provider.Stream`
+  invocation is issued and both the request context and the stream drain carry the same hard deadline.
 - **S-LSM-005** — Given a provider that never produces a terminal event, when the deadline elapses,
   then the test fails on the deadline rather than blocking, and the failure is attributable to the
   timeout.
-- **S-LSM-006** — Given the merged live run, when a reviewer looks for a retry, a loop, or a second
-  outbound request, then none exists.
+- **S-LSM-006** — Given the merged live run, when a reviewer looks in the live run's own code for a
+  retry, a loop, or a second `provider.Stream` invocation, then none exists; the adapter's own
+  ratified HTTP-layer retry policy is out of this scenario's scope and, unmodified by this change, may
+  still issue up to four HTTP attempts underneath that one invocation.
 
 ### R-LSM-003 — Three stream-shape invariants are asserted separately, and no assertion reads model content
 
@@ -192,17 +197,20 @@ module MUST still contain exactly one sweep implementation.
 
 ### R-LSM-008 — The live smoke adds no dependency, no entry point, and no scheduled or CI-triggered run
 
-This change MUST add no new module dependency; the adapter module MUST still declare zero `require`
-lines. It MUST NOT create a composition root, a user-facing command, or any CI workflow file, and
-MUST NOT introduce a scheduled, push-triggered, or otherwise automatic billing-consuming run. The
-provider adapter under test MUST NOT be modified to make the live run pass. Canonical behaviour MUST
-change only through this change's delta specs; no file under `openspec/specs/` is edited in place
-before archive.
+This change MUST add zero new `require` lines: the module's dependency set (`go.mod`/`go.sum`) MUST
+stay byte-identical to `origin/main`. (The module may already carry pre-existing `require` lines from
+earlier, independently-ratified changes — this requirement bounds what THIS change adds, not the
+module's total declared count.) It MUST NOT create a composition root, a user-facing command, or any
+CI workflow file, and MUST NOT introduce a scheduled, push-triggered, or otherwise automatic
+billing-consuming run. The provider adapter under test MUST NOT be modified to make the live run pass.
+Canonical behaviour MUST change only through this change's delta specs; no file under
+`openspec/specs/` is edited in place before archive.
 
 #### Scenarios
 
-- **S-LSM-028** — Given the merged change, when the module manifest and the import guards are read,
-  then zero `require` lines are declared and both guards pass.
+- **S-LSM-028** — Given the merged change, when `go.mod`/`go.sum` are diffed against `origin/main` and
+  the import guards are read, then the diff is empty — no `require` line was added or removed — and
+  both guards pass.
 - **S-LSM-029** — Given the merged diff, when a reviewer looks for a new `package main` entry point, a
   CI workflow file, or any automatic trigger of the live run, then none exists.
 - **S-LSM-030** — Given the merged diff, when a reviewer looks for a change to the adapter under test
@@ -227,8 +235,9 @@ before archive.
 
 1. Both gate stages are required, a closed gate skips attributably, and the default run is green with
    neither variable set (`R-LSM-001`).
-2. Exactly one request per run, bounded by one hard deadline shared by request and drain
-   (`R-LSM-002`).
+2. Exactly one `provider.Stream` invocation per run — which the adapter's unmodified, ratified retry
+   policy may expand to at most four HTTP attempts — bounded by one hard deadline shared by request
+   and drain (`R-LSM-002`).
 3. Three separately failing stream-shape invariants, none of which reads model content
    (`R-LSM-003`).
 4. Positive control passes, then the sweep runs over the captured sink on the success path and every
@@ -239,5 +248,6 @@ before archive.
    repository (`R-LSM-006`).
 7. The relocation deletes no test, publishes no new helper name, and leaves exactly one sweep
    implementation proven from both sides (`R-LSM-007`).
-8. Zero `require` lines, no entry point, no CI workflow, no automatic billing-consuming run, no
-   in-place canonical spec edit (`R-LSM-008`).
+8. Zero new `require` lines — the dependency set stays byte-identical to `origin/main` — no entry
+   point, no CI workflow, no automatic billing-consuming run, no in-place canonical spec edit
+   (`R-LSM-008`).

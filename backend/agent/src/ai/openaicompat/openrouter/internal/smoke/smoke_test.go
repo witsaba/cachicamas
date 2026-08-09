@@ -102,12 +102,20 @@ var liveSmokeRunFlagName = string([]byte{
 // needle stay byte-identical.
 const liveSmokePromptMarker = "live-smoke-prompt-marker-9b3a8f2c"
 
-// liveSmokeRequestTimeout is the per-test whole-stream timeout. The
-// design's bound is 60 seconds (R-OR-07, design D7); the value
-// repeated here is the unit the bounded-drain timeout (60 seconds
-// below) and the ctx cancel (60 seconds below) share. The OpenRouter
-// gateway charges per token; running openai/gpt-4o at 60 s caps
-// any single dispatch run at roughly one cent of real-money risk.
+// liveSmokeRequestTimeout is the top-level 60-second bound for the whole
+// live smoke request (R-OR-07, design D7). TestOpenRouterAdapter_LiveSmoke
+// uses it once, directly, to set the request context's own deadline
+// (T0+60s). runLiveSmoke's stream drain does NOT evaluate this constant a
+// second time as an independent timer: its bound is derived from what
+// remains of that same ctx deadline via drainBoundFromContext, with this
+// constant serving only as drainBoundFromContext's fallback for a ctx
+// that carries no deadline at all (never true at the real call site) —
+// so the request and the drain share one hard deadline, not two
+// independent ones (R-LSM-002, S-LSM-004; AI-39 verify report WARNING 2).
+// The OpenRouter gateway charges per token; running openai/gpt-4o under a
+// 60 s ceiling caps a single dispatch attempt at roughly one cent of
+// real-money risk (before retry expansion — see the package README's
+// cost note).
 const liveSmokeRequestTimeout = 60 * time.Second
 
 // gateDecision is the result of evaluating the live-smoke
@@ -506,6 +514,43 @@ func evaluateSweepGate(ctx context.Context, deny []smoke.DenyEntry, run func(con
 	return sink.String(), nil
 }
 
+// drainBoundFromContext derives runLiveSmoke's stream-drain timeout from
+// ctx's actual remaining time until its own deadline (R-LSM-002,
+// S-LSM-004) — the fix for AI-39 verify report WARNING 2: rather than a
+// fresh, independently-evaluated liveSmokeRequestTimeout window starting
+// the moment the drain begins (worst case, if most of ctx's 60 seconds
+// had already elapsed by the time Stream returned, the drain's own
+// second timer could add up to another ~60 seconds on top — total wall
+// time up to ~120 seconds, not 60), the drain bound is whatever is
+// actually LEFT of ctx's own deadline at the moment this is called. One
+// hard deadline — set once, in TestOpenRouterAdapter_LiveSmoke — now
+// truly bounds both the request and the drain, instead of two
+// independent timers that merely started from the same duration value.
+//
+// now is injected so this derivation is provable without a real context
+// racing a real wall clock (the evaluateSweepGate injectable-run
+// precedent above); the real call site (runLiveSmoke, below) passes
+// time.Now.
+//
+// fallback applies only when ctx carries no deadline at all — never true
+// at the real call site, which always derives ctx from
+// context.WithTimeout (TestOpenRouterAdapter_LiveSmoke) — kept so this
+// helper returns a well-defined result for any ctx rather than silently
+// depending on its only caller's construction.
+//
+// A ctx whose deadline has already elapsed by now yields a non-positive
+// result, returned unchanged: agenttest.DrainAndRecord already fails
+// loudly and attributably on a non-positive timeout (R-STK-001) — the
+// correct failure to surface here, not a manufactured positive value
+// that would hide an already-blown deadline.
+func drainBoundFromContext(ctx context.Context, fallback time.Duration, now func() time.Time) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return fallback
+	}
+	return deadline.Sub(now())
+}
+
 // runLiveSmoke performs the one bounded live dispatch (R-LSM-002):
 // provider construction, request build, Stream, drain (via a local
 // captureTB so nothing reaches a real *testing.T before the sweep,
@@ -513,6 +558,12 @@ func evaluateSweepGate(ctx context.Context, deny []smoke.DenyEntry, run func(con
 // invariants. Every failure path returns an error into sink rather than
 // calling a real t.Fatal, so evaluateSweepGate always gets the last word
 // on what is safe to release.
+//
+// The stream drain's own timeout is not a second, independently-started
+// 60-second window: drainBoundFromContext derives it from what is
+// actually left of ctx's own deadline, so the request and the drain
+// share one hard deadline end to end (S-LSM-004; AI-39 verify report
+// WARNING 2 names the two-independent-timers defect this replaces).
 func runLiveSmoke(ctx context.Context, sink *bytes.Buffer) error {
 	provider, err := openrouter.NewProvider(openrouter.Config{
 		Credential: openaicompat.NewCredential(os.Getenv(liveSmokeEnvVarName)),
@@ -532,7 +583,8 @@ func runLiveSmoke(ctx context.Context, sink *bytes.Buffer) error {
 		return fmt.Errorf("Stream: %w", err)
 	}
 
-	rec := agenttest.DrainAndRecord(tb, ch, liveSmokeRequestTimeout)
+	drainTimeout := drainBoundFromContext(ctx, liveSmokeRequestTimeout, time.Now)
+	rec := agenttest.DrainAndRecord(tb, ch, drainTimeout)
 	if tb.failed {
 		return fmt.Errorf("drain failed to close within the bound")
 	}
@@ -656,6 +708,75 @@ func TestEvaluateSweepGate(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "simulated dispatch failure") {
 			t.Errorf("error = %v, want it to surface the run failure", err)
+		}
+	})
+}
+
+// TestDrainBoundFromContext covers R-LSM-002/S-LSM-004's shared-deadline
+// requirement in isolation from any real context or wall clock (AI-39
+// verify report WARNING 2): the drain bound must be whatever is actually
+// left of ctx's own deadline, not a fresh, independently-evaluated window
+// starting whenever the drain happens to begin.
+func TestDrainBoundFromContext(t *testing.T) {
+	t.Parallel()
+
+	fixedNow := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := func() time.Time { return fixedNow }
+
+	t.Run("derives the exact remaining time until ctx's deadline", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithDeadline(context.Background(), fixedNow.Add(37*time.Second))
+		defer cancel()
+
+		got := drainBoundFromContext(ctx, liveSmokeRequestTimeout, now)
+
+		if got != 37*time.Second {
+			t.Errorf("drainBoundFromContext = %s, want 37s — the exact time remaining until ctx's own deadline (R-LSM-002, S-LSM-004)", got)
+		}
+	})
+
+	t.Run("elapsed time already spent against ctx's deadline shrinks the bound", func(t *testing.T) {
+		t.Parallel()
+
+		// ctx was given a 60s deadline, but by the time the drain starts,
+		// 45s of that window has already elapsed (provider construction,
+		// request build, Stream dispatch). A drain bound that ignored
+		// elapsed time and re-evaluated a fresh 60s window here would
+		// reintroduce exactly the two-independent-timers defect WARNING 2
+		// found — this is the load-bearing proof that it does not.
+		start := fixedNow
+		ctx, cancel := context.WithDeadline(context.Background(), start.Add(60*time.Second))
+		defer cancel()
+		atDrainStart := func() time.Time { return start.Add(45 * time.Second) }
+
+		got := drainBoundFromContext(ctx, liveSmokeRequestTimeout, atDrainStart)
+
+		if got != 15*time.Second {
+			t.Errorf("drainBoundFromContext = %s, want 15s (60s original window minus 45s already elapsed) — a drain bound that ignores elapsed time re-introduces the two-independent-timers defect WARNING 2 found", got)
+		}
+	})
+
+	t.Run("a ctx with no deadline falls back to the given fallback duration", func(t *testing.T) {
+		t.Parallel()
+
+		got := drainBoundFromContext(context.Background(), liveSmokeRequestTimeout, now)
+
+		if got != liveSmokeRequestTimeout {
+			t.Errorf("drainBoundFromContext = %s, want the fallback %s when ctx carries no deadline at all", got, liveSmokeRequestTimeout)
+		}
+	})
+
+	t.Run("a ctx whose deadline has already elapsed returns a non-positive duration unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithDeadline(context.Background(), fixedNow.Add(-5*time.Second))
+		defer cancel()
+
+		got := drainBoundFromContext(ctx, liveSmokeRequestTimeout, now)
+
+		if got != -5*time.Second {
+			t.Errorf("drainBoundFromContext = %s, want -5s unchanged — agenttest.DrainAndRecord's own non-positive-timeout guard is the correct failure path here, not a manufactured fallback (R-STK-001)", got)
 		}
 	})
 }
