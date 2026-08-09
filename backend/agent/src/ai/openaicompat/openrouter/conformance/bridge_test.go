@@ -4,6 +4,7 @@
 
 //nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
+
 //
 // # Bridge factory — the one seam RunConformance consumes
 //
@@ -98,7 +99,7 @@ import (
 // is not "chat.completion.chunk" (R-ATS-017 / D3) and treats a zero
 // created as a malformed identity chunk (R-ATS-021 / S-ATS-081).
 const (
-	conformanceBridgeChunkCreated      = 1700000000
+	conformanceBridgeChunkCreated        = 1700000000
 	conformanceBridgeObjectDiscriminator = "chat.completion.chunk"
 )
 
@@ -113,8 +114,8 @@ const (
 // openrouter's own suppression rule (R-OR-02 sub-scenario 2). No
 // header is ever set with an empty value.
 type bridgeAttributionRoundTripper struct {
-	base                            http.RoundTripper
-	referer, xTitle, xCategories    string
+	base                         http.RoundTripper
+	referer, xTitle, xCategories string
 }
 
 // RoundTrip clones the request's headers, applies the three
@@ -162,6 +163,38 @@ func bridgeServeTranscripts(transcripts [][]byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(transcripts[idx])
+	}
+}
+
+// bridgeServeTranscriptsSplit is bridgeServeTranscripts' boundary-sweep
+// twin (design D8 tier 2): serves transcripts[n] to the (n+1)th inbound
+// request, in arrival order — identical to bridgeServeTranscripts except
+// each transcript is written in two parts, transcript[:offsets[n]] then
+// transcript[offsets[n]:], with a real Flush between them so the
+// client's TCP read genuinely observes two separate reads at the split
+// boundary. len(offsets) MUST equal len(transcripts); offsets[n] MUST be
+// in [0, len(transcripts[n])].
+func bridgeServeTranscriptsSplit(transcripts [][]byte, offsets []int) http.HandlerFunc {
+	var mu sync.Mutex
+	next := 0
+	return func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		idx := next
+		next++
+		mu.Unlock()
+
+		if idx >= len(transcripts) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		offset := offsets[idx]
+		_, _ = w.Write(transcripts[idx][:offset])
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		_, _ = w.Write(transcripts[idx][offset:])
 	}
 }
 
@@ -521,6 +554,39 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 // registration would never fire here, and an unscoped run would report
 // CAP-O-04 structurally NotExercised despite the true declaration.
 func conformanceBridgeFactory() agenttest.Factory {
+	return conformanceBridgeFactoryServing(bridgeServeTranscripts)
+}
+
+// conformanceBridgeFactorySplitAt is a boundary-sweep variant of
+// conformanceBridgeFactory (design D8, R-ACR-005, tasks.md Phase 7 WU8
+// tier 2): identical Factory declarations, but EVERY transcript any case
+// in the suite constructs is served split into two writes — at
+// offsetFn(len(transcript)) — with a real Flush between them, instead of
+// written whole. Used with offsetFn = "1", "len/2" and "len-1" to prove
+// the generated CapabilityRecord survives adversarial fragmentation at
+// three representative relative positions, applied globally across one
+// full unscoped run each — not per curated boundary-sweep fixture (see
+// boundary_sweep_test.go's own header comment for the reconciliation
+// between design D8's literal "sampled offsets" choice and tasks.md
+// 7.2's measure-first phrasing).
+func conformanceBridgeFactorySplitAt(offsetFn func(transcriptLen int) int) agenttest.Factory {
+	return conformanceBridgeFactoryServing(func(transcripts [][]byte) http.HandlerFunc {
+		offsets := make([]int, len(transcripts))
+		for i, transcript := range transcripts {
+			offsets[i] = offsetFn(len(transcript))
+		}
+		return bridgeServeTranscriptsSplit(transcripts, offsets)
+	})
+}
+
+// conformanceBridgeFactoryServing builds the agenttest.Factory both
+// conformanceBridgeFactory and conformanceBridgeFactorySplitAt share,
+// parameterized only over serveFunc — the http.HandlerFunc builder that
+// turns a New call's rendered transcripts into a response-serving
+// handler. Everything else (prior-server eager close, the attribution
+// round-tripper, the declared capabilities and Dialect) is identical
+// between the two callers.
+func conformanceBridgeFactoryServing(serveFunc func(transcripts [][]byte) http.HandlerFunc) agenttest.Factory {
 	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, true
 
 	var mu sync.Mutex
@@ -536,7 +602,7 @@ func conformanceBridgeFactory() agenttest.Factory {
 				transcripts[i] = bridgeRenderScript(tb, script)
 			}
 
-			server := httptest.NewServer(bridgeServeTranscripts(transcripts))
+			server := httptest.NewServer(serveFunc(transcripts))
 
 			mu.Lock()
 			previous := current
@@ -559,10 +625,10 @@ func conformanceBridgeFactory() agenttest.Factory {
 			}
 
 			transport := bridgeAttributionRoundTripper{
-				base:         server.Client().Transport,
-				referer:      "https://app.cachicamas.test/openrouter-conformance",
-				xTitle:       "cachicamas-conformance-bridge",
-				xCategories:  "test,conformance",
+				base:        server.Client().Transport,
+				referer:     "https://app.cachicamas.test/openrouter-conformance",
+				xTitle:      "cachicamas-conformance-bridge",
+				xCategories: "test,conformance",
 			}
 			httpClient := &http.Client{Transport: transport}
 
