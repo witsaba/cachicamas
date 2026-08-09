@@ -80,13 +80,19 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 
-	// Blank import: conformancetest's init() registers the CapRetry case
-	// (retry/auto_retry_up_to_documented_bound) into the shared agenttest
-	// registry this binary's unscoped TestOpenRouterAdapter_FullConformance
-	// run consumes — see conformanceBridgeFactory's own doc comment and
-	// conformancetest's package doc for why this import must be here
-	// (design D2, R-ACR-006).
-	_ "github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest"
+	// Named, not blank: conformancetest's init() still registers the
+	// CapRetry case (retry/auto_retry_up_to_documented_bound) into the
+	// shared agenttest registry this binary's unscoped
+	// TestOpenRouterAdapter_FullConformance run consumes — a named import
+	// runs init() exactly the same way a blank one does — but this file
+	// also reads conformancetest.RetryOffered by name (AI-38 WU10
+	// CRITICAL-1 remediation, R-ACR-006): the single declared source of
+	// truth conformanceBridgeFactoryServing's Retry declaration and
+	// TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource
+	// both consume, so this factory's declaration and openaicompat's own
+	// (parity-checked separately, see openaicompat/retry_parity_test.go)
+	// cannot silently drift apart (design D2, verify-report.md Defeat #7).
+	"github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest"
 )
 
 // conformanceBridgeChunkCreated and conformanceBridgeObjectDiscriminator
@@ -546,13 +552,17 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 // registers exactly one tb.Cleanup, closing whichever server is current
 // when the whole test ends.
 //
-// Retry is declared true (AI-38 design D2, R-ACR-006, locked decision 2):
-// the client auto-retries per AI-35, and openaicompat/bridge_test.go's
-// own conformance factory declares it identically. CAP-O-04 is exercised
-// in THIS binary specifically because of the blank import of
-// conformancetest below (design D2): without it, the retry case's init()
-// registration would never fire here, and an unscoped run would report
-// CAP-O-04 structurally NotExercised despite the true declaration.
+// Retry is declared from conformancetest.RetryOffered, not a local
+// literal (AI-38 design D2, R-ACR-006, AI-38 WU10 CRITICAL-1
+// remediation, locked decision 2): the client auto-retries per AI-35,
+// and openaicompat/bridge_test.go's own conformance factory declares it
+// identically — parity-checked separately there, since Go's import
+// cycle rules keep that file from importing conformancetest directly
+// (see openaicompat/retry_parity_test.go). CAP-O-04 is exercised in
+// THIS binary specifically because of the import of conformancetest
+// below (design D2): without it, the retry case's init() registration
+// would never fire here, and an unscoped run would report CAP-O-04
+// structurally NotExercised despite the true declaration.
 func conformanceBridgeFactory() agenttest.Factory {
 	return conformanceBridgeFactoryServing(bridgeServeTranscripts)
 }
@@ -587,7 +597,8 @@ func conformanceBridgeFactorySplitAt(offsetFn func(transcriptLen int) int) agent
 // round-tripper, the declared capabilities and Dialect) is identical
 // between the two callers.
 func conformanceBridgeFactoryServing(serveFunc func(transcripts [][]byte) http.HandlerFunc) agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, true
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := false, false, false
+	retryOffered := conformancetest.RetryOffered
 
 	var mu sync.Mutex
 	var current *httptest.Server
@@ -713,5 +724,32 @@ func TestConformanceBridgeFactory_DeclaresAllThreeOptionalCapabilities(t *testin
 	}
 	if *factory.CacheBoundary != false {
 		t.Errorf("factory.CacheBoundary = %v, want false (R-CNF-004 absent declaration — bridge declares CAP-O-03 not offered)", *factory.CacheBoundary)
+	}
+}
+
+// TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource
+// proves R-ACR-006's parity requirement holds for this package's own
+// factory (AI-38 WU10 CRITICAL-1 remediation): its constructed Retry
+// pointer dereferences to exactly conformancetest.RetryOffered, the
+// single declared source every conformance factory wrapping
+// *openaicompat.Client must agree with. openaicompat's own factory is
+// parity-checked separately (openaicompat/retry_parity_test.go, a
+// raw-bytes scan — Go's import cycle rules keep that internal test file
+// from importing conformancetest directly); together the two guards
+// close the gap verify-report.md's Defeat #7 found: mutating one
+// factory's declaration away from the shared source used to make
+// neither package's tests fail. A local override that bypassed
+// conformancetest.RetryOffered here would now fail, naming the
+// mismatch.
+func TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource(t *testing.T) {
+	t.Parallel()
+
+	factory := conformanceBridgeFactory()
+
+	if factory.Retry == nil {
+		t.Fatal("conformanceBridgeFactory().Retry is nil (R-CNF-002, S-CNF-006) — declaration is by omission")
+	}
+	if *factory.Retry != conformancetest.RetryOffered {
+		t.Errorf("conformanceBridgeFactory().Retry = %v, want %v (conformancetest.RetryOffered) — every conformance factory wrapping *openaicompat.Client must declare retry identically (R-ACR-006)", *factory.Retry, conformancetest.RetryOffered)
 	}
 }

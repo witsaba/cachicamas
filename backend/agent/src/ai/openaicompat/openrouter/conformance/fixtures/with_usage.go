@@ -5,20 +5,17 @@
 // carrying a usage object (prompt_tokens: 7, completion_tokens: 24,
 // reasoning_tokens: 0, cached_tokens: 0) + the SSE [DONE] sentinel.
 //
-// # Not yet recorder-verified (Phase 5 / D6 dependency)
+// # Recorder-verified (AI-38 WU10 ACCURACY-1 remediation)
 //
-// Unlike text_stream.go and tool_call.go, this fixture's storage moved
-// to the go:embed mechanism (task 1.3) but is NOT wired into
+// Like text_stream.go and tool_call.go, this fixture is wired into
 // recorder_test.go's TestRecordTranscript_RegeneratesEveryFixture
-// round-trip: the shipped bridgeWriteTerminalChunk (bridge_test.go)
-// does not yet render a usage object at all (design D6, Phase 5/WU5 —
-// "usage object rendering present-fields-only"). Recording this
-// transcript through
-// bridgeRenderScript today would produce a DIFFERENT byte sequence (no
-// usage key), so this file stays a committed golden the recorder cannot
-// yet reproduce until D6 lands, at which point it is regenerated (not
-// necessarily byte-identical to today's all-fields-populated shape — D6
-// renders present fields only) and added to the round-trip set.
+// round-trip via recorderCanonicalTextStreamWithUsageScript: Phase
+// 5/WU5 landed design D6's "usage object rendering present-fields-only"
+// in bridgeWriteTerminalChunk, so a real HTTP capture of the canonical
+// script above is now byte-identical to this committed golden (910
+// bytes) — verify-report.md's own probe proved this first; this fixture
+// closes apply deviation #3 / WARN-3 by shipping that proof as a
+// permanent, drift-guarded test rather than a one-off probe.
 //
 // The presence of a usage object on the terminal chunk is what
 // exercises the C8 / R-ACP-005 path: openaicompat's chunk.go

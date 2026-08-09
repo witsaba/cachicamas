@@ -56,6 +56,31 @@ import (
 // two is caught by review against the delta spec at the archive phase.
 const retryDefaultMaxAttempts = 3
 
+// RetryOffered is the single declared source of truth every conformance
+// factory that wraps *openaicompat.Client MUST read for its
+// Factory.Retry field (R-ACR-006, AI-38 WU10 CRITICAL-1 remediation,
+// design D2 locked decision 2): the client auto-retries per AI-35, so
+// every conformance factory built around the same underlying client
+// offers the identical retry behaviour and MUST declare it identically.
+//
+// Before this constant existed, openaicompat/bridge_test.go and
+// openrouter/conformance/bridge_test.go each hard-coded their own local
+// `true` literal — two independent declarations living in separate test
+// binaries with no cross-binary comparison. verify-report.md's Defeat #7
+// proved the gap: flipping one factory's local literal to false left
+// both packages' tests exit 0, naming neither factory.
+//
+// Consuming this single constant instead of a local literal makes that
+// drift structurally impossible: there is exactly one place in the
+// module capable of declaring the value, and every conformance factory
+// copies it rather than inventing its own. Each consuming package also
+// carries a TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource
+// self-test asserting its own constructed Factory.Retry still
+// dereferences to this exact value, so a local override that bypassed
+// this constant entirely — reintroducing the disagreement — is caught
+// by name rather than silently accepted (S-ACR-017, S-ACR-018).
+const RetryOffered = true
+
 func init() {
 	agenttest.RegisterConformanceCase(
 		"retry/auto_retry_up_to_documented_bound",

@@ -353,7 +353,17 @@ func requireFinishReasonUnreachable(tb testing.TB, f Factory, reason ai.FinishRe
 	last := events[len(events)-1]
 	if _, ok := last.ErrorPayload(); !ok {
 		tb.Errorf("last drained event kind = %v, want the typed failure terminal in final position (R-CNF-016)", last.Kind())
+		return
 	}
+
+	// R-CNF-016 requires this outcome be "recorded ... naming the value
+	// and the dialect" and "MUST NOT read as a pass": without this, a
+	// passing subtest read as a bare --- PASS with nothing distinguishing
+	// a dialect-aware absence from an ordinary assertion (AI-38 WU10
+	// WARNING remediation, verify-report.md WARN-1). t.Logf makes the
+	// outcome visible in -v output on the genuine all-clear path only —
+	// the early returns above keep this line unreached on any failure.
+	tb.Logf("agenttest: finish reason %v recorded as a dialect-aware absence, never a pass (R-CNF-016, S-CNF-043): the declared dialect marks it unreachable, and the subject produced exactly one typed failure terminal with no Completion", reason)
 }
 
 // usageAbsentVsZeroCase proves R-CNF-016's second required case: an absent

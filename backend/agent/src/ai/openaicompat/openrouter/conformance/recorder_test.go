@@ -147,16 +147,73 @@ func recorderCanonicalToolCallScript(tb testing.TB) agenttest.Script {
 	}}
 }
 
+// recorderCanonicalTextStreamWithUsageScript renders exactly what
+// fixtures/with_usage.go documents: ResponseStart("chatcmpl-or-usage",
+// "openai/gpt-4o") + TextBlockStart(1) + TextDelta(1, "hello") +
+// TextDelta(1, " world") + TextBlockEnd(1) + Completion(FinishReasonStop,
+// Usage{Input:7, Output:24, CacheRead:0, CacheWrite:0, Reasoning:0}) — all
+// five usage counts present (D6's present-fields-only rule: an explicit
+// zero still renders its key, distinguishable from an absent one,
+// R-CNF-016/S-CNF-045).
+//
+// AI-38 WU10 ACCURACY-1 remediation (verify-report.md WARN-3, apply
+// deviation #3): this fixture's own doc comment recorded the round-trip
+// exclusion as blocked on Phase 5/WU5's D6 usage rendering. D6 landed in
+// WU5 (bridgeWriteTerminalChunk now renders usage present-fields-only);
+// this script closes that now-stale exclusion by proving the golden is
+// still exactly what the recording helper produces.
+func recorderCanonicalTextStreamWithUsageScript(tb testing.TB) agenttest.Script {
+	tb.Helper()
+	responseStart, err := ai.NewResponseStart("chatcmpl-or-usage", "openai/gpt-4o")
+	recorderRequireConstructed(tb, err, "ai.NewResponseStart")
+	start, err := ai.NewTextBlockStart(1)
+	recorderRequireConstructed(tb, err, "ai.NewTextBlockStart")
+	hello, err := ai.NewTextDelta(1, "hello")
+	recorderRequireConstructed(tb, err, "ai.NewTextDelta")
+	world, err := ai.NewTextDelta(1, " world")
+	recorderRequireConstructed(tb, err, "ai.NewTextDelta")
+	end, err := ai.NewTextBlockEnd(1)
+	recorderRequireConstructed(tb, err, "ai.NewTextBlockEnd")
+	usage := ai.Usage{
+		Input:      ai.Tokens(7),
+		Output:     ai.Tokens(24),
+		CacheRead:  ai.Tokens(0),
+		CacheWrite: ai.Tokens(0),
+		Reasoning:  ai.Tokens(0),
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, usage)
+	recorderRequireConstructed(tb, err, "ai.NewCompletion")
+
+	return agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(responseStart),
+		agenttest.Emit(start),
+		agenttest.Emit(hello),
+		agenttest.Emit(world),
+		agenttest.Emit(end),
+		agenttest.Emit(completion),
+	}}
+}
+
 // recorderFixtures is the recorder-eligible fixture set: every testdata
 // golden the recording helper can reproduce from a canonical
-// agenttest.Script today. fixtures/with_usage.go (blocked on Phase 5's D6
-// usage rendering) and fixtures/reasoning_extensions.go (a hand-authored
-// vendor-extension shape with no agenttest.Script equivalent) are
-// deliberately absent — see their own package doc comments.
+// agenttest.Script today — text_stream, tool_call, and (AI-38 WU10
+// ACCURACY-1 remediation, now that D6 landed) with_usage.
+//
+// fixtures/reasoning_extensions.go stays permanently outside this set,
+// not a phase-blocked one: reasoning_details/reasoning are vendor
+// wire-extension fields with no ai.Event equivalent at all, so
+// bridgeRenderScript has no script vocabulary that could ever produce
+// them — the same structural reason boundary_sweep_test.go's own header
+// comment states for its curated set (mirroring that file's
+// tool_call.sse sweep-bound exclusion precedent: an exclusion this
+// package cannot close by writing a script is recorded here in the
+// test, not merely left implicit in fixtures/reasoning_extensions.go's
+// package doc). See that file's own doc comment for the full rationale.
 func recorderFixtures() []recorderFixture {
 	return []recorderFixture{
 		{name: "text_stream", script: recorderCanonicalTextStreamScript, committed: fixtures.OpenrouterTextStream},
 		{name: "tool_call", script: recorderCanonicalToolCallScript, committed: fixtures.OpenrouterToolCallStream},
+		{name: "with_usage", script: recorderCanonicalTextStreamWithUsageScript, committed: fixtures.OpenrouterTextStreamWithUsage},
 	}
 }
 

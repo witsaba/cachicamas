@@ -233,6 +233,20 @@ func terminalFailureCategoryExhaustivenessCase(t *testing.T, f Factory) {
 			payload, ok := events[len(events)-1].ErrorPayload()
 			if !ok || payload.Category() != wantMidStreamCategory {
 				t.Errorf("category = %v (ok=%v), want %v (S-CNF-024, dialect-aware collapse=%v)", payload.Category(), ok, wantMidStreamCategory, wantMidStreamCategory != category)
+				return
+			}
+
+			// R-CNF-010 requires a collapse be "recorded ... naming both
+			// the category and the dialect" and "MUST NOT read as ... a
+			// pass of the original category": without this, a collapsed
+			// case read as a bare --- PASS indistinguishable from an
+			// ordinary exact-category match (AI-38 WU10 WARNING
+			// remediation, verify-report.md WARN-1). Logged only when a
+			// collapse is actually in effect — an ordinary exact-category
+			// match (nil Dialect, or a dialect that can express category
+			// itself) stays silent, exactly as before.
+			if wantMidStreamCategory != category {
+				t.Logf("agenttest: category %v recorded as a dialect-aware collapse to %v, never a pass of the original category (R-CNF-010, S-CNF-024): the declared dialect's mid-stream wire cannot preserve %v", category, wantMidStreamCategory, category)
 			}
 		})
 

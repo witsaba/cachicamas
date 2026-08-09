@@ -88,6 +88,16 @@ func (p *probeTB) Errorf(format string, args ...any) {
 	p.messages = append(p.messages, fmt.Sprintf(format, args...))
 }
 
+// Logf captures a message without marking the probe failed — real
+// testing.TB.Logf never fails a test, only records a message (AI-38 WU10
+// WARNING remediation: requireFinishReasonUnreachable now logs its
+// dialect-aware-absence outcome on the all-clear path, so this probe
+// must implement Logf rather than fall through to the nil embedded
+// testing.TB and panic).
+func (p *probeTB) Logf(format string, args ...any) {
+	p.messages = append(p.messages, fmt.Sprintf(format, args...))
+}
+
 // lastMessage returns the most recently captured message, or "".
 func (p *probeTB) lastMessage() string {
 	if len(p.messages) == 0 {

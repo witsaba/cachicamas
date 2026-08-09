@@ -58,15 +58,30 @@ import (
 // conformanceBridgeFactory builds the agenttest.Factory this milestone's
 // bridge exposes (design.md D11): New renders every given Script eagerly,
 // on the caller's own goroutine, then serves the rendered transcripts, in
-// queue order, from a real httptest.Server behind a real *Client. Retry
-// is declared true (AI-38 design D2, R-ACR-006, locked decision 2): the
-// client auto-retries per AI-35, and every factory constructing this same
-// adapter for conformance purposes must declare it identically —
-// openrouter/conformance/bridge_test.go's own factory matches. Reasoning,
-// TokenCounting and CacheBoundary stay declared non-nil false: this
-// bridge offers neither today.
+// queue order, from a real httptest.Server behind a real *Client.
+// Reasoning, TokenCounting and CacheBoundary stay declared non-nil
+// false: this bridge offers neither today.
+//
+// retryOffered is a LITERAL, not conformancetest.RetryOffered (AI-38 WU10
+// CRITICAL-1 remediation, R-ACR-006): this file is openaicompat's own
+// INTERNAL test file (package openaicompat, not openaicompat_test), and
+// conformancetest imports openaicompat — an internal test file can never
+// import anything that in turn imports its own package (Go rejects the
+// cycle at compile time), so the shared-constant approach
+// openrouter/conformance/bridge_test.go uses is unavailable here.
+// retry_parity_test.go's
+// TestOpenAICompatBridgeFactory_RetryDeclaration_MatchesSharedSource
+// closes the gap instead: it reads THIS declaration's raw source bytes
+// from openaicompat_test (a distinct package name, so the cycle does not
+// apply there) and asserts the literal equals conformancetest.RetryOffered
+// — the client auto-retries per AI-35, and every factory constructing
+// this same adapter for conformance purposes must declare it identically
+// (design D2, locked decision 2). Mutating this literal out of step with
+// the canonical constant now fails mechanically, naming this file
+// (verify-report.md Defeat #7 is the disagreement this closes).
 func conformanceBridgeFactory() agenttest.Factory {
-	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, true
+	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered := false, false, false
+	retryOffered := true
 	return agenttest.Factory{
 		New: func(tb testing.TB, scripts ...agenttest.Script) ai.ModelProvider {
 			tb.Helper()

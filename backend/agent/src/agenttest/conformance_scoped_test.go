@@ -7,6 +7,7 @@
 package agenttest
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -115,5 +116,27 @@ func TestRunConformanceFor_FailingInScopeCase_ReachesTheIdenticalPropagationSeam
 	}
 	if !found {
 		t.Fatal("casesFor(CapStreamingText) does not include text/order_contiguity_byte_exact_reconstruction, want it reachable so a failing subject would genuinely fail the scoped run (S-CLA-030)")
+	}
+}
+
+// TestRunConformanceFor_ReturnsNoVerdictOrRecord_StructuralGuard proves
+// R-CNF-028's closing sentence — "this obligation is a requirement of
+// the suite, not a documentation comment" — mechanically (AI-38 WU10
+// CRITICAL-3 remediation, S-CNF-086): RunConformanceFor's own function
+// signature carries zero return values, so a scoped run cannot produce
+// ANYTHING — no verdict, no CapabilityRecord — that a caller could cite
+// as full-conformance evidence. This is a stronger, compile-time
+// guarantee than a runtime citation check would be (verify-report.md's
+// own mitigation note), and reflection observes it directly — the same
+// structural-guard shape
+// TestCapabilityRecordEntry_ExportedShape_CarriesOnlyCapabilityStandingOutcome
+// already establishes in conformance_suite_test.go. A future refactor
+// that adds a return value to this entry point — reintroducing
+// something a consumer could mistake for total evidence — fails here,
+// naming the count.
+func TestRunConformanceFor_ReturnsNoVerdictOrRecord_StructuralGuard(t *testing.T) {
+	typ := reflect.TypeOf(RunConformanceFor)
+	if got := typ.NumOut(); got != 0 {
+		t.Fatalf("RunConformanceFor has %d return value(s), want 0 (R-CNF-028, S-CNF-085/086): a scoped run must not be able to produce a verdict or a CapabilityRecord a caller could cite as full-conformance evidence", got)
 	}
 }
