@@ -133,7 +133,20 @@ Chain strategy: size-exception
 - [x] 8.2 `make lint`; confirm `backend/agent/go.mod` zero-`require`; confirm no edit under `openspec/specs/**`. Maps S-ACR-020/021.
 - [x] 8.3 If Phase 0 evidence diverges from the predicted 5-family set, escalate per design before continuing — do not silently widen resolutions.
 
-  **8.1 evidence**: `make test` (from `backend/agent/`, `go test -race -v ./...`) — final run exit 0, 989 `--- PASS`, 0 `--- FAIL`. One `--- SKIP: TestOpenRouterAdapter_LiveSmoke` — AI-39's credential-gated live-smoke scaffold, explicitly out of AI-38's scope (proposal's own out-of-scope list), not a conformance-driver skip. Zero `t.Skip(` calls anywhere under `src/ai/openaicompat/openrouter/conformance/` (grep confirmed; the one text match is a comment mentioning "formerly-t.Skip'd", not a call). AI-21 fake: `go test ./src/agenttest/...` green throughout every phase.
+  **8.1 evidence**: `make test` (from `backend/agent/`, `go test -race -v ./...`) — final run exit 0, 989 `--- PASS`, 0 `--- FAIL`.
+
+  **[CORRECTED — AI-38 WU10, see Phase 9 below]** The sentence originally here claimed "One
+  `--- SKIP: TestOpenRouterAdapter_LiveSmoke`". That was a factual undercount, caught by
+  `verify-report.md` WARN-2 and independently re-measured during WU10: counting every `--- SKIP`
+  report line `go test -race -v ./...` prints, at any subtest nesting level, the true figure is
+  **26**, not 1. All 26 are benign — see Phase 9's own breakdown and classification. The original
+  sentence undercounted because it implicitly reflected only top-level `Test...` functions that are
+  entirely skipped (of which `TestOpenRouterAdapter_LiveSmoke` is genuinely the only one); the other
+  25 are nested subtests inside otherwise-passing parents (declared-absent optional capabilities, and
+  the retry-absent self-case, unreachable once CAP-O-04 is declared offered). Zero `t.Skip(` calls
+  anywhere under `src/ai/openaicompat/openrouter/conformance/` (grep confirmed; the one text match is
+  a comment mentioning "formerly-t.Skip'd", not a call). AI-21 fake: `go test ./src/agenttest/...`
+  green throughout every phase.
 
   **Transient flake discovered and diagnosed (not a regression)**: the FIRST `make test` run of this phase showed one failure, `TestAI33_1_RaceCancelMidDo` ("Category() = unavailable, want FailureCategoryCancellation") — in `openaicompat/a_i-33_1_test.go`, a file AI-38 never touches (confirmed via `git diff origin/main`, zero diff) and whose name literally describes a real intra-process race (cancel signal vs. network error, from milestone AI-33.1, predating this change entirely). Isolated re-runs (`-run TestAI33_1_RaceCancelMidDo`, 5×) all PASS; a full second and third `make test` run both came back exit 0 with zero failures. Diagnosed as pre-existing environment/scheduling-timing flakiness in an unrelated test, not a defect this change introduced — documented rather than silently re-run-until-green.
 
@@ -141,4 +154,102 @@ Chain strategy: size-exception
 
   **go.mod / openspec/specs — reported precisely, not smoothed over**: `backend/agent/go.mod` is NOT currently zero-require — it carries `go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/trace` and the indirect `xxhash/v2`, all from AI-37 (merged into `main` before this branch's base commit). `git diff origin/main -- backend/agent/go.mod backend/agent/go.sum` is empty: **AI-38 itself adds zero new requires**, satisfying NFR-ACR-A's actual dependency-purity intent, but the delta spec's literal sentence ("`backend/agent/go.mod` MUST still declare zero requires", NFR-ACR-A / S-ACR-020) is factually stale — it was seemingly written without accounting for AI-37's already-landed OTel dependency. This is a discovered spec/reality gap, not silently resolved here: `sdd-apply` implements code, not spec text, and this repository's own precedent (see `691b415f`, `66e12147`, `1e58068c` — AI-37's own post-hoc spec reconciliation commits) is for this kind of gap to be reconciled at verify/archive. Flagged for that phase. `openspec/specs/**`: zero diff against `origin/main` — confirmed no in-place canonical spec edits.
 
+  **[RESOLVED — AI-38 WU10]** The go.mod/spec-text gap flagged above is reconciled in Phase 9 below
+  (CRITICAL-2): `NFR-ACR-A` and `S-ACR-020` now state the actual obligation ("adds no NEW module
+  dependency; `go.mod`/`go.sum` byte-identical to base"), still proven by the identical empty-diff
+  evidence.
+
   Phase 0's RED baseline matched the design's predicted five-family set exactly (recorded in Phase 0's own evidence above) — no divergence to escalate.
+
+## Phase 9: Verify Remediation (WU10)
+
+`verify-report.md` (committed at `ae5b7600`) found 3 CRITICAL and 6 WARNING findings against the
+9-work-unit apply above. Per the maintainer's standing widest-scope remediation rule, this phase
+closes all 3 CRITICALs plus every accuracy fix (WARN-1, WARN-2, WARN-3); WARN-4/5/6 and the two
+SUGGESTIONs are spec-prose/informational and out of this phase's code scope. Each task below is its
+own independently revertible unit; commands are run from `backend/agent/`.
+
+- [x] 9.1 **CRITICAL-1 (R-ACR-006/S-ACR-018)** — retry declaration parity does not fail mechanically
+  (`verify-report.md` Defeat #7: flipping `openaicompat/bridge_test.go`'s local `retryOffered` to
+  `false` left both packages exit 0, naming neither factory).
+  - Added `conformancetest.RetryOffered` (`conformancetest/retry.go`): the single declared source of
+    truth every conformance factory wrapping `*openaicompat.Client` must read, pinned by
+    `TestRetryOffered_DeclaresTrue` (`conformancetest/retry_declaration_test.go`).
+  - `openrouter/conformance/bridge_test.go`'s `conformanceBridgeFactoryServing` now reads
+    `conformancetest.RetryOffered` (named, not blank, import) instead of a local literal;
+    `TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource` asserts the constructed
+    factory's `Retry` pointer still dereferences to it.
+  - `openaicompat/bridge_test.go` is an INTERNAL test file (package `openaicompat`) and cannot import
+    `conformancetest` — `conformancetest` imports `openaicompat`, and Go rejects the resulting import
+    cycle at compile time (discovered empirically: `go vet` failed with exactly that message on the
+    first attempt). It keeps a documented local literal instead, mechanically parity-checked by a new
+    raw-bytes scan — `openaicompat/retry_parity_test.go` — mirroring
+    `openrouter/headers_unawareness_test.go`'s established "bytes are bytes" idiom in this module:
+    `TestOpenAICompatBridgeFactory_RetryDeclaration_MatchesSharedSource` (the guard),
+    `..._FailsOnStagedMutation` (its own bite-proof), `..._ResolvesExpectedPath` (non-vacuity pin).
+  - Maps R-ACR-006/S-ACR-017/S-ACR-018.
+
+- [x] 9.2 **CRITICAL-3 (R-CNF-028/S-CNF-086)** — the scoped-run-is-not-evidence obligation shipped as
+  4 prose comments and zero checks (`grep -rn 'R-CNF-028|S-CNF-085|S-CNF-086' src/` returned only
+  prose in `run_for_test.go`).
+  - Added `TestRunConformanceFor_ReturnsNoVerdictOrRecord_StructuralGuard`
+    (`agenttest/conformance_scoped_test.go`): a reflection-based structural guard —
+    `reflect.TypeOf(RunConformanceFor).NumOut() == 0` — mirroring
+    `TestCapabilityRecordEntry_ExportedShape_CarriesOnlyCapabilityStandingOutcome`'s own established
+    shape in this package. A scoped run structurally cannot produce a verdict or `CapabilityRecord` a
+    caller could cite as full-conformance evidence; a future refactor that adds a return value fails
+    here by name.
+  - Maps R-CNF-028/S-CNF-085/S-CNF-086.
+
+- [x] 9.3 **WARNING (R-CNF-016/R-CNF-010 recorded-absence visibility)** — dialect-aware
+  absence/collapse outcomes were recorded only inside `Errorf` strings (fire on failure only), so a
+  passing subtest read as a bare `--- PASS` with nothing distinguishing it from an ordinary exact
+  match.
+  - `agenttest/conformance_capabilities.go`'s `requireFinishReasonUnreachable` now `tb.Logf`s the
+    dialect-aware-absence outcome (naming the value) on the genuine all-clear path only.
+  - `agenttest/conformance_terminal.go`'s `terminalFailureCategoryExhaustivenessCase` mid-stream
+    subtest now `t.Logf`s the dialect-aware-collapse outcome (naming both categories) exactly when a
+    collapse is in effect; an ordinary exact-category match stays silent, unchanged.
+  - `probeTB` (`conformance_suite_test.go`) gained a `Logf` override — its embedded `testing.TB` is
+    nil by design, and the new call sites above panicked through it until fixed.
+  - Maps R-CNF-010/S-CNF-024, R-CNF-016/S-CNF-043.
+
+- [x] 9.4 **ACCURACY-1 (with_usage.sse recorder round-trip)** — apply deviation #3's exclusion
+  rationale ("blocked on D6") went stale once WU5 landed D6's usage rendering.
+  - Added `recorderCanonicalTextStreamWithUsageScript` and wired `with_usage` into
+    `recorderFixtures()` (`openrouter/conformance/recorder_test.go`); the recorder now round-trips 3
+    of 4 committed transcripts, byte-identical (910 B), drift-guard proven by hand-corrupting a byte
+    and confirming the guard names the file, then reverting.
+  - `fixtures/with_usage.go`'s doc comment updated from "not yet recorder-verified" to
+    "recorder-verified".
+  - `reasoning_extension.sse` stays excluded, permanently (not phase-blocked): `reasoning_details`/
+    `reasoning` are vendor wire-extension fields with no `ai.Event` preimage at all, so
+    `bridgeRenderScript` has no script vocabulary that could ever produce them — the exclusion is now
+    also stated explicitly in `recorder_test.go`'s own `recorderFixtures()` doc comment, mirroring
+    `boundary_sweep_test.go`'s `tool_call.sse` sweep-bound exclusion precedent (stated in the test,
+    not only in the fixture's own package doc).
+  - Maps R-ACR-003/S-ACR-006/S-ACR-007.
+
+- [x] 9.5 **CRITICAL-2 (NFR-ACR-A/S-ACR-020 spec text)** — the delta spec's "`go.mod` MUST still
+  declare zero requires" is factually false (AI-37's OTel requires and indirect `xxhash` pre-exist on
+  the base commit).
+  - `specs/ai-adapter-conformance-run/spec.md`: `NFR-ACR-A`, `S-ACR-020` and acceptance criterion #7
+    reworded to the true obligation — this change adds no NEW module dependency; `go.mod`/`go.sum`
+    stay byte-identical to base — still proven by the same empty `git diff origin/main -- go.mod
+    go.sum`. Doc-only; zero code change.
+  - Maps NFR-ACR-A/S-ACR-020.
+
+- [x] 9.6 **ACCURACY-2 (honest skip inventory)** — `tasks.md`'s own Phase 8.1 evidence claimed "1
+  expected SKIP"; independently re-measured at HEAD during this phase (see the corrected paragraph in
+  Phase 8 above): counting every `--- SKIP` report line at any nesting level, the true figure is 26.
+
+### WU10 Work Unit Evidence
+
+| Field | Value |
+|---|---|
+| Focused test command (9.1) | `go test -race -count=1 -v ./src/ai/openaicompat/... -run 'RetryDeclaration'` → all new/touched tests PASS; overlay + real-edit-and-revert probes independently confirmed both `TestOpenAICompatBridgeFactory_RetryDeclaration_MatchesSharedSource` and `TestConformanceBridgeFactory_RetryDeclaration_MatchesSharedSource` FAIL, naming the mismatch, when the corresponding factory's declaration is forced to disagree with `conformancetest.RetryOffered` |
+| Focused test command (9.2) | `go test -race -count=1 -v ./src/agenttest/ -run TestRunConformanceFor_ReturnsNoVerdictOrRecord_StructuralGuard` → PASS against the real signature; overlay-mutating `RunConformanceFor` to add a `CapabilityRecord` return makes it FAIL, naming the count (1), with the rest of the package still compiling (an ignored return value is legal Go) |
+| Focused test command (9.3) | `go test -race -count=1 -v ./src/ai/openaicompat/openrouter/conformance/ -run 'TestOpenRouterAdapter_FullConformance/(finish_reason|terminal)'` → the new `t.Logf`/`tb.Logf` lines appear for all 3 dialect-unreachable finish reasons and all 8 non-`unknown` mid-stream-collapse categories, absent for `unknown` (the one category that is not actually a collapse) |
+| Focused test command (9.4) | `go test -race -count=1 -v ./src/ai/openaicompat/openrouter/conformance/ -run TestRecordTranscript_RegeneratesEveryFixture` → `text_stream`/`tool_call`/`with_usage` all PASS byte-identical; hand-corrupting one byte of `with_usage.sse` and re-running makes the guard FAIL naming the file, then reverting restores byte-identical (`git diff --stat` empty) and GREEN |
+| Runtime harness (all 9.x) | `TestOpenRouterAdapter_FullConformance` (real bridge, real `*openaicompat.Client`, real HTTP) re-run PASS after every 9.x edit; final `make test`/`make lint`/`make build` exit codes recorded at the end of this phase |
+| Rollback boundary | 9.1: `conformancetest/retry.go`, `conformancetest/retry_declaration_test.go`, `openaicompat/retry_parity_test.go`, `openaicompat/bridge_test.go`, `openrouter/conformance/bridge_test.go` (retry-declaration hunks only). 9.2: `agenttest/conformance_scoped_test.go` (one added test + import). 9.3: `agenttest/conformance_capabilities.go`, `agenttest/conformance_terminal.go`, `agenttest/conformance_suite_test.go` (`probeTB.Logf` only). 9.4: `openrouter/conformance/recorder_test.go`, `openrouter/conformance/fixtures/with_usage.go` (doc only). 9.5/9.6: `openspec/changes/cachicamas-ai-adapter-conformance/specs/ai-adapter-conformance-run/spec.md`, this file's Phase 8/9 text. Each is revertible independently without touching the others — no shared production code was modified (test-only + doc-only throughout, matching design.md's own "Threat matrix: N/A" scope). |

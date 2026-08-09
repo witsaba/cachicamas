@@ -144,14 +144,18 @@ being discovered by review.
 
 The whole run MUST be deterministic under the race detector across repeated executions and MUST NOT
 depend on wall-clock timing for correctness; bounded deadlines proving a call does not hang are
-permitted. The change MUST add no module dependency, and `backend/agent/go.mod` MUST still declare
-zero requires. Canonical behaviour MUST change only through this change's delta specs; no file under
+permitted. This change MUST add no NEW module dependency: `backend/agent/go.mod` and `go.sum` MUST
+stay byte-identical to the base commit's copies, whatever requires that base commit already carries.
+(This capability's own requirements — R-ACR-001…R-ACR-006 above — are proven entirely by test code
+and delta-spec text; none of them needs a new dependency to satisfy, so byte-identity to base is the
+correct, checkable form of this obligation regardless of what the base commit's own `go.mod` already
+declares.) Canonical behaviour MUST change only through this change's delta specs; no file under
 `openspec/specs/` is edited in place before archive.
 
 - **S-ACR-019** — Given the milestone's test set run repeatedly under the race detector, when the
   results are compared, then they are identical and no test performs vendor network I/O.
-- **S-ACR-020** — Given the merged change, when `go.mod` and the import guards are read, then it
-  declares zero requires and both guards pass.
+- **S-ACR-020** — Given the merged change, when `go.mod`/`go.sum` are diffed against the base commit
+  and the import guards are read, then the diff is empty and both guards pass.
 - **S-ACR-021** — Given the merged diff, when a reviewer looks for an edit under `openspec/specs/`,
   then none exists.
 
@@ -169,5 +173,5 @@ zero requires. Canonical behaviour MUST change only through this change's delta 
 5. Every transcript yields an identical record at every split offset, anchored by a pinned canonical
    run (`R-ACR-005`).
 6. Retry is declared identically by every adapter conformance factory (`R-ACR-006`).
-7. The suite is deterministic under `-race`, adds no dependency, and edits no promoted spec in place
-   (`NFR-ACR-A`).
+7. The suite is deterministic under `-race`, adds no NEW dependency (`go.mod`/`go.sum` byte-identical
+   to base), and edits no promoted spec in place (`NFR-ACR-A`).
