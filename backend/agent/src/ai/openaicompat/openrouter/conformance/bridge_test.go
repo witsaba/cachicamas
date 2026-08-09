@@ -230,11 +230,97 @@ func bridgeWriteTextDeltaChunk(buf *bytes.Buffer, id, model, content string) {
 
 // bridgeWriteTerminalChunk appends one SSE data frame carrying choice
 // 0's terminal finish_reason with an empty delta (C2's own
-// convention). The object discriminator is set the same way
-// bridgeWriteTextDeltaChunk sets it.
-func bridgeWriteTerminalChunk(buf *bytes.Buffer, id, model string, reason ai.FinishReason) {
-	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]}\n\n",
-		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), conformanceBridgeChunkCreated, conformanceBridgeObjectDiscriminator, bridgeQuoteJSONString(reason.String()))
+// convention) and, when usage carries at least one present count, a
+// top-level "usage" member rendering PRESENT FIELDS ONLY (design D6):
+// an absent ai.TokenCount omits its wire key entirely; a count
+// reported as zero still emits 0, distinguishable from absence by the
+// key's mere presence — resolving usage/absent_vs_zero_distinguishable
+// (R-CNF-016, S-CNF-045). Every existing case scripts ai.Usage{} (all
+// five counts absent) and keeps rendering with no "usage" key at all —
+// byte-identical to before this change. The object discriminator is
+// set the same way bridgeWriteTextDeltaChunk sets it.
+func bridgeWriteTerminalChunk(buf *bytes.Buffer, id, model string, reason ai.FinishReason, usage ai.Usage) {
+	fmt.Fprintf(buf, "data: {\"id\":%s,\"model\":%s,\"created\":%d,\"object\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":%s}]%s}\n\n",
+		bridgeQuoteJSONString(id), bridgeQuoteJSONString(model), conformanceBridgeChunkCreated, conformanceBridgeObjectDiscriminator, bridgeQuoteJSONString(reason.String()), bridgeUsageSuffix(usage))
+}
+
+// bridgeUsageSuffix renders a leading-comma "usage" member — matching
+// openaicompat/chunk.go's wireUsage field names exactly (prompt_tokens,
+// completion_tokens, prompt_tokens_details{cached_tokens,
+// cache_write_tokens}, completion_tokens_details{reasoning_tokens}) — for
+// usage's present fields only, or "" when every count is absent (design
+// D6's present-fields-only rule).
+func bridgeUsageSuffix(usage ai.Usage) string {
+	var fields []string
+	if n, present := usage.Input.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"prompt_tokens\":%d", n))
+	}
+	if n, present := usage.Output.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"completion_tokens\":%d", n))
+	}
+	if detail := bridgePromptTokensDetails(usage); detail != "" {
+		fields = append(fields, "\"prompt_tokens_details\":{"+detail+"}")
+	}
+	if n, present := usage.Reasoning.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"completion_tokens_details\":{\"reasoning_tokens\":%d}", n))
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	return ",\"usage\":{" + strings.Join(fields, ",") + "}"
+}
+
+// bridgePromptTokensDetails renders usage's CacheRead/CacheWrite present
+// fields as prompt_tokens_details' inner members, or "" when both are
+// absent — the same present-fields-only rule bridgeUsageSuffix applies at
+// the top level.
+func bridgePromptTokensDetails(usage ai.Usage) string {
+	var fields []string
+	if n, present := usage.CacheRead.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"cached_tokens\":%d", n))
+	}
+	if n, present := usage.CacheWrite.Count(); present {
+		fields = append(fields, fmt.Sprintf("\"cache_write_tokens\":%d", n))
+	}
+	return strings.Join(fields, ",")
+}
+
+// bridgeErrorFrameLabel returns the fixed, category-derived label this
+// bridge renders into an in-band error frame's "type" field (design D6).
+// Deterministic and safe by construction: it depends only on the
+// scripted ai.Failure's OWN Category() — never on anything a script could
+// plant a sentinel into (Cause, RequestID) — so every one of the nine
+// categories gets a distinct, non-secret label (conformance_redaction.go's
+// own file header: RawLabel is the sanctioned rendering channel, not
+// Cause/RequestID).
+func bridgeErrorFrameLabel(category ai.FailureCategory) string {
+	return "conformance_" + category.String() + "_error"
+}
+
+// bridgeWriteErrorFrame appends one in-band error frame — the wire shape
+// isInBandErrorFrame/failureFromErrorFrame (openaicompat/stream_failure.go)
+// decode: {"error":{"type":<fixed-label-per-category>,"message":<...>}}
+// (design D6). The message carries payload's UNWRAPPED cause text,
+// followed by its request id when present — verbatim, deliberately:
+// whatever a script planted there (including a redaction sentinel) lands
+// on the wire on purpose, because the redaction case exists to test the
+// ADAPTER's own redaction paths against real leaking input, not this test
+// bridge (R-CNF-013, R-CNF-027). "type" never carries either — only the
+// fixed, category-derived label above.
+func bridgeWriteErrorFrame(buf *bytes.Buffer, payload *ai.Failure) {
+	var message strings.Builder
+	if cause := payload.Unwrap(); cause != nil {
+		message.WriteString(cause.Error())
+	}
+	if reqID := payload.RequestID(); reqID != "" {
+		if message.Len() > 0 {
+			message.WriteByte(' ')
+		}
+		message.WriteString("request_id=")
+		message.WriteString(reqID)
+	}
+	fmt.Fprintf(buf, "data: {\"error\":{\"type\":%s,\"message\":%s}}\n\n",
+		bridgeQuoteJSONString(bridgeErrorFrameLabel(payload.Category())), bridgeQuoteJSONString(message.String()))
 }
 
 // bridgeWriteToolStartChunk appends one SSE data frame carrying a
@@ -330,8 +416,15 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 			bridgeWriteTextDeltaChunk(&buf, id, model, delta.Delta())
 		case ai.EventKindCompletion:
 			completion, _ := ev.Completion()
-			bridgeWriteTerminalChunk(&buf, id, model, completion.FinishReason())
+			bridgeWriteTerminalChunk(&buf, id, model, completion.FinishReason(), completion.Usage())
 			buf.WriteString("data: [DONE]\n\n")
+		case ai.EventKindError:
+			// D6: an in-band error frame is this dialect's own terminal
+			// (R-AEM-010) — render it and stop, matching the real
+			// adapter's contract that nothing follows a terminal.
+			payload, _ := ev.ErrorPayload()
+			bridgeWriteErrorFrame(&buf, payload)
+			return buf.Bytes()
 		case ai.EventKindToolCallStart:
 			s, _ := ev.ToolCallStart()
 			idx, ok := toolWireIndex[s.BlockIndex()]
@@ -367,7 +460,7 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 	// never produces a clean completion event (the conformance cases
 	// carry neither, by their own design).
 	if toolCallsSeen {
-		bridgeWriteTerminalChunk(&buf, id, model, ai.FinishReasonToolCalls)
+		bridgeWriteTerminalChunk(&buf, id, model, ai.FinishReasonToolCalls, ai.Usage{})
 		buf.WriteString("data: [DONE]\n\n")
 	}
 

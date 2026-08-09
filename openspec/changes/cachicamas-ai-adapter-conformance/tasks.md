@@ -85,8 +85,12 @@ Chain strategy: size-exception
 
 ## Phase 4: Bridge Rendering (WU5)
 
-- [ ] 4.1 `openrouter/conformance/bridge_test.go` `renderScript`: `EventKindError` → in-band error frame (fixed label per category, unwrapped cause+request id), stop rendering; sentinels stay off wire except sanctioned `RawLabel`. RED: Phase 0 redaction Fatalf → GREEN: redaction/leak-scan + terminal/exactly_one pass. Maps D6, redaction/terminal cases.
-- [ ] 4.2 Same file: `writeTerminalChunk` renders `usage` present-fields-only (absent ⇒ key omitted, zero ⇒ `0`). RED: Phase 0 usage/absent_vs_zero → GREEN: distinguishable. Maps R-CNF-016/S-CNF-045.
+- [x] 4.1 `openrouter/conformance/bridge_test.go` `renderScript`: `EventKindError` → in-band error frame (fixed label per category, unwrapped cause+request id), stop rendering; sentinels stay off wire except sanctioned `RawLabel`. RED: Phase 0 redaction Fatalf → GREEN: redaction/leak-scan + terminal/exactly_one pass. Maps D6, redaction/terminal cases.
+- [x] 4.2 Same file: `writeTerminalChunk` renders `usage` present-fields-only (absent ⇒ key omitted, zero ⇒ `0`). RED: Phase 0 usage/absent_vs_zero → GREEN: distinguishable. Maps R-CNF-016/S-CNF-045.
+
+  **Evidence**: GREEN — `go test ./.../conformance/... -run TestOpenRouterAdapter_FullConformance -race -v`, exit 0: **all five originally-failing families now PASS in full** — `terminal/*` (exactly_one, discriminator both states, all nine categories both delivery paths), `redaction/sentinel_absent_from_every_rendering/*` (all nine categories), `usage/absent_vs_zero_distinguishable`, plus `cancellation/*` and `finish_reason/*` from Phases 2-3 still green. Stable across 3 repeated `-count=1` runs. Safety net: `go test ./src/agenttest/... -race` green (0 → 0). `bridgeErrorFrameLabel` derives the wire `"type"` solely from the scripted failure's own `Category()` (never Cause/RequestID), so the redaction case's planted sentinels land only in `"message"` — proven by the redaction family passing (it genuinely scans the real adapter's decoded rendering now, not the fake's). `bridgeUsageSuffix`/`bridgePromptTokensDetails` are additive-only for every pre-existing case scripting `ai.Usage{}` (all fields absent): the whole `"usage"` key stays omitted, byte-identical to before.
+
+  **Note**: this reaches the unscoped acceptance run's own "every case passes" bar ahead of Phase 6/7 — `TestOpenRouterAdapter_FullConformance` does not yet assert the generated `CapabilityRecord` against a committed expectation (R-ACR-004, task 6.1) or run the boundary sweep (R-ACR-005, task 7.1); both remain as scheduled.
 
 ## Phase 5: Retry Parity (WU6)
 
