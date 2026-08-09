@@ -51,6 +51,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -897,6 +898,131 @@ func TestConformanceCancellation_BoundedCloseCase_PassesAgainstFakeFactory(t *te
 // tolerance.
 func TestConformanceCancellation_AbandonedThenCancelledCase_PassesAgainstFakeFactory(t *testing.T) {
 	cancellationAbandonedThenCancelledCase(t, FakeFactory())
+}
+
+// === AI-38 design D4 — requireCancellationTail self-tests (S-CNF-082, S-CNF-083) ===
+//
+// Hand-built ai.Event doubles, driven directly through probeTB rather than a
+// real Stream call — the two tests above already prove the amended helper
+// against a genuinely running fake, so this section's job is narrower: pin
+// each individually-rejected shape (two terminals, wrong category, an event
+// after the terminal) and the two admitted shapes (bare, and one correctly
+// placed and categorized terminal), independent of any subject's timing.
+
+// mustCancellationErrorEvent builds one ai.ErrorEvent whose failure carries
+// category — this section's own minimal event builder for hand-constructed
+// tail shapes.
+func mustCancellationErrorEvent(tb testing.TB, category ai.FailureCategory) ai.Event {
+	tb.Helper()
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: category}, false)
+	if err != nil {
+		tb.Fatalf("ai.MidStreamFailure(%v) returned %v, want no failure", category, err)
+	}
+	ev, err := ai.ErrorEvent(failure)
+	if err != nil {
+		tb.Fatalf("ai.ErrorEvent returned %v, want no failure", err)
+	}
+	return ev
+}
+
+// TestRequireCancellationTail_BareClose_Admitted proves the zero-event tail
+// (a true bare close) is accepted with no reported failure.
+func TestRequireCancellationTail_BareClose_Admitted(t *testing.T) {
+	probe := &probeTB{}
+	requireCancellationTail(probe, nil)
+	if probe.failed {
+		t.Errorf("requireCancellationTail(nil) failed = %v, messages = %v, want no failure for a bare close (R-CNF-011/R-CNF-012)", probe.failed, probe.messages)
+	}
+}
+
+// TestRequireCancellationTail_SingleCancellationTerminal_Admitted proves the
+// shape design D4 adds: an ordinary event, then exactly one
+// cancellation-category terminal in final position, is accepted.
+func TestRequireCancellationTail_SingleCancellationTerminal_Admitted(t *testing.T) {
+	probe := &probeTB{}
+	end, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockEnd returned %v, want no failure", err)
+	}
+	events := []ai.Event{end, mustCancellationErrorEvent(t, ai.FailureCategoryCancellation)}
+
+	requireCancellationTail(probe, events)
+	if probe.failed {
+		t.Errorf("requireCancellationTail([TextBlockEnd, cancellation terminal]) failed = %v, messages = %v, want no failure (design D4's amended admission)", probe.failed, probe.messages)
+	}
+}
+
+// TestRequireCancellationTail_TwoTerminals_Rejected proves S-CNF-082/083's
+// "more than one terminal" rejection: two cancellation-category terminals
+// still fail, naming the observed count.
+func TestRequireCancellationTail_TwoTerminals_Rejected(t *testing.T) {
+	probe := &probeTB{}
+	events := []ai.Event{
+		mustCancellationErrorEvent(t, ai.FailureCategoryCancellation),
+		mustCancellationErrorEvent(t, ai.FailureCategoryCancellation),
+	}
+
+	requireCancellationTail(probe, events)
+	if !probe.failed {
+		t.Fatal("requireCancellationTail([2 cancellation terminals]) did not fail, want a rejection naming the count (S-CNF-082/083)")
+	}
+	if got := probe.lastMessage(); !strings.Contains(got, "2 error terminal") {
+		t.Errorf("requireCancellationTail message = %q, want it to name the observed terminal count", got)
+	}
+}
+
+// TestRequireCancellationTail_WrongCategory_Rejected proves a terminal of
+// any non-cancellation category still fails, naming the observed and wanted
+// category (S-CNF-082/083).
+func TestRequireCancellationTail_WrongCategory_Rejected(t *testing.T) {
+	probe := &probeTB{}
+
+	requireCancellationTail(probe, []ai.Event{mustCancellationErrorEvent(t, ai.FailureCategoryTimeout)})
+	if !probe.failed {
+		t.Fatal("requireCancellationTail([timeout terminal]) did not fail, want a rejection naming the wrong category (S-CNF-082/083)")
+	}
+	if got := probe.lastMessage(); !strings.Contains(got, "timeout") || !strings.Contains(got, "cancellation") {
+		t.Errorf("requireCancellationTail message = %q, want it to name both the observed and wanted category", got)
+	}
+}
+
+// TestRequireCancellationTail_EventAfterTerminal_Rejected proves any event
+// following the admitted terminal still fails, naming that it is not in
+// final position (S-CNF-082/083).
+func TestRequireCancellationTail_EventAfterTerminal_Rejected(t *testing.T) {
+	probe := &probeTB{}
+	delta, err := ai.NewTextDelta(1, "leaked-after-terminal")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta returned %v, want no failure", err)
+	}
+	events := []ai.Event{mustCancellationErrorEvent(t, ai.FailureCategoryCancellation), delta}
+
+	requireCancellationTail(probe, events)
+	if !probe.failed {
+		t.Fatal("requireCancellationTail([cancellation terminal, TextDelta]) did not fail, want a rejection naming the trailing event (S-CNF-082/083)")
+	}
+	if got := probe.lastMessage(); !strings.Contains(got, "final position") {
+		t.Errorf("requireCancellationTail message = %q, want it to say the terminal is not in final position", got)
+	}
+}
+
+// TestRequireCancellationTail_InventedCompletion_Rejected proves a
+// fabricated Completion is rejected regardless of position — unchanged by
+// design D4 (R-CNF-011/R-CNF-012).
+func TestRequireCancellationTail_InventedCompletion_Rejected(t *testing.T) {
+	probe := &probeTB{}
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion returned %v, want no failure", err)
+	}
+
+	requireCancellationTail(probe, []ai.Event{completion})
+	if !probe.failed {
+		t.Fatal("requireCancellationTail([Completion]) did not fail, want a rejection naming the invented Completion (R-CNF-011/R-CNF-012)")
+	}
+	if got := probe.lastMessage(); !strings.Contains(got, "Completion") {
+		t.Errorf("requireCancellationTail message = %q, want it to name the invented Completion", got)
+	}
 }
 
 // === AI-23.7 — redaction cases (R-CNF-013) ===

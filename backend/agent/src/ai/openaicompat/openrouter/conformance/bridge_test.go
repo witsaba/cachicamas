@@ -393,8 +393,31 @@ func bridgeRenderScript(tb testing.TB, script agenttest.Script) []byte {
 //     applyDeclaredAbsences keys off, so every optional capability
 //     receives its absent entry at suite start, before any case runs
 //     (S-CNF-004).
+//
+// # Prior-server eager close (AI-38 WU3 discovery)
+//
+// Every New call spins up a fresh, real httptest.Server (a real TCP
+// listener plus its Serve goroutine). agenttest.RequireNoGoroutineLeak
+// calls a scenario — which calls New — up to 50 times against the SAME
+// tb, and tb.Cleanup callbacks all run at the end of that one test, not
+// incrementally: relying on tb.Cleanup alone would leave up to 50
+// concurrently-open servers alive at RequireNoGoroutineLeak's own
+// goroutine-count measurement, which is a test-harness artifact, not a
+// production leak (AI-21's in-process FakeFactory has no such cost, so
+// this was never observable before AI-38 exercises a real HTTP factory
+// through the same helper). New instead closes the PREVIOUS server it
+// built, under this closure's own mutex, before returning the new one —
+// safe because every conformance case's scenario is fully synchronous
+// (construct, stream, drain) before the next New call is ever made — and
+// registers exactly one tb.Cleanup, closing whichever server is current
+// when the whole test ends.
 func conformanceBridgeFactory() agenttest.Factory {
 	reasoningOffered, tokenCountingOffered, cacheBoundaryOffered, retryOffered := false, false, false, false
+
+	var mu sync.Mutex
+	var current *httptest.Server
+	cleanupRegistered := false
+
 	return agenttest.Factory{
 		New: func(tb testing.TB, scripts ...agenttest.Script) ai.ModelProvider {
 			tb.Helper()
@@ -405,7 +428,26 @@ func conformanceBridgeFactory() agenttest.Factory {
 			}
 
 			server := httptest.NewServer(bridgeServeTranscripts(transcripts))
-			tb.Cleanup(server.Close)
+
+			mu.Lock()
+			previous := current
+			current = server
+			needsCleanup := !cleanupRegistered
+			cleanupRegistered = true
+			mu.Unlock()
+
+			if previous != nil {
+				previous.Close()
+			}
+			if needsCleanup {
+				tb.Cleanup(func() {
+					mu.Lock()
+					defer mu.Unlock()
+					if current != nil {
+						current.Close()
+					}
+				})
+			}
 
 			transport := bridgeAttributionRoundTripper{
 				base:         server.Client().Transport,
