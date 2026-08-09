@@ -5,7 +5,7 @@
 > **Capability**: `ai-openrouter-first-provider` (new)
 > **Requirement IDs**: `R-OR-0NN` · **Scenario IDs**: `S-OR-0NN`
 > **Composes (read-only, NOT modified)**: `ai-provider-client` (AI-25) · `ai-provider-conformance-suite` (AI-23/38) · `ai-stream-testkit` (AI-22) · `ai-model-provider` (AI-20)
-> **Archived version**: `openspec/changes/archive/2026-08-04-add-openrouter-first-provider/` · **Current modification**: `openspec/changes/archive/2026-08-09-cachicamas-ai-live-smoke/`
+> **Archived version**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/` · **Current modification**: `openspec/changes/archive/2026-08-09-cachicamas-ai-live-smoke/`
 
 ---
 
@@ -15,7 +15,7 @@ ADR 0004 (Engram #1997) established the three-layer agentic architecture; AI-20 
 
 ## Status
 
-This specification is **live** as of 2026-08-09. It was introduced by `add-openrouter-first-provider` (AI-38) and modified by `cachicamas-ai-live-smoke` (AI-39). Requirements R-OR-07 and R-OR-08 were modified in AI-39 to establish the live smoke test's two-stage opt-in gate, internal package placement, setup instructions, and capture-sink sweep binding. It is canonical at `/openspec/specs/ai-openrouter-first-provider/spec.md`.
+This specification is **live** as of 2026-08-09. It was introduced by `add-openrouter-first-provider` (AI-24…AI-32) and modified by `cachicamas-ai-adapter-conformance` (AI-38) and `cachicamas-ai-live-smoke` (AI-39). Requirements R-OR-07 and R-OR-08 were modified in AI-39 to establish the live smoke test's two-stage opt-in gate, internal package placement, setup instructions, and capture-sink sweep binding. It is canonical at `/openspec/specs/ai-openrouter-first-provider/spec.md`.
 
 ---
 
@@ -303,19 +303,19 @@ The wrapper SHALL NOT support an Anthropic native adapter, SHALL NOT widen AI-32
 | **Q2** | Layer 3 reads env, passes opaque bearer into `Config.Credential` | AI-25.2 invariant; wrapper reads nothing (memory #2432 §3) |
 | **Q3** | Wrapper placement = sibling sub-package `openaicompat/openrouter/` | AI-25.2 call-site scan scope stays clean; Engram #2571 |
 | **Q4** | Conformance bridge ships in PR #2 of this change | AI-38 first-concrete-adapter charter; doc 0002 lines 2241–2277 |
-| **Q5** | Live smoke opt-in via `workflow_dispatch` + repo secret `OPENROUTER_API_KEY` | AI-39.1 charter; doc 0002 lines 2279–2299 |
+| **Q5** | ~~Live smoke opt-in via `workflow_dispatch` + repo secret `OPENROUTER_API_KEY`~~ — superseded at AI-39: env-var-only two-stage gate, no CI workflow (see R-OR-07) | AI-39.1 charter; doc 0002 lines 2279–2299 |
 | **Q6** | Three chained PRs under no-merge tracker | 800-line PR budget per `sdd-phase-common.md §E`; natural work-unit split |
 
 ## Traceability
 
-- **Proposal**: `openspec/changes/add-openrouter-first-provider/proposal.md` · Engram observation **#2570** (`sdd/add-openrouter-first-provider/proposal`)
-- **Explore**: `openspec/changes/add-openrouter-first-provider/explore.md` · Engram topic `sdd/add-openrouter-first-provider/explore` (obs #2568)
+- **Proposal**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/proposal.md` · Engram observation **#2570** (`sdd/add-openrouter-first-provider/proposal`)
+- **Explore**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/explore.md` · Engram topic `sdd/add-openrouter-first-provider/explore` (obs #2568)
 - **Wrapper-placement decision**: Engram observation **#2571** (`decision/openrouter-wrapper-placement`)
 - **Composed shipped specs** (read-only, NOT modified):
-  - [`openspec/specs/ai-provider-client/spec.md`](../../../../../specs/ai-provider-client/spec.md) (AI-25) — provider client construction
-  - [`openspec/specs/ai-provider-conformance-suite/spec.md`](../../../../../specs/ai-provider-conformance-suite/spec.md) (AI-23/38) — conformance runner + capability record
-  - [`openspec/specs/ai-stream-testkit/spec.md`](../../../../../specs/ai-stream-testkit/spec.md) (AI-22) — drain, ordering, leak, redaction helpers
-  - [`openspec/specs/ai-model-provider/spec.md`](../../../../../specs/ai-model-provider/spec.md) (AI-20) — `ModelProvider` interface + signature guard
+  - [`openspec/specs/ai-provider-client/spec.md`](../ai-provider-client/spec.md) (AI-25) — provider client construction
+  - [`openspec/specs/ai-provider-conformance-suite/spec.md`](../ai-provider-conformance-suite/spec.md) (AI-23/38) — conformance runner + capability record
+  - [`openspec/specs/ai-stream-testkit/spec.md`](../ai-stream-testkit/spec.md) (AI-22) — drain, ordering, leak, redaction helpers
+  - [`openspec/specs/ai-model-provider/spec.md`](../ai-model-provider/spec.md) (AI-20) — `ModelProvider` interface + signature guard
 - **Milestone charters** (doc 0002 — Layer 1 task graph): AI-25 lines 1447–1491 · AI-38 lines 2241–2277 · AI-39 lines 2279–2299
 - **AI-24 pre-decision** (vendor/transport, OpenAI-compatible Chat Completions + raw `net/http` + zero `go.mod` requires): Engram observation **#2432**
 - **AI-29 struck verdict** (2026-08-04, reasoning stream absent): `openspec/changes/archive/2026-08-04-cachicamas-ai-provider-reasoning-stream/decision.md` §5 row 4, §7, §9 (triggers)

@@ -13,7 +13,8 @@ Export both environment variables in your own shell — never write either
 one to a file inside this repository:
 
 ```sh
-export OPENROUTER_API_KEY=your-own-openrouter-api-key
+# Paste the key at the silent prompt: it is never echoed and never enters shell history.
+read -rs OPENROUTER_API_KEY && export OPENROUTER_API_KEY
 export RUN_LIVE_OPENROUTER_SMOKE=1
 ```
 

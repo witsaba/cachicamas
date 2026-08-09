@@ -6,7 +6,7 @@
 > **Requirement IDs**: `R-LSM-0NN` · **Scenario IDs**: `S-LSM-0NN` (both prefixes verified free across `openspec/specs/` and `openspec/changes/`)
 > **Format**: RFC 2119 + Given/When/Then, per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable.
 > **Composes (cited, not modified here)**: `ai-openrouter-first-provider` (`R-OR-07`, `R-OR-08` — deltaed in this change) · `ai-provider-conformance-suite` (`R-CNF-027`, `S-CNF-080`) · `ai-stream-testkit` (`R-STK-005`, `R-STK-006`) · `ai-model-provider`
-> **Decision forks binding this spec**: proposal D1–D7, all *recommended, pending maintainer ratification*
+> **Decision forks binding this spec**: proposal D1–D7, ratified at AI-39 close (change approved, reviewed, and archived 2026-08-09)
 
 ---
 

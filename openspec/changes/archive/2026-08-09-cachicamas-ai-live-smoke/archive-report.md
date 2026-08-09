@@ -52,13 +52,13 @@ All SDD artifacts persisted to Engram with topic keys under `sdd/cachicamas-ai-l
 ### Round 1 (Commit a345e8a4)
 
 **Verdict**: FAIL on completeness  
-**Finding**: 1 CRITICAL (S-LSM-028 archive blocker) — `grep -c '^require' backend/agent/go.mod` returned 3 matches, contradicting the wording "expect no matches" in task G.1. The specification text was correct (zero NEW require lines), but the task wording was never fixed.
+**Finding**: 1 BLOCKER, 0 CRITICAL (S-LSM-028 archive blocker) — `backend/agent/go.mod` declares 3 pre-existing require lines, contradicting the wording "expect no matches" in task G.1. The specification text was correct (zero NEW require lines), but the task wording was never fixed.
 
 **Resolution**: Work unit H amended the spec wording to "zero NEW require lines; dependency set byte-identical to origin/main" and amended task G.1's own wording, leaving the false expectation for archive-time reconciliation (which occurred).
 
 ### Round 2 — Final (Commit 2a9763bc)
 
-**Verdict**: PASS  
+**Verdict**: machine verdict `fail` (evidence-completeness only, 33/39 scenarios; the validator admits only pass/fail and rejects a pass short of total) / **PASS WITH WARNINGS** (implementation) — 0 CRITICAL  
 **Scenarios**: 33/39 pass, 6 partial (all credential-gated; none fail)  
 **Summary**:
 - 0 CRITICAL issues
@@ -167,7 +167,7 @@ This change folder was moved from `openspec/changes/cachicamas-ai-live-smoke/` t
 
 Recorded for future maintainers per review standard-skip:
 
-1. **Drain-bound wiring unpinned** (verify WARNING-2, review finding) — `evaluateSweepGate`'s call to `drainBoundFromContext` in smoke_test.go line ~XX is wired but not explicitly injected as a seam; document the injectable path for future reuse.
+1. **Drain-bound wiring unpinned** (verify WARNING-2, review finding) — `evaluateSweepGate`'s call to `drainBoundFromContext` in smoke_test.go line 586 is wired but not explicitly injected as a seam; document the injectable path for future reuse.
 
 2. **smoke_test.go header block stale** — package-level comment references old path; update to post-move path.
 
@@ -213,6 +213,6 @@ All five AI-39.1 acceptance items satisfied and verified:
 
 ## Delivery Status
 
-**For maintainer**: Branch `feat/ai-39-live-smoke` is ready for PR merge to `main` (PR number recorded at open time). All implementation complete, verified PASS, specs promoted to canonical location, change archived. The unexecuted credentialled run is accepted as per charter (optional). File-count reconciliation (AI-38-owed) will be injected when wave-6 archiving completes.
+**For maintainer**: Branch `feat/ai-39-live-smoke` is ready for PR merge to `main` (PR number recorded at open time). All implementation complete (final verify: machine verdict fail on evidence-completeness alone, implementation PASS WITH WARNINGS, 0 CRITICAL), specs promoted to canonical location, change archived. The unexecuted credentialled run is accepted as per charter (optional).
 
 Merge is blocked only by maintainer decision and PR review gate — no SDD or technical blocker remains.
