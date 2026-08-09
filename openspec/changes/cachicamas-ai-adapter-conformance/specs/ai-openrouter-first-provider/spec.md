@@ -49,12 +49,17 @@ OpenRouter wrapper using OpenRouter-shaped transcripts. All five required capabi
 (`CapStreamingText`, `CapToolCalls`, `CapCompletionMetadata`, `CapCancellation`, `CapTerminal`), with
 no skip and no waiver. The generated record SHALL be asserted entry by entry against a committed
 **nine-entry** expectation in which `CAP-O-01`, `CAP-O-02` and `CAP-O-03` are `absent` and
-`CAP-O-04` (retry) is `satisfied`. Every transcript the bridge replays SHALL be regenerable by the
-recording helper from captured wire bytes and SHALL be byte-identical to that helper's output. The
-reasoning-extension scenario SHALL be cited as covering OpenRouter's `reasoning` /
-`reasoning_details` extension fields.
+`CAP-O-04` (retry) is `satisfied`. Every transcript the bridge replays that has a neutral-event
+preimage SHALL be regenerable by the recording helper from captured wire bytes and SHALL be
+byte-identical to that helper's output; a transcript hand-authoring a vendor wire-extension field
+with no `ai.Event` equivalent (OpenRouter's `reasoning` / `reasoning_details`) has no such preimage
+and is explicitly excluded from the round-trip, named as such in the recorder test rather than
+silently omitted. The reasoning-extension scenario SHALL be cited as covering OpenRouter's
+`reasoning` / `reasoning_details` extension fields.
 (Previously: "at least the five required capabilities", the scoped-vs-unscoped distinction left
-implicit, the record stated as AI-24 §8's `absent × 3`, and transcripts unconstrained in origin.)
+implicit, the record stated as AI-24 §8's `absent × 3`, transcripts unconstrained in origin, and
+"every transcript" regenerable with no exception for a hand-authored vendor-extension fixture with
+no `ai.Event` preimage — verify-report.md's own SUG-1 named this gap.)
 
 #### Scenario: Required capabilities all pass under an unscoped run
 
@@ -74,11 +79,13 @@ implicit, the record stated as AI-24 §8's `absent × 3`, and transcripts uncons
 
 #### Scenario: Transcripts are regenerable and drift-guarded
 
-- GIVEN each transcript the bridge replays and the recording helper's output for the same captured
-  wire bytes
+- GIVEN each transcript the bridge replays that has a neutral-event preimage, and the recording
+  helper's output for the same captured wire bytes
 - WHEN the drift guard compares them
 - THEN they are byte-identical
-- AND a hand-edited transcript fails the guard naming the transcript.
+- AND a hand-edited transcript fails the guard naming the transcript
+- AND a transcript with no neutral-event preimage (a hand-authored vendor wire-extension fixture) is
+  explicitly excluded from this comparison, named as an exclusion rather than silently omitted.
 
 #### Scenario: Reasoning extension field is dropped, not leaked, not failed
 

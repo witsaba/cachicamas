@@ -61,22 +61,29 @@ MUST NOT be closed by deletion.
 - **S-ACR-005** — Given the merged suite and adapter, when the case count of the first run is
   compared with the case count at close, then no case was removed to obtain a pass.
 
-### R-ACR-003 — Every transcript is regenerable from a captured stream, and hand edits fail
+### R-ACR-003 — Every transcript with a neutral-event preimage is regenerable from a captured stream, and hand edits fail
 
-Every conformance transcript MUST be producible by the recording helper from real streamed wire
-bytes, in the exact byte format the replay harness consumes. Committed transcripts MUST be
-byte-identical to the helper's output for the same captured bytes, enforced by a drift guard so a
-hand edit fails the suite. The helper's capture mode MUST be proven against a **local
-openaicompat-speaking endpoint** and MUST NOT require, or spend against, a vendor network call; the
-default test run MUST NOT depend on any credential or network access.
+Every conformance transcript that has a neutral `agenttest.Script`/`ai.Event` preimage MUST be
+producible by the recording helper from real streamed wire bytes, in the exact byte format the
+replay harness consumes. Committed transcripts MUST be byte-identical to the helper's output for the
+same captured bytes, enforced by a drift guard so a hand edit fails the suite. A transcript that
+hand-authors a vendor wire-extension field with no `ai.Event` equivalent — for example OpenRouter's
+`reasoning` / `reasoning_details` fields — has no such preimage; it is explicitly excluded from this
+obligation, named as an exclusion in the recorder test rather than silently omitted, and stays
+covered by its own dedicated decode/replay test instead. The helper's capture mode MUST be proven
+against a **local openaicompat-speaking endpoint** and MUST NOT require, or spend against, a vendor
+network call; the default test run MUST NOT depend on any credential or network access.
+(Previously: "every conformance transcript" with no exception, which no hand-authored vendor
+wire-extension fixture — one with no `ai.Event` preimage to render from — could ever satisfy;
+verify-report.md's own SUG-1 named this gap.)
 
 #### Scenarios
 
 - **S-ACR-006** — Given the recording helper pointed at a local openaicompat-speaking endpoint, when
   it captures a stream, then it emits a transcript in the format the replay harness consumes and the
   suite replays it unchanged.
-- **S-ACR-007** — Given a committed transcript and the helper's output for the same captured bytes,
-  when the drift guard compares them, then they are byte-identical.
+- **S-ACR-007** — Given a committed transcript with a neutral-event preimage and the helper's output
+  for the same captured bytes, when the drift guard compares them, then they are byte-identical.
 - **S-ACR-008** — Given a committed transcript edited by hand, when the drift guard runs, then it
   fails naming the drifted transcript.
 - **S-ACR-009** — Given the default test run with no credential in the environment, when it
