@@ -124,3 +124,80 @@ func TestOpenAICompatBridgeFactory_RetryDeclarationScan_ResolvesExpectedPath(t *
 		t.Errorf("%q is empty — this guard would pass vacuously against an empty file", bridgeTestFilePath)
 	}
 }
+
+// conformanceRetryTestFilePath is the THIRD retry declaration site this
+// module carries (AI-38 WU11 WARN-A remediation, R-ACR-006): the driver
+// factory conformance_retry_test.go builds for
+// TestRetryCaseBody_RunsDirectly. Unlike bridge_test.go, this file lives in
+// package openaicompat_test (external) and CAN — and now does — read
+// conformancetest.RetryOffered directly (retryCaseBodyDriverFactory), so
+// this guard's job differs from the two above: it does not compare a
+// literal against the canonical value (there is no literal left to
+// compare); it proves no local literal was silently reintroduced in its
+// place, extending the parity-checking apparatus to this third site.
+const conformanceRetryTestFilePath = "conformance_retry_test.go"
+
+// TestConformanceRetryTestDriver_DoesNotReintroduceALocalLiteral proves
+// conformance_retry_test.go's retryOffered declaration reads
+// conformancetest.RetryOffered rather than a bare boolean literal — the
+// exact regression verify-report.md's round-2 pass (WARN-A) found: a local
+// `retryOffered := true` there silently converted 5 of 7 retry sub-cases
+// from PASS to SKIP when mutated to false, with the overall test still
+// exiting 0 and nothing named. Reuses retryOfferedLiteralPattern (this
+// file's own bridge_test.go guard) as a NEGATIVE assertion here: a match
+// means someone reverted to a fragile local literal, regardless of which
+// boolean value it happens to carry.
+func TestConformanceRetryTestDriver_DoesNotReintroduceALocalLiteral(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(conformanceRetryTestFilePath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v, want nil — this guard must read conformance_retry_test.go to discharge R-ACR-006 (WARN-A)", conformanceRetryTestFilePath, err)
+	}
+	if match := retryOfferedLiteralPattern.FindSubmatch(raw); match != nil {
+		t.Fatalf("%q declares retryOffered as a bare boolean literal (%q) — want it to read conformancetest.RetryOffered instead (R-ACR-006, AI-38 WU11 WARN-A remediation): a local literal can silently drift from the shared source with nothing failing (verify-report.md round-2 WARN-A)", conformanceRetryTestFilePath, match[1])
+	}
+}
+
+// TestConformanceRetryTestDriver_LiteralReintroductionScan_FailsOnStagedMutation
+// is the falsifiability proof: a scratch file in t.TempDir() carrying a
+// planted `retryOffered := true` literal IS detected by
+// retryOfferedLiteralPattern, proving the negative-assertion guard above
+// would genuinely fire against a real regression rather than passing
+// vacuously because the pattern silently stopped matching anything.
+func TestConformanceRetryTestDriver_LiteralReintroductionScan_FailsOnStagedMutation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	const fixture = "package openaicompat_test\n\nfunc plantedLiteralReintroduction() {\n\tretryOffered := true\n\t_ = retryOffered\n}\n"
+	path := filepath.Join(dir, "staged_literal_reintroduction.go")
+	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v, want nil", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v, want nil", path, err)
+	}
+	if match := retryOfferedLiteralPattern.FindSubmatch(raw); match == nil {
+		t.Fatal("planted retryOffered := true literal was not detected — the staged mutation proves nothing because the scan does not observe what it claims to observe")
+	}
+}
+
+// TestConformanceRetryTestDriverScan_ResolvesExpectedPath mirrors
+// TestOpenAICompatBridgeFactory_RetryDeclarationScan_ResolvesExpectedPath's
+// non-vacuity pin, for this third file.
+func TestConformanceRetryTestDriverScan_ResolvesExpectedPath(t *testing.T) {
+	t.Parallel()
+
+	info, err := os.Stat(conformanceRetryTestFilePath)
+	if err != nil {
+		t.Fatalf("os.Stat(%q) error = %v, want nil — this guard must read an existing file", conformanceRetryTestFilePath, err)
+	}
+	if info.IsDir() {
+		t.Fatalf("%q is a directory, want a regular file", conformanceRetryTestFilePath)
+	}
+	if info.Size() == 0 {
+		t.Errorf("%q is empty — this guard would pass vacuously against an empty file", conformanceRetryTestFilePath)
+	}
+}
