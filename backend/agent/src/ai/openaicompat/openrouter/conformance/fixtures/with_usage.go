@@ -7,12 +7,13 @@
 //
 // # Not yet recorder-verified (Phase 5 / D6 dependency)
 //
-// Unlike text_stream.go and tool_call.go, this fixture's storage moved to
-// go:embed (task 1.3) but is NOT wired into recorder_test.go's
-// TestRecordTranscript_RegeneratesEveryFixture round-trip: the shipped
-// bridgeWriteTerminalChunk (bridge_test.go) does not yet render a usage
-// object at all (design D6, Phase 5/WU5 — "usage object rendering
-// present-fields-only"). Recording this transcript through
+// Unlike text_stream.go and tool_call.go, this fixture's storage moved
+// to the go:embed mechanism (task 1.3) but is NOT wired into
+// recorder_test.go's TestRecordTranscript_RegeneratesEveryFixture
+// round-trip: the shipped bridgeWriteTerminalChunk (bridge_test.go)
+// does not yet render a usage object at all (design D6, Phase 5/WU5 —
+// "usage object rendering present-fields-only"). Recording this
+// transcript through
 // bridgeRenderScript today would produce a DIFFERENT byte sequence (no
 // usage key), so this file stays a committed golden the recorder cannot
 // yet reproduce until D6 lands, at which point it is regenerated (not
