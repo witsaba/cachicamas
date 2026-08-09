@@ -471,6 +471,35 @@ func conformanceBridgeFactory() agenttest.Factory {
 		TokenCounting: &tokenCountingOffered,
 		CacheBoundary: &cacheBoundaryOffered,
 		Retry:         &retryOffered,
+		Dialect:       conformanceBridgeDialect(),
+	}
+}
+
+// conformanceBridgeMidStreamCollapse is the single category
+// failureFromErrorFrame (openaicompat/stream_failure.go) hardcodes for
+// every in-band error frame, regardless of the vendor's real category —
+// the dialect carries no discriminator that could preserve it, only the
+// vendor's own RawLabel. conformanceBridgeDialect declares this openly
+// (design D5) rather than leaving the mid-stream half of
+// terminalFailureCategoryExhaustivenessCase to fail against it.
+var conformanceBridgeMidStreamCollapse = ai.FailureCategoryUnknown
+
+// conformanceBridgeDialect declares this bridge's wire-dialect
+// expressiveness limits (design D5, AI-38, locked decision 4 — no
+// R-ACP-002 reopen): Refusal, PauseTurn and Unknown are unreachable finish
+// reasons on a normally-finished stream (openaicompat's chunk.go strict
+// gate rejects them as typed malformed responses, R-ACP-002, S-ACP-004),
+// and every mid-stream failure category collapses to Unknown
+// (conformanceBridgeMidStreamCollapse, matching failureFromErrorFrame's
+// shipped hardcoded category exactly).
+func conformanceBridgeDialect() *agenttest.DialectConstraints {
+	return &agenttest.DialectConstraints{
+		UnreachableFinishReasons: []ai.FinishReason{
+			ai.FinishReasonRefusal,
+			ai.FinishReasonPauseTurn,
+			ai.FinishReasonUnknown,
+		},
+		MidStreamCategoryCollapse: &conformanceBridgeMidStreamCollapse,
 	}
 }
 

@@ -71,11 +71,17 @@ Chain strategy: size-exception
 
 ## Phase 3: Dialect Seam (WU4)
 
-- [ ] 3.1 `agenttest/conformance_suite.go`: add nil-safe `Dialect *DialectConstraints{UnreachableFinishReasons, MidStreamCategoryCollapse}` on `Factory`. GREEN: existing factories unaffected.
-- [ ] 3.2 `agenttest/conformance_capabilities.go`: unreachable-declared reasons assert negative (one typed failure terminal, no Completion); subset-of-hand-list check intact. RED: Phase 0 finish_reason/refusal → GREEN: dialect reasons pass negative assertion. Maps R-CNF-016/S-CNF-042-046/084.
-- [ ] 3.3 `agenttest/conformance_terminal.go`: mid-stream collapse branch + `requireFailureCategoryCoverage` counts collapse covered; pre-stream half unchanged. RED: Phase 0 terminal-category failures → GREEN: exactly one typed terminal at declared collapse. Maps R-CNF-010/S-CNF-024-025/087.
-- [ ] 3.4 `openrouter/conformance/bridge_test.go`: declare `Dialect{Unreachable:{Refusal,PauseTurn,Unknown}, Collapse:Unknown}` matching `failureFromErrorFrame`.
-- [ ] 3.5 `agenttest/conformance_suite_test.go`: self-tests proving S-CNF-084/087 anti-escape (dialect-expressible-but-unproduced still fails).
+- [x] 3.1 `agenttest/conformance_suite.go`: add nil-safe `Dialect *DialectConstraints{UnreachableFinishReasons, MidStreamCategoryCollapse}` on `Factory`. GREEN: existing factories unaffected.
+- [x] 3.2 `agenttest/conformance_capabilities.go`: unreachable-declared reasons assert negative (one typed failure terminal, no Completion); subset-of-hand-list check intact. RED: Phase 0 finish_reason/refusal → GREEN: dialect reasons pass negative assertion. Maps R-CNF-016/S-CNF-042-046/084.
+- [x] 3.3 `agenttest/conformance_terminal.go`: mid-stream collapse branch + `requireFailureCategoryCoverage` counts collapse covered; pre-stream half unchanged. RED: Phase 0 terminal-category failures → GREEN: exactly one typed terminal at declared collapse. Maps R-CNF-010/S-CNF-024-025/087.
+- [x] 3.4 `openrouter/conformance/bridge_test.go`: declare `Dialect{Unreachable:{Refusal,PauseTurn,Unknown}, Collapse:Unknown}` matching `failureFromErrorFrame`.
+- [x] 3.5 `agenttest/conformance_suite_test.go`: self-tests proving S-CNF-084/087 anti-escape (dialect-expressible-but-unproduced still fails).
+
+  **Evidence**: RED (3.1) — `go vet` failed `f.Dialect undefined` / `undefined: DialectConstraints` before the field/type existed. GREEN (3.1) — `TestFactory_DialectField_NilByDefaultUnaffectsExistingFactories` PASS. RED (3.2) — `go vet` failed `undefined: dialectFinishReasonUnreachable` / `undefined: requireFinishReasonUnreachable` before those helpers existed. GREEN (3.2-3.4) — `go test ./.../conformance/... -run "TestOpenRouterAdapter_FullConformance/(finish_reason|cancellation)" -race -v`: `finish_reason/all_seven_values_reachable_drift_guarded` fully PASSES including `refusal`/`pause_turn`/`unknown` against the real bridge; `cancellation/*` still green. `terminal/all_nine_failure_categories_exhaustive/*/mid_stream` still fails, now with a DIFFERENT root cause (`bridge: renderScript: unsupported event kind error`) confirming the collapse logic (3.3/3.4) is structurally correct but the terminal family additionally needs Phase 5/WU5's error-frame rendering (D6) to reach GREEN — expected, matches the design's own phase ordering (D5 before D6).
+
+  9 new self-tests (3.5), all PASS, split pure-function (matching this file's established testability philosophy) and probeTB-driven: `TestDialectFinishReasonUnreachable_NilDialect_NothingUnreachable`, `TestDialectFinishReasonUnreachable_DeclaredSubset_OnlyDeclaredReasonsUnreachable` (S-CNF-084 branch-selection), `TestRequireFinishReasonUnreachable_HonestSubject_Admitted` / `_EscapingSubject_Rejected` (S-CNF-084 core anti-escape, via a hand-built Factory whose declared-unreachable reason the subject actually produces), `TestWantMidStreamFailureCategory_NilDialect_ExpectsScriptedCategoryItself` / `_DeclaredCollapse_ExpectsCollapseForEveryCategory` (S-CNF-087). Safety net: `go test ./src/agenttest/... -race` green throughout.
+
+  **Refactor for testability**: `requireFinishReasonUnreachable` and the new `wantMidStreamFailureCategory` follow this package's own established pattern (`requireValidFactory`, `factoryDefect`, etc.): `testing.TB` / pure-function shape so self-tests never touch a real `*testing.T`'s pass/fail state (`t.Context()` replaced with `context.Background()` to avoid depending on whether `testing.TB` exposes `Context()`).
 
 ## Phase 4: Bridge Rendering (WU5)
 

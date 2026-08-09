@@ -1286,6 +1286,174 @@ func TestConformanceCapabilities_UsageAbsentVsZeroCase_PassesAgainstFakeFactory(
 	usageAbsentVsZeroCase(t, FakeFactory())
 }
 
+// === AI-38 design D5 — the dialect seam (R-CNF-010, R-CNF-016) ===
+
+// TestFactory_DialectField_NilByDefaultUnaffectsExistingFactories proves
+// the seam design D5 adds is additive: FakeFactory (and every other
+// existing factory) leaves Dialect nil — fully expressive, today's
+// assertions byte-identical — and a Factory value is free to declare one.
+func TestFactory_DialectField_NilByDefaultUnaffectsExistingFactories(t *testing.T) {
+	f := FakeFactory()
+	if f.Dialect != nil {
+		t.Fatalf("FakeFactory().Dialect = %v, want nil (fully expressive default, design D5)", f.Dialect)
+	}
+
+	unreachable := ai.FinishReasonRefusal
+	collapse := ai.FailureCategoryUnknown
+	f.Dialect = &DialectConstraints{
+		UnreachableFinishReasons:  []ai.FinishReason{unreachable},
+		MidStreamCategoryCollapse: &collapse,
+	}
+	if len(f.Dialect.UnreachableFinishReasons) != 1 || f.Dialect.UnreachableFinishReasons[0] != unreachable {
+		t.Errorf("Dialect.UnreachableFinishReasons = %v, want [%v]", f.Dialect.UnreachableFinishReasons, unreachable)
+	}
+	if f.Dialect.MidStreamCategoryCollapse == nil || *f.Dialect.MidStreamCategoryCollapse != collapse {
+		t.Errorf("Dialect.MidStreamCategoryCollapse = %v, want %v", f.Dialect.MidStreamCategoryCollapse, collapse)
+	}
+}
+
+// --- S-CNF-084: finish-reason dialect-aware absence is not a general escape ---
+
+// TestDialectFinishReasonUnreachable_NilDialect_NothingUnreachable proves a
+// nil Dialect declares nothing unreachable — every reason still gets the
+// full positive assertion.
+func TestDialectFinishReasonUnreachable_NilDialect_NothingUnreachable(t *testing.T) {
+	f := Factory{}
+	for _, reason := range handListedFinishReasons {
+		if dialectFinishReasonUnreachable(f, reason) {
+			t.Errorf("dialectFinishReasonUnreachable(nil Dialect, %v) = true, want false (design D5's fully-expressive default)", reason)
+		}
+	}
+}
+
+// TestDialectFinishReasonUnreachable_DeclaredSubset_OnlyDeclaredReasonsUnreachable
+// proves S-CNF-084's anti-escape at the branch-selection level: declaring
+// {Refusal, Unknown} unreachable exempts exactly those two values from the
+// positive assertion — every other hand-listed reason still falls through
+// to it, so a factory cannot declare "everything unreachable" to dodge
+// coverage.
+func TestDialectFinishReasonUnreachable_DeclaredSubset_OnlyDeclaredReasonsUnreachable(t *testing.T) {
+	f := Factory{Dialect: &DialectConstraints{UnreachableFinishReasons: []ai.FinishReason{ai.FinishReasonRefusal, ai.FinishReasonUnknown}}}
+	for _, reason := range handListedFinishReasons {
+		want := reason == ai.FinishReasonRefusal || reason == ai.FinishReasonUnknown
+		if got := dialectFinishReasonUnreachable(f, reason); got != want {
+			t.Errorf("dialectFinishReasonUnreachable(declared={refusal,unknown}, %v) = %v, want %v (S-CNF-084: the dialect-aware absence is not a general escape — only declared values are exempted)", reason, got, want)
+		}
+	}
+}
+
+// dialectHonestlyUnreachableFactory returns a Factory declaring reason
+// unreachable whose subject actually behaves that way: scripting a
+// Completion carrying reason yields exactly one typed failure terminal
+// and no Completion, matching failureFromErrorFrame's real posture.
+func dialectHonestlyUnreachableFactory(reason ai.FinishReason) Factory {
+	unreachable := []ai.FinishReason{reason}
+	collapse := ai.FailureCategoryMalformedResponse
+	return Factory{
+		New: func(_ testing.TB, _ ...Script) ai.ModelProvider {
+			return dialectStrictGateProvider{rejectedReason: reason, category: collapse}
+		},
+		Dialect: &DialectConstraints{UnreachableFinishReasons: unreachable, MidStreamCategoryCollapse: &collapse},
+	}
+}
+
+// dialectEscapingFactory returns a Factory that DECLARES reason
+// unreachable but whose subject dishonestly produces it anyway — the
+// escape attempt requireFinishReasonUnreachable must reject.
+func dialectEscapingFactory(reason ai.FinishReason) Factory {
+	unreachable := []ai.FinishReason{reason}
+	return Factory{
+		New: func(_ testing.TB, scripts ...Script) ai.ModelProvider {
+			return NewProvider(scripts...)
+		},
+		Dialect: &DialectConstraints{UnreachableFinishReasons: unreachable},
+	}
+}
+
+// dialectStrictGateProvider is a minimal ai.ModelProvider standing in for a
+// strict-gate subject: any script is rejected as rejectedReason's typed
+// failure terminal (category), whatever the script actually asked for —
+// this section's own hand-built double proving requireFinishReasonUnreachable
+// against a subject that genuinely behaves like the shipped strict gate.
+type dialectStrictGateProvider struct {
+	rejectedReason ai.FinishReason
+	category       ai.FailureCategory
+}
+
+func (d dialectStrictGateProvider) Stream(_ context.Context, _ ai.Request) (<-chan ai.Event, error) {
+	out := make(chan ai.Event, 1)
+	var stamper ai.Stamper
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: d.category}, false)
+	if err != nil {
+		return nil, err
+	}
+	terminal, err := ai.ErrorEvent(failure)
+	if err != nil {
+		return nil, err
+	}
+	out <- stamper.Stamp(terminal)
+	close(out)
+	return out, nil
+}
+
+// TestRequireFinishReasonUnreachable_HonestSubject_Admitted proves the
+// positive path: a subject that genuinely rejects the declared-unreachable
+// reason with exactly one typed terminal and no Completion is accepted.
+func TestRequireFinishReasonUnreachable_HonestSubject_Admitted(t *testing.T) {
+	probe := &probeTB{}
+	f := dialectHonestlyUnreachableFactory(ai.FinishReasonRefusal)
+
+	requireFinishReasonUnreachable(probe, f, ai.FinishReasonRefusal)
+	if probe.failed {
+		t.Errorf("requireFinishReasonUnreachable(honest strict-gate subject) failed = %v, messages = %v, want no failure", probe.failed, probe.messages)
+	}
+}
+
+// TestRequireFinishReasonUnreachable_EscapingSubject_Rejected proves
+// S-CNF-084's core anti-escape: a subject that DECLARES a reason
+// unreachable but actually produces it (via a normal Completion) is
+// rejected, naming the observed terminal count.
+func TestRequireFinishReasonUnreachable_EscapingSubject_Rejected(t *testing.T) {
+	probe := &probeTB{}
+	f := dialectEscapingFactory(ai.FinishReasonRefusal)
+
+	requireFinishReasonUnreachable(probe, f, ai.FinishReasonRefusal)
+	if !probe.failed {
+		t.Fatal("requireFinishReasonUnreachable(escaping subject that actually produces the declared-unreachable reason) did not fail, want a rejection (S-CNF-084: the dialect-aware absence is not a general escape)")
+	}
+	if got := probe.lastMessage(); !strings.Contains(got, "0 typed failure terminal") {
+		t.Errorf("requireFinishReasonUnreachable message = %q, want it to name the observed (zero) terminal count", got)
+	}
+}
+
+// --- S-CNF-087: mid-stream collapse is not a general escape ---
+
+// TestWantMidStreamFailureCategory_NilDialect_ExpectsScriptedCategoryItself
+// proves S-CNF-087's positive half: with no collapse declared, every
+// category is still expected classified as itself.
+func TestWantMidStreamFailureCategory_NilDialect_ExpectsScriptedCategoryItself(t *testing.T) {
+	f := Factory{}
+	for _, category := range ai.FailureCategories() {
+		if got := wantMidStreamFailureCategory(f, category); got != category {
+			t.Errorf("wantMidStreamFailureCategory(nil Dialect, %v) = %v, want %v (S-CNF-087: a dialect that can express the category still classifies it as itself)", category, got, category)
+		}
+	}
+}
+
+// TestWantMidStreamFailureCategory_DeclaredCollapse_ExpectsCollapseForEveryCategory
+// proves S-CNF-087's anti-escape half: a declared collapse applies
+// uniformly to every category, never quietly narrowed back to the
+// scripted category for some of them.
+func TestWantMidStreamFailureCategory_DeclaredCollapse_ExpectsCollapseForEveryCategory(t *testing.T) {
+	collapse := ai.FailureCategoryUnknown
+	f := Factory{Dialect: &DialectConstraints{MidStreamCategoryCollapse: &collapse}}
+	for _, category := range ai.FailureCategories() {
+		if got := wantMidStreamFailureCategory(f, category); got != collapse {
+			t.Errorf("wantMidStreamFailureCategory(declared collapse=%v, scripted=%v) = %v, want %v for every category (S-CNF-024, S-CNF-087)", collapse, category, got, collapse)
+		}
+	}
+}
+
 // === AI-23.6 — the capability record: totality, verdict, comparison (R-CNF-017, R-CNF-018) ===
 
 // S-CNF-047 — any completed run's record carries exactly nine entries,

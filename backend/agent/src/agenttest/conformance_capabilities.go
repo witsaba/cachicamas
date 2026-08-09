@@ -19,6 +19,8 @@
 package agenttest
 
 import (
+	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -265,6 +267,11 @@ func finishReasonExhaustivenessCase(t *testing.T, f Factory) {
 
 	for _, reason := range handListedFinishReasons {
 		t.Run(reason.String(), func(t *testing.T) {
+			if dialectFinishReasonUnreachable(f, reason) {
+				requireFinishReasonUnreachable(t, f, reason)
+				return
+			}
+
 			responseStart, err := ai.NewResponseStart("resp-finish-reason", "model-finish-reason")
 			requireConstructed(t, err, "ai.NewResponseStart")
 			completion, err := ai.NewCompletion(reason, ai.Usage{})
@@ -293,6 +300,59 @@ func finishReasonExhaustivenessCase(t *testing.T, f Factory) {
 
 	if probed, matches := finishReasonDriftGuardAgainst(handListedFinishReasons); !matches {
 		t.Errorf("agenttest: finish-reason drift guard: ai package now exposes %d finish-reason value(s), this suite's hand-list carries %d — update handListedFinishReasons to match (R-CNF-016, S-CNF-044)", probed, len(handListedFinishReasons))
+	}
+}
+
+// dialectFinishReasonUnreachable reports whether f's declared Dialect marks
+// reason unreachable on this subject's wire dialect (design D5). A nil
+// Dialect declares nothing unreachable — the suite's fully-expressive
+// default, unaffected by this seam's addition.
+func dialectFinishReasonUnreachable(f Factory, reason ai.FinishReason) bool {
+	if f.Dialect == nil {
+		return false
+	}
+	return slices.Contains(f.Dialect.UnreachableFinishReasons, reason)
+}
+
+// requireFinishReasonUnreachable proves R-CNF-016's dialect-aware-absence
+// half (S-CNF-043, S-CNF-084): scripting reason — declared unreachable on
+// f's wire dialect — MUST yield exactly one typed failure terminal and no
+// Completion. Unsatisfiable and unviolated, proven rather than skipped
+// (AI-29/AI-31 precedent): a subject that DOES manage to produce reason,
+// or any other shape besides exactly one typed terminal, still fails here
+// — the dialect-aware absence is not available as a general escape.
+func requireFinishReasonUnreachable(tb testing.TB, f Factory, reason ai.FinishReason) {
+	tb.Helper()
+
+	responseStart, err := ai.NewResponseStart("resp-finish-reason-unreachable", "model-finish-reason-unreachable")
+	requireConstructed(tb, err, "ai.NewResponseStart")
+	completion, err := ai.NewCompletion(reason, ai.Usage{})
+	requireConstructed(tb, err, "ai.NewCompletion")
+	script := Script{Steps: []Step{Emit(responseStart), Emit(completion)}}
+	subject := f.New(tb, script)
+	ch, err := subject.Stream(context.Background(), minimalRequest(tb))
+	if err != nil {
+		tb.Fatalf("Stream returned %v, want no failure constructing the scenario", err)
+	}
+	rec := DrainAndRecord(tb, ch, DefaultDrainTimeout)
+	events := rec.Events()
+
+	errorCount := 0
+	for _, ev := range events {
+		if _, ok := ev.Completion(); ok {
+			tb.Errorf("finish reason %v — declared unreachable on this dialect — produced a Completion, want the strict gate to reject it as a typed failure instead (R-CNF-016, S-CNF-084: the dialect-aware absence is not available as a general escape)", reason)
+		}
+		if _, ok := ev.ErrorPayload(); ok {
+			errorCount++
+		}
+	}
+	if errorCount != 1 {
+		tb.Errorf("finish reason %v: %d typed failure terminal(s) observed, want exactly 1 (R-CNF-016)", reason, errorCount)
+		return
+	}
+	last := events[len(events)-1]
+	if _, ok := last.ErrorPayload(); !ok {
+		tb.Errorf("last drained event kind = %v, want the typed failure terminal in final position (R-CNF-016)", last.Kind())
 	}
 }
 
