@@ -46,9 +46,17 @@ Chain strategy: size-exception
 
 ## Phase 1: Recorder + Fixtures (WU2)
 
-- [ ] 1.1 `openrouter/conformance/recorder_test.go` (new): `recordTranscript(tb, url, cred, body) []byte`, raw `io.ReadAll`, zero parsing. RED: no recorder exists → GREEN: `UPDATE_CONFORMANCE_FIXTURES=1` writes `testdata/*.sse`; unset asserts byte-identity. Maps R-ACR-003/S-ACR-006-007/009.
-- [ ] 1.2 Prove drift guard: hand-edit one committed byte in a throwaway run, confirm named failure, revert. GREEN: guard names drifted file. Maps S-ACR-008.
-- [ ] 1.3 `fixtures/*.go`: string literals → `go:embed testdata/*.sse`, accessors kept. Maps R-OR-06 (regenerable transcripts).
+- [x] 1.1 `openrouter/conformance/recorder_test.go` (new): `recordTranscript(tb, url, cred, body) []byte`, raw `io.ReadAll`, zero parsing. RED: no recorder exists → GREEN: `UPDATE_CONFORMANCE_FIXTURES=1` writes `testdata/*.sse`; unset asserts byte-identity. Maps R-ACR-003/S-ACR-006-007/009.
+- [x] 1.2 Prove drift guard: hand-edit one committed byte in a throwaway run, confirm named failure, revert. GREEN: guard names drifted file. Maps S-ACR-008.
+- [x] 1.3 `fixtures/*.go`: string literals → `go:embed testdata/*.sse`, accessors kept. Maps R-OR-06 (regenerable transcripts).
+
+  **Evidence**: RED — `go vet` on the new `recorder_test.go` failed `undefined: recordTranscript` before the function was added. GREEN — `go test ./.../conformance/... -run TestRecordTranscript_RegeneratesEveryFixture -race -v`: both `text_stream` and `tool_call` subtests PASS (real HTTP capture byte-identical to the committed, embedded golden). Triangulated: ran again with `UPDATE_CONFORMANCE_FIXTURES=1` — wrote both files, `md5sum` before/after identical (idempotent regeneration), `git status` reported no change. Drift guard proof (1.2): hand-corrupted one byte in `fixtures/testdata/text_stream.sse` (`alpha`→`alphX`), reran → `--- FAIL ... text_stream`, message "fixtures/testdata/text_stream.sse has drifted from the recording helper's output (R-ACR-003 drift guard, S-ACR-008)" — names the exact drifted file; reverted the byte, reran → PASS again.
+
+  **Path correction from design**: `testdata/*.sse` lives at `fixtures/testdata/*.sse`, not `conformance/testdata/*.sse` as design's file-changes table listed — Go's `//go:embed` directive cannot reference a parent directory (no `..` path elements permitted), so the embedding files in `fixtures/*.go` require `testdata/` nested under `fixtures/`. Noted here per "note design gaps, don't silently deviate"; behavior and accessor signatures are unaffected.
+
+  **Scope note**: only `text_stream` and `tool_call` fixtures are recorder-verified in this work unit. `with_usage.sse` stays outside the round-trip until Phase 5/WU5 lands D6's usage rendering (the current `bridgeWriteTerminalChunk` renders no `usage` key at all, so a live capture would not match the existing all-fields-populated golden). `reasoning_extension.sse` is permanently outside the round-trip — `reasoning_details`/`reasoning` are vendor wire-extension fields with no `ai.Event` equivalent, so `bridgeRenderScript` cannot produce them from any `agenttest.Script`. Both fixtures still moved to `go:embed` storage (task 1.3's literal instruction); both package doc comments explain the exclusion. Bootstrap of the initial `testdata/*.sse` byte content used a throwaway `_test.go` in `fixtures/` (real Go compilation dumped the existing literal vars to disk, then the throwaway file was deleted) — avoids any hand-transcription risk of the escaped string literals.
+
+  Pre-existing, repo-wide gofmt "missing trailing newline" convention observed across `backend/agent` (dozens of files, confirmed present before this branch via `git stash`); `.golangci.yml` enables only `govet, errcheck, staticcheck, unused, revive` — no formatting linter — so this does not affect `make lint`. Left unchanged outside the files this work unit substantively modifies.
 
 ## Phase 2: Cancellation (WU3)
 

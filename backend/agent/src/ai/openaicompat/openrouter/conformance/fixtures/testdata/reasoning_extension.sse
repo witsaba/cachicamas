@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-or-rsn","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"alpha","reasoning_details":[{"type":"reasoning.text","text":"OR-RSN-SENTINEL-7f3a"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-rsn","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"omega","reasoning":"OR-RSN-SENTINEL-7f3a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-or-rsn","model":"openai/gpt-4o","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

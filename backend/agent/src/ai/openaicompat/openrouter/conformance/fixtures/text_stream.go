@@ -1,26 +1,21 @@
-// AI-38 — recorded OpenRouter-shaped SSE text-stream fixture.
+// AI-38 — recorded OpenRouter-shaped SSE text-stream fixture (R-ACR-003,
+// design D3).
 //
-// openrouterTextStream is a single recorded wire byte slice: one
+// openrouterTextStream is testdata/text_stream.sse, embedded verbatim: one
 // ResponseStart + three TextDelta chunks + one terminal chunk
-// (finish_reason: "stop") + the SSE [DONE] sentinel. Byte-rendered
-// using the same constants the conformance bridge's renderer uses:
-//
-//   - conformanceBridgeChunkCreated = 1700000000
-//   - conformanceBridgeObjectDiscriminator = "chat.completion.chunk"
-//
-// so this fixture is byte-for-byte equivalent to what bridgeRenderScript
-// produces when given a script of ResponseStart("chatcmpl-or-text",
-// "openai/gpt-4o") + TextBlockStart(1) + TextDelta(1, "alpha") +
-// TextDelta(1, " beta") + TextDelta(1, " gamma") + TextBlockEnd(1) +
-// Completion(FinishReasonStop, Usage{}).
+// (finish_reason: "stop") + the SSE [DONE] sentinel. It is produced and
+// drift-guarded by recorder_test.go's TestRecordTranscript_
+// RegeneratesEveryFixture — a real HTTP capture of bridgeRenderScript's
+// output for the script ResponseStart("chatcmpl-or-text", "openai/gpt-4o")
+// + TextBlockStart(1) + TextDelta(1, "alpha") + TextDelta(1, " beta") +
+// TextDelta(1, " gamma") + TextBlockEnd(1) + Completion(FinishReasonStop,
+// Usage{}), not a hand-typed literal: a hand edit to the committed file
+// fails that test, naming this file.
 //
 // Any conformance case that consumes the text transcript can be wired
 // against this recorded byte slice instead of re-rendering per test
 // (sdd-phase-common §E: generated goldens are excluded from authored
-// risk count, included in complete snapshot identity). The fixture is
-// one shape — a real OpenRouter chat-completion stream — and a future
-// test that re-renders it can diff against this recorded canonical
-// byte sequence to catch renderer drift.
+// risk count, included in complete snapshot identity).
 //
 // The identity string "chatcmpl-or-text" and the served model
 // "openai/gpt-4o" are deliberately the same identity every
@@ -30,13 +25,11 @@
 
 package fixtures
 
+import _ "embed"
+
 // openrouterTextStream is the recorded text-stream canonical byte
-// sequence — see this file's package doc for the shape and the
-// renderer constants.
-var openrouterTextStream = "" +
-	"data: {\"id\":\"chatcmpl-or-text\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-text\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"alpha\"},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-text\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" beta\"},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-text\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" gamma\"},\"finish_reason\":null}]}\n\n" +
-	"data: {\"id\":\"chatcmpl-or-text\",\"model\":\"openai/gpt-4o\",\"created\":1700000000,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
-	"data: [DONE]\n\n"
+// sequence, embedded from testdata/text_stream.sse — see this file's
+// package doc for the shape and how it is regenerated/drift-guarded.
+//
+//go:embed testdata/text_stream.sse
+var openrouterTextStream string
