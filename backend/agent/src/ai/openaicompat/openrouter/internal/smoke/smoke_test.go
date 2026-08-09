@@ -392,3 +392,174 @@ func hasAnyChunk(events []ai.Event) bool {
 	}
 	return false
 }
+
+// streamShapeReport is the result of the three independent stream-shape
+// invariants R-LSM-003 mandates. Each is its own field, checked
+// separately, so that suppressing any one of the three leaves the other
+// two still able to fail — never one disjunction standing in for the
+// three (S-LSM-007).
+type streamShapeReport struct {
+	responseStartErr error
+	contentErr       error
+	terminalErr      error
+}
+
+// checkStreamShape evaluates the three R-LSM-003 invariants over events
+// and returns them independently:
+//
+//  1. responseStartErr is non-nil unless at least one
+//     [ai.EventKindResponseStart] event is present.
+//  2. contentErr is non-nil unless at least one content event
+//     ([ai.EventKindTextDelta], [ai.EventKindToolCallStart] or
+//     [ai.EventKindToolCallDelta]) is present.
+//  3. terminalErr is non-nil unless [ai.CheckStream] reports no violation
+//     AND its report is Terminated() — exactly one terminal event, in
+//     terminal position. An empty stream fails this check rather than
+//     passing vacuously (S-LSM-009).
+//
+// No check reads, compares, or matches the model's generated text, tool
+// arguments, token counts, or any other provider-chosen content — only
+// event kinds, counts, order and presence are consulted (S-LSM-010).
+func checkStreamShape(events []ai.Event) streamShapeReport {
+	return streamShapeReport{
+		responseStartErr: checkResponseStartPresent(events),
+		contentErr:       checkContentPresent(events),
+		terminalErr:      checkExactlyOneTerminal(events),
+	}
+}
+
+// checkResponseStartPresent is R-LSM-003 invariant 1: at least one
+// response-start event is present.
+func checkResponseStartPresent(events []ai.Event) error {
+	for _, ev := range events {
+		if ev.Kind() == ai.EventKindResponseStart {
+			return nil
+		}
+	}
+	return fmt.Errorf("stream shape: response-start: no response-start event observed (R-LSM-003)")
+}
+
+// checkContentPresent is R-LSM-003 invariant 2: at least one content
+// event follows. Only the event's Kind is consulted — never its payload
+// (S-LSM-010).
+func checkContentPresent(events []ai.Event) error {
+	for _, ev := range events {
+		switch ev.Kind() {
+		case ai.EventKindTextDelta, ai.EventKindToolCallStart, ai.EventKindToolCallDelta:
+			return nil
+		}
+	}
+	return fmt.Errorf("stream shape: content-presence: no content event (text delta or tool call) observed (R-LSM-003, S-LSM-008)")
+}
+
+// checkExactlyOneTerminal is R-LSM-003 invariant 3: exactly one terminal
+// event exists, in terminal position. It delegates ordering and
+// at-most-one enforcement to [ai.CheckStream] (never reimplemented) and
+// additionally requires Terminated() == true, so an empty or
+// never-terminated stream fails here rather than passing vacuously
+// (S-LSM-009).
+func checkExactlyOneTerminal(events []ai.Event) error {
+	report := ai.CheckStream(events)
+	if violation := report.Violation(); violation != nil {
+		return fmt.Errorf("stream shape: terminal-exclusivity: %w (R-LSM-003, S-LSM-009)", violation)
+	}
+	if !report.Terminated() {
+		return fmt.Errorf("stream shape: terminal-exclusivity: no terminal event observed (R-LSM-003, S-LSM-009)")
+	}
+	return nil
+}
+
+// mustEvent fails t immediately if constructing a synthetic test event
+// returned an error, otherwise returns the event. A test-only helper for
+// building the []ai.Event fixtures TestStreamShape drives.
+func mustEvent(t *testing.T, ev ai.Event, err error) ai.Event {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("constructing test event: %v", err)
+	}
+	return ev
+}
+
+// TestStreamShape covers R-LSM-003: the three stream-shape invariants are
+// asserted as three SEPARATE checks over a synthetic []ai.Event, never as
+// one disjunction. Each case below isolates one (or, for the empty
+// stream, all three) of the three checks so that suppressing any single
+// one leaves the other two still able to fail independently (S-LSM-007).
+func TestStreamShape(t *testing.T) {
+	t.Parallel()
+
+	responseStartEv, responseStartErr := ai.NewResponseStart("resp-shape", "model-shape")
+	responseStart := mustEvent(t, responseStartEv, responseStartErr)
+	completionEv, completionErr := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	completion := mustEvent(t, completionEv, completionErr)
+	toolStartEv, toolStartErr := ai.NewToolCallStart(1, "call-shape-1", "tool-shape")
+	toolStart := mustEvent(t, toolStartEv, toolStartErr)
+	toolEndEv, toolEndErr := ai.NewToolCallEnd(1, []byte("{}"))
+	toolEnd := mustEvent(t, toolEndEv, toolEndErr)
+
+	tests := []struct {
+		name                  string
+		events                []ai.Event
+		wantResponseStartFail bool
+		wantContentFail       bool
+		wantTerminalFail      bool
+	}{
+		{
+			// S-LSM-007: response-start absent, content and a single
+			// well-placed terminal both present — only the
+			// response-start check fails.
+			name:                  "missing start",
+			events:                []ai.Event{toolStart, toolEnd, completion},
+			wantResponseStartFail: true,
+			wantContentFail:       false,
+			wantTerminalFail:      false,
+		},
+		{
+			// S-LSM-008: response-start and a single well-placed
+			// terminal present, no content event between them — the
+			// content-presence check fails specifically.
+			name:                  "no content between start and terminal",
+			events:                []ai.Event{responseStart, completion},
+			wantResponseStartFail: false,
+			wantContentFail:       true,
+			wantTerminalFail:      false,
+		},
+		{
+			// S-LSM-009 (second half): an empty stream must fail rather
+			// than pass vacuously — all three checks fail.
+			name:                  "zero terminals (empty stream)",
+			events:                nil,
+			wantResponseStartFail: true,
+			wantContentFail:       true,
+			wantTerminalFail:      true,
+		},
+		{
+			// S-LSM-009 (first half): response-start and content both
+			// present, but two terminal events — only the
+			// terminal-exclusivity check fails.
+			name:                  "two terminals",
+			events:                []ai.Event{responseStart, toolStart, toolEnd, completion, completion},
+			wantResponseStartFail: false,
+			wantContentFail:       false,
+			wantTerminalFail:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := checkStreamShape(tt.events)
+
+			if gotFail := report.responseStartErr != nil; gotFail != tt.wantResponseStartFail {
+				t.Errorf("responseStartErr = %v, want failure=%v (R-LSM-003)", report.responseStartErr, tt.wantResponseStartFail)
+			}
+			if gotFail := report.contentErr != nil; gotFail != tt.wantContentFail {
+				t.Errorf("contentErr = %v, want failure=%v (R-LSM-003, S-LSM-008)", report.contentErr, tt.wantContentFail)
+			}
+			if gotFail := report.terminalErr != nil; gotFail != tt.wantTerminalFail {
+				t.Errorf("terminalErr = %v, want failure=%v (R-LSM-003, S-LSM-009)", report.terminalErr, tt.wantTerminalFail)
+			}
+		})
+	}
+}
