@@ -244,3 +244,6 @@ This archive is the closure document; the PR will be opened after archive comple
 - **Worktree**: `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/feat-ai-40-layer2-handoff`
 - **Branch**: feat/ai-40-layer2-handoff
 - **Base**: b062be74 (origin/main)
+
+
+> **Amended 2026-08-10 (post-archive)**: PR **#144** — https://github.com/witsaba/cachicamas/pull/144 (issue **#143**), open at amendment time; merge owed by the maintainer.
