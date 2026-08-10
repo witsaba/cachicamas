@@ -1,12 +1,19 @@
-# Layer 2 milestones and task graph — `cachicamas_agent` portable brain
+# Layer 2 milestones and task graph — the `cachicamas_agent` portable agent runtime
 
-> **Status:** Not started — **0 of 24** milestones shipped. **AG-00 is the first milestone.** Layer 2 code does not exist; this document is written before the first line so that the seams named in [the v2 architecture reference § 4](../0001-cachicamas-agent-stack-v2.md#4-layer-2--the-portable-brain) are built in rather than retrofitted.
+> **Status:** Not started — **0 of 24** milestones shipped. **AG-00 is the first milestone.** Layer 2 code does not exist; this document is written before the first line so that the seams named in [the v2 architecture reference § 4](../0001-cachicamas-agent-stack-v2.md#4-layer-2--the-portable-agent-runtime) are built in rather than retrofitted.
 > **Entry gate:** [AI-40 — the Layer 2 readiness contract](./0002-cachicamas-ai-layer-1-task-graph.md#ai-40--publish-the-layer-2-readiness-contract). See [the entry gate](#entry-gate--what-layer-2-waits-for) for what may start earlier and at what recorded risk.
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 1 task graph (doc 0002)](./0002-cachicamas-ai-layer-1-task-graph.md) — upstream · [Layer 3 task graph (doc 0004)](./0004-cachicamas-coding-layer-3-task-graph.md) — downstream
 > **Target package:** `backend/agent/src/agent/` (Layer 2 of module `github.com/cachicamas/backend/agent`, per [ADR 0005 § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d2--location-mapping-v2)).
 > **Date:** 2026-07-30.
 > **Milestone identifiers are append-only.** AG-NN ids follow the same rule as AI-NN ids in doc 0002: new work appends the next free number; logical insertion points are expressed with a `Blocks:` field, never by renumbering. Node identifiers (`AG-NN.p`, `AG-NN.p.q`) are equally append-only.
+
+> [!NOTE]
+> **Amended 2026-08-10 — vocabulary, not design.** Layer 2 is **the portable agent runtime**; the earlier name, *the portable brain*, was inherited from the spike narrative and retired by [doc 0001's 2026-08-10 amendment](../0001-cachicamas-agent-stack-v2.md). The metaphor claimed cognition this layer deliberately does not have: it schedules, streams, suspends, appends and counts, and it decides no policy whatsoever — which is precisely what the loop's six must-nevers and the harness's one must-never exist to enforce. Naming it a *brain* invites the exact defect the whole graph is shaped to prevent.
+>
+> Nothing in this document's structure moved: no milestone, node, dependency edge, wave, test list, gate or acceptance criterion changed, and no identifier was renumbered. What changed is the name of the thing they build, and two places where the old name appeared. **AG-00.1 gains an explicit vocabulary duty** for the new term (see its closing checklist), so that the runtime/loop/harness relationship is fixed once rather than re-litigated per milestone.
+>
+> The same amendment reframes Layer 3 as *the application layer*, with `cachicamas_coding` as its first application rather than its definition. That change lands in [doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md) and barely touches this document — because from Layer 2's side the referent was always correct. **Every "Layer 3" below means the layer, not the coding agent**, and that is not sloppiness: the runtime is forbidden to know which application is standing on it. AG-23 hands its contract to *an* application; `cachicamas_coding` is simply the first to accept it.
 
 > [!IMPORTANT]
 > **Authoring constraint, inherited from the v2 reference.** This document states *behaviors* and *what a test must prove*. It never invents Go type names, field names, or signatures — each milestone's SDD cycle owns those. "The loop", "the harness", "the envelope" are concept names from the architecture reference, not type names. No layer has shipped code — the stack restarts from zero ([doc 0002](./0002-cachicamas-ai-layer-1-task-graph.md)) — so every citation here points at a contract document, an ADR, or the architecture reference, never at code.
@@ -15,9 +22,11 @@
 
 ## Outcome first
 
-Walking every leaf of this graph to green, in dependency order, produces the portable brain the architecture reference defines: a `backend/agent/src/agent/` package that turns a provider, a tool set, and a transcript into a complete agent conversation — streaming events, executing tools under an asked-not-assumed permission protocol, holding history that never orphans a tool call, surviving interruption, compacting its own context, and reporting every token it spends — while performing **no I/O of its own** and knowing nothing about frontends, sessions on disk, or skills.
+Walking every leaf of this graph to green, in dependency order, produces the portable agent runtime the architecture reference defines: a `backend/agent/src/agent/` package that turns a provider, a tool set, and a transcript into a complete agent conversation — streaming events, executing tools under an asked-not-assumed permission protocol, holding history that never orphans a tool call, surviving interruption, compacting its own context, and reporting every token it spends — while performing **no I/O of its own** and knowing nothing about frontends, sessions on disk, or skills.
 
-Completion is measured the same way Layer 1's was: a readiness contract (AG-23) that Layer 3 can consume, proven by an external-package test that scripts an entire multi-turn agent run — fake provider, fake tools, scripted permission decisions — with zero vendor imports and zero real I/O.
+Read that list twice for what is *absent* from it. The runtime never decides whether a tool may run, what a summary should say, which model is worth its price, or what belongs in a system prompt. It asks, suspends, and executes the answer it is given. Every verb above is mechanism, and that is the definition of the word *runtime* in this stack — the [§ 4 amendment](../0001-cachicamas-agent-stack-v2.md) records why the previous name was retired for implying otherwise.
+
+Completion is measured the same way Layer 1's was: a readiness contract (AG-23) that **any** Layer 3 application can consume — `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) being the first, not the only — proven by an external-package test that scripts an entire multi-turn agent run with fake provider, fake tools and scripted permission decisions, with zero vendor imports and zero real I/O. If that proof ever needs something only a *coding* agent would supply, the contract has leaked an application's assumptions into the runtime and the leak is the bug.
 
 Every leaf is sized to be implemented test-first in one sitting, verifiable by one command, and explicit about what it does not do. When implementation disproves a leaf, [doc 0002's living-graph clause](./0002-cachicamas-ai-layer-1-task-graph.md#the-graph-is-alive--the-revert-and-record-clause) applies to this document verbatim: revert to green, record the discovery as graph structure, land the amendment in the resuming PR.
 
@@ -48,10 +57,12 @@ Settled by ADR 0004 as amended by ADR 0005 — constraints, not questions for la
 
 **Layer 2 must not own:** permission *policy* (which calls are allowed — a Layer 3 port); tool implementations and sandbox semantics (Layer 3); skills, prompts, project instructions, system-prompt assembly (Layer 3); session persistence or any filesystem path; provider catalogs, model selection UI, credential handling; price tables and money (it reports tokens; Layer 3 prices them); rendering, frontends, slash commands; provider request translation or vendor anything (Layer 1).
 
-Two wording traps, recorded because each will resurface:
+Four wording traps, recorded because each will resurface:
 
 - **"The loop executes tools" is too broad.** The loop *schedules* execution against an injected execution contract and drives the permission protocol around it. What a tool does, whether it is allowed, and under what confinement it runs are all decided above; the loop owns ordering, concurrency, suspension, and the rejoin.
 - **"The harness holds state" does not mean the harness persists state.** The harness holds the conversation *in memory* and exposes it for a Layer 3 session to persist. A harness that touches a file has crossed the boundary; the no-I/O guard (AG-03.3) exists to make that mechanical.
+- **"The runtime" is this layer, never Go's `runtime` package.** The term names the loop-plus-harness assembly — the thing that *runs* an agent conversation. Nothing in `backend/agent` imports Go's `runtime`, and AG-03.2's allowlist would have to be widened deliberately for that to change, so the collision is a reading cost only. When a sentence needs the distinction, write "the agent runtime".
+- **"Layer 3" in this document means the layer, not the coding agent.** Every out-of-scope line below that hands something to Layer 3 — policy content, pricing, persistence, prompt material, frontends — hands it to *whichever application is standing on the runtime*, which today is `cachicamas_coding` and tomorrow may not be. A test, a contract, or a milestone that only makes sense for a coding agent has put an application's assumption inside the runtime; that is a boundary violation with the same weight as an import violation, and AG-23's consumer proof is where it surfaces.
 
 ## Rules for every future SDD milestone
 
@@ -127,7 +138,7 @@ SDD change: `cachicamas-agent-contract-vocabulary` · The AI-01 of this layer: n
 **Charter**
 
 - **Goal:** Fix the meaning of every term the later milestones use, so that no SDD re-litigates what a *run*, a *turn*, a *transcript entry*, a *tool call/result pair*, a *suspension*, or a *steering message* is.
-- **Deliverable:** A recorded vocabulary artifact covering at minimum: run vs turn vs provider call (one run = many turns; one turn = one assistant response plus its tool results; one turn may span several provider calls only via retry); transcript and the pairing invariant; the loop/harness responsibility split in this repo's words (the v2 reference § 4.1–4.2 restated as testable statements); suspension and resumption; steering; delegation and the parent relationship; the cost event's token-only scope.
+- **Deliverable:** A recorded vocabulary artifact covering at minimum: **the runtime and its two parts** (the runtime *is* the loop plus the harness — not a third thing wrapping them, and not a synonym for either alone); run vs turn vs provider call (one run = many turns; one turn = one assistant response plus its tool results; one turn may span several provider calls only via retry); transcript and the pairing invariant; the loop/harness responsibility split in this repo's words (the v2 reference § 4.1–4.2 restated as testable statements); suspension and resumption; steering; delegation and the parent relationship; the cost event's token-only scope.
 - **Acceptance:** Every later AG milestone's charter can cite a vocabulary entry instead of defining a term inline; conflicting uses in doc 0001/0002 are reconciled or flagged.
 - **Depends on:** doc 0002 wave 2 closed (the model and stream contracts are defined). · **Blocks:** everything.
 - **Out of scope:** Any decision with a design alternative (AG-01, AG-02 own those).
@@ -138,6 +149,7 @@ SDD change: `cachicamas-agent-contract-vocabulary` · The AI-01 of this layer: n
   1. Every term above has exactly one definition, phrased observably (a test could cite it), including the boundary cases: is a turn with zero tool calls still a turn (yes — the terminal one); is a compaction summary a transcript entry or metadata about entries; is a steering message part of the current turn or the next one.
   2. The vocabulary states which Layer 1 identities Layer 2 reuses as-is (message identity, tool-call identity, finish reasons, usage) and which it wraps (events — Layer 2's envelope is its own, carrying Layer 1 payloads).
   3. The loop's six must-nevers and the harness's one must-never (v2 § 4.1–4.2) are restated as vocabulary-level obligations that AG-03's guards and later test lists cite.
+  4. **The layer's own name is fixed here, with its two exclusions stated.** "The portable agent runtime" denotes the loop-plus-harness assembly; the artifact records (a) that no cognitive or biological metaphor is used for any Layer 2 concept — the retired *brain* framing is named so the reason survives the rename, not just the result — and (b) that "the runtime" never abbreviates Go's `runtime` package. It also fixes **"a Layer 3 application"** as the term for the runtime's consumer, so that no later milestone writes a contract, test name, or acceptance criterion in terms of a *coding* agent specifically. AG-23's consumer proof is the mechanical check on that; this item is what gives it a definition to check against.
 - **Depends on:** — .
 
 ### AG-01 — Decide event delivery and the observer model
@@ -968,7 +980,7 @@ SDD change: `cachicamas-agent-layer3-handoff` · Layer 2's exit: the surface fre
 
 **Charter**
 
-- **Goal:** Freeze the v1 surface `cachicamas_coding` may consume, prove it sufficient by consuming it, and hand Layer 3 the deterministic test substrate it will build sessions on.
+- **Goal:** Freeze the v1 surface **a Layer 3 application** may consume, prove it sufficient by consuming it, and hand that application the deterministic test substrate it will build sessions on. `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) is the first consumer and the one that exercises the contract in anger — but the contract is written for the position, not for the occupant, and the consumer proof below deliberately builds a *generic* harness client rather than a miniature coding agent.
 - **Deliverable:** Package examples; a compatibility statement; a scripted-harness test kit (fake provider + scripted tools + scripted permission decisions, packaged); the consumer proof.
 - **Acceptance:** An external-package test builds a harness from injected fakes, runs a multi-turn conversation with tool execution, a permission suspension resolved by script, an interrupt, a resumed prompt, and a second harness constructed over the first's transcript via seeded history (AG-12.1 item 4 — the surface session resume and next-run model switching stand on, frozen here) — drains and validates the full event stream — and compiles with zero vendor imports and zero I/O.
 - **Depends on:** AG-21, AG-22.
@@ -998,7 +1010,7 @@ flowchart LR
 #### AG-23.3 — Compatibility statement `[decision]`
 
 - **Closing checklist:**
-  1. The v1 surface is enumerated and frozen; experimental corners are marked; the statement names what Layer 3 may rely on, including every seam's injection point and its v1 default.
+  1. The v1 surface is enumerated and frozen; experimental corners are marked; the statement names what a Layer 3 application may rely on, including every seam's injection point and its v1 default. It is written without reference to files, shells, skills or terminals — anything a *coding* agent needs and a different application would not is a leak, and naming one here is cheaper than discovering it at the second application.
   2. The [Layer 2 completion checklist](#layer-2-completion-checklist) is walked item by item, each citing its closing node.
   3. The known-limitations register is stated: no subagent tool, failover declines, never-compact default, and the abandoned-consumer contract inherited from Layer 1 — each with its post-v1 path.
 - **Depends on:** AG-23.1, AG-23.2.

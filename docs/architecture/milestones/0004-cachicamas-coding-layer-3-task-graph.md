@@ -1,6 +1,7 @@
-# Layer 3 milestones and task graph — `cachicamas_coding` application
+# Layer 3 milestones and task graph — `cachicamas_coding`, the first application
 
-> **Status:** Not started — **0 of 25** milestones shipped. **CO-00 is the first milestone.** Layer 3 code does not exist. This document is the third and last of the stack's plans: it turns [the v2 architecture reference § 5](../0001-cachicamas-agent-stack-v2.md#5-layer-3--the-coding-application), [ADR 0005 § D1 row 3 / § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) and [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md) into an executable graph.
+> **Status:** Not started — **0 of 25** milestones shipped. **CO-00 is the first milestone.** No Layer 3 application exists yet. This document is the third and last of the stack's plans: it turns [the v2 architecture reference § 5](../0001-cachicamas-agent-stack-v2.md#5-layer-3--the-application-layer), [ADR 0005 § D1 row 3 / § D2](../../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) and [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md) into an executable graph.
+> **Scope:** this is the plan for **one application**, not for the layer. Layer 3 is the position in the stack where policy, resources, persistence and frontends live; `cachicamas_coding` is the first program to occupy it. Read [§ what this document is, and is not](#what-this-document-is-and-is-not) before treating any CO milestone as a layer-wide obligation.
 > **Entry gate:** [AG-23 — the Layer 3 readiness contract](./0003-cachicamas-agent-layer-2-task-graph.md#ag-23--publish-the-layer-3-readiness-contract) for everything that consumes the harness. A resource track may start far earlier — see [the entry gate](#entry-gate--three-tracks-two-gates).
 > **Architecture reference:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · **Decisions:** [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0006](../../adr/0006-resolve-skill-and-prompt-source-of-truth.md)
 > **Sibling plans:** [Layer 1 task graph (doc 0002)](./0002-cachicamas-ai-layer-1-task-graph.md) · [Layer 2 task graph (doc 0003)](./0003-cachicamas-agent-layer-2-task-graph.md)
@@ -11,19 +12,55 @@
 > [!IMPORTANT]
 > **Authoring constraint, inherited from the v2 reference.** Behaviors and what a test must prove — never Go type names, field names, or signatures for code that does not exist. Port names (`ToolSource`, `SkillSource`, `PromptSource`, `PermissionPolicy`, `Sandbox`, `PriceTable`) appear because the v2 reference § 5.1 names them as *concepts*; each milestone's SDD owns their spelling.
 
+> [!NOTE]
+> **Amended 2026-08-10 — perspective, not plan.** This document previously read as though Layer 3 *were* `cachicamas_coding`: its title, its boundary section and its checklist all spoke as the layer while describing one program. [Doc 0001's 2026-08-10 amendment](../0001-cachicamas-agent-stack-v2.md) separates the two, and this document is now explicitly the plan for the **first** Layer 3 application.
+>
+> **No milestone, node, dependency edge, wave, gate, test list or acceptance criterion changed, and no identifier was renumbered.** Every CO-NN means exactly what it meant. What changed is which of them are obligations of *the position* and which are choices of *this program* — a distinction that was invisible while there was only one candidate, and becomes load-bearing the moment a second one is proposed. The new [§ what this document is, and is not](#what-this-document-is-and-is-not) draws that line, **CO-00.1 gains an explicit duty** to record it, and the [completion checklist](#completion-checklist--the-coding-application) is now scoped to this application by name.
+>
+> Companion change: Layer 2 is now **the portable agent runtime** rather than *the portable brain* — see [doc 0003](./0003-cachicamas-agent-layer-2-task-graph.md). Nothing this document depends on moved; the AG-NN identifiers, the AG-23 gate and every seam are unchanged.
+
+---
+
+## What this document is, and is not
+
+**Layer 3 is a position; `cachicamas_coding` is an occupant.** The layer is where policy lives — where something decides what the runtime may do, feeds it resources, records what happened, and shows a human. It is defined by its obligations toward Layer 2 and by the seams it must fill. An *application* is one coherent set of answers to those obligations, plus the composition root that assembles them.
+
+**The coding agent is the very first application to go live on this architecture, and that is the only thing that makes it special.** It is not the layer's definition, not its reference implementation in any normative sense, and not a constraint on what comes next. It is first — which means it is the one that will discover whether the seams below it are the right seams, and that is exactly the work worth doing first.
+
+What follows from the distinction:
+
+| Binds **any** Layer 3 application | Is **this** application's answer |
+| --- | --- |
+| Fill every seam Layer 2 names; an unfilled seam is not a default, it is an unbuildable session | Which tools exist: read, write, edit, bash (CO-06 … CO-08) |
+| Define your own ports for those seams; never reach into runtime internals or open a private channel | Which policies ship: always-ask, allow-all, rule sets (CO-03) |
+| Consume the agent event stream and nothing else; a missing capability is a doc 0003 amendment | Which resources load: skills, prompts, `AGENTS.md` (CO-09 … CO-13) |
+| Own exactly one composition root, imported by nothing | Which frontend attaches: print mode (CO-20) |
+| Read the environment, parse flags and resolve `~` only in that root | How sessions persist, and what a slash command is (CO-15, CO-19) |
+| Reach other backend modules over HTTP only, never by import | The provider catalog's shape and its rates (CO-14, CO-05) |
+
+Two practical consequences, and they are the reason the distinction is worth a section rather than a footnote:
+
+- **A second application is additive.** It brings `src/<app>/` and `src/cmd/<app>/`, fills the same Layer 2 seams with its own answers, and changes no file in `src/coding/` or below. If it ever cannot — if it needs a capability the runtime does not expose — the defect is in Layer 2's seam set, and the fix is a [doc 0003 living-graph amendment](./0003-cachicamas-agent-layer-2-task-graph.md), never a shortcut import, a fork of the harness, or a parallel mechanism.
+- **Reuse across applications is a later decision, deliberately not taken here.** Some of what this document builds is plainly coding-specific (the SKILL.md parser, the bash tool's process-group discipline). Some is plainly not (session persistence, the price table, the catalog). Promoting the second group into a shared package is a real design question with a real cost, and it is **explicitly out of scope for v1** — the honest moment to answer it is when a second application exists to be measured against, not by speculation now. What v1 owes the future is that the promotion stay *possible*: nothing in the left-hand column above may be violated to make this application shorter.
+
+Everything below this section describes `cachicamas_coding`. Where a statement binds any application, it says so.
+
 ---
 
 ## Outcome first
 
 Walking every leaf of this graph to green, in dependency order, produces the thing a user runs: the `cachicamas` CLI in print mode — a coding agent that reads, writes, edits, and shells under an asked permission policy; loads skills and prompts from three precedence-ordered sources with visible shadowing; assembles its system prompt from project instructions; persists every session as an append-only record that resumes faithfully; prices every turn; and is wired together in exactly one place.
 
-Layer 3 is where policy lives. Its milestones therefore split into three tracks, and the graph keeps them apart: **resources** (skills, prompts, instructions, catalog, rates — no Layer 2 dependency at all), **contract implementations** (ports and tools that implement Layer 2's seams), and **the session assembly** (everything that consumes the harness). The first track runs while Layer 2 is still being written; the other two are gated on the AG-23 freeze, the contract track with a priced early start.
+It produces one thing more, and that is the reason this application is scheduled first: **the stack's only end-to-end proof that the architecture works.** Layers 1 and 2 can each be proven internally consistent, and neither proves that a real application can be built on them without reaching through a boundary. This one does — or it finds the seam that was missing, which is the same value delivered as a defect report. Every leaf below is therefore doing double duty: shipping a coding agent, and testing a layer contract with a real consumer.
+
+Policy lives at Layer 3, so this application's milestones split into three tracks, and the graph keeps them apart: **resources** (skills, prompts, instructions, catalog, rates — no Layer 2 dependency at all), **contract implementations** (ports and tools that implement Layer 2's seams), and **the session assembly** (everything that consumes the harness). The first track runs while Layer 2 is still being written; the other two are gated on the AG-23 freeze, the contract track with a priced early start.
 
 Every leaf is sized for one test-first sitting and verifiable by one command. The [living-graph clause of doc 0002](./0002-cachicamas-ai-layer-1-task-graph.md#the-graph-is-alive--the-revert-and-record-clause) applies verbatim.
 
 ## Quick navigation
 
-- [Layer boundary](#layer-boundary) — what Layer 3 owns and must not own
+- [What this document is, and is not](#what-this-document-is-and-is-not) — the layer vs this application
+- [Layer boundary](#layer-boundary) — what a Layer 3 application owns and must not own
 - [Method](#method--inherited-from-doc-0002) — inherited; evidence-gate adaptations listed
 - [Entry gate](#entry-gate--three-tracks-two-gates) — the resource, contract, and session tracks
 - [Global dependency graph](#global-dependency-graph) · [Delivery sequence](#delivery-sequence)
@@ -35,7 +72,7 @@ Every leaf is sized for one test-first sitting and verifiable by one command. Th
 - [Wave F — Session](#wave-f--session): [CO-15](#co-15--persist-session-records) · [CO-16](#co-16--resume-with-reload-fidelity) · [CO-17](#co-17--assemble-the-codingsession-and-its-event-stream) · [CO-18](#co-18--price-the-run) · [CO-24](#co-24--wire-the-concrete-hooks-breakpoints-and-session-hooks)
 - [Wave G — Commands and frontend](#wave-g--commands-and-frontend): [CO-19](#co-19--implement-slash-commands) · [CO-20](#co-20--build-the-print-mode-frontend) · [CO-21](#co-21--build-the-composition-root)
 - [Wave H — Prove](#wave-h--prove): [CO-22](#co-22--run-the-end-to-end-deterministic-acceptance) · [CO-23](#co-23--publish-the-v1-completion-statement)
-- [Layer 3 completion checklist](#layer-3-completion-checklist)
+- [Completion checklist — the coding application](#completion-checklist--the-coding-application)
 - [Explicitly deferred until after v1](#explicitly-deferred-until-after-v1)
 - [Traceability spine](#traceability-spine)
 
@@ -43,13 +80,20 @@ Every leaf is sized for one test-first sitting and verifiable by one command. Th
 
 ## Layer boundary
 
-Settled by ADR 0004 as amended by ADR 0005. Layer 3 (`backend/agent/src/coding/`) may import Layers 1–2, the Go standard library, the OTel API, `net/http`, `otelslog` (permitted by [ADR 0005 § D3](../../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary)'s import table), and approved third-party TUI/TOML/tokenizer dependencies ([ADR 0005 § D1 row 3](../../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) — each new `go.mod` dependency still needs its ADR per `openspec/AGENTS.md` rule 5). It must not import `src/cmd/…`, any Go package of `database_administrator` or `workspace_syncer` (HTTP only, never an import), or the OTel SDK. The composition root (`src/cmd/cachicamas`, CO-21) is the sole exception: it may import everything, and nothing may import it.
+Settled by ADR 0004 as amended by ADR 0005. **These rules bind any application at this position**; `backend/agent/src/coding/` is where this one lives.
 
-**Layer 3 owns:** the six named ports of v2 § 5.1 (five table rows — the skill and prompt sources share one) and their v1 implementations; the built-in tools; the SKILL.md parser duplicate and its golden corpus (ADR 0006 § D4); the three-source skill/prompt chains with shadowing (ADR 0006 § D1–D3); project instructions and system-prompt assembly; the provider catalog and the credential-source seam; session persistence with parent chains; the coding session that wraps the harness and its extended event stream; pricing; slash commands; the print-mode frontend; the composition root.
+A Layer 3 application package may import Layers 1–2, the Go standard library, the OTel API, `net/http`, `otelslog` (permitted by [ADR 0005 § D3](../../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary)'s import table), and approved third-party TUI/TOML/tokenizer dependencies ([ADR 0005 § D1 row 3](../../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) — each new `go.mod` dependency still needs its ADR per `openspec/AGENTS.md` rule 5). It must not import `src/cmd/…`, any Go package of `database_administrator` or `workspace_syncer` (HTTP only, never an import), or the OTel SDK. **Its** composition root is the sole exception: it may import everything, and nothing may import it. For this application that root is `src/cmd/cachicamas` (CO-21); a second application would bring its own, and the rule is one root per application, not one root in the repository.
 
-**Layer 3 must not own:** the agent loop, harness internals, or any Layer 2 protocol (it injects policy, it does not re-implement mechanism); provider adapters or wire formats (Layer 1); environment reads or flag parsing anywhere except the composition root (v2 § 5.2: "Nothing below it reads the environment"); the OTel SDK anywhere except the composition root; writes to Postgres — the agent never writes back (ADR 0006 § D1).
+**Any Layer 3 application owns:** a port for every Layer 2 seam it fills, and their implementations; whatever tools it offers the model; whatever resources it feeds the system prompt; its session persistence and event enrichment; its frontend; its composition root. The obligations, not the list.
 
-One wording trap, recorded now: **"Layer 3 is where policy lives" does not make Layer 3 a second brain.** Every behavior in this document either implements a port Layer 2 consumes, supplies a resource, or consumes the event stream. A Layer 3 component that needs a capability the harness does not expose is a Layer 2 amendment (doc 0003, living-graph clause), never a workaround import or a parallel mechanism.
+**This application owns, concretely:** the six named ports of v2 § 5.1 (five table rows — the skill and prompt sources share one) and their v1 implementations; the built-in read/write/edit/bash tools; the SKILL.md parser duplicate and its golden corpus (ADR 0006 § D4); the three-source skill/prompt chains with shadowing (ADR 0006 § D1–D3); project instructions and system-prompt assembly; the provider catalog and the credential-source seam; session persistence with parent chains; the coding session that wraps the harness and its extended event stream; pricing; slash commands; the print-mode frontend; the composition root at `src/cmd/cachicamas`.
+
+**No Layer 3 application may own:** the agent loop, harness internals, or any Layer 2 protocol (it injects policy, it does not re-implement mechanism); provider adapters or wire formats (Layer 1); environment reads or flag parsing anywhere except its composition root (v2 § 5.2: "Nothing below it reads the environment"); the OTel SDK anywhere except that root; writes to Postgres — the agent never writes back (ADR 0006 § D1).
+
+Two wording traps, recorded now:
+
+- **"Layer 3 is where policy lives" does not license a second engine.** Every behavior in this document either implements a port Layer 2 consumes, supplies a resource, or consumes the event stream. A component that needs a capability the harness does not expose is a Layer 2 amendment (doc 0003, living-graph clause), never a workaround import, a forked harness, or a parallel mechanism. The runtime holds the mechanism precisely so that no application has to reinvent it — and an application that reinvents it has forfeited the portability the whole stack is paying for.
+- **"Layer 3" and "`cachicamas_coding`" are not synonyms, and this document is about the second.** When a milestone below says "the session", "the tools", "the frontend", it means *this application's*. Doc 0003's out-of-scope lines that hand something to "Layer 3" hand it to whichever application is running; this is the one that catches them first.
 
 ## Rules for every future SDD milestone
 
@@ -120,13 +164,13 @@ Parallelism worth exploiting: all of wave D runs beside Layer 2's development; C
 
 ## Wave A — Decide and scaffold
 
-### CO-00 — Record the Layer 3 contract vocabulary and v1 scope
+### CO-00 — Record the application's contract vocabulary and v1 scope
 
 SDD change: `cachicamas-coding-contract-vocabulary`.
 
 **Charter**
 
-- **Goal:** Fix the terms and the v1 scope so later milestones cite instead of re-deciding: what a *session* is (vs a run — one session holds many runs), a *session record*, a *frontend*, a *slash command* (session control, never sent to the model), a *skill in scope*, *shadowing*, *print mode*.
+- **Goal:** Fix the terms and the v1 scope so later milestones cite instead of re-deciding: what a *session* is (vs a run — one session holds many runs), a *session record*, a *frontend*, a *slash command* (session control, never sent to the model), a *skill in scope*, *shadowing*, *print mode* — and, before any of those, what an **application** is as distinct from the **layer** it occupies.
 - **Deliverable:** A recorded vocabulary artifact plus the v1 scope verdicts: print mode is the only v1 frontend (TUI deferred — v2 § 8's reasoning: a TUI written first acquires state the stream does not carry); MCP tool sources deferred (the ToolSource port is the seam); sandbox implementations deferred ("none" ships); the subagent tool deferred; session branching supported by the format, exposed by no UI.
 - **Acceptance:** Every deferred item cites the v2 § 8 non-goal or names its seam; every v1 item has milestones below; a mismatch is a bug fixed before this closes.
 - **Depends on:** AI-00; doc 0003 exists (vocabulary alignment). · **Blocks:** everything.
@@ -137,6 +181,7 @@ SDD change: `cachicamas-coding-contract-vocabulary`.
   1. Each term above has one observable definition, including the boundary cases: is a resumed session the same session (yes — same record, new process); is a slash command's effect recorded in the session (yes, as session metadata — it never enters the model transcript); is a shadowing event part of the agent stream or the session stream (the session stream — Layer 2 knows nothing of skills).
   2. The v1 scope verdicts are recorded with the non-goal/seam citations, and the transparency principle is adopted as a Layer 3 obligation: **everything the model will receive is enumerable from the session** (the spike's honest-sidebar rule, which print mode and any future TUI inherit).
   3. The session/run/turn vocabulary is checked against doc 0003's AG-00 artifact for conflicts; conflicts resolve here or amend there — never both silently.
+  4. **The layer/application distinction is recorded as a term, not as prose.** The artifact defines *the application layer* (a position with obligations) separately from *an application* (one occupant), states that `cachicamas_coding` is the first occupant and not the definition, and fixes the naming convention a second application would follow (`src/<app>/` with its own `src/cmd/<app>/` root). It also records the **reuse question as deliberately open**: which of this application's parts — session persistence, catalog, price table — could later be promoted to shared code is not decided in v1, and the artifact says so explicitly so that a later milestone neither assumes the promotion nor forecloses it. AG-00's runtime vocabulary is consumed here rather than restated: Layer 2 is the portable agent runtime, and no Layer 3 term may imply the application drives its mechanism.
 - **Depends on:** AI-00.
 
 ### CO-01 — Package scaffold and boundary guards
@@ -148,7 +193,7 @@ SDD change: `cachicamas-coding-package-scaffold`.
 - **Goal:** Create `backend/agent/src/coding/` with its boundaries mechanically guarded from birth.
 - **Deliverable:** The package and doc comment; the import guard; the no-environment guard.
 - **Acceptance:** `make test` green; both guards recorded biting.
-- **Depends on:** AI-00, CO-00. · **Blocks:** all Layer 3 code.
+- **Depends on:** AI-00, CO-00. · **Blocks:** all of this application's code.
 - **Out of scope:** the composition root package (CO-21 creates it — it has different rules).
 
 ```mermaid
@@ -800,14 +845,15 @@ SDD change: `cachicamas-coding-e2e-acceptance` · The AI-38 of the stack: everyt
 
 ### CO-23 — Publish the v1 completion statement
 
-SDD change: `cachicamas-coding-v1-statement` · The stack's exit.
+SDD change: `cachicamas-coding-v1-statement` · The stack's exit, proven by its first application.
 
 **Charter**
 
-- **Goal:** Declare v1 of the whole stack: what ships, what is frozen, what is deferred and where its seam is.
-- **Deliverable:** The statement; the walked checklists (this document's, and confirmation that docs 0002/0003's gates held); the deferred register with seams named.
+- **Goal:** Declare v1 of the whole stack: what ships, what is frozen, what is deferred and where its seam is — and, separately, what the first application taught the layers beneath it.
+- **Deliverable:** The statement; the walked checklists (this document's, and confirmation that docs 0002/0003's gates held); the deferred register with seams named; **the first-application report** (below).
 - **Acceptance:** Every checklist item below cites its closing node; every v2 § 8 non-goal is either still deferred with its seam named or has become scheduled follow-up work; the first-run experience is documented (install, credential setup by name, first prompt) and was executed as written on a clean environment (recorded).
 - **Depends on:** CO-22.
+- **Note — why this milestone carries an extra deliverable.** `cachicamas_coding` is the first program to stand on this architecture, so it is the first and only evidence that the seams are the right seams. That evidence is worth nothing unrecorded: the second application will otherwise rediscover every friction this one absorbed. The report is not a retrospective — it is input to whatever document plans application number two.
 
 #### CO-23.1 — The statement `[decision]`
 
@@ -815,11 +861,14 @@ SDD change: `cachicamas-coding-v1-statement` · The stack's exit.
   1. The completion checklist is walked, node-cited, all boxes held.
   2. The deferred register is republished with current seam locations (TUI, MCP, sandbox implementations, subagent tool, failover, session-branching UI, org cost aggregation, multimodal — each pointing at its seam and its owning future document).
   3. The documented first-run was performed on a clean environment and recorded; discrepancies were fixed in docs or code before close.
+  4. **The first-application report is written**, covering four questions with evidence rather than impression: (a) which Layer 2 seams were consumed as designed, and which needed a doc 0003 amendment while this application was built — each amendment cited; (b) which parts of this application are coding-specific and which are plainly application-generic, stated as a list rather than a feeling, so the promotion question CO-00.1 item 4 left open has data behind it; (c) any place this application was tempted to reach past a boundary, what it did instead, and what that cost; (d) whether AG-23's contract held without a coding-shaped assumption leaking into it. The report names no schedule and proposes no second application — it is evidence, and the decision that consumes it is somebody else's.
 - **Depends on:** CO-22.
 
 ---
 
-## Layer 3 completion checklist
+## Completion checklist — the coding application
+
+Scoped to `cachicamas_coding`. The boundary rows (first and last) are obligations any Layer 3 application inherits; the rest are this application's own commitments.
 
 - [ ] `src/coding/` exists with import and no-environment guards biting; SDK-and-env-only-in-root guarded module-wide.
 - [ ] All six named v2 § 5.1 ports exist with v1 implementations: static tool source (change-visible), permission policies with in-session memory, sandbox vocabulary with explicit "none", catalog-driven price table, skill and prompt chains.
@@ -842,6 +891,11 @@ SDD change: `cachicamas-coding-v1-statement` · The stack's exit.
 ## Explicitly deferred until after v1
 
 Per CO-00's verdicts and the deferrals this stack inherits (doc 0003's AG-02/AG-15.3 for failover; Layer 1's non-goal for multimodal; v2 § 8 for org cost aggregation; CO-21's charter for login flows) — each with its seam: the **TUI** (consumes the same session stream print mode proved sufficient); **MCP tool sources** (the tool source port); **sandbox implementations** (the CO-04 vocabulary; workspace-write first); the **subagent tool** (AG-19's proven substrate); **failover** (AG-15.3); **session branching UI** (the parent-chain format); **login flows / credential storage** (the credential-name seam); **org catalog authentication** (named prerequisite, ADR 0006); **multimodal content** (Layer 1 non-goal); **org-wide cost aggregation** (a `database_administrator` concern, v2 § 8).
+
+Two deferrals belong to the layer rather than to this application, and are recorded here because this is the only Layer 3 document that exists:
+
+- **A second Layer 3 application.** The architecture permits one and the layer boundary is written for the general case, but nothing schedules one and nothing in v1 should be shaped by a guess about what it would be. Its seam is the layer boundary itself, plus CO-23.1 item 4's first-application report — which is the evidence such a decision would be made on.
+- **Promoting any of this application's parts into shared Layer 3 code.** Session persistence, the provider catalog and the price table are the plausible candidates and are deliberately *not* generalized in v1. Generalizing from a single example produces an abstraction fitted to that example; the honest time to decide is when a second consumer exists. The seam is that these parts already sit behind their own ports and read nothing ambient, so promotion stays a move rather than a rewrite.
 
 ## Traceability spine
 

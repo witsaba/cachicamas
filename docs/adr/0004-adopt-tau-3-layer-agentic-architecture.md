@@ -12,6 +12,18 @@
 > project-instruction rows are further amended by
 > [ADR 0006](./0006-resolve-skill-and-prompt-source-of-truth.md). This document is kept
 > intact as the record of the 2026-07-17 decision.
+>
+> 📝 **Terminology amended** (2026-08-10) by
+> [the v2 architecture reference](../architecture/0001-cachicamas-agent-stack-v2.md), which is
+> the current vocabulary of record. **No decision in this ADR changed** — not the split, not the
+> loop/harness separation, not the dependency direction, not a location. Two names did:
+> **Layer 2 is "the portable agent runtime"**, not *the portable brain* — the metaphor implied
+> cognition the layer deliberately does not have, and this document's own text below reads
+> "brain" where it means the loop-plus-harness assembly; and **Layer 3 is "the application
+> layer"**, with `cachicamas_coding` as its **first application** rather than its definition —
+> a distinction this ADR already had right in the Decision section ("`cachicamas_coding` **is**
+> the application") and that later documents had collapsed. The 2026-07-17 wording is left
+> unedited below as the record of what was decided; read it with these two substitutions.
 
 ---
 

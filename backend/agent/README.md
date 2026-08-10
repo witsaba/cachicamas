@@ -1,8 +1,8 @@
 # `backend/agent`
 
 The cachicamas agent stack: a self-contained Go module that turns a language model
-into a coding agent. It owns the model adapter, the portable agent brain, and the
-coding application that drives them. It is a **library plus a CLI**, not a service —
+into a coding agent. It owns the model adapter, the portable agent runtime, and the
+first application that drives them. It is a **library plus a CLI**, not a service —
 it serves no HTTP traffic, owns no database, and is deployed by being run, not by
 being containerised.
 
@@ -17,18 +17,26 @@ cover the other half.
 Dependencies flow in exactly one direction, and only downward:
 
 ```
-src/cmd/cachicamas   composition root (package main) — the ONLY place policy meets
-        |            mechanism, and the only place allowed to install the OTel SDK
+src/cmd/cachicamas   this application's composition root (package main) — the ONLY
+        |            place policy meets mechanism, and the only place allowed to
+        |            install the OTel SDK
         v
-src/coding           Layer 3 — the coding application: slash commands, session
+src/coding           Layer 3, the application layer — occupied by the coding agent,
+        |            the FIRST application on this stack: slash commands, session
         |            persistence, skills, prompts, tools, permission policy
         v
-src/agent            Layer 2 — the portable brain: the stateless loop and the
-        |            stateful harness, connected by an event stream
+src/agent            Layer 2 — the portable agent runtime: the stateless loop and
+        |            the stateful harness, connected by an event stream
         v
 src/ai               Layer 1 — the model adapter: provider-neutral request and
                      stream contracts, plus one adapter per vendor
 ```
+
+**`src/coding` is one application, not the whole of Layer 3.** Layers 1 and 2 are
+each the whole of their layer; Layer 3 is a position, and the coding agent is the
+first program to occupy it. A second application would add a sibling `src/<app>/`
+with its own `src/cmd/<app>/` root, attach to the *same* `src/agent`, and change
+nothing below it — which is what "portable" in Layer 2's name is claiming.
 
 **Only `src/ai` exists today.** Layers 2 and 3 and the composition root are planned
 in [doc 0003](../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md)
