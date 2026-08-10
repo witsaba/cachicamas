@@ -25,7 +25,7 @@ import (
 //   - HTTP-Referer                 — when referer != ""
 //   - X-OpenRouter-Title            — when xTitle != ""
 //   - X-Title                       — when xTitle != "" (alias of
-//                                     X-OpenRouter-Title)
+//     X-OpenRouter-Title)
 //   - X-OpenRouter-Categories       — when xCategories != ""
 //
 // An empty attribution string suppresses its header (R-OR-02
@@ -85,6 +85,15 @@ func (rt attributionRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		body = overrideBodyModel(body, rt.modelOverride)
 		clonedReq.Body = io.NopCloser(bytes.NewReader(body))
 		clonedReq.ContentLength = int64(len(body))
+		// GetBody is what net/http calls — not Body — to transparently
+		// replay this request on a 307/308 redirect or an HTTP/2
+		// GOAWAY/stream-refused retry. Left pointing at the reader
+		// http.NewRequestWithContext built from the PRE-override bytes,
+		// a replay would silently resend the original model, so it is
+		// re-pointed at the overridden bytes alongside Body.
+		clonedReq.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(body)), nil
+		}
 	}
 
 	return rt.base.RoundTrip(clonedReq)

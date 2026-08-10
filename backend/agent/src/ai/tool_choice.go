@@ -320,3 +320,16 @@ func toolChoiceModeWithName(name string) ToolChoiceMode {
 	}
 	return 0
 }
+
+// String renders the choice for the %v and %s verbs, naming the mode only.
+// A named choice's tool name is withheld — the same R-AMR-017 line
+// Tool.String keeps (V-FAIL-13).
+func (c ToolChoice) String() string {
+	if c.mode == 0 {
+		return "toolchoice(unset)"
+	}
+	return "toolchoice(" + c.mode.String() + ")"
+}
+
+// GoString renders the choice for the %#v verb — same posture as String.
+func (c ToolChoice) GoString() string { return c.String() }

@@ -31,11 +31,11 @@
 // in this PR without one. This file closes that loop with
 // TestSentinelSweep_CatchesDeliberateLogfKeyMutation, which:
 //
-//   1. Builds a known-leaky log buffer (the literal substring
-//      "Bearer " + the secret prefix).
-//   2. Runs the scan over the buffer.
-//   3. Asserts the scan returns a non-nil error naming the leak
-//      vector.
+//  1. Builds a known-leaky log buffer (the literal substring
+//     "Bearer " + the secret prefix).
+//  2. Runs the scan over the buffer.
+//  3. Asserts the scan returns a non-nil error naming the leak
+//     vector.
 //
 // The bite-proof is structural: a regression that broke the scan
 // (returning nil for any input, or only returning the vector name
@@ -50,13 +50,16 @@
 // # TDD posture (work unit 3.2)
 //
 // RED  : the assertions below reference Scan, BuildDenyList, and
-//        DenyEntry, none of which exist yet — the file does not
-//        compile. The seven tests are the coverable surface; the
-//        bite-proof is the eighth.
+//
+//	DenyEntry, none of which exist yet — the file does not
+//	compile. The seven tests are the coverable surface; the
+//	bite-proof is the eighth.
+//
 // GREEN: sentinel_sweep.go lands with the three exports plus the
-//        runtime needle construction. All eight tests pass. The
-//        scan's error message never reproduces the credential once
-//        the helper is in place.
+//
+//	runtime needle construction. All eight tests pass. The
+//	scan's error message never reproduces the credential once
+//	the helper is in place.
 //
 // credential-scan:deliberate-plant — plants three OpenAI-style/bearer
 // secret-shaped literals ("Bearer sk-aa-bb-cc-dd-ee-ff-gg",
@@ -271,11 +274,11 @@ func TestSentinelSweep_EmptyCaptured_ReportsNoLeak(t *testing.T) {
 //
 // The bite-proof is structural:
 //
-//   1. Stage a known-leaky log buffer with the literal
-//      "Bearer " + the credential prefix — the regression.
-//   2. Run the scan over the buffer.
-//   3. Assert the scan returns a non-nil error naming the
-//      leak vector.
+//  1. Stage a known-leaky log buffer with the literal
+//     "Bearer " + the credential prefix — the regression.
+//  2. Run the scan over the buffer.
+//  3. Assert the scan returns a non-nil error naming the
+//     leak vector.
 //
 // A regression that disabled the scan (returned nil for any
 // input) would turn the assertion into a false negative — the

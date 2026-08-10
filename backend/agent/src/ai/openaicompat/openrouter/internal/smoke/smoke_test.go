@@ -42,16 +42,19 @@
 // # TDD posture (work unit 3.1)
 //
 // RED  : the assertions below reference decideLiveSmoke, a helper
-//        that does not exist yet — the _test.go file does not
-//        compile under `make test`. The gate-decision tests
-//        (TestLiveSmokeGate_*) are the coverable surface; the
-//        live test itself is the integration surface that proves
-//        the gate is observable without making a real call when
-//        the env vars are absent.
+//
+//	that does not exist yet — the _test.go file does not
+//	compile under `make test`. The gate-decision tests
+//	(TestLiveSmokeGate_*) are the coverable surface; the
+//	live test itself is the integration surface that proves
+//	the gate is observable without making a real call when
+//	the env vars are absent.
+//
 // GREEN: decideLiveSmoke + the live test body land together. The
-//        gate-decision tests pass; the live test reports SKIP
-//        under `make test` (no env vars) and asserts the stream
-//        produced at least one chunk when both env vars are set.
+//
+//	gate-decision tests pass; the live test reports SKIP
+//	under `make test` (no env vars) and asserts the stream
+//	produced at least one chunk when both env vars are set.
 //
 // credential-scan:deliberate-plant — plants "sk-prove-stages-of-gate-are-not-collapsed"
 // to prove the live smoke's two-stage gate (key first, then run-flag) does

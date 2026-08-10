@@ -51,7 +51,7 @@ and [§ D3](../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observa
 
 | Package | May import | Must not import |
 | --- | --- | --- |
-| `src/ai` (Layer 1) | Go stdlib; `net/http`; vendor model SDKs; OpenTelemetry **API** | the sibling layers; any package of another backend module; OTel **SDK**, exporters, `otelslog` |
+| `src/ai` (Layer 1) | Go stdlib; `net/http`; vendor model SDKs *(ADR-permitted in principle; **none admitted today** — AI-24 chose raw `net/http`, and the deny-by-default allowlist admits no SDK until one is deliberately added)*; OpenTelemetry **API** | the sibling layers; any package of another backend module; OTel **SDK**, exporters, `otelslog` |
 | `src/agent` (Layer 2) | Layer 1; Go stdlib; OTel API | Layer 3; `cmd`; another module; OTel SDK; the environment; the filesystem; `net/http` |
 | `src/coding` (Layer 3) | Layers 1–2; Go stdlib; OTel API; `net/http`; third-party TUI/TOML/tokenizer deps | `cmd`; **any** Go package of another backend module — it may call them over HTTP, never import them; OTel SDK |
 | `src/cmd/cachicamas` | everything above, plus the OTel SDK and exporters | — it is `package main`, so nothing *can* import it |
@@ -61,17 +61,22 @@ SDK no.** The API modules are dependency-light and are no-ops until a provider i
 registered, so an unwired Layer 1 costs nothing at runtime. The SDK and its
 exporters are process-lifecycle concerns and belong to a composition root.
 
-**The module currently has zero dependencies**, and `go.mod` carries no `require`
-at all. That is a checked property, not an accident: the forward guard is
-deny-by-default, so a dependency that nobody thought to forbid by name still fails.
-Two milestones may change it — one selecting a transport, one adding the OTel API —
-and each needs its own ADR.
+**The module's dependency set is exactly the OpenTelemetry API** — 2 direct
+`require`s (`go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/trace`) plus 1
+indirect (`github.com/cespare/xxhash/v2`), added by AI-37 under ADR 0005 § D3.
+The two milestones this paragraph once said *may* add a dependency have both
+resolved: AI-24 selected raw `net/http` (standard library, zero requires) and
+AI-37 added the OTel API. That the set grows no further is a checked property,
+not an accident: the forward guard is deny-by-default AND pins the exact
+require-set and package closure by set equality
+(`TestLayer1_DependencySet_ExactRequiresAndClosure`), so a dependency nobody
+thought to forbid by name still fails.
 
 ## Layout
 
 ```
 backend/agent/
-├── go.mod              zero requires; no go.sum
+├── go.mod              2 requires (OTel API) + 1 indirect; go.sum committed
 ├── Makefile            copied from database_administrator; see the note below
 ├── .golangci.yml       byte-identical to database_administrator's
 ├── README.md

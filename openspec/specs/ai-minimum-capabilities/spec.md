@@ -18,7 +18,9 @@
 
 Fix, for Layer 1 v1: which behaviors every conformant adapter must exhibit, which an adapter may lack while remaining fully conformant, which are excluded from the neutral vocabulary altogether, how an optional capability is advertised and asked for without ever widening the core provider contract, and the shape of the record that states what a run observed.
 
-Three closed lists — five required, three optional, four excluded — a discovery mechanism, a marking rule, and a capability record with a closed four-value outcome set in which **absent** and **not exercised** are different values.
+Three closed lists — five required, ~~three~~ **four** optional, four excluded — a discovery mechanism, a marking rule, and a capability record with a closed four-value outcome set in which **absent** and **not exercised** are different values.
+
+> **Amended 2026-08-10 — the fourth optional capability, recorded in its owning list.** AI-35 introduced `CAP-O-04` (**auto-retry of retryable pre-stream failures**, `CapRetry`) and amended the conformance suite (`R-CNF-019`), the OpenRouter capability record and the adapter-conformance run — but never this document, which is the exact path § 13 rule 1 forbids: *"A fourth optional capability arrives by amendment to **this document** … never by a downstream milestone deciding locally."* The omission was found by the 2026-08-10 whole-layer re-verification: anyone applying § 11's marking rule from this document alone marked `CapRetry` required, disagreeing with the shipped suite. This amendment back-fills the owning list. `CAP-O-04` is optional because auto-retry is adapter policy, not a wire behavior every vendor can exhibit: an adapter that issues each request exactly once is fully conformant, declares nothing, and records `absent`; Layer 1 never substitutes for the absence (§ 13 rule 4). Every "three optional" / "all three" count below predates this amendment; § 11's marking biconditional now ranges over `CAP-O-01` … `CAP-O-04`.
 
 ## Status — this file is the live home of the contract
 
@@ -79,6 +81,7 @@ The matrix, before any argument, for the reader who came for one row.
 | `CAP-O-01` | **reasoning content** | Providers differ irreconcilably in what they emit, and a consumer that receives none loses nothing it needs for correctness |
 | `CAP-O-02` | **token counting** | A required count forces an adapter whose vendor has none either to fail conformance or to fabricate — and a fabricated count corrupts a compaction decision **silently**, where an absent one degrades to a **visible** estimate |
 | `CAP-O-03` | **honoring cache-boundary markers** | Markers are advisory by contract; an adapter for an auto-caching provider is conformant while ignoring every one of them |
+| `CAP-O-04` | **auto-retry of retryable pre-stream failures** *(added 2026-08-10; introduced by AI-35)* | Retry is adapter policy, not a wire behavior: a required auto-retry would impose one backoff discipline on every vendor. An adapter claiming it MUST honor the full AI-35 contract (bounded attempts, retry-after, byte-identical replay, per-attempt drain — `R-AIS-041`…`044`, `R-CNF-019`); an adapter that issues each request exactly once is fully conformant and declares nothing |
 
 ### Excluded for v1 — not a capability at all, in either list
 
@@ -598,7 +601,7 @@ AI-03.1's five items, each against this contract, as verified at merge.
 
 **Register amendment.** Three nouns were appended to the vocabulary register by AI-03.1, under its § 9 rule 2: `V-PRV-16` **capability**, `V-PRV-17` **token counting** and `V-PRV-18` **capability outcome**, all owned by AI-03, all taking the next free `V-PRV` ordinals, under a dated amendment blockquote. No existing row was renumbered, reworded or removed. Each definition defers its substance to AI-03 by name, so the register still settles words rather than behavior (register § 9 rule 5). None of the three is defined here; all three are cited by identifier. One of them, `V-PRV-16`, closes a gap the register identified in its own § 7 preamble, which names five terms AI-03's charter is not writable without against a table that delivered four.
 
-**Milestone acceptance, as stated in doc 0002 and checked at merge:** *"AI-23's suite can mark each case required or optional from this list alone; a provider lacking an optional capability is fully conformant and records 'absent' rather than skipping silently."* The first clause is § 11. The second is § 6's opening statement — a provider lacking all three optional capabilities is fully conformant — together with § 10's outcome set, in which `absent` is a legal conformant outcome and `not exercised` is a different value that no record may use in its place.
+**Milestone acceptance, as stated in doc 0002 and checked at merge:** *"AI-23's suite can mark each case required or optional from this list alone; a provider lacking an optional capability is fully conformant and records 'absent' rather than skipping silently."* The first clause is § 11. The second is § 6's opening statement — a provider lacking ~~all three~~ **all four** optional capabilities is fully conformant (the fourth per the 2026-08-10 amendment) — together with § 10's outcome set, in which `absent` is a legal conformant outcome and `not exercised` is a different value that no record may use in its place.
 
 **Unblocked by this contract:** AI-20 (node AI-20.5), AI-23 (the conformance suite), AI-24 (the first provider and transport) — and, through them, AI-29.0, AI-37, AI-38 and AI-40. Wave 1 (AI-04 … AI-13) depends on nothing decided here.
 

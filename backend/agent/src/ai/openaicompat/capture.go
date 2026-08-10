@@ -114,11 +114,15 @@ func captureBody(rc io.ReadCloser) capturedBody {
 		data = probe
 	}
 
-	// Drain the unread remainder (slow-loris guard, S-AEM-059) before
-	// the deferred Close fires. The drain is silent — any error from
-	// io.Copy is the network's problem, not a capture-level concern;
-	// the structural invariants we care about (closed exactly once,
-	// drained to EOF) are observable independently.
+	// Drain the unread remainder IN FULL (S-AEM-059's multi-megabyte
+	// scenario is canonical) before the deferred Close fires. The drain
+	// is silent — any error is the network's problem, not a capture-level
+	// concern. Deliberately NOT byte-bounded like run()'s post-terminal
+	// drain (drainBodyLimit, stream.go): this drain runs pre-handover,
+	// while the caller is still blocked inside Stream() holding the
+	// context — a flooding server is recoverable by the caller's own
+	// cancel, unlike run()'s post-[DONE] drain, which no correct caller
+	// has any reason to cancel.
 	_, _ = io.Copy(io.Discard, rc)
 
 	return capturedBody{data: data}

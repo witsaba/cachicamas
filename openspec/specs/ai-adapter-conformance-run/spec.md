@@ -1,7 +1,7 @@
 # Spec — the deterministic adapter conformance run
 
 > **Milestone**: AI-38 — Run full deterministic adapter conformance (doc 0002) · **Wave**: 6 — Hand off
-> **Introduced by**: `openspec/changes/archive/2026-08-09-cachicamas-ai-adapter-conformance/` · PR **#140** (**open — not yet merged** at the time this spec was promoted; branch `feat/ai-38-adapter-conformance`, HEAD `135b5105`, 16 commits over `origin/main@033baa67`)
+> **Introduced by**: `openspec/changes/archive/2026-08-09-cachicamas-ai-adapter-conformance/` · PR **#140** (open at the time this spec was promoted; branch `feat/ai-38-adapter-conformance`, HEAD `135b5105`, 16 commits over `origin/main@033baa67`) — **merged as `5bc2da4e`** *(back-annotated 2026-08-10, the honest edit this file's own Status section promised)*
 > **Status**: **live** — this file carries the contract; later milestones cite it and amend it
 > **Capability**: `ai-adapter-conformance-run` (new capability, full spec at creation — no MODIFIED/REMOVED/RENAMED)
 > **Project**: cachicamas (witsaba) · **Target package**: `backend/agent/src/agenttest/`, `backend/agent/src/ai/openaicompat/openrouter/`
@@ -19,7 +19,7 @@
 
 The archived change folder at [`openspec/changes/archive/2026-08-09-cachicamas-ai-adapter-conformance/`](../../changes/archive/2026-08-09-cachicamas-ai-adapter-conformance/) is the historical record of how AI-38 was explored, proposed, designed, applied and verified — including the RED-baseline evidence (five failing case families, not the three `t.Skip` drivers originally suspected) that grounded the design's cancellation and dialect-collapse decisions, and the two remediation rounds `sdd-verify` required before its final PASS (14/14 requirements, 47/47 scenarios).
 
-**PR status at promotion time.** Following the precedent recorded in `openspec/changes/archive/WAVE-1-ARCHIVE.md`: PR **#140** is **open, not merged**, at the moment this spec was promoted to canonical. The merge is owed by the maintainer, not by this archive step. When PR #140 merges, the honest edit is to append the merge commit to the line above; nothing else about this spec changes.
+**PR status at promotion time.** Following the precedent recorded in `openspec/changes/archive/WAVE-1-ARCHIVE.md`: PR **#140** is **open, not merged**, at the moment this spec was promoted to canonical. The merge is owed by the maintainer, not by this archive step. When PR #140 merges, the honest edit is to append the merge commit to the line above; nothing else about this spec changes. **Done 2026-08-10: merged as `5bc2da4e`** — the merge commit is appended to the `Introduced by` line above, exactly as promised here.
 
 ## Purpose
 

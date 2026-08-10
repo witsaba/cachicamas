@@ -83,9 +83,39 @@ func TestErrorEvent_EnvelopeInvariants_MatchAI14(t *testing.T) {
 	t.Run("the kind is derived from the payload, never supplied separately (S-AIP-004)", func(t *testing.T) {
 		t.Parallel()
 
-		event := mustErrorEvent(t, mustPreStreamFailure(t, ai.FailureCategoryRateLimit))
+		event := mustErrorEvent(t, mustMidStreamFailure(t, ai.FailureCategoryRateLimit, false))
 		if got := event.Kind(); got != ai.EventKindError {
 			t.Errorf("event.Kind() = %v, want ai.EventKindError", got)
+		}
+	})
+
+	t.Run("a pre-stream-delivery payload is rejected with ErrMisplaced at payload", func(t *testing.T) {
+		t.Parallel()
+
+		// A *Failure whose Delivery() is DeliveryPreStream was returned
+		// directly from Stream — it never crossed a carrier. Wrapping it
+		// as the stream's terminal event would produce an event whose own
+		// payload reports the wrong delivery path, so the contradictory
+		// combination is unconstructible here, not merely undocumented —
+		// the same posture R-AIP-010's fourth cell already takes.
+		pre := mustPreStreamFailure(t, ai.FailureCategoryTimeout)
+		event, err := ai.ErrorEvent(pre)
+		if err == nil {
+			t.Fatal("ai.ErrorEvent(pre-stream failure) = nil error, want a rejection — " +
+				"the wrapped event's Delivery() would contradict its own carrier")
+		}
+		if !errors.Is(err, ai.ErrMisplaced) {
+			t.Errorf("errors.Is(err, ai.ErrMisplaced) = false, want true; err = %v", err)
+		}
+		var violation *ai.Violation
+		if !errors.As(err, &violation) {
+			t.Fatalf("errors.As(err, &violation) = false, want true; err = %v", err)
+		}
+		if got, want := violation.Path().String(), "payload"; got != want {
+			t.Errorf("violation position = %q, want %q", got, want)
+		}
+		if event != (ai.Event{}) {
+			t.Error("ai.ErrorEvent(pre-stream failure) returned a non-zero Event alongside its rejection")
 		}
 	})
 
@@ -136,7 +166,7 @@ func TestErrorEvent_EnvelopeInvariants_MatchAI14(t *testing.T) {
 		t.Parallel()
 
 		var s ai.Stamper
-		failed := mustErrorEvent(t, mustPreStreamFailure(t, ai.FailureCategoryTimeout))
+		failed := mustErrorEvent(t, mustMidStreamFailure(t, ai.FailureCategoryTimeout, false))
 		after, err := ai.NewResponseStart("resp_ai19_01", "model-x")
 		if err != nil {
 			t.Fatalf("ai.NewResponseStart returned %v, want no failure", err)
@@ -161,7 +191,7 @@ func TestErrorEvent_TerminalExclusivity_NeverBothCompletionAndError(t *testing.T
 	t.Run("an error event carries no completion payload, and a completion event carries no error payload (S-AIP-007)", func(t *testing.T) {
 		t.Parallel()
 
-		errorEvent := mustErrorEvent(t, mustPreStreamFailure(t, ai.FailureCategoryTimeout))
+		errorEvent := mustErrorEvent(t, mustMidStreamFailure(t, ai.FailureCategoryTimeout, false))
 		if c, ok := errorEvent.Completion(); ok {
 			t.Errorf("errorEvent.Completion() = (%+v, true), want ok=false on an event of another kind", c)
 		}
@@ -231,7 +261,7 @@ func TestErrorEvent_TerminalExclusivity_NeverBothCompletionAndError(t *testing.T
 	t.Run("an error event and a completion event never report the same Kind() (S-AIP-009)", func(t *testing.T) {
 		t.Parallel()
 
-		errEvent := mustErrorEvent(t, mustPreStreamFailure(t, ai.FailureCategoryTimeout))
+		errEvent := mustErrorEvent(t, mustMidStreamFailure(t, ai.FailureCategoryTimeout, false))
 		completionEvent, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
 		if err != nil {
 			t.Fatalf("ai.NewCompletion returned %v, want no failure", err)

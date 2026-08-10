@@ -70,7 +70,7 @@ func diffWitnessEvents(t *testing.T) map[ai.EventKind]ai.Event {
 	mustNoDiffErr(t, err)
 	out[ai.EventKindToolCallEnd] = toolEnd
 
-	failure, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout})
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout}, false)
 	mustNoDiffErr(t, err)
 	errorEvent, err := ai.ErrorEvent(failure)
 	mustNoDiffErr(t, err)
@@ -493,7 +493,7 @@ func TestRequireSameEvents_BoundHoldsForEveryEventKind(t *testing.T) {
 			return ev
 		}},
 		{"Error/RawLabel", func(t *testing.T) ai.Event {
-			f, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: sentinel})
+			f, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnknown, RawLabel: sentinel}, false)
 			mustNoDiffErr(t, err)
 			ev, err := ai.ErrorEvent(f)
 			mustNoDiffErr(t, err)

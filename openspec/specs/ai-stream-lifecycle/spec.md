@@ -25,7 +25,7 @@ Five questions, five answers, and the argument for each. What the container *car
 
 - **This file states the contract.** AI-14, AI-19, AI-20, AI-21, AI-22, AI-23, AI-33, AI-34, AI-35 and AI-40 cite it. § 10 tells each of them what it inherits, in its own terms.
 - **The archived `decision.md` is the historical record of how the contract was decided** — the same five decisions as they stood at merge, with AI-02.1's closing-checklist verification. It is immutable. It is at [`openspec/changes/archive/2026-07-31-cachicamas-ai-stream-lifecycle/decision.md`](../../changes/archive/2026-07-31-cachicamas-ai-stream-lifecycle/decision.md).
-- **One clause here is explicitly awaiting evidence.** § 6's starting buffer capacity of **64** is a hypothesis, not a measurement, and AI-34.1's charter is to confirm or change it *with measurements*. That is an amendment to this file, not a new artifact — which is precisely why the contract could not be frozen in the archive.
+- **One clause here is explicitly awaiting evidence.** § 6's starting buffer capacity of **64** is a hypothesis, not a measurement, and AI-34.1's charter is to confirm or change it *with measurements*. That is an amendment to this file, not a new artifact — which is precisely why the contract could not be frozen in the archive. **Resolved 2026-08-07 (AI-34.1): measured, and changed to `0`** — § 6's amended body carries the measured value and the `decision.md` citation; this bullet stays as the record of why the file stayed live. *(Reconciled 2026-08-10: the summary table below and the § 6 rationale prose are annotated to match — the hypothesis's own "why 64" argument is historical, not the standing decision.)*
 
 ### How to amend this contract
 
@@ -64,7 +64,7 @@ Five conclusions, before any argument, for the reader who came for one of them.
 | 1 | **Carrier** (`V-STR-02`) | A **receive-only channel** at the package boundary. Iterator ergonomics are delegated to AI-22.5 as a `V-STR-22` **carrier view**. doc 0002 needs no amendment nodes |
 | 2 | **Ownership** (`V-STR-05`) | **One sending goroutine, one closing site, every exit path, after the last send attempt.** Nothing else closes |
 | 3 | **Cancellation** (`V-STR-06`, `V-STR-07`) | Caller-owned signal; every send waits on it; bounded close. The legal consumer endings are **drain to close** and **cancel**. Anything else is **abandonment** — a documented contract violation, stated in the package contract because it cannot be tested to termination |
-| 4 | **Buffering** (`V-STR-08`, `V-STR-09`, `V-STR-23`) | Bounded, **starting capacity 64**, falsifiable at AI-34.1. Backpressure is waiting, never dropping. Exactly one sanctioned loss path: cancellation with a saturated buffer drops late events and closes without a terminal |
+| 4 | **Buffering** (`V-STR-08`, `V-STR-09`, `V-STR-23`) | Bounded, ~~starting capacity 64~~ **capacity `0` — measured and fixed by AI-34.1** (amended 2026-08-10 in this summary; § 6's body already carried it since 2026-08-07). Backpressure is waiting, never dropping. Exactly one sanctioned loss path: cancellation with a saturated buffer drops late events and closes without a terminal |
 | 5 | **Failure delivery** (`V-FAIL-11`, `V-FAIL-12`) | The boundary is **the handover of the carrier**, not the first event. Before it, the failure is returned directly and no stream and no producer exist. After it, every failure arrives as the terminal error event |
 
 ---
@@ -210,6 +210,8 @@ AI-20.1 (documentation), AI-20.3 (proof), AI-21 (the fake obeys it), AI-24 onwar
 ### R-AIS-033 (added 2026-08-07) — Body lifecycle: drain-before-close on every exit path
 
 > **Behavior.** When a stream ends for any reason — completion, terminal error, or any cancellation moment — the underlying transport connection MUST be cleanly released: the response body MUST be drained (any unread bytes discarded) before the producer's close fires. The drain MUST be part of the producer's existing single-defer ownership (no second closing site, no second goroutine — `R-ATS-003`). The drain MUST be silent — any error is the network's concern, not a Layer 1 contract concern. The drain MUST complete before the close returns.
+>
+> **Amended 2026-08-10 — the producer's drain is byte-bounded.** Unbounded, the drain converts a server that keeps writing after the terminal sentinel into an indefinite hold on the producer's unwind — on exactly the stream whose context a correct consumer never cancels, because from its vantage the stream completed normally — and the carrier's close never fires. The producer's drain therefore consumes at most a fixed byte bound; within it the connection is fully drained and returned to the pool (S-1/S-2 unchanged for every realistic remainder), past it the body is closed undrained and the transport discards the connection — a bounded close is worth strictly more than a reused one. The bound applies to the producer's own drain only: the pre-handover failure-capture drain stays full (its canonical multi-megabyte scenario in `ai-provider-error-mapping` is unchanged), because there the caller is still blocked inside the call, holding the context, and can cancel out of a flood. Found and proven by the 2026-08-10 whole-layer re-verification's flood test.
 
 #### Scenario: R-AIS-033 / S-1 — Drain fires on normal completion *(pin: `R-CNF-005`, `R-CNF-009`)*
 - **GIVEN** a transport that delivers more bytes than the consumer reads before the terminal event lands
@@ -322,6 +324,8 @@ AI-20.1, AI-20.2 (a context already cancelled at call time — see § 7), AI-20.
 ### R-AIS-036 (added 2026-08-07) — Truly-abandoned consumer + cancellation drops cleanly with no terminal invented
 
 > **Behavior.** Pinned to the conformance assertion for the abandoned-then-cancelled path (verbatim wording). When the consumer has stopped reading, the producer is blocked mid-send, and the context is cancelled, the stream MUST close bare — no terminal event of any kind observed, no undelivered event forced through, no goroutine leak. The bounded-wait cap on the typed terminal IS the bounded close; the abandonment is what makes the bounded-wait terminal fail to land.
+>
+> **Amended 2026-08-10 — the pin's source moved, and this requirement moves with it.** `R-CNF-012` — the conformance assertion the paragraph above quotes "verbatim" — was MODIFIED in place by AI-38: it now admits **either** a bare close **or** exactly one cancellation-category terminal (a consumer racing `select`'s no-case-priority can legally observe the terminal land), while still rejecting a `Completion`, a second terminal, any other category, and anything after the terminal. The quoted "no terminal event of any kind" is therefore the pre-AI-38 wording, kept above as the historical pin; the binding admission is `R-CNF-012`'s current text. For a TRULY abandoned consumer nothing drains the carrier, so the bare close remains the expected observation — the widening only legalises the race a drain-again consumer can win. Found by the 2026-08-10 whole-layer re-verification; `a_i-33_3_test.go`'s header quote carries the same annotation.
 
 #### Scenario: R-AIS-036 / S-1 — Text stream, truly abandoned, then cancel *(pin: `R-CNF-012`, `R-STK-029`)*
 - **GIVEN** a server serving a text transcript
@@ -405,6 +409,8 @@ Three corollaries, each stated because each is a place a reader goes wrong:
 An unbounded buffer converts backpressure into memory growth (`V-STR-08`) — silently, and worst under exactly the conditions where memory is already tight. Boundedness has to be a contract rather than an implementation choice, because an implementation choice is reversible by one well-meaning change.
 
 ### Why 64
+
+> **Historical (annotated 2026-08-10).** This section argued the pre-measurement hypothesis, including the case *against* zero. AI-34.1's M1/M2/M3 measurements against realistic workloads answered it the other way: the measured decision is **capacity `0`** (the amended clause later in this file, with the archived `decision.md`). The section is kept as the record of the reasoning the measurement displaced — it is not the standing rationale.
 
 The buffer's job is to absorb a burst on the order of **one streamed block** (`V-STR-14`), so that a consumer's brief per-block work never reaches the transport read. A run of streamed text arrives as tens of deltas (`V-STR-16`), bracketed by a start and an end event, with metadata interleaved. 64 covers a typical block with headroom. It is a power of two so that no reader mistakes it for a measured figure — it is not one, and § "What would change it" says so.
 
@@ -661,7 +667,7 @@ This requirement carries **no production-code obligation** beyond the documentat
               PRE-STREAM (V-FAIL-11)                    ── HANDOVER ──────────────
               failure returned directly                 carrier handed to caller
               no stream, no producer,                    one producer goroutine
-              no goroutine                               bounded buffer, capacity 64
+              no goroutine                               bounded buffer, capacity 0
                                                                      │
                                           ┌──────────────────────────┼──────────────────────────┐
                                           ▼                          ▼                          ▼

@@ -1,9 +1,10 @@
 // AI-00.2 — the external-consumer compile proof.
 //
-// This file is deliberately a compile proof and nothing more. Package ai exports
-// no declaration yet, so there is no behavior available to assert; what is worth
-// proving today is that the Layer 1 package is importable, by its full module
-// path, from a package that is not itself part of it.
+// This file is deliberately a compile proof and nothing more. When it was
+// written package ai exported no declaration, so there was no behavior to
+// assert; the package has long since grown its full surface, but this file's
+// job is unchanged: prove the Layer 1 package is importable, by its full
+// module path, from a package that is not itself part of it.
 //
 // That is not a tautology. It fails if the module path in go.mod disagrees with
 // the directory layout, if src/agenttest stops being a direct sibling of src/ai,

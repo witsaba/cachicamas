@@ -379,6 +379,7 @@ func TestAI33_5_DrainBeforeClose_OnCompletionPath_Text(t *testing.T) {
 			got)
 	}
 }
+
 // R-AIS-033 / S-1 on the tool-call stream kind (charter line 1989):
 // the same connection-reuse proof, with a tool-call transcript. The
 // tool-call accumulation path runs end-to-end, then the producer hits

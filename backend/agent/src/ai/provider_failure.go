@@ -628,15 +628,25 @@ func MidStreamFailure(r FailureReport, outputPreceded bool) (*Failure, error) {
 //
 // A nil f is rejected with [ErrEmpty] at "payload", the same AI-04 sentinel
 // every other Layer 1 constructor reports an absent required value with. A
-// non-nil f was already validated by [PreStreamFailure] or
-// [MidStreamFailure] — the only doors that produce one — so this function
-// re-checks nothing about its fields; [CheckEmit] is the "again" pass every
-// registered kind receives (R-AEE-010), not a second call here. On failure
-// the zero [Event] is returned. The returned event is unstamped (sequence
-// 0); stamping is a [Stamper]'s job, per-stream, at the producer boundary.
+// pre-stream-delivery f is rejected with [ErrMisplaced] at "payload": a
+// failure whose [Failure.Delivery] reports [DeliveryPreStream] was returned
+// directly from Stream and never crossed a carrier, so wrapping it as the
+// stream's terminal event would produce an event whose own payload
+// contradicts the carrier it arrived on — the contradictory combination is
+// unconstructible, not merely undocumented, the same posture
+// [PreStreamFailure] already takes for R-AIP-010's fourth cell. A non-nil,
+// mid-stream f was already validated by [MidStreamFailure] — so this
+// function re-checks nothing else about its fields; [CheckEmit] is the
+// "again" pass every registered kind receives (R-AEE-010), not a second
+// call here. On failure the zero [Event] is returned. The returned event is
+// unstamped (sequence 0); stamping is a [Stamper]'s job, per-stream, at the
+// producer boundary.
 func ErrorEvent(f *Failure) (Event, error) {
 	if f == nil {
 		return Event{}, Invalid(ErrEmpty, At("payload"))
+	}
+	if f.delivery != DeliveryMidStream {
+		return Event{}, Invalid(ErrMisplaced, At("payload"))
 	}
 	return Event{payload: f}, nil
 }

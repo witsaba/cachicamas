@@ -1,6 +1,6 @@
 # Spec — the opt-in live smoke test
 
-> **Introduced by**: `cachicamas-ai-live-smoke` (AI-39, Wave 6 — Hand off)
+> **Introduced by**: `cachicamas-ai-live-smoke` (AI-39, Wave 6 — Hand off) · PR **#142**, merged as `b062be74` *(merge provenance added 2026-08-10)*
 > **Status**: live
 > **Capability**: `ai-live-smoke` (**new** — full spec, no MODIFIED/REMOVED/RENAMED)
 > **Requirement IDs**: `R-LSM-0NN` · **Scenario IDs**: `S-LSM-0NN` (both prefixes verified free across `openspec/specs/` and `openspec/changes/`)

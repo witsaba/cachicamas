@@ -125,7 +125,7 @@ func aI34DripFrames(transcript string) []string {
 // is proven against the tool-call producer shape as well.
 func TestAI34_2_CarrierCapacityMatchesConstant(t *testing.T) {
 	cases := []struct {
-		name      string
+		name       string
 		transcript string
 		request    func(t *testing.T) ai.Request
 	}{

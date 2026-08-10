@@ -1,4 +1,9 @@
-// AI-23.2 amendment — the mandated response lifecycle (R-CNF-019…R-CNF-021):
+// AI-23.2 amendment — the mandated response lifecycle (R-CNF-019…R-CNF-021
+// in the ARCHIVED amendment's numbering — see the identifier note in
+// openspec/specs/ai-provider-conformance-suite/spec.md: these three were
+// never promoted into the canonical file, whose own R-CNF-019 is AI-35's
+// unrelated CapRetry requirement; this file's citations keep the archived
+// numbering deliberately, pending the recorded restore):
 // every started-response conformance case must open its drained window with
 // the lifecycle prefix carrying the case's own scripted identity, and every
 // exact count this amendment introduces is derived from its own amended

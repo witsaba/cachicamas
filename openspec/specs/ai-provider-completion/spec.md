@@ -317,7 +317,7 @@ real-adapter bridge's `writeTerminalChunk` renders `reason.String()` straight on
 emit `"refusal"`, `"pause_turn"` and `"unknown"` — all correctly rejected by the strict gate of R-ACP-003 — and
 `finish_reason/all_seven_values_reachable_drift_guarded` would fail against the real adapter. The obligation
 MUST be recorded against **AI-38.2**'s expected-versus-generated capability report, where declared-capability
-standing is decided. Consistent with `R-CNF-023`: a scoped run is never full-conformance evidence.
+standing is decided. Consistent with ~~`R-CNF-023`~~ **`R-CNF-028`** *(citation corrected 2026-08-10: `R-CNF-023` — archived-amendment numbering — is "a capability-scoped entry point exists"; the scoped-run-is-never-evidence rule is the canonical `R-CNF-028`, promoted 2026-08-09 by AI-38)*: a scoped run is never full-conformance evidence.
 
 #### Scenarios
 

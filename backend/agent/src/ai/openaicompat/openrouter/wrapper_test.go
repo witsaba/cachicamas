@@ -24,8 +24,8 @@ import (
 // are exactly what the wrapper handed downstream — including any
 // model override and attribution-header injection.
 type captureTransport struct {
-	mu          sync.Mutex
-	captured    *http.Request
+	mu           sync.Mutex
+	captured     *http.Request
 	capturedBody []byte
 }
 
