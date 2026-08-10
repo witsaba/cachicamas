@@ -27,8 +27,8 @@ testing:
     Engram #2055 names backend/database_administrator/Makefile as the backend runner;
     that observation is subsystem-scoped and does NOT apply to backend/agent.
 
-status: apply-remediation-complete
-next: [sdd-verify]   # re-verify the S-L2H-041/NFR-L2H-B remediation; documentation-only, no code changed
+status: verify-complete
+next: [sdd-archive]   # 0 CRITICAL, 0 blockers; remaining items are by-design partials
 
 phases:
   explore:
@@ -113,23 +113,49 @@ phases:
   verify:
     status: done
     depends_on: [apply]
-    artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report.md
-    engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report
-    verdict: fail
-    blockers: 1
-    critical_findings: 1
-    requirements: 10/12
-    scenarios: 42/45
-    evidence_revision: sha256:44355a9d8a63429b216fad065e80168546b17bab73f8006650cb890e9b754aa5
-    gates:
-      test: "PASS - cd backend/agent && make test - exit 0, 1017 PASS / 0 FAIL / 1 SKIP"
-      lint: "PASS - make lint - 0 issues"
-      build: "PASS - make build - exit 0"
-    blocking_issue: >
-      S-L2H-041 / NFR-L2H-B: tasks.md carries no recorded RED or GREEN output and no
-      refactor notes. The evidence is real and reproducible but lives in commit messages
-      and Engram #2804, not in tasks.md as the spec requires. Remediation is a
-      documentation transcription; no code change and no re-run required.
+    rounds: 2
+    round_1:
+      artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report.md
+      engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report
+      head: 806652c4
+      verdict: fail
+      blockers: 1
+      critical_findings: 1
+      scenarios: 42/45
+      outcome: >
+        CRITICAL S-L2H-041 / NFR-L2H-B - tasks.md carried no recorded RED/GREEN evidence.
+        Remediated by 746577d2 and 1dbb1fb1. Report retained (superseding pattern, AI-37/AI-39).
+    final:
+      artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report-final.md
+      engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report-final
+      head: 1dbb1fb1
+      verdict: fail            # machine envelope: evidence-completeness only, 0 blockers
+      implementation_verdict: pass-with-warnings
+      blockers: 0
+      critical_findings: 0
+      warnings: 2
+      suggestions: 5
+      requirements: 11/12
+      scenarios: 43/45
+      evidence_revision: sha256:44355a9d8a63429b216fad065e80168546b17bab73f8006650cb890e9b754aa5
+      gates:
+        test: "PASS - cd backend/agent && make test - exit 0, 1017 PASS / 0 FAIL / 1 SKIP"
+        lint: "PASS - make lint - 0 issues"
+        build: "PASS - make build - exit 0"
+      incomplete_by_design:
+        - "S-L2H-032 - partial by design (AD-6: doc 0002 checkbox lines stay bare, Wave-2 precedent)"
+        - "S-CNF-088 - unsatisfiable pre-archive by construction; asserts on the promoted spec"
+      remaining_warnings:
+        - "S-L2H-032 by-design partial - accept or amend the scenario at archive"
+        - >
+          Single top-level --- SKIP misidentified as cap_retry_absent_reported_not_silent in
+          tasks.md, doc 0002 line 72, and Engram #2804; it is actually TestOpenRouterAdapter_LiveSmoke.
+          Both are pre-existing and benign; counts 1017/0/1 are correct. One-clause fix.
+      archive_action_required:
+        - >
+          Promote the D6 delta into openspec/specs/ai-provider-conformance-suite/spec.md:343
+          (eight -> nine entries) with its dated amendment note, satisfying S-CNF-088.
+      archive_ready: true
   archive:
     status: pending
     depends_on: [verify]

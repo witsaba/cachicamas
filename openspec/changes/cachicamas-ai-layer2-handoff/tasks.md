@@ -402,8 +402,9 @@ ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal
 ok  	github.com/cachicamas/backend/agent/src/handoff	(cached)
 ```
 
-The single `SKIP` is the pre-existing, benign `cap_retry_absent_reported_not_silent` retry-absent
-subtest — unrelated to this change.
+The single top-level `SKIP` is the pre-existing, benign `TestOpenRouterAdapter_LiveSmoke`
+(AI-39's gate-closed skip; `cap_retry_absent_reported_not_silent` is one of 12 nested subtest
+skips, not the top-level one) — unrelated to this change.
 
 ```
 $ cd backend/agent && make lint
