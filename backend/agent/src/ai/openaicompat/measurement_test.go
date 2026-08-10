@@ -96,7 +96,7 @@ func measurementTextFrames() []string {
 	)
 	for i := 0; i < 50; i++ {
 		frames = append(frames,
-			`data: {"id":"m-text","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":null}]}` + "\n\n",
+			`data: {"id":"m-text","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":null}]}`+"\n\n",
 		)
 		_ = i
 	}
@@ -118,7 +118,7 @@ func measurementToolFrames() []string {
 	)
 	for i := 0; i < 20; i++ {
 		frames = append(frames,
-			`data: {"id":"m-tool","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}` + "\n\n",
+			`data: {"id":"m-tool","model":"m","created":1700000000,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}`+"\n\n",
 		)
 		_ = i
 	}
@@ -368,11 +368,11 @@ func TestMeasurement_Workload_M1M2M3(t *testing.T) {
 	concurrencies := []int{1, 4, 16, 64}
 
 	type profile struct {
-		name       string
-		consumer   time.Duration
-		pauseMode  bool
-		pause      time.Duration
-		gap        time.Duration // drip-server gap
+		name      string
+		consumer  time.Duration
+		pauseMode bool
+		pause     time.Duration
+		gap       time.Duration // drip-server gap
 	}
 	profiles := []profile{
 		{name: "bursty", consumer: 5 * time.Millisecond, gap: 5 * time.Millisecond},

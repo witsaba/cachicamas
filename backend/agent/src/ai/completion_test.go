@@ -521,7 +521,7 @@ func TestResponseEvents_ExtremeInputs_NeverPanic(t *testing.T) {
 			_ = ai.CheckEmit(ai.Event{})
 		}},
 		{"CheckStream over a stream mixing both new kinds, unstamped", func() {
-			start, _ := ai.NewResponseStart("", "")   // deliberately invalid/zero on failure
+			start, _ := ai.NewResponseStart("", "") // deliberately invalid/zero on failure
 			done, _ := ai.NewCompletion(ai.FinishReason(0), ai.Usage{})
 			report := ai.CheckStream([]ai.Event{start, done})
 			_ = report.Violation()

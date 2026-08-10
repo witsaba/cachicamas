@@ -35,13 +35,13 @@ type AfterReader func(*ai.Failure) (time.Duration, bool)
 // Config controls one Loop invocation. MaxAttempts is the retry budget, not
 // the initial request; zero values select the package defaults.
 type Config struct {
-	MaxAttempts      int
-	NowFunc          NowFunc
-	SleepFunc        SleepFunc
+	MaxAttempts int
+	NowFunc     NowFunc
+	SleepFunc   SleepFunc
 	AfterReader AfterReader
-	BaseDelay        time.Duration
-	MaxDelay         time.Duration
-	JitterSeed       int64
+	BaseDelay   time.Duration
+	MaxDelay    time.Duration
+	JitterSeed  int64
 }
 
 // AttemptReport is the typed outer cause returned when the retry budget is

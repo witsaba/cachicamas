@@ -35,14 +35,14 @@ func TestConfig_CredentialFieldDoesNotBreakRedactionPosture(t *testing.T) {
 	cfg := Config{Credential: cred}
 
 	renderings := map[string]string{
-		"%%v via Config struct":     fmt.Sprintf("%v", cfg),
-		"%%+v via Config struct":    fmt.Sprintf("%+v", cfg),
-		"%%#v via Config struct":    fmt.Sprintf("%#v", cfg),
-		"%%v via Config.Credential": fmt.Sprintf("%v", cfg.Credential),
-		"%%s via Config.Credential": fmt.Sprintf("%s", cfg.Credential), //nolint:staticcheck // intentional verb coverage
-		"%%+v via Config.Credential": fmt.Sprintf("%+v", cfg.Credential),
-		"%%#v via Config.Credential": fmt.Sprintf("%#v", cfg.Credential),
-		"String via Config.Credential":  cfg.Credential.String(),
+		"%%v via Config struct":          fmt.Sprintf("%v", cfg),
+		"%%+v via Config struct":         fmt.Sprintf("%+v", cfg),
+		"%%#v via Config struct":         fmt.Sprintf("%#v", cfg),
+		"%%v via Config.Credential":      fmt.Sprintf("%v", cfg.Credential),
+		"%%s via Config.Credential":      fmt.Sprintf("%s", cfg.Credential), //nolint:staticcheck // intentional verb coverage
+		"%%+v via Config.Credential":     fmt.Sprintf("%+v", cfg.Credential),
+		"%%#v via Config.Credential":     fmt.Sprintf("%#v", cfg.Credential),
+		"String via Config.Credential":   cfg.Credential.String(),
 		"GoString via Config.Credential": cfg.Credential.GoString(),
 	}
 

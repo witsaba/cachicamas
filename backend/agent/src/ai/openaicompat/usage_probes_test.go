@@ -114,7 +114,7 @@ func TestUsage_SingleFrame_U6Shape(t *testing.T) {
 func TestUsage_MultiplePopulatedFrames_LastWinsNoFold(t *testing.T) {
 	t.Parallel()
 
-frame := func(n int64) string {
+	frame := func(n int64) string {
 		return "data: {\"id\":\"chatcmpl-u\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"choices\":[],\"usage\":{\"prompt_tokens\":" +
 			strconv.FormatInt(n, 10) +
 			",\"completion_tokens\":1,\"total_tokens\":" + strconv.FormatInt(n+1, 10) + "}}\n\n"

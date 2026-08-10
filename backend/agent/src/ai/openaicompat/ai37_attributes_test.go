@@ -107,18 +107,18 @@ func TestAI37_Attributes_PerKeyTable(t *testing.T) {
 	// of the twelve (every key except error.type, which only ever
 	// appears on a failure path — S-AOB-025's own complementary case).
 	wantKeys := map[string]bool{
-		"gen_ai.system":                    true,
-		"gen_ai.request.model":             true,
-		"gen_ai.request.max_tokens":        true,
-		"gen_ai.response.finish_reasons":   true,
-		"gen_ai.usage.input_tokens":        true,
-		"gen_ai.usage.output_tokens":       true,
-		"gen_ai.usage.cache_read_tokens":   true,
-		"gen_ai.usage.cache_write_tokens":  true,
-		"http.response.status_code":        true,
-		"retry.count":                      true,
-		"stream.event_count":               true,
-		"error.type":                       true,
+		"gen_ai.system":                   true,
+		"gen_ai.request.model":            true,
+		"gen_ai.request.max_tokens":       true,
+		"gen_ai.response.finish_reasons":  true,
+		"gen_ai.usage.input_tokens":       true,
+		"gen_ai.usage.output_tokens":      true,
+		"gen_ai.usage.cache_read_tokens":  true,
+		"gen_ai.usage.cache_write_tokens": true,
+		"http.response.status_code":       true,
+		"retry.count":                     true,
+		"stream.event_count":              true,
+		"error.type":                      true,
 	}
 	for _, kv := range attrs {
 		if !wantKeys[string(kv.Key)] {

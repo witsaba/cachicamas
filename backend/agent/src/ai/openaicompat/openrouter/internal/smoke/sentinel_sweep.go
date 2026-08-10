@@ -12,15 +12,15 @@
 // at teardown) against a deny-list of three entries the live smoke
 // configures:
 //
-//   1. The literal env-var name "OPENROUTER_API_KEY" — knowing
-//      the env-var name is logged is the first hint that the
-//      secret is reachable; flag it.
-//   2. The secret's prefix (4 chars) — the live smoke feeds the
-//      prefix; finding the prefix in the buffer is the strongest
-//      signal that the secret was emitted into a log path.
-//   3. The planted prompt bytes — the live smoke's request
-//      embeds a non-secret marker; finding the marker in the
-//      buffer is the third deny-list entry the spec names.
+//  1. The literal env-var name "OPENROUTER_API_KEY" — knowing
+//     the env-var name is logged is the first hint that the
+//     secret is reachable; flag it.
+//  2. The secret's prefix (4 chars) — the live smoke feeds the
+//     prefix; finding the prefix in the buffer is the strongest
+//     signal that the secret was emitted into a log path.
+//  3. The planted prompt bytes — the live smoke's request
+//     embeds a non-secret marker; finding the marker in the
+//     buffer is the third deny-list entry the spec names.
 //
 // A scan that finds a match returns a non-nil error naming the
 // offending vector ("env-var", "secret-prefix", "planted-prompt")
@@ -54,16 +54,19 @@
 // # TDD posture (work unit 3.2)
 //
 // RED  : the assertions in sentinel_sweep_test.go reference
-//        smoke.Scan, smoke.BuildDenyList, and smoke.DenyEntry —
-//        none of which exist before this file lands. The
-//        _test.go file does not compile and the package
-//        reports "no non-test Go files", which is the observable
-//        RED state.
+//
+//	smoke.Scan, smoke.BuildDenyList, and smoke.DenyEntry —
+//	none of which exist before this file lands. The
+//	_test.go file does not compile and the package
+//	reports "no non-test Go files", which is the observable
+//	RED state.
+//
 // GREEN: this file lands with the three exports and the
-//        runtime needle construction. The eight tests
-//        (including the deferred R-OR-08 staged-mutation
-//        bite-proof) pass; the scan's error message never
-//        reproduces the credential.
+//
+//	runtime needle construction. The eight tests
+//	(including the deferred R-OR-08 staged-mutation
+//	bite-proof) pass; the scan's error message never
+//	reproduces the credential.
 //
 // # AI-36.1 (WU-1, task 1.3) — delegates to the shared sweep core
 //

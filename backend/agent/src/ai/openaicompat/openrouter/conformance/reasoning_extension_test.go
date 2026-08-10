@@ -72,10 +72,10 @@ func reasoningExtensionBridge(t *testing.T, transcript string) (ai.ModelProvider
 	t.Cleanup(server.Close)
 
 	transport := bridgeAttributionRoundTripper{
-		base:         server.Client().Transport,
-		referer:      "https://app.cachicamas.test/openrouter-reasoning",
-		xTitle:       "cachicamas-reasoning-drop",
-		xCategories:  "test,reasoning",
+		base:        server.Client().Transport,
+		referer:     "https://app.cachicamas.test/openrouter-reasoning",
+		xTitle:      "cachicamas-reasoning-drop",
+		xCategories: "test,reasoning",
 	}
 	httpClient := &http.Client{Transport: transport}
 
