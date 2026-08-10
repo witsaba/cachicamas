@@ -107,8 +107,8 @@ phases:
           verbatim from what apply actually captured, to every work unit (WU-A..WU-F, Phase 6)
           in tasks.md. Corrected task 1.1's RED description from the anticipated compile
           failure (never observed) to the actual runtime panic that was observed.
-        commit: "(pending — see commits list above once created)"
-        gates_rerun: "make test — unchanged (docs-only), see commits list"
+        commit: "746577d2 docs(sdd): transcribe per-work-unit RED/GREEN evidence into tasks.md"
+        gates_rerun: "make test — exit 0, 1017 PASS / 0 FAIL / 1 SKIP (unchanged, docs-only)"
         status: applied, pending re-verify
   verify:
     status: done
