@@ -78,6 +78,18 @@ var forbiddenPrefixes = []struct {
 	// coding -> agent -> ai and never upward. These three directories do not
 	// exist yet; naming them now is what makes the rule testable on the day
 	// the first one is created.
+	//
+	// KNOWN HAZARD for that day (recorded 2026-08-10, before doc 0003's
+	// AG milestones create src/agent): layer1Pattern scans the WHOLE
+	// module, and `go list -deps -test` emits the pattern's own member
+	// packages — so merely CREATING backend/agent/src/agent makes the
+	// new package appear in the scanned set and match this forbidden
+	// prefix, failing the guard with zero actual import violations. The
+	// deliberate fix when it fires is to narrow the scanned roots to
+	// Layer 1's own packages (src/ai/..., src/agenttest/..., src/handoff)
+	// or to exempt the pattern's own members from the prefix match —
+	// decided then, in the change that creates the directory, never by
+	// deleting the prefix row.
 	{modulePath + "/src/agent", "ADR 0005 § D1 row 1: Layer 1 must not import Layer 2"},
 	{modulePath + "/src/coding", "ADR 0005 § D1 row 1: Layer 1 must not import Layer 3"},
 	{modulePath + "/src/cmd", "ADR 0005 § D1 row 1: Layer 1 must not import the composition root"},
@@ -97,8 +109,13 @@ var forbiddenPrefixes = []struct {
 // AI-37 (ADR 0005 § D3, D-1/D-6) adds five entries — the OpenTelemetry
 // tracing API and its own transitive closure, and NOTHING else from that
 // ecosystem. Deliberately absent: the root `go.opentelemetry.io/otel`
-// global-getter package (§ D3 permits it; D-1 declines it — Layer 1 takes
-// an injected TracerProvider instead), `otel/metric`, `otel/baggage`,
+// global-getter package — § D3's import table permits it, and D-1 declines
+// it for two recorded reasons: Layer 1 takes an injected TracerProvider
+// instead of the global getter, AND the root package's own measured
+// package closure contains `go.opentelemetry.io/auto/sdk`, a path
+// literally named for the SDK, inside the one boundary whose acceptance
+// clause is "the OTel API and nothing else from that ecosystem"
+// (S-AOB-003's owed source-comment, added 2026-08-10) — `otel/metric`, `otel/baggage`,
 // `otel/propagation`, and every `sdk`/`exporters`/`auto/sdk`-named path
 // (already forbidden above). Each entry below is bounded by the exact
 // package-closure pin (TestLayer1_DependencySet_ExactRequiresAndClosure,

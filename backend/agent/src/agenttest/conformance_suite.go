@@ -31,8 +31,9 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// Capability identifies one of AI-03's nine capabilities in its two closed
-// lists (CAP-R-01…05, CAP-O-01…04), plus [CapNone] for a case that
+// Capability identifies one of the nine capabilities in the two closed
+// lists — CAP-R-01…05 and CAP-O-01…03 from AI-03, CAP-O-04 added by AI-35
+// under AI-03 §13 rule 1 — plus [CapNone] for a case that
 // exercises none of them. The zero value is not a member — this package's
 // zero-names-nothing idiom, restated: a [conformanceCase] whose author
 // forgot to set its capability field is caught as a registration defect
@@ -116,7 +117,8 @@ func (c Capability) String() string {
 	return fmt.Sprintf("capability(%d)", uint8(c))
 }
 
-// Capabilities returns AI-03's nine-member closed-list union — CAP-R-01…05
+// Capabilities returns the nine-member closed-list union (AI-03's eight
+// plus AI-35's CAP-O-04) — CAP-R-01…05
 // then CAP-O-01…04, in declaration order — the enumerator [CapabilityRecord]
 // totality is built from. [CapNone] is deliberately excluded: it is not a
 // member of either closed list. The result is a fresh slice on every call —
@@ -130,7 +132,8 @@ func Capabilities() []Capability {
 }
 
 // Optional reports whether c is one of CAP-O-01…04 — AI-03 §11's marking
-// rule, applied mechanically: every other value, including [CapNone], the
+// rule as amended for CAP-O-04 (AI-35), applied mechanically: every other
+// value, including [CapNone], the
 // zero value and a value outside this vocabulary entirely, is required by
 // the same default.
 func (c Capability) Optional() bool {
@@ -143,7 +146,7 @@ func (c Capability) Optional() bool {
 }
 
 // registered reports whether c is a legitimate value this suite recognises:
-// one of the eight real capabilities, or [CapNone]. Anything else —
+// one of the nine real capabilities, or [CapNone]. Anything else —
 // including the zero value — is a case-registration defect (S-CNF-009).
 func (c Capability) registered() bool {
 	return c == CapNone || (c >= capabilityFirst && c < capabilityEnd)
@@ -360,7 +363,7 @@ func FactoryDefectForTest(f Factory) string {
 // declaredOffered reports whether f declares c offered — true only for a
 // non-nil, true *bool. Called only after requireValidFactory has already
 // confirmed every optional capability's *bool is non-nil, so dereferencing
-// here is safe; a capability outside the three optional ones (including
+// here is safe; a capability outside the four optional ones (including
 // CapNone) always reports false, which is never consulted for a required
 // capability's standing (Optional() gates every caller of this function).
 func declaredOffered(f Factory, c Capability) bool {
@@ -378,10 +381,10 @@ func declaredOffered(f Factory, c Capability) bool {
 	}
 }
 
-// optionalCapabilities returns CAP-O-01…03 in Capabilities()' order — the
-// three-member subset every declared-capability decision iterates over.
+// optionalCapabilities returns CAP-O-01…04 in Capabilities()' order — the
+// four-member subset every declared-capability decision iterates over.
 func optionalCapabilities() []Capability {
-	out := make([]Capability, 0, 3)
+	out := make([]Capability, 0, 4)
 	for _, c := range Capabilities() {
 		if c.Optional() {
 			out = append(out, c)
@@ -418,8 +421,8 @@ func applyTokenCountingCrossCheck(record *CapabilityRecord, satisfiesTokenCounte
 // R-AMP-017 makes askable in v1. A declared-true TokenCounting whose subject
 // does not satisfy ai.TokenCounter fails the entry immediately, naming the
 // contradiction (S-CNF-005), independent of whether any CAP-O-02 case is
-// registered yet. CAP-O-01 and CAP-O-03 have no askable seam and are not
-// checked here; their outcome comes entirely from their own cases running
+// registered yet. CAP-O-01, CAP-O-03 and CAP-O-04 have no askable seam and
+// are not checked here; their outcome comes entirely from their own cases running
 // (or being skipped, when declared absent). tb is testing.TB for the same
 // substitutability reason requireValidFactory takes it.
 func crossCheckDeclaredOptionalCapabilities(tb testing.TB, f Factory, record *CapabilityRecord) {

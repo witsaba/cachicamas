@@ -1,14 +1,24 @@
 # Spec — the Layer 2 readiness contract
 
-> **Introduced by**: `cachicamas-ai-layer2-handoff` (AI-40, Wave 6 — Hand off; **last** milestone, Layer 1's exit)
+> **Introduced by**: `openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/` (AI-40, Wave 6 — Hand off; **last** milestone, Layer 1's exit) · PR **#144**, merged as `7326a813` *(archive path, PR and merge commit added 2026-08-10 — the promotion transform's provenance line, completed late)*
 > **Status**: **live** — this file carries the contract for Layer 2's entry gate
 > **Capability**: `ai-layer2-handoff` (**new** — full spec, no MODIFIED/REMOVED/RENAMED)
 > **Requirement IDs**: `R-L2H-0NN` · **Scenario IDs**: `S-L2H-0NN` (both prefixes verified free across `openspec/specs/` and `openspec/changes/`)
 > **Format**: RFC 2119 + Given/When/Then, per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable.
 > **Composes (cited, never modified here)**: `ai-model-provider` · `ai-fake-provider` (AI-21) · `ai-stream-testkit` (AI-22.3 `ai.CheckStream`) · `ai-provider-conformance-suite` (`R-CNF-017`, `R-CNF-018`; deltaed in this change) · `ai-openrouter-first-provider` (`R-OR-05`) · AI-00.3 import-boundary guard
 > **Decision forks binding this spec**: proposal D1–D7 (adopted by design and applied in implementation)
-> **Charter**: doc 0002 lines 2369–2410; inherited publication duty at line 2402; item-6 language at line 2446
+> **Charter**: doc 0002 lines ~~2369–2410~~ **2389–2430**; inherited publication duty at line ~~2402~~ **2422**; item-6 language at line ~~2446~~ **2466** *(re-resolved 2026-08-10 after doc-0002 amendments shifted the file — the original numbers were stale by +12 the moment AI-40's own reconciliation commit landed above the charter; anchor headings: `### AI-40 — Publish the Layer 2 readiness contract`, the `Amended 2026-08-04 (AI-29) — inherited publication duty` blockquote under AI-40.2, and the `**Item 6 also stays open**` blockquote in the completion-checklist amendments — prefer the anchors over the numbers)*
 > **Blocks**: doc 0003 AG-03 onward (normative entry gate)
+
+---
+
+## Status — this file is the canonical home of the contract
+
+`openspec/AGENTS.md` calls `openspec/specs/` the *source of truth (main specs)*. The Layer 2 readiness
+contract's nine requirements and two NFRs live here, not only as a pointer into the archive; the
+archived change folder named in the header is the historical record of how AI-40 was explored,
+proposed, designed, applied and verified. *(Section added 2026-08-10, completing the four-part
+promotion transform the sibling Wave 6 promotions already carried.)*
 
 ---
 
@@ -143,7 +153,7 @@ v1**, naming its cause: `AI-26.6` landed as a refusal and `AI-29.2` is struck by
 reasoning on this wire to round-trip and no v1 node can close the wire half. The **stream** half —
 closed by **AI-17** (`R-ARE-009` / `R-ARE-010`) and recorded on the **G12(b)** spine row — MUST be named
 in the same statement as **unaffected and not reopened**. The distinction language MUST be lifted from
-doc 0002 line 2446 and the AI-40.2 amendment at line 2402, not paraphrased. The publication MUST NOT
+doc 0002's item-6 blockquote (line ~~2446~~ **2466** as of the 2026-08-10 re-resolution — anchor: `**Item 6 also stays open**`) and the AI-40.2 inherited-publication-duty amendment (line ~~2402~~ **2422** — anchor: `Amended 2026-08-04 (AI-29)`), not paraphrased. The publication MUST NOT
 tick item 6's checkbox and MUST NOT strike, weaken, or restate AI-17's closure as open.
 
 #### Scenarios
@@ -152,8 +162,8 @@ tick item 6's checkbox and MUST NOT strike, weaken, or restate AI-17's closure a
   exercisable in v1 and names `AI-26.6`'s refusal and `AI-29.2`'s striking as the cause.
 - **S-L2H-021** — Given the published duty, when it is read, then the same statement names AI-17,
   `R-ARE-009` and `R-ARE-010` and asserts the stream half is unaffected and not reopened.
-- **S-L2H-022** — Given the published duty and doc 0002 lines 2402 and 2446, when the distinction
-  language is compared, then it is lifted from those lines rather than paraphrased.
+- **S-L2H-022** — Given the published duty and doc 0002's two anchor blockquotes (lines ~~2402 and 2446~~ **2422 and 2466** as of the 2026-08-10 re-resolution), when the distinction
+  language is compared, then it is lifted from those blockquotes rather than paraphrased.
 - **S-L2H-023** — Given the merged change, when doc 0002's completion checklist is read, then item 6 is
   still `[ ]`, and no artifact in this change ticks it or claims it closed.
 
@@ -303,7 +313,7 @@ strict TDD, with both outputs recorded in `tasks.md`. The milestone MUST close o
 | AI-40.1 — consumer proof | `R-L2H-001` |
 | AI-40.2 (1) — runnable examples | `R-L2H-002` |
 | AI-40.2 (2) — capability matrix published | `R-L2H-003`, `R-L2H-004` |
-| AI-40.2 duty 1 — item 6 wire clause (doc 0002 line 2402) | `R-L2H-005` |
+| AI-40.2 duty 1 — item 6 wire clause (doc 0002 line ~~2402~~ 2422) | `R-L2H-005` |
 | AI-40.2 duty 2 — Layer 2 strips reasoning | `R-L2H-006` |
 | AI-40.3 (1) — frozen v1 surface | `R-L2H-007` |
 | AI-40.3 (2) — eighteen-item checklist walk | `R-L2H-008` |

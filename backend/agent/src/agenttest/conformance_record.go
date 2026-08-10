@@ -25,7 +25,8 @@ const (
 	// including one this suite has not classified at all (§11's default).
 	StandingRequired Standing = iota + 1
 
-	// StandingOptional is exactly CAP-O-01…03 (AI-03 §6).
+	// StandingOptional is exactly CAP-O-01…04 (AI-03 §6, as amended
+	// 2026-08-10 for AI-35's CAP-O-04).
 	StandingOptional
 )
 

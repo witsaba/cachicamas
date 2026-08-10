@@ -18,6 +18,17 @@
 // see rather than a divergence that has to be re-derived (proposal § 7's open
 // decision, tasks.md risk R2).
 //
+// DRIFT RECORDED 2026-08-10: the quote above is R-CNF-012's PRE-AI-38
+// wording. AI-38 modified the requirement in place — it now admits either a
+// bare close or exactly one cancellation-category terminal (a drain-again
+// consumer can win select's no-priority race), still rejecting a
+// Completion, a second terminal, any other category, and anything after
+// the terminal. The prose pin did exactly what it could: made the drift a
+// visible diff, not a silent divergence. For this file's TRULY abandoned
+// consumer nothing drains the carrier, so the bare-close assertions below
+// remain the correct observation under both wordings, and no assertion
+// changes. R-AIS-036 carries the matching amendment.
+//
 // The conformance suite already proves those physics over the FAKE provider
 // (agenttest/conformance_cancellation.go:94, whose produce() selects on
 // `out <- ev` vs `<-ctx.Done()`). What was missing, and what this file adds,

@@ -10,9 +10,10 @@
 // and this package owns the conformance tests and deterministic fakes that prove
 // them against its contracts.
 //
-// It is empty today by design. The contract text grows one milestone at a time,
-// and each milestone's documentation paragraph is guarded where it makes a
-// checkable claim. See the Layer 1 task graph in
+// It began empty by design and is now complete: the contract text grew one
+// milestone at a time — the full Layer 1 surface (42 of 42 milestones) ships
+// here — and each milestone's documentation paragraph is guarded where it
+// makes a checkable claim. See the Layer 1 task graph in
 // docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md.
 //
 // # What this package must not own
@@ -37,16 +38,22 @@
 //
 // # The import rule
 //
-// This package may import the Go standard library, net/http, vendor model SDKs,
-// and the OpenTelemetry API. It must not import the sibling layers
+// This package may import the Go standard library, net/http, the OpenTelemetry
+// API, and — in ADR principle — vendor model SDKs; no vendor SDK is admitted
+// today, because AI-24 chose raw net/http and the deny-by-default allowlist in
+// import_boundary_test.go admits only this module plus the OTel API prefixes.
+// Adding a vendor SDK is a deliberate allowlist edit, not a permission this
+// paragraph grants. The package must not import the sibling layers
 // (src/agent, src/coding, src/cmd), any package of another backend module, or
 // the OpenTelemetry SDK, its exporters, or otelslog. The rule is
 // ADR 0005 § D1 row 1 and § D3; it is enforced mechanically by the deny-by-default
 // guard in import_boundary_test.go, so a dependency nobody thought to forbid by
 // name still fails.
 //
-// The module carries zero dependencies today. One milestone may change that,
-// and it needs its own ADR: AI-37 adds the OpenTelemetry API.
+// The module's dependency set is exactly the OpenTelemetry API added by AI-37
+// under ADR 0005 § D3 — 2 direct requires plus 1 indirect — pinned by exact
+// set equality in import_boundary_test.go; AI-24's transport decision added
+// none.
 //
 // # What comes back
 //
