@@ -55,4 +55,4 @@ coverage.txt
 # § D3) is the first change to give backend/agent a real dependency, which
 # makes go.work.sum carry real verification hashes for the first time
 # (agent-module-scaffold R-AGM-003, S-AGM-068) — it is now tracked and MUST
-# be committed alongside any change to a workspace module's own go.sum.
+# be committed alongside any change to a workspace module's own go.sum.__pycache__/
