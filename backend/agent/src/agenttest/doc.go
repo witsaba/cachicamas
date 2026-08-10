@@ -76,4 +76,12 @@
 // So: src/ai/ and src/agenttest/ share the parent src/. Moving, nesting or
 // renaming either one is a breaking change that must update the guard in the
 // same commit.
+//
+// # The v1 surface freeze
+//
+// AI-40.1's consumer proof (src/handoff) and AI-40.2's four runnable
+// examples (src/ai/example_test.go) are the compiled, run evidence for the
+// v1 surface this package and src/ai expose. See
+// cachicamas-ai-layer2-handoff's decision.md (doc 0002 § AI-40) for the
+// full by-capability enumeration, frozen as of that change.
 package agenttest

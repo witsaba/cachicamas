@@ -340,8 +340,10 @@ Every test-list item of AI-23.1 … AI-23.8 MUST be taken red → green → refa
 7. Cancellation closes within a bounded deadline with no leak, and the abandoned-then-cancelled saturated path closes bare with the abandoned-never-cancelled narrowing recorded (`R-CNF-011`, `R-CNF-012`).
 8. A planted sentinel appears in no event, no error string and no test-failure output, including bounded summaries and diffs (`R-CNF-013`).
 9. All three optional subjects are covered — reasoning, token counting, cache-boundary honoring — and the finish-reason and usage cases in that node are marked **required**, with all **seven** finish reasons iterated behind a drift guard and no `src/ai` edit (`R-CNF-014` … `R-CNF-016`, `NFR-CNF-B`).
-10. The record carries exactly eight entries with standing from AI-03 and the four-value outcome set; any `not exercised` entry is **inconclusive** and a failed required entry cannot pass (`R-CNF-017`, `R-CNF-018`).
+10. The record carries exactly **nine** entries with standing from AI-03 and the four-value outcome set; any `not exercised` entry is **inconclusive** and a failed required entry cannot pass (`R-CNF-017`, `R-CNF-018`).
 11. `make test` green under `-race`, `make lint` clean, AI-00 import guards and AI-20.4's signature guard passing unmodified, `go.mod` unchanged, `src/ai` and AI-21/AI-22 sources untouched (`NFR-CNF-A` … `NFR-CNF-F`).
+
+> **Amended 2026-08-10 (AI-40)** by `cachicamas-ai-layer2-handoff`: acceptance item 10 corrected from "eight entries" to **nine**. AI-35 amended `R-CNF-017` and its scenarios on 2026-08-07 but missed this acceptance line; AI-38 recorded the drift without fixing it. Documentation-only correction — no suite behavior, adapter, or committed expectation changed.
 
 ## What design resolved
 

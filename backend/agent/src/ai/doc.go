@@ -72,4 +72,49 @@
 // guard in src/agenttest. Concrete vendor adapters implementing
 // [ModelProvider] arrive from AI-25 onward; this package owns the
 // contract, never a vendor's satisfaction of it.
+//
+// # The first adapter's capability record
+//
+// AI-38.2 runs TestOpenRouterAdapter_FullConformance
+// (src/ai/openaicompat/openrouter/conformance/run_for_test.go) — the
+// AI-23 conformance suite's whole registered case table, unscoped,
+// against a real *openaicompat.Client speaking real HTTP to a local
+// httptest.Server — and asserts the generated nine-entry capability
+// record, entry-for-entry, against the committed expectation in the same
+// package's capability_record_test.go (expectedOpenRouterRecord). The
+// table below is transcribed from that committed expectation — never
+// regenerated, re-decided, or amended by this comment — and is protected
+// against silent drift by a read-only test in the same conformance
+// package (doc_matrix_guard_test.go).
+//
+//	CAP-R-01(streaming_text)      required  satisfied — text arrives as delimited blocks, reconstructible exactly
+//	CAP-R-02(tool_calls)          required  satisfied — a tool call arrives with identity, name, exact argument bytes and an observable ordinal
+//	CAP-R-03(completion_metadata) required  satisfied — a normally-finished stream ends carrying a finish reason and a usage record
+//	CAP-R-04(cancellation)        required  satisfied — the caller-owned signal ends the stream within bounded time
+//	CAP-R-05(typed_failures)      required  satisfied — every failure is classifiable through one vocabulary, on both delivery paths, and states whether content preceded it
+//	CAP-O-01(reasoning_content)   optional  absent    — struck verdict (AI-29's decision.md); reopens only on R-OR-05/R-ACR-004's named triggers, with a new ADR required — never read as a permanent property of this adapter
+//	CAP-O-02(token_counting)      optional  absent    — the discoverable optional token-counting contract is not offered by this adapter
+//	CAP-O-03(cache_boundary)      optional  absent    — cache-boundary markers are not honored by this adapter
+//	CAP-O-04(retry)               optional  satisfied — retryable pre-stream failures are auto-retried with bounded attempts
+//
+// Two publication duties delegated to this node (AI-29's decision.md
+// § 11) are stated below, beside each other — neither in place of the
+// other.
+//
+// Completion-checklist item 6's wire clause is not exercisable in v1:
+// AI-26.6 landed as a refusal and AI-29.2 is struck by AI-29, so there is
+// no reasoning on this wire to round-trip and no v1 node can close the
+// wire half. The stream half of item 6, already closed by AI-17
+// (R-ARE-009/R-ARE-010), is unaffected and is not reopened.
+//
+// Layer 2 MUST strip OpenRouter's reasoning_details field on the wire —
+// a recorded absence (AI-29's decision.md), not an oversight.
+//
+// # The v1 surface freeze
+//
+// The v1 surface this package and its siblings expose is enumerated and
+// declared frozen as of the cachicamas-ai-layer2-handoff change (doc
+// 0002 § AI-40); see that change's decision.md for the full by-capability
+// enumeration, the eighteen-item completion-checklist walk, and the
+// never-cancelled abandoned-consumer posture.
 package ai
