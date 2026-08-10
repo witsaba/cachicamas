@@ -5,7 +5,7 @@
 // # Why this is its own subpackage, not part of agenttest itself
 //
 // agenttest imports "testing" package-wide (conformance_redaction.go), and
-// openrouter/smoke/sentinel_sweep.go is a non-test file: importing
+// openrouter/internal/smoke/sentinel_sweep.go is a non-test file: importing
 // agenttest directly from it would pull testing's flag registration into a
 // non-test build. This package imports only "bytes" and "fmt", so it is
 // safe to import from a non-test file, a _test.go file, or any package
@@ -14,7 +14,7 @@
 // # Detection facts, not formatted errors (AD-1)
 //
 // Scan reports WHAT matched, never a formatted message: each existing call
-// site (openrouter/smoke's Scan, agenttest's scanForSentinel/
+// site (openrouter/internal/smoke's Scan, agenttest's scanForSentinel/
 // scanTextForSentinel) keeps its own message text verbatim rather than
 // adopting a new one, so migrating to this shared core is a behavior-
 // preserving refactor, not a message-format change.

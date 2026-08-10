@@ -7,7 +7,7 @@
 // (os.ReadDir) belonging to the external test package (`package
 // openaicompat_test`). That was a disclosed gap (stream.go:309-318): an
 // *accidental* real credential in an internal-package test file, or in
-// any nested directory (openrouter/, openrouter/smoke/,
+// any nested directory (openrouter/, openrouter/internal/smoke/,
 // openrouter/conformance/, testdata/), was invisible.
 //
 // The scan now walks the whole adapter tree recursively
@@ -81,8 +81,8 @@ var deliberatePlantAllowlist = []string{
 	"capture_proof_test.go",
 	"viability_test.go",
 	filepath.Join("openrouter", "credential_redaction_test.go"),
-	filepath.Join("openrouter", "smoke", "smoke_test.go"),
-	filepath.Join("openrouter", "smoke", "sentinel_sweep_test.go"),
+	filepath.Join("openrouter", "internal", "smoke", "smoke_test.go"),
+	filepath.Join("openrouter", "internal", "smoke", "sentinel_sweep_test.go"),
 }
 
 // scanResult is one file the recursive walk found carrying a

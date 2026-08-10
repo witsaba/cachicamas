@@ -1,20 +1,23 @@
 # Spec — OpenRouter as the first concrete AI provider for Layer 1
 
-> **Change**: `add-openrouter-first-provider`
+> **Introduced by**: `add-openrouter-first-provider` (AI-24…AI-32, Waves 4–5; archived 2026-08-06) · **Modified by**: `cachicamas-ai-adapter-conformance` (AI-38) · `cachicamas-ai-live-smoke` (AI-39, Wave 6)
+> **Status**: live
 > **Capability**: `ai-openrouter-first-provider` (new)
-> **Status**: DRAFT
-> **Date**: 2026-08-06
-> **Artifact store**: hybrid (file + engram)
-> **Format**: RFC 2119 + Given/When/Then, per `openspec/config.yaml`
 > **Requirement IDs**: `R-OR-0NN` · **Scenario IDs**: `S-OR-0NN`
 > **Composes (read-only, NOT modified)**: `ai-provider-client` (AI-25) · `ai-provider-conformance-suite` (AI-23/38) · `ai-stream-testkit` (AI-22) · `ai-model-provider` (AI-20)
-> **Links**: [proposal](../../proposal.md) · [explore](../../explore.md) · Engram `#2570` (proposal) · `#2568` (explore) · `#2571` (wrapper-placement decision)
+> **Archived version**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/` · **Current modification**: `openspec/changes/archive/2026-08-09-cachicamas-ai-live-smoke/`
 
 ---
 
 ## Purpose
 
 ADR 0004 (Engram #1997) established the three-layer agentic architecture; AI-20 (Engram #2235) froze the `ModelProvider` interface every concrete adapter must satisfy; AI-24 (Engram #2432) pre-decided vendor = OpenAI-compatible Chat Completions streaming dialect with raw `net/http` transport and zero `go.mod` requires. The shipped `backend/agent/src/ai/openaicompat/` package is vendor-agnostic but has **no first concrete vendor**, so AI-38 (full deterministic adapter conformance) and AI-39 (opt-in live smoke) have no subject, and AI-40 (Layer 2 readiness handoff) cannot publish. This capability concretizes **OpenRouter** as that first vendor — composing (not re-implementing) the shipped `openaicompat` package, `agenttest.RunConformance`, and the `ai-stream-testkit` helpers. It ships as three chained PRs under a no-merge tracker: wrapper → conformance bridge → live smoke.
+
+## Status
+
+This specification is **live** as of 2026-08-09. It was introduced by `add-openrouter-first-provider` (AI-24…AI-32) and modified by `cachicamas-ai-adapter-conformance` (AI-38) and `cachicamas-ai-live-smoke` (AI-39). Requirements R-OR-07 and R-OR-08 were modified in AI-39 to establish the live smoke test's two-stage opt-in gate, internal package placement, setup instructions, and capture-sink sweep binding. It is canonical at `/openspec/specs/ai-openrouter-first-provider/spec.md`.
+
+---
 
 ## ADDED Requirements
 
@@ -152,27 +155,84 @@ The conformance bridge SHALL run the **unscoped** conformance entry point end-to
 - AND the stream does not fail
 - AND the reasoning-extension test passes.
 
-### R-OR-07 — Live smoke is opt-in via workflow dispatch and repo secret
+### R-OR-07 — Live smoke is opt-in via environment variables only, with no CI workflow file
 
-The live smoke (`TestOpenRouterAdapter_LiveSmoke`) SHALL be `t.Skip`-gated on the absence of `OPENROUTER_API_KEY` in the test process. The CI workflow file `.github/workflows/agent-openrouter-smoke.yml` SHALL be `workflow_dispatch` only — no `schedule`, `push`, or `pull_request` trigger. `make test` in `backend/agent/` SHALL NOT depend on OpenRouter or any network credential.
+The live smoke (`TestOpenRouterAdapter_LiveSmoke`) SHALL be `t.Skip`-gated unless BOTH
+`OPENROUTER_API_KEY` is present in the test process AND `RUN_LIVE_OPENROUTER_SMOKE` equals the exact
+literal `1`; the credential alone SHALL NOT be sufficient consent. The skip reason SHALL attribute
+which stage closed the gate. `make test` in `backend/agent/` SHALL NOT depend on OpenRouter or on any
+network credential. **No CI workflow file is required or created by this spec**: the repository's
+established posture is that no `.github/workflows/` directory exists (ADR 0005 § Enforcement; doc 0002
+"No CI exists"), so the live smoke is opt-in for human, local runs only. The smoke package SHALL live
+under a path containing an `internal` segment beneath `.../openaicompat/openrouter/`, and
+credential-safe setup instructions SHALL ship in that package directory. The full live-smoke contract
+is stated in the `ai-live-smoke` capability (`R-LSM-001`…`R-LSM-008`); this requirement is its
+vendor-side anchor.
+(Previously: the gate was stated as `OPENROUTER_API_KEY` alone, and the requirement mandated a
+`.github/workflows/agent-openrouter-smoke.yml` `workflow_dispatch`-only file. That file does not
+exist, cannot exist under ADR 0005's no-CI posture, and was never created; its scenario is therefore
+retired with the clause that required it rather than left as an unsatisfiable obligation. The
+`internal` placement and the shipped setup instructions are new, from AI-39.1 items 4 and 5.)
 
-#### Scenario: Skip path exercised without the secret
+> **Amended 2026-08-09 (AI-39)** by `cachicamas-ai-live-smoke`: the gate is restated as the shipped
+> two-stage environment-variable opt-in; the CI-workflow obligation is removed as superseded by facts
+> on disk, adopting the text the orphan `add-openrouter-first-provider` change folder already carried;
+> `internal` placement and shipped setup instructions are added. The removed
+> "Workflow file is dispatch-only" scenario is retired deliberately, not lost — it asserted properties
+> of a file this repository will never create.
 
-- GIVEN `OPENROUTER_API_KEY` absent from the test process
+#### Scenario: Skip path exercised without the env vars
+
+- GIVEN `OPENROUTER_API_KEY` OR `RUN_LIVE_OPENROUTER_SMOKE=1` absent from the test process
 - WHEN `make test` runs
-- THEN the live smoke is skipped with an attributable message
+- THEN the live smoke is skipped with a reason naming the missing stage
 - AND no outbound request is made.
 
-#### Scenario: Workflow file is dispatch-only
+#### Scenario: The credential alone does not open the gate
 
-- GIVEN the merged `.github/workflows/agent-openrouter-smoke.yml`
-- WHEN the workflow's triggers are enumerated
-- THEN `workflow_dispatch` is present
-- AND no `schedule`, `push`, or `pull_request` trigger is present.
+- GIVEN `OPENROUTER_API_KEY` present and `RUN_LIVE_OPENROUTER_SMOKE` set to any value other than the
+  exact literal `1`
+- WHEN the gate is evaluated
+- THEN it reports closed and the test skips
+- AND no outbound request is made.
 
-### R-OR-08 — Credential redaction extends to the live smoke's logging
+#### Scenario: No CI workflow file is introduced
 
-The live smoke SHALL NOT log the credential, secret value, or full prompt. A sentinel-sweep helper SHALL scan captured output (test logs, error messages, `t.Logf` calls) against a deny-list that includes the literal `OPENROUTER_API_KEY` env-var name, the secret's prefix (4 chars), and planted prompt bytes. A sentinel match SHALL fail the test.
+- GIVEN the merged repository
+- WHEN it is searched for a `.github/workflows/` file triggering the live smoke
+- THEN none exists
+- AND no scheduled, push, or pull-request trigger of a billing-consuming run exists.
+
+#### Scenario: The package is internal and ships its own setup instructions
+
+- GIVEN the merged smoke package
+- WHEN its path and directory contents are read
+- THEN the path contains an `internal` segment beneath `.../openaicompat/openrouter/`
+- AND setup instructions naming both env vars, shell `export` only, the exact post-move invocation,
+  the timeout bound and the per-run cost are present in that directory
+- AND no step in them writes the credential to a file inside the repository.
+
+### R-OR-08 — Credential redaction extends to the live smoke's own captured output, proven by a positive control
+
+The live smoke SHALL NOT log the credential, the secret value, or the full prompt, on the success path
+or on any failure path. It SHALL route every diagnostic it produces through a single capture sink and
+SHALL run the shared sentinel sweep over that sink before any of those bytes reaches the test log. The
+deny list SHALL include the literal `OPENROUTER_API_KEY` env-var name, the secret value's 4-character
+prefix, and the planted prompt marker. The sweep's positive control (`sweep.SelfTest`) SHALL pass over
+that deny list before a clean sweep result is trusted; a clean result obtained without the positive
+control SHALL count as no result, per `R-CNF-027` clause 5. A sentinel match SHALL fail the test,
+naming only the vector and stating that output was withheld, and SHALL NOT reproduce the matched
+bytes. The smoke package's scan SHALL delegate to the module's single sweep implementation and SHALL
+be proven equivalent to it, so `S-CNF-080`'s "both reach that one implementation" holds after the
+package is relocated.
+(Previously: the sweep was required to exist and to catch a planted leak, but nothing bound it to the
+live test's own captured output, the failure paths, or the mandatory positive control — so the "even
+on failure" clause was an untested intention and a clean result could pass vacuously.)
+
+> **Amended 2026-08-09 (AI-39)** by `cachicamas-ai-live-smoke`: the sweep is now bound to the live
+> run's own capture sink on every path, the `sweep.SelfTest` positive control becomes mandatory before
+> a clean result is trusted, and the single-implementation convergence obligation is restated so it
+> survives the move to `.../openrouter/internal/smoke`.
 
 #### Scenario: Sentinel sweep catches a deliberate leak mutation
 
@@ -185,6 +245,30 @@ The live smoke SHALL NOT log the credential, secret value, or full prompt. A sen
 - GIVEN the wrapper's credential value
 - WHEN it is rendered through `String()`, `GoString()`, `MarshalJSON`, or default formatting
 - THEN no rendering contains the token.
+
+#### Scenario: The sweep runs over the live run's captured output on every path
+
+- GIVEN a credentialled live run that ends by success, by request failure, by drain failure, or by a
+  failed stream-shape invariant
+- WHEN the run finishes
+- THEN the sweep has run over the captured diagnostics for that path before any of them reached the
+  test log
+- AND a clean sweep releases the captured diagnostics in full.
+
+#### Scenario: The positive control gates the clean result
+
+- GIVEN the deny list built for a live run
+- WHEN `sweep.SelfTest` is forced to fail over it
+- THEN the test fails rather than reporting a clean sweep
+- AND no clean-sweep claim is made without the control having passed.
+
+#### Scenario: One sweep implementation, reached from both sides after the move
+
+- GIVEN the merged module with the smoke package under `.../openrouter/internal/smoke`
+- WHEN the sweep implementations are enumerated and both the smoke-side scan and the suite-side scan
+  are run over the same corpus and planted needle
+- THEN exactly one implementation exists
+- AND both are proven equivalent to it, with every previously published name still published.
 
 ### R-OR-09 — AI-00.3 forward guard stays green
 
@@ -219,19 +303,19 @@ The wrapper SHALL NOT support an Anthropic native adapter, SHALL NOT widen AI-32
 | **Q2** | Layer 3 reads env, passes opaque bearer into `Config.Credential` | AI-25.2 invariant; wrapper reads nothing (memory #2432 §3) |
 | **Q3** | Wrapper placement = sibling sub-package `openaicompat/openrouter/` | AI-25.2 call-site scan scope stays clean; Engram #2571 |
 | **Q4** | Conformance bridge ships in PR #2 of this change | AI-38 first-concrete-adapter charter; doc 0002 lines 2241–2277 |
-| **Q5** | Live smoke opt-in via `workflow_dispatch` + repo secret `OPENROUTER_API_KEY` | AI-39.1 charter; doc 0002 lines 2279–2299 |
+| **Q5** | ~~Live smoke opt-in via `workflow_dispatch` + repo secret `OPENROUTER_API_KEY`~~ — superseded at AI-39: env-var-only two-stage gate, no CI workflow (see R-OR-07) | AI-39.1 charter; doc 0002 lines 2279–2299 |
 | **Q6** | Three chained PRs under no-merge tracker | 800-line PR budget per `sdd-phase-common.md §E`; natural work-unit split |
 
 ## Traceability
 
-- **Proposal**: `openspec/changes/add-openrouter-first-provider/proposal.md` · Engram observation **#2570** (`sdd/add-openrouter-first-provider/proposal`)
-- **Explore**: `openspec/changes/add-openrouter-first-provider/explore.md` · Engram topic `sdd/add-openrouter-first-provider/explore` (obs #2568)
+- **Proposal**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/proposal.md` · Engram observation **#2570** (`sdd/add-openrouter-first-provider/proposal`)
+- **Explore**: `openspec/changes/archive/2026-08-06-add-openrouter-first-provider/explore.md` · Engram topic `sdd/add-openrouter-first-provider/explore` (obs #2568)
 - **Wrapper-placement decision**: Engram observation **#2571** (`decision/openrouter-wrapper-placement`)
 - **Composed shipped specs** (read-only, NOT modified):
-  - [`openspec/specs/ai-provider-client/spec.md`](../../../../../specs/ai-provider-client/spec.md) (AI-25) — provider client construction
-  - [`openspec/specs/ai-provider-conformance-suite/spec.md`](../../../../../specs/ai-provider-conformance-suite/spec.md) (AI-23/38) — conformance runner + capability record
-  - [`openspec/specs/ai-stream-testkit/spec.md`](../../../../../specs/ai-stream-testkit/spec.md) (AI-22) — drain, ordering, leak, redaction helpers
-  - [`openspec/specs/ai-model-provider/spec.md`](../../../../../specs/ai-model-provider/spec.md) (AI-20) — `ModelProvider` interface + signature guard
+  - [`openspec/specs/ai-provider-client/spec.md`](../ai-provider-client/spec.md) (AI-25) — provider client construction
+  - [`openspec/specs/ai-provider-conformance-suite/spec.md`](../ai-provider-conformance-suite/spec.md) (AI-23/38) — conformance runner + capability record
+  - [`openspec/specs/ai-stream-testkit/spec.md`](../ai-stream-testkit/spec.md) (AI-22) — drain, ordering, leak, redaction helpers
+  - [`openspec/specs/ai-model-provider/spec.md`](../ai-model-provider/spec.md) (AI-20) — `ModelProvider` interface + signature guard
 - **Milestone charters** (doc 0002 — Layer 1 task graph): AI-25 lines 1447–1491 · AI-38 lines 2241–2277 · AI-39 lines 2279–2299
 - **AI-24 pre-decision** (vendor/transport, OpenAI-compatible Chat Completions + raw `net/http` + zero `go.mod` requires): Engram observation **#2432**
 - **AI-29 struck verdict** (2026-08-04, reasoning stream absent): `openspec/changes/archive/2026-08-04-cachicamas-ai-provider-reasoning-stream/decision.md` §5 row 4, §7, §9 (triggers)

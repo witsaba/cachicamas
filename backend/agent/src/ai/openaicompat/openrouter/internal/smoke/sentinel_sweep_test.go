@@ -73,7 +73,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/smoke"
+	"github.com/cachicamas/backend/agent/src/agenttest/sweep"
+	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke"
 )
 
 // commitRedactedPlaceholder is the synthetic credential-shaped
@@ -366,4 +367,60 @@ func TestSentinelSweep_CatchesDeliberateLogfPromptMutation(t *testing.T) {
 	if !strings.Contains(err.Error(), "prompt") {
 		t.Errorf("error = %q, want a substring naming the leak vector 'prompt'", err.Error())
 	}
+}
+
+// TestSentinelSweep_ConvergesWithSharedSweepCore is the smoke-side half of
+// the S-CNF-080 convergence pin (design.md D2), cross-referencing
+// src/agenttest/sweep_convergence_test.go's
+// TestSweepConvergence_SameCorpusAndNeedle_BothConsumersAgree — the
+// agenttest-side half. Both halves compare their own consumer against
+// agenttest/sweep's Scan directly, over the same canary-corpus
+// construction, so a divergence in either consumer names itself, and the
+// two consumers transitively agree with each other over that same corpus
+// coverage (R-LSM-007, S-LSM-025).
+//
+// This is a regression pin, not RED-first (design.md D2): smoke.Scan
+// already delegates to sweep.Scan (sentinel_sweep.go); this proves that
+// delegation stays intact after the AI-39 move to
+// openrouter/internal/smoke.
+func TestSentinelSweep_ConvergesWithSharedSweepCore(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a planted needle: both consumers detect it", func(t *testing.T) {
+		t.Parallel()
+
+		const needle = "SWEEP-CONVERGENCE-PLANTED-CANARY-3d8f"
+		corpus := "prefix noise " + needle + " suffix noise"
+
+		smokeErr := smoke.Scan([]byte(corpus), smoke.BuildDenyList("unrelated-env-var", "unrelated-secret-pfx", needle))
+		smokeFound := smokeErr != nil
+
+		_, coreFound := sweep.Scan([]byte(corpus), []sweep.Entry{{Vector: "needle", Needle: []byte(needle)}})
+
+		if smokeFound != coreFound {
+			t.Errorf("smoke.Scan found=%v, sweep.Scan found=%v, want identical detection outcomes (S-LSM-025)", smokeFound, coreFound)
+		}
+		if !smokeFound {
+			t.Fatal("neither consumer detected the planted needle, want both to (positive control)")
+		}
+	})
+
+	t.Run("no planted needle: neither consumer reports a leak", func(t *testing.T) {
+		t.Parallel()
+
+		const needle = "SWEEP-CONVERGENCE-ABSENT-CANARY-9a1c"
+		corpus := "clean prose with nothing planted"
+
+		smokeErr := smoke.Scan([]byte(corpus), smoke.BuildDenyList("unrelated-env-var", "unrelated-secret-pfx", needle))
+		smokeFound := smokeErr != nil
+
+		_, coreFound := sweep.Scan([]byte(corpus), []sweep.Entry{{Vector: "needle", Needle: []byte(needle)}})
+
+		if smokeFound != coreFound {
+			t.Errorf("smoke.Scan found=%v, sweep.Scan found=%v, want identical detection outcomes on a clean corpus", smokeFound, coreFound)
+		}
+		if smokeFound {
+			t.Error("smoke.Scan reported a leak on a clean corpus, want none")
+		}
+	})
 }
