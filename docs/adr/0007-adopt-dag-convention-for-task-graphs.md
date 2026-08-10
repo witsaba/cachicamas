@@ -89,6 +89,20 @@ The **`Depends on:` fields are the single source of truth for edges.** The globa
 the delivery table, and parallelism notes are derived summaries (the skill's Step 6 audit already
 enforces this direction).
 
+> **Amended 2026-08-10 — item 3 widened to three nesting levels and Gherkin bodies; item 4
+> follows.** Layer 1 completed with node ids capped at two levels below the milestone
+> (`XX-NN.p.q`, used exactly twice in 164 nodes), and the v2 milestone format needs one more
+> level for milestones that are genuinely a DAG of DAGs. Item 3 now reads: nodes are
+> ~~`#### XX-NN.p — <title> `[type]`` headings~~ **`#### XX-NN.p`, `##### XX-NN.p.q`, and at most
+> `###### XX-NN.p.q.r` headings — three levels below the milestone, never more — each carrying a
+> backticked `[type]` tag**, followed by ~~a test/check/closing list of numbered items~~ **either
+> Gherkin scenarios (fenced ` ```gherkin ` block or `- **Scenario:**` bullets — the v2 form for
+> `[leaf]`/`[guard]`) or a numbered test/check/closing list (the pre-Gherkin form, still valid in
+> merged documents)**, and `- **<Label>:**` metadata bullets. Item 4's edge-id shape widens
+> accordingly: a bare id is ~~`XX-NN` or `XX-NN.p`~~ **`XX-NN` followed by up to three dotted
+> numeric segments**. The mechanical validator
+> (`.claude/skills/task-graph-milestone-doc/scripts/validate_taskgraph.py`) enforces both bounds.
+
 ### D3 — Two renderings, one source of truth
 
 - **In-file:** mermaid blocks inside the document remain the offline/GitHub rendering. They are
@@ -99,6 +113,14 @@ enforces this direction).
   any future viewer consumes the same contract.
 - Neither rendering is authoritative. When a rendering and a `Depends on:` field disagree, the
   field wins and the rendering is regenerated.
+
+> **Amended 2026-08-10 — v2 documents add a mandatory per-wave rendering.** Every `## Wave`
+> section of a document authored under the v2 skill opens with a mermaid flowchart of the wave's
+> **entire containment subtree** (milestones as subgraphs, nodes at every depth) with dependency
+> edges overlaid, in the D4 palette. It is a derived summary like every other rendering — the
+> `Depends on:` fields still win — but its *presence* is contract for v2 documents, so a reader
+> sees each wave's whole DAG without reconstructing it from fields. Merged pre-v2 documents
+> (0002–0004) are not restyled retroactively.
 
 ### D4 — The canonical node-type palette
 
