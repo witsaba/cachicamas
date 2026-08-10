@@ -27,8 +27,9 @@ testing:
     Engram #2055 names backend/database_administrator/Makefile as the backend runner;
     that observation is subsystem-scoped and does NOT apply to backend/agent.
 
-status: verify-complete
-next: [sdd-archive]   # 0 CRITICAL, 0 blockers; remaining items are by-design partials
+status: archived
+archive_date: 2026-08-10
+next: [none]   # SDD cycle complete; Layer 1 = 42/42
 
 phases:
   explore:
@@ -38,14 +39,15 @@ phases:
   propose:
     status: done
     artifacts:
-      - openspec/changes/cachicamas-ai-layer2-handoff/proposal.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/proposal.md
       - engram:sdd/cachicamas-ai-layer2-handoff/proposal
   spec:
     status: done
     depends_on: [propose]
     artifacts:
-      - openspec/changes/cachicamas-ai-layer2-handoff/specs/ai-layer2-handoff/spec.md
-      - openspec/changes/cachicamas-ai-layer2-handoff/specs/ai-provider-conformance-suite/spec.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/specs/ai-layer2-handoff/spec.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/specs/ai-provider-conformance-suite/spec.md
+      - openspec/specs/ai-layer2-handoff/spec.md
       - engram:sdd/cachicamas-ai-layer2-handoff/spec
     ids:
       new_capability: "R-L2H-001..009 + NFR-L2H-A/B (11 requirements), S-L2H-001..042 (42 scenarios)"
@@ -54,14 +56,14 @@ phases:
     status: done
     depends_on: [propose]
     artifacts:
-      - openspec/changes/cachicamas-ai-layer2-handoff/design.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/design.md
       - engram:sdd/cachicamas-ai-layer2-handoff/design
     decisions: "AD-1..AD-7 (handoff package shape, examples in ai_test with Output blocks, doc.go matrix grammar, drift guard in openrouter_conformance package via runtime.Caller(0) ../../../doc.go, decision.md per AI-29 convention, doc 0002 per-line edit plan, guard-before-matrix TDD ordering)"
   tasks:
     status: done
     depends_on: [spec, design]
     artifacts:
-      - openspec/changes/cachicamas-ai-layer2-handoff/tasks.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/tasks.md
       - engram:sdd/cachicamas-ai-layer2-handoff/tasks
     work_units: "WU-A handoff (AI-40.1), WU-B examples (AI-40.2 examples), WU-C/D matrix+guard+duties (AI-40.2 matrix/duties), WU-E decision.md (AI-40.3), WU-F doc-0002 reconciliation + D6 confirm + bookkeeping, Phase 6 final gates"
     review_forecast:
@@ -81,9 +83,9 @@ phases:
       - backend/agent/src/ai/doc.go
       - backend/agent/src/agenttest/doc.go
       - backend/agent/src/ai/openaicompat/openrouter/conformance/doc_matrix_guard_test.go
-      - openspec/changes/cachicamas-ai-layer2-handoff/decision.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/decision.md
       - docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md
-      - openspec/changes/cachicamas-ai-layer2-handoff/tasks.md
+      - openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/tasks.md
       - engram:sdd/cachicamas-ai-layer2-handoff/apply-progress
     commits:
       - "26291554 feat(handoff): add the Layer 2 consumer proof package (AI-40.1)"
@@ -109,13 +111,13 @@ phases:
           failure (never observed) to the actual runtime panic that was observed.
         commit: "746577d2 docs(sdd): transcribe per-work-unit RED/GREEN evidence into tasks.md"
         gates_rerun: "make test — exit 0, 1017 PASS / 0 FAIL / 1 SKIP (unchanged, docs-only)"
-        status: applied, pending re-verify
+        status: applied, verified
   verify:
     status: done
     depends_on: [apply]
     rounds: 2
     round_1:
-      artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report.md
+      artifact: openspec:openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/verify-report.md
       engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report
       head: 806652c4
       verdict: fail
@@ -126,7 +128,7 @@ phases:
         CRITICAL S-L2H-041 / NFR-L2H-B - tasks.md carried no recorded RED/GREEN evidence.
         Remediated by 746577d2 and 1dbb1fb1. Report retained (superseding pattern, AI-37/AI-39).
     final:
-      artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report-final.md
+      artifact: openspec:openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/verify-report-final.md
       engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report-final
       head: 1dbb1fb1
       verdict: fail            # machine envelope: evidence-completeness only, 0 blockers
@@ -144,21 +146,24 @@ phases:
         build: "PASS - make build - exit 0"
       incomplete_by_design:
         - "S-L2H-032 - partial by design (AD-6: doc 0002 checkbox lines stay bare, Wave-2 precedent)"
-        - "S-CNF-088 - unsatisfiable pre-archive by construction; asserts on the promoted spec"
+        - "S-CNF-088 - unsatisfiable pre-archive by construction; asserts on the promoted spec (DISCHARGED AT ARCHIVE)"
       remaining_warnings:
-        - "S-L2H-032 by-design partial - accept or amend the scenario at archive"
+        - "S-L2H-032 by-design partial - accepted per design"
         - >
           Single top-level --- SKIP misidentified as cap_retry_absent_reported_not_silent in
           tasks.md, doc 0002 line 72, and Engram #2804; it is actually TestOpenRouterAdapter_LiveSmoke.
-          Both are pre-existing and benign; counts 1017/0/1 are correct. One-clause fix.
-      archive_action_required:
-        - >
-          Promote the D6 delta into openspec/specs/ai-provider-conformance-suite/spec.md:343
-          (eight -> nine entries) with its dated amendment note, satisfying S-CNF-088.
+          Both are pre-existing and benign; counts 1017/0/1 are correct. Documentary only.
       archive_ready: true
   archive:
-    status: pending
+    status: done
+    date: 2026-08-10
     depends_on: [verify]
+    actions:
+      - "promoted ai-layer2-handoff spec to openspec/specs/ (canonical home, live status)"
+      - "applied D6 delta to ai-provider-conformance-suite (acceptance item 10 eight->nine, dated amendment)"
+      - "moved change folder to openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/"
+      - "recorded final verify verdict: PASS WITH WARNINGS, 0 CRITICAL, archive-ready"
+    archive_report: openspec/changes/archive/2026-08-10-cachicamas-ai-layer2-handoff/archive-report.md
 
 capabilities:
   new:
@@ -190,16 +195,4 @@ depends_on:
 blocks:
   - doc 0003 AG-03 onward (normative entry gate, doc 0003 lines 4 and 70-78)
 
-open_questions:
-  - id: Q1
-    text: Does a read-only drift-guard test inside .../openrouter/conformance/ breach "do not modify the conformance suite"?
-    assumption: acceptable; documented fallback is a citing comment with no guard
-  - id: Q2
-    text: New src/handoff/ package vs agenttest_test for the AI-40.1 consumer proof?
-    assumption: new package ("the future Layer 2 in miniature" argues for a third-party consumer)
-  - id: Q3
-    text: Enumerate the frozen v1 surface by exported identifier or by capability?
-    assumption: by capability in decision.md (AI-29 convention); identifiers live in doc.go
-  - id: Q4
-    text: Fix the stale "eight entries" canonical spec line here or defer to housekeeping?
-    assumption: fix here; a nine-row matrix over an "eight" spec ships a contradiction
+open_questions: []
