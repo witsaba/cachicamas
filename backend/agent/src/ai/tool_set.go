@@ -2,7 +2,10 @@
 
 package ai
 
-import "slices"
+import (
+	"slices"
+	"strconv"
+)
 
 // ToolSet is the ordered, deterministically iterable collection of tool
 // declarations offered on one request (V-REQ-14).
@@ -110,3 +113,13 @@ func (s ToolSet) Declares(name string) bool {
 	}
 	return false
 }
+
+// String renders the set for the %v and %s verbs, naming only its size —
+// never a member's name, description or schema (V-FAIL-13; see
+// Tool.String for the posture).
+func (s ToolSet) String() string {
+	return "toolset(" + strconv.Itoa(len(s.tools)) + " tools)"
+}
+
+// GoString renders the set for the %#v verb — same posture as String.
+func (s ToolSet) GoString() string { return s.String() }

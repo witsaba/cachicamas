@@ -231,3 +231,20 @@ func (m Message) IsCacheBoundary() bool { return m.cacheBoundary }
 func (m Message) Equal(other Message) bool {
 	return m.role == other.role && m.cacheBoundary == other.cacheBoundary && slices.Equal(m.content, other.content)
 }
+
+// String renders the message for the %v and %s verbs, naming structure only
+// — the role and the part count — never a byte of content. fmt's printValue
+// skips handleMethods for a value reached through an unexported field, so
+// without this method %v on anything holding a Message falls back to
+// reflection and prints the conversation verbatim (V-FAIL-13, the same
+// posture every other payload-carrying type in this package keeps).
+func (m Message) String() string {
+	if m.role == 0 && len(m.content) == 0 {
+		return "message(unset)"
+	}
+	return "message(" + m.role.String() + ", " + strconv.Itoa(len(m.content)) + " parts)"
+}
+
+// GoString renders the message for the %#v verb. It exists so the redaction
+// posture covers every fmt verb rather than the three a reader thinks of.
+func (m Message) GoString() string { return m.String() }

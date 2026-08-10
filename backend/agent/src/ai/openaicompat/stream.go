@@ -108,6 +108,7 @@ package openaicompat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -128,7 +129,7 @@ const streamReadBufferSize = 32 * 1024
 
 // streamCarrierBuffer sizes the event carrier the producer hands back to
 // the caller (R-AIS-031, R-AIS-039). The value is frozen by
-// `openspec/changes/2026-08-07-cachicamas-ai-backpressure/decision.md` —
+// `openspec/changes/archive/2026-08-07-cachicamas-ai-backpressure/decision.md` —
 // AI-34.1's M1 / M2 / M3 measurements, with doc 0002 § 6 line 432's
 // "prefer the smaller" tie-break applied. The chosen N is `0` (rendezvous):
 // the unbuffered carrier minimises on every axis the measurements name
@@ -139,6 +140,21 @@ const streamReadBufferSize = 32 * 1024
 // package-private constant; no `Config.BufferCapacity` field (design D1,
 // proposal Q3).
 const streamCarrierBuffer = 0
+
+// drainBodyLimit caps how many bytes run()'s pre-close body drain will
+// consume. The drain exists so the transport can return the keep-alive
+// connection to its idle pool (R-AIS-033, amended 2026-08-10); unbounded,
+// it becomes a hang when a server keeps writing after the terminal
+// sentinel on a stream whose context the consumer — correctly — never
+// cancels. Past the bound the body is closed undrained and the transport
+// discards the connection instead of reusing it: a bounded close is worth
+// strictly more than a reused connection. The bound applies ONLY here:
+// captureBody's own drain (capture.go) stays full per S-AEM-059, because
+// it runs pre-handover where the caller is still blocked in Stream()
+// holding the context and can cancel out of a flood. A server that goes
+// silent WITHOUT closing is the caller's ctx to bound on either path,
+// per the AI-02 ownership contract — a byte bound cannot close that case.
+const drainBodyLimit = 256 * 1024
 
 // emitFailureSendBound caps how long a single terminal-failure send
 // may wait for the consumer (AI-32.3 bounded-wait). Generous enough
@@ -625,9 +641,10 @@ func refuseNonStreamContentType(resp *http.Response, cred Credential) error {
 func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span trace.Span) {
 	defer close(out)
 	// AI-33.5 (R-AIS-033): drain-before-close — see header. Silent
-	// (network errors ignored), runs inside the producer goroutine's
-	// existing defer chain (R-ATS-003 preserved: no second goroutine).
-	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
+	// (network errors ignored), byte-bounded (drainBodyLimit — see its
+	// doc comment), runs inside the producer goroutine's existing defer
+	// chain (R-ATS-003 preserved: no second goroutine).
+	defer func() { _, _ = io.CopyN(io.Discard, resp.Body, drainBodyLimit); _ = resp.Body.Close() }()
 
 	// AI-37 (AD-5): the span finalizer is registered AFTER the two defers
 	// above, so LIFO runs it FIRST — finalizer, then drain, then
@@ -663,13 +680,16 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 	// run's own copy, updated only once emit actually confirms a send,
 	// is the one true account of what the CARRIER has observed.
 	blockOpen := false
-	// toolBlocksOpen counts the open tool-call blocks as observed by the
-	// carrier (AI-30.1, design.md D8 inheritance): the count rises with
-	// each ToolCallStart emit-confirmed and falls with each
-	// ToolCallEnd. The mapper's own toolOpenOrder is the source of truth
-	// for which blocks to close on a failure path (D7/D8), but run
-	// tracks the count independently — same reasoning blockOpen uses.
-	toolBlocksOpen := 0
+	// openToolBlocks is the set of tool-call blocks open as observed by
+	// the carrier (AI-30.1, design.md D8 inheritance): a block index
+	// enters on an emit-confirmed ToolCallStart and leaves on an
+	// emit-confirmed ToolCallEnd. The mapper's own toolOpenOrder is the
+	// source of truth for the CLOSING BYTES of a failure-path close
+	// (D7/D8), but run tracks membership independently — same reasoning
+	// blockOpen uses — so a terminal path never closes a block whose
+	// start the carrier never received (a lost ToolCallStart send would
+	// otherwise turn the close into a no-matching-start violation).
+	openToolBlocks := make(map[ai.BlockIndex]struct{})
 
 	buf := make([]byte, streamReadBufferSize)
 	for {
@@ -693,7 +713,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 				if string(frame.Data) == doneSentinel {
 					completion, compErr := state.buildCompletion()
 					if compErr != nil {
-						outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
+						outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
 						return
 					}
 					if payload, ok := completion.Completion(); ok {
@@ -749,6 +769,14 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 						if ctxErr := ctx.Err(); ctxErr != nil {
 							if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
 								outcome.failure = failure
+								for _, end := range confirmedToolCallEnds(state, openToolBlocks) {
+									endStamped := stamper.Stamp(end)
+									select {
+									case out <- endStamped:
+										outcome.eventCount++
+									case <-time.After(emitFailureSendBound):
+									}
+								}
 								if blockOpen {
 									if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
 										endStamped := stamper.Stamp(end)
@@ -800,6 +828,16 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 					// reordering changes no other observable behavior.
 					failure := failureFromErrorFrame(frame.Data, outputPreceded)
 					outcome.failure = failure
+					// Close every carrier-confirmed open tool-call block
+					// before the terminal — the same D7/D8 discipline
+					// emitFailure keeps — so a provider error frame that
+					// arrives with a tool call open still yields a stream
+					// ai.CheckStream accepts (AI-30.1).
+					for _, end := range confirmedToolCallEnds(state, openToolBlocks) {
+						if !sendEvent(end) {
+							return
+						}
+					}
 					if blockOpen {
 						if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
 							if !sendEvent(end) {
@@ -817,7 +855,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 
 				chunk, decodeErr := decodeChunk(frame.Data)
 				if decodeErr != nil {
-					outcome.failure = emitFailure(ctx, out, stamper, state, errMalformedChunkJSON, outputPreceded, blockOpen, &outcome.eventCount)
+					outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, errMalformedChunkJSON, outputPreceded, blockOpen, &outcome.eventCount)
 					return
 				}
 				if !chunk.isChunk() {
@@ -829,46 +867,54 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 
 				events, applyErr := state.applyChunk(chunk)
 				if applyErr != nil {
-					outcome.failure = emitFailure(ctx, out, stamper, state, applyErr, outputPreceded, blockOpen, &outcome.eventCount)
+					outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, applyErr, outputPreceded, blockOpen, &outcome.eventCount)
 					return
 				}
-			for _, ev := range events {
-				if !sendEvent(ev) {
-					// AI-32.3: a normal mid-stream emit losing the
-					// ctx.Done() race (R-AEM-014) MUST still surface
-					// a typed terminal failure on cancel/deadline
-					// (S-AEM-051/052), NOT the AI-20.3 silent loss
-					// path. Bounded-wait send — same rationale as
-					// emitFailure's terminal send — so the consumer
-					// that has reached drainAll can observe the
-					// typed failure alongside the eventual close.
-					if ctxErr := ctx.Err(); ctxErr != nil {
-						if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
-							outcome.failure = failure
-							if blockOpen {
-								if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
-									if endStamped := stamper.Stamp(end); true {
+				for _, ev := range events {
+					if !sendEvent(ev) {
+						// AI-32.3: a normal mid-stream emit losing the
+						// ctx.Done() race (R-AEM-014) MUST still surface
+						// a typed terminal failure on cancel/deadline
+						// (S-AEM-051/052), NOT the AI-20.3 silent loss
+						// path. Bounded-wait send — same rationale as
+						// emitFailure's terminal send — so the consumer
+						// that has reached drainAll can observe the
+						// typed failure alongside the eventual close.
+						if ctxErr := ctx.Err(); ctxErr != nil {
+							if failure := midStreamFailureFrom(ctxErr, outputPreceded); failure != nil {
+								outcome.failure = failure
+								for _, end := range confirmedToolCallEnds(state, openToolBlocks) {
+									endStamped := stamper.Stamp(end)
+									select {
+									case out <- endStamped:
+										outcome.eventCount++
+									case <-time.After(emitFailureSendBound):
+									}
+								}
+								if blockOpen {
+									if end, err := ai.NewTextBlockEnd(textBlockIndex); err == nil {
+										if endStamped := stamper.Stamp(end); true {
+											select {
+											case out <- endStamped:
+												outcome.eventCount++
+											case <-time.After(emitFailureSendBound):
+											}
+										}
+									}
+								}
+								if errEv, err := ai.ErrorEvent(failure); err == nil {
+									if errStamped := stamper.Stamp(errEv); true {
 										select {
-										case out <- endStamped:
+										case out <- errStamped:
 											outcome.eventCount++
 										case <-time.After(emitFailureSendBound):
 										}
 									}
 								}
 							}
-							if errEv, err := ai.ErrorEvent(failure); err == nil {
-								if errStamped := stamper.Stamp(errEv); true {
-									select {
-									case out <- errStamped:
-										outcome.eventCount++
-									case <-time.After(emitFailureSendBound):
-									}
-								}
-							}
 						}
+						return
 					}
-					return
-				}
 					if isOutputEvent(ev) {
 						outputPreceded = true
 					}
@@ -878,27 +924,31 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 					case ai.EventKindTextBlockEnd:
 						blockOpen = false
 					case ai.EventKindToolCallStart:
-						toolBlocksOpen++
+						if payload, ok := ev.ToolCallStart(); ok {
+							openToolBlocks[payload.BlockIndex()] = struct{}{}
+						}
 					case ai.EventKindToolCallEnd:
-						toolBlocksOpen--
+						if payload, ok := ev.ToolCallEnd(); ok {
+							delete(openToolBlocks, payload.BlockIndex())
+						}
 					}
 				}
 			}
 			if feedErr != nil {
-				outcome.failure = emitFailure(ctx, out, stamper, state, feedErr, outputPreceded, blockOpen, &outcome.eventCount)
+				outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, feedErr, outputPreceded, blockOpen, &outcome.eventCount)
 				return
 			}
 		}
 		if readErr != nil {
-			if readErr == io.EOF {
+			if errors.Is(readErr, io.EOF) {
 				if finishErr := decoder.Finish(); finishErr != nil {
-					outcome.failure = emitFailure(ctx, out, stamper, state, finishErr, outputPreceded, blockOpen, &outcome.eventCount)
+					outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, finishErr, outputPreceded, blockOpen, &outcome.eventCount)
 					return
 				}
 				// Clean SSE framing, but the sentinel was never observed
 				// — design.md D9's sibling case at the transport-EOF edge
 				// rather than the [DONE]-with-no-terminal-chunk edge.
-				outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
+				outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
 				return
 			}
 			if ctx.Err() != nil {
@@ -918,6 +968,14 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 					// send in this file, so a terminal event that follows
 					// earlier stamped events never carries sequence 0
 					// (R-AEE-007/R-AEE-008).
+					for _, end := range confirmedToolCallEnds(state, openToolBlocks) {
+						endStamped := stamper.Stamp(end)
+						select {
+						case out <- endStamped:
+							outcome.eventCount++
+						case <-time.After(emitFailureSendBound):
+						}
+					}
 					if end, err := ai.NewTextBlockEnd(textBlockIndex); blockOpen && err == nil {
 						endStamped := stamper.Stamp(end)
 						select {
@@ -937,7 +995,7 @@ func run(ctx context.Context, resp *http.Response, out chan<- ai.Event, span tra
 				}
 				return
 			}
-			outcome.failure = emitFailure(ctx, out, stamper, state, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
+			outcome.failure = emitFailure(ctx, out, stamper, state, openToolBlocks, errIncompleteStream, outputPreceded, blockOpen, &outcome.eventCount)
 			return
 		}
 	}
@@ -1020,7 +1078,39 @@ func emit(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, ev ai.E
 // stream.event_count carrier, shared with run's own sendEvent closure so
 // the final count equals every event actually drained regardless of
 // which of the two ever produced it.
-func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, cause error, outputPreceded, blockOpen bool, eventCount *int) *ai.Failure {
+// confirmedToolCallEnds builds the closing ToolCallEnd events for every
+// tool-call block that is open FROM THE CARRIER'S VANTAGE — the
+// intersection of the mapper's still-open calls (state.truncateOpenCalls,
+// raw accumulated bytes, Q2 ruling) with run's own openToolBlocks set. A
+// call the mapper opened but whose ToolCallStart the carrier never
+// received (a lost send, or a chunk whose events were discarded on an
+// applyChunk error) is excluded: closing it would itself be an
+// ai.CheckStream no-matching-start violation. On a truncateOpenCalls
+// error the close set is empty — the terminal failure still goes out,
+// which matters more (the same posture emitFailure's own text-block
+// close already keeps).
+func confirmedToolCallEnds(state *mapperState, open map[ai.BlockIndex]struct{}) []ai.Event {
+	if state == nil || len(open) == 0 {
+		return nil
+	}
+	ends, err := state.truncateOpenCalls()
+	if err != nil {
+		return nil
+	}
+	confirmed := make([]ai.Event, 0, len(ends))
+	for _, end := range ends {
+		payload, ok := end.ToolCallEnd()
+		if !ok {
+			continue
+		}
+		if _, isOpen := open[payload.BlockIndex()]; isOpen {
+			confirmed = append(confirmed, end)
+		}
+	}
+	return confirmed
+}
+
+func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, state *mapperState, openToolBlocks map[ai.BlockIndex]struct{}, cause error, outputPreceded, blockOpen bool, eventCount *int) *ai.Failure {
 	// AI-32.3: scoped to the function's own terminal-event send. The
 	// tool-call close + text-block close below still respect ctx via
 	// emit(), so a cancellation that lands BEFORE this function runs
@@ -1041,20 +1131,16 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 		return nil
 	}
 
-	// Close every still-open tool-call block (AI-30.1, D8 inheritance).
-	// truncateOpenCalls reads state.toolOpenOrder; its raw-bytes close
+	// Close every carrier-confirmed still-open tool-call block (AI-30.1,
+	// D8 inheritance). confirmedToolCallEnds reads state.toolOpenOrder
+	// filtered by run's own openToolBlocks set; its raw-bytes close
 	// keeps a partial / malformed payload's bytes intact (Q2 ruling).
-	if state != nil {
-		toolEnds, terr := state.truncateOpenCalls()
-		if terr == nil {
-			for _, end := range toolEnds {
-				if !emit(ctx, out, stamper, end) {
-					return failure
-				}
-				if eventCount != nil {
-					*eventCount++
-				}
-			}
+	for _, end := range confirmedToolCallEnds(state, openToolBlocks) {
+		if !emit(ctx, out, stamper, end) {
+			return failure
+		}
+		if eventCount != nil {
+			*eventCount++
 		}
 	}
 
@@ -1101,7 +1187,3 @@ func emitFailure(ctx context.Context, out chan<- ai.Event, stamper *ai.Stamper, 
 	}
 	return failure
 }
-
-// referenced from run() so the linter / errcheck posture this file's
-// other helpers already keep is preserved for the in-band frame path.
-var _ = emit

@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -94,11 +93,18 @@ func TestProvider_MidScriptCancellation_ClosesWithinBoundedTime_DropsRemainingAn
 // preserving AI-20.2's ordering rather than short-circuiting on
 // cancellation.
 func TestProvider_PreStreamCancellation_TypedFailureNoCarrier_ValidationOrderedFirst(t *testing.T) {
-	t.Parallel()
+	// Deliberately NOT parallel: the goroutine-accounting subtest below
+	// runs under RequireNoGoroutineLeak, whose serial-only pin
+	// (stream_kit_leak.go's tb.Setenv) panics under a parallel ancestor.
+	// The pre-kit form of this test took a process-wide
+	// runtime.NumGoroutine() snapshot inside a t.Parallel() subtest, which
+	// passed in a full-package run (the before-snapshot lands at the
+	// high-water mark) and deterministically failed under a narrow
+	// `go test -run` selection (sibling parallel tests ramp the count
+	// between the before and after snapshots) — the exact hazard the kit's
+	// serial pin exists to prevent.
 
 	t.Run("valid request, already-cancelled context: typed cancellation failure, no carrier, no extra goroutine", func(t *testing.T) {
-		t.Parallel()
-
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -125,24 +131,14 @@ func TestProvider_PreStreamCancellation_TypedFailureNoCarrier_ValidationOrderedF
 			t.Errorf("failure.Delivery() = %v, want %v (pre-stream, never carried by an event)", got, ai.DeliveryPreStream)
 		}
 
-		// S-AFP-031 — a single before/after runtime.NumGoroutine() snapshot
-		// is unreliable in this package's own busy, heavily t.Parallel()
-		// binary (unrelated tests' goroutines wind down concurrently), so
-		// this repeats the failing call many times instead: a per-call
-		// leak would grow the count by roughly the repeat count, while
-		// background jitter from sibling tests does not — a bound well
-		// below the repeat count still catches a real leak.
-		const repeats = 50
-		before := runtime.NumGoroutine()
-		for range repeats {
+		// S-AFP-031 — per-call goroutine accounting through the AI-22.4
+		// kit, which repeats the scenario, tolerates background jitter,
+		// and mechanically enforces its own serial-only precondition.
+		agenttest.RequireNoGoroutineLeak(t, func() {
 			if _, err := agenttest.NewProvider(mustTextDeltaScript(t)).Stream(ctx, mustSimpleRequest(t)); err == nil {
 				t.Fatal("repeated pre-stream call unexpectedly succeeded")
 			}
-		}
-		settleAfterFakeCancel()
-		if after := runtime.NumGoroutine(); after > before+repeats/2 {
-			t.Errorf("goroutine count grew from %d to %d across %d pre-stream failures, want no per-call goroutine leak", before, after, repeats)
-		}
+		})
 	})
 
 	t.Run("zero-value request, already-cancelled context: the validation failure wins, not cancellation", func(t *testing.T) {

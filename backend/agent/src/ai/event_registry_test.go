@@ -135,7 +135,10 @@ var eventKindWitnesses = map[ai.EventKind]eventKindWitness{
 	ai.EventKindError: {
 		registeredName: "error",
 		construct: func() (ai.Event, error) {
-			f, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout})
+			// Mid-stream delivery: ErrorEvent rejects a pre-stream
+			// failure — a stream terminal's payload must report the
+			// carrier it actually arrived on.
+			f, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout}, false)
 			if err != nil {
 				return ai.Event{}, err
 			}

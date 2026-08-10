@@ -40,7 +40,7 @@ func TestRequireValidStream_TerminalFollowedByDelta_CarriesCheckStreamsOwnVerdic
 	t.Parallel()
 
 	prior := mustPriorOutputEvent(t)
-	failure, err := ai.PreStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout})
+	failure, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout}, false)
 	mustNoOrderingErr(t, err)
 	terminal, err := ai.ErrorEvent(failure)
 	mustNoOrderingErr(t, err)

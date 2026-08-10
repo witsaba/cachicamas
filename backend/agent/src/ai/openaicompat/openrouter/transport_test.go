@@ -265,3 +265,66 @@ func TestAttributionRoundTripper_PartialEmptyHeaders_OnlyNonEmptySet(t *testing.
 		t.Errorf("X-OpenRouter-Categories present = %v, want absent (empty categories)", got)
 	}
 }
+
+// TestAttributionRoundTripper_ModelOverride_GetBodyServesOverriddenBytes
+// pins the replay path: net/http calls GetBody — not Body — to re-send a
+// request on a 307/308 redirect or an HTTP/2 GOAWAY/stream-refused retry.
+// When the round tripper rewrites the body for a model override, the
+// outbound request's GetBody must serve the SAME overridden bytes, or a
+// transparent replay silently reverts to the configured default model.
+func TestAttributionRoundTripper_ModelOverride_GetBodyServesOverriddenBytes(t *testing.T) {
+	t.Parallel()
+
+	const original = `{"model":"default/model","messages":[]}`
+	const override = "openai/gpt-4o"
+
+	base := &capturingTransport{}
+	rt := attributionRoundTripper{
+		base:          base,
+		modelOverride: override,
+	}
+
+	// http.NewRequestWithContext sets GetBody automatically for a
+	// *strings.Reader body — the same construction openaicompat's own
+	// request.go uses with its *bytes.Reader.
+	inbound, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://example.invalid/v1", strings.NewReader(original))
+	if err != nil {
+		t.Fatalf("http.NewRequestWithContext() error = %v, want nil", err)
+	}
+	if inbound.GetBody == nil {
+		t.Fatal("precondition: inbound.GetBody is nil, want the stdlib-installed replayer")
+	}
+
+	if _, err := rt.RoundTrip(inbound); err != nil {
+		t.Fatalf("RoundTrip() error = %v, want nil", err)
+	}
+	outbound := base.requests[0]
+
+	wantBody := string(overrideBodyModel([]byte(original), override))
+
+	gotBody, err := io.ReadAll(outbound.Body)
+	if err != nil {
+		t.Fatalf("reading outbound.Body: %v", err)
+	}
+	if string(gotBody) != wantBody {
+		t.Fatalf("outbound.Body = %q, want %q", gotBody, wantBody)
+	}
+
+	if outbound.GetBody == nil {
+		t.Fatal("outbound.GetBody is nil after the body rewrite — a 307/308 or GOAWAY replay would have no body at all")
+	}
+	replay, err := outbound.GetBody()
+	if err != nil {
+		t.Fatalf("outbound.GetBody() error = %v, want nil", err)
+	}
+	gotReplay, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatalf("reading GetBody() reader: %v", err)
+	}
+	if string(gotReplay) != wantBody {
+		t.Errorf("GetBody() bytes = %q, want %q — a transparent replay must resend the OVERRIDDEN body, not the original", gotReplay, wantBody)
+	}
+	if outbound.ContentLength != int64(len(wantBody)) {
+		t.Errorf("outbound.ContentLength = %d, want %d", outbound.ContentLength, len(wantBody))
+	}
+}

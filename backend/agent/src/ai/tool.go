@@ -194,3 +194,19 @@ func (t Tool) MarkCacheBoundary() Tool {
 // A declaration that was never marked reports false, and marking an
 // already-marked declaration again is idempotent (R-ACB-001).
 func (t Tool) IsCacheBoundary() bool { return t.cacheBoundary }
+
+// String renders the declaration for the %v and %s verbs, naming structure
+// only. The tool's name, description and schema are all withheld — the
+// same line R-AMR-017 already draws for a request rendering ("a tool's
+// name or schema" must not be reproduced), kept at the value level so a
+// logged Tool cannot leak what a logged Request may not (V-FAIL-13).
+func (t Tool) String() string {
+	if t.name == "" {
+		return "tool(unset)"
+	}
+	return "tool(declared)"
+}
+
+// GoString renders the declaration for the %#v verb — same posture as
+// String, covering the reflection-fallback verb.
+func (t Tool) GoString() string { return t.String() }
