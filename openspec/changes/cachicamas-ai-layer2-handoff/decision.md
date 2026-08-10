@@ -63,24 +63,26 @@ Every item of [the Layer 1 completion checklist](../../../docs/architecture/mile
 
 | # | Item (doc 0002's own words) | Observed on 2026-08-10 | Closing node(s) | Evidence |
 |---|---|---|---|---|
-| 1 | The `backend/agent` module exists at the ADR-defined location, and `database_administrator/src/tools/` is untouched. | `[x]` | AI-00.1 | doc 0002 checklist line 2418 |
-| 2 | **Both** import directions are mechanically guarded, and each guard has been recorded biting. | `[x]` | AI-00.3, AI-00.4 | line 2419 |
-| 3 | Neutral request, message, content and tool contracts are documented and tested. | `[x]` | AI-05 … AI-10 | line 2420 |
-| 4 | Every content-part variant is readable from another package, and no unconstructed value can reach a request. | `[x]` | AI-06.2, AI-06.3, AI-10.5 | line 2421 |
-| 5 | Cache breakpoints are expressible; per-request options and a provider escape hatch exist; a request is rebuildable without mutation. | `[x]` | AI-11, AI-12 | line 2422 |
-| 6 | Provider round-trip tokens survive byte-exact through normalization, rebuild, and the wire. | `[ ]` — **stays open by design** | Stream half closed: AI-07.3, AI-12.1, AI-17 (`R-ARE-009`/`R-ARE-010`, the `G12(b)` spine row). Wire half: AI-26.6 landed as a refusal; AI-29.2 is **struck** by AI-29 | doc 0002 lines 2423, 2446; AI-29's `decision.md` § 11; this change's `src/ai/doc.go` publication (AI-40.2) |
-| 7 | Event order and stream ownership are explicit, and the sequence is per-stream and provably starts at 1 for every stream. | `[x]` | AI-14.2, AI-14.4, AI-22.3 | line 2424; Wave 2 close amendment, line 2439 |
-| 8 | Every event kind that can be emitted has a payload that can actually be constructed. | `[x]` | AI-14.1, AI-19.1 | line 2425; Wave 2 close amendment, line 2440 |
-| 9 | The error taxonomy is typed, safe and inspectable, with a partial-output discriminator. | `[x]` | AI-19 | line 2426; Wave 2 close amendment, line 2441 |
-| 10 | The provider interface exposes no vendor type, and optional capabilities are discovered rather than required. | `[x]` | AI-20.1, AI-20.4, AI-20.5 | line 2427; Wave 2 close amendment, line 2442 |
+| 1 | The `backend/agent` module exists at the ADR-defined location, and `database_administrator/src/tools/` is untouched. | `[x]` | AI-00.1 | doc 0002 checklist line 2430 |
+| 2 | **Both** import directions are mechanically guarded, and each guard has been recorded biting. | `[x]` | AI-00.3, AI-00.4 | line 2431 |
+| 3 | Neutral request, message, content and tool contracts are documented and tested. | `[x]` | AI-05 … AI-10 | line 2432 |
+| 4 | Every content-part variant is readable from another package, and no unconstructed value can reach a request. | `[x]` | AI-06.2, AI-06.3, AI-10.5 | line 2433 |
+| 5 | Cache breakpoints are expressible; per-request options and a provider escape hatch exist; a request is rebuildable without mutation. | `[x]` | AI-11, AI-12 | line 2434 |
+| 6 | Provider round-trip tokens survive byte-exact through normalization, rebuild, and the wire. | `[ ]` — **stays open by design** | Stream half closed: AI-07.3, AI-12.1, AI-17 (`R-ARE-009`/`R-ARE-010`, the `G12(b)` spine row). Wire half: AI-26.6 landed as a refusal; AI-29.2 is **struck** by AI-29 | doc 0002 lines 2435, 2458; AI-29's `decision.md` § 11; this change's `src/ai/doc.go` publication (AI-40.2) |
+| 7 | Event order and stream ownership are explicit, and the sequence is per-stream and provably starts at 1 for every stream. | `[x]` | AI-14.2, AI-14.4, AI-22.3 | line 2436; Wave 2 close amendment, line 2451 |
+| 8 | Every event kind that can be emitted has a payload that can actually be constructed. | `[x]` | AI-14.1, AI-19.1 | line 2437; Wave 2 close amendment, line 2452 |
+| 9 | The error taxonomy is typed, safe and inspectable, with a partial-output discriminator. | `[x]` | AI-19 | line 2438; Wave 2 close amendment, line 2453 |
+| 10 | The provider interface exposes no vendor type, and optional capabilities are discovered rather than required. | `[x]` | AI-20.1, AI-20.4, AI-20.5 | line 2439; Wave 2 close amendment, line 2454 |
 | 11 | Cancellation cannot leak goroutines. | `[x]` (this change) | AI-33 | AI-33 close amendment, line 16 |
 | 12 | Backpressure is bounded and lossless, with exactly one sanctioned loss path. | `[x]` (this change) | AI-34 | AI-34 close amendment, line 18 |
-| 13 | The fake provider supports deterministic Layer 2 tests. | `[x]` | AI-21 | line 2430; Wave 3 close amendment, line 2450 |
-| 14 | The conformance suite can be reused for every future adapter. | `[x]` (this change) | AI-23, AI-38.1 | AI-23, Wave 3 close amendment line 2451; AI-38.1, AI-38 close amendment line 48 (PR #140, `5bc2da4e`) |
+| 13 | The fake provider supports deterministic Layer 2 tests. | `[x]` | AI-21 | line 2442; Wave 3 close amendment, line 2462 |
+| 14 | The conformance suite can be reused for every future adapter. | `[x]` (this change) | AI-23, AI-38.1 | AI-23, Wave 3 close amendment line 2463; AI-38.1, AI-38 close amendment line 48 (PR #140, `5bc2da4e`) |
 | 15 | The first concrete adapter passes deterministic conformance. | `[x]` (this change) | AI-38 | AI-38 close amendment, line 48 |
-| 16 | Secrets and sensitive bodies are absent from diagnostics by default. | `[x]` (this change) | AI-36, suite case AI-23.7 | AI-36 close amendment, line 24; suite case AI-23.7, spine line 2507 |
+| 16 | Secrets and sensitive bodies are absent from diagnostics by default. | `[x]` (this change) | AI-36, suite case AI-23.7 | AI-36 close amendment, line 24; suite case AI-23.7, spine line 2519 |
 | 17 | The live test is optional, bounded, and unreachable from any entry point. | `[x]` (this change) | AI-39.1 | PR #142, merged `b062be74` |
 | 18 | The Layer 2 handoff example compiles without vendor dependencies, and the v1 surface is declared frozen. | `[x]` (this change) | AI-40.1, AI-40.3 | `TestHandoff_ConsumerProof` (this change); this artifact (AI-40.3) |
+
+*Line numbers above are as of this change's own close (post AI-40 amendment, doc 0002 line count +12 from the amendment block above the checklist); a later amendment appended above the checklist will shift them again by its own line count — the item text and node citations are the durable identity, not the numbers.*
 
 **Row 6, read in full.** Item 6 stays `[ ]` — by design, not by omission. `AI-29.2` is struck by AI-29 (see AI-29's `decision.md` §§ 4–9): the pinned dialect's own schema carries no reasoning field a v1 adapter could round-trip, so the wire half has no v1 node that can close it. `src/ai/doc.go` (this change, AI-40.2) publishes that wire clause as **not exercisable in v1**, naming `AI-26.6`'s refusal and `AI-29.2`'s striking as its cause. The **stream** half — closed by AI-17 (`R-ARE-009`/`R-ARE-010`, the `G12(b)` spine row) — is named **unaffected and not reopened** in that same publication. Neither this row nor `src/ai/doc.go`'s publication ticks item 6's checkbox or restates AI-17's closure as open.
 
