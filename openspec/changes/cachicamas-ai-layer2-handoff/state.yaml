@@ -27,8 +27,8 @@ testing:
     Engram #2055 names backend/database_administrator/Makefile as the backend runner;
     that observation is subsystem-scoped and does NOT apply to backend/agent.
 
-status: apply-complete
-next: [sdd-verify]
+status: apply-remediation-complete
+next: [sdd-verify]   # re-verify the S-L2H-041/NFR-L2H-B remediation; documentation-only, no code changed
 
 phases:
   explore:
@@ -90,7 +90,7 @@ phases:
       - "747e13a9 feat(ai): add four runnable package examples (AI-40.2)"
       - "bbde0221 docs(agent): publish the capability matrix and inherited duties (AI-40.2)"
       - "7465c856 docs(agent): add AI-40 SDD planning artifacts and compatibility statement"
-      - "(pending) docs(agent): reconcile doc 0002 completion checklist at AI-40 close"
+      - "806652c4 docs(agent): reconcile doc 0002 completion checklist at AI-40 close"
     gates:
       test: "PASS — go test -race -v ./... — 1017 PASS / 0 FAIL / 1 SKIP (benign, pre-existing)"
       lint: "PASS — golangci-lint run — 0 issues"
@@ -98,9 +98,38 @@ phases:
       go_mod_sum: "byte-identical to base b062be74 (empty diff both ways)"
       no_rename: "confirmed — git diff --stat -M shows no rename/move of src/agenttest or src/ai"
     tasks_complete: 51/51
+    remediation:
+      - trigger: "sdd-verify FAIL, 1 CRITICAL (S-L2H-041 / NFR-L2H-B) + 1 WARNING"
+        evidence_revision_addressed: "sha256:44355a9d8a63429b216fad065e80168546b17bab73f8006650cb890e9b754aa5"
+        scope: documentation-only — tasks.md + state.yaml, no code change, no test-run change
+        fix: >
+          Added a recorded RED/GREEN (and bite, where applicable) evidence block, transcribed
+          verbatim from what apply actually captured, to every work unit (WU-A..WU-F, Phase 6)
+          in tasks.md. Corrected task 1.1's RED description from the anticipated compile
+          failure (never observed) to the actual runtime panic that was observed.
+        commit: "(pending — see commits list above once created)"
+        gates_rerun: "make test — unchanged (docs-only), see commits list"
+        status: applied, pending re-verify
   verify:
-    status: pending
+    status: done
     depends_on: [apply]
+    artifact: openspec:openspec/changes/cachicamas-ai-layer2-handoff/verify-report.md
+    engram_topic: sdd/cachicamas-ai-layer2-handoff/verify-report
+    verdict: fail
+    blockers: 1
+    critical_findings: 1
+    requirements: 10/12
+    scenarios: 42/45
+    evidence_revision: sha256:44355a9d8a63429b216fad065e80168546b17bab73f8006650cb890e9b754aa5
+    gates:
+      test: "PASS - cd backend/agent && make test - exit 0, 1017 PASS / 0 FAIL / 1 SKIP"
+      lint: "PASS - make lint - 0 issues"
+      build: "PASS - make build - exit 0"
+    blocking_issue: >
+      S-L2H-041 / NFR-L2H-B: tasks.md carries no recorded RED or GREEN output and no
+      refactor notes. The evidence is real and reproducible but lives in commit messages
+      and Engram #2804, not in tasks.md as the spec requires. Remediation is a
+      documentation transcription; no code change and no re-run required.
   archive:
     status: pending
     depends_on: [verify]

@@ -5,6 +5,15 @@
 > Strict TDD. Test runner `cd backend/agent && make test` (`-race`); lint `make lint`;
 > build `make build`. `go.mod`/`go.sum` byte-identical to base (NFR-L2H-A, S-L2H-039).
 
+> **Remediation, 2026-08-10 (post-`sdd-verify`, CRITICAL S-L2H-041/NFR-L2H-B + one WARNING).**
+> Every work unit below now carries its own recorded RED/GREEN (and bite, where applicable)
+> evidence block, transcribed from what was actually captured during apply — not left as the
+> pre-apply imperative wording alone. Task 1.1's RED description is corrected: the originally
+> anticipated compile failure (`package handoff` does not exist) provably never occurs; the
+> genuine RED was a runtime panic from a script-ordering bug, evidenced below. This remediation
+> is documentation-only — no production or test code changed, no test behavior changed, no
+> checkbox state changed.
+
 ## Binding corrections applied in this task list
 
 1. Text-delta events use `ai.NewTextDelta(block, delta) (Event, error)` — NOT `NewTextBlockDelta`
@@ -59,14 +68,22 @@ delta spec.md ~69 ln, design.md ~115 ln) plus this tasks.md and the new `decisio
 
 ## Phase 1 — WU-A: Consumer proof (`src/handoff/`, AI-40.1, R-L2H-001)
 
-- [x] 1.1 RED: create `backend/agent/src/handoff/handoff_test.go` (`package handoff_test`,
-      imports `context`, `errors`, `testing`, `.../src/ai`, `.../src/agenttest`) with
+- [x] 1.1 RED (text corrected 2026-08-10 during `sdd-verify` remediation — the original wording
+      below anticipated a RED that never occurred; see the RED evidence block for what actually
+      happened): create
+      `backend/agent/src/handoff/handoff_test.go` (`package handoff_test`, imports `context`,
+      `errors`, `testing`, `time`, `.../src/ai`, `.../src/agenttest`) with
       `TestHandoff_ConsumerProof` and its three `t.Run` subtests (drain / scripted error /
-      cancellation) per design AD-1. Run `go test ./src/handoff/...` — record the build failure
-      (`package handoff` does not exist).
+      cancellation) per design AD-1. Ran `go test ./src/handoff/...` **before** `doc.go` existed:
+      this task originally anticipated a build failure (`package handoff` does not exist), but
+      that anticipated RED **provably never happens** — Go compiles and runs an external test
+      package (`handoff_test`) with no base `handoff` package file present. The genuine RED
+      observed was a runtime panic instead, caused by a real bug in the "exits boundedly on
+      cancellation" subtest's own script (an opened block never closed before its `Hold` step);
+      see the RED evidence block below for the exact captured output and the fix.
 - [x] 1.2 GREEN: add `backend/agent/src/handoff/doc.go` (`package handoff`, ~5-line comment: the
-      package is intentionally empty, the test is the deliverable). Run `go test ./src/handoff/...
-      -race -v` — record all three subtests passing.
+      package is intentionally empty, the test is the deliverable). Ran `go test ./src/handoff/...
+      -race -v` — all three subtests passing; see the GREEN evidence block below.
 - [x] 1.3 Subtest "drains a scripted stream": `ai.NewText`→`ai.NewMessage`→`ai.NewRequest`;
       `agenttest.NewProvider(agenttest.Script{...})` emits `ai.NewTextBlockStart`,
       `ai.NewTextDelta` (not `NewTextBlockDelta`), `ai.NewTextBlockEnd`, then
@@ -84,6 +101,37 @@ delta spec.md ~69 ln, design.md ~115 ln) plus this tasks.md and the new `decisio
 - [x] 1.7 Run `go list -deps -test ./...` from `backend/agent` (or `make test`, which sweeps
       `import_boundary_test.go`) and confirm `src/handoff` reports zero vendor imports with NO
       edit to `import_boundary_test.go` or its allowlist. (S-L2H-005, S-L2H-006)
+
+**RED evidence** (captured verbatim during apply, before `doc.go` existed; the goroutine stack
+trace below the panic line is elided for length — marked, not omitted silently):
+
+```
+--- FAIL: TestHandoff_ConsumerProof (0.00s)
+    --- FAIL: TestHandoff_ConsumerProof/exits_boundedly_on_cancellation (0.00s)
+panic: agenttest: scripted stream violates ordering: event[1].block[1]: value is not well-formed for its documented encoding [recovered, repanicked]
+
+goroutine 7 [running]:
+[... goroutine stack trace elided ...]
+FAIL	github.com/cachicamas/backend/agent/src/handoff	0.475s
+FAIL
+```
+
+Root cause: the "exits boundedly on cancellation" subtest scripted `Emit(TextBlockStart)` then
+`Hold(gate)` with no closing `TextBlockEnd`. `ai.CheckStream`'s end-of-stream unterminated-block
+rule rejects this — `Provider.Stream` validates the whole script up front, past the `Hold` step,
+before any goroutine starts. Fix: rewrote the subtest to script `Hold` as its sole step, with no
+preceding block-scoped event.
+
+**GREEN evidence** (captured verbatim during apply, after the fix and after `doc.go` was added):
+
+```
+--- PASS: TestHandoff_ConsumerProof (0.00s)
+    --- PASS: TestHandoff_ConsumerProof/drains_a_scripted_stream (0.00s)
+    --- PASS: TestHandoff_ConsumerProof/surfaces_a_scripted_terminal_error (0.00s)
+    --- PASS: TestHandoff_ConsumerProof/exits_boundedly_on_cancellation (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/handoff	1.293s
+```
 
 **Commit boundary**: one commit — `handoff_test.go` + `doc.go` travel together (RED recorded in
 commit message per work-unit-commits convention, never left broken in history).
@@ -115,6 +163,37 @@ commit message per work-unit-commits convention, never left broken in history).
       examples passing under `-race`. (S-L2H-007)
 - [x] 2.9 Confirm `go test ./src/ai/... -race -run Example` runs and verifies all four —
       `make test`'s normal `./...` sweep already includes them. (S-L2H-011)
+
+**RED evidence** (captured verbatim during apply — task 2.7's deliberate one-character break:
+`ExampleNewRequest`'s `// Output:` "messages: 1" changed to "messages: 2"):
+
+```
+=== RUN   ExampleNewRequest
+--- FAIL: ExampleNewRequest (0.00s)
+got:
+model: example-model
+messages: 1
+want:
+model: example-model
+messages: 2
+```
+
+The other three examples still passed in the same run — only `ExampleNewRequest` failed, matching
+the change. Reverted the `// Output:` line.
+
+**GREEN evidence** (captured verbatim during apply, after reverting the `// Output:` line):
+
+```
+=== RUN   ExampleNewRequest
+--- PASS: ExampleNewRequest (0.00s)
+=== RUN   ExampleModelProvider_streaming
+--- PASS: ExampleModelProvider_streaming (0.00s)
+=== RUN   ExampleModelProvider_toolCallReconstruction
+--- PASS: ExampleModelProvider_toolCallReconstruction (0.00s)
+=== RUN   ExampleFailure_inspection
+--- PASS: ExampleFailure_inspection (0.00s)
+PASS
+```
 
 **Commit boundary**: one commit — skeleton, four examples, and the RED/GREEN evidence travel
 together; only the corrected file lands in the tree.
@@ -157,6 +236,37 @@ together; only the corrected file lands in the tree.
 - [x] 3.8 Confirm item 6's checkbox is untouched by this WU (doc 0002 edit is WU-F's, not this
       one) and no artifact here claims item 6 closed. (S-L2H-023)
 
+**RED evidence** (captured verbatim during apply, before `ai/doc.go` carried any matrix row):
+
+```
+=== RUN   TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+=== PAUSE TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+=== CONT  TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+    doc_matrix_guard_test.go:100: doc-matrix guard: found 0 of 9 rows in "/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/feat-ai-40-layer2-handoff/backend/agent/src/ai/doc.go" — the published matrix must carry exactly one row per capability, entry-for-entry with the committed expectation
+--- FAIL: TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation (0.00s)
+FAIL
+```
+
+**GREEN evidence** (captured verbatim during apply, after publishing the nine-row matrix):
+
+```
+=== RUN   TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+=== PAUSE TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+=== CONT  TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation
+--- PASS: TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation (0.00s)
+PASS
+```
+
+**Bite/defeat-test evidence** (task 3.6, captured verbatim during apply — `CAP-R-01`'s outcome
+flipped from "satisfied" to "failed" in `ai/doc.go`, then reverted):
+
+```
+doc_matrix_guard_test.go:109: doc-matrix guard: row 1 = "CAP-R-01(streaming_text)"/"required"/"failed", want "CAP-R-01(streaming_text)"/"required"/"satisfied" (capability/standing/outcome) — the published matrix has drifted from the committed expectation
+--- FAIL: TestPublishedCapabilityMatrix_MatchesTheCommittedExpectation (0.00s)
+```
+
+After reverting the flip, the guard was re-run and returned to the GREEN state shown above.
+
 **Commit boundary**: one commit — guard test and the `doc.go` matrix/duties it protects travel
 together (RED "found 0 of 9 rows" recorded in the commit message, never left broken in history).
 
@@ -187,6 +297,18 @@ together (RED "found 0 of 9 rows" recorded in the commit message, never left bro
       verification of AI-40.1/40.2/40.3's own three criteria, AI-29 §12 style.
 - [x] 4.7 Structural readback: confirm the `doc.go` pointer (task 3.5) names this file by change
       name and carries a summary, not a duplicate enumeration. (S-L2H-029)
+
+**RED/GREEN evidence**: N/A — passive doc, per design AD-7 (no executable surface). Structural
+readback performed instead (task 4.7), captured verbatim during apply:
+
+```
+$ grep -n "cachicamas-ai-layer2-handoff" backend/agent/src/ai/doc.go backend/agent/src/agenttest/doc.go
+backend/agent/src/agenttest/doc.go:85:// cachicamas-ai-layer2-handoff's decision.md (doc 0002 § AI-40) for the
+backend/agent/src/ai/doc.go:116:// declared frozen as of the cachicamas-ai-layer2-handoff change (doc
+```
+
+Exactly one match in each file, confirming both pointer paragraphs name the change and carry a
+summary only, not a duplicate enumeration.
 
 **Commit boundary**: one commit — passive doc, no code. Independently revertible except that
 tasks 1–3's artifacts are cited by name inside it (cite-only, not modified by reverting this).
@@ -219,6 +341,23 @@ tasks 1–3's artifacts are cited by name inside it (cite-only, not modified by 
       (`phases.apply.status`, `status:` field) on completion — per the openspec convention, not
       as a separate code change.
 
+**RED/GREEN evidence**: N/A — passive doc; structural readback. Task 0.1's fresh read (Phase 0
+above) is this work unit's precondition evidence. A file-count investigation, captured verbatim
+during apply, is this work unit's own verification evidence: an initial measurement (`find
+backend/agent/src -name "*.go" -not -path "*/testdata/*"`, applying the exclusion AI-33/34's own
+prose describes) at base `b062be74` returned 92 production / 168 test — apparently contradicting
+AI-39's own reported 95/168. Re-measured via `git ls-tree`:
+
+```
+$ git ls-tree -r --name-only b062be74 -- backend/agent/src | grep '\.go$' | grep -v '_test\.go$' | wc -l
+      95
+```
+
+— without the testdata exclusion, matching AI-39's figure exactly (the three `testdata/`-nested
+compile-fixture `main.go` files ARE counted as production by every close's actually-applied
+practice). AI-39's figure was correct; recorded as a methodology note in the new amendment
+blockquote (task 5.10) rather than a false correction.
+
 **Commit boundary**: one commit — doc-0002 edits are independently revertible from Phases 1–4
 (no code cites doc 0002's checkbox text).
 
@@ -237,7 +376,79 @@ tasks 1–3's artifacts are cited by name inside it (cite-only, not modified by 
       `src/handoff` (task 1.7) and the doc-matrix guard is green (task 3.2) as part of the same
       `make test` run — no standalone re-run needed once 6.1 is green.
 - [x] 6.7 Confirm every WU above recorded a genuine RED before its GREEN in this file's commit
-      history (S-L2H-041): WU-A (compile fail), WU-B (broken Output line), WU-C/D (0-of-9-rows).
+      history (S-L2H-041): WU-A (runtime panic — corrected description, see task 1.1), WU-B
+      (broken Output line), WU-C/D (0-of-9-rows).
+
+**Final gate evidence** (captured verbatim during apply; the full `go test -v` transcript is
+~1017 individual `--- PASS` lines and was written to a scratchpad log, not reproduced here in
+full — the aggregate counts and per-package results below are transcribed verbatim from that run):
+
+```
+$ cd backend/agent && go test -race -v ./...
+EXIT: 0
+PASS: 1017
+FAIL: 0
+SKIP: 1
+ok  	github.com/cachicamas/backend/agent/src/agenttest	(cached)
+ok  	github.com/cachicamas/backend/agent/src/agenttest/sweep	(cached)
+ok  	github.com/cachicamas/backend/agent/src/agenttest/tracetest	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/internal/retry	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance	(cached)
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke	(cached)
+ok  	github.com/cachicamas/backend/agent/src/handoff	(cached)
+```
+
+The single `SKIP` is the pre-existing, benign `cap_retry_absent_reported_not_silent` retry-absent
+subtest — unrelated to this change.
+
+```
+$ cd backend/agent && make lint
+go vet ./...
+bin/golangci-lint run --config=.golangci.yml ./...
+0 issues.
+```
+
+```
+$ cd backend/agent && make build
+go build -trimpath ./...
+```
+
+(silent success; exit code captured separately as `0`.)
+
+```
+$ git diff origin/main -- backend/agent/go.mod | wc -l
+       0
+$ git diff origin/main -- backend/agent/go.sum | wc -l
+       0
+```
+
+```
+$ git diff origin/main --stat -M
+ backend/agent/src/agenttest/doc.go                 |   8 +
+ backend/agent/src/ai/doc.go                        |  45 +++
+ backend/agent/src/ai/example_test.go               | 259 +++++++++++++++++
+ .../conformance/doc_matrix_guard_test.go           | 113 ++++++++
+ backend/agent/src/handoff/doc.go                   |   6 +
+ backend/agent/src/handoff/handoff_test.go          | 240 ++++++++++++++++
+ .../0002-cachicamas-ai-layer-1-task-graph.md       |  28 +-
+ .../cachicamas-ai-layer2-handoff/decision.md       | 125 ++++++++
+ .../changes/cachicamas-ai-layer2-handoff/design.md | 115 ++++++++
+ .../cachicamas-ai-layer2-handoff/proposal.md       | 226 +++++++++++++++
+ .../specs/ai-layer2-handoff/spec.md                | 319 +++++++++++++++++++++
+ .../specs/ai-provider-conformance-suite/spec.md    |  68 +++++
+ .../cachicamas-ai-layer2-handoff/state.yaml        | 150 ++++++++++
+ .../changes/cachicamas-ai-layer2-handoff/tasks.md  | 245 ++++++++++++++++
+ 14 files changed, 1939 insertions(+), 8 deletions(-)
+```
+
+No `=>` rename marker anywhere in that output — confirms no move of `src/agenttest` or `src/ai`
+(S-L2H-038). `TestModelProviderInterface_SignatureGuard` and
+`TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` both ran inside the full suite above
+and both `--- PASS`.
 
 ## Skipped rows
 
