@@ -9,6 +9,35 @@
 > **Schedule** lives in the [Layer 1 milestones and task graph](./milestones/0002-cachicamas-ai-layer-1-task-graph.md).
 > **Date**: 2026-07-30. **Review source**: Engram `obs #2243`.
 
+> [!NOTE]
+> **Amended 2026-08-10 — two vocabulary corrections, no design change.** Neither alters a
+> boundary, a seam, a dependency rule, or a milestone; both correct names that were describing the
+> wrong thing.
+>
+> 1. **Layer 2 is "the portable agent runtime", not "the portable brain".** The stack borrowed
+>    *brain* from the spike narrative, and the metaphor claims something the layer does not do:
+>    it does not think, reason, or decide anything. It runs a loop and holds a transcript. What
+>    § 4 actually specifies is a **runtime** — the thing that executes an agent conversation:
+>    the stateless loop schedules, the stateful harness remembers, and both are mechanism. A
+>    metaphor that implies cognition invites exactly the design mistake §§ 4.1–4.2 spend two
+>    pages forbidding, which is putting *policy* inside Layer 2. Policy lives at Layer 3;
+>    Layer 2 is an engine.
+>    **Disambiguation, recorded once:** in this stack "the runtime" always means the Layer 2
+>    portable agent runtime, never Go's `runtime` package — which nothing in `backend/agent`
+>    imports.
+> 2. **Layer 3 is "the application layer"; the coding agent is its first application, not the
+>    layer itself.** § 5 previously read as though Layer 3 *were* `cachicamas_coding`. It is not:
+>    Layer 3 is the position in the stack where policy, resources, persistence and frontends
+>    live, and `cachicamas_coding` is the **first application to occupy it**, not its definition.
+>    § 5 now separates the layer's contract (what any application at this position must do) from
+>    this application's choices (what a *coding* agent in particular needs). ADR 0004 already
+>    said "`cachicamas_coding` is the application"; this document had collapsed the two.
+>
+> The corresponding milestone plans are [doc 0003](./milestones/0003-cachicamas-agent-layer-2-task-graph.md)
+> (the runtime) and [doc 0004](./milestones/0004-cachicamas-coding-layer-3-task-graph.md) (the
+> first application). Both keep their numbers — identifiers are append-only across this stack,
+> and four documents link to them.
+
 > [!IMPORTANT]
 > **Authoring constraint.** This document states *seams* and *what must be expressible*. It never
 > states Go type names, field names, or method signatures. The Layer 1 roadmap deliberately
@@ -24,7 +53,7 @@
 | --- | --- | --- |
 | [1](#1-why-v2) | Why this document exists | The split is a good dependency rule and an incomplete architecture |
 | [2.1](#21-module-view) | Module boundaries | Three modules; the agent imports nobody |
-| [2.2](#22-layer-view) | Layer boundaries | One composition root; resources fan in at Layer 3 |
+| [2.2](#22-layer-view) | Layer boundaries | One composition root per application; resources fan in at Layer 3 |
 | [2.3](#23-turn-sequence) | What one turn actually does | Six things happen per turn that the v1 sequence diagram omits |
 | [3.1](#31-what-is-frozen-today) | The retired Layer 1 surface | Four self-contradicting contracts, now prevented rather than corrected |
 | [3.2](#32-what-must-change-before-a-vendor-adapter-exists) | Layer 1 work remaining | Five contract requirements, all cheaper before the first adapter |
@@ -32,8 +61,8 @@
 | [4.1](#41-the-loop--stateless) | Loop responsibilities | The loop owns scheduling, not policy |
 | [4.2](#42-the-harness--stateful) | Harness responsibilities | History, suspension, cancellation tree, delegation |
 | [4.3](#43-the-agent-event-envelope) | The Layer 2 contract | Six event families, three of them absent from v1 |
-| [5.1](#51-the-ports-layer-3-defines) | Layer 3 ports | Five ports; each is where a v1 gap becomes implementable |
-| [5.2](#52-what-the-composition-root-wires) | Startup | The only place policy meets mechanism |
+| [5.1](#51-the-ports-an-application-defines) | Application ports | Five ports the coding application defines; each is where a v1 gap becomes implementable |
+| [5.2](#52-what-the-composition-root-wires) | Startup | One root per application — the only place policy meets mechanism |
 
 ## Full TOC
 
@@ -46,12 +75,12 @@
   - [3.1 What is frozen today](#31-what-is-frozen-today)
   - [3.2 What must change before a vendor adapter exists](#32-what-must-change-before-a-vendor-adapter-exists)
   - [3.3 The provider-leakage register](#33-the-provider-leakage-register)
-- [4. Layer 2 — the portable brain](#4-layer-2--the-portable-brain)
+- [4. Layer 2 — the portable agent runtime](#4-layer-2--the-portable-agent-runtime)
   - [4.1 The loop — stateless](#41-the-loop--stateless)
   - [4.2 The harness — stateful](#42-the-harness--stateful)
   - [4.3 The agent event envelope](#43-the-agent-event-envelope)
-- [5. Layer 3 — the coding application](#5-layer-3--the-coding-application)
-  - [5.1 The ports Layer 3 defines](#51-the-ports-layer-3-defines)
+- [5. Layer 3 — the application layer](#5-layer-3--the-application-layer)
+  - [5.1 The ports an application defines](#51-the-ports-an-application-defines)
   - [5.2 What the composition root wires](#52-what-the-composition-root-wires)
 
 ---
@@ -106,9 +135,9 @@ direction. All four are working, and this document keeps every one of them.
 flowchart LR
     subgraph AGENTMOD["backend/agent  (module: github.com/cachicamas/backend/agent)"]
         direction TB
-        CMD["src/cmd/cachicamas<br/>package main"]
-        COD["src/coding<br/>Layer 3"]
-        AGT["src/agent<br/>Layer 2"]
+        CMD["src/cmd/cachicamas<br/>package main<br/>this application's root"]
+        COD["src/coding<br/>Layer 3 — first application"]
+        AGT["src/agent<br/>Layer 2 — the runtime"]
         AIL["src/ai<br/>Layer 1"]
         CMD --> COD --> AGT --> AIL
     end
@@ -141,9 +170,16 @@ flowchart LR
     class VEND ven
 ```
 
-**How to read it.** Solid arrows are Go imports. Dotted arrows are runtime calls that are
+**How to read it.** Solid arrows are Go imports. Dotted arrows are calls made at run time that are
 deliberately *not* imports. The agent module imports nothing from the other two — and because these
 are separate Go modules, that is a compiler-enforced invariant rather than a convention.
+
+**`src/coding` and `src/cmd/cachicamas` are one application, not the whole of Layer 3.** The
+column is drawn as a straight line because today there is exactly one application; the shape that
+matters is `<app> → src/agent → src/ai`, and a second Layer 3 application would appear as a
+sibling pair — its own `src/<app>` package and its own `src/cmd/<app>` root — attaching to the
+*same* `src/agent`. Nothing about the runtime changes when that happens, which is the entire point
+of § 4's no-I/O rule. See [§ 5](#5-layer-3--the-application-layer).
 
 The dotted arrow from the hexagon up to Layer 2 is the honest form of ADR 0004's "any package can
 drive an agent session": permitted by
@@ -160,13 +196,13 @@ flowchart TB
         CUSTOM["Future: IDE / RPC"]
     end
 
-    subgraph L3["Layer 3 — coding  (the application)"]
+    subgraph L3["Layer 3 — the application layer<br/>shown: coding, the FIRST application"]
         CS["CodingSession<br/>slash commands · session persistence<br/>project instructions · price table"]
-        PORTS["Ports it defines<br/>ToolSource · SkillSource · PromptSource<br/>Sandbox · PermissionPolicy"]
+        PORTS["Ports this application defines<br/>ToolSource · SkillSource · PromptSource<br/>Sandbox · PermissionPolicy"]
         CSE["CodingSessionEvent<br/>extends AgentEvent"]
     end
 
-    subgraph L2["Layer 2 — agent  (the portable brain)"]
+    subgraph L2["Layer 2 — agent  (the portable agent runtime)"]
         HARNESS["AgentHarness — stateful<br/>history · suspension · cancellation tree<br/>delegation · compaction trigger"]
         LOOP["AgentLoop — stateless<br/>one turn: stream, schedule tools,<br/>collect, decide continue/stop"]
         EVENTS["AgentEvent stream<br/>lifecycle · message · tool<br/>permission · cost · subagent"]
@@ -180,7 +216,7 @@ flowchart TB
     SRC["Skill / prompt sources<br/>repo FS › user FS › org catalog"]
     TOOLS["Tool sources<br/>built-ins · MCP servers"]
     VEND["LLM vendors"]
-    MAIN["cmd/cachicamas — the ONLY composition root<br/>installs the OTel SDK · builds every port · picks a frontend"]
+    MAIN["cmd/cachicamas — this application's ONLY composition root<br/>installs the OTel SDK · builds every port · picks a frontend"]
 
     MAIN -.->|wires| CS
     MAIN -.->|wires| SRC
@@ -217,14 +253,24 @@ flowchart TB
     class SRC,TOOLS,VEND,MAIN ext
 ```
 
+**What is drawn here is one application's slice of the stack.** Layers 1 and 2 are the whole of
+their layers — there is one runtime and one model-adapter contract for everybody. The Layer 3 box
+is not: it is `cachicamas_coding`, the first application to stand on the runtime. A second
+application substitutes its own box and its own root, keeps everything below unchanged, and that
+substitutability *is* the architecture. Read every "Layer 3" in the rest of this document as "the
+application at Layer 3", and § 5 will tell you which statements bind the layer and which bind this
+application.
+
 Three differences from ADR 0004's diagram, each closing a review finding:
 
-- **`cmd/cachicamas` is drawn, and it is the only composition root.** ADR 0004's diagram had no
-  `main`, which is how Layer 3 quietly became one (finding S2).
+- **`cmd/cachicamas` is drawn, and it is the only composition root — for this application.**
+  ADR 0004's diagram had no `main`, which is how Layer 3 quietly became one (finding S2). The
+  invariant is one root *per application*, and nothing may import it; a second application brings
+  a second root rather than extending this one.
 - **Resources fan in through ports, not through direct filesystem reads.** Skills and prompts
   arrive from three sources per [ADR 0006](../adr/0006-resolve-skill-and-prompt-source-of-truth.md);
-  tools arrive from built-ins and MCP servers. Layer 3 defines the ports; the composition root
-  chooses the implementations.
+  tools arrive from built-ins and MCP servers. The application defines the ports; its composition
+  root chooses the implementations.
 - **There is an upward arrow from the frontend, and it is the only one.** A permission decision
   resumes a suspended turn. It is not the frontend driving the loop — the harness suspended and is
   awaiting an answer it already asked for on the event stream.
@@ -398,10 +444,27 @@ grows without bound. An escape hatch keeps the neutral surface small and honest 
 
 ---
 
-## 4. Layer 2 — the portable brain
+## 4. Layer 2 — the portable agent runtime
 
 Layer 2 does not exist yet. This section is the contract it must satisfy, written now because
 several Layer 1 decisions depend on it.
+
+**What the name claims, and what it refuses to claim.** Layer 2 is a *runtime*: the machinery that
+executes an agent conversation. It is built from exactly two parts, and § 4.1 and § 4.2 specify
+them separately because the split is the whole design — **a stateless loop** that runs one turn and
+**a stateful harness** that holds the conversation across turns. Everything the runtime does is
+mechanism: schedule, stream, suspend, resume, append, count, cancel. Nothing it does is judgement.
+Whether a tool may run, what a good summary looks like, which model is worth its price, what the
+system prompt should say — every one of those is a Layer 3 decision injected through a seam, and
+§§ 4.1–4.2 spend two pages saying so in the negative ("the loop must never…", "the harness must
+never…").
+
+*Portable* is the load-bearing adjective and it is a testable property, not a compliment: the
+runtime performs no I/O, reads no environment, touches no filesystem, renders nothing, and cannot
+name a frontend. That is what lets the same Layer 2 serve the coding application, a future
+review agent, and a `database_administrator`-driven session without a line changing — and it is
+mechanically guarded, not merely intended
+([doc 0003 AG-03.2, AG-03.3](./milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-03--package-scaffold-and-boundary-guards)).
 
 ### 4.1 The loop — stateless
 
@@ -488,13 +551,50 @@ Four invariants the envelope must satisfy:
 
 ---
 
-## 5. Layer 3 — the coding application
+## 5. Layer 3 — the application layer
 
-### 5.1 The ports Layer 3 defines
+Layer 3 is a **position in the stack**, not a program. It is where policy lives: the layer that
+decides what the runtime is allowed to do, supplies it with resources, persists what happened, and
+shows it to a human. An *application* is one concrete occupant of that position — a coherent set of
+policy answers, tools, resources and a frontend, plus the composition root that assembles them.
 
-Layer 3 is where policy lives. Each port below is the seam at which one of the review's gaps
-becomes implementable — which is why they are named now, before Layer 2 is written, even though
-several will have exactly one implementation for a long time.
+**`cachicamas_coding` is the first such application, and only the first.** It is a coding agent: it
+reads and writes files, runs shell commands, loads skills and project instructions, and prints a
+session to a terminal. Every one of those is a choice *a coding agent* makes, not a requirement of
+the layer. A review agent, a migration agent, or a `database_administrator`-driven session would
+occupy the same position with different tools, a different permission posture and a different
+frontend — standing on an unchanged Layer 2, because § 4 made the runtime incapable of caring.
+
+The distinction is worth the paragraph because it decides where things belong:
+
+| The **layer** obliges every application to… | This **application** answers… |
+| --- | --- |
+| Fill every seam Layer 2 names — an unfilled seam is not a default, it is an unbuildable session | Which tools exist: read, write, edit, bash |
+| Define the ports it needs as *its own* contracts; never reach into runtime internals | Which policies ship: always-ask, allow-all, rule sets |
+| Consume the agent event stream and nothing else; a capability the stream lacks is a Layer 2 amendment, never a private channel | Which resources load: skills, prompts, `AGENTS.md` |
+| Own exactly one composition root, which nothing imports | Which frontend attaches: print mode |
+| Read the environment nowhere but that root | How sessions persist: append-only, under `~` |
+
+Two consequences follow, and both are already true of the plan in
+[doc 0004](./milestones/0004-cachicamas-coding-layer-3-task-graph.md):
+
+- **The ports are the application's, not the layer's.** § 5.1's five rows exist because a coding
+  agent needs them. The layer's rule is "define ports for the seams you fill"; the *set* is an
+  application's design. A second application will reuse most of these — the seams are the same —
+  and will add its own, and that is not a violation of anything.
+- **A second application is an additive change, not a refactor.** It brings `src/<app>/` and
+  `src/cmd/<app>/`, implements the same Layer 2 seams, and changes no existing file. If it ever
+  cannot, the defect is in Layer 2's seam set, and the fix is a doc 0003 amendment.
+
+The rest of § 5 describes `cachicamas_coding` specifically. Where a statement binds *any*
+application, it says so.
+
+### 5.1 The ports an application defines
+
+Each port below is the seam at which one of the review's gaps becomes implementable — which is why
+they are named now, before Layer 2 is written, even though several will have exactly one
+implementation for a long time. **This is the coding application's set**; the obligation the layer
+imposes is to define ports for the seams it fills, not to define these five.
 
 | Port | Answers | Implementations foreseen | Gap it closes |
 | --- | --- | --- | --- |
@@ -517,16 +617,20 @@ Two notes that determine whether these ports work at all:
 
 ### 5.2 What the composition root wires
 
-`cmd/cachicamas` is the only place where policy meets mechanism, and it is the only package allowed
-to install the OpenTelemetry SDK
-([ADR 0005 § D3](../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary)).
+**Every application has exactly one composition root, and nothing imports it.** That is the layer's
+rule. `cmd/cachicamas` is the coding application's: the only place where policy meets mechanism,
+and the only package permitted to install the OpenTelemetry SDK
+([ADR 0005 § D3](../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) —
+the permission belongs to composition roots as a class, and today there is one).
 It resolves the provider catalog and credentials; builds the skill, prompt and tool source chains;
 selects the permission policy and sandbox mode from flags, configuration and the environment;
 constructs the session; and attaches exactly one frontend.
 
 Everything below it receives its dependencies. Nothing below it reads the environment, opens a
 configuration file, or decides a policy — which is what makes the layers testable in isolation and
-what keeps `cachicamas_agent` genuinely portable.
+what keeps `cachicamas_agent` genuinely portable. Note which way that last clause runs: the
+runtime is portable *because* every root does this work, so a second application inherits the
+property only by accepting the same discipline.
 
 Sessions remain append-only records with parent chains for branching, under the user's home
 directory. Two consequences the session format must accommodate, both easy now and expensive later:

@@ -129,7 +129,7 @@ The agent stack is the exception to "hexagonal": `backend/agent` is a **layered*
 | --------- | --------- | -------- |
 | `database_administrator` | The backend API. Identity/OAuth callback, organizations, workspaces, sync jobs + SSE, GitHub adapter, prompts, skills. Also owns all schema migrations under `src/migration/sql/`. | Live on `main` |
 | `workspace_syncer` | Git clone + validate worker. `POST /internal/clone-and-validate`, HMAC callback to `database_administrator`. | Live on `main` |
-| `agent` | The 3-layer agentic stack — model adapter (`src/ai/`), portable brain (`src/agent/`), coding application (`src/coding/`), CLI (`src/cmd/cachicamas/`). See [ADR 0004](docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) as amended by [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md). | Layer 1 in progress — moves into this module in milestone AI-39 |
+| `agent` | The 3-layer agentic stack — model adapter (`src/ai/`), portable agent runtime (`src/agent/`), application layer (`src/coding/` — the coding agent, its first application), CLI (`src/cmd/cachicamas/`). See [ADR 0004](docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) as amended by [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md), with current vocabulary in [the v2 architecture reference](docs/architecture/0001-cachicamas-agent-stack-v2.md). | Layer 1 in progress — moves into this module in milestone AI-39 |
 | `frontend` (Qwik 1.20.0) | Operator UI. Auth.js GitHub login, workspaces, Prompt Studio, Skill Studio. | Live on `main` |
 
 **Hexagonal layout** (under `backend/<service>/src/`):
