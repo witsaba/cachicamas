@@ -80,7 +80,7 @@ func TestCallbackClient_Post_Success(t *testing.T) {
 }
 
 func TestCallbackClient_Post_4xxReturnsError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer srv.Close()
@@ -96,7 +96,7 @@ func TestCallbackClient_Post_4xxReturnsError(t *testing.T) {
 }
 
 func TestCallbackClient_Post_5xxReturnsError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -124,7 +124,7 @@ func TestCallbackClient_Post_NetworkErrorReturnsError(t *testing.T) {
 func TestCallbackClient_Post_DiscardsResponseBody(t *testing.T) {
 	// The server sends a large body. The client must read and
 	// discard it so the underlying connection can be reused.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, strings.Repeat("x", 4096))
 	}))
 	defer srv.Close()

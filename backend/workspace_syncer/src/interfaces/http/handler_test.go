@@ -1,4 +1,4 @@
-package http
+package httpiface
 
 import (
 	"bytes"
@@ -21,24 +21,23 @@ import (
 // fakeRunnerForHandler mirrors the one in application/clone_service_test.go;
 // duplicated here so the http package test is self-contained.
 type fakeRunnerForHandler struct {
-	mu        sync.Mutex
 	clonePath string
 	cloneErr  error
 	probeSHA  string
 	probeErr  error
 }
 
-func (f *fakeRunnerForHandler) Clone(ctx context.Context, workspaceID int64, owner, repo, oauthToken string) (string, error) {
+func (f *fakeRunnerForHandler) Clone(_ context.Context, _ int64, _, _, _ string) (string, error) {
 	return f.clonePath, f.cloneErr
 }
-func (f *fakeRunnerForHandler) WorktreeProbe(ctx context.Context, path string) (string, error) {
+func (f *fakeRunnerForHandler) WorktreeProbe(_ context.Context, _ string) (string, error) {
 	return f.probeSHA, f.probeErr
 }
-func (f *fakeRunnerForHandler) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
+func (f *fakeRunnerForHandler) ResolveDefaultBranch(_ context.Context, _ string) (string, error) {
 	return "main", nil
 }
 
-func (f *fakeRunnerForHandler) ResolveHead(ctx context.Context, path string) (string, error) {
+func (f *fakeRunnerForHandler) ResolveHead(_ context.Context, _ string) (string, error) {
 	return f.probeSHA, nil
 }
 
@@ -47,7 +46,7 @@ type fakeCallbackForHandler struct {
 	calls []httpclient.CallbackRequest
 }
 
-func (f *fakeCallbackForHandler) Post(ctx context.Context, req httpclient.CallbackRequest) error {
+func (f *fakeCallbackForHandler) Post(_ context.Context, req httpclient.CallbackRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)

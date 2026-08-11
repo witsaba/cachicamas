@@ -91,6 +91,9 @@ func (e *PermissionsInsufficientError) Error() string {
 	return fmt.Sprintf("token lacks push permission on %s/%s", e.Owner, e.Repo)
 }
 
+// Code returns the locked machine-readable identifier for
+// PermissionsInsufficientError (WORKSPACE_PERMISSIONS_INSUFFICIENT).
+// Mirrors the contract of every other AppError in this package.
 func (e *PermissionsInsufficientError) Code() string { return ErrCodePermissionsInsufficient }
 
 // BranchNotFoundError signals that the default_branch is missing
@@ -106,6 +109,9 @@ func (e *BranchNotFoundError) Error() string {
 	return fmt.Sprintf("default branch %q not found on %s/%s", e.DefaultBranch, e.Owner, e.Repo)
 }
 
+// Code returns the locked machine-readable identifier for
+// BranchNotFoundError (BRANCH_NOT_FOUND). Mirrors the contract of
+// every other AppError in this package.
 func (e *BranchNotFoundError) Code() string { return ErrCodeBranchNotFound }
 
 // WorktreeProbeFailedError signals that the worktree probe exited
@@ -119,6 +125,9 @@ func (e *WorktreeProbeFailedError) Error() string {
 	return fmt.Sprintf("git worktree add exited with code %d", e.ExitCode)
 }
 
+// Code returns the locked machine-readable identifier for
+// WorktreeProbeFailedError (WORKTREE_PROBE_FAILED). Mirrors the
+// contract of every other AppError in this package.
 func (e *WorktreeProbeFailedError) Code() string { return ErrCodeWorktreeProbeFailed }
 
 // CloneTimeoutError signals that the git clone exceeded the
@@ -132,6 +141,9 @@ func (e *CloneTimeoutError) Error() string {
 	return fmt.Sprintf("repository clone took longer than %d seconds", e.TimeoutSeconds)
 }
 
+// Code returns the locked machine-readable identifier for
+// CloneTimeoutError (CLONE_TIMEOUT). Mirrors the contract of
+// every other AppError in this package.
 func (e *CloneTimeoutError) Code() string { return ErrCodeCloneTimeout }
 
 // TokenExpiredError signals that GitHub returned 401 for the
@@ -143,6 +155,9 @@ func (e *TokenExpiredError) Error() string {
 	return "github token is no longer valid; please reconnect github"
 }
 
+// Code returns the locked machine-readable identifier for
+// TokenExpiredError (TOKEN_EXPIRED). Mirrors the contract of
+// every other AppError in this package.
 func (e *TokenExpiredError) Code() string { return ErrCodeTokenExpired }
 
 // CloneFailedError is the catch-all for unexpected git failures.
@@ -158,4 +173,7 @@ func (e *CloneFailedError) Error() string {
 	return "clone failed"
 }
 
+// Code returns the locked machine-readable identifier for
+// CloneFailedError (CLONE_FAILED). Mirrors the contract of
+// every other AppError in this package.
 func (e *CloneFailedError) Code() string { return ErrCodeCloneFailed }

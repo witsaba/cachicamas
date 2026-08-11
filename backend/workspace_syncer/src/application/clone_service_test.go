@@ -23,23 +23,23 @@ type fakeRunner struct {
 	defaultBranchErr error
 }
 
-func (f *fakeRunner) Clone(ctx context.Context, workspaceID int64, owner, repo, oauthToken string) (string, error) {
+func (f *fakeRunner) Clone(_ context.Context, _ int64, _, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.clonePath, f.cloneErr
 }
 
-func (f *fakeRunner) WorktreeProbe(ctx context.Context, path string) (string, error) {
+func (f *fakeRunner) WorktreeProbe(_ context.Context, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.probeSHA, f.probeErr
 }
 
-func (f *fakeRunner) ResolveHead(ctx context.Context, path string) (string, error) {
+func (f *fakeRunner) ResolveHead(_ context.Context, _ string) (string, error) {
 	return f.probeSHA, nil
 }
 
-func (f *fakeRunner) ResolveDefaultBranch(ctx context.Context, path string) (string, error) {
+func (f *fakeRunner) ResolveDefaultBranch(_ context.Context, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.defaultBranchErr != nil {
@@ -55,7 +55,7 @@ type fakeCallback struct {
 	postErr error
 }
 
-func (f *fakeCallback) Post(ctx context.Context, req httpclient.CallbackRequest) error {
+func (f *fakeCallback) Post(_ context.Context, req httpclient.CallbackRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
@@ -68,7 +68,7 @@ type fakeGitHub struct {
 	err        error
 }
 
-func (f *fakeGitHub) IsRepoAccessible(ctx context.Context, owner, repo string) (bool, error) {
+func (f *fakeGitHub) IsRepoAccessible(_ context.Context, _, _ string) (bool, error) {
 	return f.accessible, f.err
 }
 
