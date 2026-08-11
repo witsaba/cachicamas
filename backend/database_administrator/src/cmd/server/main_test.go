@@ -69,7 +69,7 @@ func TestBodyLimit_AcceptsNormalBody(t *testing.T) {
 func TestRecover_HandlerPanicReturns500(t *testing.T) {
 	e := echo.New()
 	e.Use(middleware.Recover())
-	e.GET("/panic", func(c *echo.Context) error {
+	e.GET("/panic", func(_ *echo.Context) error {
 		panic("something exploded (intentional test panic)")
 	})
 
@@ -109,7 +109,7 @@ func TestProductionMiddlewareChain_Ordering(t *testing.T) {
 	}
 
 	// Panic handler still 500.
-	e.GET("/panic", func(c *echo.Context) error {
+	e.GET("/panic", func(_ *echo.Context) error {
 		panic("test panic")
 	})
 	req = httptest.NewRequest(http.MethodGet, "/panic", nil)

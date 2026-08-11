@@ -43,20 +43,12 @@ func TestDomain_DoesNotImportPgx(t *testing.T) {
 
 func TestSkillRepository_PortInterface(t *testing.T) {
 	t.Parallel()
-	fake := &fakeSkillRepo{}
-	var _ domain.SkillRepository = fake
-	if fake == nil {
-		t.Fatalf("unexpected nil fake")
-	}
+	var _ domain.SkillRepository = &fakeSkillRepo{}
 }
 
 func TestSkillRevisionRepository_PortInterface(t *testing.T) {
 	t.Parallel()
-	fake := &fakeSkillRevisionRepo{}
-	var _ domain.SkillRevisionRepository = fake
-	if fake == nil {
-		t.Fatalf("unexpected nil fake")
-	}
+	var _ domain.SkillRevisionRepository = &fakeSkillRevisionRepo{}
 }
 
 // fakeSkillRepo satisfies domain.SkillRepository at compile time.

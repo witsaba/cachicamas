@@ -256,6 +256,11 @@ type RepoMetadata struct {
 	Permissions     RepoPermissions
 }
 
+// RepoPermissions is the locked subset of GitHub's
+// `permissions` object that the sync flow needs in order to
+// decide whether a token is allowed to push to the target repo.
+// Admin is exposed because the frontend branches on it for the
+// "Reconnect GitHub" banner copy.
 type RepoPermissions struct {
 	Pull  bool
 	Push  bool

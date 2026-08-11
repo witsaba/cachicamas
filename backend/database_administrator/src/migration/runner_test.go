@@ -1368,11 +1368,6 @@ func TestRunner_Up_WorkspacesPR1a_AccountTokenColumns(t *testing.T) {
 	// Insert a post-PR1a row with a non-NULL access_token and confirm
 	// the column round-trips.
 	exp := time.Unix(1735689600, 0).UTC() // 2025-01-01 00:00:00 UTC
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO identity.user (email, name) VALUES ('post-pr1a@example.com', 'Post PR1a') RETURNING id`,
-		nil); err != nil {
-		// Use the upsert path instead because we want one user_id back.
-	}
 	var userID2 int64
 	if err := db.QueryRowContext(ctx,
 		`INSERT INTO identity.user (email, name) VALUES ('post-pr1a@example.com', 'Post PR1a') RETURNING id`).Scan(&userID2); err != nil {

@@ -171,10 +171,16 @@ func (e *SkillGoneError) Error() string {
 	return "skill name=" + e.Name + ": " + MsgSkillDeleted
 }
 
+// Code returns the stable machine-readable identifier for
+// SkillGoneError, mirroring the contract used by every other
+// domain error in this package.
 func (e *SkillGoneError) Code() string { return CodeSkillDeleted }
 
 func (e *SkillGoneError) Unwrap() error { return e.Cause }
 
+// NewSkillDeleted builds a SkillGoneError for the given skill
+// name. The returned error is a sentinel suitable for errors.As
+// via AsSkillDeleted.
 func NewSkillDeleted(name string) *SkillGoneError {
 	return &SkillGoneError{Name: name}
 }
@@ -190,30 +196,72 @@ func AsSkillDeleted(err error) (*SkillGoneError, bool) {
 }
 
 const (
-	MsgSkillNameLength         = "Skill name must be 1-64 characters."
-	MsgSkillNameFormat         = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
-	MsgSkillNameReserved       = "Skill name cannot contain \"anthropic\" or \"claude\"."
+	// MsgSkillNameLength is the user-facing message when the skill
+	// name fails the 1-64 character length check.
+	MsgSkillNameLength = "Skill name must be 1-64 characters."
+	// MsgSkillNameFormat is the user-facing message when the skill
+	// name fails the lowercase-letters / digits / hyphen regex.
+	MsgSkillNameFormat = "Skill name must be lowercase letters, digits, and single hyphens; cannot start or end with a hyphen."
+	// MsgSkillNameReserved is the user-facing message when the skill
+	// name contains a reserved substring ("anthropic" or "claude").
+	MsgSkillNameReserved = "Skill name cannot contain \"anthropic\" or \"claude\"."
+	// MsgSkillDescriptionInvalid is the user-facing message when
+	// the description fails the 1-1024 character length check.
 	MsgSkillDescriptionInvalid = "Skill description must be 1-1024 characters."
-	MsgSkillBodyTooLarge       = "Skill body must be 1-524288 characters."
+	// MsgSkillBodyTooLarge is the user-facing message when the body
+	// exceeds the 524288 character cap.
+	MsgSkillBodyTooLarge = "Skill body must be 1-524288 characters."
 
 	// Frontmatter parser messages (spec SCN-3.5, SCN-3.6).
-	MsgSkillFrontmatterMissing       = "Skill body must start with YAML frontmatter (---)."
-	MsgSkillFrontmatterUnterminated  = "Skill body frontmatter is missing the closing --- fence."
-	MsgSkillFrontmatterMalformed     = "Skill body frontmatter is not valid YAML."
-	MsgSkillFrontmatterNameMissing   = "Skill body frontmatter is missing the required 'name' key."
-	MsgSkillFrontmatterDescMissing   = "Skill body frontmatter is missing the required 'description' key."
+
+	// MsgSkillFrontmatterUnterminated is the user-facing message when
+	// the YAML frontmatter fence is opened but never closed.
+	MsgSkillFrontmatterUnterminated = "Skill body frontmatter is missing the closing --- fence."
+	// MsgSkillFrontmatterMalformed is the user-facing message when
+	// the YAML frontmatter parses but is not valid YAML.
+	MsgSkillFrontmatterMalformed = "Skill body frontmatter is not valid YAML."
+	// MsgSkillFrontmatterNameMissing is the user-facing message when
+	// the YAML frontmatter is missing the required 'name' key.
+	MsgSkillFrontmatterNameMissing = "Skill body frontmatter is missing the required 'name' key."
+	// MsgSkillFrontmatterDescMissing is the user-facing message when
+	// the YAML frontmatter is missing the required 'description' key.
+	MsgSkillFrontmatterDescMissing = "Skill body frontmatter is missing the required 'description' key."
+	// MsgSkillFrontmatterNameNotString is the user-facing message when
+	// the YAML frontmatter 'name' is not a string.
 	MsgSkillFrontmatterNameNotString = "Skill body frontmatter 'name' must be a string."
+	// MsgSkillFrontmatterDescNotString is the user-facing message when
+	// the YAML frontmatter 'description' is not a string.
 	MsgSkillFrontmatterDescNotString = "Skill body frontmatter 'description' must be a string."
 
-	// Lock-step (spec S-SK-035, S-SK-036).
-	MsgSkillNameLockStep        = "Skill body frontmatter 'name' must match the URL slug."
+// Lock-step (spec S-SK-035, S-SK-036).
+
+	// MsgSkillNameLockStep is the user-facing message for the
+	// case where the YAML frontmatter 'name' disagrees with the
+	// URL slug the skill was requested under.
+	MsgSkillNameLockStep = "Skill body frontmatter 'name' must match the URL slug."
+	// MsgSkillDescriptionLockStep is the user-facing message for
+	// the case where the YAML frontmatter 'description' disagrees
+	// with the request description.
 	MsgSkillDescriptionLockStep = "Skill body frontmatter 'description' must match the request description."
 
-	// User-facing messages.
-	MsgSkillNotFound         = "Skill not found."
+// User-facing messages.
+
+	// MsgSkillFrontmatterMissing is the user-facing message when
+	// the skill body does not begin with a YAML frontmatter
+	// '---' fence.
+	MsgSkillFrontmatterMissing = "Skill body must start with YAML frontmatter (---)."
+	// MsgSkillNotFound is the user-facing message when the
+	// requested skill does not exist.
+	MsgSkillNotFound = "Skill not found."
+	// MsgSkillRevisionNotFound is the user-facing message when the
+	// requested skill revision does not exist.
 	MsgSkillRevisionNotFound = "Skill revision not found."
-	MsgSkillDeleted          = "This skill has been deleted and cannot be modified."
-	MsgSkillConflict         = "This skill name is already taken. Try another."
+	// MsgSkillDeleted is the user-facing message when a write is
+	// attempted on a soft-deleted skill.
+	MsgSkillDeleted = "This skill has been deleted and cannot be modified."
+	// MsgSkillConflict is the user-facing message when a skill
+	// name is already taken.
+	MsgSkillConflict = "This skill name is already taken. Try another."
 )
 
 // ---------------------------------------------------------------------------
@@ -233,8 +281,9 @@ type Skill struct {
 	UpdatedAt   time.Time  `db:"updated_at"  json:"updated_at"`
 }
 
-// SkillRevision: one row of `skill_revision`. Append-only (never
-// UPDATE, never DELETE except via CASCADE when parent is hard-deleted).
+// SkillRevision is one row of `skill_revision`. Append-only
+// (never UPDATE, never DELETE except via CASCADE when parent is
+// hard-deleted).
 type SkillRevision struct {
 	ID             int64     `db:"id"              json:"id"`
 	SkillID        int64     `db:"skill_id"        json:"skill_id"`
@@ -347,14 +396,14 @@ func LockStepCheck(slug, reqDescription string, fm Frontmatter) error {
 // the field was undefined at runtime).
 // ---------------------------------------------------------------------------
 
-// SkillDetail: response shape for a single skill (current state +
-// current revision number, joined at the DB level).
+// SkillDetail is the response shape for a single skill (current
+// state + current revision number, joined at the DB level).
 type SkillDetail struct {
 	Skill
 	CurrentRevision int `db:"current_revision" json:"current_revision"`
 }
 
-// SkillListItem: trimmed shape for GET /skills.
+// SkillListItem is the trimmed shape for GET /skills.
 type SkillListItem struct {
 	Name            string    `db:"name"             json:"name"`
 	Description     string    `db:"description"      json:"description"`
@@ -362,8 +411,8 @@ type SkillListItem struct {
 	UpdatedAt       time.Time `db:"updated_at"       json:"updated_at"`
 }
 
-// SkillRevisionItem: one entry in GET /skills/:name/revisions. Body
-// intentionally omitted (can be large).
+// SkillRevisionItem is one entry in GET /skills/:name/revisions.
+// Body intentionally omitted (can be large).
 type SkillRevisionItem struct {
 	RevisionNumber int       `db:"revision_number" json:"revision_number"`
 	Description    string    `db:"description"     json:"description"`
@@ -413,7 +462,7 @@ type SkillRepository interface {
 	MaxRevisionNumber(ctx context.Context, db sqlExecutor, skillID int64) (int, error)
 }
 
-// SkillRevisionRepository: reads/persists SkillRevision rows.
+// SkillRevisionRepository reads/persists SkillRevision rows.
 // Contract (PR1b):
 //   - Insert: sets r.ID, r.CreatedAt from DB clock.
 //   - SelectBySkillAndNumber: *NotFoundError on miss.

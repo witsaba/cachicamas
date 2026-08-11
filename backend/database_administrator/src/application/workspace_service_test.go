@@ -107,7 +107,7 @@ func (f *wsFakeRepo) SelectAllByOrg(_ context.Context, orgID int64, limit int) (
 	return f.selectAllResult, f.selectAllErr
 }
 
-func (f *wsFakeRepo) SelectByID(_ context.Context, orgID, id int64) (*domain.Workspace, error) {
+func (f *wsFakeRepo) SelectByID(_ context.Context, _, id int64) (*domain.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls++
@@ -144,7 +144,7 @@ func (f *wsFakeRepo) UpdateName(_ context.Context, orgID, ownerID, id int64, nam
 	return &out, nil
 }
 
-func (f *wsFakeRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) error {
+func (f *wsFakeRepo) SoftDelete(_ context.Context, _, _, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteCalls++
@@ -152,7 +152,7 @@ func (f *wsFakeRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) err
 	return f.deleteErr
 }
 
-func (f *wsFakeRepo) MarkSynced(_ context.Context, orgID, id int64, commitSHA, defaultBranch string) error {
+func (f *wsFakeRepo) MarkSynced(_ context.Context, _, id int64, commitSHA, defaultBranch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markSyncedCalls++

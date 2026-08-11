@@ -1,3 +1,7 @@
+// Package domain holds the hexagonal core entities, errors, and
+// repository ports shared by every backend service.
+package domain
+
 // sync.go — the SyncJob aggregate and SyncJobRepository port for
 // the 2026-07-08-workspace-sync-clone change. The migration
 // `20260708120200_sync_job.sql` (PR-1) creates the underlying
@@ -8,7 +12,6 @@
 // (at most one in-flight job per workspace_id) is enforced at
 // the database level via a partial unique index; the Go code
 // surfaces the violation as a *ConflictError.
-package domain
 
 import (
 	"context"

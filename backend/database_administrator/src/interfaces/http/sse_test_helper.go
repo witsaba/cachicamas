@@ -1,9 +1,13 @@
+// Package httpiface contains the HTTP-layer test helpers
+// (Echo + auth stubs) shared by the SSE handler tests in this
+// directory.
+package httpiface
+
 // sse_test_helper.go — minimal Echo + auth stub for the SSE
 // handler tests. The production RegisterAuthenticatedWorkspaceRoutes
 // wires a real IdentityFromCookie middleware; for the SSE tests
 // we use a stub that injects a fake identity so the auth check
 // in the SSE handler passes without a real JWE session.
-package httpiface
 
 import (
 	"github.com/labstack/echo/v5"
@@ -32,14 +36,6 @@ func newSSEEcho() *echo.Echo {
 		}
 	})
 	return e
-}
-
-// newSSEEchoGroup is deprecated; use newSSERootAndGroup to get
-// a single Echo + its sub-group. Kept for backwards compat
-// with any older test that calls it directly.
-func newSSEEchoGroup() *echo.Group {
-	e := newSSEEcho()
-	return e.Group("")
 }
 
 // newSSERootAndGroup returns (root, group) so the test can

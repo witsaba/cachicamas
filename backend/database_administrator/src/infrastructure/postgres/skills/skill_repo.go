@@ -30,6 +30,9 @@ type SkillRepo struct {
 	db *sql.DB
 }
 
+// NewSkillRepo returns a SkillRepo backed by the supplied
+// *sql.DB. The repo satisfies domain.SkillRepository (compile-time
+// checked on the next line).
 func NewSkillRepo(db *sql.DB) *SkillRepo { return &SkillRepo{db: db} }
 
 // Compile-time check.

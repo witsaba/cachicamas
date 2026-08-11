@@ -404,7 +404,7 @@ func identityFromContext(c *echo.Context) (*domain.Identity, bool) {
 // To keep this file self-contained, we expose a setter the
 // composition root can override (cmd/server/main.go sets it on
 // startup). Default is 1.
-func singleTenantOrganizationID(c *echo.Context) int64 {
+func singleTenantOrganizationID(_ *echo.Context) int64 {
 	if singleTenantOrgIDFn != nil {
 		return singleTenantOrgIDFn()
 	}
