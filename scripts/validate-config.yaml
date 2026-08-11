@@ -1,0 +1,25 @@
+# scripts/validate-config.yaml
+#
+# Default config for scripts/validate.py.
+# Override with --config PATH.
+#
+# Allowlist (R-RVH-012): documented absences that MUST NOT be reported
+# as tool-missing. Each entry is a (scope, target) pair.
+#
+# Add entries only when an ADR or Makefile comment documents the absence
+# as deliberate. Anything else belongs in the report as a finding.
+allowlist:
+  - scope: backend/agent
+    target: install   # deliberate absence — backend/agent/Makefile lines 55-58
+
+# Failure threshold (R-RVH-002). Any finding with mapped severity >=
+# this triggers exit 1. Valid values: info | low | medium | high | critical.
+# Default: high.
+fail_on: high
+
+# Per-check timeout in seconds (R-RVH-001, design.md "Per-check Timeout").
+# Default: 600.
+timeout_check: 600
+
+# e2e timeout in seconds. Default: 1200.
+timeout_e2e: 1200
