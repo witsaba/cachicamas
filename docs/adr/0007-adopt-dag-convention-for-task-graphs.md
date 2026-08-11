@@ -122,6 +122,23 @@ enforces this direction).
 > sees each wave's whole DAG without reconstructing it from fields. Merged pre-v2 documents
 > (0002–0004) are not restyled retroactively.
 
+> **Amended 2026-08-10 — a projection into a datastore is a rendering.** [ADR 0008 § D4](0008-adopt-the-cachicamas-delivery-loop.md#d4--a-projection-is-a-rendering--amending-adr-0007--d3)
+> extends this section to cover a database projection of the contract, resolving the apparent
+> conflict with the sidecar rejected in *Alternatives rejected*. A projection qualifies as a
+> rendering — not as a second source of truth — only under this invariant:
+>
+> > Every column in the projection is exactly one of: **(P)** a pure projection of a byte range of a
+> > source document identified by `(path, content_sha256)`, rebuildable by re-running the parser and
+> > discardable without information loss; or **(S)** execution state that has no representation in any
+> > document. No column is both.
+>
+> Mechanically: (P) rows are deleted and reinserted wholesale on reparse; ingest refuses to run when
+> the document hash does not match the revision under review, so drift is a hard failure rather than a
+> silent divergence; and there is no write path from the datastore back to a document and no update
+> path on a (P) row. The `Depends on:` fields still win. A projection that stores anything authored —
+> anything a human or agent edits *there* rather than in the document — is the rejected sidecar and
+> this amendment does not license it.
+
 ### D4 — The canonical node-type palette
 
 One color vocabulary for node types, used by every mermaid block and every viewer. Color never
