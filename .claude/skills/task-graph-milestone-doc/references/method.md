@@ -1,17 +1,20 @@
 # The task-graph milestone method (v2)
 
-This is the full method behind `docs/architecture/milestones/0002…0004`, upgraded after Layer 1
-completed (42/42 milestones executed through it). The output is one markdown document that a
-sequence of implementers (human or agent) can walk leaf-by-leaf with SDD + Strict TDD, where every
-behavior is a Gherkin scenario, every dependency is an edge, and every deferral is a recorded
-decision. Doc 0002 owns the canonical node grammar; ADR 0007 (as amended) owns the renderable
-shapes. A new document **cites** those; it never re-defines them.
+This is the full normative method for task-graph milestone documents, distilled from its first
+complete execution (a 42/42-milestone delivery; the current project's exemplars are listed in
+`SKILL.md` § Project Bindings). The output is one markdown document that a sequence of
+implementers (human or agent) can walk leaf-by-leaf with SDD + Strict TDD, where every behavior
+is a Gherkin scenario, every dependency is an edge, and every deferral is a recorded decision.
+This skill owns the canonical node grammar and the renderable shapes (the DAG contract below);
+each project ratifies that contract in an ADR of its own and names a founding method document
+(both in its Project Bindings). A new document **cites** its project's ratifying ADR and founding
+document; it never re-defines them.
 
 The v2 deltas over the shipped exemplars: a mandatory intake → research → consistency phase before
 any authoring; Gherkin scenarios instead of free-form test items; a mandatory rendered DAG tree per
 wave; nesting to three levels; and normative text that is implementation-language-agnostic.
 
-## The DAG contract (ADR 0007 — every document must conform)
+## The DAG contract (every document must conform; ratified per project by its DAG-convention ADR)
 
 Two structures, named by these terms everywhere (files, ADRs, Engram, skills):
 
@@ -28,9 +31,10 @@ with an `SDD change:` line and `**Charter**` bullets (`- **<Label>:** …`) ·
 delivery-sequence table carries range, gate, and exit condition per wave. The `Depends on:` fields
 are the **single source of truth for edges**; every mermaid block and table is a derived summary —
 when they disagree, the field wins and the rendering is regenerated. New mermaid blocks copy the
-canonical type palette from ADR 0007 § D4 verbatim (guard amber, decision violet, leaf slate,
-mechanical gray, compound teal); color never encodes alone. Never introduce a YAML/JSON sidecar or
-front-matter DAG — rejected in ADR 0007 as a second source of truth.
+canonical type palette verbatim (guard amber, decision violet, leaf slate, mechanical gray,
+compound teal — the classDefs in `assets/milestone-doc-template.md`, restated in the ratifying
+ADR's § D4); color never encodes alone. Never introduce a YAML/JSON sidecar or front-matter DAG —
+rejected at contract ratification as a second source of truth.
 
 ## Phase 0 — Intake
 
@@ -78,10 +82,11 @@ document's *method section* binds each role to this project's concrete tool once
 
 ## Phase 4 — Identifiers and structure
 
-- **Prefix:** two letters + `-NN`, unique per document (`AI-`, `AG-`, `CO-` are taken). Nodes are
-  `XX-NN.p`, `XX-NN.p.q`, and at most `XX-NN.p.q.r` — **three levels below the milestone, never
-  more**. Depth is a split budget, not a target: use depth 2–3 only when a node is genuinely a DAG
-  of its own; Layer 1 needed depth 2 exactly twice in 164 nodes.
+- **Prefix:** two letters + `-NN`, unique per document (the Project Bindings list the prefixes
+  already taken). Nodes are `XX-NN.p`, `XX-NN.p.q`, and at most `XX-NN.p.q.r` — **three levels
+  below the milestone, never more**. Depth is a split budget, not a target: use depth 2–3 only
+  when a node is genuinely a DAG of its own; the first execution needed depth 2 exactly twice in
+  164 nodes.
 - **Append-only rule:** once the first milestone merges, ids are never renumbered. New work
   appends the next free number; logical insertion points use a `Blocks:` field. Node splits append
   children, never renumber siblings. Amendments are dated blockquotes
@@ -90,7 +95,7 @@ document's *method section* binds each role to this project's concrete tool once
   references, date, append-only rule) → authoring constraint → *Outcome first* → quick navigation
   → **sources and research** (digest + inconsistency register) → scope boundary → SDD milestone
   rules + method bindings (evidence-gate command, TDD cycle, language-specific tools) →
-  method-inheritance citation of doc 0002 → entry gate (mandatory when anything upstream must
+  method-inheritance citation of the project's founding method document → entry gate (mandatory when anything upstream must
   freeze first) → global dependency graph (mermaid) + delivery-sequence table → waves → completion
   checklist → explicitly-deferred register → traceability spine.
 
@@ -113,7 +118,7 @@ document's *method section* binds each role to this project's concrete tool once
 ## Phase 6 — Milestones and their inner DAGs
 
 Every milestone section is: heading (`### XX-NN — <imperative title>`) · **`SDD change:` line
-(mandatory, 42/42 in the exemplar)** naming the kebab-case SDD change slug this milestone runs as,
+(mandatory — 42/42 in the first execution)** naming the kebab-case SDD change slug this milestone runs as,
 plus what it closes (finding/gap/ADR/requirement ids) · **Charter** · the milestone's rendered
 node DAG (mermaid) when it has 2+ nodes · child nodes.
 
@@ -128,7 +133,7 @@ node DAG (mermaid) when it has 2+ nodes · child nodes.
   refactor (performance, clean code, the idioms of the implementation language) → review**, in
   that order (see `gherkin-authoring.md`).
 
-**Node grammar** (doc 0002 owns the definitions):
+**Node grammar** (canonical here; a project's founding document may restate and extend it):
 
 | Type | Closes by |
 | --- | --- |
@@ -147,8 +152,8 @@ skeleton** — the thinnest end-to-end path; later leaves widen it, never open a
 front. Error paths follow happy paths; hardening follows function.
 
 **Evidence gate:** one command closes a leaf, declared once in the method section (bound there to
-the project's language and toolchain — e.g. Layer 1 bound it to `make test` running the Go race
-detector). Exceptions must be scoped and named per node.
+the project's language and toolchain — the first execution bound it to a `make test` target running
+the race detector). Exceptions must be scoped and named per node.
 
 ## Phase 7 — Gherkin
 
@@ -161,7 +166,7 @@ language-agnostic *and* directly executable as TDD: the RED test is the scenario
 
 **Every `## Wave` section opens with a mermaid flowchart showing the wave's entire tree**: every
 milestone, every node at every depth (containment as subgraphs, dependency edges as arrows),
-using the ADR 0007 § D4 palette with type-tag text on every node. This is mandatory — a reader
+using the canonical palette with type-tag text on every node. This is mandatory — a reader
 must see the whole DAG of a wave without reconstructing it from fields. The global graph
 (wave-level) and per-milestone graphs stay as before. All three renderings are derived summaries:
 regenerate them whenever a `Depends on:` field changes; on disagreement the field wins.
@@ -215,11 +220,11 @@ Implementation *will* disprove parts of the plan. When a scenario's first red te
 driven green in small steps: revert to green; record the discovery as graph structure (append the
 prerequisite node, draw the edge, move remaining scenarios into children if the leaf became
 compound); land the amendment **in the same PR** that resumes work. Newly discovered *scenarios*
-append to the owning leaf's list instead. Layer 1 used this 35 times — the amendment blockquote is
-the normal state of a living document, not an exception.
+append to the owning leaf's list instead. The first execution used this 35 times — the amendment
+blockquote is the normal state of a living document, not an exception.
 
 ## Method sources
 
 Canon TDD test lists (Beck) · BDD/Gherkin (North, Chelimsky) · Mikado method · HTN planning · WBS
-100 % rule · INVEST/SPIDR/Elephant Carpaccio · Walking skeleton (Cockburn) / GOOS · this repo's
-openspec SDD conventions. Full rationale: doc 0002 § "Method sources".
+100 % rule · INVEST/SPIDR/Elephant Carpaccio · Walking skeleton (Cockburn) / GOOS · the project's
+SDD conventions. Full rationale: the founding method document's § "Method sources".

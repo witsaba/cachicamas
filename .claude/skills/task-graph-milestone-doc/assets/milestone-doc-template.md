@@ -2,7 +2,7 @@
 
 > **Status**: 0 of N milestones complete. **First SDD to start**: XX-01.
 > **Entry gate**: <what must freeze upstream, or "none — from-zero plan">.
-> **References**: <PRD path> · <architecture doc> · <ADRs executed> · ADR 0007 (DAG convention).
+> **References**: <PRD path> · <architecture doc> · <ADRs executed> · <the project's DAG-convention ADR>.
 > **Date**: YYYY-MM-DD.
 > **Append-only rule**: once the first milestone merges, ids are never renumbered; new work
 > appends the next free number; amendments are dated blockquotes with struck-through text.
@@ -54,7 +54,7 @@
 ## Method — SDD milestone rules
 
 This document inherits the node grammar, leaf anatomy, split triggers, and living-graph clause
-from doc 0002 § method (cite, don't restate). Bindings for this project:
+from <the project's founding method document> § method (cite, don't restate). Bindings for this project:
 
 - **Evidence gate:** one command closes a leaf: `<command>` (bind the language/toolchain here,
   e.g. the test runner with the race detector). Per-node exceptions are named on the node.
