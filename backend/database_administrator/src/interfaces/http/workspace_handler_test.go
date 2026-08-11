@@ -84,7 +84,7 @@ func (f *fakeRepo) Insert(_ context.Context, w *domain.Workspace) (*domain.Works
 	return &out, nil
 }
 
-func (f *fakeRepo) SelectByID(_ context.Context, orgID, id int64) (*domain.Workspace, error) {
+func (f *fakeRepo) SelectByID(_ context.Context, _, id int64) (*domain.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.deletedIDs[id] {
@@ -113,7 +113,7 @@ func (f *fakeRepo) SelectAllByOrg(_ context.Context, orgID int64, limit int) ([]
 	return out, nil
 }
 
-func (f *fakeRepo) UpdateName(_ context.Context, orgID, ownerID, id int64, name string) (*domain.Workspace, error) {
+func (f *fakeRepo) UpdateName(_ context.Context, _, _, id int64, name string) (*domain.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.updateErr != nil {
@@ -131,7 +131,7 @@ func (f *fakeRepo) UpdateName(_ context.Context, orgID, ownerID, id int64, name 
 	return w, nil
 }
 
-func (f *fakeRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) error {
+func (f *fakeRepo) SoftDelete(_ context.Context, _, _, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.deleteErr != nil {
@@ -147,7 +147,7 @@ func (f *fakeRepo) SoftDelete(_ context.Context, orgID, ownerID, id int64) error
 	return nil
 }
 
-func (f *fakeRepo) MarkSynced(_ context.Context, orgID, _ int64, _, _ string) error {
+func (f *fakeRepo) MarkSynced(_ context.Context, _, _ int64, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return nil

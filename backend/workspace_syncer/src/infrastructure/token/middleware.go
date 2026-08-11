@@ -1,9 +1,14 @@
-// Package token contains the bearer-token middleware that guards
-// every internal endpoint on the workspace_syncer. See
+// Package tokenauth contains the bearer-token middleware that
+// guards every internal endpoint on the workspace_syncer. See
 // openspec/changes/2026-07-08-workspace-sync-clone/design.md §5
 // (Cross-service auth posture) and the ADR at
 // adr/workspace-syncer-internal-auth for the v1 static-bearer choice.
-package token
+//
+// The directory is src/infrastructure/token/, but the package
+// name is tokenauth to avoid shadowing the standard library's
+// hypothetical 'token' identifier and to satisfy revive's
+// var-naming rule (no stdlib package-name clashes).
+package tokenauth
 
 import (
 	"crypto/subtle"
@@ -19,31 +24,6 @@ import (
 // before comparing).
 const bearerPrefix = "Bearer "
 
-// ServiceTokenMiddleware returns an Echo middleware that rejects any
-// request whose Authorization header does not exactly match
-// "Bearer <expected>" using a constant-time compare.
-//
-// Behavior:
-//   - Missing Authorization header → 401 with
-//     {"error": "unauthorized", "message": "..."}.
-//   - Authorization header without the "Bearer " prefix → 401.
-//   - Authorization header with the wrong token → 401.
-//   - Authorization header with the correct token → next handler runs.
-//
-// The comparison uses subtle.ConstantTimeCompare to defend against
-// timing attacks; both length-mismatch and value-mismatch are
-// handled in constant time. The handler does NOT distinguish between
-// "missing", "malformed", and "wrong token" in the response body —
-// the 401 envelope is the same so an attacker cannot probe for
-// "is the token shape right" vs "is the token value right".
-//
-// The expected token is captured by value at construction time (not
-// by reference) so a future caller that mutates the source slice
-// after NewServiceTokenMiddleware does not change the middleware's
-// behavior. Defense-in-depth.
-//
-// The middleware is the ONLY auth gate on the workspace_syncer; it
-// is applied to the entire Echo instance in main.go.
 // ServiceTokenMiddlewareConfig is the optional configuration for
 // ServiceTokenMiddleware. The zero value is the strictest possible:
 // no skipper (every request is checked), and the fail-safe empty-token

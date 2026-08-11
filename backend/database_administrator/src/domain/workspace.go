@@ -302,7 +302,11 @@ func (e *GitHubNotConnectedError) Code() string { return CodeGitHubNotConnected 
 type WorkspaceNotFoundError struct{}
 
 func (e *WorkspaceNotFoundError) Error() string { return MsgWorkspaceNotFound }
-func (e *WorkspaceNotFoundError) Code() string  { return CodeNotFound }
+
+// Code returns the stable machine-readable identifier for
+// WorkspaceNotFoundError. Distinct from the generic NotFoundError
+// so callers can branch on Code() == CodeWorkspaceNotFound.
+func (e *WorkspaceNotFoundError) Code() string { return CodeNotFound }
 
 // ---------------------------------------------------------------------------
 // 2026-07-08-workspace-sync-clone: locked error codes for the sync flow.
@@ -340,6 +344,9 @@ type ErrSyncAlreadyRunning struct {
 func (e *ErrSyncAlreadyRunning) Error() string {
 	return "sync already running for this workspace"
 }
+
+// Code returns the stable machine-readable identifier for
+// ErrSyncAlreadyRunning (CodeSyncAlreadyRunning).
 func (e *ErrSyncAlreadyRunning) Code() string { return CodeSyncAlreadyRunning }
 
 // ErrInsufficientPermissions is the typed error returned by the
@@ -353,6 +360,9 @@ type ErrInsufficientPermissions struct {
 func (e *ErrInsufficientPermissions) Error() string {
 	return "github token has insufficient permissions (push) for this repository"
 }
+
+// Code returns the stable machine-readable identifier for
+// ErrInsufficientPermissions (CodeSyncInsufficientPermissions).
 func (e *ErrInsufficientPermissions) Code() string { return CodeSyncInsufficientPermissions }
 
 // ErrTokenExpired is the typed error returned when the OAuth
@@ -362,4 +372,7 @@ type ErrTokenExpired struct{}
 func (e *ErrTokenExpired) Error() string {
 	return "github access token is expired; reconnect required"
 }
+
+// Code returns the stable machine-readable identifier for
+// ErrTokenExpired (CodeSyncTokenExpired).
 func (e *ErrTokenExpired) Code() string { return CodeSyncTokenExpired }

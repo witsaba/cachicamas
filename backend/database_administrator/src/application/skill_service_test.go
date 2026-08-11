@@ -133,7 +133,7 @@ func validSkillBody(name, description string) string {
 func TestSkillService_Create_WritesRevisionOne(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -168,7 +168,7 @@ func TestSkillService_Create_WritesRevisionOne(t *testing.T) {
 func TestSkillService_Create_RejectsInvalidName(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -200,7 +200,7 @@ func TestSkillService_Create_RejectsInvalidName(t *testing.T) {
 func TestSkillService_Create_RejectsReservedName(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -234,7 +234,7 @@ func TestSkillService_Create_RejectsReservedName(t *testing.T) {
 func TestSkillService_Create_RejectsLongDescription(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -254,7 +254,7 @@ func TestSkillService_Create_RejectsLongDescription(t *testing.T) {
 func TestSkillService_Create_RejectsOversizeBody(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -274,7 +274,7 @@ func TestSkillService_Create_RejectsOversizeBody(t *testing.T) {
 func TestSkillService_Create_RejectsMissingFrontmatter(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -294,7 +294,7 @@ func TestSkillService_Create_RejectsMissingFrontmatter(t *testing.T) {
 func TestSkillService_Create_RejectsNameLockStep(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -315,7 +315,7 @@ func TestSkillService_Create_RejectsNameLockStep(t *testing.T) {
 func TestSkillService_Create_RejectsDescriptionLockStep(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -340,7 +340,7 @@ func TestSkillService_Create_RejectsDescriptionLockStep(t *testing.T) {
 func TestSkillService_Create_DuplicateName_ReturnsConflictError(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -371,7 +371,7 @@ func TestSkillService_Create_DuplicateName_ReturnsConflictError(t *testing.T) {
 func TestSkillService_Update_AppendsNextRevision(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -411,7 +411,7 @@ func TestSkillService_Update_AppendsNextRevision(t *testing.T) {
 func TestSkillService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -449,7 +449,7 @@ func TestSkillService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
 func TestSkillService_Update_DeletedSkill_ReturnsGoneError(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -476,7 +476,7 @@ func TestSkillService_Update_DeletedSkill_ReturnsGoneError(t *testing.T) {
 func TestSkillService_Restore_OnDeletedSkill_ReturnsGoneError(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -506,7 +506,7 @@ func TestSkillService_Restore_OnDeletedSkill_ReturnsGoneError(t *testing.T) {
 func TestSkillService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -566,7 +566,7 @@ func TestSkillService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T)
 func TestSkillService_SoftDelete_Idempotent(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -591,7 +591,7 @@ func TestSkillService_SoftDelete_Idempotent(t *testing.T) {
 func TestSkillService_SoftDelete_ThenRecreate_AllowsReuse(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -632,7 +632,7 @@ func TestSkillService_SoftDelete_ThenRecreate_AllowsReuse(t *testing.T) {
 func TestSkillService_GetBySlug_DeletedSkill_ReturnsNotFound(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -658,7 +658,7 @@ func TestSkillService_GetBySlug_DeletedSkill_ReturnsNotFound(t *testing.T) {
 func TestSkillService_List_ExcludesDeleted(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -686,7 +686,7 @@ func TestSkillService_List_ExcludesDeleted(t *testing.T) {
 func TestSkillService_List_LimitCapEnforced(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -710,7 +710,7 @@ func TestSkillService_List_LimitCapEnforced(t *testing.T) {
 func TestSkillService_ListRevisions_NewestFirst(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -752,7 +752,7 @@ func TestSkillService_ListRevisions_NewestFirst(t *testing.T) {
 func TestSkillService_ConcurrentCreate_OneSucceedsOneConflicts(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -791,7 +791,7 @@ func TestSkillService_ConcurrentCreate_OneSucceedsOneConflicts(t *testing.T) {
 func TestSkillService_ConcurrentUpdate_ProducesMonotonicRevisions(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 
@@ -837,7 +837,7 @@ func TestSkillService_ConcurrentUpdate_ProducesMonotonicRevisions(t *testing.T) 
 func TestSkillService_ConcurrentRestoreAndUpdate_NoLostUpdate(t *testing.T) {
 	skipIfNoIntegrationSkill(t)
 	db := openSkillAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureSkillAppMigrations(t, db)
 	cleanSkillAppTables(t, db)
 

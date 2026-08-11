@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -133,12 +132,6 @@ func TestRunServer_BindFailure(t *testing.T) {
 // TestMainProcessSignalHandling is a smoke test that the signal
 // machinery works.
 func TestMainProcessSignalHandling(t *testing.T) {
-	// Sanity: signal.NotifyContext is the API we depend on.
-	ch := make(chan os.Signal, 1)
-	defer close(ch)
-	if ch == nil {
-		t.Fatal("channel creation failed")
-	}
 	// And syscall.SIGTERM is the signal we listen for.
 	if syscall.SIGTERM == 0 {
 		t.Fatal("syscall.SIGTERM is 0; the constant is wrong")
@@ -148,7 +141,7 @@ func TestMainProcessSignalHandling(t *testing.T) {
 // TestEchoContextType guards against the echo.Context type
 // changing. Echo v5 uses *echo.Context; if a future upgrade renames
 // it, this test fails and the handler signatures must be updated.
-func TestEchoContextType(t *testing.T) {
+func TestEchoContextType(_ *testing.T) {
 	var c *echo.Context
 	_ = c
 }

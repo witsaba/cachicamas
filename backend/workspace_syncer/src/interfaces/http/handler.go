@@ -1,8 +1,13 @@
-// Package http contains the HTTP handlers for the workspace_syncer
-// service. In v1 there is exactly one handler:
+// Package httpiface contains the HTTP handlers for the
+// workspace_syncer service. In v1 there is exactly one handler:
 // POST /internal/clone-and-validate. PR-2c may add others (e.g.
 // GET /admin/sync-jobs for operators).
-package http
+//
+// The directory is src/interfaces/http/, but the package name is
+// httpiface to avoid shadowing the standard library net/http
+// package and to satisfy revive's var-naming rule (no stdlib
+// package-name clashes).
+package httpiface
 
 import (
 	"context"

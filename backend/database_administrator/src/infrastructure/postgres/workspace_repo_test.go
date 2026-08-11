@@ -397,15 +397,12 @@ func TestWorkspaceRepo_SelectAllByOrg_OrdersCreatedDescAndCapsLimit(t *testing.T
 
 	// Insert 3 rows with deterministic names so we can assert order.
 	names := []string{"first", "second", "third"}
-	inserted := make([]*domain.Workspace, 0, len(names))
 	for _, n := range names {
-		w, err := repo.Insert(ctx, makeWorkspaceInput(orgID, n))
-		if err != nil {
+		if _, err := repo.Insert(ctx, makeWorkspaceInput(orgID, n)); err != nil {
 			t.Fatalf("Insert %q: %v", n, err)
 		}
 		// 1ms gap so created_at strictly orders even on fast clocks.
 		time.Sleep(2 * time.Millisecond)
-		inserted = append(inserted, w)
 	}
 
 	got, err := repo.SelectAllByOrg(ctx, orgID, 100)

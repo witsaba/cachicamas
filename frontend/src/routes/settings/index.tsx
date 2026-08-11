@@ -71,10 +71,7 @@ export default component$(() => (
       <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
         Settings
       </h1>
-      <p
-        class="mt-2 text-sm text-slate-500"
-        data-testid="settings-subtitle"
-      >
+      <p class="mt-2 text-sm text-slate-500" data-testid="settings-subtitle">
         Customize your workspace.
       </p>
     </header>

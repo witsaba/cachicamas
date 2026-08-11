@@ -141,8 +141,7 @@ export const PromptEditor = component$<PromptEditorProps>(
     // existing "No changes to save" text already gated on
     // !hasChanges — this brings the button in line with it.
     const canSave = useComputed$(
-      () =>
-        body.value.trim().length > 0 && !saving && hasChanges.value,
+      () => body.value.trim().length > 0 && !saving && hasChanges.value,
     );
 
     const handleSave = $(() => {

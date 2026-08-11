@@ -33,7 +33,7 @@ type fakeStreamer struct {
 	delay time.Duration
 }
 
-func (f *fakeStreamer) GetLatestSyncJob(ctx context.Context, workspaceID int64) (*domain.SyncJob, error) {
+func (f *fakeStreamer) GetLatestSyncJob(_ context.Context, _ int64) (*domain.SyncJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -139,7 +139,7 @@ func TestSSE_InitialEventCarriesCurrentJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -193,7 +193,7 @@ func TestSSE_EmitsNullThenClosesWhenNoJobExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -229,12 +229,13 @@ func TestSSE_EmitsNullThenClosesWhenNoJobExists(t *testing.T) {
 	// body EOFs within a tight budget (the only externally
 	// observable signal that the connection was closed).
 	body, _ := io.ReadAll(resp.Body)
-	if len(body) == 0 {
+	if len(body) != 0 {
 		// httptest.NewServer doesn't enable HTTP/1.1
 		// keep-alive by default, so the body EOFs
 		// immediately. That's the desired behavior in
-		// production too.
-	} else {
+		// production too. Any bytes past the null event
+		// mean the server kept the connection open when
+		// it should have closed it.
 		t.Errorf("expected body EOF after null event; got %d extra bytes: %q", len(body), body)
 	}
 }
@@ -251,7 +252,7 @@ func TestSSE_OnlyEmitsOnChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the initial event. The next poll (within ssePollInterval)
 	// MUST NOT re-emit if the state is unchanged.
@@ -299,7 +300,7 @@ func TestSSE_ClosesAfterTerminalState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -332,7 +333,7 @@ func TestSSE_EmitsOnStateChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the initial event.
 	events := readSSE(t, resp.Body, 1, 1*time.Second)
@@ -376,7 +377,7 @@ func TestSSE_PollErrorsDoNotKillStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Simulate transient errors.
 	streamer.err = errors.New("connection reset by peer")
@@ -423,7 +424,7 @@ func TestSSE_RejectsUnauthenticatedRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 (the auth check must fire when no identity is in context)", resp.StatusCode)

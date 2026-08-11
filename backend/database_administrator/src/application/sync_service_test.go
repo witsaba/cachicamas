@@ -20,7 +20,7 @@ type fakeSyncJobRepo struct {
 	getErr    error
 }
 
-func (f *fakeSyncJobRepo) Insert(ctx context.Context, job *domain.SyncJob) (*domain.SyncJob, error) {
+func (f *fakeSyncJobRepo) Insert(_ context.Context, job *domain.SyncJob) (*domain.SyncJob, error) {
 	if f.insertErr != nil {
 		return nil, f.insertErr
 	}
@@ -30,7 +30,7 @@ func (f *fakeSyncJobRepo) Insert(ctx context.Context, job *domain.SyncJob) (*dom
 	return job, nil
 }
 
-func (f *fakeSyncJobRepo) GetLatestForWorkspace(ctx context.Context, workspaceID int64) (*domain.SyncJob, error) {
+func (f *fakeSyncJobRepo) GetLatestForWorkspace(_ context.Context, workspaceID int64) (*domain.SyncJob, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -43,7 +43,7 @@ func (f *fakeSyncJobRepo) GetLatestForWorkspace(ctx context.Context, workspaceID
 	return nil, nil
 }
 
-func (f *fakeSyncJobRepo) Update(ctx context.Context, job *domain.SyncJob) error {
+func (f *fakeSyncJobRepo) Update(_ context.Context, _ *domain.SyncJob) error {
 	return nil
 }
 
@@ -60,9 +60,6 @@ func TestSyncService_EnqueueSync_FreshInsert(t *testing.T) {
 	}
 	if id == 0 {
 		t.Errorf("id = 0, want > 0")
-	}
-	if existing == nil {
-		t.Errorf("existing = nil, want the persisted job")
 	}
 	if existing.Status != domain.SyncJobStatusPending {
 		t.Errorf("status = %q, want pending", existing.Status)

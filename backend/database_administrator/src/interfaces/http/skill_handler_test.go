@@ -137,9 +137,9 @@ func cleanSkillHandlerTables(t *testing.T, db *sql.DB) {
 	}
 }
 
-// skillHttpDo executes an HTTP request against the Echo app and returns
+// skillHTTPDo executes an HTTP request against the Echo app and returns
 // the response recorder.
-func skillHttpDo(t *testing.T, e *echo.Echo, method, path string, body []byte) *httptest.ResponseRecorder {
+func skillHTTPDo(t *testing.T, e *echo.Echo, method, path string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Reader
 	if body != nil {
@@ -176,7 +176,7 @@ func TestSkillHandler_Create_Returns201AndCurrentRevisionOne(t *testing.T) {
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
 
-	rec := skillHttpDo(t, e, "POST", "/skills", payload)
+	rec := skillHTTPDo(t, e, "POST", "/skills", payload)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 	}
@@ -225,7 +225,7 @@ func TestSkillHandler_Create_ValidationErrorEnvelopeShape(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	body := []byte(`{"name":"BAD","description":"d","body":"x"}`)
-	rec := skillHttpDo(t, e, "POST", "/skills", body)
+	rec := skillHTTPDo(t, e, "POST", "/skills", body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
@@ -255,10 +255,10 @@ func TestSkillHandler_Create_DuplicateName_Returns409WithConflictCode(t *testing
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
 
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("first POST status = %d, want 201", rec.Code)
 	}
-	rec := skillHttpDo(t, e, "POST", "/skills", payload)
+	rec := skillHTTPDo(t, e, "POST", "/skills", payload)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("duplicate POST status = %d, want 409; body = %s", rec.Code, rec.Body.String())
 	}
@@ -282,14 +282,14 @@ func TestSkillHandler_DeletedSkill_UsesSkillDeletedCode(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	if rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
+	if rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
 	// Now PATCH on the soft-deleted skill — MUST be 410 + skill_deleted.
-	rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, []byte(`{"description":"new"}`))
+	rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, []byte(`{"description":"new"}`))
 	if rec.Code != http.StatusGone {
 		t.Fatalf("patch status = %d, want 410; body = %s", rec.Code, rec.Body.String())
 	}
@@ -317,13 +317,13 @@ func TestSkillHandler_List_EmitsCurrentRevision(t *testing.T) {
 		desc := "d"
 		body := validSkillBody(name, desc)
 		payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-		if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+		if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 			t.Fatalf("create %s status = %d, want 201; body = %s", name, rec.Code, rec.Body.String())
 		}
 		_ = i
 	}
 
-	rec := skillHttpDo(t, e, "GET", "/skills", nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -349,7 +349,7 @@ func TestSkillHandler_List_DefaultsLimit50AndCapsAt200(t *testing.T) {
 	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
-	rec := skillHttpDo(t, e, "GET", "/skills", nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -363,7 +363,7 @@ func TestSkillHandler_List_DefaultsLimit50AndCapsAt200(t *testing.T) {
 	}
 
 	// Also verify the cap is honored: a limit=999 request does not error.
-	rec2 := skillHttpDo(t, e, "GET", "/skills?limit=999", nil)
+	rec2 := skillHTTPDo(t, e, "GET", "/skills?limit=999", nil)
 	if rec2.Code != http.StatusOK {
 		t.Errorf("limit=999 status = %d, want 200 (clamped to 200)", rec2.Code)
 	}
@@ -375,7 +375,7 @@ func TestSkillHandler_GetBySlug_NotFoundReturns404Envelope(t *testing.T) {
 	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
-	rec := skillHttpDo(t, e, "GET", "/skills/missing", nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills/missing", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
@@ -398,13 +398,13 @@ func TestSkillHandler_GetBySlug_DeletedReturns404Envelope(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	if rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
+	if rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
-	rec := skillHttpDo(t, e, "GET", "/skills/"+name, nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills/"+name, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("GET deleted status = %d, want 404", rec.Code)
 	}
@@ -431,14 +431,14 @@ func TestSkillHandler_Update_AppendsRevision_AndReturnsNewRevision(t *testing.T)
 	desc1 := "v1"
 	body1 := validSkillBody(name, desc1)
 	create := []byte(`{"name":"` + name + `","description":"` + desc1 + `","body":` + jsonString(body1) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
 
 	desc2 := "v2"
 	body2 := validSkillBody(name, desc2)
 	patch := []byte(`{"description":"` + desc2 + `","body":` + jsonString(body2) + `}`)
-	rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, patch)
+	rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, patch)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("patch status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -464,7 +464,7 @@ func TestSkillHandler_Update_400OnInvalidBody(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	create := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
 	// PATCH with a body that violates the name regex (frontmatter says
@@ -472,7 +472,7 @@ func TestSkillHandler_Update_400OnInvalidBody(t *testing.T) {
 	// run the lock-step validator and return 400.
 	badBody := validSkillBody("BAD", desc)
 	patch := []byte(`{"body":` + jsonString(badBody) + `}`)
-	rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, patch)
+	rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, patch)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("patch status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
@@ -494,14 +494,14 @@ func TestSkillHandler_Update_410OnDeletedSkill(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	create := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	if rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
+	if rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
 	patch := []byte(`{"description":"new","body":` + jsonString(validSkillBody(name, "new")) + `}`)
-	rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, patch)
+	rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, patch)
 	if rec.Code != http.StatusGone {
 		t.Fatalf("patch status = %d, want 410; body = %s", rec.Code, rec.Body.String())
 	}
@@ -527,10 +527,10 @@ func TestSkillHandler_Delete_Returns204(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil)
+	rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
@@ -541,7 +541,7 @@ func TestSkillHandler_Delete_MissingReturns204(t *testing.T) {
 	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
-	rec := skillHttpDo(t, e, "DELETE", "/skills/never-existed", nil)
+	rec := skillHTTPDo(t, e, "DELETE", "/skills/never-existed", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete missing status = %d, want 204 (idempotent)", rec.Code)
 	}
@@ -557,13 +557,13 @@ func TestSkillHandler_Delete_AlreadyDeletedReturns204(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	if rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
+	if rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("first delete status = %d, want 204", rec.Code)
 	}
-	rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil)
+	rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("second delete status = %d, want 204 (idempotent)", rec.Code)
 	}
@@ -583,19 +583,19 @@ func TestSkillHandler_ListRevisions_NewestFirst(t *testing.T) {
 	desc1 := "v1"
 	body1 := validSkillBody(name, desc1)
 	create := []byte(`{"name":"` + name + `","description":"` + desc1 + `","body":` + jsonString(body1) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
 	// Apply two more updates → revisions 1, 2, 3.
 	for i := 2; i <= 3; i++ {
 		d := "v" + string(rune('0'+i))
 		patch := []byte(`{"description":"` + d + `","body":` + jsonString(validSkillBody(name, d)) + `}`)
-		if rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, patch); rec.Code != http.StatusOK {
+		if rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, patch); rec.Code != http.StatusOK {
 			t.Fatalf("patch %d status = %d, want 200", i, rec.Code)
 		}
 	}
 
-	rec := skillHttpDo(t, e, "GET", "/skills/"+name+"/revisions", nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills/"+name+"/revisions", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list revisions status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -618,7 +618,7 @@ func TestSkillHandler_ListRevisions_NotFoundReturns404Envelope(t *testing.T) {
 	e, _, db := setupSkillHandler(t)
 	defer func() { _ = db.Close() }()
 
-	rec := skillHttpDo(t, e, "GET", "/skills/never-existed/revisions", nil)
+	rec := skillHTTPDo(t, e, "GET", "/skills/never-existed/revisions", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
@@ -642,16 +642,16 @@ func TestSkillHandler_Restore_AppendsNewRevision(t *testing.T) {
 	desc1 := "v1"
 	body1 := validSkillBody(name, desc1)
 	create := []byte(`{"name":"` + name + `","description":"` + desc1 + `","body":` + jsonString(body1) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", create); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
 	// Update once → revisions 1, 2.
 	patch := []byte(`{"description":"v2","body":` + jsonString(validSkillBody(name, "v2")) + `}`)
-	if rec := skillHttpDo(t, e, "PATCH", "/skills/"+name, patch); rec.Code != http.StatusOK {
+	if rec := skillHTTPDo(t, e, "PATCH", "/skills/"+name, patch); rec.Code != http.StatusOK {
 		t.Fatalf("patch status = %d, want 200", rec.Code)
 	}
 	// Restore revision 1 → new revision 3 with the body of revision 1.
-	rec := skillHttpDo(t, e, "POST", "/skills/"+name+"/revisions/1/restore", nil)
+	rec := skillHTTPDo(t, e, "POST", "/skills/"+name+"/revisions/1/restore", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("restore status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -676,13 +676,13 @@ func TestSkillHandler_Restore_OnDeletedReturns410Envelope(t *testing.T) {
 	desc := "d"
 	body := validSkillBody(name, desc)
 	payload := []byte(`{"name":"` + name + `","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	if rec := skillHttpDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
+	if rec := skillHTTPDo(t, e, "POST", "/skills", payload); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
 	}
-	if rec := skillHttpDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
+	if rec := skillHTTPDo(t, e, "DELETE", "/skills/"+name, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
-	rec := skillHttpDo(t, e, "POST", "/skills/"+name+"/revisions/1/restore", nil)
+	rec := skillHTTPDo(t, e, "POST", "/skills/"+name+"/revisions/1/restore", nil)
 	if rec.Code != http.StatusGone {
 		t.Fatalf("restore deleted status = %d, want 410", rec.Code)
 	}
@@ -734,7 +734,7 @@ func TestSkillHandler_NoPIIInLogs(t *testing.T) {
 	desc := "log-test-description"
 	body := validSkillBody("logtest", desc) + "\n" + sentinel
 	payload := []byte(`{"name":"logtest","description":"` + desc + `","body":` + jsonString(body) + `}`)
-	rec := skillHttpDo(t, e, "POST", "/skills", payload)
+	rec := skillHTTPDo(t, e, "POST", "/skills", payload)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 	}

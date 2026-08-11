@@ -36,7 +36,7 @@ type stubTokenFetcher struct {
 	dbErr       error
 }
 
-func (s *stubTokenFetcher) AccessTokenForIdentity(ctx context.Context, provider, accountID string) (string, error) {
+func (s *stubTokenFetcher) AccessTokenForIdentity(_ context.Context, _, _ string) (string, error) {
 	if s.dbErr != nil {
 		return "", s.dbErr
 	}

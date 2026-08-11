@@ -24,9 +24,9 @@ import (
 
 	"github.com/cachicamas/backend/workspace_syncer/src/application"
 	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/git"
-	httphandler "github.com/cachicamas/backend/workspace_syncer/src/interfaces/http"
+	httpiface "github.com/cachicamas/backend/workspace_syncer/src/interfaces/http"
 	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/httpclient"
-	"github.com/cachicamas/backend/workspace_syncer/src/infrastructure/token"
+	tokenauth "github.com/cachicamas/backend/workspace_syncer/src/infrastructure/token"
 	"github.com/cachicamas/backend/workspace_syncer/src/otel"
 )
 
@@ -153,7 +153,7 @@ func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Ech
 	//   - /healthz is the only public route (compose healthcheck);
 	//     the skipper lets it through without the token.
 	//   - Every other route is internal-only and requires the token.
-	e.Use(token.ServiceTokenMiddleware(serviceToken, token.ServiceTokenMiddlewareConfig{
+	e.Use(tokenauth.ServiceTokenMiddleware(serviceToken, tokenauth.ServiceTokenMiddlewareConfig{
 		Skipper: func(c *echo.Context) bool {
 			return c.Request().URL.Path == "/healthz"
 		},
@@ -180,7 +180,7 @@ func newEcho(serviceToken, callbackSecret string, logger *slog.Logger) *echo.Ech
 	// client lands in PR-2c). The use case skips permission
 	// validation when the accessor is nil.
 	svc := application.NewCloneService(runner, callback, nil, logger)
-	cloneHandler := httphandler.NewCloneHandler(svc, logger)
+	cloneHandler := httpiface.NewCloneHandler(svc, logger)
 	cloneHandler.Register(e)
 
 	return e

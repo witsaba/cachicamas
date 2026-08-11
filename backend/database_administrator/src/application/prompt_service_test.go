@@ -121,7 +121,7 @@ func newAppService(t *testing.T, db *sql.DB) *application.PromptService {
 func TestPromptService_Create_WritesRevisionOne(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -148,7 +148,7 @@ func TestPromptService_Create_WritesRevisionOne(t *testing.T) {
 func TestPromptService_Create_RejectsInvalidSlug(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -167,7 +167,7 @@ func TestPromptService_Create_RejectsInvalidSlug(t *testing.T) {
 func TestPromptService_Create_DuplicateSlug_ReturnsConflictError(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -194,7 +194,7 @@ func TestPromptService_Create_DuplicateSlug_ReturnsConflictError(t *testing.T) {
 func TestPromptService_Update_AppendsNextRevision(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -222,7 +222,7 @@ func TestPromptService_Update_AppendsNextRevision(t *testing.T) {
 func TestPromptService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -248,7 +248,7 @@ func TestPromptService_Update_DescriptionOnly_AppendsRevision(t *testing.T) {
 func TestPromptService_Update_DeletedPrompt_ReturnsGoneError(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -277,7 +277,7 @@ func TestPromptService_Update_DeletedPrompt_ReturnsGoneError(t *testing.T) {
 func TestPromptService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -320,7 +320,7 @@ func TestPromptService_Restore_AppendsNewRevisionWithHistoricalBody(t *testing.T
 func TestPromptService_Restore_OnDeletedPrompt_ReturnsGoneError(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -347,7 +347,7 @@ func TestPromptService_Restore_OnDeletedPrompt_ReturnsGoneError(t *testing.T) {
 func TestPromptService_SoftDelete_Idempotent(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -372,7 +372,7 @@ func TestPromptService_SoftDelete_Idempotent(t *testing.T) {
 func TestPromptService_SoftDelete_ThenRecreate_AllowsReuse(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -400,7 +400,7 @@ func TestPromptService_SoftDelete_ThenRecreate_AllowsReuse(t *testing.T) {
 func TestPromptService_GetBySlug_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -424,7 +424,7 @@ func TestPromptService_GetBySlug_DeletedPrompt_ReturnsNotFound(t *testing.T) {
 func TestPromptService_List_ExcludesDeleted(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -452,7 +452,7 @@ func TestPromptService_List_ExcludesDeleted(t *testing.T) {
 func TestPromptService_List_LimitCapEnforced(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -472,7 +472,7 @@ func TestPromptService_List_LimitCapEnforced(t *testing.T) {
 func TestPromptService_ListRevisions_NewestFirst(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -512,7 +512,7 @@ func TestPromptService_ListRevisions_NewestFirst(t *testing.T) {
 func TestPromptService_ConcurrentCreate_OneSucceedsOneConflicts(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -551,7 +551,7 @@ func TestPromptService_ConcurrentCreate_OneSucceedsOneConflicts(t *testing.T) {
 func TestPromptService_ConcurrentUpdate_ProducesMonotonicRevisions(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 
@@ -598,7 +598,7 @@ func TestPromptService_ConcurrentUpdate_ProducesMonotonicRevisions(t *testing.T)
 func TestPromptService_ConcurrentRestoreAndUpdate_NoLostUpdate(t *testing.T) {
 	skipIfNoIntegrationApp(t)
 	db := openAppTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ensureAppPromptMigrations(t, db)
 	cleanAppPromptTables(t, db)
 

@@ -32,10 +32,19 @@ import (
 const DefaultTimeoutSeconds = 30
 
 // antiReplayToleranceMs is the maximum clock skew (in milliseconds)
+// antiReplayToleranceMs is the maximum clock skew (in ms) that
 // the syncer allows between its timestamp and the db_admin's
-// server clock. The db_admin enforces a 5-min window in BOTH
-// directions; we use the same value on the sending side so the
-// signature is always inside the window.
+// server clock. Reserved for the future signed-timestamp wire
+// field — see design.md §5 (Cross-service contract). The current
+// callback wire format does not include a signed timestamp; the
+// db_admin trusts the bearer token. When the signed-timestamp
+// wire field lands, the signature builder will consume this
+// constant.
+//
+// Defined here so future readers see the planned value; pinned at
+// 5 minutes to mirror the db_admin's anti-replay window.
+//
+//nolint:unused
 const antiReplayToleranceMs = 5 * 60 * 1000
 
 // CallbackRequest is the body posted to

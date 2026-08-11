@@ -363,7 +363,7 @@ def default_check_matrix(repo_root: Path) -> list[dict[str, Any]]:
             "scope": "frontend",
             "name": "lint",
             "target": "lint",
-            "command": ["pnpm", "--dir", str(frontend), "lint", "--", "--format", "json"],
+            "command": ["pnpm", "--dir", str(frontend), "lint"],
             "cwd": str(frontend),
             "opt_in": None,
         },
@@ -371,7 +371,7 @@ def default_check_matrix(repo_root: Path) -> list[dict[str, Any]]:
             "scope": "frontend",
             "name": "typecheck",
             "target": "build.types",
-            "command": ["pnpm", "--dir", str(frontend), "build.types", "--", "--pretty", "false"],
+            "command": ["pnpm", "--dir", str(frontend), "build.types"],
             "cwd": str(frontend),
             "opt_in": None,
         },
@@ -387,7 +387,7 @@ def default_check_matrix(repo_root: Path) -> list[dict[str, Any]]:
             "scope": "frontend",
             "name": "test",
             "target": "test:ci",
-            "command": ["pnpm", "--dir", str(frontend), "test:ci", "--", "--reporter=json"],
+            "command": ["pnpm", "--dir", str(frontend), "test:ci"],
             "cwd": str(frontend),
             "opt_in": None,
         },
@@ -403,7 +403,7 @@ def default_check_matrix(repo_root: Path) -> list[dict[str, Any]]:
             "scope": "frontend",
             "name": "vuln-check",
             "target": "vuln-check",
-            "command": ["pnpm", "--dir", str(frontend), "run", "vuln-check", "--", "--json"],
+            "command": ["pnpm", "--dir", str(frontend), "run", "vuln-check"],
             "cwd": str(frontend),
             "opt_in": None,
         },
@@ -604,13 +604,37 @@ def parse_golangci_json(raw: str, scope: str) -> list[Finding]:
     return out
 
 
+def _strip_pnpm_preamble(raw: str) -> str:
+    """Drop any text before the first '{' or '[' in `raw`.
+
+    `pnpm --dir <dir> <script>` emits an install preamble ("Already up
+    to date\\nDone in ...ms") before the actual script output. The
+    preamble is plain text and corrupts JSON / NDJSON parsers. We
+    keep the bytes from the first JSON delimiter onwards so the
+    real payload lands intact in the parser.
+    """
+    if not raw:
+        return raw
+    candidates = (raw.find("{"), raw.find("["))
+    candidates = [c for c in candidates if c >= 0]
+    if not candidates:
+        return raw
+    start = min(candidates)
+    return raw[start:]
+
+
 def parse_eslint_json(raw: str, scope: str) -> list[Finding]:
     """Parse ESLint 9 JSON output.
 
     Severity 1 == warn, 2 == error. Verbatim preserved on Finding.severity.
     """
+    # pnpm prepends an install preamble ("Already up to date\nDone in ...ms")
+    # before the actual script output when invoked via `pnpm --dir <dir> lint`.
+    # Strip everything before the first '{' or '[' so the JSON parser only
+    # sees the real payload.
+    cleaned = _strip_pnpm_preamble(raw)
     try:
-        arr = json.loads(raw)
+        arr = json.loads(cleaned)
     except json.JSONDecodeError:
         return [_finding_from_tool(
             tool="eslint", scope=scope, severity="medium",
@@ -642,7 +666,7 @@ def parse_eslint_json(raw: str, scope: str) -> list[Finding]:
                 column=msg.get("column"),
                 message=msg.get("message") or "",
                 evidence=json.dumps(msg, ensure_ascii=False),
-                reproduce="cd frontend && pnpm lint -- --format json",
+                reproduce="cd frontend && pnpm lint",
             ))
     return out
 
@@ -662,7 +686,7 @@ def parse_tsc(out: str, scope: str) -> list[Finding]:
             severity="error", category="typecheck",
             rule=code, file=file, line=int(line_no), column=int(col),
             message=msg, evidence=line,
-            reproduce="cd frontend && pnpm build.types -- --pretty false",
+            reproduce="cd frontend && pnpm build.types",
         ))
     return findings
 
@@ -704,6 +728,8 @@ def parse_vitest(raw: str, scope: str) -> list[Finding]:
             doc = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(doc, dict):
+            continue
         # Vitest JSON shape varies; the field we care about is per-test status.
         status = doc.get("status")
         name = doc.get("name") or ""
@@ -716,7 +742,7 @@ def parse_vitest(raw: str, scope: str) -> list[Finding]:
                 rule=None, file=None, line=None, column=None,
                 message=f"test failed: {name}",
                 evidence=line,
-                reproduce="cd frontend && pnpm test:ci -- --reporter=json",
+                reproduce="cd frontend && pnpm test:ci",
             ))
     return findings
 
@@ -770,9 +796,19 @@ def parse_playwright(out: str, scope: str) -> list[Finding]:
 
 
 def parse_pnpm_audit(raw: str, scope: str) -> list[Finding]:
+    # pnpm --dir prepends an install preamble ("Already up to date\nDone in ...ms").
+    # Strip it before looking for JSON.
+    raw = _strip_pnpm_preamble(raw)
+    # pnpm audit --json may append a non-JSON trailer such as
+    # "[ELIFECYCLE] Command failed with exit code 1." when vulnerabilities
+    # are found. Find the last balanced top-level '}' and parse only the
+    # JSON prefix.
+    json_text = raw
+    end = json_text.rfind("\n}")
+    if end != -1:
+        json_text = json_text[: end + 2]
     try:
-        doc = json.loads(raw)
-        vulns = doc.get("vulnerabilities") or {}
+        doc = json.loads(json_text)
     except json.JSONDecodeError:
         return [_finding_from_tool(
             tool="pnpm-audit", scope=scope, severity="medium",
@@ -780,17 +816,22 @@ def parse_pnpm_audit(raw: str, scope: str) -> list[Finding]:
             message="pnpm audit output was not valid JSON",
             evidence=raw, reproduce="see log",
         )]
+    # pnpm's JSON schema: { "advisories": { <id>: { module_name, severity, title, findings: [...] } }, "metadata": {...} }
+    advisories = doc.get("advisories") or {}
     findings: list[Finding] = []
-    for name, info in vulns.items():
+    for adv_id, info in advisories.items():
+        if not isinstance(info, dict):
+            continue
         sev = (info.get("severity") or "medium").lower()
+        module_name = info.get("module_name") or adv_id
         findings.append(_finding_from_tool(
             tool="pnpm-audit", scope=scope,
             severity=sev, category="vuln",
-            rule=name, file="package.json", line=None, column=None,
-            message=f"{name}: {info.get('title', 'vulnerability')}",
+            rule=module_name, file="package.json", line=None, column=None,
+            message=f"{module_name}: {info.get('title', 'vulnerability')}",
             evidence=json.dumps(info, ensure_ascii=False)[:_EVIDENCE_MAX],
             reproduce="cd frontend && pnpm audit --json --audit-level=high",
-            fix_hint=f"Update or remove dependency: {name}.",
+            fix_hint=f"Update or remove dependency: {module_name}.",
         ))
     return findings
 
