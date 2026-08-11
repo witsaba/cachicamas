@@ -24,12 +24,18 @@ overrides:
   # repo-validation-harness audit output. Each entry collapses every
   # matching range in the dep graph to a single tree-wide version.
   #
-  # brace-expansion note: minimatch@3 (transitive via @eslint/config-array)
-  # requires the v1.x API (the `expand` export). A blanket
-  # `brace-expansion` override that bumps to v5.x breaks ESLint at
-  # runtime, so we accept the brace-expansion 1.x / 2.x / 5.x vulns
-  # here and document them in the repo-validation-harness allowlist
-  # until minimatch@3 is itself bumped upstream.
+  # brace-expansion override: collapases every v1.x consumer to v2.1.4.
+  # v1.x and v2.x share the same module shape (`module.exports =
+  # expandTop`, the callable default), so minimatch@3.x (transitive
+  # via @eslint/config-array@0.21.2 -> eslint@9) keeps working
+  # unchanged. v2.1.4 already carries the DoS hardening that landed
+  # for CVE-2026-14257 / CVE-2026-13149 (EXPANSION_MAX = 100_000,
+  # EXPANSION_MAX_LENGTH = 4_000_000) — same protection v5.x has,
+  # minus the breaking ESM-only renames. v5.x is reachable in the
+  # tree today via minimatch@10.x, so the wide override never bumps
+  # the v5.x path. If minimatch@3 ever gets bumped upstream, drop
+  # this entry and rely on the v5.x path for everyone.
+  "brace-expansion@^1.0.0": "npm:brace-expansion@^2.1.4"
   "image-size@<2.0.3": ">=2.0.3"
   "js-yaml@<4.3.1": ">=4.3.1"
   "nanoid@<3.3.17": ">=3.3.17"
