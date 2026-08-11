@@ -122,7 +122,7 @@ enforces this direction).
 > sees each wave's whole DAG without reconstructing it from fields. Merged pre-v2 documents
 > (0002–0004) are not restyled retroactively.
 
-> **Amended 2026-08-10 — a projection into a datastore is a rendering.** [ADR 0008 § D4](0008-adopt-the-cachicamas-delivery-loop.md#d4--a-projection-is-a-rendering--amending-adr-0007--d3)
+> **Amended 2026-08-11 — a projection into a datastore is a rendering.** [ADR 0008 § D4](0008-adopt-the-cachicamas-delivery-loop.md#d4--a-projection-is-a-rendering--amending-adr-0007--d3)
 > extends this section to cover a database projection of the contract, resolving the apparent
 > conflict with the sidecar rejected in *Alternatives rejected*. A projection qualifies as a
 > rendering — not as a second source of truth — only under this invariant:

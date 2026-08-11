@@ -1,10 +1,10 @@
 # PRD 0001 — The cachicamas delivery loop
 
-> **Status:** Draft — awaiting review. Consumed by no milestone document yet.
+> **Status:** **Accepted** (2026-08-11, issue #151, PR #152) — not yet consumed by a milestone document.
 > **Decisions** live in [ADR 0008](../adr/0008-adopt-the-cachicamas-delivery-loop.md); this document states *what must be true*, never *which option was picked*.
 > **Downstream:** this PRD is the Phase-0 intake source for `.claude/skills/task-graph-milestone-doc`. It produces `docs/architecture/milestones/0005-cachicamas-delivery-loop-task-graph.md`, prefix **`DF-`**.
 > **Plan structure is not in scope here.** ADR 0007 owns the DAG contract; the skill owns the PRD→milestones method. This PRD must not restate either.
-> **Date:** 2026-08-10
+> **Date:** 2026-08-11
 > **Numbering:** `docs/prd/` opens its own append-only sequence. The milestone document that consumes this PRD takes the next number in the `docs/architecture/` stack sequence (0005).
 
 > [!IMPORTANT]

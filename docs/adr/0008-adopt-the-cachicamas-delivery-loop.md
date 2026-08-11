@@ -1,6 +1,6 @@
 # ADR 0008: Adopt the cachicamas delivery loop
 
-> Status: **Proposed** (2026-08-10)
+> Status: **Accepted** (2026-08-11, issue #151, PR #152)
 > Author: cachicamas parent orchestrator, from an adversarial review of the proposed pipeline
 > Companion: [PRD 0001 — The cachicamas delivery loop](../prd/0001-cachicamas-delivery-loop.md)
 > Amends: [ADR 0007 § D3](0007-adopt-dag-convention-for-task-graphs.md) — see § D4
