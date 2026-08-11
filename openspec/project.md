@@ -86,6 +86,7 @@ the compose stack are expected to grow as services stabilize.
 | PostgreSQL      | 18-alpine3.24                        |
 | Jaeger          | 2.19.0                               |
 | OTel Collector  | contrib 0.137.0                      |
+| uv              | 0.11.17 (host runtime for `scripts/*.py` shebangs) |
 
 ## Active Changes
 
