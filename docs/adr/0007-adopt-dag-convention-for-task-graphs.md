@@ -1,11 +1,11 @@
 # ADR 0007: Adopt the DAG convention for task-graph documents
 
-> Status: **Proposed** (2026-07-30)
+> Status: **Accepted** (2026-08-11 · proposed 2026-07-30)
 > Author: cachicamas SDD pipeline (parent orchestrator)
 > Companion: [ADR 0005](./0005-promote-agent-stack-to-own-module.md) — module boundaries the
 > graphs plan against · docs [0002](../architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) /
 > [0003](../architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) /
-> [0004](../architecture/milestones/0004-cachicamas-coding-layer-3-task-graph.md) — the exemplar documents
+> [0004](../architecture/milestones/0004-cachicamas-coding-layer-3-task-graph.md) — the exemplar documents (0003 restructured to v2 on 2026-08-11; 0002/0004 remain pre-v2)
 > Skill: `.claude/skills/task-graph-milestone-doc/SKILL.md` — executes this convention for new documents
 
 ---
@@ -121,6 +121,17 @@ enforces this direction).
 > `Depends on:` fields still win — but its *presence* is contract for v2 documents, so a reader
 > sees each wave's whole DAG without reconstructing it from fields. Merged pre-v2 documents
 > (0002–0004) are not restyled retroactively.
+
+> **Amended 2026-08-11 — status accepted; doc 0003 upgraded to v2 on user request.** This ADR had
+> been enforced as normative by the v2 skill while formally ~~Proposed~~; it is now **Accepted**,
+> matching practice. Separately, doc 0003 — none of whose milestones had merged — was restructured
+> to the full v2 form (Gherkin bodies, numbered waves, per-wave renderings, gate column) on the
+> user's request, with its v1 revision archived at
+> `docs/architecture/milestones/archive/0003-cachicamas-agent-layer-2-task-graph-v1.md`. The
+> no-retroactive-restyle rule above now covers the *merged* pre-v2 documents, 0002 and 0004; a
+> user-requested restructure of an unstarted document was never what it forbade. Every new v2
+> document (0003 included) cites this ADR from its references line — the exemplars now follow the
+> contract they seeded.
 
 > **Amended 2026-08-11 — a projection into a datastore is a rendering.** [ADR 0008 § D4](0008-adopt-the-cachicamas-delivery-loop.md#d4--a-projection-is-a-rendering--amending-adr-0007--d3)
 > extends this section to cover a database projection of the contract, resolving the apparent

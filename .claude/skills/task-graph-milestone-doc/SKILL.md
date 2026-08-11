@@ -31,6 +31,9 @@ receiving a PRD/requirement/architecture document, creating or amending a milest
   merged content are dated amendment blockquotes.
 - Never skip the intake and consistency phases; only the research phase (Phase 1) may be skipped,
   and only on the user's explicit waiver.
+- **Merged pre-v2 exemplars are exempt from the Gherkin and per-wave-mermaid rules above:** docs
+  0002 and 0004 predate Gherkin — validate them with `--profile v1` and restructure only on the
+  user's explicit request. Doc 0003 was restructured to v2 (2026-08-11) and validates under v2.
 
 ## Decision Gates
 
@@ -40,7 +43,7 @@ receiving a PRD/requirement/architecture document, creating or amending a milest
 | Node too big for one sitting / > 7 scenarios / > 400 changed lines | Split: append children (inner DAG, ≤ 3 levels) |
 | Capability out of scope | Deferred register + named seam, not silence |
 | Plan disproved during execution | Living-graph amendment in the same PR that resumes work |
-| Doc predates Gherkin (0002–0004) | Validate with `--profile v1`; restructure only on user request |
+| Doc predates Gherkin (0002, 0004) | Validate with `--profile v1`; restructure only on user request (0003 did so, 2026-08-11) |
 
 ## Execution Steps
 
@@ -63,4 +66,5 @@ findings fixed; the PR; and the Engram observation ids saved.
 - `references/gherkin-authoring.md` — scenario anatomy, style rules, anti-patterns.
 - `scripts/validate_taskgraph.py` — mechanical validator (self-tested; `--self-test`).
 - `assets/milestone-doc-template.md` — skeleton document with all required sections.
-- Exemplars: `docs/architecture/milestones/0002…0004`; contract: `docs/adr/0007…`.
+- Exemplars: `docs/architecture/milestones/0003…` (v2) · `0002`/`0004` (pre-v2, `--profile v1`);
+  contract: `docs/adr/0007…` (accepted 2026-08-11).
