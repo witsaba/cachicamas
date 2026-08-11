@@ -92,7 +92,7 @@ Every leaf is sized to be implemented test-first in one sitting, verifiable by o
 | 3 | v1's premise "No layer has shipped code — the stack restarts from zero … every citation points at a contract document, never at code" vs the repository: Layer 1 complete 42/42, AI-40 merged `7326a813`, `src/{ai,agenttest,handoff}` on disk. | **Reconciled:** status header and authoring constraint updated; the entry gate is recorded satisfied; citations may now point at the shipped Layer 1 surface. |
 | 4 | Five edge fields used ellipsis ranges (e.g. "AG-14 … AG-20") vs [ADR 0007 D2 item 4](../../adr/0007-adopt-dag-convention-for-task-graphs.md#d2--the-machine-readable-contract): every edge is a bare node id; a range mechanically collapses to its endpoints, silently dropping the interior edges. | **Reconciled:** every edge field enumerates bare ids. Ranges survive only in derived summaries (the delivery table, where ADR 0007 expects a milestone range). |
 | 5 | Charter-declared dependencies that no node carried: AG-07 (the test substrate, the envelope), AG-12 (the frozen Layer 1 surface), AG-16.1 (retry), AG-18 (the event families, the scope verdict), AG-19.1 (the scope verdict). The method requires charter and node graph to agree at every depth. | **Reconciled:** each gap closed on the node that consumes the dependency; each milestone's node-dependency union now equals its charter. |
-| 6 | One-way `Blocks:` edges (AG-02 → AG-18, AG-04 → AG-07) and a one-way `Parallel with:` (AG-21.2). Legal under ADR 0007 — `Blocks:` is itself an edge — but drift-prone. | **Reconciled** with an explicit convention for this document: every `Blocks:` entry is mirrored by the target's `Depends on:`, `Blocks:` lists direct dependents only (transitive reach is the DAG's job), and `Parallel with:` is stated on both sides or neither. |
+| 6 | One-way `Blocks:` edges (AG-02 → AG-18, AG-04 → AG-07) and a one-way `Parallel with:` (AG-21.2). Legal under ADR 0007 — `Blocks:` is itself an edge — but drift-prone. | **Reconciled** with an explicit convention for this document: `Blocks:` is optional gating emphasis, never the edge list — the `Depends on:` fields alone are complete — but where a `Blocks:` field appears, every entry names a direct dependent, is mirrored by that dependent's `Depends on:`, and the field omits no direct dependent; `Parallel with:` is stated on both sides or neither. |
 | 7 | [ADR 0007](../../adr/0007-adopt-dag-convention-for-task-graphs.md) names docs 0002–0004 its exemplars, and the v2 skill requires citing it — yet no exemplar cited it, and the ADR sat in **Proposed** while accumulating three amendments and being enforced as normative. | **Reconciled outside this file** (same change): this document now cites ADR 0007 in its references; the ADR's acceptance is proposed to the user in the delivering PR. Docs 0002/0004 remain pre-v2 exemplars per the ADR's own no-retroactive-restyle rule. |
 | 8 | The v2 skill's Hard Rules state the Gherkin and per-wave-mermaid mandates unconditionally, while its Decision Gates exempt pre-Gherkin docs via `--profile v1` — an agent reading only the Hard Rules would restructure a merged exemplar unasked. | **Flagged and fixed in the skill** (same change): the exemption moves into the Hard Rule itself. This document is v2 either way, and validates under the v2 profile. |
 
@@ -164,12 +164,12 @@ Parallelism worth exploiting: AG-05 ∥ AG-06 inside wave 1; AG-12 runs beside a
 | Wave | Milestones | Gate | Exit condition (the wave's value) |
 | --- | --- | --- | --- |
 | 0 — Decide | AG-00 … AG-02 | doc 0002 wave 2 contracts frozen — **satisfied** | Vocabulary, event delivery model, and v1 scope are unambiguous and recorded. |
-| 1 — Envelope | AG-03 … AG-06 | AI-40 merged — **satisfied 2026-08-10** · wave 0 | Every event family the v2 reference names is constructible, validated, and guarded; the package exists with its boundary guards biting. |
-| 2 — Loop | AG-07 … AG-11 | Wave 1 | One assistant turn runs end-to-end against the fake provider: streaming, hooks, scheduled tools, permission suspension, typed failure, termination. |
-| 3 — Harness | AG-12 … AG-16 | AG-03 (for AG-12) · wave 2 (for the rest) | A multi-turn run completes with history integrity, steering, a working cancellation tree, retry policy, and cost events. |
-| 4 — Context | AG-17 … AG-18 | Wave 3 | The context strategy seam exists; compaction works, is recorded, and is recoverable. |
-| 5 — Delegation + hooks | AG-19 … AG-20 | Waves 3–4 | The harness is provably re-entrant with nested cancellation/cost/permission scope; the four-hook taxonomy is complete. |
-| 6 — Harden + hand off | AG-21 … AG-23 | Waves 4–5 | Race- and leak-clean under adversarial schedules; observability inside the § D3 boundary; Layer 3 readiness contract published and frozen. |
+| 1 — Envelope | AG-03 … AG-06 | AI-40 merged — **satisfied 2026-08-10** · AG-00 · AG-01 | Every event family the v2 reference names is constructible, validated, and guarded; the package exists with its boundary guards biting. |
+| 2 — Loop | AG-07 … AG-11 | AG-04 · AG-05 · AG-06, plus the shipped AI-21/AI-22 substrate | One assistant turn runs end-to-end against the fake provider: streaming, hooks, scheduled tools, permission suspension, typed failure, termination. |
+| 3 — Harness | AG-12 … AG-16 | AG-03 (for AG-12) · AG-06 · AG-10 · AG-11 (for the rest) | A multi-turn run completes with history integrity, steering, a working cancellation tree, retry policy, and cost events. |
+| 4 — Context | AG-17 … AG-18 | AG-02 · AG-06 · AG-12 · AG-13 · AG-16 | The context strategy seam exists; compaction works, is recorded, and is recoverable. |
+| 5 — Delegation + hooks | AG-19 … AG-20 | AG-02 · AG-06 · AG-08 · AG-10 · AG-13 · AG-14 · AG-16 · AG-18 | The harness is provably re-entrant with nested cancellation/cost/permission scope; the four-hook taxonomy is complete. |
+| 6 — Harden + hand off | AG-21 … AG-23 | AG-14 · AG-15 · AG-16 · AG-18 · AG-19 · AG-20 | Race- and leak-clean under adversarial schedules; observability inside the § D3 boundary; Layer 3 readiness contract published and frozen. |
 
 **First SDD to start: AG-00** (`cachicamas-agent-contract-vocabulary`) — unblocked now. First code-bearing SDD: AG-03.
 
@@ -207,7 +207,7 @@ SDD change: `cachicamas-agent-contract-vocabulary` · Closes: R-20's start condi
 - **Goal:** Fix the meaning of every term the later milestones use, so that no SDD re-litigates what a *run*, a *turn*, a *transcript entry*, a *tool call/result pair*, a *suspension*, or a *steering message* is.
 - **Deliverable:** A recorded vocabulary artifact covering at minimum: **the runtime and its two parts** (the runtime *is* the loop plus the harness — not a third thing wrapping them, and not a synonym for either alone); run vs turn vs provider call (one run = many turns; one turn = one assistant response plus its tool results; one turn may span several provider calls only via retry); transcript and the pairing invariant; the loop/harness responsibility split in this repo's words (the v2 reference § 4.1–4.2 restated as testable statements); suspension and resumption; steering; delegation and the parent relationship; the cost event's token-only scope.
 - **Acceptance:** Every later AG milestone's charter can cite a vocabulary entry instead of defining a term inline; conflicting uses in doc 0001/0002 are reconciled or flagged.
-- **Depends on:** the doc 0002 wave 2 contract surface (frozen — the model and stream contracts shipped with Layer 1). · **Blocks:** everything — mechanically, its direct dependents below.
+- **Depends on:** the doc 0002 wave 2 contract surface (frozen — the model and stream contracts shipped with Layer 1). · **Blocks:** AG-01, AG-02, AG-03 — and through them everything.
 - **Out of scope:** Any decision with a design alternative (AG-01, AG-02 own those).
 
 #### AG-00.1 — The vocabulary decision `[decision]`
@@ -228,7 +228,7 @@ SDD change: `cachicamas-agent-event-delivery` · The G13 of this layer, decided 
 - **Goal:** Decide how agent events reach consumers — the carrier at the package boundary, the buffering/backpressure posture, who closes what, how observers attach without being able to stall token delivery (envelope invariant 3) — and how the **upward path** (permission decisions, steering input, interrupts) re-enters a live run (R-09).
 - **Deliverable:** A recorded decision, no production code.
 - **Acceptance:** The decision answers every question in the closing checklist and is closed before AG-04 starts.
-- **Depends on:** AG-00. · **Blocks:** AG-04.
+- **Depends on:** AG-00. · **Blocks:** AG-02, AG-04.
 - **Note — documented default: keep channels,** for symmetry with the Layer 1 carrier decision (AI-02) and for the same reasons: the select-on-cancellation send discipline closes the stranded-producer hazard, and one carrier idiom across the module is worth more than marginal ergonomics. The iterator-view ergonomics live in the test kit, as doc 0002's AI-22 provides.
 
 #### AG-01.1 — The delivery decision `[decision]`
@@ -305,10 +305,14 @@ flowchart TB
         AG06_4 --> AG06_5
     end
     GATE --> AG03_1
+    GATE --> AG04_1
     AG03_1 --> AG04_1
     AG04_4 --> AG05_1
     AG04_4 --> AG05_2
     AG04_4 --> AG06_1
+    AG04_4 --> AG06_2
+    AG04_4 --> AG06_3
+    AG04_4 --> AG06_4
 
     classDef leaf fill:#e2e8f0,stroke:#94a3b8,color:#1f2937
     classDef guard fill:#fef3c7,stroke:#d97706,color:#1f2937
@@ -331,7 +335,7 @@ SDD change: `cachicamas-agent-package-scaffold` · Closes: R-01, R-02, R-03 mech
 - **Goal:** Create `backend/agent/src/agent/` with its import and I/O boundaries mechanically guarded from birth, so the no-I/O rule is never a matter of review vigilance.
 - **Deliverable:** The package with a doc comment stating the layer contract; a forward import guard covering both the production and the test import closures; a no-ambient-authority guard; both proven to bite.
 - **Acceptance:** `make test` green in `backend/agent/`; both guards recorded failing against scratch violations.
-- **Depends on:** AI-40 (satisfied), AG-00. · **Blocks:** everything code-bearing — mechanically, its direct dependents.
+- **Depends on:** AI-40 (satisfied), AG-00. · **Blocks:** AG-04, AG-12 — and through them everything code-bearing.
 - **Out of scope:** Any event, loop, or harness behavior.
 
 ```mermaid
@@ -444,9 +448,9 @@ Scenario: ordering is per-consumer-stream and 1-based from birth
   Then each stream carries an independent, contiguous, 1-based ordering
 
 Scenario: the parent identifier exists before delegation does
-  Given an event constructed without a parent and one constructed with a parent
-  When both are validated
-  Then the parent identifier is optional at the envelope level and present exactly when given
+  Given the envelope surface, before any delegation mechanism exists
+  When an event belonging to a delegated harness and an event belonging to no delegation are constructed
+  Then the delegated event carries its parent identifier and the top-level event carries none — the field exists now because explicit nesting cannot be retrofitted; delegation fills it later
 ```
 
 - **Depends on:** AG-01, AG-03.
@@ -561,6 +565,12 @@ Scenario: a whole message is indistinguishable from a fragmented one after recon
 - **Scenarios:**
 
 ```gherkin
+Scenario: the start event carries what a frontend needs
+  Given a tool start event for one call
+  When a consumer inspects it
+  Then it carries the call identity, the tool name, and the arguments — enough to render "running tool X with these arguments" live
+  And progress events, when present, are indexed
+
 Scenario: the three end states are distinct by type
   Given tool start, optional indexed progress, and end events for one call
   When a consumer inspects the end event
@@ -744,6 +754,8 @@ flowchart TB
         AG11_1 --> AG11_2
     end
     GATE --> AG07_1
+    GATE --> AG09_1
+    GATE --> AG10_1
     AG07_1 --> AG08_1
     AG07_1 --> AG09_1
     AG09_1 --> AG10_1
@@ -827,7 +839,7 @@ SDD change: `cachicamas-agent-pre-request-hook` · Closes: R-12; seam 1 of [v2 �
 - **Goal:** Give the loop the hook that runs immediately before the provider call — the seam cache breakpoints, injected context and prompt trimming will stand on.
 - **Deliverable:** The hook seam with an identity default, using Layer 1's copy-on-write rebuild (AI-12) as its mutation mechanism; the loop-side prefix-stability guarantee (**G4**'s Layer 2 half).
 - **Acceptance:** A hook can observe and replace the outgoing request; the identity default changes nothing; hook failures are typed and abort the turn before I/O; identical inputs yield identical outgoing requests across turns.
-- **Depends on:** AG-07. **Parallel with:** AG-09.
+- **Depends on:** AG-07. **Parallel with:** AG-09. · **Blocks:** AG-20.
 - **Out of scope:** Any concrete hook (cache-breakpoint placement is Layer 3 wiring — doc 0004 CO-24); the other three hook points (AG-20).
 
 ```mermaid
@@ -999,7 +1011,7 @@ SDD change: `cachicamas-agent-permission-protocol` · Closes: **G1**'s protocol 
 - **Goal:** Around every scheduled call: ask the injected policy; if the policy defers to a human, emit decision-required, **suspend that call without blocking anything else**, resume on the decision; emit decision-made and, when applicable, resolution-remembered.
 - **Deliverable:** The ask–suspend–resume protocol in the loop's scheduling path, driving AG-06.1's events, against an injected policy contract.
 - **Acceptance:** A suspended call blocks neither its siblings nor event delivery; all four outcomes work (allow once / allow always / deny / modify input); deny produces a denial result the model can see; modify-input executes with the modified arguments and the stream says so.
-- **Depends on:** AG-06, AG-09. · **Blocks:** AG-13 — a run must be resumable across a suspension.
+- **Depends on:** AG-06, AG-09. · **Blocks:** AG-13, AG-19 — a run must be resumable across a suspension, and delegation derives its scope from this protocol.
 - **Out of scope:** Policy content (Layer 3 port — doc 0004); persistence of remembered rules (Layer 3 session); derived scope for subagents (AG-19.3).
 
 ```mermaid
@@ -1197,6 +1209,8 @@ flowchart TB
     end
     GATE --> AG12_1
     GATE --> AG13_1
+    GATE --> AG15_1
+    GATE --> AG16_1
     AG12_1 --> AG13_1
     AG13_1 --> AG14_1
     AG13_1 --> AG14_2
@@ -1219,7 +1233,8 @@ SDD change: `cachicamas-agent-history` · Closes: R-07's boundary enforcement ·
 - **Goal:** The harness's transcript store: append-only within a run, validated at the boundary, with orphan synthesis for interruption.
 - **Deliverable:** History with the pairing invariant; orphan-synthesis behavior; read access for the loop and (eventually) Layer 3 persistence.
 - **Acceptance:** A transcript that would orphan a call cannot be committed; interruption synthesizes results for orphaned calls before the next turn; the enforcement lives at the boundary, not at call sites (v2 § 4.2's exact phrasing, as architecture).
-- **Depends on:** AG-03, AI-40 — the frozen Layer 1 message contracts. **Parallel with:** all of wave 2. · **Blocks:** AG-13, AG-17.
+- **Depends on:** AG-03, AI-40 — the frozen Layer 1 message contracts. · **Blocks:** AG-13, AG-17.
+- **Note:** the whole milestone runs beside wave 2 — its only in-document edge is the scaffold; the wave-3 introduction and the global parallelism note record the concurrency.
 - **Out of scope:** Persistence (Layer 3); compaction's interaction (AG-18.2 re-proves the invariant post-compaction).
 
 ```mermaid
@@ -1285,7 +1300,7 @@ SDD change: `cachicamas-agent-run-driver` · Closes: R-08's driving loop · The 
 - **Goal:** The harness runs the loop repeatedly — append user message, run turn, execute/append results (via the loop), repeat — until a terminal finish reason, emitting run lifecycle events, handling pause-resumption, and accepting queued steering input.
 - **Deliverable:** The run driver over the loop, permission protocol, termination, and history; steering-message queueing.
 - **Acceptance:** A scripted two-call-then-answer conversation completes with correct history and a correctly ordered event stream; a steering message queued mid-turn enters the transcript at the next turn boundary; pause resumes; the run survives a permission suspension spanning a turn.
-- **Depends on:** AG-10, AG-11, AG-12. · **Blocks:** AG-14, AG-15, AG-16, AG-17, AG-19.
+- **Depends on:** AG-10, AG-11, AG-12. · **Blocks:** AG-14, AG-15, AG-16, AG-17, AG-19, AG-20.
 - **Out of scope:** Retry/failover (AG-15); compaction check (AG-17 inserts it); cancellation details (AG-14).
 
 ```mermaid
@@ -1421,6 +1436,7 @@ Scenario: a cancellation-deaf tool cannot hold the run hostage
   When the run winds down
   Then it still ends within the documented bound
   And the offending call is reported typed — which tool, still running — with its task detached and named, not silently abandoned
+  And no task belonging to the harness itself remains after the wind-down — the later package-wide leak sweep depends on this report being precise
 ```
 
 - **Depends on:** AG-14.1, AG-14.2.
@@ -1570,6 +1586,8 @@ flowchart TB
         AG18_3 --> AG18_5
     end
     GATE --> AG17_1
+    GATE --> AG18_1
+    GATE --> AG18_3
     AG17_1 --> AG18_1
 
     classDef leaf fill:#e2e8f0,stroke:#94a3b8,color:#1f2937
@@ -1761,6 +1779,8 @@ flowchart TB
         AG20_1 --> AG20_2
     end
     GATE --> AG19_1
+    GATE --> AG19_2
+    GATE --> AG19_3
     GATE --> AG20_1
 
     classDef leaf fill:#e2e8f0,stroke:#94a3b8,color:#1f2937
