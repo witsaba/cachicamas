@@ -87,14 +87,16 @@ export default component$(() => {
   const skillsLoader = useSkillsLoader();
 
   // Skills list (from SSR loader, updated client-side).
-// Reactive: useTask$ syncs the local `skills` signal whenever the
-// loader value changes. The hook's `.value` is a wrapper; the
-// actual loader data is at `.value.value` (Qwik City loader contract).
-// The cast through `unknown` is required because Qwik's types do not
-// surface the wrapper — only the loaders return value is typed.
+  // Reactive: useTask$ syncs the local `skills` signal whenever the
+  // loader value changes. The hook's `.value` is a wrapper; the
+  // actual loader data is at `.value.value` (Qwik City loader contract).
+  // The cast through `unknown` is required because Qwik's types do not
+  // surface the wrapper — only the loaders return value is typed.
   const skills = useSignal<Skill[]>(() => {
-    const v = (skillsLoader.value as unknown as { value: unknown })
-      .value as { ok?: boolean; skills?: Skill[] };
+    const v = (skillsLoader.value as unknown as { value: unknown }).value as {
+      ok?: boolean;
+      skills?: Skill[];
+    };
     return v?.ok && Array.isArray(v.skills) ? v.skills : [];
   });
   useTask$(({ track }) => {
@@ -106,8 +108,10 @@ export default component$(() => {
     skills.value = v?.ok && Array.isArray(v.skills) ? v.skills : [];
   });
   const loaderError = useSignal<string | null>(() => {
-    const v = (skillsLoader.value as unknown as { value: unknown })
-      .value as { ok?: boolean; message?: string };
+    const v = (skillsLoader.value as unknown as { value: unknown }).value as {
+      ok?: boolean;
+      message?: string;
+    };
     return v?.ok ? null : (v?.message ?? null);
   });
   useTask$(({ track }) => {
@@ -169,69 +173,65 @@ export default component$(() => {
   //   agentskills.io spec the name lives in the body's YAML
   //   frontmatter (ADR-SK-005). We parse it from the frontmatter on
   //   save; if missing or malformed, surface a friendly error.
-  const handleSave = $(
-    async (input: { description: string; body: string }) => {
-      editorSaving.value = true;
-      editorError.value = null;
+  const handleSave = $(async (input: { description: string; body: string }) => {
+    editorSaving.value = true;
+    editorError.value = null;
 
-      let result: ApiResult<Skill>;
+    let result: ApiResult<Skill>;
 
-      if (mode.value === "create") {
-        // Parse `name:` from the frontmatter (best-effort; the
-        // backend will lock-step validate the full body anyway).
-        const fmNameMatch = /^---\n[\s\S]*?name:\s*([^\n]+)\n/.exec(
-          input.body,
-        );
-        const fmName = fmNameMatch ? fmNameMatch[1].trim() : "";
-        if (!fmName) {
-          editorError.value =
-            "Body must start with YAML frontmatter including a `name:` field.";
-          editorSaving.value = false;
-          return;
-        }
-        result = await createSkill({
-          name: fmName,
-          description: input.description,
-          body: input.body,
-        });
-      } else if (selectedName.value) {
-        // Anti-drift gate: edit-mode PATCH sends BOTH description AND body.
-        result = await updateSkill(selectedName.value, {
-          description: input.description,
-          body: input.body,
-        });
-      } else {
+    if (mode.value === "create") {
+      // Parse `name:` from the frontmatter (best-effort; the
+      // backend will lock-step validate the full body anyway).
+      const fmNameMatch = /^---\n[\s\S]*?name:\s*([^\n]+)\n/.exec(input.body);
+      const fmName = fmNameMatch ? fmNameMatch[1].trim() : "";
+      if (!fmName) {
+        editorError.value =
+          "Body must start with YAML frontmatter including a `name:` field.";
         editorSaving.value = false;
         return;
       }
-
-      if (result.ok) {
-        // Refresh the skills list
-        const listResult = await listSkills();
-        if (listResult.ok) skills.value = listResult.value;
-
-        if (mode.value === "create") {
-          // Switch to edit mode for the new skill
-          selectedName.value = result.value.name;
-          currentSkill.value = result.value;
-          mode.value = "edit";
-          const revResult = await listRevisions(result.value.name);
-          currentRevisions.value = revResult.ok ? revResult.value : [];
-        } else {
-          // Update current skill in memory
-          currentSkill.value = result.value;
-          if (selectedName.value) {
-            const revResult = await listRevisions(selectedName.value);
-            currentRevisions.value = revResult.ok ? revResult.value : [];
-          }
-        }
-      } else {
-        editorError.value = result.message;
-      }
-
+      result = await createSkill({
+        name: fmName,
+        description: input.description,
+        body: input.body,
+      });
+    } else if (selectedName.value) {
+      // Anti-drift gate: edit-mode PATCH sends BOTH description AND body.
+      result = await updateSkill(selectedName.value, {
+        description: input.description,
+        body: input.body,
+      });
+    } else {
       editorSaving.value = false;
-    },
-  );
+      return;
+    }
+
+    if (result.ok) {
+      // Refresh the skills list
+      const listResult = await listSkills();
+      if (listResult.ok) skills.value = listResult.value;
+
+      if (mode.value === "create") {
+        // Switch to edit mode for the new skill
+        selectedName.value = result.value.name;
+        currentSkill.value = result.value;
+        mode.value = "edit";
+        const revResult = await listRevisions(result.value.name);
+        currentRevisions.value = revResult.ok ? revResult.value : [];
+      } else {
+        // Update current skill in memory
+        currentSkill.value = result.value;
+        if (selectedName.value) {
+          const revResult = await listRevisions(selectedName.value);
+          currentRevisions.value = revResult.ok ? revResult.value : [];
+        }
+      }
+    } else {
+      editorError.value = result.message;
+    }
+
+    editorSaving.value = false;
+  });
 
   // Open delete dialog (task 7.10)
   const handleDeleteRequest = $(() => {
@@ -362,7 +362,10 @@ export default component$(() => {
   const hasSkills = skills.value.length > 0;
 
   return (
-    <main class="mx-auto flex max-w-5xl flex-col px-4 py-8" data-testid="skill-studio-shell">
+    <main
+      class="mx-auto flex max-w-5xl flex-col px-4 py-8"
+      data-testid="skill-studio-shell"
+    >
       {/* Page header */}
       <div class="mb-6 flex items-center justify-between">
         <div class="flex items-center gap-3">
@@ -449,13 +452,13 @@ export default component$(() => {
                   onSave$={handleSave}
                   onCancel$={handleCancel}
                   onDelete$={handleDeleteRequest}
-onRestore$={handleRestoreRequest}
-                 />
-               </div>
-             )}
-           </div>
-         )}
-       </div>
+                  onRestore$={handleRestoreRequest}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Dialogs (task 7.10) */}
       {deletingName.value && (

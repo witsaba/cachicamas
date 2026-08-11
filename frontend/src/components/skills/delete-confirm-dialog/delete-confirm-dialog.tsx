@@ -39,8 +39,7 @@ export const DeleteConfirmDialog = component$<DeleteConfirmDialogProps>(
             Delete &ldquo;{name}&rdquo;?
           </h2>
           <p class="mt-3 text-sm text-slate-700">
-            This action cannot be undone. The skill will be permanently
-            removed.
+            This action cannot be undone. The skill will be permanently removed.
           </p>
           <div class="mt-6 flex justify-end gap-2">
             <Button

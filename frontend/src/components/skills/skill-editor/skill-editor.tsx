@@ -47,14 +47,7 @@ export interface SkillEditorProps {
 }
 
 export const SkillEditor = component$<SkillEditorProps>(
-  ({
-    skill,
-    saving,
-    error,
-    onSave$,
-    onCancel$,
-    onDelete$,
-  }) => {
+  ({ skill, saving, error, onSave$, onCancel$, onDelete$ }) => {
     // Class table for the form controls. Pure function — see ./classes.
     const classes = skillEditorClasses();
 

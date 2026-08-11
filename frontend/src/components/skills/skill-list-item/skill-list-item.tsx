@@ -52,16 +52,10 @@ export const SkillListItem = component$<SkillListItemProps>(
             selected ? "skill-list-item-selected" : "skill-list-item"
           }
         >
-          <span
-            class={classes.name}
-            data-testid="skill-list-item-name"
-          >
+          <span class={classes.name} data-testid="skill-list-item-name">
             {skill.name}
           </span>
-          <span
-            class={classes.meta}
-            data-testid="skill-list-item-meta"
-          >
+          <span class={classes.meta} data-testid="skill-list-item-meta">
             v{rev} &middot; {formatDate(skill.updated_at)}
           </span>
         </button>

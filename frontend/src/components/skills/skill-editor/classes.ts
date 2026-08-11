@@ -33,7 +33,8 @@ export function skillEditorClasses(): SkillEditorClasses {
       "flex-1 rounded border border-slate-200 px-2 py-1 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 focus:outline-none",
     bodyTextarea:
       "flex-1 resize-none rounded border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 focus:outline-none",
-    footerRow: "flex items-center justify-between border-t border-slate-200 px-4 py-3",
+    footerRow:
+      "flex items-center justify-between border-t border-slate-200 px-4 py-3",
     noChangesHint: "text-xs text-slate-400",
   };
 }
