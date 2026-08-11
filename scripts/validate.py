@@ -604,13 +604,37 @@ def parse_golangci_json(raw: str, scope: str) -> list[Finding]:
     return out
 
 
+def _strip_pnpm_preamble(raw: str) -> str:
+    """Drop any text before the first '{' or '[' in `raw`.
+
+    `pnpm --dir <dir> <script>` emits an install preamble ("Already up
+    to date\\nDone in ...ms") before the actual script output. The
+    preamble is plain text and corrupts JSON / NDJSON parsers. We
+    keep the bytes from the first JSON delimiter onwards so the
+    real payload lands intact in the parser.
+    """
+    if not raw:
+        return raw
+    candidates = (raw.find("{"), raw.find("["))
+    candidates = [c for c in candidates if c >= 0]
+    if not candidates:
+        return raw
+    start = min(candidates)
+    return raw[start:]
+
+
 def parse_eslint_json(raw: str, scope: str) -> list[Finding]:
     """Parse ESLint 9 JSON output.
 
     Severity 1 == warn, 2 == error. Verbatim preserved on Finding.severity.
     """
+    # pnpm prepends an install preamble ("Already up to date\nDone in ...ms")
+    # before the actual script output when invoked via `pnpm --dir <dir> lint`.
+    # Strip everything before the first '{' or '[' so the JSON parser only
+    # sees the real payload.
+    cleaned = _strip_pnpm_preamble(raw)
     try:
-        arr = json.loads(raw)
+        arr = json.loads(cleaned)
     except json.JSONDecodeError:
         return [_finding_from_tool(
             tool="eslint", scope=scope, severity="medium",
@@ -772,6 +796,9 @@ def parse_playwright(out: str, scope: str) -> list[Finding]:
 
 
 def parse_pnpm_audit(raw: str, scope: str) -> list[Finding]:
+    # pnpm --dir prepends an install preamble ("Already up to date\nDone in ...ms").
+    # Strip it before looking for JSON.
+    raw = _strip_pnpm_preamble(raw)
     # pnpm audit --json may append a non-JSON trailer such as
     # "[ELIFECYCLE] Command failed with exit code 1." when vulnerabilities
     # are found. Find the last balanced top-level '}' and parse only the
