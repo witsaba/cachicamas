@@ -26,7 +26,7 @@ A `[leaf]` node body contains, in order:
 
 - **Scenarios:** 1–7, in a fenced ```gherkin block (preferred; renderable and extractable) or as
   `- **Scenario:** Given … When … Then …` bullets. More than 7 is a split trigger.
-- **Depends on:** bare node ids (the edge list — see ADR 0007).
+- **Depends on:** bare node ids (the edge list — see the DAG contract in `method.md`).
 - **Out of scope:** what keeps this leaf exclusive of its siblings.
 - **Split if:** the pre-declared fission trigger, where foreseeable.
 - ***(pin)*** marker on any scenario that is a regression pin rather than new behavior.

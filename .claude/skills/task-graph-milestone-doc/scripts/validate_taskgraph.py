@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanical validator for task-graph milestone documents (ADR 0007 DAG contract).
+"""Mechanical validator for task-graph milestone documents (the skill's DAG contract).
 
 Checks a milestone document for the structural invariants that a reviewer
 should never have to find by hand:
@@ -36,7 +36,7 @@ Usage:
 
 Exit codes: 0 = no errors (warnings allowed), 1 = errors, 2 = usage/parse failure.
 Profile v2 (default) enforces all checks; v1 skips Gherkin and per-wave mermaid,
-so shipped pre-Gherkin documents (docs 0002-0004) can still be audited.
+so pre-Gherkin documents (listed in the skill's Project Bindings) can still be audited.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def extract_edges(line: str) -> tuple[list[str], list[str]]:
 
     A line may hold several bolded segments (`**Depends on:** … **Blocks:** …`);
     ids belong to the nearest preceding marker, and anything after an unbolded
-    "parallel with" inside a segment is prose, not an edge (ADR 0007 D1).
+    "parallel with" inside a segment is prose, not an edge (DAG contract D1).
     """
     parts = EDGE_MARKER_RE.split(line)
     depends: list[str] = []
@@ -155,7 +155,7 @@ def parse(lines: list[str], report: Report) -> dict[str, Section]:
                 continue
             expected_level = 3 + sid.count(".")
             if level != expected_level and expected_level <= 6:
-                report.error(lineno, f"{sid} sits at heading level {level}; its depth requires level {expected_level} (ADR 0007 D2)")
+                report.error(lineno, f"{sid} sits at heading level {level}; its depth requires level {expected_level} (DAG contract D2)")
             tag = TYPE_TAG_RE.search(m.group("title"))
             if tag:
                 sec.type_tag = tag.group(1)
@@ -199,7 +199,7 @@ def check_edges(sections: dict[str, Section], prefix: str | None, report: Report
             continue
         for target in sec.depends_on + sec.blocks:
             if target.count(".") > 3:
-                report.error(sec.line, f"edge id {target} exceeds three dotted segments (ADR 0007 D2 item 4)")
+                report.error(sec.line, f"edge id {target} exceeds three dotted segments (DAG contract D2 item 4)")
         for target in sec.depends_on:
             if target in sections:
                 edges.append((sec.id, target))
