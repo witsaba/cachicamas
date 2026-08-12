@@ -4,12 +4,15 @@
 package agent_test
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/cachicamas/backend/agent/src/ai"
 )
 
 // exportedPackageAgentNames enumerates every exported top-level
@@ -113,6 +116,34 @@ func packageFileDoc(t *testing.T, file string) string {
 		t.Fatalf("%s carries no leading comment; the guard would pass vacuously", file)
 	}
 	return strings.Join(strings.Fields(f.Comments[0].Text()), " ")
+}
+
+// requireViolationPosition fails t unless violation is an *ai.Violation
+// whose position's last step carries an index equal to wantIndex —
+// R-AEV-006's "MUST name the offending position" obligation (post-verify
+// correction, W1/W2), pinned exactly rather than merely checked for
+// presence: a report that omits the index, or names the wrong one (for
+// example the offending event's sequence value instead of its slice
+// index), fails here.
+func requireViolationPosition(t *testing.T, violation error, wantIndex int) {
+	t.Helper()
+
+	var v *ai.Violation
+	if !errors.As(violation, &v) {
+		t.Fatalf("violation = %T, want errors.As to reach *ai.Violation so its position is inspectable", violation)
+	}
+	path := v.Path()
+	if len(path) == 0 {
+		t.Fatal("violation carries an empty position; R-AEV-006 requires the report to name the offending position")
+	}
+	last := path[len(path)-1]
+	idx, indexed := last.Index()
+	if !indexed {
+		t.Fatalf("violation's last position step %q carries no index; want the offending event's slice index", last.Name())
+	}
+	if idx != wantIndex {
+		t.Errorf("violation position index = %d, want %d (the offending event's own 0-based index within the checked slice, not its sequence value)", idx, wantIndex)
+	}
 }
 
 // allFileComments returns every comment group in file, concatenated and

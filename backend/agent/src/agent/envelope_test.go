@@ -124,6 +124,48 @@ func TestEvent_Identity_ReadableFromExternalPackage(t *testing.T) {
 			t.Error("a top-level event reports a parent identity, want none")
 		}
 	})
+
+	// Post-verify correction (W4): the subtest above only ever asserts the
+	// absent direction (a run-scoped event reports no turn). It would
+	// still pass if Event.Turn() returned a hardcoded constant for every
+	// turn-scoped event, because it never reads the value back. This
+	// subtest reads two turn-scoped events built with two different turn
+	// identities and requires both the individual values and their
+	// difference from each other — an assertion a hardcoded return cannot
+	// satisfy.
+	t.Run("turn-scoped event: turn identity distinguishes two different turns", func(t *testing.T) {
+		t.Parallel()
+
+		run := agent.RunID("run-external-turn")
+		first, err := agent.NewTurnStart(run, "turn-alpha")
+		if err != nil {
+			t.Fatalf("agent.NewTurnStart() error = %v, want nil", err)
+		}
+		second, err := agent.NewTurnStart(run, "turn-beta")
+		if err != nil {
+			t.Fatalf("agent.NewTurnStart() error = %v, want nil", err)
+		}
+
+		firstTurn, hasTurn := first.Turn()
+		if !hasTurn {
+			t.Fatal("a turn-scoped event reports no turn identity, want one")
+		}
+		if got, want := firstTurn, agent.TurnID("turn-alpha"); got != want {
+			t.Errorf("first.Turn() = %v, want %v", got, want)
+		}
+
+		secondTurn, hasTurn := second.Turn()
+		if !hasTurn {
+			t.Fatal("a turn-scoped event reports no turn identity, want one")
+		}
+		if got, want := secondTurn, agent.TurnID("turn-beta"); got != want {
+			t.Errorf("second.Turn() = %v, want %v", got, want)
+		}
+
+		if firstTurn == secondTurn {
+			t.Fatalf("first.Turn() and second.Turn() both report %v for two differently-constructed turns, want distinguishable values", firstTurn)
+		}
+	})
 }
 
 // S-AEV-005 — the Layer 2 kind vocabulary is a closed set declared by
@@ -258,14 +300,19 @@ func TestCheckStream_SequenceNotStartingAtOne_RejectedNamingTheRule(t *testing.T
 }
 
 // S-AEV-013 — a hand-built sequence with a gap or a repeat in its
-// ordering is REJECTED, and the rejection names the offending position.
+// ordering is REJECTED, and the rejection names the offending position:
+// the offending event's own 0-based index within the checked slice, never
+// its sequence value — which is itself the value under rejection and, for
+// a gap, may not even be a valid index into the slice being checked
+// (post-verify correction, W1/W2: CheckStream reported the sequence value
+// instead of the slice index, and no test asserted a position at all).
 func TestCheckStream_GapOrRepeat_RejectedNamingThePosition(t *testing.T) {
 	t.Parallel()
 
 	t.Run("gap", func(t *testing.T) {
 		t.Parallel()
 		events := buildStampedRunStarts(t, 3)
-		gapped := []agent.Event{events[0], events[2]} // 1, 3 — skips 2
+		gapped := []agent.Event{events[0], events[2]} // 1, 3 — skips 2; offending element gapped[1], sequence value 3
 
 		report := agent.CheckStream(gapped)
 		if report.Violation() == nil {
@@ -274,12 +321,21 @@ func TestCheckStream_GapOrRepeat_RejectedNamingThePosition(t *testing.T) {
 		if !errors.Is(report.Violation(), ai.ErrOutOfRange) {
 			t.Errorf("agent.CheckStream(gapped sequence) = %v, want errors.Is to match ai.ErrOutOfRange", report.Violation())
 		}
+		// gapped[1] is the offending element (0-based slice index 1); its
+		// sequence value is 3, which is not even a valid index into this
+		// 2-element slice — the exact defect verify found (W2).
+		requireViolationPosition(t, report.Violation(), 1)
 	})
 
 	t.Run("repeat", func(t *testing.T) {
 		t.Parallel()
-		events := buildStampedRunStarts(t, 2)
-		repeated := []agent.Event{events[0], events[0]} // 1, 1 — repeats
+		// A bracket-valid prefix (not four bare run-starts, which would
+		// themselves trip the duplicate-open bracket rule): prefix[0]
+		// repeats at the end, chosen so the offending element's slice
+		// index (4) and its sequence value (1) cannot coincide by
+		// accident, unlike an adjacent repeat.
+		prefix := buildValidRunBracket(t, "run-013-repeat")
+		repeated := []agent.Event{prefix[0], prefix[1], prefix[2], prefix[3], prefix[0]}
 
 		report := agent.CheckStream(repeated)
 		if report.Violation() == nil {
@@ -288,6 +344,7 @@ func TestCheckStream_GapOrRepeat_RejectedNamingThePosition(t *testing.T) {
 		if !errors.Is(report.Violation(), ai.ErrOutOfRange) {
 			t.Errorf("agent.CheckStream(repeated sequence) = %v, want errors.Is to match ai.ErrOutOfRange", report.Violation())
 		}
+		requireViolationPosition(t, report.Violation(), 4)
 	})
 }
 

@@ -6,6 +6,8 @@ package agent_test
 import (
 	"errors"
 	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -438,6 +440,11 @@ func TestCheckStream_SingleRuleViolation_NamesOnlyThatRule(t *testing.T) {
 	if !errors.Is(violation, ai.ErrMisplaced) {
 		t.Errorf("agent.CheckStream() violation = %v, want errors.Is to match ai.ErrMisplaced", violation)
 	}
+	// The single offending event is the only element of the checked slice
+	// (0-based index 0), stamped with sequence 1 — deliberately different
+	// values, so a report naming the sequence instead of the slice index
+	// (post-verify correction, W1/W2) is caught here too.
+	requireViolationPosition(t, violation, 0)
 }
 
 // S-AEV-053 — a fully valid hand-built run containing run-start, two
@@ -487,6 +494,52 @@ func TestCheckStream_RuleCoverage_MatchesTheDocumentedList(t *testing.T) {
 		if !containsFold(doc, phrase) {
 			t.Errorf("stream_check.go's documentation does not mention %q; the rule-coverage enumeration must name every rule the engine checks", phrase)
 		}
+	}
+}
+
+// Regression test (post-verify correction, W3): EventDescriptor.Terminal
+// was declared and documented ("the validator reports a violation for any
+// event that follows one") but CheckStream never read it — verify proved
+// this by flipping the only Terminal: true to false and finding the whole
+// suite still green, because "nothing follows the terminal" was actually
+// driven by the BracketRoleClosesRun-derived run-bracket state, not by
+// Terminal at all. Fixed by tracking terminalSeen from d.Terminal
+// directly. This test pins the fix structurally, at the source: it fails
+// unless CheckStream's own function body genuinely references .Terminal,
+// so a future edit that reintroduces the inert-field defect by deleting
+// that reference fails here — a behavioral test cannot distinguish the
+// two mechanisms for AG-04's own registry, because EventKindRunEnd is
+// currently the only kind carrying either property, so they coincide for
+// every reachable input.
+func TestCheckStream_Source_ReadsTheTerminalDescriptorField(t *testing.T) {
+	t.Parallel()
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "stream_check.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parser.ParseFile(%q) error = %v, want nil", "stream_check.go", err)
+	}
+
+	var fn *ast.FuncDecl
+	for _, decl := range f.Decls {
+		if d, ok := decl.(*ast.FuncDecl); ok && d.Recv == nil && d.Name.Name == "CheckStream" {
+			fn = d
+			break
+		}
+	}
+	if fn == nil || fn.Body == nil {
+		t.Fatal("stream_check.go declares no CheckStream function body; the guard would pass vacuously")
+	}
+
+	referencesTerminal := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Terminal" {
+			referencesTerminal = true
+		}
+		return true
+	})
+	if !referencesTerminal {
+		t.Error("CheckStream's body never references .Terminal — the field is written by the registry (event.go) but never read by the engine, so it documents a rule the engine does not implement (R-AEV-004)")
 	}
 }
 
