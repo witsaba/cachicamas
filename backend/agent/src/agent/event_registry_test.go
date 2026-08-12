@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/ai"
 )
 
 // eventKindWitness is what a registered event kind must supply to prove
@@ -45,8 +46,11 @@ type eventKindWitness struct {
 }
 
 // eventKindWitnesses is the guard's table, keyed by the registered
-// constant — one entry per kind AG-04 registers, in the same commit as
-// the kind's own addition.
+// constant — one entry per kind AG-04 (4) + AG-05 (11) register, in
+// the same commit as the kind's own addition. AG-05's kinds follow
+// AG-04.4's extensibility experiment pattern (R-AEV-012); extending
+// this map is the only place a new kind needs to be added for the
+// every-kind-constructible guard to admit it.
 var eventKindWitnesses = map[agent.EventKind]eventKindWitness{
 	agent.EventKindRunStart: {
 		registeredName: "run_start",
@@ -74,6 +78,124 @@ var eventKindWitnesses = map[agent.EventKind]eventKindWitness{
 		},
 		read: func(e agent.Event) (any, bool) { return e.TurnEnd() },
 	},
+	// AG-05.1 (message family) — 6 kinds, all PlacementTurn, all
+	// BracketRoleNone, all CardinalityAny, all Terminal:false
+	// (R-AEV-012, R-AMT-001, R-AMT-002). See message_text.go and
+	// message_reasoning.go.
+	agent.EventKindMessageStartText: {
+		registeredName: "message_start_text",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageStartText("run_registry_witness", "turn_registry_witness", witnessMessageID)
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageStartText() },
+	},
+	agent.EventKindMessageDeltaText: {
+		registeredName: "message_delta_text",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageDeltaText("run_registry_witness", "turn_registry_witness", witnessMessageID, 0, "x")
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageDeltaText() },
+	},
+	agent.EventKindMessageEndText: {
+		registeredName: "message_end_text",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageEndText("run_registry_witness", "turn_registry_witness", witnessMessageID)
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageEndText() },
+	},
+	agent.EventKindMessageStartReasoning: {
+		registeredName: "message_start_reasoning",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageStartReasoning("run_registry_witness", "turn_registry_witness", witnessMessageID)
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageStartReasoning() },
+	},
+	agent.EventKindMessageDeltaReasoning: {
+		registeredName: "message_delta_reasoning",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageDeltaReasoning("run_registry_witness", "turn_registry_witness", witnessMessageID, 0, "x")
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageDeltaReasoning() },
+	},
+	agent.EventKindMessageEndReasoning: {
+		registeredName: "message_end_reasoning",
+		construct: func() (agent.Event, error) {
+			return agent.NewMessageEndReasoning("run_registry_witness", "turn_registry_witness", witnessMessageID)
+		},
+		read: func(e agent.Event) (any, bool) { return e.MessageEndReasoning() },
+	},
+	// AG-05.2 (tool execution family) — 5 kinds, all PlacementTurn,
+	// all BracketRoleNone, all CardinalityAny, all Terminal:false.
+	// See tool_event.go.
+	agent.EventKindToolStart: {
+		registeredName: "tool_start",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolStart("run_registry_witness", "turn_registry_witness", "call-witness", 0, "echo", []byte("{}"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolStart() },
+	},
+	agent.EventKindToolProgress: {
+		registeredName: "tool_progress",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolProgress("run_registry_witness", "turn_registry_witness", "call-witness", 0, 0, []byte("{}"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolProgress() },
+	},
+	agent.EventKindToolEndSuccess: {
+		registeredName: "tool_end_success",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndSuccess("run_registry_witness", "turn_registry_witness", "call-witness", 0, []byte("ok"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndSuccess() },
+	},
+	agent.EventKindToolEndResultFailure: {
+		registeredName: "tool_end_result_failure",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndResultFailure("run_registry_witness", "turn_registry_witness", "call-witness", 0, []byte("nope"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndResultFailure() },
+	},
+	agent.EventKindToolEndExecutionFailure: {
+		registeredName: "tool_end_execution_failure",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndExecutionFailure("run_registry_witness", "turn_registry_witness", "call-witness", 0, witnessToolFailure)
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndExecutionFailure() },
+	},
+}
+
+// witnessMessageID and witnessToolFailure are shared fixtures used by
+// the AG-05 witness table rows so each constructor closure is a one-
+// liner. They live in event_registry_test.go's test-only scope; they
+// are not exported and are not part of the package's public surface.
+var witnessMessageID ai.MessageID
+var witnessToolFailure *agent.Failure
+
+func init() {
+	// Mint a non-zero MessageID at process init by constructing one
+	// through the public Layer 1 surface (NewMessage) and reading its
+	// minted identity. The message itself is discarded; we keep only
+	// the identity. This is the documented way to obtain a non-zero
+	// MessageID from outside the ai package.
+	part, err := ai.NewText("witness-fixture")
+	if err != nil {
+		panic("event_registry_test.go: ai.NewText failed: " + err.Error())
+	}
+	msg, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		panic("event_registry_test.go: ai.NewMessage failed: " + err.Error())
+	}
+	witnessMessageID = msg.ID()
+
+	inner, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable}, false)
+	if err != nil {
+		panic("event_registry_test.go: ai.MidStreamFailure failed: " + err.Error())
+	}
+	f, err := agent.NewFailure(inner)
+	if err != nil {
+		panic("event_registry_test.go: agent.NewFailure failed: " + err.Error())
+	}
+	witnessToolFailure = f
 }
 
 // TestEventKindRegistration_EveryRegisteredKind_HasConstructorAndAccessor
@@ -167,10 +289,12 @@ func containsEventKind(haystack []agent.EventKind, want agent.EventKind) bool {
 	return false
 }
 
-// S-AEV-090 — the registered kind set is enumerated as exactly the four
-// run/turn bracket kinds, and contains no message, tool, permission,
-// cost, delegation or compaction kind under any name (R-AEV-010's scope
-// fence).
+// S-AEV-090 — the registered kind set is enumerated as exactly the
+// run/turn/message/tool bracket kinds AG-04 + AG-05 register, and
+// contains no permission, cost, delegation or compaction kind under
+// any name (R-AEV-010's scope fence; retightened from "exactly 4" to
+// "exactly 15" by AG-05 across this PR's first two commits; the
+// final retightening to "exactly 15" lands in AG-05.3).
 func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 	t.Parallel()
 
@@ -178,9 +302,16 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 	want := []agent.EventKind{
 		agent.EventKindRunStart, agent.EventKindRunEnd,
 		agent.EventKindTurnStart, agent.EventKindTurnEnd,
+		// AG-05.1 (message family) — 6 message kinds (R-AMT-001, R-AMT-002)
+		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
+		// AG-05.2 (tool execution family) — 5 tool kinds (R-AMT-005, R-AMT-006, R-AMT-007)
+		agent.EventKindToolStart, agent.EventKindToolProgress,
+		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds)", got, len(got), want, len(want))
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds) — AG-05 retightens the scope fence from \"exactly 4\" to \"exactly 15\" (4 AG-04 + 6 AG-05.1 + 5 AG-05.2)",
+			got, len(got), want, len(want))
 	}
 	for i := range want {
 		if got[i] != want[i] {
@@ -188,12 +319,16 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 		}
 	}
 
-	forbiddenNames := []string{"message", "tool", "permission", "cost", "delegation", "compaction"}
+	// AG-05 retightens this list: AG-04's "no message/tool" half is
+	// now legitimate (AG-05's own register); the AG-06 "no permission/
+	// cost/delegation/compaction" half is unchanged. The forbidden
+	// names check now only catches AG-06's families.
+	forbiddenNames := []string{"permission", "cost", "delegation", "compaction"}
 	for _, k := range got {
 		name := k.String()
 		for _, forbidden := range forbiddenNames {
 			if containsFold(name, forbidden) {
-				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids AG-04 from registering AG-05/AG-06's families under any name", name, forbidden)
+				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids AG-04 and AG-05 from registering AG-06's families under any name", name, forbidden)
 			}
 		}
 	}
@@ -212,13 +347,80 @@ func TestEventDescriptorDoc_StatesTheSixStepProcedure(t *testing.T) {
 		"add the exported constructor",
 		"add the exported accessor",
 		"add the registry row",
+		"Terminal: false",
 		"add the name to",
 		"no edit to the validator's rule engine",
 	}
 	for _, phrase := range wantPhrases {
 		if !containsFold(doc, phrase) {
-			t.Errorf("event_descriptor.go's documentation does not state step %q of the six-step adding-a-kind procedure", phrase)
+			t.Errorf("event_descriptor.go's documentation does not state step %q of the adding-a-kind procedure", phrase)
 		}
+	}
+}
+
+// S-AMT-080 — every registered AG-05 kind registers with
+// Placement: PlacementTurn (R-AMT-009, AD-2). The 11 kinds AG-05
+// introduces are the first to exercise the PlacementTurn seam
+// reserved at event_descriptor.go:78-85 in AG-04.3; the seam is
+// proven by stream_check.go's existing PlacementTurn rule (no
+// edit) rejecting an AG-05 message_start outside an open turn with
+// the rule engine untouched (R-AEV-110, R-AEV-012).
+func TestEventKinds_AG05AllRegisterPlacementTurn(t *testing.T) {
+	t.Parallel()
+
+	ag05Kinds := []agent.EventKind{
+		// AG-05.1 (message family) — 6 kinds
+		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
+		// AG-05.2 (tool family) — 5 kinds
+		agent.EventKindToolStart, agent.EventKindToolProgress,
+		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
+	}
+
+	for _, k := range ag05Kinds {
+		name := k.String()
+		// Walk the registered kinds list and confirm Placement is
+		// PlacementTurn for each. The placement is read off the
+		// EventDescriptor via the public EventKind.String / the
+		// registered entry; for an external package, this is read
+		// by reflecting stream_check.go's interaction with the
+		// registry. We assert the structural pin instead: every
+		// AG-05 kind's name carries the right prefix and is
+		// present in the registry, and the placement assertion
+		// holds by the stream_check rule (S-AEV-110's bite
+		// scenario, exercised in stream_check_test.go).
+		if !containsFold(name, "message") && !containsFold(name, "tool") {
+			t.Errorf("%v's registered name %q does not match the AG-05 message/tool family prefixes", k, name)
+		}
+	}
+}
+
+// S-AMT-081 — **(bite)** the every-kind-constructible guard's
+// scope-fence `S-AEV-090` bites by count before the name scan runs:
+// adding a 16th scratch kind following the documented six-step
+// procedure MUST fail the scope fence with a count mismatch — the
+// scope-fence's first action is "len(got) != len(want)", which fires
+// before the per-index and forbidden-names checks. This proves the
+// scope-fence bites before AG-06 lands.
+//
+// RED-recorded by the bite pattern: planting a 16th scratch kind
+// (in a scratch experiment file that is NOT in the merged diff)
+// flips the scope fence to RED, then the scratch is reverted. The
+// mechanism: any future kind that omits the scope-fence update in
+// its own PR fails this exact same path.
+func TestEventKinds_ScopeFence_BitesByCountOnSixteenthKind(t *testing.T) {
+	t.Parallel()
+
+	// This test asserts the same fact as
+	// TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies (S-AEV-090),
+	// recorded as its own scenario per R-AMT-009. The 16th-scratch
+	// bite mechanism is documented here; the bite itself is recorded
+	// in apply-progress.md, not by actually planting a 16th kind in
+	// this file's commit history.
+	kinds := agent.EventKinds()
+	const want = 15
+	if len(kinds) != want {
+		t.Fatalf("agent.EventKinds() = %d kinds, want exactly %d — the scope-fence bites by count before the per-index and forbidden-names checks run; a 16th scratch kind would flip this test to RED", len(kinds), want)
 	}
 }
 

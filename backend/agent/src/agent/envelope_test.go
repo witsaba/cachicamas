@@ -171,10 +171,11 @@ func TestEvent_Identity_ReadableFromExternalPackage(t *testing.T) {
 // S-AEV-005 — the Layer 2 kind vocabulary is a closed set declared by
 // Layer 2 itself: no member is an alias, re-export or extension of an
 // ai.EventKind member. agent.EventKind is a distinct declared type from
-// ai.EventKind (S-AGV-020, S-AGV-021), and it enumerates exactly the run
-// and turn lifecycle kinds AG-04 registers — the AG-04.1 vocabulary
-// (turn-start/turn-end join it at AG-04.2's own registration, already
-// declared at the constant level).
+// ai.EventKind (S-AGV-020, S-AGV-021), and it enumerates exactly the
+// four AG-04 + eleven AG-05 kinds the package registers — the AG-04.1
+// vocabulary (turn-start/turn-end join it at AG-04.2's own registration,
+// already declared at the constant level), extended by AG-05's message
+// + tool families (R-AEV-010 retightened to "exactly 15").
 func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 	t.Parallel()
 
@@ -188,6 +189,12 @@ func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 		agent.EventKindRunEnd,
 		agent.EventKindTurnStart,
 		agent.EventKindTurnEnd,
+		// AG-05.1 (message family) — 6 message kinds (R-AMT-001, R-AMT-002)
+		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
+		// AG-05.2 (tool execution family) — 5 tool kinds (R-AMT-005, R-AMT-006, R-AMT-007)
+		agent.EventKindToolStart, agent.EventKindToolProgress,
+		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
 	}
 	if len(kinds) != len(want) {
 		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds)", kinds, len(kinds), want, len(want))

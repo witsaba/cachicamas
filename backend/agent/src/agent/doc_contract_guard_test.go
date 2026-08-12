@@ -44,18 +44,21 @@ type contractRow struct {
 }
 
 // expectedLayer2ContractRows is the committed source of truth this guard
-// diffs doc.go's parsed rows against. It mirrors doc.go's four rows
+// diffs doc.go's parsed rows against. It mirrors doc.go's five rows
 // byte-for-byte; a divergence in either direction is what proves the
 // comparison is closed, not a containment check (S-AGP-013, S-AGP-014).
 //
 // L2C-04 (added by AG-04, agent-event-envelope) landed in the same commit
 // as doc.go's own row, per this guard's own rule: count equality first,
 // then per-row byte-exact diff (this file's own package comment, above).
+// L2C-05 (added by AG-05, agent-message-tool-events) follows the same
+// pattern: doc.go's row and the guard's expected table grow together.
 var expectedLayer2ContractRows = []contractRow{
 	{id: "L2C-01", text: "Imports: the Go standard library, github.com/cachicamas/backend/agent/src/ai and its measured transitive closure — nothing else, deny-by-default (ADR 0005 § D1 row 2; import_boundary_test.go)."},
 	{id: "L2C-02", text: "No I/O of its own: no environment read, no filesystem access, no network call, no process spawn (ADR 0005 § D1 row 2; ambient_authority_test.go and import_boundary_test.go)."},
 	{id: "L2C-03", text: "The event stream is the only upward contract: Layer 2 reports exclusively through emitted events; callers observe the stream, they never reach into the loop (AG-00 vocabulary)."},
 	{id: "L2C-04", text: "Stream membership: a fact belongs on the event stream or it does not exist upward — if it is not on the stream, no frontend can render it and no log can reconstruct it. This is the criterion every later event family is judged by (doc 0003 AG-04 acceptance; agent-event-envelope)."},
+	{id: "L2C-05", text: "Message and tool families are reconstructable: a session log carrying a message-text bracket, a reasoning bracket, or a tool-call bracket reconstructs each message and each tool outcome independently and completely, so a frontend can render \"what the model said\" and \"what the tools did\" without losing interleaving order (doc 0003 AG-05 acceptance; agent-message-tool-events). Reconstruction helpers are test-only code; the property is the test."},
 }
 
 // docGoPath resolves src/agent/doc.go relative to THIS test file's own
