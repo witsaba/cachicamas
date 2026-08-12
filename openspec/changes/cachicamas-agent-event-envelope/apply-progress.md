@@ -4,7 +4,7 @@
 
 ## Status
 
-**47/47 tasks in `tasks.md` marked `[x]`** across Phases 1–5. All 51 spec scenarios (`S-AEV-001`…`S-AEV-102`) have recorded evidence. `make test` is green (all 12 packages, zero FAIL, zero DATA RACE, pre- and post-change). `make lint` scoped to `./src/agent/...` is 0 issues; the full-module `make lint` exits 1 solely because of one pre-existing, unrelated finding outside AG-04's charter (see Deviations #4). AG-03's three boundary guards pass with zero changes to their own logic.
+**45/45 tasks in `tasks.md`'s Phases 1–5 marked `[x]`** (45/47 of the whole file — Phase 6's 2 tasks, spec promotion, are correctly left `[ ]`: that phase is archive-scoped, per this file's own scope line above and AG-03's identical precedent). All 51 spec scenarios (`S-AEV-001`…`S-AEV-102`) have recorded evidence. `make test` is green (all 12 packages, zero FAIL, zero DATA RACE, pre- and post-change). `make lint` scoped to `./src/agent/...` is 0 issues; the full-module `make lint` exits 1 solely because of one pre-existing, unrelated finding outside AG-04's charter (see Deviations #4). AG-03's three boundary guards pass with zero changes to their own logic.
 
 **Real changed-line count** (`git diff --numstat origin/main`): **2687** lines in `backend/agent/src/agent` (2681 insertions + 6 deletions), **921** more in `openspec/` planning docs and the milestone-doc status line, **3608 total**. This exceeds the tasks.md forecast's own upper bound (2200, code-only) and the session's pre-authorized 1000-line `size:exception` ceiling — flagged explicitly below (Deviations #5), not silently rounded down, mirroring AG-03's own precedent (`archive-report.md`: "5 lines over the pre-authorized 1000-line ceiling").
 
@@ -133,4 +133,4 @@ Every RED above is a real, command-verified failure (not a fabricated or reporte
 
 ## Task completion
 
-All 47 tasks in `tasks.md` (Phases 1–5) marked `[x]`. Phase 6 (spec promotion) intentionally untouched — happens at archive, per this repo's convention.
+All 45 tasks in `tasks.md`'s Phases 1–5 marked `[x]` (45/47 of the whole file). Phase 6's 2 tasks (spec promotion) intentionally untouched — happens at archive, per this repo's convention.
