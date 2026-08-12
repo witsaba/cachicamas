@@ -171,6 +171,16 @@ type eventPayload interface {
 	validate(at ai.Path) *ai.Violation
 }
 
+// under extends at with steps, cloning first so the original is never
+// mutated through append's capacity reuse — a payload's own validate()
+// methods use it to build a sub-position, mirroring `ai.content_part.go`'s
+// unexported helper of the same name and shape.
+func under(at ai.Path, steps ...ai.Step) ai.Path {
+	out := make(ai.Path, len(at), len(at)+len(steps))
+	copy(out, at)
+	return append(out, steps...)
+}
+
 // RunID is the opaque identity of one run (VL2-EVT-02). It is also the
 // identity a delegated event's parent field carries (VL2-EVT-13) — a
 // parent identifier is always a RunID.

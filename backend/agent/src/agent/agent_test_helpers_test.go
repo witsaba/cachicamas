@@ -72,3 +72,68 @@ func exportedPackageAgentNames(t *testing.T) []string {
 func containsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
+
+// funcDeclSignature returns the *ast.FuncType of the top-level function
+// named funcName declared in file (a package-agent source file resolved
+// relative to the test binary's own working directory, mirroring
+// exportedPackageAgentNames), or nil if either does not exist. Used to
+// prove a declaration's shape — parameter types, receiver, exportedness —
+// directly from source, never by importing the package.
+func funcDeclSignature(t *testing.T, file, funcName string) *ast.FuncType {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatalf("parser.ParseFile(%q) error = %v, want nil", file, err)
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != funcName {
+			continue
+		}
+		return fn.Type
+	}
+	return nil
+}
+
+// packageFileDoc returns file's own leading comment group, collapsed to
+// single-spaced text — sequence_test.go's own
+// TestSequenceGoFile_PackageDoc_StatesTheCrossStreamRule idiom, restated
+// here for reuse across AG-04's documentation-reading assertions.
+func packageFileDoc(t *testing.T, file string) string {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parser.ParseFile(%q) error = %v, want nil", file, err)
+	}
+	if len(f.Comments) == 0 {
+		t.Fatalf("%s carries no leading comment; the guard would pass vacuously", file)
+	}
+	return strings.Join(strings.Fields(f.Comments[0].Text()), " ")
+}
+
+// allFileComments returns every comment group in file, concatenated and
+// collapsed to single-spaced text — used where the text being asserted on
+// may live in a specific declaration's own doc comment rather than the
+// file's leading package-doc comment (packageFileDoc's narrower scope).
+func allFileComments(t *testing.T, file string) string {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parser.ParseFile(%q) error = %v, want nil", file, err)
+	}
+	if len(f.Comments) == 0 {
+		t.Fatalf("%s carries no comments; the guard would pass vacuously", file)
+	}
+	var b strings.Builder
+	for _, group := range f.Comments {
+		b.WriteString(group.Text())
+		b.WriteByte(' ')
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}

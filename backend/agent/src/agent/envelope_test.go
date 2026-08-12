@@ -164,9 +164,9 @@ func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 func TestLaneStamper_TwoLanes_EachIndependentlyContiguousAndOneBased(t *testing.T) {
 	t.Parallel()
 
-	const perLane = 5
-	first := buildStampedRunStarts(t, perLane)
-	second := buildStampedRunStarts(t, perLane)
+	const perLane = 4 // run-start, turn-start, turn-end, run-end: one complete valid bracket.
+	first := buildValidRunBracket(t, "run-first")
+	second := buildValidRunBracket(t, "run-second")
 
 	for i := range perLane {
 		if got, want := first[i].Sequence(), agent.Sequence(i+1); got != want {
@@ -385,4 +385,37 @@ func mustStamp(t *testing.T, e agent.Event) agent.Event {
 	t.Helper()
 	var lane agent.LaneStamper
 	return lane.Stamp(e)
+}
+
+// buildValidRunBracket stamps one complete, CheckStream-valid run
+// bracket through a fresh LaneStamper: run-start, turn-start, turn-end,
+// run-end (sequences 1..4). Used by tests that need a stream CheckStream
+// accepts outright, once the full bracket engine is present (AG-04.2).
+func buildValidRunBracket(t *testing.T, run agent.RunID) []agent.Event {
+	t.Helper()
+	var lane agent.LaneStamper
+
+	start, err := agent.NewRunStart(run)
+	if err != nil {
+		t.Fatalf("agent.NewRunStart() error = %v, want nil", err)
+	}
+	turnStart, err := agent.NewTurnStart(run, "turn-1")
+	if err != nil {
+		t.Fatalf("agent.NewTurnStart() error = %v, want nil", err)
+	}
+	turnEnd, err := agent.NewTurnEnd(run, "turn-1", agent.TurnOutcomeFinished, nil)
+	if err != nil {
+		t.Fatalf("agent.NewTurnEnd() error = %v, want nil", err)
+	}
+	end, err := agent.NewRunEnd(run, agent.RunOutcomeCompleted, nil)
+	if err != nil {
+		t.Fatalf("agent.NewRunEnd() error = %v, want nil", err)
+	}
+
+	return []agent.Event{
+		lane.Stamp(start),
+		lane.Stamp(turnStart),
+		lane.Stamp(turnEnd),
+		lane.Stamp(end),
+	}
 }
