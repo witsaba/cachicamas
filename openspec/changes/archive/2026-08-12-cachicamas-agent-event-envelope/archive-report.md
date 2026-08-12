@@ -76,7 +76,30 @@ Five warnings remain as methodological findings or structural open items:
 
 ### Other Findings
 
-**Pre-existing lint issue (not AG-04's)**: Full-module `make lint` exits 1 on ONE finding: `src/ai/openaicompat/openrouter/conformance/doc_matrix_guard_test.go:17` (`var-naming` — revive). This file is byte-identical to `origin/main` (verified by `git diff origin/main -- src/ai/openaicompat/...`). It is **pre-existing, unrelated to AG-04, and out of AG-04's charter** (frozen Layer 1 vendor-adapter subtree). Not fixed; correctly not claimed as AG-04's finding.
+**Lint: clean. An earlier "pre-existing finding" claim in this cycle was wrong and is retracted here.**
+
+Throughout apply and verify, full-module `make lint` exited 1 on one finding — `src/ai/openaicompat/openrouter/conformance/doc_matrix_guard_test.go:17` (`var-naming`, revive) — and it was recorded as pre-existing and out of charter. That conclusion was reached from byte-identity of the flagged file against `origin/main`, which is sound reasoning from an unsound premise: the finding was never real.
+
+Run to ground at close, by direct experiment rather than inference:
+
+1. Pristine `origin/main` in a fresh worktree: `make lint` → **0 issues**. So the finding was *not* pre-existing on main, contradicting the original claim.
+2. The flagged package's directory diffed recursively against this branch's copy: **identical**. Same for the entire `backend/agent` tree.
+3. AG-04's `src/agent/*.go` copied into the pristine main worktree: still **0 issues**. So AG-04's code does not cause it either.
+4. Same golangci-lint binary (v2.9.0), same `--config`, at a sibling worktree path on pristine main: **0 issues**; on this branch's worktree: **1 issue**. Identical bytes, opposite results — a contradiction that rules out content as the cause.
+5. `golangci-lint cache clean` in this worktree, then re-run: **0 issues**, stable across repeated runs.
+
+The finding was a **stale golangci-lint cache artifact** local to this worktree, not a defect in this repository at any commit. Both "AG-04 introduced it" and "it is pre-existing on main" are false.
+
+**Verified quality gates at close** (`backend/agent/`, after `golangci-lint cache clean`):
+
+| Target | Result |
+| --- | --- |
+| `make test` (`go test -race -v ./...`) | 12/12 packages green, zero data races |
+| `make lint` (`go vet` + golangci-lint v2.9.0) | **0 issues** |
+| `make vuln-check` (govulncheck v1.1.4) | **No vulnerabilities found** |
+| `make build` | clean |
+
+**Lesson for later milestones:** a golangci-lint result that disagrees with byte-identical content is a cache artifact until proven otherwise. Run `golangci-lint cache clean` before recording any lint finding as pre-existing or out of charter — byte-identity of the flagged file proves the file did not change, not that the finding is real.
 
 **Lint for `./src/agent/...` scoped alone**: 0 issues (after fixing three self-introduced `package-comments` findings during apply — missing blank line before `package agent`, mirroring Layer 1's convention; applied consistently across all 7 new production files).
 
@@ -227,7 +250,7 @@ Per proposal and design:
 Per tasks.md Acceptance criteria (lines 224–240, restated here with close evidence):
 
 - [x] 1. Every scenario `S-AEV-001` through `S-AEV-102` has recorded evidence (tasks.md Phase 1–4 REDs/GREENs; verify-report.md Learned section lists all 102 scenario results)
-- [x] 2. `cd backend/agent && make test` and `make lint` are green, recorded pre- and post-change (tasks.md 5.3; verified uncached at apply close and verify close; pre-existing lint finding documented)
+- [x] 2. `cd backend/agent && make test` and `make lint` are green, recorded pre- and post-change (tasks.md 5.3; verified uncached at apply close and verify close). `make lint` is **0 issues** after `golangci-lint cache clean`; the finding recorded earlier in this cycle was a stale-cache artifact and is retracted above. `make vuln-check` (govulncheck v1.1.4) reports no vulnerabilities; `make build` is clean.
 - [x] 3. `backend/agent/go.mod` and `go.sum` are byte-unchanged (tasks.md 5.2; `git diff --stat` confirms)
 - [x] 4. An external-package test constructs, validates and inspects **every** kind this milestone registers (event_registry_test.go, AG-04.4; S-AEV-080/081)
 - [x] 5. The stream-contract validator is exported from production and callable from another package with no test-only build tag (stream_check.go; S-AEV-050/051)
