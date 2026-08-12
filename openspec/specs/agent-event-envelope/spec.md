@@ -3,6 +3,7 @@
 > **Change**: `cachicamas-agent-event-envelope` · **Milestone**: AG-04 (Layer 2, Wave 1) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-04--define-the-agent-event-envelope-and-ordering-invariants), `0003:410-517`
 > **Nodes**: AG-04.1 `[leaf]` · AG-04.2 `[leaf]` · AG-04.3 `[leaf]` · AG-04.4 `[guard]`
 > **Introduced by**: `openspec/changes/archive/2026-08-12-cachicamas-agent-event-envelope/`, opened as a PR against `main` on 2026-08-12 (PR number and merge commit to be back-filled once merged, per this repo's convention on already-merged specs).
+> **Amended 2026-08-12 (AG-05)**: `R-AEV-007` and `R-AEV-010` MODIFIED (invariant 1 co-closure now joint with AG-05.1; scope-fence retightened from 4 to 15); `R-AEV-012` ADDED (documents the AG-04.4 extensibility experiment path AG-05 took). See delta spec at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/specs/agent-event-envelope/spec.md` and the AG-05 archive report at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/archive-report.md`.
 > **Status**: **live** — the invariants below hold for the lifetime of Layer 2, not only at the moment AG-04 merged
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario is independently verifiable.
 > **Identifier convention**: requirements `R-AEV-0NN`, scenarios `S-AEV-0NN`. Append-only. (`R-AGE-`/`S-AGE-` belong to `agent-event-delivery` and are not reused here.)
@@ -109,11 +110,12 @@ Its rejection report MUST name the offending position and the rule that rejected
 - **S-AEV-053** — Given a fully valid hand-built run containing run-start, two non-overlapping turn brackets, and run-end, when the validator checks it, then it is ACCEPTED with an empty violation set.
 - **S-AEV-054** — Given the validator, when its checks are enumerated against this spec, then every rule of `R-AEV-001`–`R-AEV-005` that is expressible over a finite sequence has a corresponding check, and no check enforces a rule this spec does not state.
 
-### R-AEV-007 — Invariant pin 1: a delta kind has no route to an accumulated-message payload
+### R-AEV-007 — Invariant pin 1: a delta kind has no route to an accumulated-message payload (joint with AG-05.1)
 
 The envelope's public construction surface MUST offer **no route** by which a delta kind can be attached to an accumulated-message payload (`VL2-EVT-12`, envelope invariant 1, `decision.md:173`). A delta carries an index and the new fragment only.
 
-AG-04 registers no message family, so this requirement is a **structural pin on the construction surface**, not an assertion about a message-delta kind AG-05 will introduce. It closes invariant 1 jointly with AG-05.1 (`0003:2203`); it does not close it alone.
+AG-04 registers no message family, so this requirement is a **structural pin on the construction surface**, not an assertion about a message-delta kind AG-05 will introduce. AG-05.1 introduces `message_delta_text` and `message_delta_reasoning`; AG-05.1's per-kind construction surface inherits this pin. Envelope invariant 1 is therefore closed **jointly by AG-04.3 + AG-05.1** (`0003:2203`); AG-05.1's co-closure is asserted by `S-AMT-021` (bite, in the new spec). The pin remains structural rather than instance-based; AG-05.1's two delta kinds do not weaken it — they extend the surface it guards.
+(Previously: requirement text referenced AG-05.1 as forthcoming; co-closure is now joint and the bite lives in the AG-05 spec.)
 
 #### Scenarios
 
@@ -153,15 +155,16 @@ The guard proves **construction-time exhaustiveness of the kind registry — not
 - **S-AEV-083** — Given a witness-table entry naming a kind the registry does not contain, when the guard runs, then it FAILS naming the unknown entry — proving the cross-check is bidirectional and not a containment check.
 - **S-AEV-084** — Given the guard's source, when its recorded scope note is read, then it states that the guard proves construction-time exhaustiveness only, and closes neither envelope invariant 3 nor the loop-level typed-error path.
 
-### R-AEV-010 — AG-04 registers exactly two families and no more
+### R-AEV-010 — AG-04 registers exactly two families; AG-05 adds two more; the scope-fence now stands at 15
 
-The package MUST register exactly the two event families AG-04 owns: run lifecycle (`VL2-EVT-02`) and turn lifecycle (`VL2-EVT-03`). It MUST NOT register, stub, placeholder or reserve any kind of the message lifecycle (`VL2-EVT-04`), tool execution (`VL2-EVT-05`), permission (`VL2-EVT-06`), cost (`VL2-EVT-07`), delegation (`VL2-EVT-08`) or compaction (`VL2-EVT-09`) families — those belong to AG-05 and AG-06 (`0003:420`).
+The package MUST register exactly the four event families its milestones own: AG-04 owns run lifecycle (`VL2-EVT-02`) and turn lifecycle (`VL2-EVT-03`); AG-05 owns message lifecycle (`VL2-EVT-04`) and tool execution (`VL2-EVT-05`). It MUST NOT register, stub, placeholder or reserve any kind of the permission (`VL2-EVT-06`), cost (`VL2-EVT-07`), delegation (`VL2-EVT-08`) or compaction (`VL2-EVT-09`) families — those belong to AG-06 (`0003:420`). The scope-fence `S-AEV-090` retightens from "exactly 4" to "exactly 15" in the same commit as the AG-05 kinds land.
 
-The registry and the guard MUST nonetheless remain **structurally extensible**: AG-05 and AG-06 MUST be able to add a kind by following a documented procedure without editing the validator's rule engine, mirroring Layer 1's six-step procedure (`backend/agent/src/ai/event_descriptor.go:12-32`), which AI-15…AI-19 followed with zero checker changes.
+The registry and the guard MUST remain **structurally extensible**: AG-06 MUST be able to add a kind by following the documented procedure without editing the validator's rule engine, mirroring the AG-04.4 extensibility experiment (`S-AEV-092`, restated in the new requirement `R-AEV-012`).
+(Previously: scope-fence held at "exactly 4"; forbidden-names list included message/tool; permission/cost/delegation/compaction unchanged.)
 
 #### Scenarios
 
-- **S-AEV-090** — Given the package's registered kind set, when it is enumerated, then it contains exactly the run lifecycle and turn lifecycle kinds and no message, tool, permission, cost, delegation or compaction kind, under any name.
+- **S-AEV-090** — Given the package's registered kind set, when it is enumerated, then it contains exactly the run, turn, message and tool lifecycle kinds (15 kinds total: 4 AG-04 + 11 AG-05) and no permission, cost, delegation or compaction kind, under any name.
 - **S-AEV-091** — Given the package documentation, when its "adding a kind" procedure is read, then it states the ordered steps a later milestone follows to register a new kind, and states that following them requires no edit to the validator's rule engine.
 - **S-AEV-092** — Given the registry, when a new kind is added following the documented procedure in a scratch experiment, then the every-kind-constructible guard and the validator both continue to compile and run without edits to their own logic. Recorded, then reverted.
 
@@ -176,6 +179,16 @@ Both statements MUST be pinned by test, so a later edit that removes or contradi
 - **S-AEV-100** — Given `backend/agent/src/agent/`'s package documentation, when it is read, then it states that ordering is per consumer lane, independent, contiguous and 1-based, and that Layer 2's counter is not Layer 1's per-stream sequence.
 - **S-AEV-101** — Given the package documentation, when it is read, then it states the membership criterion and identifies it as the criterion later event families are judged by.
 - **S-AEV-102** — Given a scratch edit that removes or contradicts either statement, when `cd backend/agent && go test ./src/agent/...` runs, then a test FAILS naming the missing or divergent statement. Recorded, then reverted.
+
+### R-AEV-012 — AG-05 followed the AG-04.4 extensibility experiment pattern
+
+AG-05's 11 new kinds MUST be registered by following the six-step "adding a kind" procedure documented at `event_descriptor.go:13-31`, with no edit to `stream_check.go`, `event_registry_test.go`, or `failure.go`. The AG-04.4 extensibility experiment (`S-AEV-092`) is the documented path AG-05 took — proven by the `S-AMT-081` bite (a 16th scratch kind fails the scope-fence by count) and by `R-AMT-009`'s placement assertion (`S-AMT-080`, all 11 kinds register under `PlacementTurn`).
+
+#### Scenarios
+
+- **S-AEV-110** — Given AG-05's 11 new kinds registered following the six-step procedure, when the validator checks a hand-built sequence containing a `message_start_text` outside an open turn, then it is REJECTED naming the `PlacementTurn` rule — proving the seam AG-04.3 reserved was actually exercised.
+- **S-AEV-111** — Given the registry after AG-05, when `stream_check.go` and `event_registry_test.go` are diffed against the AG-04 merge (`967d043f`), then the diffs are empty for both files; AG-05's value is in the substrate's extensibility, demonstrated.
+- **S-AEV-112** — Given the six-step procedure doc, when it is read, then it states that any future kind declaring `Terminal: true` MUST be honored by the validator (the W3 latent-trap guard) and that the `CardinalityAtMostOne` seam is reserved for AG-06.
 
 ## Non-functional requirements
 
@@ -210,7 +223,7 @@ Stated so that no test, guard or acceptance line is written as if AG-04 closes m
 
 Also out of scope, each with a named owner:
 
-- Message lifecycle and tool execution families (`VL2-EVT-04`, `VL2-EVT-05`) — **AG-05**.
+- Message lifecycle and tool execution families (`VL2-EVT-04`, `VL2-EVT-05`) — **AG-05** (shipped 2026-08-12, PR #164; kinds registered, scope-fence now at 15 per `R-AEV-010` retrospective, `R-AEV-012` documents the path taken).
 - Permission, cost, delegation, compaction families (`VL2-EVT-06`…`VL2-EVT-09`) — **AG-06**.
 - Delivery mechanics — carrier, buffering posture, observer attachment, the upward path — **AG-01**, already decided and merged.
 - Any loop or harness behavior: no producer, no driver, no turn execution — **AG-07 onward**. The run and turn scopes have named owners (`decision.md:352-354`); AG-04 ships neither owner, only the validator that will judge them.
@@ -232,7 +245,7 @@ Also out of scope, each with a named owner:
 
 The contract holds when:
 
-1. Every scenario `S-AEV-001` through `S-AEV-102` has recorded evidence.
+1. Every scenario `S-AEV-001` through `S-AEV-102` and `S-AEV-110` through `S-AEV-112` has recorded evidence.
 2. `cd backend/agent && make test` and `make lint` are green, recorded pre- and post-change.
 3. `backend/agent/go.mod` and `go.sum` are byte-unchanged.
 4. An external-package test constructs, validates and inspects **every** kind this milestone registers.
@@ -240,7 +253,7 @@ The contract holds when:
 6. Two independently stamped hand-built sequences are checked under `-race` and each is contiguous and 1-based.
 7. Every violating lifecycle permutation named by `R-AEV-004` and `R-AEV-005` is rejected with a named rule.
 8. The every-kind-constructible guard's bite is recorded red and its scratch kind is absent from the merged diff.
-9. Exactly the run and turn lifecycle families are registered; no AG-05 or AG-06 kind appears under any name.
+9. Exactly the run, turn, message and tool lifecycle families are registered (15 kinds: 4 AG-04 + 11 AG-05); no permission, cost, delegation or compaction kind appears under any name. (AG-05 retightened this scope-fence from 4 to 15 in the same commit as the new kinds landed; AG-06 must follow the same pattern to extend to 16+.)
 10. The ordering invariants and the membership criterion are in the package documentation and pinned by test.
 11. AG-03's two boundary guards pass with zero changes to their own logic.
 12. No spec line, test name or acceptance line claims AG-04 closes envelope invariant 3, or invariants 1, 2 or 4 on its own.
@@ -255,11 +268,12 @@ The contract holds when:
 | `R-AEV-004` | AG-04.2 | `VL2-EVT-02`, `VL2-EVT-10` | `:464-468`, `:476-479` |
 | `R-AEV-005` | AG-04.2 | `VL2-EVT-03`, `VL2-EVT-11` | `:470-474` |
 | `R-AEV-006` | AG-04.2 (asserted through by all nodes) | `VL2-EVT-16`, `VL2-SEAM-14` | `:417` (deliverable) |
-| `R-AEV-007` | AG-04.3 | `VL2-EVT-12` | `:489-492` |
+| `R-AEV-007` | AG-04.3 + AG-05.1 (joint) | `VL2-EVT-12` | `:489-492` |
 | `R-AEV-008` | AG-04.3 | `VL2-EVT-15` | `:494-498` |
 | `R-AEV-009` | AG-04.4 | `VL2-EVT-01` (enforced by AG-04.4) | `:510-513` |
 | `R-AEV-010` | AG-04.4 (scope fence) | `VL2-EVT-02`…`VL2-EVT-09` | `:420` |
 | `R-AEV-011` | AG-04.1, AG-04.3 | — | `:418` (acceptance) |
+| `R-AEV-012` | AG-05 (extensibility experiment) | `VL2-EVT-04`, `VL2-EVT-05` (the 11 new kinds) | `:543-583`, `:594-597` (AG-05 charter) |
 
 All 11 charter Gherkin scenarios (`0003:438-514`) are represented; none is reduced.
 
@@ -269,4 +283,4 @@ All 11 charter Gherkin scenarios (`0003:438-514`) are represented; none is reduc
 2. **The membership criterion is an acceptance clause, not a Gherkin scenario, in the charter** (`0003:418`). It is promoted to a requirement here (`R-AEV-011`) because the charter states it as a deliverable of AG-04 and it is otherwise unowned.
 3. **Whether `R-AEV-011`'s pin is a new `doc.go` guarded row or a separate test is unresolved** — proposal open decision 3, owned by `sdd-design`. The requirement states the obligation; it does not choose the mechanism. If a row is added, `agent-package-scaffold` takes a delta amending its expectation table in the same pull request (`R-AGP-002`).
 4. **`R-AEV-008`'s Go shape is unresolved** — proposal open decision 2. "Wrap, not reuse-as-is" is settled by `S-AGV-020`; the shape is design's.
-5. **`R-AEV-007` is asserted over a construction surface that registers no delta kind at AG-04.** The pin is therefore structural (no route exists) rather than instance-based. If design concludes the pin is unassertable before AG-05 registers a delta kind, that is a finding to record against this requirement, not a reason to weaken it silently.
+5. **`R-AEV-007` is asserted over a construction surface that registers no delta kind at AG-04.** The pin is therefore structural (no route exists) rather than instance-based. If design concludes the pin is unassertable before AG-05 registers a delta kind, that is a finding to record against this requirement, not a reason to weaken it silently. **Closed at AG-05 archive (2026-08-12):** AG-05.1 introduced `message_delta_text` and `message_delta_reasoning`; the pin is now structural *and* instance-based. `S-AMT-021` (bite) mechanically asserts no route from a delta kind to an accumulated payload. Invariant 1's co-closure by AG-04.3 + AG-05.1 is now observed, not merely structural.
