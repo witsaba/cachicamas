@@ -22,11 +22,25 @@ import (
 
 // S-AEV-060 — every exported route from a delta kind to a payload is
 // enumerated, and none accepts or produces an accumulated-message
-// payload; the pin is asserted mechanically. AG-04 registers no delta
-// kind at all (its four kinds are exactly the run/turn bracket family, no
-// BracketRoleDelta-equivalent concept exists), so the mechanical pin is
-// twofold: the registered kind set is exactly the four bracket kinds, and
-// no exported declaration names a delta or accumulated-message concept.
+// payload; the pin is asserted mechanically (R-AEV-007, joint with
+// R-AEV-007 + R-AMT-003, the AG-05.1 co-closure of envelope invariant
+// 1 per 0003:2203). The mechanical pin is twofold:
+//   - the registered kind set contains the four AG-04 bracket kinds
+//     AND the eleven AG-05 kinds (delta kinds now legitimately
+//     exist), but no exported declaration names an accumulated-
+//     message or snapshot concept;
+//   - no exported declaration names "Accumulat" or "Snapshot" — the
+//     route from a delta kind to a payload that would carry the prior
+//     accumulated state.
+//
+// AG-04 registers no delta kind at all (its four kinds are exactly the
+// run/turn bracket family); AG-05.1 introduces
+// message_delta_text and message_delta_reasoning (R-AMT-003).
+// AG-05.1's two delta kinds do not weaken the pin: they extend the
+// surface the pin guards, and the "Delta" identifier is now
+// legitimately present (message_delta_text etc.). Only "Accumulat" and
+// "Snapshot" remain forbidden — the structural absence of any route
+// from a delta kind to a payload that holds prior accumulated state.
 func TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload(t *testing.T) {
 	t.Parallel()
 
@@ -34,12 +48,20 @@ func TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload(t *testing
 	want := []agent.EventKind{
 		agent.EventKindRunStart, agent.EventKindRunEnd,
 		agent.EventKindTurnStart, agent.EventKindTurnEnd,
+		// AG-05.1 (message family) — 6 message kinds (R-AMT-001, R-AMT-002)
+		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
 	}
 	if len(kinds) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 4 bracket kinds %v", kinds, len(kinds), want)
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 10 kinds (4 AG-04 + 6 AG-05.1) %v — AG-05.2 retightens to \"exactly 15\" in this PR's second commit", kinds, len(kinds), want)
 	}
 
-	forbidden := []string{"Delta", "Accumulat", "Snapshot", "Message"}
+	// S-AMT-021 — the AG-05 half of the no-snapshot-route bite:
+	// the registered kind set includes delta kinds now (message_delta_text,
+	// message_delta_reasoning), but the no-snapshot pin still holds —
+	// "Delta" is no longer forbidden (delta kinds are legitimate
+	// R-AMT-003), only "Accumulat" and "Snapshot" remain forbidden.
+	forbidden := []string{"Accumulat", "Snapshot"}
 	names := exportedPackageAgentNames(t)
 	if len(names) == 0 {
 		t.Fatal("exportedPackageAgentNames found zero declarations; the assertion would pass vacuously")
@@ -47,7 +69,7 @@ func TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload(t *testing
 	for _, name := range names {
 		for _, f := range forbidden {
 			if containsFold(name, f) {
-				t.Errorf("exported declaration %q names a delta/accumulated-message concept (%q); AG-04 registers no delta kind and offers no route to one (R-AEV-007)", name, f)
+				t.Errorf("exported declaration %q names an accumulated/snapshot concept (%q); the no-snapshot-route pin (R-AEV-007, R-AMT-003) forbids any route from a delta kind to a payload that carries prior accumulated state", name, f)
 			}
 		}
 	}

@@ -47,17 +47,45 @@ import (
 // the kind of an event that was never constructed, and [CheckEmit] rejects
 // it wherever an event is offered at the producer's emission boundary.
 //
-// # Registered kinds (R-AEV-010 — exactly these four, no more)
+// # Registered kinds (R-AEV-010 — exactly these fifteen, no more)
+//
+// AG-04 (merged at 967d043f) registers the run + turn bracket family
+// (4 kinds); AG-05 (this change) registers the message + tool family
+// (11 kinds). The scope-fence `S-AEV-090` retightens from "exactly 4"
+// to "exactly 15" in the same commit as the AG-05 kinds land.
 //
 //   - run_start — opens the run bracket (VL2-EVT-02).
 //   - run_end — closes the run bracket, carrying the run's typed outcome
-//     (VL2-EVT-02, VL2-EVT-10).
+//     (VL2-EVT-02, VL2-EVT-10). Terminal.
 //   - turn_start — opens a turn nested inside the run bracket (VL2-EVT-03).
 //   - turn_end — closes a turn, carrying the turn's typed outcome
 //     (VL2-EVT-03, VL2-EVT-11).
+//   - message_start_text — opens a text-message bracket (VL2-EVT-04,
+//     R-AMT-001). PlacementTurn.
+//   - message_delta_text — carries one new fragment of a text-message
+//     bracket (R-AMT-003). PlacementTurn.
+//   - message_end_text — closes a text-message bracket (R-AMT-001).
+//     PlacementTurn.
+//   - message_start_reasoning — opens a reasoning-message bracket
+//     (VL2-EVT-04, R-AMT-002). PlacementTurn. Independent of text.
+//   - message_delta_reasoning — carries one new fragment of a reasoning-
+//     message bracket (R-AMT-003). PlacementTurn.
+//   - message_end_reasoning — closes a reasoning-message bracket
+//     (R-AMT-002). PlacementTurn.
+//   - tool_start — opens a tool call bracket (VL2-EVT-05, R-AMT-005).
+//     PlacementTurn.
+//   - tool_progress — indexed progress on a tool call (R-AMT-005).
+//     PlacementTurn.
+//   - tool_end_success — closes a tool call that succeeded (R-AMT-006).
+//     PlacementTurn.
+//   - tool_end_result_failure — closes a tool call that returned a
+//     failure result (R-AMT-006). PlacementTurn.
+//   - tool_end_execution_failure — closes a tool call whose execution
+//     itself failed (R-AMT-006). PlacementTurn. Carries a typed
+//     [Failure].
 //
-// AG-04 registers no message, tool, permission, cost, delegation or
-// compaction kind under any name — those belong to AG-05 and AG-06.
+// AG-05 registers no permission, cost, delegation or compaction kind
+// under any name — those belong to AG-06.
 type EventKind uint8
 
 const (
@@ -77,10 +105,38 @@ const (
 	// typed outcome. See turn_events.go.
 	EventKindTurnEnd
 
+	// AG-05.1 (message family) — 6 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-AEV-012,
+	// R-AMT-001, R-AMT-002, R-AMT-003). See message_text.go and
+	// message_reasoning.go.
+
+	// EventKindMessageStartText opens a text-message bracket.
+	EventKindMessageStartText
+
+	// EventKindMessageDeltaText carries one new text fragment.
+	EventKindMessageDeltaText
+
+	// EventKindMessageEndText closes a text-message bracket.
+	EventKindMessageEndText
+
+	// EventKindMessageStartReasoning opens a reasoning-message bracket
+	// (independent of text).
+	EventKindMessageStartReasoning
+
+	// EventKindMessageDeltaReasoning carries one new reasoning fragment.
+	EventKindMessageDeltaReasoning
+
+	// EventKindMessageEndReasoning closes a reasoning-message bracket.
+	EventKindMessageEndReasoning
+
+	// AG-05.2 (tool execution family) — 5 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false. See tool_event.go.
+	// (Land at AG-05.2; this commit registers only the message family.)
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindTurnEnd + 1
+	eventKindEnd   = EventKindMessageEndReasoning + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -95,6 +151,13 @@ type eventRegistration struct {
 // eventRegistry is the kind registration table, indexed by the kind
 // constant itself, mirroring `ai.eventRegistry`. Index 0 is the permanent
 // placeholder for the zero (non-member) kind.
+//
+// AG-05's 11 new rows follow AG-04.4's extensibility experiment pattern
+// (R-AEV-012): every row declares its descriptor, no edit to the
+// validator's rule engine. All 11 register Placement: PlacementTurn,
+// BracketRole: BracketRoleNone, Cardinality: CardinalityAny, Terminal:
+// false — explicitly, per the W3 latent-trap guard the
+// `event_descriptor.go` six-step procedure restates.
 var eventRegistry = []eventRegistration{
 	EventKindRunStart: {
 		name:       "run_start",
@@ -112,6 +175,33 @@ var eventRegistry = []eventRegistration{
 		name:       "turn_end",
 		descriptor: EventDescriptor{Bracket: BracketRoleClosesTurn},
 	},
+	EventKindMessageStartText: {
+		name:       "message_start_text",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindMessageDeltaText: {
+		name:       "message_delta_text",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindMessageEndText: {
+		name:       "message_end_text",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindMessageStartReasoning: {
+		name:       "message_start_reasoning",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindMessageDeltaReasoning: {
+		name:       "message_delta_reasoning",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindMessageEndReasoning: {
+		name:       "message_end_reasoning",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	// AG-05.2 (tool execution family) — 5 rows land at AG-05.2 in the
+	// same PR's second commit. The scope-fence retightens to
+	// "exactly 15" at AG-05.3 (the third commit) in the same PR.
 }
 
 // eventRegistryEntry returns a kind's registry entry, and whether it has
