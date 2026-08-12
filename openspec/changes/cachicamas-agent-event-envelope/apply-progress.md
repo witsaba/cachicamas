@@ -4,7 +4,9 @@
 
 ## Status
 
-**45/45 tasks in `tasks.md`'s Phases 1–5 marked `[x]`** (45/47 of the whole file — Phase 6's 2 tasks, spec promotion, are correctly left `[ ]`: that phase is archive-scoped, per this file's own scope line above and AG-03's identical precedent). All 51 spec scenarios (`S-AEV-001`…`S-AEV-102`) have recorded evidence. `make test` is green (all 12 packages, zero FAIL, zero DATA RACE, pre- and post-change). `make lint` scoped to `./src/agent/...` is 0 issues; the full-module `make lint` exits 1 solely because of one pre-existing, unrelated finding outside AG-04's charter (see Deviations #4). AG-03's three boundary guards pass with zero changes to their own logic.
+**45/45 tasks in `tasks.md`'s Phases 1–5 marked `[x]`** (45/47 of the whole file — Phase 6's 2 tasks, spec promotion, are correctly left `[ ]`: that phase is archive-scoped, per this file's own scope line above and AG-03's identical precedent). All 45 unique `S-AEV-001`…`S-AEV-102` scenario ids (plus 6 restated `S-AGP-010`…`S-AGP-015` ids from the `agent-package-scaffold` delta — 51 spec scenario ids total across the change) have recorded evidence. `make test` is green (all 12 packages, zero FAIL, zero DATA RACE, pre- and post-change). `make lint` scoped to `./src/agent/...` is 0 issues; the full-module `make lint` exits 1 solely because of one pre-existing, unrelated finding outside AG-04's charter (see Deviations #4). AG-03's three boundary guards pass with zero changes to their own logic.
+
+**Post-verify status**: four scoped corrections applied after `sdd-verify` — see "Post-verify corrections" section below. `make test -race` remains green after all four.
 
 **Real changed-line count** (`git diff --numstat origin/main`): **2687** lines in `backend/agent/src/agent` (2681 insertions + 6 deletions), **921** more in `openspec/` planning docs and the milestone-doc status line, **3608 total**. This exceeds the tasks.md forecast's own upper bound (2200, code-only) and the session's pre-authorized 1000-line `size:exception` ceiling — flagged explicitly below (Deviations #5), not silently rounded down, mirroring AG-03's own precedent (`archive-report.md`: "5 lines over the pre-authorized 1000-line ceiling").
 
@@ -36,7 +38,7 @@ Design AD-2 states RunEnd's failure rule explicitly ("`f` required iff `RunOutco
 
 ### 5. Review-budget overage against the forecast
 
-tasks.md's own Review Workload Forecast estimated 1400–2200 changed lines for `backend/agent` code. The actual figure is 2687 (code) / 3608 (code + openspec planning docs) — roughly 1.2x over the forecast's own upper bound and 2.7x over the session's pre-authorized 1000-line `size:exception` ceiling. Driven by 51 spec scenarios across 11 charter Gherkin scenarios, each RED-first, plus the first real production Go this layer has shipped (envelope, per-lane ordering, run/turn lifecycle, typed-failure wrap, a two-level scope-engine validator, a witness-table guard). `delivery_strategy: exception-ok` was pre-authorized for exactly this shape of change; the overage is flagged here for visibility, not hidden.
+tasks.md's own Review Workload Forecast estimated 1400–2200 changed lines for `backend/agent` code. The actual figure is 2687 (code) / 3608 (code + openspec planning docs) — roughly 1.2x over the forecast's own upper bound and 2.7x over the session's pre-authorized 1000-line `size:exception` ceiling. Driven by 45 `S-AEV` spec scenarios across 11 charter Gherkin scenarios (plus 6 restated `S-AGP` scenarios from the `agent-package-scaffold` delta, 51 spec scenario ids total), each RED-first, plus the first real production Go this layer has shipped (envelope, per-lane ordering, run/turn lifecycle, typed-failure wrap, a two-level scope-engine validator, a witness-table guard). `delivery_strategy: exception-ok` was pre-authorized for exactly this shape of change; the overage is flagged here for visibility, not hidden.
 
 ### 6. Caught-and-fixed defect: a self-referencing audit test
 
@@ -119,7 +121,7 @@ Created `event_registry_test.go` (witness table, two legs per kind, bidirectiona
 
 ## TDD Cycle Evidence
 
-Every RED above is a real, command-verified failure (not a fabricated or reported-only claim) followed by a real passing re-run after revert — see the phase-by-phase sections for exact commands and output. RED methodology note: since production skeletons were written before test files at this scale (51 interdependent scenarios), RED evidence is a **targeted break-and-restore cycle** against already-implemented behavior throughout, disclosed once here rather than repeated per row.
+Every RED above is a real, command-verified failure (not a fabricated or reported-only claim) followed by a real passing re-run after revert — see the phase-by-phase sections for exact commands and output. RED methodology note: since production skeletons were written before test files at this scale (51 interdependent spec scenario ids: 45 `S-AEV` plus 6 restated `S-AGP`), RED evidence is a **targeted break-and-restore cycle** against already-implemented behavior throughout, disclosed once here rather than repeated per row.
 
 | Phase / Requirement | Test file | RED | GREEN | Bite proof |
 |---|---|---|---|---|
@@ -138,3 +140,84 @@ Every RED above is a real, command-verified failure (not a fabricated or reporte
 ## Task completion
 
 All 45 tasks in `tasks.md`'s Phases 1–5 marked `[x]` (45/47 of the whole file). Phase 6's 2 tasks (spec promotion) intentionally untouched — happens at archive, per this repo's convention.
+
+## Post-verify corrections
+
+Scoped correction transaction, driven by `sdd-verify`'s findings (`verify-report.md`, verdict **PASS WITH WARNINGS**). Four fixes, no binding design decision (AD-1..AD-6) changed, no test weakened or deleted, no new event kind or family, `agenttest` still never imported, AG-03's guards still byte-unchanged. `git diff --numstat` for `backend/agent/src/agent`: **175 insertions, 22 deletions** across 4 files (`stream_check.go`, `stream_check_test.go`, `envelope_test.go`, `agent_test_helpers_test.go`) — `event.go`'s two break-and-restore cycles left it byte-clean.
+
+### Fix 1 — the reported violation position was the sequence value, not the slice index (W2)
+
+**Defect**: every one of `stream_check.go`'s 12 `ai.AtIndex("event", ...)` call sites passed `int(seq)` — the offending event's own `Sequence()` value — instead of its position in the slice being checked. `CheckStream([seq1, seq3])` reported `event[3]` for a 2-element slice; index 3 does not exist in it.
+
+**Choice**: 0-based slice index (Go `range`'s own `i`), not 1-based. Two reasons, both from existing code, not invented for this fix:
+1. `agenttest.CheckContiguity` (`src/agenttest/stream_kit_ordering.go:47-70`) is Layer 1's own analogous check for this exact class of violation (gap/repeat in a checked slice), and it reports `event[%d]` using the 0-based `range` index `i` throughout (`event[0]`, `event[i-1]`, etc.) — never the sequence value. AG-04's `CheckStream` explicitly absorbs the job Layer 1 split off into this kit (design AD-1 divergence 1), so mirroring its position convention, not inventing a new one, is the same "mirror the architecture" posture AD-1 already commits to.
+2. Layer 1's own `ai.AtIndex` call sites are dominated by this same convention: `request.go`, `content_part.go` and `request_extension.go` all pass a bare `for i, x := range slice` index (9 of 11 non-`stream_check.go` call sites). The two exceptions are `ai/stream_check.go` itself, which passes `int(seq)` — but that file never checks contiguity at all (delegated to `agenttest`), so its `seq` is only ever read for an already-contiguity-assumed stream, not a position within a slice that might itself be gapped — the exact case this fix is closing.
+
+**Fix**: `for _, e := range events` → `for i, e := range events`; all 12 `ai.AtIndex("event", int(seq))` → `ai.AtIndex("event", i)`. `seq` is retained for the contiguity comparison itself. Doc comment updated to state the convention and why. `backend/agent/src/agent/stream_check.go`.
+
+### Fix 2 — R-AEV-006's "MUST name the offending position" was untested (W1)
+
+**Defect**: verify proved this by deleting `ai.AtIndex("event", int(seq))` from all 12 sites and getting a fully green suite — no test read a violation's position at all.
+
+**Fix**: added `requireViolationPosition(t, violation, wantIndex)` to `agent_test_helpers_test.go` — reaches `*ai.Violation` via `errors.As`, reads `.Path()`, and requires the last step to carry an index equal to `wantIndex`; fails on a missing index (catches deletion) and on a wrong one (catches Fix 1's own defect). Wired into two existing tests, chosen to cover two different rule classes:
+- `TestCheckStream_GapOrRepeat_RejectedNamingThePosition` (S-AEV-013, `envelope_test.go`) — contiguity. The "repeat" subtest's data was restructured from two bare run-starts (which would themselves trip the duplicate-open bracket rule before reaching four contiguous elements) to a bracket-valid 4-event prefix (`buildValidRunBracket`) plus a repeat of its first element, so the offending index (4) and its sequence value (1) cannot coincide by accident.
+- `TestCheckStream_SingleRuleViolation_NamesOnlyThatRule` (S-AEV-052, `stream_check_test.go`) — R-AEV-006's own scenario, a bracket-misplaced violation.
+
+**RED recorded** (`go test ./src/agent/... -run 'TestCheckStream_GapOrRepeat_RejectedNamingThePosition|TestCheckStream_SingleRuleViolation_NamesOnlyThatRule' -v`, against the pre-Fix-1 production code):
+```
+stream_check_test.go:445: violation position index = 1, want 0 (...)
+--- FAIL: TestCheckStream_SingleRuleViolation_NamesOnlyThatRule
+envelope_test.go:285: violation position index = 3, want 1 (...)
+envelope_test.go:305: violation position index = 1, want 4 (...)
+--- FAIL: TestCheckStream_GapOrRepeat_RejectedNamingThePosition (gap, repeat)
+```
+Exactly the sequence-value-not-index defect (W2), reproduced by the new assertions before Fix 1 landed. GREEN after Fix 1.
+
+### Fix 3 — `Event.Turn()`'s identity value was unproven (W4)
+
+**Defect**: `TestEvent_Identity_ReadableFromExternalPackage` (S-AEV-004) asserted only the *absent* direction (a run-scoped event reports no turn). `Event.Turn()` hardcoded to return `"SCRATCH_BREAK"` for every turn-scoped event left the suite green.
+
+**Fix**: added a subtest constructing two turn-start events with different turn ids, asserting each `Turn()` result equals the id it was built with, and that the two results differ from each other — a hardcoded return cannot satisfy either the per-value checks or the distinguishing check. `envelope_test.go`. Production code (`event.go`) was already correct; no production change was needed for this fix.
+
+**RED recorded** (break-and-restore, `Event.Turn()` temporarily changed to `return "SCRATCH_BREAK", e.hasTurn`):
+```
+envelope_test.go:154: first.Turn() = SCRATCH_BREAK, want turn-alpha
+envelope_test.go:162: second.Turn() = SCRATCH_BREAK, want turn-beta
+envelope_test.go:166: first.Turn() and second.Turn() both report SCRATCH_BREAK for two differently-constructed turns, want distinguishable values
+--- FAIL: TestEvent_Identity_ReadableFromExternalPackage/turn-scoped_event
+```
+Reverted; `go test` green again; `git diff --stat -- event.go` empty, confirming a byte-clean revert.
+
+### Fix 4 — `EventDescriptor.Terminal` was written but never read (W3)
+
+**Defect**: verify proved this by flipping the only `Terminal: true` (on `EventKindRunEnd`'s registry row) to `false` and finding the suite still green — "nothing follows the terminal" was actually driven by the `BracketRoleClosesRun`-derived run-bracket state (`run == runBracketClosed`), never by the `Terminal` field the descriptor declares and documents for exactly this purpose.
+
+**Choice**: (a) — made the validator read `Terminal`, rather than removing the field. `Terminal bool` is part of `EventDescriptor`'s shape as AD-1 itself states it ("the Layer 2 descriptor carries the new dimension as data: ... `Terminal bool`"), so removing it would touch AD-1's own declared contract; reading it does not. It is also the literal mechanism AD-1 says this validator mirrors from Layer 1's own engine (Layer 1's `ai.CheckStream` tracks a `terminalSeen` boolean from `descriptor.Terminal` directly — `src/ai/stream_check.go:83,101-103`) — AG-04's validator had simply not carried that specific piece of the mirror over yet.
+
+**Fix**: added `terminalSeen bool`, set from `d.Terminal` at the end of each event's processing; the top-of-loop "nothing follows the terminal" check now reads `terminalSeen` instead of `run == runBracketClosed`. The run-bracket state machine itself is unchanged and still drives every other rule (duplicate-open, unclosed-turn-at-close, escaped-turn, incomplete-run-at-end). For AG-04's own 4 registered kinds this is behavior-preserving — `EventKindRunEnd` is the only kind carrying either property, so `terminalSeen` becomes true at exactly the point `run` becomes `runBracketClosed` — confirmed by the full suite staying green with zero other test changes. `backend/agent/src/agent/stream_check.go`.
+
+**Test added**: `TestCheckStream_Source_ReadsTheTerminalDescriptorField` (`stream_check_test.go`) — parses `stream_check.go`, locates `CheckStream`'s function body via `go/ast`, and fails unless a `*ast.SelectorExpr` named `Terminal` is found in it. A *behavioral* test cannot distinguish "driven by `Terminal`" from "driven by `BracketRoleClosesRun`" for AG-04's own registry, because the two properties currently coincide on every reachable input (traced through all 4 kinds × all 6 rule branches) — this structural test is what actually closes W3.
+
+**RED recorded** (against the pre-fix production code, `Terminal` not yet referenced anywhere in `stream_check.go`):
+```
+stream_check_test.go:542: CheckStream's body never references .Terminal — the field is written by the registry (event.go) but never read by the engine (...)
+--- FAIL: TestCheckStream_Source_ReadsTheTerminalDescriptorField
+```
+GREEN after the fix.
+
+**A second, independent break-and-restore**, disabling only the wiring (`if false && d.Terminal { terminalSeen = true }`, the read stays present so the structural test alone stays green) confirmed the fix is genuinely load-bearing, not coincidental: the structural test cannot detect a dead condition (it only proves a reference exists), but the pre-existing, byte-unchanged `TestCheckStream_EventAfterRunEnd_RejectedNamingTheFollowingEvent` (S-AEV-033) does — its trailing run-start's own `BracketRoleOpensRun` check independently fires `ai.ErrDuplicate` once `terminalSeen` no longer intercepts first, instead of the expected `ai.ErrMisplaced`:
+```
+stream_check_test.go:99: agent.CheckStream(event after run-end) = event[2]: ..., want errors.Is to match ai.ErrMisplaced
+--- FAIL: TestCheckStream_EventAfterRunEnd_RejectedNamingTheFollowingEvent
+```
+Reverted; full suite green; `git diff --stat -- stream_check.go` matched the intended Fix 1 + Fix 4 diff exactly, confirming a clean revert of both scratch breaks.
+
+### Scenario-count correction (verify's "51 vs 45" reconciliation, W9)
+
+The spec declares **45** unique `S-AEV` scenario ids; the change total of **51** is 45 `S-AEV` plus **6** restated `S-AGP` ids from the `agent-package-scaffold` delta — both figures are correct, but several statements in this change's own artifacts attributed all 51 to `S-AEV`, which is wrong. Corrected:
+- `tasks.md:19` — "(51 spec scenario ids)" → "(45 `S-AEV` scenario ids; together with 6 restated `S-AGP` scenario ids ..., 51 spec scenario ids total across the change)".
+- `apply-progress.md` — the Status section's "All 51 spec scenarios (`S-AEV-001`…`S-AEV-102`)", the review-budget-overage paragraph's "51 spec scenarios across 11 charter Gherkin scenarios", and the TDD Cycle Evidence closing note's "(51 interdependent scenarios)" — each reworded to state 45 `S-AEV` plus 6 restated `S-AGP` explicitly. Deviation #0's own "45 unique `S-AEV-0NN` ids" was already correct and is unchanged.
+
+### Final verification
+
+`cd backend/agent && make test` (`go test -race -v ./...`): **all 12 packages `ok`, zero FAIL, zero DATA RACE**. `go build ./...`: clean. `bin/golangci-lint run ./src/agent/...`: **0 issues**. Full-module `make lint`: the same single pre-existing, unrelated finding as before this correction (`src/ai/openaicompat/openrouter/conformance/doc_matrix_guard_test.go:17`, byte-unchanged vs. `origin/main`). `git diff --stat` for `import_boundary_test.go`, `ambient_authority_test.go`, `go.mod`, `go.sum`, `Makefile`, `.golangci.yml`: empty. `git status --short`: clean of scratch residue (both break-and-restore cycles fully reverted before this section was written).
