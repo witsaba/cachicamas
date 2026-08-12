@@ -66,14 +66,14 @@ Rationale: explore.md § 7 forecasts 1400–2200 lines, 1.4–2.2x AG-03's alrea
 
 ## Phase 4: AG-04.4 — Every-kind-constructible guard + scope fence (guard, depends on Phase 2 and Phase 3)
 
-- [ ] 4.1 Create `event_registry_test.go` (new, `package agent_test`): `map[agent.EventKind]eventKindWitness`, two legs per kind (no-arg constructor closure `func() (agent.Event, error)`; payload-accessor closure `func(agent.Event) (any, bool)`), cross-checked bidirectionally against `agent.EventKinds()`.
-- [ ] 4.2 **GREEN baseline**: confirm the guard passes over the four registered kinds, reports having constructed at least one instance per kind, each instance passed through the R-AEV-001 validation gate. (S-AEV-080, S-AEV-081)
-- [ ] 4.3 **RED** — S-AEV-082 (bite, closing evidence for R-AEV-009): plant a scratch `EventKind` constant + registry row with no constructible payload; run `go test ./src/agent/...`; confirm the guard FAILS naming the offending kind; record the failing output; delete the scratch addition; confirm it is absent from the merged diff.
-- [ ] 4.4 **RED** — S-AEV-083: plant a witness-table entry naming a kind the registry does not contain; confirm the guard FAILS naming the unknown entry (proves the cross-check is bidirectional, not containment-only); record, then revert.
-- [ ] 4.5 **RED/GREEN** — S-AEV-090: failing-then-passing test enumerating the registered kind set, asserting it is exactly run-start/run-end/turn-start/turn-end and contains no message/tool/permission/cost/delegation/compaction kind under any name. (R-AEV-010 scope fence)
-- [ ] 4.6 Confirm S-AEV-091: a test or documentation-reading assertion confirms the 1.2 six-step procedure comment states the ordered steps and that following them requires no edit to the validator's rule engine.
-- [ ] 4.7 **RED/GREEN** — S-AEV-092 (extensibility experiment, closing evidence for R-AEV-010): in a scratch addition, add one new kind following the documented six-step procedure exactly; confirm the guard and validator both compile and run without editing their own rule-engine logic; record the result; then revert the scratch kind before merge.
-- [ ] 4.8 **GREEN**: confirm `go test -race ./src/agent/...` green with zero scratch artifacts present.
+- [x] 4.1 Create `event_registry_test.go` (new, `package agent_test`): `map[agent.EventKind]eventKindWitness`, two legs per kind (no-arg constructor closure `func() (agent.Event, error)`; payload-accessor closure `func(agent.Event) (any, bool)`), cross-checked bidirectionally against `agent.EventKinds()`.
+- [x] 4.2 **GREEN baseline**: confirm the guard passes over the four registered kinds, reports having constructed at least one instance per kind, each instance passed through the R-AEV-001 validation gate. (S-AEV-080, S-AEV-081)
+- [x] 4.3 **RED** — S-AEV-082 (bite, closing evidence for R-AEV-009): plant a scratch `EventKind` constant + registry row with no constructible payload; run `go test ./src/agent/...`; confirm the guard FAILS naming the offending kind; record the failing output; delete the scratch addition; confirm it is absent from the merged diff.
+- [x] 4.4 **RED** — S-AEV-083: plant a witness-table entry naming a kind the registry does not contain; confirm the guard FAILS naming the unknown entry (proves the cross-check is bidirectional, not containment-only); record, then revert.
+- [x] 4.5 **RED/GREEN** — S-AEV-090: failing-then-passing test enumerating the registered kind set, asserting it is exactly run-start/run-end/turn-start/turn-end and contains no message/tool/permission/cost/delegation/compaction kind under any name. (R-AEV-010 scope fence)
+- [x] 4.6 Confirm S-AEV-091: a test or documentation-reading assertion confirms the 1.2 six-step procedure comment states the ordered steps and that following them requires no edit to the validator's rule engine.
+- [x] 4.7 **RED/GREEN** — S-AEV-092 (extensibility experiment, closing evidence for R-AEV-010): in a scratch addition, add one new kind following the documented six-step procedure exactly; confirm the guard and validator both compile and run without editing their own rule-engine logic; record the result; then revert the scratch kind before merge.
+- [x] 4.8 **GREEN**: confirm `go test -race ./src/agent/...` green with zero scratch artifacts present.
 
 ## Phase 5: Regression, evidence close-out, milestone doc update
 
