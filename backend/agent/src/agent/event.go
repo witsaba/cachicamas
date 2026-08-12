@@ -28,6 +28,7 @@
 // mechanism exists yet (R-AEV-003): explicit nesting cannot be retrofitted,
 // so the field is part of the envelope now, and delegation semantics are
 // AG-19's.
+
 package agent
 
 import (

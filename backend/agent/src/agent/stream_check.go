@@ -29,6 +29,7 @@
 // table by registering a descriptor, with no change to this file
 // (R-AEV-010's structural-extensibility half, proven by S-AEV-092's
 // scratch experiment).
+
 package agent
 
 import "github.com/cachicamas/backend/agent/src/ai"

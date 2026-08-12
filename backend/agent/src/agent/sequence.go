@@ -25,6 +25,7 @@
 //
 // At AG-04 there is no producer: tests play the forwarding-activity role,
 // one LaneStamper per hand-built stream.
+
 package agent
 
 // Sequence is the per-lane ordering position an event is stamped with

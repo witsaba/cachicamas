@@ -28,6 +28,7 @@
 //  6. add the name to [EventKind]'s documented list AND the witness entry
 //     in event_registry_test.go — the guard's bidirectional cross-check
 //     fails the same pull request that skips either half.
+
 package agent
 
 // BracketRole is a registered kind's position in the run/turn bracket

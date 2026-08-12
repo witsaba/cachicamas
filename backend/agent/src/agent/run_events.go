@@ -21,6 +21,7 @@
 // consumer of a complete run. Recorded in apply-progress.md as the same
 // shape of reconciliation tasks.md already documents for stream_check.go's
 // own two-commit split.
+
 package agent
 
 import (

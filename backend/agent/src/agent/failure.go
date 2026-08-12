@@ -16,6 +16,7 @@
 // scenarios (S-AEV-070..073, invariant_pin_test.go) still land at AG-04.3
 // as tasks.md planned — only the type's existence moved earlier. Recorded
 // in apply-progress.md alongside the identical RunStart reconciliation.
+
 package agent
 
 import "github.com/cachicamas/backend/agent/src/ai"
