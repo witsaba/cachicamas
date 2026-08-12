@@ -17,6 +17,7 @@
 //	L2C-01	Imports: the Go standard library, github.com/cachicamas/backend/agent/src/ai and its measured transitive closure — nothing else, deny-by-default (ADR 0005 § D1 row 2; import_boundary_test.go).
 //	L2C-02	No I/O of its own: no environment read, no filesystem access, no network call, no process spawn (ADR 0005 § D1 row 2; ambient_authority_test.go and import_boundary_test.go).
 //	L2C-03	The event stream is the only upward contract: Layer 2 reports exclusively through emitted events; callers observe the stream, they never reach into the loop (AG-00 vocabulary).
+//	L2C-04	Stream membership: a fact belongs on the event stream or it does not exist upward — if it is not on the stream, no frontend can render it and no log can reconstruct it. This is the criterion every later event family is judged by (doc 0003 AG-04 acceptance; agent-event-envelope).
 //
 // # Ordering invariants (R-AEV-011)
 //
@@ -31,4 +32,13 @@
 // invariant 4 with AG-11.2; it is absent from invariant 3 entirely, which
 // AG-01.1 and AG-20.2 close without it (0003:2203, agent-event-envelope's
 // Explicit non-requirements table).
+//
+// # The delta rule (R-AEV-007)
+//
+// A delta carries an index and the new fragment only, never an
+// accumulated snapshot of what came before. AG-04 registers no delta
+// kind, so this rule is a pin on the construction surface, not an
+// assertion about a message-delta kind: the absence of any route from a
+// delta kind to an accumulated-message payload is the mechanism AG-05
+// inherits when it registers its own delta kinds.
 package agent
