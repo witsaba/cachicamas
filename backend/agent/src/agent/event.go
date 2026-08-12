@@ -131,12 +131,28 @@ const (
 
 	// AG-05.2 (tool execution family) — 5 kinds, all PlacementTurn,
 	// BracketRoleNone, CardinalityAny, Terminal:false. See tool_event.go.
-	// (Land at AG-05.2; this commit registers only the message family.)
+
+	// EventKindToolStart opens a tool call bracket.
+	EventKindToolStart
+
+	// EventKindToolProgress carries indexed progress on a tool call.
+	EventKindToolProgress
+
+	// EventKindToolEndSuccess closes a tool call that succeeded.
+	EventKindToolEndSuccess
+
+	// EventKindToolEndResultFailure closes a tool call that returned a
+	// failure result.
+	EventKindToolEndResultFailure
+
+	// EventKindToolEndExecutionFailure closes a tool call whose execution
+	// itself failed; carries a typed [Failure].
+	EventKindToolEndExecutionFailure
 
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindMessageEndReasoning + 1
+	eventKindEnd   = EventKindToolEndExecutionFailure + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -199,9 +215,28 @@ var eventRegistry = []eventRegistration{
 		name:       "message_end_reasoning",
 		descriptor: EventDescriptor{Placement: PlacementTurn},
 	},
-	// AG-05.2 (tool execution family) — 5 rows land at AG-05.2 in the
-	// same PR's second commit. The scope-fence retightens to
-	// "exactly 15" at AG-05.3 (the third commit) in the same PR.
+	// AG-05.2 (tool execution family) — 5 rows. All PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false.
+	EventKindToolStart: {
+		name:       "tool_start",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindToolProgress: {
+		name:       "tool_progress",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindToolEndSuccess: {
+		name:       "tool_end_success",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindToolEndResultFailure: {
+		name:       "tool_end_result_failure",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindToolEndExecutionFailure: {
+		name:       "tool_end_execution_failure",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
 }
 
 // eventRegistryEntry returns a kind's registry entry, and whether it has

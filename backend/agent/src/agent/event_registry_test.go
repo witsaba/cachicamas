@@ -46,7 +46,7 @@ type eventKindWitness struct {
 }
 
 // eventKindWitnesses is the guard's table, keyed by the registered
-// constant — one entry per kind AG-04 (4) and AG-05.1 (6) register, in
+// constant — one entry per kind AG-04 (4) + AG-05 (11) register, in
 // the same commit as the kind's own addition. AG-05's kinds follow
 // AG-04.4's extensibility experiment pattern (R-AEV-012); extending
 // this map is the only place a new kind needs to be added for the
@@ -124,15 +124,52 @@ var eventKindWitnesses = map[agent.EventKind]eventKindWitness{
 		},
 		read: func(e agent.Event) (any, bool) { return e.MessageEndReasoning() },
 	},
-	// AG-05.2 (tool execution family) — 5 kinds land in this PR's
-	// second commit. See tool_event.go.
+	// AG-05.2 (tool execution family) — 5 kinds, all PlacementTurn,
+	// all BracketRoleNone, all CardinalityAny, all Terminal:false.
+	// See tool_event.go.
+	agent.EventKindToolStart: {
+		registeredName: "tool_start",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolStart("run_registry_witness", "turn_registry_witness", "call-witness", 0, "echo", []byte("{}"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolStart() },
+	},
+	agent.EventKindToolProgress: {
+		registeredName: "tool_progress",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolProgress("run_registry_witness", "turn_registry_witness", "call-witness", 0, 0, []byte("{}"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolProgress() },
+	},
+	agent.EventKindToolEndSuccess: {
+		registeredName: "tool_end_success",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndSuccess("run_registry_witness", "turn_registry_witness", "call-witness", 0, []byte("ok"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndSuccess() },
+	},
+	agent.EventKindToolEndResultFailure: {
+		registeredName: "tool_end_result_failure",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndResultFailure("run_registry_witness", "turn_registry_witness", "call-witness", 0, []byte("nope"))
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndResultFailure() },
+	},
+	agent.EventKindToolEndExecutionFailure: {
+		registeredName: "tool_end_execution_failure",
+		construct: func() (agent.Event, error) {
+			return agent.NewToolEndExecutionFailure("run_registry_witness", "turn_registry_witness", "call-witness", 0, witnessToolFailure)
+		},
+		read: func(e agent.Event) (any, bool) { return e.ToolEndExecutionFailure() },
+	},
 }
 
-// witnessMessageID is the shared fixture used by the AG-05.1 message
-// family witness table rows so each constructor closure is a one-
-// liner. It lives in event_registry_test.go's test-only scope; it is
-// not exported and is not part of the package's public surface.
+// witnessMessageID and witnessToolFailure are shared fixtures used by
+// the AG-05 witness table rows so each constructor closure is a one-
+// liner. They live in event_registry_test.go's test-only scope; they
+// are not exported and are not part of the package's public surface.
 var witnessMessageID ai.MessageID
+var witnessToolFailure *agent.Failure
 
 func init() {
 	// Mint a non-zero MessageID at process init by constructing one
@@ -149,6 +186,16 @@ func init() {
 		panic("event_registry_test.go: ai.NewMessage failed: " + err.Error())
 	}
 	witnessMessageID = msg.ID()
+
+	inner, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable}, false)
+	if err != nil {
+		panic("event_registry_test.go: ai.MidStreamFailure failed: " + err.Error())
+	}
+	f, err := agent.NewFailure(inner)
+	if err != nil {
+		panic("event_registry_test.go: agent.NewFailure failed: " + err.Error())
+	}
+	witnessToolFailure = f
 }
 
 // TestEventKindRegistration_EveryRegisteredKind_HasConstructorAndAccessor
@@ -243,12 +290,11 @@ func containsEventKind(haystack []agent.EventKind, want agent.EventKind) bool {
 }
 
 // S-AEV-090 — the registered kind set is enumerated as exactly the
-// run/turn/message bracket kinds AG-04 + AG-05.1 register, and
-// contains no tool, permission, cost, delegation or compaction kind
-// under any name (R-AEV-010's scope fence; retightened from "exactly 4"
-// to "exactly 10" by AG-05.1 in the same commit as the new message
-// kinds land; retightened to "exactly 15" by AG-05.2 in this PR's
-// second commit).
+// run/turn/message/tool bracket kinds AG-04 + AG-05 register, and
+// contains no permission, cost, delegation or compaction kind under
+// any name (R-AEV-010's scope fence; retightened from "exactly 4" to
+// "exactly 15" by AG-05 across this PR's first two commits; the
+// final retightening to "exactly 15" lands in AG-05.3).
 func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 	t.Parallel()
 
@@ -259,9 +305,12 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 		// AG-05.1 (message family) — 6 message kinds (R-AMT-001, R-AMT-002)
 		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
 		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
+		// AG-05.2 (tool execution family) — 5 tool kinds (R-AMT-005, R-AMT-006, R-AMT-007)
+		agent.EventKindToolStart, agent.EventKindToolProgress,
+		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds) — AG-05.1 retightens the scope fence from \"exactly 4\" to \"exactly 10\" (4 AG-04 + 6 AG-05.1); AG-05.2 retightens to \"exactly 15\" in the next commit",
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds) — AG-05 retightens the scope fence from \"exactly 4\" to \"exactly 15\" (4 AG-04 + 6 AG-05.1 + 5 AG-05.2)",
 			got, len(got), want, len(want))
 	}
 	for i := range want {
@@ -270,17 +319,16 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 		}
 	}
 
-	// AG-05.1 retightens this list: AG-04's "no message" half is
-	// now legitimate (AG-05.1's own register); the AG-05.2 "no tool"
-	// half is still forbidden (those land at the next commit); the
-	// AG-06 "no permission/cost/delegation/compaction" half is
-	// unchanged.
-	forbiddenNames := []string{"tool", "permission", "cost", "delegation", "compaction"}
+	// AG-05 retightens this list: AG-04's "no message/tool" half is
+	// now legitimate (AG-05's own register); the AG-06 "no permission/
+	// cost/delegation/compaction" half is unchanged. The forbidden
+	// names check now only catches AG-06's families.
+	forbiddenNames := []string{"permission", "cost", "delegation", "compaction"}
 	for _, k := range got {
 		name := k.String()
 		for _, forbidden := range forbiddenNames {
 			if containsFold(name, forbidden) {
-				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids AG-04 and AG-05.1 from registering AG-05.2/AG-06's families under any name", name, forbidden)
+				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids AG-04 and AG-05 from registering AG-06's families under any name", name, forbidden)
 			}
 		}
 	}
