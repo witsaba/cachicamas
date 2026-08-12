@@ -241,13 +241,16 @@ const (
 	ToolOutcomeExecutionFailure
 
 	// toolOutcomeLimit is the first value outside the vocabulary. It
-	// must stay last.
-	toolOutcomeLimit
+	// must stay last, mirroring runOutcomeLimit / turnOutcomeLimit.
+	toolOutcomeLimit = iota
 )
 
 // String renders the outcome, or "unset"/"tooloutcome(N)" for a
 // non-member, mirroring RunOutcome.String's posture.
 func (o ToolOutcome) String() string {
+	if o >= toolOutcomeLimit {
+		return "tooloutcome(" + strconv.FormatUint(uint64(o), 10) + ")"
+	}
 	switch o {
 	case ToolOutcomeSuccess:
 		return "success"

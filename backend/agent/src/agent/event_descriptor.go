@@ -12,22 +12,38 @@
 //
 // # Adding a kind: the six-step procedure
 //
-// AG-05 and AG-06 register their own kinds by following these six steps,
-// with no edit to the validator's rule engine or to the every-kind-
+// AG-05 and AG-06 register their own kinds by following these seven steps
+// (the seventh — `Terminal: false` — was added by AG-05 to close the W3
+// latent trap, per R-AEV-012's extensibility experiment pattern), with
+// no edit to the validator's rule engine or to the every-kind-
 // constructible guard's own logic:
 //
-//  1. declare the constant at the end of the EventKind block and move the
-//     end bound past it;
+//  1. declare the constant at the end of the EventKind block and move
+//     the end bound past it;
 //  2. add an unexported payload type implementing kind() and validate();
 //  3. add the exported constructor New<Kind>, whose rules are the
 //     payload's and the envelope identity's;
 //  4. add the exported accessor func (e Event) <Kind>() (T, bool);
-//  5. add the registry row in event.go pairing the kind's name with its
-//     [EventDescriptor] — one table, so a kind structurally cannot register
-//     without a descriptor;
-//  6. add the name to [EventKind]'s documented list AND the witness entry
-//     in event_registry_test.go — the guard's bidirectional cross-check
-//     fails the same pull request that skips either half.
+//  5. add the registry row in event.go pairing the kind's name with
+//     its [EventDescriptor] — one table, so a kind structurally
+//     cannot register without a descriptor;
+//  5a. **state `Terminal: false` explicitly** if the kind is not a
+//     stream-terminator. The validator reads [EventDescriptor.Terminal]
+//     (W3 latent-trap guard — see stream_check.go's regression test
+//     and AG-04.4's `S-AEV-092` extensibility experiment). Every
+//     kind AG-05 registers declares `Terminal: false`; only `run_end`
+//     declares `Terminal: true`;
+//  6. add the name to [EventKind]'s documented list AND the witness
+//     entry in event_registry_test.go — the guard's bidirectional
+//     cross-check fails the same pull request that skips either half.
+//
+// # CardinalityAtMostOne seam (AG-06's, AG-05's not used)
+//
+// Step 5's descriptor row may also declare `Cardinality:
+// CardinalityAtMostOne` for a kind that must appear at most once per
+// stream. The validator's rule engine implements this seam
+// unconditionally (stream_check.go:166-171), so AG-06 may opt a kind
+// into it with no engine edit. AG-05 does not exercise this seam.
 
 package agent
 

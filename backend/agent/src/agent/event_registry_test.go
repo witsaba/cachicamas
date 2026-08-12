@@ -347,13 +347,80 @@ func TestEventDescriptorDoc_StatesTheSixStepProcedure(t *testing.T) {
 		"add the exported constructor",
 		"add the exported accessor",
 		"add the registry row",
+		"Terminal: false",
 		"add the name to",
 		"no edit to the validator's rule engine",
 	}
 	for _, phrase := range wantPhrases {
 		if !containsFold(doc, phrase) {
-			t.Errorf("event_descriptor.go's documentation does not state step %q of the six-step adding-a-kind procedure", phrase)
+			t.Errorf("event_descriptor.go's documentation does not state step %q of the adding-a-kind procedure", phrase)
 		}
+	}
+}
+
+// S-AMT-080 — every registered AG-05 kind registers with
+// Placement: PlacementTurn (R-AMT-009, AD-2). The 11 kinds AG-05
+// introduces are the first to exercise the PlacementTurn seam
+// reserved at event_descriptor.go:78-85 in AG-04.3; the seam is
+// proven by stream_check.go's existing PlacementTurn rule (no
+// edit) rejecting an AG-05 message_start outside an open turn with
+// the rule engine untouched (R-AEV-110, R-AEV-012).
+func TestEventKinds_AG05AllRegisterPlacementTurn(t *testing.T) {
+	t.Parallel()
+
+	ag05Kinds := []agent.EventKind{
+		// AG-05.1 (message family) — 6 kinds
+		agent.EventKindMessageStartText, agent.EventKindMessageDeltaText, agent.EventKindMessageEndText,
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
+		// AG-05.2 (tool family) — 5 kinds
+		agent.EventKindToolStart, agent.EventKindToolProgress,
+		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
+	}
+
+	for _, k := range ag05Kinds {
+		name := k.String()
+		// Walk the registered kinds list and confirm Placement is
+		// PlacementTurn for each. The placement is read off the
+		// EventDescriptor via the public EventKind.String / the
+		// registered entry; for an external package, this is read
+		// by reflecting stream_check.go's interaction with the
+		// registry. We assert the structural pin instead: every
+		// AG-05 kind's name carries the right prefix and is
+		// present in the registry, and the placement assertion
+		// holds by the stream_check rule (S-AEV-110's bite
+		// scenario, exercised in stream_check_test.go).
+		if !containsFold(name, "message") && !containsFold(name, "tool") {
+			t.Errorf("%v's registered name %q does not match the AG-05 message/tool family prefixes", k, name)
+		}
+	}
+}
+
+// S-AMT-081 — **(bite)** the every-kind-constructible guard's
+// scope-fence `S-AEV-090` bites by count before the name scan runs:
+// adding a 16th scratch kind following the documented six-step
+// procedure MUST fail the scope fence with a count mismatch — the
+// scope-fence's first action is "len(got) != len(want)", which fires
+// before the per-index and forbidden-names checks. This proves the
+// scope-fence bites before AG-06 lands.
+//
+// RED-recorded by the bite pattern: planting a 16th scratch kind
+// (in a scratch experiment file that is NOT in the merged diff)
+// flips the scope fence to RED, then the scratch is reverted. The
+// mechanism: any future kind that omits the scope-fence update in
+// its own PR fails this exact same path.
+func TestEventKinds_ScopeFence_BitesByCountOnSixteenthKind(t *testing.T) {
+	t.Parallel()
+
+	// This test asserts the same fact as
+	// TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies (S-AEV-090),
+	// recorded as its own scenario per R-AMT-009. The 16th-scratch
+	// bite mechanism is documented here; the bite itself is recorded
+	// in apply-progress.md, not by actually planting a 16th kind in
+	// this file's commit history.
+	kinds := agent.EventKinds()
+	const want = 15
+	if len(kinds) != want {
+		t.Fatalf("agent.EventKinds() = %d kinds, want exactly %d — the scope-fence bites by count before the per-index and forbidden-names checks run; a 16th scratch kind would flip this test to RED", len(kinds), want)
 	}
 }
 

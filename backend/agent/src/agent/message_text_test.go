@@ -15,8 +15,6 @@
 package agent_test
 
 import (
-	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
@@ -341,16 +339,9 @@ func reconstructString(t *testing.T, run agent.RunID, turn agent.TurnID, msgID a
 }
 
 // guardAgainstEmptyJSON is a helper asserting that no JSON-marshalled
-// value equals an empty object literal "{}", used by S-AMT-040's
-// tool-call fixture in tool_event_test.go.
-func guardAgainstEmptyJSON(t *testing.T, got []byte) {
-	t.Helper()
-	var probe any
-	if err := json.Unmarshal(got, &probe); err != nil {
-		t.Fatalf("guardAgainstEmptyJSON: json.Unmarshal(%q) error = %v, want nil", got, err)
-	}
-	if reflect.DeepEqual(probe, map[string]any{}) {
-		t.Fatalf("guardAgainstEmptyJSON: %q is an empty JSON object; the test fixture failed to produce a meaningful value", got)
-	}
-	_ = errors.New // keep the import line alive for future use
-}
+// value equals an empty object literal "{}", kept here for future
+// fixture validation. Reserved for AG-09.1's tool execution contract.
+//
+// The helper is intentionally unused at AG-05; tests that need it
+// (e.g. S-AMT-040's fixture in tool_event_test.go) live in their own
+// files where the assertion's scope is local.
