@@ -45,14 +45,24 @@ import (
 // modulePath is this module, and the only non-stdlib prefix the allowlist admits.
 const modulePath = "github.com/cachicamas/backend/agent"
 
-// layer1Pattern scopes the scan. It is fully qualified on purpose: `go test` runs
-// with the working directory set to the package under test, so a relative
-// pattern such as ./... would silently narrow the guard to src/ai alone and stop
-// covering src/agenttest.
-const layer1Pattern = modulePath + "/..."
+// layer1Patterns scopes the scan to Layer 1's own packages: src/ai, its
+// external test package src/agenttest, and src/handoff. Each pattern is
+// fully qualified on purpose: `go test` runs with the working directory set
+// to the package under test, so a relative pattern such as ./... would
+// silently narrow the guard to src/ai alone and stop covering src/agenttest.
+//
+// Narrowed from a single "modulePath + /..." pattern (AD-1, fixed
+// 2026-08-12, AG-03): see the FIXED comment on forbiddenPrefixes' src/agent
+// row, below, for why the module-wide pattern stopped being safe the moment
+// Layer 2 (src/agent) started existing.
+var layer1Patterns = []string{
+	modulePath + "/src/ai/...",
+	modulePath + "/src/agenttest/...",
+	modulePath + "/src/handoff/...",
+}
 
 // requestPackagePath scopes AI-10.4 item 3's guard, below. It names the one
-// package request.go lives in rather than layer1Pattern, because the claim
+// package request.go lives in rather than layer1Patterns, because the claim
 // under test — "validation performs no I/O" — is about the request path
 // specifically, not about Layer 1 as a whole.
 const requestPackagePath = modulePath + "/src/ai"
@@ -75,21 +85,36 @@ var forbiddenPrefixes = []struct {
 	{"github.com/cachicamas/backend/workspace_syncer", "ADR 0005 § D1 row 1: no package of another backend module"},
 
 	// ADR 0005 § D1 row 1 — the sibling layers. Dependencies flow
-	// coding -> agent -> ai and never upward. These three directories do not
-	// exist yet; naming them now is what makes the rule testable on the day
-	// the first one is created.
+	// coding -> agent -> ai and never upward. `src/coding` and `src/cmd`
+	// do not exist yet; naming them now is what makes the rule testable on
+	// the day each is created. `src/agent` was the first of the three to
+	// be created — AG-03 (doc 0003) — which is exactly the day the hazard
+	// below fired and was fixed.
 	//
-	// KNOWN HAZARD for that day (recorded 2026-08-10, before doc 0003's
-	// AG milestones create src/agent): layer1Pattern scans the WHOLE
-	// module, and `go list -deps -test` emits the pattern's own member
-	// packages — so merely CREATING backend/agent/src/agent makes the
-	// new package appear in the scanned set and match this forbidden
-	// prefix, failing the guard with zero actual import violations. The
-	// deliberate fix when it fires is to narrow the scanned roots to
-	// Layer 1's own packages (src/ai/..., src/agenttest/..., src/handoff)
-	// or to exempt the pattern's own members from the prefix match —
-	// decided then, in the change that creates the directory, never by
-	// deleting the prefix row.
+	// FIXED (AD-1, 2026-08-12, AG-03): this row's self-reference hazard —
+	// recorded 2026-08-10, before doc 0003's AG milestones created
+	// src/agent — is resolved by narrowing the scanned roots, not by
+	// exempting this row's own target from the match. layer1Patterns
+	// (above) now names only Layer 1's own packages (src/ai/...,
+	// src/agenttest/..., src/handoff/...) instead of the whole module, so
+	// src/agent is never a member of the scanned set and can only appear
+	// here as a genuine dependency of a Layer 1 package.
+	//
+	// Rejected alternative: exempting the pattern's own members from
+	// matchForbidden instead of narrowing the pattern. `go list -deps
+	// -test` emits a FLATTENED dependency set, so src/agent appearing as a
+	// pattern member is byte-identical to src/agent appearing as a
+	// genuine dependency of src/ai — a member exemption would therefore
+	// also exempt the exact violation this row exists to catch.
+	// Distinguishing "member of the scanned pattern" from "genuine
+	// dependency" needs per-package Deps attribution (`go list -json`),
+	// which is a rewrite of this guard, not a targeted fix.
+	//
+	// This row is preserved, not deleted: if src/ai, src/agenttest or
+	// src/handoff ever imports src/agent, src/agent enters that root's own
+	// dependency closure, `go list` still emits it, and it still matches
+	// here — agent-package-scaffold's S-AGP-062 re-proves this with a
+	// planted import.
 	{modulePath + "/src/agent", "ADR 0005 § D1 row 1: Layer 1 must not import Layer 2"},
 	{modulePath + "/src/coding", "ADR 0005 § D1 row 1: Layer 1 must not import Layer 3"},
 	{modulePath + "/src/cmd", "ADR 0005 § D1 row 1: Layer 1 must not import the composition root"},
@@ -151,13 +176,13 @@ var allowedNonStdlibPrefixes = []string{
 func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 	t.Parallel()
 
-	deps, err := listNonStdlibDeps(layer1Pattern)
+	deps, err := listNonStdlibDeps(layer1Patterns...)
 	if err != nil {
 		t.Fatalf("go list failed: %v", err)
 	}
 	if len(deps) == 0 {
 		t.Fatal("go list returned no packages; the guard would pass vacuously. " +
-			"Check that the module pattern still resolves: " + layer1Pattern)
+			"Check that the module patterns still resolve: " + strings.Join(layer1Patterns, ", "))
 	}
 
 	for _, dep := range deps {
@@ -320,7 +345,7 @@ func TestLayer1_DependencySet_ExactRequiresAndClosure(t *testing.T) {
 			len(wantRequiresSorted), wantRequiresSorted, len(gotRequiresSorted), gotRequiresSorted)
 	}
 
-	deps, err := listNonStdlibDeps(layer1Pattern)
+	deps, err := listNonStdlibDeps(layer1Patterns...)
 	if err != nil {
 		t.Fatalf("go list failed: %v", err)
 	}
@@ -358,14 +383,18 @@ func isAllowed(importPath string) bool {
 }
 
 // listNonStdlibDeps returns the deduplicated non-stdlib transitive dependency set
-// of pattern, test imports included.
+// of patterns, test imports included. patterns is variadic (AD-1) because
+// `go list` accepts multiple patterns in one invocation, which is what lets
+// layer1Patterns scan src/ai, src/agenttest and src/handoff as a single call
+// instead of three separately deduplicated ones.
 //
 // The standard library is filtered by the toolchain via `.Standard` rather than
 // by a list maintained here — see the package comment for why the obvious
 // heuristic is wrong.
-func listNonStdlibDeps(pattern string) ([]string, error) {
-	cmd := exec.Command("go", "list", "-deps", "-test",
-		"-f", "{{if not .Standard}}{{.ImportPath}}{{end}}", pattern)
+func listNonStdlibDeps(patterns ...string) ([]string, error) {
+	args := append([]string{"list", "-deps", "-test",
+		"-f", "{{if not .Standard}}{{.ImportPath}}{{end}}"}, patterns...)
+	cmd := exec.Command("go", args...)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
