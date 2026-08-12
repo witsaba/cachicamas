@@ -9,6 +9,13 @@
 //
 // This guard closes on bite proof (S-AEV-082, S-AEV-083), not on green: a
 // guard that has only ever been green is unproven.
+//
+// # Recorded scope (S-AEV-084, R-AEV-009)
+//
+// This guard proves construction-time exhaustiveness of the kind registry
+// — nothing wider. It MUST NOT be read as proof of envelope invariant 3
+// (observer asynchrony), which AG-04 does not touch at all, nor of the
+// full loop-level typed-error path, which is AG-11's.
 package agent_test
 
 import (
@@ -212,6 +219,24 @@ func TestEventDescriptorDoc_StatesTheSixStepProcedure(t *testing.T) {
 		if !containsFold(doc, phrase) {
 			t.Errorf("event_descriptor.go's documentation does not state step %q of the six-step adding-a-kind procedure", phrase)
 		}
+	}
+}
+
+// S-AEV-084 — the guard's recorded scope note states that it proves
+// construction-time exhaustiveness only, and closes neither envelope
+// invariant 3 nor the loop-level typed-error path.
+func TestEventRegistryDoc_StatesTheGuardsRecordedScope(t *testing.T) {
+	t.Parallel()
+
+	doc := packageFileDoc(t, "event_registry_test.go")
+	if !containsFold(doc, "construction-time exhaustiveness") {
+		t.Errorf("event_registry_test.go's documentation does not state the guard proves construction-time exhaustiveness only:\n%s", doc)
+	}
+	if !containsFold(doc, "invariant 3") {
+		t.Errorf("event_registry_test.go's documentation does not state the guard closes no part of envelope invariant 3:\n%s", doc)
+	}
+	if !containsFold(doc, "loop-level typed-error path") {
+		t.Errorf("event_registry_test.go's documentation does not state the guard closes no part of the loop-level typed-error path:\n%s", doc)
 	}
 }
 

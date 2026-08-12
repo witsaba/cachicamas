@@ -193,6 +193,36 @@ func TestSuite_NeverAssertsOnFailureMessageStringContent(t *testing.T) {
 	}
 }
 
+// S-AEV-100 — the package documentation states that ordering is per
+// consumer lane, independent, contiguous and 1-based, and that Layer 2's
+// counter is not Layer 1's per-stream sequence.
+func TestPackageDoc_StatesOrderingInvariants(t *testing.T) {
+	t.Parallel()
+
+	doc := packageFileDoc(t, "doc.go")
+	if !containsFold(doc, "per consumer lane") || !containsFold(doc, "independent") ||
+		!containsFold(doc, "contiguous") || !containsFold(doc, "1-based") {
+		t.Errorf("doc.go's package documentation does not state ordering is per-consumer-lane, independent, contiguous and 1-based:\n%s", doc)
+	}
+	if !containsFold(doc, "not") || !containsFold(doc, "ai.Sequence") {
+		t.Errorf("doc.go's package documentation does not state that Layer 2's counter is not ai.Sequence:\n%s", doc)
+	}
+}
+
+// S-AEV-101 — the package documentation states the membership criterion
+// and identifies it as the criterion later event families are judged by.
+func TestPackageDoc_StatesMembershipCriterion(t *testing.T) {
+	t.Parallel()
+
+	doc := packageFileDoc(t, "doc.go")
+	if !containsFold(doc, "belongs on the event stream or it does not exist upward") {
+		t.Errorf("doc.go's package documentation does not state the membership criterion:\n%s", doc)
+	}
+	if !containsFold(doc, "criterion every later event family is judged by") {
+		t.Errorf("doc.go's package documentation does not identify the criterion as what later event families are judged by:\n%s", doc)
+	}
+}
+
 // S-AEV-102 — (bite) doc.go's raw bytes contain both the ordering-
 // invariants statement (R-AEV-011, 1.5) and the membership-criterion
 // statement (R-AEV-011, the L2C-04 row, 3.2). A scratch edit removing or

@@ -10,7 +10,11 @@
 
 ## Deviations from design.md (flagged, not silently applied)
 
-Two structural sequencing findings (both resolved the same way tasks.md already resolved `stream_check.go`'s own two-commit split), one resolved design gap, one caught-and-fixed test defect, one lint-convention fix, one pre-existing unrelated finding, and the size overage.
+Two structural sequencing findings (both resolved the same way tasks.md already resolved `stream_check.go`'s own two-commit split), one resolved design gap, one caught-and-fixed test defect, one lint-convention fix, one pre-existing unrelated finding, one closing completeness pass, and the size overage.
+
+### 0. Closing completeness pass: 3 spec scenarios with no explicit coverage
+
+Before declaring done, cross-checked every `S-AEV-0NN` id in `specs/agent-event-envelope/spec.md` against every id referenced in `backend/agent/src/agent/*.go`. Found 3 gaps: `S-AEV-084` (the every-kind-constructible guard's own "recorded scope note" — R-AEV-009 requires the guard's source to state it proves construction-time exhaustiveness only, closing neither invariant 3 nor the loop-level typed-error path), `S-AEV-100` and `S-AEV-101` (independently-labeled tests for the ordering-invariants and membership-criterion doc statements — both were *substantively* covered already by `S-AEV-102`'s bite test, since the spec's own literal wording is a substring of the same paragraphs, but neither had its own independently-verifiable, explicitly-labeled scenario as the spec's format requires). Fixed: added the scope note to `event_registry_test.go`'s header comment plus `TestEventRegistryDoc_StatesTheGuardsRecordedScope`; added `TestPackageDoc_StatesOrderingInvariants` and `TestPackageDoc_StatesMembershipCriterion` to `invariant_pin_test.go`. All three RED-proved by scratch-removal, then reverted. Final cross-check: every one of the 45 unique `S-AEV-0NN` ids in spec.md is now referenced in the implementation — confirmed by `diff` of two `grep -oE` extractions.
 
 ### 1. `RunStart`'s payload and constructors moved from AG-04.2 to AG-04.1
 
