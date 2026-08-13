@@ -58,9 +58,11 @@ func TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload(t *testing
 		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade, agent.EventKindPermissionResolutionRemembered,
 		// AG-06.2 (cost family) — 2 kinds (R-APE-004, R-APE-005)
 		agent.EventKindCostTurn, agent.EventKindCostSession,
+		// AG-06.3 (delegation family) — 2 kinds (R-APE-006)
+		agent.EventKindSubagentStarted, agent.EventKindSubagentEnded,
 	}
 	if len(kinds) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 20 kinds (4 AG-04 + 11 AG-05 + 3 AG-06.1 + 2 AG-06.2) %v", kinds, len(kinds), want)
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 22 kinds (4 AG-04 + 11 AG-05 + 3 AG-06.1 + 2 AG-06.2 + 2 AG-06.3) %v", kinds, len(kinds), want)
 	}
 
 	// S-AMT-021 — the AG-05 half of the no-snapshot-route bite:

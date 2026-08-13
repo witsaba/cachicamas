@@ -187,10 +187,21 @@ const (
 	// run (PlacementRun).
 	EventKindCostSession
 
+	// AG-06.3 (delegation family) — 2 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-006).
+	// See delegation_events.go.
+
+	// EventKindSubagentStarted opens a subagent's stream inside a
+	// delegated run (parent identifier set on envelope).
+	EventKindSubagentStarted
+
+	// EventKindSubagentEnded closes it.
+	EventKindSubagentEnded
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindCostSession + 1
+	eventKindEnd   = EventKindSubagentEnded + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -304,6 +315,16 @@ var eventRegistry = []eventRegistration{
 	EventKindCostSession: {
 		name:       "cost_session",
 		descriptor: EventDescriptor{Placement: PlacementRun},
+	},
+	// AG-06.3 (delegation family) — 2 rows. Both PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-006).
+	EventKindSubagentStarted: {
+		name:       "subagent_started",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindSubagentEnded: {
+		name:       "subagent_ended",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
 	},
 }
 
