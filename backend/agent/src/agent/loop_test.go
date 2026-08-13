@@ -4,7 +4,7 @@
 // Every scenario is in package agent_test (NFR-LSK-001): the
 // external-test posture proves every behavioral claim from outside the
 // package, with no reach into unexported surface. The file carries the
-// small shared helpers (mustSimpleRequest, mintLoopRunID, mintLoopTurnID,
+// small shared helpers (mintLoopRunID, mintLoopTurnID,
 // reconstructLoopMessage, scriptTextResponse) the S-LSK-001..007 tests
 // reuse, plus the every-kind-constructible guard and the substrate
 // "untouched" guard at S-LSK-006.
@@ -21,6 +21,7 @@ package agent_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -138,28 +139,6 @@ func scriptReasoningTextResponse(t *testing.T, finishReason ai.FinishReason, rea
 		agenttest.Emit(textEnd),
 		agenttest.Emit(completion),
 	}}
-}
-
-// mustSimpleRequest builds the smallest valid request the tests need:
-// one model identity, one user text message (matches agenttest's
-// provider_test.go mustSimpleRequest, restated here so this file's
-// tests have no cross-file test-only dependencies).
-func mustSimpleRequest(t *testing.T) ai.Request {
-	t.Helper()
-
-	part, err := ai.NewText("hello")
-	if err != nil {
-		t.Fatalf("ai.NewText returned %v, want no failure", err)
-	}
-	message, err := ai.NewMessage(ai.RoleUser, part)
-	if err != nil {
-		t.Fatalf("ai.NewMessage returned %v, want no failure", err)
-	}
-	request, err := ai.NewRequest("cachicamas-neutral-model-1", []ai.Message{message})
-	if err != nil {
-		t.Fatalf("ai.NewRequest returned %v, want no failure", err)
-	}
-	return request
 }
 
 // drainSink drains the agent-level event channel sink into a slice.
@@ -313,44 +292,6 @@ func reconstructLoopMessage(events []agent.Event) (reconstructedLoopMessage, boo
 // (V-REQ-03, doc 0001's seal on MessageID's unforgeability).
 func equalByContent(a, b ai.Message) bool {
 	return reflect.DeepEqual(a.Content(), b.Content())
-}
-
-// TestTurn_Phase1_NoOpCompileCheck is Phase 1's only test (tasks 1.1
-// / 1.2 / 1.3): the skeleton compiles, the file's helpers are all
-// reachable, and substrate stays untouched. The real RED/GREEN tests
-// for S-LSK-001..007 land in Phase 2 / Phase 3 / Phase 4.
-//
-// This test is intentionally tiny: it proves the loop file imports
-// compile, the helpers compile, and the stub `Turn` is callable. It
-// asserts nothing about behavior — that is Phase 2's job.
-func TestTurn_Phase1_NoOpCompileCheck(t *testing.T) {
-	t.Parallel()
-
-	script := scriptTextResponse(t, ai.FinishReasonStop)
-	_ = script
-	req := mustSimpleRequest(t)
-	_ = req
-
-	// drainSink and reconstructLoopMessage are reachable from this
-	// test, satisfying the linter without committing to a behavioral
-	// assertion at Phase 1.
-	ch := make(chan *agent.Event)
-	close(ch) // drainSink reads until close — close immediately.
-	_ = drainSink(t, ch)
-	recon, ok := reconstructLoopMessage(nil)
-	_ = recon
-	_ = ok
-
-	// scriptReasoningTextResponse is reachable too — proves the
-	// interleaved reasoning + text scripted shape compiles.
-	reasoningScript := scriptReasoningTextResponse(t, ai.FinishReasonStop, "thinking…", []byte("token-lsk-005"))
-	_ = reasoningScript
-
-	// equalByContent on two zero messages — proves the comparison
-	// helper compiles and round-trips the trivial case.
-	if !equalByContent(ai.Message{}, ai.Message{}) {
-		t.Error("equalByContent returned false on two zero messages")
-	}
 }
 
 // S-LSK-001 — AG-07.1 walking skeleton. Given a text response scripted
@@ -839,6 +780,22 @@ func gitDiff(t *testing.T, root, ref string, paths ...string) (string, error) {
 	return string(out), nil
 }
 
+// gitOutput runs an arbitrary `git <args...>` invocation from the
+// supplied root and returns the trimmed stdout. It is the substrate
+// guard's escape hatch for refs that must be resolved at run time
+// (e.g. `git merge-base HEAD origin/main`) rather than pinned in
+// source.
+func gitOutput(t *testing.T, root string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // filterOutLoopFiles strips entire file-level diff blocks whose path
 // matches loop.go or loop_test.go. A git diff is a sequence of
 // "diff --git a/<path> b/<path>" headers followed by hunks; the test
@@ -1106,29 +1063,41 @@ func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
 	// asserted in (a) above).
 }
 
-// S-LSK-006 — AG-07.1 substrate untouched (R-LSK-004). Given main at
-// 8420b2c4 (post-AG-06 merge), when the AG-07 changes are compared
-// against main, then the diff against backend/agent/src/agent/
-// (excluding loop.go and loop_test.go) shows zero lines changed, and
-// the diff against backend/agent/go.mod and backend/agent/go.sum is
-// empty.
+// S-LSK-006 — AG-07.1 substrate untouched (R-LSK-004). Given the
+// base ref that AG-07 branched from (post-AG-06 merge), when the
+// AG-07 changes are compared against that ref, then the diff against
+// backend/agent/src/agent/ (excluding loop.go and loop_test.go)
+// shows zero lines changed, and the diff against backend/agent/go.mod
+// and backend/agent/go.sum is empty.
 //
 // Recorded at Task 4.1 (GREEN — substrate preservation is a structural
-// property the test enforces by running `git diff main` from within
+// property the test enforces by running `git diff <base>` from within
 // the test). The boundary-guard re-verify (import_boundary_test.go,
 // ambient_authority_test.go) is the responsibility of the standard
 // `make test` run that includes this file; both guards are already
 // in the same package and run alongside this test.
+//
+// The base ref is resolved at run time so the test survives merge:
+// an `AG07_BASE_REF` env var pins it explicitly when set; otherwise
+// it falls back to the merge-base of HEAD and origin/main, which is
+// the most recent common ancestor and remains meaningful both on the
+// feature branch and after merge into main.
 func TestTurn_SubstrateUntouched(t *testing.T) {
 	root, err := gitTopLevel(t)
 	if err != nil {
 		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
 	}
 
-	// Pin main at the documented post-AG-06 merge commit (the base
-	// of feat/agent-layer2-wave2-ag07, per openspec/changes/.../
-	// design.md's "main at 8420b2c4" line).
-	const mainRef = "8420b2c4"
+	mainRef := os.Getenv("AG07_BASE_REF")
+	if mainRef == "" {
+		// Fall back to the merge-base with origin/main (the most
+		// recent common ancestor).
+		out, err := gitOutput(t, root, "merge-base", "HEAD", "origin/main")
+		if err != nil {
+			t.Fatalf("substrate untouched: cannot determine base ref (set AG07_BASE_REF): %v", err)
+		}
+		mainRef = out
+	}
 
 	// 1. backend/agent/src/agent/ excluding loop.go + loop_test.go.
 	raw, err := gitDiff(t, root, mainRef, "backend/agent/src/agent/")
