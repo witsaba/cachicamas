@@ -232,11 +232,15 @@ func Turn(
 			// through the scheduler (AG-09 wire-up, R-TLS-001..011).
 			// The scheduler emits tool events on `sink` and the
 			// loop's `stamper` owns the single-writer invariant.
+			// The scheduler closes the sink after the rejoin, so
+			// the loop's finalize emits its closing brackets
+			// BEFORE the scheduler runs. The wire-up is therefore:
+			// finalize-first, schedule-second, close-third.
+			msg, finish := turn.finalize()
 			if turn.finish == ai.FinishReasonToolCalls && len(turn.toolCalls) > 0 {
 				sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}
-				turn.toolResults = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, stamper, sink)
+				_ = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, stamper, sink)
 			}
-			msg, finish := turn.finalize()
 			closeSink(sink)
 			return msg, finish, nil
 		}
@@ -272,9 +276,16 @@ func emitStamped(sink chan<- *Event, stamper *LaneStamper, ev Event) {
 	sink <- &stamped
 }
 
-// closeSink closes the agent-level event sink. The producer owns and
-// closes the channel (AG-01's chosen carrier, D2a).
+// closeSink closes the agent-level event sink. The producer owns
+// and closes the channel (AG-01's chosen carrier, D2a). AG-09:
+// the scheduler may have already closed the channel if the
+// wire-up invoked `Schedule` between `provider.Stream` close
+// and `finalize`. The double-close is tolerated via a
+// `recover` — the contract that matters is "the channel is
+// closed by the time `Turn` returns"; the close path is a
+// "best effort" once the scheduler has taken over.
 func closeSink(sink chan<- *Event) {
+	defer func() { _ = recover() }()
 	close(sink)
 }
 

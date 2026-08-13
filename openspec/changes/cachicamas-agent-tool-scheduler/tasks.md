@@ -48,8 +48,8 @@ Chain strategy: size-exception
 
 ## Phase 4: Test substrate + integration (commits 6, 7 — `test`)
 
-- [ ] 4.1 (commit 6) Create `backend/agent/src/agenttest/scripted_tool.go` (in-memory `Tool`: configurable outcome, records start + policy byte-for-byte) + `scripted_tool_test.go`. Create `backend/agent/src/agent/loop_tool_dispatch_test.go` using AI-21 fake provider + scripted tools: streams `ToolCallStart/Delta/End` + `Completion{FinishReasonToolCalls}` → loop calls `Schedule` once → emits AG-05.2 events → finalizes. S-LSK-008 + S-LSK-008a bite. `go test -run TestTurn_ToolDispatch -race` → GREEN.
-- [ ] 4.2 (commit 7) Modify `substrate_untouched_test.go` filter: widen to exclude `loop_tool_dispatch_test.go`. 21-path list unchanged. `AG09_BASE_REF` env-var + dynamic `git merge-base`. `go test -run TestSubstrateUntouched -race` → GREEN (NFR-TLS-003, 6th consecutive milestone).
+- [x] 4.1 (commit 6) Create `backend/agent/src/agenttest/scripted_tool.go` (in-memory `Tool`: configurable outcome, records start + policy byte-for-byte) + `scripted_tool_test.go`. Create `backend/agent/src/agent/loop_tool_dispatch_test.go` using AI-21 fake provider + scripted tools: streams `ToolCallStart/Delta/End` + `Completion{FinishReasonToolCalls}` → loop calls `Schedule` once → emits AG-05.2 events → finalizes. S-LSK-008 + S-LSK-008a bite. `go test -run TestTurn_ToolDispatch -race` → GREEN.
+- [x] 4.2 (commit 7) Modify `substrate_untouched_test.go` filter: widen to exclude `loop_tool_dispatch_test.go`. 21-path list unchanged. `AG09_BASE_REF` env-var + dynamic `git merge-base`. `go test -run TestSubstrateUntouched -race` → GREEN (NFR-TLS-003, 6th consecutive milestone).
 
 ## Phase 5: Verification + docs (commit 8 — `docs`)
 
