@@ -96,6 +96,42 @@ func hookWithMarkerAppended() func(_ context.Context, req ai.Request) (ai.Reques
 	}
 }
 
+// hookBoomAlwaysErrors returns a PreRequestHook that returns a
+// sentinel error. Used by S-PRH-003 (R-PRH-003: failing hook aborts
+// before I/O with typed error).
+func hookBoomAlwaysErrors() func(_ context.Context, _ ai.Request) (ai.Request, error) {
+	return func(_ context.Context, _ ai.Request) (ai.Request, error) {
+		return ai.Request{}, errHookBoom
+	}
+}
+
+// errHookBoom is the typed sentinel hookBoomAlwaysErrors returns.
+// Distinct from the loop's other failure sentinels so a test
+// failure can name the exact path under test.
+var errHookBoom = errors.New("hook boom")
+
+// hookMutatesInputViaAccessor returns a PreRequestHook that reads
+// req.Messages() and writes back to the same slice header — the
+// substrate R-REX-001 read test (S-PRH-004). The hook's *intent*
+// is to mutate the loop's input in place; the substrate's promise
+// is that the mutation does not propagate because Messages()
+// returns a fresh slice on every call.
+func hookMutatesInputViaAccessor() func(_ context.Context, req ai.Request) (ai.Request, error) {
+	return func(_ context.Context, req ai.Request) (ai.Request, error) {
+		msgs := req.Messages()
+		if len(msgs) == 0 {
+			return req, nil
+		}
+		// Build a fresh message that the helper uses to overwrite the
+		// slot it just read — the substrate's no-mutation promise is
+		// that the loop's input is unaffected.
+		part, _ := ai.NewText("loop-input-mutation-attempt")
+		mutated, _ := ai.NewMessage(ai.RoleUser, part)
+		msgs[0] = mutated
+		return req, nil
+	}
+}
+
 // S-PRH-001a — RED bite (recorded 2026-08-13): the no-segment hook
 // returns req unchanged; the assertion checks that the captured
 // request's system region DOES NOT contain the marker.
@@ -338,5 +374,132 @@ func TestTurn_PreRequestHook_NilIdentity(t *testing.T) {
 	if !skeletonCaptured[0].Equal(secondCaptured[0]) {
 		t.Errorf("identity default NOT byte-stable: skeleton's captured request != second's captured request\n  skeleton system: %q\n  second system:   %q",
 			loopRequestSystemText(t, skeletonCaptured[0]), loopRequestSystemText(t, secondCaptured[0]))
+	}
+}
+
+// S-PRH-003 — AG-08.1 failing hook aborts before I/O (R-PRH-003, D2).
+// Given a hook that returns (ai.Request{}, errHookBoom), when Turn
+// runs, then:
+//
+//   (a) provider.Requests() is empty — provider.Stream was never
+//       called (the hook aborted the turn BEFORE I/O);
+//   (b) the sink drains unblocked — the loop closed sink before
+//       returning the typed error;
+//   (c) the returned error wraps *ai.PreStreamFailure with a
+//       hook-attributing FailureReport.Category
+//       (FailureCategoryUnsupportedCapability).
+//
+// Mirrors the existing pre-stream-failure path (loop.go:140-147):
+// close sink, return (ai.Message{}, 0, typedErr).
+func TestTurn_PreRequestHook_FailureAbortsBeforeStream(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for prh-003",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookBoomAlwaysErrors()},
+		sink,
+	)
+	if err == nil {
+		t.Fatal("Turn returned err = nil, want a non-nil typed pre-stream failure (hook returned an error)")
+	}
+
+	// (a) Provider never saw a request — Stream was not called.
+	captured := provider.Requests()
+	if len(captured) != 0 {
+		t.Errorf("provider captured %d request(s), want 0 (hook failure must abort BEFORE provider.Stream, R-PRH-003)",
+			len(captured))
+	}
+
+	// (b) Sink drains unblocked — the loop closed it. drainSink
+	// returns when the channel closes; reaching here proves it.
+	got := drainSink(t, sink)
+	if len(got) == 0 {
+		t.Error("sink was empty after Turn returned; the loop emits run_start + turn_start before the hook call, so the sink should carry those even on the failure path")
+	}
+
+	// (c) The returned error wraps *ai.PreStreamFailure with a
+	// hook-attributing FailureReport.Category (UnsupportedCapability).
+	var failure *ai.Failure
+	if !errors.As(err, &failure) {
+		t.Fatalf("errors.As(err, *ai.Failure) = false on %v — the loop must wrap hook failures in *ai.PreStreamFailure", err)
+	}
+	if failure.Category() != ai.FailureCategoryUnsupportedCapability {
+		t.Errorf("failure category = %v, want %v (hook-attributing; not provider-auth)",
+			failure.Category(), ai.FailureCategoryUnsupportedCapability)
+	}
+}
+
+// S-PRH-004 — AG-08.1 hook cannot mutate input in place (R-PRH-004,
+// R-REX-001). Given a hook that reads req.Messages() and writes
+// back to the same slice header (a deliberate attempt to mutate the
+// loop's input in place), when Turn runs, then the captured request
+// at provider.Requests()[0] is byte-equal (via ai.Request.Equal) to
+// the skeleton's captured request — the substrate's copy-on-write
+// promise holds: the mutation is local to the hook's accessor copy
+// and does not propagate.
+//
+// This is a direct read of R-REX-001: ai.Request is a value type
+// whose accessors return fresh slices on every call.
+func TestTurn_PreRequestHook_CannotMutateInput(t *testing.T) {
+	t.Parallel()
+
+	// First: capture the skeleton's known-good request (no hook).
+	skeletonProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	skeletonSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		skeletonProvider,
+		"system prompt for prh-004",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		skeletonSink,
+	)
+	if err != nil {
+		t.Fatalf("skeleton Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, skeletonSink)
+	skeletonCaptured := skeletonProvider.Requests()
+	if len(skeletonCaptured) != 1 {
+		t.Fatalf("skeleton provider captured %d request(s), want 1", len(skeletonCaptured))
+	}
+
+	// Second: run with the mutating hook. The hook writes back into
+	// the slice it got from req.Messages(); if Messages() returned
+	// the loop's internal buffer (a violation of R-REX-001), the
+	// loop's `req` would carry the mutated message; the captured
+	// request would then NOT equal skeleton's.
+	mutateProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	mutateSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		mutateProvider,
+		"system prompt for prh-004",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookMutatesInputViaAccessor()},
+		mutateSink,
+	)
+	if err != nil {
+		t.Fatalf("mutating-hook Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, mutateSink)
+	mutateCaptured := mutateProvider.Requests()
+	if len(mutateCaptured) != 1 {
+		t.Fatalf("mutating-hook provider captured %d request(s), want 1", len(mutateCaptured))
+	}
+
+	// The mutation MUST NOT have propagated: captured == skeleton via
+	// Request.Equal (which excludes MessageID identity but compares
+	// every message's Content).
+	if !mutateCaptured[0].Equal(skeletonCaptured[0]) {
+		t.Errorf("mutating hook DID mutate loop input: captured request NOT equal to skeleton's (R-REX-001 / R-PRH-004 violation)\n  skeleton system: %q\n  mutate system:   %q",
+			loopRequestSystemText(t, skeletonCaptured[0]), loopRequestSystemText(t, mutateCaptured[0]))
 	}
 }
