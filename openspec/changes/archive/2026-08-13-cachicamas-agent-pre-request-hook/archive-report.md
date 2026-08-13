@@ -3,7 +3,7 @@
 > **Change**: cachicamas-agent-pre-request-hook · AG-08 (Layer 2 Wave 2, milestone 8 of 24; doc 0003, lines 833-900). Branch `feat/agent-layer2-wave2-ag08` based at `93077c07` (post-AG-07 PR #167 merge). Worktree `agent-layer2-wave2-ag08`. Store: HYBRID. Strict TDD CLOSED.
 > **Verdict**: PASS WITH WARNINGS — 0 CRITICAL, 3 WARNING, 3 SUGGESTION. Nothing blocks merge.
 > **Date**: 2026-08-13
-> **PR**: <TBD — filled by archive phase>
+> **PR**: https://github.com/witsaba/cachicamas/pull/168 (OPEN)
 
 ## Executive summary
 
@@ -191,10 +191,12 @@ Plus the archive commit (this phase):
 ## PR
 
 - **Title**: `feat(agent): AG-08 — Add the pre-request hook seam`
-- **URL**: <to be filled after PR open>
+- **URL**: https://github.com/witsaba/cachicamas/pull/168
+- **Number**: #168
+- **State**: OPEN
 - **Base branch**: `main`
 - **Compare branch**: `feat/agent-layer2-wave2-ag08`
-- **`size:exception`**: pre-authorized (user explicit "1000 lines with exception if bigger due to only we are working on AG-08")
+- **Labels**: `type:feature` (matches AG-04/05/06/07 precedent; `size:exception` label does not exist in this repo and is not needed — AG-08 landed at 996 lines, under the 1000-line pre-authorized budget)
 - **Files changed**: 9 implementation files + 1 archive spec edit (loop.go, loop_hook_test.go, loop_test.go + 7 openspec artifacts + 1 spec clarification). Per apply result: 996 lines added in `backend/agent/` (loop.go +72, loop_hook_test.go +921, loop_test.go +3/−1).
 - **Linked milestone**: doc 0003 lines 833-900 (AG-08 charter); R-12 (G4 Layer 2 half); v2 § 6 seam 1
 
