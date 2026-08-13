@@ -10,6 +10,15 @@
 // message lifecycle (VL2-EVT-04) and tool execution (VL2-EVT-05) families
 // — 11 kinds — and adds the AG-05.3 reconstruction property, biting
 // twice on a vacuous helper before going GREEN (agent-message-tool-events).
+// AG-06 closes Layer 2 Wave 1 with the four protocol event families
+// doc 0001 § 4.3 marks absent — permission (VL2-EVT-06, G1), cost
+// (VL2-EVT-07, G10), delegation (VL2-EVT-08, G7), compaction
+// (VL2-EVT-09, G3's visible halves) — 10 more kinds, exercising the
+// CardinalityAtMostOne seam reserved at AG-04.3
+// (`event_descriptor.go:103-120`) for the first time
+// (R-APE-003, S-APE-082), the first non-AG-04.1 consumer of the parent
+// identifier (R-AEV-003 direction-2, R-APE-006), and the recovery-
+// after-failure `Terminal: false` declaration (R-APE-008, S-APE-084).
 //
 // The layer contract below is machine-checked, not remembered: each row is
 // parsed back out of this file's own bytes and diffed against a committed
@@ -22,6 +31,7 @@
 //	L2C-03	The event stream is the only upward contract: Layer 2 reports exclusively through emitted events; callers observe the stream, they never reach into the loop (AG-00 vocabulary).
 //	L2C-04	Stream membership: a fact belongs on the event stream or it does not exist upward — if it is not on the stream, no frontend can render it and no log can reconstruct it. This is the criterion every later event family is judged by (doc 0003 AG-04 acceptance; agent-event-envelope).
 //	L2C-05	Message and tool families are reconstructable: a session log carrying a message-text bracket, a reasoning bracket, or a tool-call bracket reconstructs each message and each tool outcome independently and completely, so a frontend can render "what the model said" and "what the tools did" without losing interleaving order (doc 0003 AG-05 acceptance; agent-message-tool-events). Reconstruction helpers are test-only code; the property is the test.
+//	L2C-06	Permission, cost, delegation, and compaction families are constructible on the event stream: a session log receives each family's events with their typed payloads and identity fields, and a frontend renders "may this call proceed?", the model's token usage, the delegation tree, and the compaction lifecycle without losing interleaving order (doc 0003 AG-06 acceptance; agent-protocol-events). Per-family semantics — the closed PermissionOutcome enum (R-APE-002), the token-only CostFigures shape (R-APE-004), the parent identifier envelope field (R-APE-006), the turn-bracket CompactionSpan (R-APE-007) — belong in this package's prose and per-family files, not in the guarded row.
 //
 // # Ordering invariants (R-AEV-011)
 //

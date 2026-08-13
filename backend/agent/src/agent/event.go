@@ -307,40 +307,43 @@ var eventRegistry = []eventRegistration{
 	// CardinalityAny, Terminal:false (R-APE-001, R-APE-002).
 	// resolution_remembered is the first AG-06 exercise of the
 	// CardinalityAtMostOne seam (R-APE-003, S-APE-082) and declares
-	// it on its descriptor row.
+	// it on its descriptor row. All 3 rows declare Terminal:false
+	// EXPLICITLY (AG-05 S1 carry-forward, W3 latent-trap guard).
 	EventKindPermissionDecisionRequired: {
 		name:       "permission_decision_required",
-		descriptor: EventDescriptor{Placement: PlacementTurn},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 	EventKindPermissionDecisionMade: {
 		name:       "permission_decision_made",
-		descriptor: EventDescriptor{Placement: PlacementTurn},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 	EventKindPermissionResolutionRemembered: {
 		name:       "permission_resolution_remembered",
-		descriptor: EventDescriptor{Placement: PlacementTurn, Cardinality: CardinalityAtMostOne},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Cardinality: CardinalityAtMostOne, Terminal: false},
 	},
 	// AG-06.2 (cost family) — 2 rows. cost_turn is PlacementTurn;
 	// cost_session is PlacementRun (a session marker spans the whole
 	// run). Both are BracketRoleNone, CardinalityAny, Terminal:false
-	// (R-APE-004, R-APE-005).
+	// (R-APE-004, R-APE-005). All 2 rows declare Terminal:false
+	// EXPLICITLY (AG-05 S1 carry-forward).
 	EventKindCostTurn: {
 		name:       "cost_turn",
-		descriptor: EventDescriptor{Placement: PlacementTurn},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 	EventKindCostSession: {
 		name:       "cost_session",
-		descriptor: EventDescriptor{Placement: PlacementRun},
+		descriptor: EventDescriptor{Placement: PlacementRun, Terminal: false},
 	},
 	// AG-06.3 (delegation family) — 2 rows. Both PlacementTurn,
 	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-006).
+	// Both rows declare Terminal:false EXPLICITLY.
 	EventKindSubagentStarted: {
 		name:       "subagent_started",
-		descriptor: EventDescriptor{Placement: PlacementTurn},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 	EventKindSubagentEnded: {
 		name:       "subagent_ended",
-		descriptor: EventDescriptor{Placement: PlacementTurn},
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 	// AG-06.4 (compaction family) — 3 rows. All PlacementTurn,
 	// BracketRoleNone, CardinalityAny. compaction_failed EXPLICITLY

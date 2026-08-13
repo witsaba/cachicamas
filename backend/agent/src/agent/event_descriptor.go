@@ -10,7 +10,7 @@
 // checks with no change to the validator's own source, mirroring Layer 1's
 // event_descriptor.go (`backend/agent/src/ai/event_descriptor.go:120-130`).
 //
-// # Adding a kind: the six-step procedure
+// # Adding a kind: the seven-step procedure
 //
 // AG-05 and AG-06 register their own kinds by following these seven steps
 // (the seventh — `Terminal: false` — was added by AG-05 to close the W3
@@ -37,13 +37,21 @@
 //     entry in event_registry_test.go — the guard's bidirectional
 //     cross-check fails the same pull request that skips either half.
 //
-// # CardinalityAtMostOne seam (AG-06's, AG-05's not used)
+// # CardinalityAtMostOne seam (AG-06's first exercise)
 //
 // Step 5's descriptor row may also declare `Cardinality:
 // CardinalityAtMostOne` for a kind that must appear at most once per
 // stream. The validator's rule engine implements this seam
 // unconditionally (stream_check.go:166-171), so AG-06 may opt a kind
 // into it with no engine edit. AG-05 does not exercise this seam.
+//
+// AG-06.1's `permission_resolution_remembered` is the FIRST kind to
+// opt into this seam (R-APE-003, S-APE-082): a hand-built stream with
+// two resolution_remembered events for the same tool name is
+// REJECTED with the `ai.ErrDuplicate` rule class and the second
+// offending position via `ai.AtIndex("event", i)`. The AG-04.3
+// reservation that kept this seam unused paid off: no engine edit
+// was needed for AG-06 to exercise it.
 
 package agent
 
