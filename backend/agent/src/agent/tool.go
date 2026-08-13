@@ -217,36 +217,6 @@ type Scheduler struct {
 	MaxConcurrentReads int
 }
 
-// Schedule is the scheduler's main entry point. The full implementation
-// lives in `scheduler.go`; this stub keeps the package compileable so
-// the contract tests in `tool_test.go` can run while the scheduler is
-// still being built. The stub returns a slice of zero `Result`
-// values whose length matches the input calls. Bites in
-// `scheduler_test.go` observe the empty / zero `Content` and fail at
-// the assertion level — RED, not process-aborting panic.
-func (s *Scheduler) Schedule(
-	_ context.Context,
-	calls []ai.ToolCall,
-	_ Registry,
-	_ RunID,
-	_ TurnID,
-	_ *LaneStamper,
-	_ chan<- *Event,
-) []Result {
-	out := make([]Result, len(calls))
-	for i := range out {
-		out[i].SetCallID(calls[i].ID())
-	}
-	return out
-}
-
-// aiToolCall is the in-package alias for the Layer 1 `ai.ToolCall`,
-// here only to keep the scheduler's `Schedule` signature compatible
-// with the contract test surfaces without forcing an import cycle. The
-// full Layer 1 type is reachable via `ai.ToolCall`; the scheduler
-// implementation in `scheduler.go` uses the Layer 1 type directly.
-type aiToolCall = aiToolCallCaller
-
 // Registry resolves a tool name to its implementation. Map-backed or
 // any source; resolution miss yields a typed `Result{ExecutionFailure}`
 // in the call's ordinal slot (consistent with R-TLS-010 "one bad
@@ -272,9 +242,3 @@ func (r mapRegistry) Resolve(name string) (Tool, bool) {
 	t, ok := r[name]
 	return t, ok
 }
-
-// aiToolCallCaller is the indirection the `Schedule` stub uses to
-// build the calls signature. The real `Schedule` in `scheduler.go`
-// takes `[]ai.ToolCall` (the Layer 1 type). The stub panics, so the
-// concrete type is never used at runtime.
-type aiToolCallCaller struct{ ID, name, args string }
