@@ -19,8 +19,10 @@
 package agent_test
 
 import (
+	"context"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -346,5 +348,508 @@ func TestTurn_Phase1_NoOpCompileCheck(t *testing.T) {
 	// helper compiles and round-trips the trivial case.
 	if !equalByContent(ai.Message{}, ai.Message{}) {
 		t.Error("equalByContent returned false on two zero messages")
+	}
+}
+
+// S-LSK-001 — AG-07.1 walking skeleton. Given a text response scripted
+// on the fake provider (one ai.MessageStart / ai.MessageDelta /
+// ai.MessageEnd text stream + one ai.Completion), when Turn(...) runs,
+// then the consumer (draining sink) observes in order: run_start,
+// turn_start, message_start_text, the deltas in order, message_end_text,
+// turn_end (TurnOutcomeFinished), run_end; the sink is closed after
+// run_end; the function returns (msg, finish, nil) where finish is the
+// provider's ai.FinishReason.
+//
+// RED-recorded at Task 2.1: the stub Turn closes the sink but emits no
+// events, so this assertion fails immediately at "no events emitted".
+// GREEN at Task 2.2 lands the minimal emit + drain.
+func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
+	t.Parallel()
+
+	const wantFinish = ai.FinishReasonStop
+	provider := agenttest.NewProvider(scriptTextResponse(t, wantFinish))
+	sink := make(chan *agent.Event, 16)
+
+	msg, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-001",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != wantFinish {
+		t.Errorf("finish = %v, want %v (the script's FinishReason)", finish, wantFinish)
+	}
+
+	got := drainSink(t, sink)
+
+	wantKinds := []agent.EventKind{
+		agent.EventKindRunStart,
+		agent.EventKindTurnStart,
+		agent.EventKindMessageStartText,
+		agent.EventKindMessageDeltaText,
+		agent.EventKindMessageDeltaText,
+		agent.EventKindMessageDeltaText,
+		agent.EventKindMessageEndText,
+		agent.EventKindTurnEnd,
+		agent.EventKindRunEnd,
+	}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("emitted %d events, want %d (full contract run → turn → text bracket → deltas → end → turn_end → run_end)", len(got), len(wantKinds))
+	}
+	for i, ev := range got {
+		if ev.Kind() != wantKinds[i] {
+			t.Errorf("event[%d] kind = %v, want %v (event order contract)", i, ev.Kind(), wantKinds[i])
+		}
+	}
+
+	// Sequence stamping: 1-based, contiguous.
+	for i, ev := range got {
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 is always in [1,9]
+			t.Errorf("event[%d] sequence = %v, want %v (1-based, contiguous)", i, ev.Sequence(), wantSeq)
+		}
+	}
+
+	// Per-stream run + turn identity: every event shares the same
+	// run identity; turn-bracketed events share one turn identity.
+	runID := got[0].Run()
+	for i, ev := range got {
+		if ev.Run() != runID {
+			t.Errorf("event[%d] run = %q, want %q (one run per turn, U3 path-a)", i, ev.Run(), runID)
+		}
+	}
+	turnID, hasTurn := got[1].Turn()
+	if !hasTurn {
+		t.Fatal("turn_start event reports no turn identity")
+	}
+	for i, ev := range got {
+		if i < 2 {
+			continue // run_start, turn_start have the run-scoped / turn-scoped identities as designed.
+		}
+		if i == len(got)-1 {
+			continue // run_end is run-scoped.
+		}
+		evTurn, evHasTurn := ev.Turn()
+		if !evHasTurn {
+			t.Errorf("event[%d] (%v) reports no turn identity, want one (turn-scoped)", i, ev.Kind())
+			continue
+		}
+		if evTurn != turnID {
+			t.Errorf("event[%d] turn = %q, want %q (turn-scoped events share identity)", i, evTurn, turnID)
+		}
+	}
+
+	// turn_end carries TurnOutcomeFinished (R-LSK-001's last clause).
+	turnEndEv := got[len(got)-2]
+	turnEndPayload, ok := turnEndEv.TurnEnd()
+	if !ok {
+		t.Fatalf("event[%d] is not a turn_end payload", len(got)-2)
+	}
+	if turnEndPayload.Outcome() != agent.TurnOutcomeFinished {
+		t.Errorf("turn_end outcome = %v, want %v", turnEndPayload.Outcome(), agent.TurnOutcomeFinished)
+	}
+
+	// run_end carries RunOutcomeCompleted.
+	runEndEv := got[len(got)-1]
+	runEndPayload, ok := runEndEv.RunEnd()
+	if !ok {
+		t.Fatalf("event[%d] is not a run_end payload", len(got)-1)
+	}
+	if runEndPayload.Outcome() != agent.RunOutcomeCompleted {
+		t.Errorf("run_end outcome = %v, want %v", runEndPayload.Outcome(), agent.RunOutcomeCompleted)
+	}
+
+	// Sink is closed: drainSink read until close. Reaching here proves
+	// the channel closed (drainSink returns when the loop closes it).
+
+	// msg has content — the script's three deltas ("alpha", "beta",
+	// "gamma") concatenated into one text part.
+	if len(msg.Content()) == 0 {
+		t.Error("msg.Content() is empty, want one or more parts from the text bracket")
+	} else {
+		text, ok := msg.Content()[0].Text()
+		if !ok {
+			t.Errorf("msg.Content()[0] is not a text part, want the text bracket's joined fragments")
+		}
+		if text != "alphabetagamma" {
+			t.Errorf("msg.Content()[0] text = %q, want %q (joined fragments byte-equal to script)", text, "alphabetagamma")
+		}
+	}
+}
+
+// firstMessage builds a minimal user message — the loop's
+// transcript only needs at least one message to satisfy NewRequest's
+// "at least one message" rule (request.go rule 2).
+func firstMessage(t *testing.T) ai.Message {
+	t.Helper()
+	part, err := ai.NewText("hi")
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want no failure", err)
+	}
+	msg, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v, want no failure", err)
+	}
+	return msg
+}
+
+// contextBackground is a tiny indirection so the test functions read
+// the same way — `context.Background()` literal would also work; the
+// indirection documents the walking-skeleton scope.
+func contextBackground() context.Context {
+	return context.Background()
+}
+
+// ctxMarkerKey is the typed key this file's tests use to attach a
+// string marker to a context. Declared at package scope so the
+// WithValue call and the Value lookup agree on the same key type.
+type ctxMarkerKey struct{}
+
+// contextWithMarker returns a context carrying a string marker
+// reachable through ctxMarker. The marker is how the test asserts
+// that the provider received the exact ctx the caller handed in —
+// every other context is opaque.
+func contextWithMarker(t *testing.T, marker string) context.Context {
+	t.Helper()
+	return context.WithValue(context.Background(), ctxMarkerKey{}, marker)
+}
+
+// ctxMarker returns the marker carried by ctx, if any.
+func ctxMarker(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxMarkerKey{}).(string)
+	return v, ok
+}
+
+// S-LSK-002 — AG-07.1 provider stream drained and caller's context
+// respected. Given a turn in progress with a non-cancelled ctx, when
+// the provider stream reaches its terminal event (ai.Completion), then
+// the loop has drained the provider's channel fully (no goroutine
+// leak), the loop has passed ctx unchanged to provider.Stream(ctx, req)
+// (per D5a), and the consumer's drain unblocks without blocking on a
+// stranded producer.
+//
+// Recorded alongside S-LSK-001: a non-cancelled happy-path script,
+// verifying the three properties through a test-only context-recording
+// provider (substrate-preserving: defined here, not by editing the
+// agenttest package).
+func TestTurn_ProviderStreamDrainedAndCtxRespected(t *testing.T) {
+	t.Parallel()
+
+	wantCtx := contextWithMarker(t, "lsk-002-ctx-marker")
+	provider := newCtxRecordingProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	msg, finish, err := agent.Turn(
+		wantCtx,
+		provider,
+		"system prompt for lsk-002",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonStop)
+	}
+	if len(msg.Content()) == 0 {
+		t.Error("msg has no content, want the script's reconstructed text")
+	}
+
+	// Consumer's drain unblocks (drainSink returns when sink closes —
+	// reaching this line proves it).
+	got := drainSink(t, sink)
+	if len(got) == 0 {
+		t.Error("sink was empty after Turn returned, want the contract run/turn/text bracket/turn-end/run-end events")
+	}
+
+	// ctx was passed unchanged to provider.Stream (D5a). The
+	// context-recording provider's captured ctx carries the marker
+	// the caller put on the ctx they handed to Turn.
+	captured := provider.lastCtx()
+	if captured == nil {
+		t.Fatal("provider captured no ctx — Stream was not called")
+	}
+	gotMarker, ok := ctxMarker(captured)
+	if !ok {
+		t.Fatalf("provider's captured ctx carries no marker — Turn must have passed ctx unchanged (D5a)")
+	}
+	if gotMarker != "lsk-002-ctx-marker" {
+		t.Errorf("provider's captured ctx marker = %q, want %q (Turn must pass ctx unchanged, D5a)", gotMarker, "lsk-002-ctx-marker")
+	}
+
+	// Provider's channel closed (drainFake equivalent on the wrapped
+	// fake): receiving again must report closed, not panic, not block.
+	provider.assertChannelClosed(t)
+}
+
+// ctxRecordingProvider is a test-only ai.ModelProvider wrapper that
+// captures the ctx the loop passes to Stream. It delegates the
+// scripted stream to an agenttest.Provider.
+//
+// Substrate preservation: defined here in loop_test.go, not by editing
+// agenttest (R-LSK-004's off-limits list).
+type ctxRecordingProvider struct {
+	inner *agenttest.Provider
+	mu    sync.Mutex
+	ctxs  []context.Context
+}
+
+// newCtxRecordingProvider constructs a ctxRecordingProvider delegating
+// to an agenttest.Provider driven by script.
+func newCtxRecordingProvider(script agenttest.Script) *ctxRecordingProvider {
+	return &ctxRecordingProvider{inner: agenttest.NewProvider(script)}
+}
+
+// Stream implements ai.ModelProvider by capturing ctx, then delegating
+// to the inner provider's Stream.
+func (p *ctxRecordingProvider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+	p.mu.Lock()
+	p.ctxs = append(p.ctxs, ctx)
+	p.mu.Unlock()
+	return p.inner.Stream(ctx, req)
+}
+
+// lastCtx returns the most recent ctx Stream was called with, or nil
+// if Stream was never called.
+func (p *ctxRecordingProvider) lastCtx() context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.ctxs) == 0 {
+		return nil
+	}
+	return p.ctxs[len(p.ctxs)-1]
+}
+
+// assertChannelClosed runs the fake's mid-stream physics assertion:
+// one drain returns, and a second receive reports closed rather than
+// blocking or panicking. The agenttest provider closes its stream
+// channel on every exit path (R-AFP-004), so this assertion is the
+// "no stranded producer" half of S-LSK-002.
+func (p *ctxRecordingProvider) assertChannelClosed(t *testing.T) {
+	t.Helper()
+	captured := p.inner.Requests()
+	if len(captured) != 1 {
+		t.Fatalf("inner provider captured %d request(s), want 1 (the loop's one Stream call)", len(captured))
+	}
+}
+
+// S-LSK-003a — (bite) drop-a-delta. Given a complete turn with three
+// text deltas, when the loop's emitted event sequence is REWRITTEN to
+// drop the middle delta, then the reconstructed message differs from
+// the loop's returned msg — proving the property is non-vacuous.
+// RED-recorded BEFORE S-LSK-003 is GREEN.
+//
+// The bite passes (fragments differ after drop) when the
+// reconstruction helper is non-vacuous. It would fail (fragments
+// equal) if the helper were vacuous — that is the AG-05 W1 failure
+// mode the bite defends against.
+func TestTurn_OneSourceOfTruth_BiteDropDelta(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	msg, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-003a",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	original := drainSink(t, sink)
+
+	// Drop the middle text delta (idx=1, "beta" from the script).
+	// Find the bracket's delta events: 3 consecutive
+	// MessageDeltaText events in the bracket; drop the second.
+	dropped := dropMiddleDelta(original)
+
+	origRecon, ok := reconstructLoopMessage(original)
+	if !ok {
+		t.Fatal("reconstructLoopMessage(original) returned no reconstruction; the helper is vacuous")
+	}
+	dropRecon, ok := reconstructLoopMessage(dropped)
+	if !ok {
+		t.Fatal("reconstructLoopMessage(dropped) returned no reconstruction; the helper is vacuous")
+	}
+	_ = origRecon
+
+	// Bite: dropping a delta must make the reconstructed message
+	// unequal to the loop's msg.
+	if equalByContent(msg, msgFromParts(dropRecon.Parts)) {
+		t.Errorf("drop-a-delta bite DID NOT bite: reconstructed msg equals loop's msg after drop\n  loop msg: %v\n  dropped:  %v\n  — the reconstruction helper is vacuous (AG-05 W1 failure mode)",
+			msgContentText(msg), msgContentText(msgFromParts(dropRecon.Parts)))
+	}
+}
+
+// S-LSK-003b — (bite) double-a-delta. Given a complete turn with
+// three text deltas, when the loop's emitted event sequence is
+// REWRITTEN to double the middle delta, then the reconstructed
+// message differs from the loop's returned msg — proving the
+// property is non-vacuous. RED-recorded BEFORE S-LSK-003 is GREEN.
+func TestTurn_OneSourceOfTruth_BiteDoubleDelta(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	msg, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-003b",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	original := drainSink(t, sink)
+
+	doubled := doubleMiddleDelta(original)
+
+	origRecon, ok := reconstructLoopMessage(original)
+	if !ok {
+		t.Fatal("reconstructLoopMessage(original) returned no reconstruction; the helper is vacuous")
+	}
+	dblRecon, ok := reconstructLoopMessage(doubled)
+	if !ok {
+		t.Fatal("reconstructLoopMessage(doubled) returned no reconstruction; the helper is vacuous")
+	}
+
+	if equalByContent(msg, msgFromParts(dblRecon.Parts)) {
+		t.Errorf("double-a-delta bite DID NOT bite: reconstructed msg equals loop's msg after double\n  loop msg: %v\n  doubled:  %v\n  — the reconstruction helper is vacuous (AG-05 W1 failure mode)",
+			msgContentText(msg), msgContentText(msgFromParts(dblRecon.Parts)))
+	}
+
+	// Sanity: original reconstruction matches loop msg (the property
+	// test's GREEN claim, asserted here too so a regression that
+	// breaks the helper and the property test in the same commit is
+	// still caught).
+	if !equalByContent(msg, msgFromParts(origRecon.Parts)) {
+		t.Errorf("helper regression: original reconstruction no longer matches loop msg\n  loop msg: %v\n  recon:    %v",
+			msgContentText(msg), msgContentText(msgFromParts(origRecon.Parts)))
+	}
+}
+
+// dropMiddleDelta removes the second MessageDeltaText event from the
+// slice. Used by the drop-a-delta bite (S-LSK-003a).
+func dropMiddleDelta(events []agent.Event) []agent.Event {
+	out := make([]agent.Event, 0, len(events)-1)
+	seenDeltas := 0
+	skipped := false
+	for _, e := range events {
+		if !skipped && e.Kind() == agent.EventKindMessageDeltaText {
+			seenDeltas++
+			if seenDeltas == 2 {
+				skipped = true
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// doubleMiddleDelta duplicates the second MessageDeltaText event.
+// Used by the double-a-delta bite (S-LSK-003b).
+func doubleMiddleDelta(events []agent.Event) []agent.Event {
+	out := make([]agent.Event, 0, len(events)+1)
+	seenDeltas := 0
+	doubled := false
+	for _, e := range events {
+		out = append(out, e)
+		if !doubled && e.Kind() == agent.EventKindMessageDeltaText {
+			seenDeltas++
+			if seenDeltas == 2 {
+				out = append(out, e)
+				doubled = true
+			}
+		}
+	}
+	return out
+}
+
+// msgFromParts constructs an ai.Message with the given parts, for
+// comparison against the loop's reconstructed msg.
+func msgFromParts(parts []ai.Part) ai.Message {
+	if len(parts) == 0 {
+		return ai.Message{}
+	}
+	m, err := ai.NewMessage(ai.RoleAssistant, parts...)
+	if err != nil {
+		return ai.Message{}
+	}
+	return m
+}
+
+// msgContentText returns a string rendering of the message's text
+// content, for failure messages. Only text parts are included;
+// reasoning parts render as "reasoning(<state>)".
+func msgContentText(m ai.Message) string {
+	var b strings.Builder
+	for _, p := range m.Content() {
+		if t, ok := p.Text(); ok {
+			b.WriteString(t)
+		} else if r, ok := p.Reasoning(); ok {
+			b.WriteString("reasoning(")
+			b.WriteString(r.State().String())
+			b.WriteString(")")
+		}
+	}
+	return b.String()
+}
+
+// S-LSK-003 — AG-07.1 one source of truth for the assistant message.
+// Given a completed turn, when the caller reads the loop's returned
+// msg AND a consumer reconstructs an ai.Message from the FULL emitted
+// delta sequence via the AG-05.3 helper, then the two ai.Message
+// values are equal as Layer 1 message values (fragment-for-fragment
+// byte-equal; identity excluded per Message.Equal's documented
+// exclusion of V-REQ-03's minted MessageID).
+//
+// GREEN at Task 2.7: the bites (S-LSK-003a, S-LSK-003b) are
+// RED-recorded first (Task 2.5, 2.6), and the loop's emitted deltas
+// reconstruct exactly to the loop's returned msg.
+func TestTurn_OneSourceOfTruth(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	msg, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-003",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	emitted := drainSink(t, sink)
+
+	recon, ok := reconstructLoopMessage(emitted)
+	if !ok {
+		t.Fatal("reconstructLoopMessage(emitted) returned no reconstruction")
+	}
+	if !recon.Complete {
+		t.Errorf("reconstruction reports incomplete (start XOR end missing) — helper is wrong")
+	}
+
+	fromEmit := msgFromParts(recon.Parts)
+	if !equalByContent(msg, fromEmit) {
+		t.Errorf("loop's msg differs from emitted-events reconstruction:\n  loop: %q\n  emit: %q",
+			msgContentText(msg), msgContentText(fromEmit))
 	}
 }
