@@ -22,8 +22,13 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -701,4 +706,216 @@ func TestTurn_PrefixStability_DeterministicHook(t *testing.T) {
 		t.Errorf("hook NOT deterministic: first captured request != second captured request (R-PRH-007 violation)\n  first system:  %q\n  second system: %q",
 			loopRequestSystemText(t, firstCaptured[0]), loopRequestSystemText(t, secondCaptured[0]))
 	}
+}
+
+// S-PRH-007 — AG-07 W1 carry: back-pressure through the hook path.
+// Given an unbuffered sink (make(chan *Event)) and a concurrent
+// consumer goroutine that drains sink while Turn runs, when Turn
+// returns, then runtime.NumGoroutine() returns to its baseline (no
+// stranded producer) and the consumer's drain unblocks — proves the
+// hook path supports back-pressure, not just the buffered-sink path
+// AG-07 exercised.
+//
+// The hook is installed to exercise the full hook → provider.Stream
+// → translate → emit path through the unbuffered channel.
+func TestTurn_PreRequestHook_UnbufferedSink(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event) // unbuffered
+
+	// Baseline goroutine count before launching the consumer +
+	// Turn. Both add goroutines; after Turn returns and the
+	// consumer exits, NumGoroutine must drop back to baseline.
+	baseline := runtime.NumGoroutine()
+
+	var consumerWG sync.WaitGroup
+	consumerWG.Add(1)
+	go func() {
+		defer consumerWG.Done()
+		// Consumer drains every event; the loop emits into an
+		// unbuffered channel, so the consumer's presence is what
+		// keeps the producer from blocking. The loop terminates the
+		// drain by closing sink before returning.
+		for range sink {
+			// discard — the test only cares that the consumer reads.
+			_ = struct{}{}
+		}
+	}()
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for prh-007",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil (sink consumer was draining)", err)
+	}
+
+	// The loop closed sink on its return — consumer's range loop
+	// must terminate. Wait for the consumer to exit.
+	consumerDone := make(chan struct{})
+	go func() {
+		consumerWG.Wait()
+		close(consumerDone)
+	}()
+	select {
+	case <-consumerDone:
+		// Consumer drained to completion; the loop closed sink.
+	case <-time.After(5 * time.Second):
+		t.Fatal("consumer did not exit within 5s — sink was not closed by Turn (back-pressure failure)")
+	}
+
+	// Goroutine baseline must return to its pre-Turn value (or
+	// below it after GC). Poll briefly to allow the runtime to
+	// settle; the consumer goroutine has already exited.
+	waitForGoroutineBaseline(t, baseline, 2*time.Second)
+}
+
+// waitForGoroutineBaseline polls runtime.NumGoroutine() until it
+// drops back to baseline (or below) or the deadline expires. Used
+// by S-PRH-007 to assert no stranded producer.
+func waitForGoroutineBaseline(t *testing.T, baseline int, deadline time.Duration) {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		if runtime.NumGoroutine() <= baseline {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Errorf("runtime.NumGoroutine() = %d, baseline = %d (stranded producer goroutine — back-pressure failure)",
+		runtime.NumGoroutine(), baseline)
+}
+
+// TestTurn_PreRequestHook_SubstrateUntouched — NFR-PRH-003 substrate
+// guard (AG-08's author). Given the base ref that AG-08 branched
+// from (post-AG-07 merge at 93077c07), when the AG-08 changes are
+// compared against that ref, then the diff against
+// backend/agent/src/agent/ (excluding loop.go, loop_test.go, and
+// loop_hook_test.go) shows zero lines changed, and the diff against
+// backend/agent/go.mod and backend/agent/go.sum is empty — the 21
+// substrate files (per NFR-PRH-003) are byte-unchanged.
+//
+// The base ref is resolved at run time so the test survives merge:
+// an `AG08_BASE_REF` env var pins it explicitly when set; otherwise
+// it falls back to the merge-base of HEAD and origin/main (AG-07 W3
+// fix carried forward — env-var fallback shipped in AG-07 PR #167).
+//
+// This is the AG-08 substrate guard; AG-07's TestTurn_SubstrateUntouched
+// also runs (its filter was widened to exclude loop_hook_test.go).
+// Together they cover the substrate for AG-08's full footprint.
+func TestTurn_PreRequestHook_SubstrateUntouched(t *testing.T) {
+	root, err := gitTopLevelHook(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+
+	mainRef := os.Getenv("AG08_BASE_REF")
+	if mainRef == "" {
+		// Fall back to the merge-base with origin/main (the most
+		// recent common ancestor).
+		out, err := gitOutputHook(t, root, "merge-base", "HEAD", "origin/main")
+		if err != nil {
+			t.Fatalf("substrate untouched: cannot determine base ref (set AG08_BASE_REF): %v", err)
+		}
+		mainRef = out
+	}
+
+	// 1. backend/agent/src/agent/ excluding loop.go, loop_test.go,
+	// loop_hook_test.go. The three loop files are owned by AG-07
+	// (loop.go, loop_test.go) and AG-08 (loop_hook_test.go); all
+	// other files are substrate.
+	raw, err := gitDiffHook(t, root, mainRef, "backend/agent/src/agent/")
+	if err != nil {
+		t.Fatalf("git diff %s -- backend/agent/src/agent/ failed: %v", mainRef, err)
+	}
+	stripped := filterOutLoopHookFiles(raw)
+	if len(stripped) != 0 {
+		t.Errorf("substrate was edited (NFR-PRH-003 violated):\n%s", stripped)
+	}
+
+	// 2. backend/agent/go.mod and backend/agent/go.sum byte-identical.
+	goModSum, err := gitDiffHook(t, root, mainRef, "backend/agent/go.mod", "backend/agent/go.sum")
+	if err != nil {
+		t.Fatalf("git diff %s -- backend/agent/go.mod go.sum failed: %v", mainRef, err)
+	}
+	if len(goModSum) != 0 {
+		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
+	}
+}
+
+// gitTopLevelHook returns the absolute path of the repo root.
+func gitTopLevelHook(t *testing.T) (string, error) {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// gitDiffHook runs `git diff <ref> -- <paths...>` and returns the
+// raw output. An empty output means no diff.
+func gitDiffHook(t *testing.T, root, ref string, paths ...string) (string, error) {
+	t.Helper()
+	args := []string{"diff", ref, "--"}
+	args = append(args, paths...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// gitOutputHook runs an arbitrary `git <args...>` invocation from
+// the supplied root and returns the trimmed stdout. The substrate
+// guard's escape hatch for refs that must be resolved at run time
+// (e.g. `git merge-base HEAD origin/main`) rather than pinned in
+// source.
+func gitOutputHook(t *testing.T, root string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// filterOutLoopHookFiles strips entire file-level diff blocks whose
+// path matches loop.go, loop_test.go, or loop_hook_test.go. Mirrors
+// loop_test.go's filter at file granularity.
+func filterOutLoopHookFiles(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	var kept strings.Builder
+	lines := strings.Split(diff, "\n")
+	skip := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			idx := strings.LastIndex(line, " b/")
+			path := line
+			if idx >= 0 {
+				path = line[idx+3:]
+			}
+			skip = strings.HasSuffix(path, "/loop.go") ||
+				strings.HasSuffix(path, "/loop_test.go") ||
+				strings.HasSuffix(path, "/loop_hook_test.go")
+		}
+		if !skip {
+			kept.WriteString(line)
+			kept.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(kept.String())
 }
