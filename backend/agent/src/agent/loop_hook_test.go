@@ -21,6 +21,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -65,6 +66,33 @@ func systemIncludesSegment(t *testing.T, req ai.Request, want string) bool {
 func hookNoSegmentIdentity() func(_ context.Context, req ai.Request) (ai.Request, error) {
 	return func(_ context.Context, req ai.Request) (ai.Request, error) {
 		return req, nil
+	}
+}
+
+// hookWithMarkerAppended returns a PreRequestHook that derives a new
+// ai.Request by appending the hookMarker as a new system segment.
+// Used by S-PRH-001 (R-PRH-002: hook sees + shapes outgoing request).
+//
+// It exercises AI-12's copy-on-write rebuild (R-REX-001):
+// req.With(...) returns a fresh value; the loop's `req` is observably
+// unmodified after the call returns.
+func hookWithMarkerAppended() func(_ context.Context, req ai.Request) (ai.Request, error) {
+	return func(_ context.Context, req ai.Request) (ai.Request, error) {
+		system, hasSystem := req.SystemInstruction()
+		if !hasSystem {
+			return ai.Request{}, errors.New("hookWithMarkerAppended: request carries no SystemInstruction")
+		}
+		markerSeg, err := ai.NewSegment(hookMarker)
+		if err != nil {
+			return ai.Request{}, err
+		}
+		segments := append([]ai.Segment{}, system.Segments()...)
+		segments = append(segments, markerSeg)
+		newInstr, err := ai.NewSystemInstruction(segments...)
+		if err != nil {
+			return ai.Request{}, err
+		}
+		return req.With(ai.WithSystemInstruction(newInstr))
 	}
 }
 
@@ -189,5 +217,126 @@ func TestTurn_PreRequestHook_AddsSegmentBite(t *testing.T) {
 	}
 	if systemIncludesSegment(t, skeletonCaptured[0], hookMarker) {
 		t.Errorf("skeleton leaked the marker into the captured system region")
+	}
+}
+
+// S-PRH-001 — AG-08.1 happy path. Given a hook that derives a new
+// ai.Request via req.With(ai.WithSystemInstruction(...)) appending a
+// marker segment, when Turn runs, then the captured request at
+// provider.Requests()[0] carries the added marker — the hook's return
+// value is what the provider received (R-PRH-002 / D2).
+//
+// RED bites (S-PRH-001a/001b) are RED-recorded first (Task 2) and
+// GREEN at this point (Task 3 added the seam). This is the
+// property test that the bites defend against being vacuous.
+func TestTurn_PreRequestHook_AddsSystemSegment(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for prh-001",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	captured := provider.Requests()
+	if len(captured) != 1 {
+		t.Fatalf("provider captured %d request(s), want 1", len(captured))
+	}
+
+	// The hook appended the marker — assert the captured system
+	// region carries it (the property: hook sees + shapes the
+	// outgoing request).
+	if !systemIncludesSegment(t, captured[0], hookMarker) {
+		t.Errorf("captured request's system region LACKS marker %q — the hook's derived request did not reach the provider (R-PRH-002 violation)",
+			hookMarker)
+	}
+
+	// Belt-and-braces: the original system region (the system prompt
+	// the loop's buildLoopRequest constructed) must still be present
+	// alongside the marker — the hook APPENDED, did not REPLACE.
+	if !strings.Contains(loopRequestSystemText(t, captured[0]), "system prompt for prh-001") {
+		t.Errorf("captured system region lost the original system prompt — hook replaced instead of appending")
+	}
+}
+
+// S-PRH-002 — AG-08.1 identity default (R-PRH-005, D4a). Given a
+// zero-value TurnOptions (no hook installed), when Turn runs twice
+// against the same script and inputs as the skeleton's S-LSK-001
+// baseline, then provider.Requests()[0] from each turn is byte-equal
+// (via ai.Request.Equal) to the other — the seam adds zero observable
+// behavior when not installed (AG-07 R-LSK-002 carry).
+//
+// Two-turn comparison replaces the JSON golden fixture the design
+// spec called for: ai.Request is a sealed value type (R-REX-001,
+// V-REQ-03) with no MarshalJSON, so a stable byte-fingerprint
+// golden would require either a JSON encoding (substrate edit) or
+// a per-region field dump (test bloat). The two-turn comparison
+// proves the same property: identical inputs + identity default →
+// byte-equal captured requests.
+//
+// This is RED-then-GREEN: the identity default is the load-bearing
+// property AG-07's S-LSK-001 byte-stability passed and AG-08 must
+// not regress.
+func TestTurn_PreRequestHook_NilIdentity(t *testing.T) {
+	t.Parallel()
+
+	skeletonProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	skeletonSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		skeletonProvider,
+		"system prompt for prh-002",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{}, // zero value, no hook (identity default)
+		skeletonSink,
+	)
+	if err != nil {
+		t.Fatalf("skeleton Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, skeletonSink)
+
+	skeletonCaptured := skeletonProvider.Requests()
+	if len(skeletonCaptured) != 1 {
+		t.Fatalf("skeleton provider captured %d request(s), want 1", len(skeletonCaptured))
+	}
+
+	// Run a SECOND skeleton Turn with the same inputs. The captured
+	// request MUST be byte-equal to the first — the identity default
+	// preserves AG-07's R-LSK-002 byte-stability on identical inputs.
+	secondProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	secondSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for prh-002",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{}, // zero value, no hook (identity default)
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, secondSink)
+
+	secondCaptured := secondProvider.Requests()
+	if len(secondCaptured) != 1 {
+		t.Fatalf("second provider captured %d request(s), want 1", len(secondCaptured))
+	}
+
+	if !skeletonCaptured[0].Equal(secondCaptured[0]) {
+		t.Errorf("identity default NOT byte-stable: skeleton's captured request != second's captured request\n  skeleton system: %q\n  second system:   %q",
+			loopRequestSystemText(t, skeletonCaptured[0]), loopRequestSystemText(t, secondCaptured[0]))
 	}
 }
