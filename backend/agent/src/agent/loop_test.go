@@ -19,6 +19,7 @@
 package agent_test
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"strings"
@@ -852,4 +853,190 @@ func TestTurn_OneSourceOfTruth(t *testing.T) {
 		t.Errorf("loop's msg differs from emitted-events reconstruction:\n  loop: %q\n  emit: %q",
 			msgContentText(msg), msgContentText(fromEmit))
 	}
+}
+
+// S-LSK-004 — AG-07.2 two sequential turns share nothing. Given one
+// Turn(...) that has already run a turn, when a second turn runs via
+// a second Turn(...) invocation (fresh slices, fresh opts, fresh sink,
+// fresh provider script), then the second turn's emitted events
+// carry fresh per-stream ordering starting at 1, and the second
+// turn's events do not depend on any state from the first turn (no
+// closure captures over first-turn results, no shared LaneStamper).
+//
+// Recorded at Task 3.1 (RED-then-GREEN, single commit): the assertion
+// reads runID, turnID, and sequence values from both turns.
+func TestTurn_TwoSequentialTurnsShareNothing(t *testing.T) {
+	t.Parallel()
+
+	// First turn.
+	firstScript := scriptTextResponse(t, ai.FinishReasonStop)
+	firstProvider := agenttest.NewProvider(firstScript)
+	firstSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		firstProvider,
+		"system prompt for lsk-004 first",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		firstSink,
+	)
+	if err != nil {
+		t.Fatalf("first Turn returned err = %v, want nil", err)
+	}
+	firstEvents := drainSink(t, firstSink)
+
+	// Second turn: completely fresh inputs (slices, opts, sink,
+	// provider, script).
+	secondScript := scriptTextResponse(t, ai.FinishReasonLength)
+	secondProvider := agenttest.NewProvider(secondScript)
+	secondSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for lsk-004 second",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	secondEvents := drainSink(t, secondSink)
+
+	// Fresh run identity: every event in turn N carries that turn's
+	// own runID, distinct from any other turn's runID.
+	firstRunID := firstEvents[0].Run()
+	secondRunID := secondEvents[0].Run()
+	if firstRunID == secondRunID {
+		t.Errorf("first and second turns share runID %q — Turn must mint fresh run identities (R-LSK-002)", firstRunID)
+	}
+	for i, ev := range firstEvents {
+		if ev.Run() != firstRunID {
+			t.Errorf("first turn event[%d] carries runID %q, want %q", i, ev.Run(), firstRunID)
+		}
+	}
+	for i, ev := range secondEvents {
+		if ev.Run() != secondRunID {
+			t.Errorf("second turn event[%d] carries runID %q, want %q", i, ev.Run(), secondRunID)
+		}
+	}
+
+	// Fresh turn identity: every turn-scoped event in turn N carries
+	// that turn's own turnID, distinct from any other turn's turnID.
+	firstTurnID, _ := firstEvents[1].Turn()
+	secondTurnID, _ := secondEvents[1].Turn()
+	if firstTurnID == secondTurnID {
+		t.Errorf("first and second turns share turnID %q — Turn must mint fresh turn identities (R-LSK-002)", firstTurnID)
+	}
+
+	// Fresh per-stream ordering: every turn's first event is at
+	// sequence 1, contiguously from there.
+	if len(firstEvents) == 0 || firstEvents[0].Sequence() != 1 {
+		t.Errorf("first turn's first event sequence = %v, want 1", firstEvents[0].Sequence())
+	}
+	if len(secondEvents) == 0 || secondEvents[0].Sequence() != 1 {
+		t.Errorf("second turn's first event sequence = %v, want 1 (per-stream, R-LSK-002)", secondEvents[0].Sequence())
+	}
+	for i, ev := range secondEvents {
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 always in [1,9]
+			t.Errorf("second turn event[%d] sequence = %v, want %v (restarts at 1, not continuing first turn's count)",
+				i, ev.Sequence(), wantSeq)
+		}
+	}
+}
+
+// S-LSK-005 — AG-07.2 reasoning flows through distinguished, byte-
+// exact. Given a scripted response interleaving reasoning and text
+// deltas (per D4a: response_start, reasoning block start/delta/end
+// with a non-empty reasoning round-trip token, then text block
+// start/delta/delta/end, then completion), when the loop re-emits
+// it via Turn(...), then:
+//   (a) reasoning and text are emitted as separate bracket kinds
+//       (message_start_reasoning / message_delta_reasoning /
+//       message_end_reasoning vs message_start_text / etc.);
+//   (b) the assistant message's reasoning-content round-trip token
+//       is byte-equal to the script's token (R-ARE-010, V-REQ-11);
+//   (c) the event order matches the script's emit calls.
+//
+// RED-recorded at Task 3.2: the current loop drops reasoning events
+// on the floor and produces no reasoning Part, so the byte-exact
+// assertion fails immediately.
+func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
+	t.Parallel()
+
+	reasoningText := "thinking through the problem…"
+	tokenBytes := []byte("rt-token-lsk-005-\x00\xff-binary") // non-text bytes to prove byte-exactness (R-ARE-010).
+	provider := agenttest.NewProvider(scriptReasoningTextResponse(t, ai.FinishReasonStop, reasoningText, tokenBytes))
+	sink := make(chan *agent.Event, 16)
+
+	msg, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-005",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonStop)
+	}
+
+	got := drainSink(t, sink)
+
+	// (a) Reasoning and text emitted as separate kinds. Walk the
+	// events and assert both kinds appear, with the script's
+	// interleaved order (response_start dropped; reasoning bracket;
+	// text bracket; completion).
+	wantOrder := []agent.EventKind{
+		agent.EventKindRunStart,
+		agent.EventKindTurnStart,
+		agent.EventKindMessageStartReasoning,
+		agent.EventKindMessageDeltaReasoning,
+		agent.EventKindMessageEndReasoning,
+		agent.EventKindMessageStartText,
+		agent.EventKindMessageDeltaText,
+		agent.EventKindMessageDeltaText,
+		agent.EventKindMessageEndText,
+		agent.EventKindTurnEnd,
+		agent.EventKindRunEnd,
+	}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("emitted %d events, want %d (interleaved reasoning + text + closing brackets)", len(got), len(wantOrder))
+	}
+	for i, ev := range got {
+		if ev.Kind() != wantOrder[i] {
+			t.Errorf("event[%d] kind = %v, want %v (reasoning and text as separate bracket kinds, in script order)", i, ev.Kind(), wantOrder[i])
+		}
+	}
+
+	// (b) Reasoning round-trip token byte-equal in the assistant
+	// message (R-ARE-010).
+	var foundReasoningPart bool
+	for _, p := range msg.Content() {
+		if r, ok := p.Reasoning(); ok {
+			token, hasToken := r.Token()
+			if !hasToken {
+				t.Errorf("reasoning Part has no token — R-ARE-010's byte-exact round-trip preserved across the loop")
+				continue
+			}
+			if !bytes.Equal(token, tokenBytes) {
+				t.Errorf("reasoning round-trip token = %v, want %v (byte-equal, R-ARE-010)", token, tokenBytes)
+			}
+			if r.Text() != reasoningText {
+				t.Errorf("reasoning text = %q, want %q", r.Text(), reasoningText)
+			}
+			foundReasoningPart = true
+		}
+	}
+	if !foundReasoningPart {
+		t.Errorf("assistant message carries no reasoning Part — reasoning events were dropped instead of translated")
+	}
+
+	// (c) Event order matches the script's emit calls (already
+	// asserted in (a) above).
 }

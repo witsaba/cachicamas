@@ -223,10 +223,11 @@ func modelForOpts(opts TurnOptions) string {
 }
 
 // turnAccumulator is the per-turn walker that holds the in-flight
-// bracket identities, the running text fragment list, and the
-// LaneStamper used to stamp every emitted event. Walking-skeleton
-// scope: a single text or reasoning bracket at a time — AG-23
-// introduces multiple brackets.
+// bracket identities, the running text and reasoning fragment lists,
+// the reasoning round-trip token (R-ARE-009), and the LaneStamper
+// used to stamp every emitted event. Walking-skeleton scope: a single
+// text or reasoning bracket at a time — AG-23 introduces multiple
+// brackets.
 //
 // It is NOT shared across calls: every Turn(...) call mints a fresh
 // turnAccumulator (R-LSK-002).
@@ -241,6 +242,15 @@ type turnAccumulator struct {
 		ended     bool
 		idx       uint32
 		fragments []string
+	}
+	reasoningBracket struct {
+		msgID     ai.MessageID
+		started   bool
+		ended     bool
+		idx       uint32
+		fragments []byte
+		token     []byte
+		hasToken  bool
 	}
 	finish   ai.FinishReason
 	finishOk bool
@@ -308,6 +318,53 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 		emitStamped(t.sink, t.stamper, out)
 		return false
 
+	case ai.EventKindReasoningBlockStart:
+		msgID := mintLoopMessageID()
+		t.reasoningBracket.msgID = msgID
+		t.reasoningBracket.started = true
+		t.reasoningBracket.ended = false
+		t.reasoningBracket.idx = 0
+		t.reasoningBracket.fragments = nil
+		t.reasoningBracket.token = nil
+		t.reasoningBracket.hasToken = false
+		out, err := NewMessageStartReasoning(t.runID, t.turnID, msgID)
+		if err != nil {
+			t.fatal = err
+			return false
+		}
+		emitStamped(t.sink, t.stamper, out)
+		return false
+
+	case ai.EventKindReasoningDelta:
+		delta, _ := ev.ReasoningDelta()
+		idx := t.reasoningBracket.idx
+		t.reasoningBracket.idx++
+		t.reasoningBracket.fragments = append(t.reasoningBracket.fragments, delta.Fragment()...)
+		out, err := NewMessageDeltaReasoning(t.runID, t.turnID, t.reasoningBracket.msgID, idx, string(delta.Fragment()))
+		if err != nil {
+			t.fatal = err
+			return false
+		}
+		emitStamped(t.sink, t.stamper, out)
+		return false
+
+	case ai.EventKindReasoningBlockEnd:
+		t.reasoningBracket.ended = true
+		if blockEnd, ok := ev.ReasoningBlockEnd(); ok {
+			token, hasToken := blockEnd.Token()
+			if hasToken {
+				t.reasoningBracket.token = append([]byte(nil), token...)
+				t.reasoningBracket.hasToken = true
+			}
+		}
+		out, err := NewMessageEndReasoning(t.runID, t.turnID, t.reasoningBracket.msgID)
+		if err != nil {
+			t.fatal = err
+			return false
+		}
+		emitStamped(t.sink, t.stamper, out)
+		return false
+
 	case ai.EventKindCompletion:
 		completion, _ := ev.Completion()
 		t.finish = completion.FinishReason()
@@ -349,8 +406,22 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 	}
 
 	// Reconstruct the assistant message from accumulated fragments.
-	// Walking-skeleton scope: one text Part per complete text bracket.
+	// Walking-skeleton scope: one text Part per complete text bracket,
+	// one reasoning Part per complete reasoning bracket (carrying the
+	// round-trip token byte-exact per R-ARE-010). Order: reasoning
+	// before text (the order the walking skeleton handles them at).
 	var parts []ai.Part
+	if t.reasoningBracket.started && t.reasoningBracket.ended {
+		text := string(t.reasoningBracket.fragments)
+		var tokenArg []byte
+		if t.reasoningBracket.hasToken {
+			tokenArg = t.reasoningBracket.token
+		}
+		part, perr := ai.NewReasoning(text, tokenArg)
+		if perr == nil {
+			parts = append(parts, part)
+		}
+	}
 	if t.textBracket.started && len(t.textBracket.fragments) > 0 {
 		joined := ""
 		for _, frag := range t.textBracket.fragments {
