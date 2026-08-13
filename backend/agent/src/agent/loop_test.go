@@ -820,7 +820,9 @@ func filterOutLoopFiles(diff string) string {
 			if idx >= 0 {
 				path = line[idx+3:]
 			}
-			skip = strings.HasSuffix(path, "/loop.go") || strings.HasSuffix(path, "/loop_test.go")
+			skip = strings.HasSuffix(path, "/loop.go") ||
+				strings.HasSuffix(path, "/loop_test.go") ||
+				strings.HasSuffix(path, "/loop_hook_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

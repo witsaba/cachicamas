@@ -43,11 +43,41 @@ import (
 // TurnOptions is the options struct for a single assistant turn.
 // Walking-skeleton scope: trivial/zero fields; AG-08 introduces hooks,
 // AG-09 introduces tool opts, AG-11 introduces retry opts.
+//
+// AG-08 extends the surface with a pre-request hook seam
+// (R-PRH-001..007): the hook is invoked once per Turn between
+// buildLoopRequest (loop.go:132) and provider.Stream (loop.go:140).
+// Nil is the identity default; a non-nil hook may derive a new
+// ai.Request via req.With(...) and must NOT mutate the loop's input
+// in place (R-REX-001).
 type TurnOptions struct {
 	// Model is the model identifier passed to the provider. Empty = provider default.
+	// (AG-07 — unchanged)
 	Model string
 	// MaxTokens is the optional max-tokens budget. Zero = provider default.
+	// (AG-07 — unchanged)
 	MaxTokens int
+
+	// PreRequestHook is invoked once per Turn, after buildLoopRequest
+	// (loop.go:132) and before provider.Stream (loop.go:140). It
+	// receives the fully-assembled ai.Request and the loop's own ctx.
+	// It returns a derived ai.Request (typically via req.With(...)) or
+	// an error.
+	//
+	// Nil is the identity default: Turn skips the seam and proceeds
+	// unchanged, preserving AG-07's R-LSK-002 byte-stability on
+	// identical inputs (R-PRH-005, S-PRH-002).
+	//
+	// A non-nil hook that returns an error aborts the turn before I/O:
+	// sink is closed, and Turn returns (ai.Message{}, 0, *ai.PreStreamFailure)
+	// reusing the existing pre-stream-failure path (R-PRH-003, S-PRH-003).
+	//
+	// Hooks must NOT mutate the loop's input in place; ai.Request is
+	// a value type whose With(...) rebuilds from r.options
+	// (R-REX-001, request.go:325-336). For identical inputs across
+	// calls, the hook must produce byte-equal outputs (R-PRH-007,
+	// S-PRH-006).
+	PreRequestHook func(ctx context.Context, req ai.Request) (ai.Request, error)
 }
 
 // lastLoopRunIDCounter and lastLoopTurnIDCounter are the sources of
@@ -135,6 +165,26 @@ func Turn(
 		return ai.Message{}, 0, err
 	}
 
+	// AG-08.1 — pre-request hook seam (R-PRH-001..007). Nil is the
+	// identity default (R-PRH-005, D4a); a non-nil hook returns a
+	// derived ai.Request via req.With(...) (R-REX-001). On hook error
+	// the turn aborts BEFORE provider.Stream, mirroring the
+	// pre-stream-failure path (R-PRH-003, D2): close sink, return
+	// (ai.Message{}, 0, *ai.PreStreamFailure) carrying a
+	// hook-attributing FailureReport.Category (UnsupportedCapability).
+	req, err = applyPreRequestHook(ctx, req, opts.PreRequestHook)
+	if err != nil {
+		typedErr, perr := ai.PreStreamFailure(ai.FailureReport{
+			Category:    ai.FailureCategoryUnsupportedCapability,
+			StatusClass: 4,
+		})
+		closeSink(sink)
+		if perr != nil {
+			return ai.Message{}, 0, perr
+		}
+		return ai.Message{}, 0, typedErr
+	}
+
 	// Drain the provider's channel, translating each event into an
 	// agent-level bracket (S-LSK-001, S-LSK-002).
 	pCh, streamErr := provider.Stream(ctx, req)
@@ -220,6 +270,28 @@ func buildLoopRequest(opts TurnOptions, system string, transcript []ai.Message) 
 		reqOpts = append(reqOpts, ai.WithMaxOutputTokens(opts.MaxTokens))
 	}
 	return ai.NewRequest(modelForOpts(opts), transcript, reqOpts...)
+}
+
+// applyPreRequestHook invokes hook if non-nil; returns (req, nil)
+// unchanged when hook is nil. AG-08.1's helper, extracted to keep the
+// Turn branch small and to make the identity-default no-op reachable
+// for direct testing if needed.
+//
+// Nil is the identity default (R-PRH-005, D4a): a zero-value
+// TurnOptions produces byte-identical output to AG-07's skeleton for
+// identical inputs (AG-07 R-LSK-002 carry). When hook is non-nil, the
+// helper delegates to it; the loop's caller owns the typed-error
+// handling path that wraps a non-nil hook error in *ai.PreStreamFailure
+// (R-PRH-003, S-PRH-003).
+func applyPreRequestHook(
+	ctx context.Context,
+	req ai.Request,
+	hook func(ctx context.Context, req ai.Request) (ai.Request, error),
+) (ai.Request, error) {
+	if hook == nil {
+		return req, nil
+	}
+	return hook(ctx, req)
 }
 
 // modelForOpts returns the request's model identity. Walking-skeleton
