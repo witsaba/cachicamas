@@ -917,6 +917,7 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/loop_hook_test.go") ||
 				strings.HasSuffix(path, "/tool.go") ||
 				strings.HasSuffix(path, "/tool_test.go") ||
+				strings.HasSuffix(path, "/scheduler.go") ||
 				strings.HasSuffix(path, "/scheduler_test.go")
 		}
 		if !skip {

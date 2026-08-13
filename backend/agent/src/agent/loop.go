@@ -35,6 +35,7 @@ package agent
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -50,6 +51,14 @@ import (
 // Nil is the identity default; a non-nil hook may derive a new
 // ai.Request via req.With(...) and must NOT mutate the loop's input
 // in place (R-REX-001).
+//
+// AG-09 extends the surface with a `Tools` registry (R-TLS-001..011).
+// On `Completion{FinishReason: FinishReasonToolCalls}` the loop
+// consumes the AI-18 tool-call events accumulated during the
+// stream and dispatches them to the scheduler. Nil is the
+// identity default: a zero-value `Tools` produces the same
+// tool-call failure results as a registry whose Resolve always
+// returns false (R-TLS-009 "one bad tool does not abort the turn").
 type TurnOptions struct {
 	// Model is the model identifier passed to the provider. Empty = provider default.
 	// (AG-07 — unchanged)
@@ -78,6 +87,25 @@ type TurnOptions struct {
 	// calls, the hook must produce byte-equal outputs (R-PRH-007,
 	// S-PRH-006).
 	PreRequestHook func(ctx context.Context, req ai.Request) (ai.Request, error)
+
+	// Tools is the registry keyed by tool name (D9a, R-TLS-001).
+	// The loop resolves each model request via registry.Resolve(name);
+	// an unresolved name yields a typed
+	// Result{Outcome: ExecutionFailure, Failure: ...} in that call's
+	// ordinal slot — consistent with R-TLS-009 "one bad tool does
+	// not abort the turn".
+	//
+	// Nil is the identity default: a zero-value TurnOptions
+	// produces the same tool-call failure results as a TurnOptions
+	// with a registry whose Resolve always returns false. Non-breaking
+	// zero-value extension; AG-07/AG-08 tests that don't set Tools
+	// continue to pass byte-stable.
+	//
+	// The loop calls `Schedule` exactly once per Turn between
+	// `provider.Stream` close and `finalize` when the provider's
+	// completion carries `FinishReasonToolCalls` (R-TLS-008 wording
+	// trap; AG-13 owns iteration).
+	Tools Registry
 }
 
 // lastLoopRunIDCounter and lastLoopTurnIDCounter are the sources of
@@ -200,6 +228,14 @@ func Turn(
 	for ev := range pCh {
 		if done := turn.translate(ev); done {
 			// Completion: capture the finish reason and exit the loop.
+			// If the completion carries tool calls, dispatch them
+			// through the scheduler (AG-09 wire-up, R-TLS-001..011).
+			// The scheduler emits tool events on `sink` and the
+			// loop's `stamper` owns the single-writer invariant.
+			if turn.finish == ai.FinishReasonToolCalls && len(turn.toolCalls) > 0 {
+				sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}
+				turn.toolResults = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, stamper, sink)
+			}
 			msg, finish := turn.finalize()
 			closeSink(sink)
 			return msg, finish, nil
@@ -333,9 +369,20 @@ type turnAccumulator struct {
 		token     []byte
 		hasToken  bool
 	}
-	finish   ai.FinishReason
-	finishOk bool
-	fatal    error
+	// toolCalls accumulates the AI-18 tool-call events the
+	// provider streams. On Completion{FinishReasonToolCalls}
+	// the loop forwards the slice to the scheduler (AG-09).
+	// Per-block fields hold the in-flight tool call's identity
+	// and argument bytes; the completed ToolCall is appended
+	// to `calls` on ToolCallEnd.
+	toolCalls       []ai.ToolCall
+	toolResults     []Result
+	currentToolID   string
+	currentToolName string
+	currentToolArgs strings.Builder
+	finish          ai.FinishReason
+	finishOk        bool
+	fatal           error
 }
 
 // newTurnAccumulator constructs a fresh per-turn walker.
@@ -452,6 +499,53 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 		t.finishOk = true
 		return true
 
+	case ai.EventKindToolCallStart:
+		// AG-09 wire-up: accumulate AI-18 tool-call events. The
+		// loop translates the three call events (start / delta /
+		// end) into a `[]ai.ToolCall` it forwards to the scheduler
+		// on Completion. Drops on the floor are no longer
+		// correct once the model emits a FinishReasonToolCalls
+		// completion (R-TLS-001, R-TLS-009).
+		if start, ok := ev.ToolCallStart(); ok {
+			t.currentToolID = start.ID()
+			t.currentToolName = start.Name()
+			t.currentToolArgs.Reset()
+		}
+		return false
+
+	case ai.EventKindToolCallDelta:
+		// Fragment is raw bytes (R-ATC-005). The loop stores
+		// them as a string builder; NewToolCall will validate
+		// JSON well-formedness at the seam 2 boundary.
+		if delta, ok := ev.ToolCallDelta(); ok {
+			t.currentToolArgs.Write(delta.Fragment())
+		}
+		return false
+
+	case ai.EventKindToolCallEnd:
+		// ToolCallEnd carries the complete argument bytes
+		// (R-ATC-006, R-ATC-007). Construct a Layer 1 ToolCall
+		// and append to the in-flight list. The scheduler takes
+		// the slice; loop.go never decodes, re-marshals, or
+		// re-orders the bytes (R-ATC-006 carry, V-REQ-17).
+		if _, ok := ev.ToolCallEnd(); ok && t.currentToolID != "" {
+			args := t.currentToolArgs.String()
+			// Layer 1 NewToolCall validates JSON well-formedness
+			// (R-ATC-007); a malformed payload is a typed failure
+			// the loop records as fatal so the next emit is
+			// rejected by the validator.
+			part, terr := ai.NewToolCall(t.currentToolID, t.currentToolName, []byte(args))
+			if terr != nil {
+				t.fatal = terr
+				t.currentToolID = ""
+				return false
+			}
+			tc, _ := part.ToolCall()
+			t.toolCalls = append(t.toolCalls, tc)
+			t.currentToolID = ""
+		}
+		return false
+
 	case ai.EventKindError:
 		// Mid-stream terminal error: record the failure and let the
 		// drain loop break. drainProvider empties whatever is left
@@ -516,6 +610,26 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 		part, perr := ai.NewText(joined)
 		if perr == nil {
 			parts = append(parts, part)
+		}
+	}
+	// AG-09 — append tool-result parts when the turn carries
+	// tool calls (the loop accumulated them during translate;
+	// the scheduler ran them between Completion and finalize).
+	// The tool results are stored as text parts in the order
+	// the scheduler returned them.
+	if len(t.toolResults) > 0 {
+		for _, r := range t.toolResults {
+			// Tool outcomes are typed; we serialize the result
+			// payload as a text part for the message transcript.
+			// R-TLS-007's typed `Result` reaches the caller as a
+			// transcript part; future AGs widen this surface.
+			if r.Content == nil {
+				continue
+			}
+			part, perr := ai.NewText(string(r.Content))
+			if perr == nil {
+				parts = append(parts, part)
+			}
 		}
 	}
 	if len(parts) == 0 {

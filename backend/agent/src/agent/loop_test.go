@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -144,14 +145,30 @@ func scriptReasoningTextResponse(t *testing.T, finishReason ai.FinishReason, rea
 // drainSink drains the agent-level event channel sink into a slice.
 // Mirrors agenttest's drainFake but for the agent envelope: stops on
 // channel close (the loop owns the close, R-LSK-001).
+//
+// AG-07 SUGG 1 + AG-08 SUGG 1 + AG-09 carry: the drain is bounded
+// by a 1s timeout. A genuinely stuck producer fails this helper
+// in seconds — never hanging the test binary indefinitely. The
+// AG-09 wire-up is the first named consumer of the scheduler's
+// results via `sink`, so this deadline is the single closing
+// point for the three AG carries.
 func drainSink(t *testing.T, sink <-chan *agent.Event) []agent.Event {
 	t.Helper()
 
 	var got []agent.Event
-	for ev := range sink {
-		got = append(got, *ev)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case ev, ok := <-sink:
+			if !ok {
+				return got
+			}
+			got = append(got, *ev)
+		case <-deadline:
+			t.Fatalf("drainSink: sink did not close within 1s (%d event(s) received so far) — the loop is not closing the sink it owns", len(got))
+			return nil
+		}
 	}
-	return got
 }
 
 // reconstructedLoopMessage is the AG-07 reconstruction helper's
@@ -826,6 +843,7 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/loop_hook_test.go") ||
 				strings.HasSuffix(path, "/tool.go") ||
 				strings.HasSuffix(path, "/tool_test.go") ||
+				strings.HasSuffix(path, "/scheduler.go") ||
 				strings.HasSuffix(path, "/scheduler_test.go")
 		}
 		if !skip {
