@@ -47,12 +47,14 @@ import (
 // the kind of an event that was never constructed, and [CheckEmit] rejects
 // it wherever an event is offered at the producer's emission boundary.
 //
-// # Registered kinds (R-AEV-010 — exactly these fifteen, no more)
+// # Registered kinds (R-AEV-010 — exactly these eighteen, no more)
 //
 // AG-04 (merged at 967d043f) registers the run + turn bracket family
-// (4 kinds); AG-05 (this change) registers the message + tool family
-// (11 kinds). The scope-fence `S-AEV-090` retightens from "exactly 4"
-// to "exactly 15" in the same commit as the AG-05 kinds land.
+// (4 kinds); AG-05 (merged at 6b4a3468) registers the message + tool
+// family (11 kinds); AG-06.1 (this change) registers the permission
+// family (3 kinds). The scope-fence `S-AEV-090` retightens from
+// "exactly 15" to "exactly 25" in AG-06.5 as the remaining four
+// families (cost, delegation, compaction) land.
 //
 //   - run_start — opens the run bracket (VL2-EVT-02).
 //   - run_end — closes the run bracket, carrying the run's typed outcome
@@ -83,9 +85,16 @@ import (
 //   - tool_end_execution_failure — closes a tool call whose execution
 //     itself failed (R-AMT-006). PlacementTurn. Carries a typed
 //     [Failure].
+//   - permission_decision_required — opens the "may this call proceed?"
+//     loop (VL2-EVT-06, R-APE-001). PlacementTurn.
+//   - permission_decision_made — answers it with a typed
+//     [PermissionOutcome] (R-APE-002). PlacementTurn.
+//   - permission_resolution_remembered — records a fact about future
+//     calls; at most one per stream per tool name
+//     (CardinalityAtMostOne, R-APE-003). PlacementTurn.
 //
-// AG-05 registers no permission, cost, delegation or compaction kind
-// under any name — those belong to AG-06.
+// AG-06.1 registers no cost, delegation or compaction kind under any
+// name — those belong to AG-06.2, AG-06.3 and AG-06.4.
 type EventKind uint8
 
 const (
@@ -149,10 +158,66 @@ const (
 	// itself failed; carries a typed [Failure].
 	EventKindToolEndExecutionFailure
 
+	// AG-06.1 (permission family) — 3 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny (resolution_remembered:
+	// CardinalityAtMostOne), Terminal:false (R-APE-001, R-APE-002,
+	// R-APE-003). See permission_events.go.
+
+	// EventKindPermissionDecisionRequired opens the "may this call
+	// proceed?" loop (VL2-EVT-06, R-APE-001).
+	EventKindPermissionDecisionRequired
+
+	// EventKindPermissionDecisionMade answers it with a typed
+	// PermissionOutcome (R-APE-002).
+	EventKindPermissionDecisionMade
+
+	// EventKindPermissionResolutionRemembered records a fact about
+	// future calls — at most one per stream per tool name
+	// (CardinalityAtMostOne seam, R-APE-003).
+	EventKindPermissionResolutionRemembered
+
+	// AG-06.2 (cost family) — 2 kinds, all BracketRoleNone,
+	// CardinalityAny, Terminal:false (R-APE-004, R-APE-005).
+	// See cost_events.go.
+
+	// EventKindCostTurn carries per-turn token figures (PlacementTurn).
+	EventKindCostTurn
+
+	// EventKindCostSession carries cumulative token figures over the
+	// run (PlacementRun).
+	EventKindCostSession
+
+	// AG-06.3 (delegation family) — 2 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-006).
+	// See delegation_events.go.
+
+	// EventKindSubagentStarted opens a subagent's stream inside a
+	// delegated run (parent identifier set on envelope).
+	EventKindSubagentStarted
+
+	// EventKindSubagentEnded closes it.
+	EventKindSubagentEnded
+
+	// AG-06.4 (compaction family) — 3 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-007,
+	// R-APE-008). See compaction_events.go.
+
+	// EventKindCompactionStarted opens a context-compaction bracket.
+	EventKindCompactionStarted
+
+	// EventKindCompactionFinished closes one with a turn bracket and
+	// summary identity (R-APE-007).
+	EventKindCompactionFinished
+
+	// EventKindCompactionFailed closes one with a typed failure;
+	// Terminal: false (R-APE-008). Distinct from
+	// compaction_finished.
+	EventKindCompactionFailed
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindToolEndExecutionFailure + 1
+	eventKindEnd   = EventKindCompactionFailed + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -236,6 +301,67 @@ var eventRegistry = []eventRegistration{
 	EventKindToolEndExecutionFailure: {
 		name:       "tool_end_execution_failure",
 		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	// AG-06.1 (permission family) — 3 rows. decision_required and
+	// decision_made are PlacementTurn, BracketRoleNone,
+	// CardinalityAny, Terminal:false (R-APE-001, R-APE-002).
+	// resolution_remembered is the first AG-06 exercise of the
+	// CardinalityAtMostOne seam (R-APE-003, S-APE-082) and declares
+	// it on its descriptor row. All 3 rows declare Terminal:false
+	// EXPLICITLY (AG-05 S1 carry-forward, W3 latent-trap guard).
+	EventKindPermissionDecisionRequired: {
+		name:       "permission_decision_required",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindPermissionDecisionMade: {
+		name:       "permission_decision_made",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindPermissionResolutionRemembered: {
+		name:       "permission_resolution_remembered",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Cardinality: CardinalityAtMostOne, Terminal: false},
+	},
+	// AG-06.2 (cost family) — 2 rows. cost_turn is PlacementTurn;
+	// cost_session is PlacementRun (a session marker spans the whole
+	// run). Both are BracketRoleNone, CardinalityAny, Terminal:false
+	// (R-APE-004, R-APE-005). All 2 rows declare Terminal:false
+	// EXPLICITLY (AG-05 S1 carry-forward).
+	EventKindCostTurn: {
+		name:       "cost_turn",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindCostSession: {
+		name:       "cost_session",
+		descriptor: EventDescriptor{Placement: PlacementRun, Terminal: false},
+	},
+	// AG-06.3 (delegation family) — 2 rows. Both PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-006).
+	// Both rows declare Terminal:false EXPLICITLY.
+	EventKindSubagentStarted: {
+		name:       "subagent_started",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindSubagentEnded: {
+		name:       "subagent_ended",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	// AG-06.4 (compaction family) — 3 rows. All PlacementTurn,
+	// BracketRoleNone, CardinalityAny. compaction_failed EXPLICITLY
+	// declares Terminal:false (AG-05 S1 carry-forward — the
+	// validator reads Terminal: stream_check.go:173-175); the
+	// started/finished rows also declare Terminal:false explicitly
+	// (W3 latent-trap guard, AG-04.4 + AG-05.1).
+	EventKindCompactionStarted: {
+		name:       "compaction_started",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindCompactionFinished: {
+		name:       "compaction_finished",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindCompactionFailed: {
+		name:       "compaction_failed",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 }
 

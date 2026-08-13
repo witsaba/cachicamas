@@ -54,9 +54,17 @@ func TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload(t *testing
 		// AG-05.2 (tool execution family) — 5 tool kinds (R-AMT-005, R-AMT-006, R-AMT-007)
 		agent.EventKindToolStart, agent.EventKindToolProgress,
 		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
+		// AG-06.1 (permission family) — 3 kinds (R-APE-001, R-APE-002, R-APE-003)
+		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade, agent.EventKindPermissionResolutionRemembered,
+		// AG-06.2 (cost family) — 2 kinds (R-APE-004, R-APE-005)
+		agent.EventKindCostTurn, agent.EventKindCostSession,
+		// AG-06.3 (delegation family) — 2 kinds (R-APE-006)
+		agent.EventKindSubagentStarted, agent.EventKindSubagentEnded,
+		// AG-06.4 (compaction family) — 3 kinds (R-APE-007, R-APE-008)
+		agent.EventKindCompactionStarted, agent.EventKindCompactionFinished, agent.EventKindCompactionFailed,
 	}
 	if len(kinds) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 15 kinds (4 AG-04 + 11 AG-05) %v", kinds, len(kinds), want)
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want exactly the 25 kinds (4 AG-04 + 11 AG-05 + 10 AG-06) %v", kinds, len(kinds), want)
 	}
 
 	// S-AMT-021 — the AG-05 half of the no-snapshot-route bite:

@@ -172,10 +172,12 @@ func TestEvent_Identity_ReadableFromExternalPackage(t *testing.T) {
 // Layer 2 itself: no member is an alias, re-export or extension of an
 // ai.EventKind member. agent.EventKind is a distinct declared type from
 // ai.EventKind (S-AGV-020, S-AGV-021), and it enumerates exactly the
-// four AG-04 + eleven AG-05 kinds the package registers — the AG-04.1
-// vocabulary (turn-start/turn-end join it at AG-04.2's own registration,
-// already declared at the constant level), extended by AG-05's message
-// + tool families (R-AEV-010 retightened to "exactly 15").
+// four AG-04 + eleven AG-05 + ten AG-06 kinds the package registers —
+// the AG-04.1 vocabulary (turn-start/turn-end join it at AG-04.2's own
+// registration, already declared at the constant level), extended by
+// AG-05's message + tool families, AG-06.1's permission family,
+// AG-06.2's cost family, AG-06.3's delegation family, and AG-06.4's
+// compaction family (R-AEV-010 retightened to "exactly 25").
 func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +197,14 @@ func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 		// AG-05.2 (tool execution family) — 5 tool kinds (R-AMT-005, R-AMT-006, R-AMT-007)
 		agent.EventKindToolStart, agent.EventKindToolProgress,
 		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
+		// AG-06.1 (permission family) — 3 kinds (R-APE-001, R-APE-002, R-APE-003)
+		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade, agent.EventKindPermissionResolutionRemembered,
+		// AG-06.2 (cost family) — 2 kinds (R-APE-004, R-APE-005)
+		agent.EventKindCostTurn, agent.EventKindCostSession,
+		// AG-06.3 (delegation family) — 2 kinds (R-APE-006)
+		agent.EventKindSubagentStarted, agent.EventKindSubagentEnded,
+		// AG-06.4 (compaction family) — 3 kinds (R-APE-007, R-APE-008)
+		agent.EventKindCompactionStarted, agent.EventKindCompactionFinished, agent.EventKindCompactionFailed,
 	}
 	if len(kinds) != len(want) {
 		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds)", kinds, len(kinds), want, len(want))
@@ -394,18 +404,30 @@ func TestNewRunStart_TopLevel_ReportsNoParentAsADistinguishableState(t *testing.
 }
 
 // S-AEV-022 — after this change, the package's exported surface declares
-// no delegation, subagent, or child-harness mechanism — only the parent
-// identifier field and its accessor. Proven by enumerating the package's
+// only the delegation kinds AG-06.3 owns — subagent_started and
+// subagent_ended — and the parent identifier field. No further
+// delegation, child-harness, or spawn mechanism lives on the surface
+// yet: AG-19 owns the harness. Proven by enumerating the package's
 // exported declarations and asserting none names a delegation concept
-// beyond NewDelegatedRunStart / Event.Parent themselves.
+// beyond the AG-06.3 doors + NewDelegatedRunStart / Event.Parent.
 func TestPackageSurface_DeclaresNoDelegationMechanism(t *testing.T) {
 	t.Parallel()
 
-	forbidden := []string{"Delegate", "Subagent", "ChildHarness", "Spawn"}
-	// The two names the parent field's own construction/reading door is
-	// allowed to carry — everything else naming delegation is forbidden.
+	forbidden := []string{"ChildHarness", "Spawn"}
+	// The names the delegation family's own construction/reading doors
+	// are allowed to carry — everything else naming delegation is
+	// forbidden. AG-06.3 owns the two Subagent* kinds;
+	// NewDelegatedRunStart is AG-04.1's door; everything else (no
+	// child harness, no spawn) belongs to AG-19.
 	allowed := map[string]bool{
-		"NewDelegatedRunStart": true,
+		"NewDelegatedRunStart":          true,
+		"SubagentStarted":               true,
+		"SubagentEnded":                 true,
+		"NewSubagentStarted":            true,
+		"NewSubagentEnded":              true,
+		"EventKindSubagentStarted":      true,
+		"EventKindSubagentEnded":        true,
+		"SubagentID":                    true,
 	}
 
 	exported := exportedPackageAgentNames(t)
