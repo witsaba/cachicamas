@@ -47,12 +47,14 @@ import (
 // the kind of an event that was never constructed, and [CheckEmit] rejects
 // it wherever an event is offered at the producer's emission boundary.
 //
-// # Registered kinds (R-AEV-010 — exactly these fifteen, no more)
+// # Registered kinds (R-AEV-010 — exactly these eighteen, no more)
 //
 // AG-04 (merged at 967d043f) registers the run + turn bracket family
-// (4 kinds); AG-05 (this change) registers the message + tool family
-// (11 kinds). The scope-fence `S-AEV-090` retightens from "exactly 4"
-// to "exactly 15" in the same commit as the AG-05 kinds land.
+// (4 kinds); AG-05 (merged at 6b4a3468) registers the message + tool
+// family (11 kinds); AG-06.1 (this change) registers the permission
+// family (3 kinds). The scope-fence `S-AEV-090` retightens from
+// "exactly 15" to "exactly 25" in AG-06.5 as the remaining four
+// families (cost, delegation, compaction) land.
 //
 //   - run_start — opens the run bracket (VL2-EVT-02).
 //   - run_end — closes the run bracket, carrying the run's typed outcome
@@ -83,9 +85,16 @@ import (
 //   - tool_end_execution_failure — closes a tool call whose execution
 //     itself failed (R-AMT-006). PlacementTurn. Carries a typed
 //     [Failure].
+//   - permission_decision_required — opens the "may this call proceed?"
+//     loop (VL2-EVT-06, R-APE-001). PlacementTurn.
+//   - permission_decision_made — answers it with a typed
+//     [PermissionOutcome] (R-APE-002). PlacementTurn.
+//   - permission_resolution_remembered — records a fact about future
+//     calls; at most one per stream per tool name
+//     (CardinalityAtMostOne, R-APE-003). PlacementTurn.
 //
-// AG-05 registers no permission, cost, delegation or compaction kind
-// under any name — those belong to AG-06.
+// AG-06.1 registers no cost, delegation or compaction kind under any
+// name — those belong to AG-06.2, AG-06.3 and AG-06.4.
 type EventKind uint8
 
 const (
@@ -149,10 +158,28 @@ const (
 	// itself failed; carries a typed [Failure].
 	EventKindToolEndExecutionFailure
 
+	// AG-06.1 (permission family) — 3 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny (resolution_remembered:
+	// CardinalityAtMostOne), Terminal:false (R-APE-001, R-APE-002,
+	// R-APE-003). See permission_events.go.
+
+	// EventKindPermissionDecisionRequired opens the "may this call
+	// proceed?" loop (VL2-EVT-06, R-APE-001).
+	EventKindPermissionDecisionRequired
+
+	// EventKindPermissionDecisionMade answers it with a typed
+	// PermissionOutcome (R-APE-002).
+	EventKindPermissionDecisionMade
+
+	// EventKindPermissionResolutionRemembered records a fact about
+	// future calls — at most one per stream per tool name
+	// (CardinalityAtMostOne seam, R-APE-003).
+	EventKindPermissionResolutionRemembered
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindToolEndExecutionFailure + 1
+	eventKindEnd   = EventKindPermissionResolutionRemembered + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -236,6 +263,24 @@ var eventRegistry = []eventRegistration{
 	EventKindToolEndExecutionFailure: {
 		name:       "tool_end_execution_failure",
 		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	// AG-06.1 (permission family) — 3 rows. decision_required and
+	// decision_made are PlacementTurn, BracketRoleNone,
+	// CardinalityAny, Terminal:false (R-APE-001, R-APE-002).
+	// resolution_remembered is the first AG-06 exercise of the
+	// CardinalityAtMostOne seam (R-APE-003, S-APE-082) and declares
+	// it on its descriptor row.
+	EventKindPermissionDecisionRequired: {
+		name:       "permission_decision_required",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindPermissionDecisionMade: {
+		name:       "permission_decision_made",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindPermissionResolutionRemembered: {
+		name:       "permission_resolution_remembered",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Cardinality: CardinalityAtMostOne},
 	},
 }
 
