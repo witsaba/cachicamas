@@ -797,11 +797,12 @@ func gitOutput(t *testing.T, root string, args ...string) (string, error) {
 }
 
 // filterOutLoopFiles strips entire file-level diff blocks whose path
-// matches loop.go or loop_test.go. A git diff is a sequence of
+// matches loop.go, loop_test.go, loop_hook_test.go, tool.go,
+// tool_test.go, or scheduler_test.go. A git diff is a sequence of
 // "diff --git a/<path> b/<path>" headers followed by hunks; the test
-// excludes loop files at file granularity, not at line granularity
-// (the latter would falsely drop content lines mentioning the file's
-// own name, etc.).
+// excludes the AG-07/AG-08/AG-09 loop+tool family at file granularity,
+// not at line granularity (the latter would falsely drop content
+// lines mentioning the file's own name, etc.).
 func filterOutLoopFiles(diff string) string {
 	if diff == "" {
 		return ""
@@ -812,9 +813,9 @@ func filterOutLoopFiles(diff string) string {
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
 			// Header line: detect whether this file block is for a
-			// loop file. Both sides of the diff carry the same path
-			// ("a/loop.go" and "b/loop.go"); the trailing segment
-			// after the last space identifies the file.
+			// loop or tool family file. Both sides of the diff
+			// carry the same path; the trailing segment after the
+			// last space identifies the file.
 			idx := strings.LastIndex(line, " b/")
 			path := line
 			if idx >= 0 {
@@ -822,7 +823,10 @@ func filterOutLoopFiles(diff string) string {
 			}
 			skip = strings.HasSuffix(path, "/loop.go") ||
 				strings.HasSuffix(path, "/loop_test.go") ||
-				strings.HasSuffix(path, "/loop_hook_test.go")
+				strings.HasSuffix(path, "/loop_hook_test.go") ||
+				strings.HasSuffix(path, "/tool.go") ||
+				strings.HasSuffix(path, "/tool_test.go") ||
+				strings.HasSuffix(path, "/scheduler_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

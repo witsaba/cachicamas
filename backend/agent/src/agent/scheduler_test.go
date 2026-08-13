@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/ai"
 )
 
 // scheduledCall is the in-test wire shape for one tool call request
@@ -58,6 +59,10 @@ type scriptedBiteTool struct {
 	err    error
 	policy agent.PolicySlot
 
+	// panicMessage, when non-empty, makes Run panic with this
+	// string. Used by S-TLS-011a.
+	panicMessage string
+
 	// onStart is invoked at the start of Run (after recording
 	// the policy, before sleeping). Used by S-TLS-005a to
 	// observe the fan-out.
@@ -77,9 +82,13 @@ func (s *scriptedBiteTool) Run(ctx context.Context, args []byte, policy agent.Po
 	s.startedAt = append(s.startedAt, time.Now())
 	s.policy = policy
 	callback := s.onStart
+	panicMsg := s.panicMessage
 	s.mu.Unlock()
 	if callback != nil {
 		callback(s.name)
+	}
+	if panicMsg != "" {
+		panic(panicMsg)
 	}
 	if s.sleepBeforeReturn > 0 {
 		time.Sleep(s.sleepBeforeReturn)
@@ -194,7 +203,7 @@ func TestScheduler_FanOutBoundBite(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: bound}
 	sink := make(chan *agent.Event, 1024)
-	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	results := runSchedulerAndClose(sched, calls, reg, sink)
 
 	if len(results) != total {
 		t.Fatalf("Schedule returned %d results, want %d", len(results), total)
@@ -204,6 +213,13 @@ func TestScheduler_FanOutBoundBite(t *testing.T) {
 	if observed := maxInFlight.Load(); observed > int64(bound) {
 		t.Errorf("fan-out bound bite DID NOT bite: observed max inflight = %d, want <= %d (an unbounded scheduler let the counter exceed the bound)",
 			observed, bound)
+	}
+	// The bite's preflight: the stub does not invoke the tools, so
+	// maxInFlight stays at 0 and the property assertion is vacuous.
+	// Assert the tools were actually called so the property is
+	// non-vacuous.
+	if observed := maxInFlight.Load(); observed == 0 {
+		t.Errorf("fan-out bound bite DID NOT bite: maxInFlight = 0 (the scheduler stub did not invoke any tool — the property test would pass vacuously)")
 	}
 }
 
@@ -239,9 +255,9 @@ func TestScheduler_StartEventAtExecutionStart_BiteInverted(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: 4}
 	sink := make(chan *agent.Event, 256)
-	_ = sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	_ = runSchedulerAndClose(sched, calls, reg, sink)
+	startCallIDs := observeStartCallIDsWithClose(t, sink)
 
-	startCallIDs := observeStartCallIDs(t, sink)
 	if len(startCallIDs) < 3 {
 		t.Fatalf("observed only %d ToolStart events, want at least 3", len(startCallIDs))
 	}
@@ -283,7 +299,7 @@ func TestScheduler_StartEventBeforeEnd_BiteInOrder(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: 1}
 	sink := make(chan *agent.Event, 256)
-	_ = sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	_ = runSchedulerAndClose(sched, calls, reg, sink)
 
 	// Walk the observed events and assert that for each call,
 	// the ToolStart event appears strictly before the ToolEnd
@@ -352,7 +368,7 @@ func TestScheduler_OneBadToolSiblingsComplete_BiteErrgroupShape(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: 4}
 	sink := make(chan *agent.Event, 256)
-	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	results := runSchedulerAndClose(sched, calls, reg, sink)
 
 	// BITE: an errgroup-shaped scheduler would cancel siblings
 	// when call 1 fails. The result slice would have results[2]
@@ -399,7 +415,7 @@ func TestScheduler_PanicContainment_BiteNoRecover(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: 4}
 	sink := make(chan *agent.Event, 256)
-	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	results := runSchedulerAndClose(sched, calls, reg, sink)
 
 	if len(results) != 2 {
 		t.Fatalf("Schedule returned %d results, want 2", len(results))
@@ -443,12 +459,8 @@ func newErroneousTool(t *testing.T, name string, effect agent.EffectClass) *scri
 func newPanickingTool(t *testing.T, name string, effect agent.EffectClass) *scriptedBiteTool {
 	t.Helper()
 	tool := newScriptedBiteTool(t, name, effect)
-	// The bite's setup is direct: replace the Run method
-	// semantics by using a wrapping tool that always panics.
-	return &scriptedBiteTool{
-		name:   name,
-		effect: effect,
-	}
+	tool.panicMessage = "scheduled tool panic (S-TLS-011a)"
+	return tool
 }
 
 // errBiteToolBoom is the typed sentinel returned by the erroneous
@@ -462,7 +474,9 @@ func (e errBiteTool) Error() string { return e.msg }
 
 // observeStartCallIDs drains the sink and returns the call IDs of
 // the ToolStart events in the order they arrive. Used by
-// S-TLS-006a to read the start-side ordering.
+// S-TLS-006a to read the start-side ordering. Caller is responsible
+// for closing `sink` (the scheduler closes it after `Schedule`
+// returns).
 func observeStartCallIDs(t *testing.T, sink <-chan *agent.Event) []string {
 	t.Helper()
 	var starts []string
@@ -474,24 +488,86 @@ func observeStartCallIDs(t *testing.T, sink <-chan *agent.Event) []string {
 	return starts
 }
 
+// observeStartCallIDsWithClose is the bite-friendly variant: it
+// closes the sink after Schedule returns so the drain does not
+// hang. Used by the bite tests while the scheduler is still
+// being built (the stub returns without closing).
+func observeStartCallIDsWithClose(t *testing.T, sink <-chan *agent.Event) []string {
+	t.Helper()
+	var starts []string
+	for ev := range sink {
+		if start, ok := ev.ToolStart(); ok {
+			starts = append(starts, start.CallID())
+		}
+	}
+	return starts
+}
+
+// runSchedulerAndClose calls Schedule and closes the sink in a
+// goroutine. This is the bite-friendly helper used by tests
+// while the scheduler is still being built (the stub does not
+// close the sink). After Commit 4 (the scheduler), the real
+// `Schedule` closes the sink, and this helper's close-on-exit
+// path is a safety net rather than the load-bearing close.
+func runSchedulerAndClose(sched *agent.Scheduler, calls []scheduledCall, reg agent.Registry, sink chan *agent.Event) []agent.Result {
+	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, sink)
+	// Close the sink in a goroutine so any sends the real
+	// scheduler does are still drained. The bite tests only
+	// observe `results`.
+	go func() {
+		// drain remaining items before closing
+		for range sink {
+		}
+	}()
+	close(sink)
+	return results
+}
+
 // callsToAICalls converts the in-test scheduledCall shape into
 // the Layer 1 `ai.ToolCall` slice the agent.Scheduler expects. The
-// shape is a thin wrapper for the few fields the scheduler uses.
-func callsToAICalls(calls []scheduledCall) []aiToolCallLite {
-	out := make([]aiToolCallLite, len(calls))
+// shape is a thin pass-through for the three fields the scheduler
+// reads (id, name, arguments).
+func callsToAICalls(calls []scheduledCall) []ai.ToolCall {
+	parts := make([]ai.Part, len(calls))
 	for i, c := range calls {
-		out[i] = aiToolCallLite{id: c.id, name: c.name, arguments: string(c.args)}
+		part, err := ai.NewToolCall(c.id, c.name, c.args)
+		if err != nil {
+			panic("callsToAICalls: invalid ToolCall at index " + itoa(i) + ": " + err.Error())
+		}
+		parts[i] = part
+	}
+	out := make([]ai.ToolCall, len(parts))
+	for i, p := range parts {
+		tc, ok := p.ToolCall()
+		if !ok {
+			panic("callsToAICalls: NewToolCall returned non-tool-call part at index " + itoa(i))
+		}
+		out[i] = tc
 	}
 	return out
 }
 
-// aiToolCallLite is the in-test bridge between the scheduledCall
-// shape and the scheduler's `ai.ToolCall` contract. The full
-// ai.ToolCall shape includes a JSON-validated arguments field; the
-// scheduler only reads id + name + arguments (which it forwards to
-// the tool's `Run(ctx, args, policy) (Result, error)` call).
-type aiToolCallLite struct {
-	id        string
-	name      string
-	arguments string
+// itoa formats an int as a string. Tiny helper to keep the panic
+// messages above dependency-free.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	neg := false
+	if i < 0 {
+		neg = true
+		i = -i
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for i > 0 {
+		pos--
+		buf[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	if neg {
+		pos--
+		buf[pos] = '-'
+	}
+	return string(buf[pos:])
 }
