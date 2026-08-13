@@ -4,6 +4,7 @@
 > **Nodes**: AG-04.1 `[leaf]` · AG-04.2 `[leaf]` · AG-04.3 `[leaf]` · AG-04.4 `[guard]`
 > **Introduced by**: `openspec/changes/archive/2026-08-12-cachicamas-agent-event-envelope/`, opened as a PR against `main` on 2026-08-12 (PR number and merge commit to be back-filled once merged, per this repo's convention on already-merged specs).
 > **Amended 2026-08-12 (AG-05)**: `R-AEV-007` and `R-AEV-010` MODIFIED (invariant 1 co-closure now joint with AG-05.1; scope-fence retightened from 4 to 15); `R-AEV-012` ADDED (documents the AG-04.4 extensibility experiment path AG-05 took). See delta spec at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/specs/agent-event-envelope/spec.md` and the AG-05 archive report at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/archive-report.md`.
+> **Amended 2026-08-13 (AG-06)**: `R-AEV-010` MODIFIED (scope-fence retightened from 15 to 25; forbidden-names list retires); `R-AEV-012` MODIFIED (extensibility pattern restated to record AG-06 as the third kind-set following AG-04.4); `R-AEV-013`, `R-AEV-014`, `R-AEV-015` ADDED (registry stands at 25; L2C-06 doc-contract row; AG-06 envelope invariants compliance). See delta spec at `openspec/changes/archive/2026-08-13-cachicamas-agent-protocol-events/specs/agent-event-envelope/spec.md` and the AG-06 archive report at `openspec/changes/archive/2026-08-13-cachicamas-agent-protocol-events/archive-report.md`.
 > **Status**: **live** — the invariants below hold for the lifetime of Layer 2, not only at the moment AG-04 merged
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario is independently verifiable.
 > **Identifier convention**: requirements `R-AEV-0NN`, scenarios `S-AEV-0NN`. Append-only. (`R-AGE-`/`S-AGE-` belong to `agent-event-delivery` and are not reused here.)
@@ -155,16 +156,16 @@ The guard proves **construction-time exhaustiveness of the kind registry — not
 - **S-AEV-083** — Given a witness-table entry naming a kind the registry does not contain, when the guard runs, then it FAILS naming the unknown entry — proving the cross-check is bidirectional and not a containment check.
 - **S-AEV-084** — Given the guard's source, when its recorded scope note is read, then it states that the guard proves construction-time exhaustiveness only, and closes neither envelope invariant 3 nor the loop-level typed-error path.
 
-### R-AEV-010 — AG-04 registers exactly two families; AG-05 adds two more; the scope-fence now stands at 15
+### R-AEV-010 — AG-04/AG-05/AG-06 register exactly six families; the scope-fence now stands at 25
 
-The package MUST register exactly the four event families its milestones own: AG-04 owns run lifecycle (`VL2-EVT-02`) and turn lifecycle (`VL2-EVT-03`); AG-05 owns message lifecycle (`VL2-EVT-04`) and tool execution (`VL2-EVT-05`). It MUST NOT register, stub, placeholder or reserve any kind of the permission (`VL2-EVT-06`), cost (`VL2-EVT-07`), delegation (`VL2-EVT-08`) or compaction (`VL2-EVT-09`) families — those belong to AG-06 (`0003:420`). The scope-fence `S-AEV-090` retightens from "exactly 4" to "exactly 15" in the same commit as the AG-05 kinds land.
+The package MUST register exactly the eight event families its milestones own across Wave 1: AG-04 owns run lifecycle (`VL2-EVT-02`) and turn lifecycle (`VL2-EVT-03`); AG-05 owns message lifecycle (`VL2-EVT-04`) and tool execution (`VL2-EVT-05`); AG-06 owns permission (`VL2-EVT-06`), cost (`VL2-EVT-07`), delegation (`VL2-EVT-08`), and compaction (`VL2-EVT-09`). The registry MUST hold exactly 25 kinds (4 AG-04 + 11 AG-05 + 10 AG-06) — no stub, placeholder, or reservation outside these eight families. The scope-fence `S-AEV-090` retightens from "exactly 15" to "exactly 25" in the same commit as the AG-06 kinds land; the forbidden-names list at `event_registry_test.go:326` retires (permission, cost, delegation, compaction are now AG-06's own).
 
-The registry and the guard MUST remain **structurally extensible**: AG-06 MUST be able to add a kind by following the documented procedure without editing the validator's rule engine, mirroring the AG-04.4 extensibility experiment (`S-AEV-092`, restated in the new requirement `R-AEV-012`).
-(Previously: scope-fence held at "exactly 4"; forbidden-names list included message/tool; permission/cost/delegation/compaction unchanged.)
+The registry and the guard MUST remain **structurally extensible**: AG-07 onward MUST be able to add a kind by following the documented procedure without editing the validator's rule engine, mirroring the AG-04.4 extensibility experiment (`S-AEV-092`, restated in `R-AEV-012`; AG-06 followed the same path, recorded by `R-AEV-015`).
+(Previously: scope-fence held at "exactly 15"; AG-06's four families were forbidden; AG-06 retightens to "exactly 25" and the forbidden-names list retires.)
 
 #### Scenarios
 
-- **S-AEV-090** — Given the package's registered kind set, when it is enumerated, then it contains exactly the run, turn, message and tool lifecycle kinds (15 kinds total: 4 AG-04 + 11 AG-05) and no permission, cost, delegation or compaction kind, under any name.
+- **S-AEV-090** — Given the package's registered kind set, when it is enumerated, then it contains exactly the run, turn, message, tool, permission, cost, delegation and compaction lifecycle kinds (25 kinds total: 4 AG-04 + 11 AG-05 + 10 AG-06) and no further kind of any name.
 - **S-AEV-091** — Given the package documentation, when its "adding a kind" procedure is read, then it states the ordered steps a later milestone follows to register a new kind, and states that following them requires no edit to the validator's rule engine.
 - **S-AEV-092** — Given the registry, when a new kind is added following the documented procedure in a scratch experiment, then the every-kind-constructible guard and the validator both continue to compile and run without edits to their own logic. Recorded, then reverted.
 
@@ -180,15 +181,41 @@ Both statements MUST be pinned by test, so a later edit that removes or contradi
 - **S-AEV-101** — Given the package documentation, when it is read, then it states the membership criterion and identifies it as the criterion later event families are judged by.
 - **S-AEV-102** — Given a scratch edit that removes or contradicts either statement, when `cd backend/agent && go test ./src/agent/...` runs, then a test FAILS naming the missing or divergent statement. Recorded, then reverted.
 
-### R-AEV-012 — AG-05 followed the AG-04.4 extensibility experiment pattern
+### R-AEV-012 — AG-04/AG-05/AG-06 followed the AG-04.4 extensibility experiment pattern
 
-AG-05's 11 new kinds MUST be registered by following the six-step "adding a kind" procedure documented at `event_descriptor.go:13-31`, with no edit to `stream_check.go`, `event_registry_test.go`, or `failure.go`. The AG-04.4 extensibility experiment (`S-AEV-092`) is the documented path AG-05 took — proven by the `S-AMT-081` bite (a 16th scratch kind fails the scope-fence by count) and by `R-AMT-009`'s placement assertion (`S-AMT-080`, all 11 kinds register under `PlacementTurn`).
+AG-04's 4 kinds, AG-05's 11 kinds, and AG-06's 10 kinds MUST all be registered by following the seven-step "adding a kind" procedure documented at `event_descriptor.go:13-46`, with no edit to `stream_check.go`, `event_registry_test.go`, or `failure.go`. The AG-04.4 extensibility experiment (`S-AEV-092`) is the documented path all three kind-sets took — proven by AG-04's `S-AEV-082` bite, AG-05's `S-AMT-081` bite (a 16th scratch kind fails the scope-fence by count), AG-06's `S-APE-081` bite (a 26th scratch kind fails by count), AG-05's `R-AMT-009` placement assertion (`S-AMT-080`, all 11 AG-05 kinds register under `PlacementTurn`), and AG-06's `R-AEV-015` invariant compliance assertion (`S-AEV-124`, AG-06's parent-identifier and `CardinalityAtMostOne` exercises).
 
 #### Scenarios
 
 - **S-AEV-110** — Given AG-05's 11 new kinds registered following the six-step procedure, when the validator checks a hand-built sequence containing a `message_start_text` outside an open turn, then it is REJECTED naming the `PlacementTurn` rule — proving the seam AG-04.3 reserved was actually exercised.
 - **S-AEV-111** — Given the registry after AG-05, when `stream_check.go` and `event_registry_test.go` are diffed against the AG-04 merge (`967d043f`), then the diffs are empty for both files; AG-05's value is in the substrate's extensibility, demonstrated.
-- **S-AEV-112** — Given the six-step procedure doc, when it is read, then it states that any future kind declaring `Terminal: true` MUST be honored by the validator (the W3 latent-trap guard) and that the `CardinalityAtMostOne` seam is reserved for AG-06.
+- **S-AEV-112** — Given the seven-step procedure doc, when it is read, then it states that any future kind declaring `Terminal: true` MUST be honored by the validator (the W3 latent-trap guard), that `CardinalityAtMostOne` is exercised by AG-06's `permission_resolution_remembered` (R-APE-003, `S-APE-082`), and that future kinds MAY opt into the same seam via the descriptor row.
+
+### R-AEV-013 — AG-06's registry holds exactly 25 kinds; the scope-fence now stands at 25
+
+The package MUST register exactly the eight event families its milestones own across Wave 1: AG-04 owns run lifecycle (`VL2-EVT-02`) and turn lifecycle (`VL2-EVT-03`); AG-05 owns message lifecycle (`VL2-EVT-04`) and tool execution (`VL2-EVT-05`); AG-06 owns permission (`VL2-EVT-06`), cost (`VL2-EVT-07`), delegation (`VL2-EVT-08`), and compaction (`VL2-EVT-09`). The registry MUST hold exactly 25 kinds (4 AG-04 + 11 AG-05 + 10 AG-06) — no stub, placeholder, or reservation. The scope-fence `S-AEV-090` retightens from "exactly 15" to "exactly 25" in the **same commit** as the AG-06 kinds land. The forbidden-names list at `event_registry_test.go:326` (the AG-04/AG-05 forward-fence against AG-06's families) retires — permission, cost, delegation, and compaction are AG-06's own.
+
+#### Scenarios
+
+- **S-AEV-120** — Given the package's registered kind set, when it is enumerated, then it contains exactly **25 kinds** (4 AG-04 + 11 AG-05 + 10 AG-06) — the four protocol families included — and no further kind of any name; the forbidden-names list is empty or absent.
+- **S-AEV-121** — Given the every-kind-constructible guard, when it runs, then it constructs at least one instance of every registered kind (25 total) through the public surface from an external test package; the forbidden-names check does not flag any AG-06 family name.
+
+### R-AEV-014 — L2C-06 doc-contract row references the four protocol families
+
+The doc-contract guard's `expectedLayer2ContractRows` table MUST carry an `L2C-06` row added in the same commit as the AG-06 kinds and the `L2C-06` row in `doc.go`. The row's text states that the four protocol families (permission, cost, delegation, compaction) are constructible on the event stream and that the per-family semantics belong in `doc.go` prose, not in the guarded row, per `R-AGP-002`'s closed-amendment rule. The guardian of this amendment is the same `doc_contract_guard_test.go` that guards `L2C-01`..`L2C-05`.
+
+#### Scenarios
+
+- **S-AEV-122** — Given the `expectedLayer2ContractRows` table in `doc_contract_guard_test.go`, when it is read, then it contains 6 rows (`L2C-01`..`L2C-06`) — the new `L2C-06` row is present, in order, with row text referencing the four protocol families.
+- **S-AEV-123** — Given a scratch edit that appends an `L2C-06` row to `doc.go` without adding its entry to `expectedLayer2ContractRows`, when the doc-contract guard runs, then it FAILS naming the unexpected row — the closed-amendment rule is observed, not bypassed. RED-recordable.
+
+### R-AEV-015 — Protocol family kinds follow the AG-04.1 envelope invariants
+
+Every AG-06 kind MUST follow the AG-04.1 envelope invariants: derived kind from payload (`R-AEV-001`); identity fields (run, turn, parent) readable from an external package (`R-AEV-001`/`R-AEV-003`); and per-lane ordering 1-based and contiguous (`R-AEV-002`). `subagent_started` and `subagent_ended` are the **first** non-`NewDelegatedRunStart` consumers of the parent identifier field (`event.go:362-366`, `R-AEV-003`) — the field has existed from AG-04.1 and AG-06.3 is its first extension. AG-06 closes invariant 2 (explicit nesting) **partially**; AG-19.1 closes it fully. The `CardinalityAtMostOne` seam reserved at AG-04.3 (`event_descriptor.go:103-120`) is exercised for the first time by `permission_resolution_remembered` (R-APE-003).
+
+#### Scenarios
+
+- **S-AEV-124** — Given the 10 new AG-06 kinds registered following the seven-step procedure, when the every-kind-constructible guard constructs each through the public surface and inspects them, then every kind's identity fields (run, turn, parent) are readable from an external package; `subagent_started`/`subagent_ended` distinguishably report `(parentID, true)`; `permission_resolution_remembered` declares `CardinalityAtMostOne`; `compaction_failed` declares `Terminal: false` — the three AG-06 substrate exercises are mechanically asserted.
 
 ## Non-functional requirements
 
@@ -245,7 +272,7 @@ Also out of scope, each with a named owner:
 
 The contract holds when:
 
-1. Every scenario `S-AEV-001` through `S-AEV-102` and `S-AEV-110` through `S-AEV-112` has recorded evidence.
+1. Every scenario `S-AEV-001` through `S-AEV-102` and `S-AEV-110` through `S-AEV-112` and `S-AEV-120` through `S-AEV-124` has recorded evidence.
 2. `cd backend/agent && make test` and `make lint` are green, recorded pre- and post-change.
 3. `backend/agent/go.mod` and `go.sum` are byte-unchanged.
 4. An external-package test constructs, validates and inspects **every** kind this milestone registers.
@@ -253,7 +280,7 @@ The contract holds when:
 6. Two independently stamped hand-built sequences are checked under `-race` and each is contiguous and 1-based.
 7. Every violating lifecycle permutation named by `R-AEV-004` and `R-AEV-005` is rejected with a named rule.
 8. The every-kind-constructible guard's bite is recorded red and its scratch kind is absent from the merged diff.
-9. Exactly the run, turn, message and tool lifecycle families are registered (15 kinds: 4 AG-04 + 11 AG-05); no permission, cost, delegation or compaction kind appears under any name. (AG-05 retightened this scope-fence from 4 to 15 in the same commit as the new kinds landed; AG-06 must follow the same pattern to extend to 16+.)
+9. Exactly the run, turn, message, tool, permission, cost, delegation and compaction lifecycle families are registered (25 kinds: 4 AG-04 + 11 AG-05 + 10 AG-06); no further kind of any name appears. (AG-05 retightened this scope-fence from 4 to 15 in the same commit as the AG-05 kinds landed; AG-06 retightens to 25 in the same commit as the AG-06 kinds land; AG-07 onward must follow the same pattern to extend to 26+.)
 10. The ordering invariants and the membership criterion are in the package documentation and pinned by test.
 11. AG-03's two boundary guards pass with zero changes to their own logic.
 12. No spec line, test name or acceptance line claims AG-04 closes envelope invariant 3, or invariants 1, 2 or 4 on its own.

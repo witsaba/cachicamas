@@ -135,20 +135,20 @@ Bite distribution: S-APE-081 (26th scratch fails by count, AG-06.5); S-APE-082 (
 
 ## Phase 6: Final gates + cleanup
 
-- [ ] 6.1 `golangci-lint cache clean && make lint` (full pass; cite `6c821c0a` precedent)
-- [ ] 6.2 `make build` clean
-- [ ] 6.3 `make vuln-check` clean (NOT in `make all`; runs explicitly per Engram `obs #2944`)
-- [ ] 6.4 AG-03 boundary guards pass with zero changes: `import_boundary_test.go`, `ambient_authority_test.go`
-- [ ] 6.5 `go.mod` / `go.sum` byte-unchanged from main (`git diff main -- backend/agent/go.mod go.sum` returns empty)
-- [ ] 6.6 `stream_check.go` / `failure.go` / `sequence.go` byte-unchanged (the AG-06 bet — third consecutive milestone demonstrating extensibility)
-- [ ] 6.7 `event_descriptor.go` byte-identical EXCEPT for doc-only procedure note (no struct edit per AG-05 S1 carry-forward)
-- [ ] 6.8 forbidden-names list retired at `event_registry_test.go:326`; scope-fence at "exactly 25" with 26th-scratch bite recorded
-- [ ] 6.9 envelope delta applied: `R-AEV-010` + `R-AEV-012` MODIFIED; `R-AEV-013` + `R-AEV-014` + `R-AEV-015` ADDED; 5 new S-AEV-120..124 + 6 preserved
-- [ ] 6.10 `L2C-06` row in `doc.go` AND `expectedLayer2ContractRows` in same commit (R-AGP-002 closed-amendment)
-- [ ] 6.11 Single PR opened with `size:exception` documented in PR body (citing braejan's AG-04 standing instruction; AG-05 precedent #164)
-- [ ] 6.12 Worktree `cachicamas-worktrees/agent-layer2-wave1-ag06` left in place for verify phase (per AG-04/AG-05 precedent); branch `feat/agent-layer2-wave1-ag06` retained locally + remotely
-- [ ] 6.13 Apply-progress saved to Engram with scenario count restated identically: **9 charter → 15 spec + 4 bites = 19 total (new spec); 5 added + 6 preserved (envelope-delta)**
-- [ ] 6.14 All six `sdd-attempt settle` flags passed at apply phase: `--outcome`, `--harness-disposition`, `--evidence-revision`, `--diagnosis`, `--cleanup-evidence`, `--process-evidence` (Engram `obs #2961`)
+- [x] 6.1 `golangci-lint cache clean && make lint` (full pass; cite `6c821c0a` precedent)
+- [x] 6.2 `make build` clean
+- [x] 6.3 `make vuln-check` clean (NOT in `make all`; runs explicitly per Engram `obs #2944`)
+- [x] 6.4 AG-03 boundary guards pass with zero changes: `import_boundary_test.go`, `ambient_authority_test.go`
+- [x] 6.5 `go.mod` / `go.sum` byte-unchanged from main (`git diff main -- backend/agent/go.mod go.sum` returns empty)
+- [x] 6.6 `stream_check.go` / `failure.go` / `sequence.go` byte-unchanged (the AG-06 bet — third consecutive milestone demonstrating extensibility)
+- [x] 6.7 `event_descriptor.go` byte-identical EXCEPT for doc-only procedure note (no struct edit per AG-05 S1 carry-forward)
+- [x] 6.8 forbidden-names list retired at `event_registry_test.go:326`; scope-fence at "exactly 25" with 26th-scratch bite recorded
+- [x] 6.9 envelope delta applied: `R-AEV-010` + `R-AEV-012` MODIFIED; `R-AEV-013` + `R-AEV-014` + `R-AEV-015` ADDED; 5 new S-AEV-120..124 + 6 preserved
+- [x] 6.10 `L2C-06` row in `doc.go` AND `expectedLayer2ContractRows` in same commit (R-AGP-002 closed-amendment)
+- [x] 6.11 Single PR opened with `size:exception` documented in PR body (citing braejan's AG-04 standing instruction; AG-05 precedent #164)
+- [x] 6.12 Worktree `cachicamas-worktrees/agent-layer2-wave1-ag06` left in place for verify phase (per AG-04/AG-05 precedent); branch `feat/agent-layer2-wave1-ag06` retained locally + remotely
+- [x] 6.13 Apply-progress saved to Engram with scenario count restated identically: **9 charter → 15 spec + 4 bites = 19 total (new spec); 5 added + 6 preserved (envelope-delta)**
+- [x] 6.14 All six `sdd-attempt settle` flags passed at apply phase: `--outcome`, `--harness-disposition`, `--evidence-revision`, `--diagnosis`, `--cleanup-evidence`, `--process-evidence` (Engram `obs #2961`)
 
 ## Commit Graph (work-unit-commits skill)
 
