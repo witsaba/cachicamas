@@ -172,13 +172,14 @@ func TestEvent_Identity_ReadableFromExternalPackage(t *testing.T) {
 // Layer 2 itself: no member is an alias, re-export or extension of an
 // ai.EventKind member. agent.EventKind is a distinct declared type from
 // ai.EventKind (S-AGV-020, S-AGV-021), and it enumerates exactly the
-// four AG-04 + eleven AG-05 + three AG-06.1 kinds the package
-// registers — the AG-04.1 vocabulary (turn-start/turn-end join it at
-// AG-04.2's own registration, already declared at the constant level),
-// extended by AG-05's message + tool families (R-AEV-010 retightened
-// to "exactly 15") and AG-06.1's permission family (R-AEV-010
-// retightened to "exactly 18"; final retightening to 25 lands in
-// AG-06.5).
+// four AG-04 + eleven AG-05 + three AG-06.1 + two AG-06.2 kinds the
+// package registers — the AG-04.1 vocabulary (turn-start/turn-end
+// join it at AG-04.2's own registration, already declared at the
+// constant level), extended by AG-05's message + tool families
+// (R-AEV-010 retightened to "exactly 15"), AG-06.1's permission
+// family (R-AEV-010 retightened to "exactly 18") and AG-06.2's cost
+// family (R-AEV-010 retightened to "exactly 20"; final retightening
+// to 25 lands in AG-06.5).
 func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 	t.Parallel()
 
@@ -200,6 +201,8 @@ func TestEventKind_IsItsOwnClosedVocabulary_NotAnAliasOfLayer1(t *testing.T) {
 		agent.EventKindToolEndSuccess, agent.EventKindToolEndResultFailure, agent.EventKindToolEndExecutionFailure,
 		// AG-06.1 (permission family) — 3 kinds (R-APE-001, R-APE-002, R-APE-003)
 		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade, agent.EventKindPermissionResolutionRemembered,
+		// AG-06.2 (cost family) — 2 kinds (R-APE-004, R-APE-005)
+		agent.EventKindCostTurn, agent.EventKindCostSession,
 	}
 	if len(kinds) != len(want) {
 		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds)", kinds, len(kinds), want, len(want))

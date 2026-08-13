@@ -176,10 +176,21 @@ const (
 	// (CardinalityAtMostOne seam, R-APE-003).
 	EventKindPermissionResolutionRemembered
 
+	// AG-06.2 (cost family) — 2 kinds, all BracketRoleNone,
+	// CardinalityAny, Terminal:false (R-APE-004, R-APE-005).
+	// See cost_events.go.
+
+	// EventKindCostTurn carries per-turn token figures (PlacementTurn).
+	EventKindCostTurn
+
+	// EventKindCostSession carries cumulative token figures over the
+	// run (PlacementRun).
+	EventKindCostSession
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindPermissionResolutionRemembered + 1
+	eventKindEnd   = EventKindCostSession + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -281,6 +292,18 @@ var eventRegistry = []eventRegistration{
 	EventKindPermissionResolutionRemembered: {
 		name:       "permission_resolution_remembered",
 		descriptor: EventDescriptor{Placement: PlacementTurn, Cardinality: CardinalityAtMostOne},
+	},
+	// AG-06.2 (cost family) — 2 rows. cost_turn is PlacementTurn;
+	// cost_session is PlacementRun (a session marker spans the whole
+	// run). Both are BracketRoleNone, CardinalityAny, Terminal:false
+	// (R-APE-004, R-APE-005).
+	EventKindCostTurn: {
+		name:       "cost_turn",
+		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	EventKindCostSession: {
+		name:       "cost_session",
+		descriptor: EventDescriptor{Placement: PlacementRun},
 	},
 }
 
