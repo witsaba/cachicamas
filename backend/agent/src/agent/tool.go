@@ -1,4 +1,6 @@
-// AG-09.1 — the tool execution contract (R-TLS-001..003, D1, D2, D3).
+// Package agent is Layer 2 of the cachicamas agent stack. This
+// file (tool.go) hosts AG-09.1 — the tool execution contract
+// (R-TLS-001..003, D1, D2, D3).
 //
 // This file defines the surface Layer 3 (built-in tools, doc 0004) and
 // future adapters implement to plug into the Layer 2 scheduler. It is
@@ -190,7 +192,7 @@ var _ Tool = (*importPathGuard)(nil)
 // the `Tool` interface from a non-test package-private path. It is
 // unexported and never constructed; the var above is the entire
 // reason it exists.
-type importPathGuard struct{ name string }
+type importPathGuard struct{}
 
 func (importPathGuard) Name() string                    { return "guard" }
 func (importPathGuard) EffectClass() EffectClass         { return EffectClassRead }

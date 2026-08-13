@@ -203,7 +203,7 @@ type scriptedReadTool struct {
 func (s *scriptedReadTool) Name() string                 { return s.name }
 func (s *scriptedReadTool) EffectClass() agent.EffectClass { return agent.EffectClassRead }
 
-func (s *scriptedReadTool) Run(ctx context.Context, args []byte, policy agent.PolicySlot) (agent.Result, error) {
+func (s *scriptedReadTool) Run(_ context.Context, args []byte, policy agent.PolicySlot) (agent.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.invocations++

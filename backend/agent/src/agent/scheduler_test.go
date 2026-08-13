@@ -79,7 +79,7 @@ type scriptedBiteTool struct {
 func (s *scriptedBiteTool) Name() string                  { return s.name }
 func (s *scriptedBiteTool) EffectClass() agent.EffectClass { return s.effect }
 
-func (s *scriptedBiteTool) Run(ctx context.Context, args []byte, policy agent.PolicySlot) (agent.Result, error) {
+func (s *scriptedBiteTool) Run(_ context.Context, _ []byte, policy agent.PolicySlot) (agent.Result, error) {
 	s.invocations.Add(1)
 	s.mu.Lock()
 	s.startedAt = append(s.startedAt, time.Now())
@@ -118,12 +118,6 @@ func (s *scriptedBiteTool) scriptedCompletedAt() []time.Time {
 	out := make([]time.Time, len(s.completedAt))
 	copy(out, s.completedAt)
 	return out
-}
-
-func (s *scriptedBiteTool) scriptedRecordedPolicy() agent.PolicySlot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.policy
 }
 
 // scriptedBiteTool constructs a fresh scripted bite tool. Default
@@ -502,37 +496,6 @@ type errBiteTool struct{ msg string }
 
 func (e errBiteTool) Error() string { return e.msg }
 
-// observeStartCallIDs drains the sink and returns the call IDs of
-// the ToolStart events in the order they arrive. Used by
-// S-TLS-006a to read the start-side ordering. Caller is responsible
-// for closing `sink` (the scheduler closes it after `Schedule`
-// returns).
-func observeStartCallIDs(t *testing.T, sink <-chan *agent.Event) []string {
-	t.Helper()
-	var starts []string
-	for ev := range sink {
-		if start, ok := ev.ToolStart(); ok {
-			starts = append(starts, start.CallID())
-		}
-	}
-	return starts
-}
-
-// observeStartCallIDsWithClose is the bite-friendly variant: it
-// closes the sink after Schedule returns so the drain does not
-// hang. Used by the bite tests while the scheduler is still
-// being built (the stub returns without closing).
-func observeStartCallIDsWithClose(t *testing.T, sink <-chan *agent.Event) []string {
-	t.Helper()
-	var starts []string
-	for ev := range sink {
-		if start, ok := ev.ToolStart(); ok {
-			starts = append(starts, start.CallID())
-		}
-	}
-	return starts
-}
-
 // collectEndCallIDs walks an already-drained event slice and
 // returns the call IDs of the ToolEndSuccess events in the order
 // they appear.
@@ -573,6 +536,7 @@ func runSchedulerAndClose(sched *agent.Scheduler, calls []scheduledCall, reg age
 	go func() {
 		defer func() { _ = recover() }()
 		for range sink {
+			_ = struct{}{}
 		}
 	}()
 	return results
@@ -841,7 +805,7 @@ func TestScheduler_ConcurrencyPolicy_ReadsConcurrent_MutatingsSerialized(t *test
 	// Overlap test: the [start, completed] intervals must not
 	// overlap. Equivalent to: one of the two intervals ends
 	// before the other starts.
-	overlap := !(m0Completed[0].Before(m1Started[0]) || m1Completed[0].Before(m0Started[0]))
+	overlap := !m0Completed[0].Before(m1Started[0]) && !m1Completed[0].Before(m0Started[0])
 	if overlap {
 		t.Errorf("mutating Runs overlap: m0 [%v, %v], m1 [%v, %v] — the serialized channel's contract requires the Runs to be sequential",
 			m0Started[0], m0Completed[0], m1Started[0], m1Completed[0])

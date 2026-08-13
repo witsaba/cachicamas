@@ -25,9 +25,9 @@ import (
 // the `PolicySlot` value the loop / scheduler forwarded to it
 // (byte-exact, R-TLS-002).
 type ScriptedTool struct {
-	Name_  string
-	Effect agent.EffectClass
-	Script func(ctx context.Context, args []byte, policy agent.PolicySlot) (agent.Result, error)
+	toolName string
+	Effect   agent.EffectClass
+	Script   func(ctx context.Context, args []byte, policy agent.PolicySlot) (agent.Result, error)
 
 	// Recorded state (test inspection surface):
 	mu             sync.Mutex
@@ -38,11 +38,14 @@ type ScriptedTool struct {
 	startAt        []int64
 }
 
+// Name returns the tool's display name.
+func (s *ScriptedTool) Name() string { return s.toolName }
+
 // NewScriptedTool constructs a fresh scripted tool whose `Run`
 // returns the given `Result` and `nil` error.
 func NewScriptedTool(name string, effect agent.EffectClass, result agent.Result) *ScriptedTool {
 	return &ScriptedTool{
-		Name_:  name,
+		toolName: name,
 		Effect: effect,
 		Script: func(_ context.Context, _ []byte, _ agent.PolicySlot) (agent.Result, error) {
 			return result, nil
@@ -56,7 +59,7 @@ func NewScriptedTool(name string, effect agent.EffectClass, result agent.Result)
 // asserts the tool result reaches the message parts.
 func EchoScriptedTool(name string, effect agent.EffectClass) *ScriptedTool {
 	return &ScriptedTool{
-		Name_:  name,
+		toolName: name,
 		Effect: effect,
 		Script: func(_ context.Context, args []byte, _ agent.PolicySlot) (agent.Result, error) {
 			return agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: args}, nil
@@ -70,7 +73,7 @@ func EchoScriptedTool(name string, effect agent.EffectClass) *ScriptedTool {
 // rejoin.
 func BlockingScriptedTool(name string, effect agent.EffectClass, release <-chan struct{}) *ScriptedTool {
 	return &ScriptedTool{
-		Name_:  name,
+		toolName: name,
 		Effect: effect,
 		Script: func(_ context.Context, _ []byte, _ agent.PolicySlot) (agent.Result, error) {
 			<-release
@@ -83,16 +86,13 @@ func BlockingScriptedTool(name string, effect agent.EffectClass, release <-chan 
 // panics. Used by the panic-containment test (S-TLS-011).
 func PanickingScriptedTool(name string, effect agent.EffectClass, msg string) *ScriptedTool {
 	return &ScriptedTool{
-		Name_:  name,
+		toolName: name,
 		Effect: effect,
 		Script: func(_ context.Context, _ []byte, _ agent.PolicySlot) (agent.Result, error) {
 			panic(msg)
 		},
 	}
 }
-
-// Name implements `agent.Tool`.
-func (s *ScriptedTool) Name() string { return s.Name_ }
 
 // EffectClass implements `agent.Tool`.
 func (s *ScriptedTool) EffectClass() agent.EffectClass { return s.Effect }

@@ -1,5 +1,7 @@
-// AG-09.2 / AG-09.3 / AG-09.4 — the hand-rolled tool scheduler
-// (R-TLS-004..011, D4, D5, D6, D6b, D9a).
+// Package agent is Layer 2 of the cachicamas agent stack. This
+// file (scheduler.go) hosts AG-09.2 / AG-09.3 / AG-09.4 — the
+// hand-rolled tool scheduler (R-TLS-004..011, D4, D5, D6, D6b,
+// D9a).
 //
 // The scheduler is the core of AG-09: it takes a slice of tool
 // calls and runs them under the AG-09.2 concurrency policy (reads
@@ -84,7 +86,7 @@ type emission struct {
 // `maxReadFanOutDefault`. Mutating and execute classes are
 // serialized in call order, regardless of this value.
 func (s *Scheduler) Schedule(
-	ctx context.Context,
+	_ context.Context,
 	calls []ai.ToolCall,
 	reg Registry,
 	runID RunID,
