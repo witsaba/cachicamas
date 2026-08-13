@@ -4,7 +4,7 @@
 
 **Verdict**: PASS WITH WARNINGS — 0 CRITICAL, 6 WARNING, 4 SUGGESTION. Nothing blocks the merge.
 
-**PR**: <filled in after PR creation>
+**PR**: https://github.com/witsaba/cachicamas/pull/167
 
 ## What shipped
 
@@ -50,7 +50,7 @@ Zero modifications to the AG-04/05/06 envelope, descriptor, validator, ordering,
 ## Evidence
 
 - **Branch**: feat/agent-layer2-wave2-ag07 @ `731717a2` (6 commits ahead of main `8420b2c4`)
-- **PR**: <URL>
+- **PR**: https://github.com/witsaba/cachicamas/pull/167
 - **Worktree**: /Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/agent-layer2-wave2-ag07 (retained per AG-05/06 precedent; user merges manually)
 - **Main checkout**: untouched (no commits on main; PR carries the archive changes)
 - **Tasks**: 22/22 complete
