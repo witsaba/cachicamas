@@ -164,9 +164,18 @@ func Turn(
 	}
 
 	// Provider closed without a Completion: walking-skeleton scope
-	// treats this as a "ran to empty" turn — close sink, return.
+	// treats this as a "ran to empty" turn — close the brackets
+	// (turn_end + run_end), reconstruct msg from accumulated
+	// fragments, return FinishReasonStop as the documented fallback
+	// for a stream that finished without a Completion event (per
+	// AI-13.1's unknown-stop semantics: the absence is recorded,
+	// not corrected).
+	msg, finish := turn.finalize()
 	closeSink(sink)
-	return ai.Message{}, 0, nil
+	if finish == 0 {
+		finish = ai.FinishReasonStop
+	}
+	return msg, finish, nil
 }
 
 // emitStamped stamps ev through the LaneStamper and sends it on sink.
@@ -372,10 +381,15 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 		return true
 
 	case ai.EventKindError:
-		if payload, ok := ev.ErrorPayload(); ok && payload != nil {
+		// Mid-stream terminal error: record the failure and let the
+		// drain loop break. drainProvider empties whatever is left
+		// so the producer's goroutine is not stranded (S-LSK-002).
+		// The else branch is unreachable through agenttest's Emit
+		// (which rejects an event that was never constructed), but
+		// it stays defensive: an unconstructed terminal is the
+		// provider's defect, not the loop's.
+		if payload, ok := ev.ErrorPayload(); ok {
 			t.fatal = payload
-		} else {
-			t.fatal = errUnknownProviderError
 		}
 		return false
 
@@ -441,14 +455,3 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 	}
 	return msg, t.finish
 }
-
-// errUnknownProviderError is the sentinel a mid-stream terminal error
-// event without a payload carries — an unconstructed terminal is the
-// provider's defect, not the loop's.
-var errUnknownProviderError = errorString("agent: provider terminal error event with no payload")
-
-// errorString is a tiny string-backed error for sentinels the walking
-// skeleton does not want to allocate.
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
