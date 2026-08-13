@@ -198,10 +198,26 @@ const (
 	// EventKindSubagentEnded closes it.
 	EventKindSubagentEnded
 
+	// AG-06.4 (compaction family) — 3 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-007,
+	// R-APE-008). See compaction_events.go.
+
+	// EventKindCompactionStarted opens a context-compaction bracket.
+	EventKindCompactionStarted
+
+	// EventKindCompactionFinished closes one with a turn bracket and
+	// summary identity (R-APE-007).
+	EventKindCompactionFinished
+
+	// EventKindCompactionFailed closes one with a typed failure;
+	// Terminal: false (R-APE-008). Distinct from
+	// compaction_finished.
+	EventKindCompactionFailed
+
 	// eventKindFirst and eventKindEnd bound the declared production
 	// constant space, mirroring `ai.eventKindFirst`/`eventKindEnd`.
 	eventKindFirst = EventKindRunStart
-	eventKindEnd   = EventKindSubagentEnded + 1
+	eventKindEnd   = EventKindCompactionFailed + 1
 )
 
 // eventRegistration is one row of the kind registry: a kind's name and its
@@ -325,6 +341,24 @@ var eventRegistry = []eventRegistration{
 	EventKindSubagentEnded: {
 		name:       "subagent_ended",
 		descriptor: EventDescriptor{Placement: PlacementTurn},
+	},
+	// AG-06.4 (compaction family) — 3 rows. All PlacementTurn,
+	// BracketRoleNone, CardinalityAny. compaction_failed EXPLICITLY
+	// declares Terminal:false (AG-05 S1 carry-forward — the
+	// validator reads Terminal: stream_check.go:173-175); the
+	// started/finished rows also declare Terminal:false explicitly
+	// (W3 latent-trap guard, AG-04.4 + AG-05.1).
+	EventKindCompactionStarted: {
+		name:       "compaction_started",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindCompactionFinished: {
+		name:       "compaction_finished",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
+	},
+	EventKindCompactionFailed: {
+		name:       "compaction_failed",
+		descriptor: EventDescriptor{Placement: PlacementTurn, Terminal: false},
 	},
 }
 

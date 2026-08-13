@@ -223,6 +223,31 @@ var eventKindWitnesses = map[agent.EventKind]eventKindWitness{
 		},
 		read: func(e agent.Event) (any, bool) { return e.SubagentEnded() },
 	},
+	// AG-06.4 (compaction family) — 3 kinds, all PlacementTurn,
+	// BracketRoleNone, CardinalityAny, Terminal:false (R-APE-007,
+	// R-APE-008). See compaction_events.go.
+	agent.EventKindCompactionStarted: {
+		registeredName: "compaction_started",
+		construct: func() (agent.Event, error) {
+			return agent.NewCompactionStarted("run_registry_witness", "turn_registry_witness", "comp-witness")
+		},
+		read: func(e agent.Event) (any, bool) { return e.CompactionStarted() },
+	},
+	agent.EventKindCompactionFinished: {
+		registeredName: "compaction_finished",
+		construct: func() (agent.Event, error) {
+			return agent.NewCompactionFinished("run_registry_witness", "turn_registry_witness", "comp-witness",
+				agent.CompactionSpan{StartTurnID: "turn-aaa-witness", EndTurnID: "turn-zzz-witness"}, "sum-witness")
+		},
+		read: func(e agent.Event) (any, bool) { return e.CompactionFinished() },
+	},
+	agent.EventKindCompactionFailed: {
+		registeredName: "compaction_failed",
+		construct: func() (agent.Event, error) {
+			return agent.NewCompactionFailed("run_registry_witness", "turn_registry_witness", "comp-witness", witnessToolFailure)
+		},
+		read: func(e agent.Event) (any, bool) { return e.CompactionFailed() },
+	},
 }
 
 // witnessMessageID and witnessToolFailure are shared fixtures used by
@@ -351,13 +376,14 @@ func containsEventKind(haystack []agent.EventKind, want agent.EventKind) bool {
 }
 
 // S-AEV-090 — the registered kind set is enumerated as exactly the
-// run/turn/message/tool/permission/cost/delegation bracket kinds AG-04
-// + AG-05 + AG-06.1 + AG-06.2 + AG-06.3 register, and contains no
-// compaction kind under any name (R-AEV-010's scope fence;
-// retightened from "exactly 4" to "exactly 15" by AG-05, to "exactly
-// 18" by AG-06.1, to "exactly 20" by AG-06.2, and to "exactly 22" by
-// AG-06.3 across this PR's first four commits; the final
-// retightening to "exactly 25" lands in AG-06.5).
+// run/turn/message/tool/permission/cost/delegation/compaction
+// families AG-04 + AG-05 + AG-06 register (R-AEV-010's scope fence;
+// retightened from "exactly 4" to "exactly 15" by AG-05, and across
+// AG-06 to "exactly 25"). The forbidden-names list at this row
+// previously named "permission", "cost", "delegation", "compaction"
+// as the AG-06 forward-fence; AG-06 retires that fence in this PR's
+// final retightening — the eight event families AG-04 / AG-05 / AG-06
+// own across Wave 1 are now legitimate registrations.
 func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 	t.Parallel()
 
@@ -377,9 +403,11 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 		agent.EventKindCostTurn, agent.EventKindCostSession,
 		// AG-06.3 (delegation family) — 2 kinds (R-APE-006)
 		agent.EventKindSubagentStarted, agent.EventKindSubagentEnded,
+		// AG-06.4 (compaction family) — 3 kinds (R-APE-007, R-APE-008)
+		agent.EventKindCompactionStarted, agent.EventKindCompactionFinished, agent.EventKindCompactionFailed,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds) — AG-06.3 retightens the scope fence from \"exactly 20\" to \"exactly 22\" (4 AG-04 + 6 AG-05.1 + 5 AG-05.2 + 3 AG-06.1 + 2 AG-06.2 + 2 AG-06.3)",
+		t.Fatalf("agent.EventKinds() = %v (%d kinds), want %v (%d kinds) — AG-06 retightens the scope fence to \"exactly 25\" (4 AG-04 + 6 AG-05.1 + 5 AG-05.2 + 3 AG-06.1 + 2 AG-06.2 + 2 AG-06.3 + 3 AG-06.4)",
 			got, len(got), want, len(want))
 	}
 	for i := range want {
@@ -388,15 +416,16 @@ func TestEventKinds_ScopeFence_ExactlyRunAndTurnFamilies(t *testing.T) {
 		}
 	}
 
-	// AG-06.3 retightens this list: AG-06.2 + earlier "no delegation"
-	// half is now legitimate (AG-06.3's own register); the
-	// AG-06.4 "no compaction" half is unchanged.
-	forbiddenNames := []string{"compaction"}
+	// AG-06 retires the forbidden-names forward-fence: the four
+	// families AG-06 owns are now legitimate registrations, and
+	// future milestones will add their own kinds under names that
+	// do not collide with the eight families registered here.
+	forbiddenNames := []string{}
 	for _, k := range got {
 		name := k.String()
 		for _, forbidden := range forbiddenNames {
 			if containsFold(name, forbidden) {
-				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids AG-04, AG-05, AG-06.1, AG-06.2 and AG-06.3 from registering AG-06.4's families under any name", name, forbidden)
+				t.Errorf("registered kind %q names a %s family; R-AEV-010 forbids future milestones from registering this family under any name", name, forbidden)
 			}
 		}
 	}
@@ -486,9 +515,9 @@ func TestEventKinds_ScopeFence_BitesByCountOnTwentySixthKind(t *testing.T) {
 	// in apply-progress.md, not by actually planting a 26th kind in
 	// this file's commit history.
 	kinds := agent.EventKinds()
-	const want = 22
+	const want = 25
 	if len(kinds) != want {
-		t.Fatalf("agent.EventKinds() = %d kinds, want exactly %d — the scope-fence bites by count before the per-index and forbidden-names checks run; a 26th scratch kind would flip this test to RED (the full retightening to 25 lands in AG-06.5)", len(kinds), want)
+		t.Fatalf("agent.EventKinds() = %d kinds, want exactly %d — the scope-fence bites by count before the per-index and forbidden-names checks run; a 26th scratch kind would flip this test to RED", len(kinds), want)
 	}
 }
 
