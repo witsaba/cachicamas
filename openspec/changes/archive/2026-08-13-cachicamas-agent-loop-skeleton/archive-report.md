@@ -49,7 +49,7 @@ Zero modifications to the AG-04/05/06 envelope, descriptor, validator, ordering,
 
 ## Evidence
 
-- **Branch**: feat/agent-layer2-wave2-ag07 @ <commit SHA after archive commit>
+- **Branch**: feat/agent-layer2-wave2-ag07 @ `731717a2` (6 commits ahead of main `8420b2c4`)
 - **PR**: <URL>
 - **Worktree**: /Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/agent-layer2-wave2-ag07 (retained per AG-05/06 precedent; user merges manually)
 - **Main checkout**: untouched (no commits on main; PR carries the archive changes)
