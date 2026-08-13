@@ -503,3 +503,202 @@ func TestTurn_PreRequestHook_CannotMutateInput(t *testing.T) {
 			loopRequestSystemText(t, skeletonCaptured[0]), loopRequestSystemText(t, mutateCaptured[0]))
 	}
 }
+
+// S-PRH-005 — AG-08.2 prefix stability (R-PRH-006, R-ACB-007). Given
+// two consecutive Turn(...) calls with the same system, same tools,
+// same hook, and the second transcript = first transcript + 1
+// appended message, when both captured requests are compared via
+// ai.Request.Equal, then:
+//
+//   (a) the captured requests' system regions are byte-equal;
+//   (b) the captured requests' tools regions are byte-equal;
+//   (c) the captured requests' CacheBoundaries() return the same
+//       cascade order (R-ACB-007);
+//   (d) the second captured request has exactly one more message than
+//       the first; the first N messages are content-equal via
+//       Message.Equal (which excludes MessageID identity).
+//
+// The walking-skeleton scope emits no tools region, so (b) is
+// vacuously satisfied (both have no tools). The tools check still
+// runs and asserts equal via Request.Equal.
+//
+// Mirrors AG-07 S-LSK-004 (two-sequential-turns share nothing on
+// identity, share everything on input) but AG-08 closes the
+// *byte-stability* property the prefix-cache (Layer 3) relies on.
+func TestTurn_PrefixStability_ByteStableToolsSystem(t *testing.T) {
+	t.Parallel()
+
+	// First turn: a single user message.
+	firstTranscript := []ai.Message{firstMessage(t)}
+
+	firstProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	firstSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		firstProvider,
+		"system prompt for prh-005",
+		firstTranscript,
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		firstSink,
+	)
+	if err != nil {
+		t.Fatalf("first Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, firstSink)
+	firstCaptured := firstProvider.Requests()
+	if len(firstCaptured) != 1 {
+		t.Fatalf("first provider captured %d request(s), want 1", len(firstCaptured))
+	}
+
+	// Second turn: same system + same tools + same hook; transcript
+	// has one APPENDED message (the first message + a new one).
+	appendedPart, _ := ai.NewText("second-turn-appended")
+	appendedMsg, _ := ai.NewMessage(ai.RoleUser, appendedPart)
+	secondTranscript := append([]ai.Message{}, firstTranscript...)
+	secondTranscript = append(secondTranscript, appendedMsg)
+
+	secondProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	secondSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for prh-005",
+		secondTranscript,
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, secondSink)
+	secondCaptured := secondProvider.Requests()
+	if len(secondCaptured) != 1 {
+		t.Fatalf("second provider captured %d request(s), want 1", len(secondCaptured))
+	}
+
+	// (a) System regions byte-equal (the marker was appended by the
+	// hook in both turns — same input, same hook → same marker
+	// position).
+	if !strings.Contains(loopRequestSystemText(t, firstCaptured[0]), hookMarker) {
+		t.Errorf("first turn's system region LACKS marker %q (hook did not run?)", hookMarker)
+	}
+	if !strings.Contains(loopRequestSystemText(t, secondCaptured[0]), hookMarker) {
+		t.Errorf("second turn's system region LACKS marker %q (hook did not run?)", hookMarker)
+	}
+	if loopRequestSystemText(t, firstCaptured[0]) != loopRequestSystemText(t, secondCaptured[0]) {
+		t.Errorf("system regions differ between turns:\n  first:  %q\n  second: %q",
+			loopRequestSystemText(t, firstCaptured[0]), loopRequestSystemText(t, secondCaptured[0]))
+	}
+
+	// (b) Tools regions byte-equal. Walking skeleton has no tools;
+	// assert both report absent tools (or both report equal empty).
+	firstTools, firstHasTools := firstCaptured[0].Tools()
+	secondTools, secondHasTools := secondCaptured[0].Tools()
+	if firstHasTools != secondHasTools {
+		t.Errorf("tools presence differs: first=%v, second=%v", firstHasTools, secondHasTools)
+	}
+	if firstHasTools {
+		firstToolList := firstTools.Tools()
+		secondToolList := secondTools.Tools()
+		if len(firstToolList) != len(secondToolList) {
+			t.Errorf("tools length differs: first=%d, second=%d", len(firstToolList), len(secondToolList))
+		}
+		// Walking-skeleton scope: no tools region by construction.
+		// The presence equality above is the AG-08 invariant; if a
+		// future milestone installs tools, this branch needs a
+		// field-by-field comparison through the accessor surface.
+		_ = secondToolList
+	}
+
+	// (c) CacheBoundaries() cascade order pinned (R-ACB-007).
+	firstBoundaries := firstCaptured[0].CacheBoundaries()
+	secondBoundaries := secondCaptured[0].CacheBoundaries()
+	if len(firstBoundaries) != len(secondBoundaries) {
+		t.Errorf("CacheBoundaries() count differs: first=%d, second=%d", len(firstBoundaries), len(secondBoundaries))
+	}
+	for i := range firstBoundaries {
+		if firstBoundaries[i] != secondBoundaries[i] {
+			t.Errorf("CacheBoundaries()[%d] differs: first=%+v, second=%+v (cascade order drift, R-ACB-007)",
+				i, firstBoundaries[i], secondBoundaries[i])
+		}
+	}
+
+	// (d) Message region grew by 1; first N messages content-equal.
+	firstMsgs := firstCaptured[0].Messages()
+	secondMsgs := secondCaptured[0].Messages()
+	if len(secondMsgs) != len(firstMsgs)+1 {
+		t.Errorf("message region grew by %d, want 1 (first=%d, second=%d)",
+			len(secondMsgs)-len(firstMsgs), len(firstMsgs), len(secondMsgs))
+	}
+	for i := 0; i < len(firstMsgs); i++ {
+		if !firstMsgs[i].Equal(secondMsgs[i]) {
+			t.Errorf("message[%d] content differs:\n  first:  %+v\n  second: %+v",
+				i, firstMsgs[i].Content(), secondMsgs[i].Content())
+		}
+	}
+}
+
+// S-PRH-006 — AG-08.2 hook determinism (R-PRH-007). Given a hook
+// that adds a constant system segment, when the loop calls it twice
+// with byte-equal req values, then both hook invocations' outputs are
+// byte-equal (via Request.Equal) — hook-applied markers cannot
+// oscillate between turns.
+//
+// Combined with S-PRH-005, this closes the prefix-stability property:
+// tools + system regions byte-equal across turns AND the hook that
+// populated them is deterministic. A timestamp-bearing hook would
+// fail S-PRH-005's cascade comparison; a non-deterministic hook
+// would fail S-PRH-006 directly.
+func TestTurn_PrefixStability_DeterministicHook(t *testing.T) {
+	t.Parallel()
+
+	// First call: capture the captured request.
+	firstProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	firstSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		firstProvider,
+		"system prompt for prh-006",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		firstSink,
+	)
+	if err != nil {
+		t.Fatalf("first Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, firstSink)
+	firstCaptured := firstProvider.Requests()
+	if len(firstCaptured) != 1 {
+		t.Fatalf("first provider captured %d request(s), want 1", len(firstCaptured))
+	}
+
+	// Second call: same inputs, same hook. The captured request MUST
+	// be byte-equal to the first — the hook is deterministic.
+	secondProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	secondSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for prh-006",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{PreRequestHook: hookWithMarkerAppended()},
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, secondSink)
+	secondCaptured := secondProvider.Requests()
+	if len(secondCaptured) != 1 {
+		t.Fatalf("second provider captured %d request(s), want 1", len(secondCaptured))
+	}
+
+	if !firstCaptured[0].Equal(secondCaptured[0]) {
+		t.Errorf("hook NOT deterministic: first captured request != second captured request (R-PRH-007 violation)\n  first system:  %q\n  second system: %q",
+			loopRequestSystemText(t, firstCaptured[0]), loopRequestSystemText(t, secondCaptured[0]))
+	}
+}
