@@ -434,46 +434,43 @@ func (s *Scheduler) executeCall(
 	}
 }
 
-// runPermissionGate is the per-call AG-10 gate (R-APP-001..003,
-// AG-10.1 implementation). It consults `policy.Resolve` once per
-// call and dispatches the verdict:
+// runPermissionGate is the per-call AG-10 gate (R-APP-001..007,
+// AG-10.1+AG-10.2 implementation). It consults `policy.Resolve`
+// once per call and dispatches the verdict:
 //
-//   - nil policy       → bypass (AG-09 behavior preserved; the
-//                        call proceeds as if the gate were absent).
-//   - PermissionDefer  → emit `permission_decision_required`,
-//                        park the call on `parked.park(callID)`,
-//                        wait for the wake hand-off OR ctx
-//                        cancellation. On wake (Commit 4 will
-//                        re-evaluate; Commit 3 proceeds), return
-//                        proceed=true with no modifications. On
-//                        ctx cancel, populate the result slot
-//                        with a typed abort failure and return
-//                        proceed=false.
-//   - AllowOnce        → no event, return proceed=true with no
-//                        modifications.
-//   - AllowAlways       → no event at this gate (Commit 4 will
-//                        emit `decision_made` after the tool
-//                        completes and consult `policy.Remember`
-//                        for the `resolution_remembered` emission),
-//                        return proceed=true with no modifications.
-//   - Deny             → (Commit 4 will implement) emit
-//                        `decision_made{Deny}`, populate the result
-//                        slot with `Result{ExecutionFailure,
-//                        typedDenial}`, return proceed=false.
-//   - ModifyInput      → (Commit 4 will implement) emit
-//                        `decision_made{ModifyInput}`, return
-//                        proceed=true with `modifiedArgs`
-//                        populated so executeCall rewrites the
-//                        ToolStart payload and the tool's Run
-//                        input.
-//
-// Commit 3 implements the bypass, AllowOnce, AllowAlways-stub,
-// and Defer paths. The Deny and ModifyInput branches are wired
-// in Commit 4; for now, an unrecognized non-Defer verdict
-// proceeds (defensive default for the four-outcome value space
-// that exists at this gate — `permissionOutcomeLimit` is not
-// reached because the typed enum's validator rejects it
-// upstream).
+//   - nil policy        → bypass (AG-09 behavior preserved; the
+//                         call proceeds as if the gate were absent).
+//   - PermissionDefer   → emit `permission_decision_required`,
+//                         park the call on `parked.park(callID)`,
+//                         wait for the wake hand-off OR ctx
+//                         cancellation. On wake, proceed (Commit 4
+//                         stub; a later milestone re-evaluates the
+//                         verdict with the human's decision). On
+//                         ctx cancel, populate the result slot with
+//                         a typed abort failure and return
+//                         proceed=false.
+//   - AllowOnce         → emit `permission_decision_made{outcome=
+//                         AllowOnce}` (R-APP-004), return
+//                         proceed=true with no modifications.
+//   - AllowAlways       → emit `permission_decision_made{outcome=
+//                         AllowAlways}` (R-APP-007), return
+//                         proceed=true with no modifications.
+//                         Commit 6 wires `policy.Remember` and the
+//                         `permission_resolution_remembered` emission.
+//   - Deny              → emit `permission_decision_made{outcome=
+//                         Deny, failure=verdict.Failure}` (R-APP-005),
+//                         populate the result slot with
+//                         `Result{ExecutionFailure, typedDenial}`
+//                         so the model sees the denial as a typed
+//                         outcome (NOT a Go error), return
+//                         proceed=false.
+//   - ModifyInput       → emit `permission_decision_made{outcome=
+//                         ModifyInput, modifiedArgs}` (R-APP-006),
+//                         return proceed=true with `modifiedArgs`
+//                         populated so executeCall rewrites the
+//                         ToolStart payload and the tool's Run
+//                         input. The bytes reach the tool and the
+//                         stream in lockstep (transparency bite).
 func (s *Scheduler) runPermissionGate(
 	ctx context.Context,
 	ordinal int,
@@ -514,10 +511,10 @@ func (s *Scheduler) runPermissionGate(
 		parkCh := parked.park(call.ID())
 		select {
 		case <-parkCh:
-			// Woken. Commit 4 wires a second Resolve call
-			// here so the policy can re-evaluate with the
-			// human's decision; Commit 3's RED-then-GREEN
-			// shape proceeds without re-evaluation.
+			// Woken. Commit 4 stub proceeds without re-evaluation;
+			// a later milestone will call policy.Resolve again to
+			// surface the human's decision. For AG-10.2, the
+			// woken call's verdict is treated as AllowOnce.
 			return true, nil, nil
 		case <-ctx.Done():
 			// Mid-park cancel: typed abort failure (AG-10.3
@@ -530,19 +527,91 @@ func (s *Scheduler) runPermissionGate(
 		}
 	}
 
-	// AllowOnce / AllowAlways: synchronous, no event. AG-10.4
-	// will route AllowAlways through `policy.Remember` after the
-	// tool completes; the gate's responsibility here is just to
-	// proceed.
-	if verdict.Outcome == PermissionOutcomeAllowOnce ||
-		verdict.Outcome == PermissionOutcomeAllowAlways {
+	// AllowOnce: emit decision_made{AllowOnce}, proceed.
+	if verdict.Outcome == PermissionOutcomeAllowOnce {
+		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
+			PermissionOutcomeAllowOnce, nil, nil)
+		if err == nil {
+			emissions <- emission{ev: madeEv}
+		}
 		return true, nil, nil
 	}
 
-	// Deny and ModifyInput are implemented in Commit 4. Until
-	// then, the gate proceeds (defensive default). Commit 4's
-	// implementation replaces this branch.
+	// AllowAlways: emit decision_made{AllowAlways}, proceed. The
+	// `policy.Remember` invocation and the conditional
+	// `permission_resolution_remembered` emission are wired in
+	// Commit 6 (R-APP-007). Commit 4 emits the decision_made;
+	// Commit 6 attaches the remembered emission.
+	if verdict.Outcome == PermissionOutcomeAllowAlways {
+		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
+			PermissionOutcomeAllowAlways, nil, nil)
+		if err == nil {
+			emissions <- emission{ev: madeEv}
+		}
+		return true, nil, nil
+	}
+
+	// Deny: typed rejection (R-APP-005, R-AEV-008). Populate the
+	// result slot with `Result{ExecutionFailure, verdict.Failure}`
+	// so the model sees the denial as a typed outcome — NOT a Go
+	// error (which would hide the typed-failure surface). The
+	// dispatcher emits `tool_end_execution_failure` from the
+	// populated slot.
+	if verdict.Outcome == PermissionOutcomeDeny {
+		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
+			PermissionOutcomeDeny, nil, verdict.Failure)
+		if err == nil {
+			emissions <- emission{ev: madeEv}
+		}
+		var failRes Result
+		if verdict.Failure != nil {
+			failRes = Result{Outcome: ToolOutcomeExecutionFailure, Failure: verdict.Failure}
+			failRes.SetCallID(call.ID())
+		} else {
+			// Defensive default: a Deny without a typed failure
+			// is a policy defect; the typed failure surface still
+			// requires a Failure. The result carries a typed
+			// execution failure derived from a sentinel cause so
+			// the rejoin slot is fully populated.
+			failRes = typedExecutionFailureFromError(call.ID(),
+				errPermissionDeniedWithoutFailure)
+		}
+		results[ordinal] = failRes
+		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		return false, nil, failRes.Failure
+	}
+
+	// ModifyInput: substitute args, emit decision_made with the
+	// modified bytes (R-APP-006 transparency). The caller
+	// (executeCall) reads `modifiedArgs` and rewrites both the
+	// ToolStart emission AND the tool's Run input.
+	if verdict.Outcome == PermissionOutcomeModifyInput {
+		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
+			PermissionOutcomeModifyInput, verdict.ModifiedArgs, nil)
+		if err == nil {
+			emissions <- emission{ev: madeEv}
+		}
+		return true, append([]byte(nil), verdict.ModifiedArgs...), nil
+	}
+
+	// Defensive default for any future PermissionOutcome value the
+	// gate does not yet handle (mirrors AG-09's zero-outcome guard
+	// at `executeCall`'s default branch).
 	return true, nil, nil
+}
+
+// errPermissionDeniedWithoutFailure is the typed sentinel for a
+// `Deny` verdict that lacks the required `*Failure` (R-AEV-008).
+// A policy that returns Deny without populating the typed failure
+// is a policy defect — the result slot still carries a typed
+// execution failure so the rejoin is fully populated and the model
+// sees the denial.
+var errPermissionDeniedWithoutFailure = permissionDeniedWithoutFailure{}
+
+type permissionDeniedWithoutFailure struct{}
+
+func (permissionDeniedWithoutFailure) Error() string {
+	return "agent: policy returned Deny without a typed *Failure (R-AEV-008 violation)"
 }
 
 // emitOrphanExecutionFailure emits a `ToolEndExecutionFailure` for a
