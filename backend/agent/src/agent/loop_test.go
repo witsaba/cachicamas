@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -144,14 +145,30 @@ func scriptReasoningTextResponse(t *testing.T, finishReason ai.FinishReason, rea
 // drainSink drains the agent-level event channel sink into a slice.
 // Mirrors agenttest's drainFake but for the agent envelope: stops on
 // channel close (the loop owns the close, R-LSK-001).
+//
+// AG-07 SUGG 1 + AG-08 SUGG 1 + AG-09 carry: the drain is bounded
+// by a 1s timeout. A genuinely stuck producer fails this helper
+// in seconds — never hanging the test binary indefinitely. The
+// AG-09 wire-up is the first named consumer of the scheduler's
+// results via `sink`, so this deadline is the single closing
+// point for the three AG carries.
 func drainSink(t *testing.T, sink <-chan *agent.Event) []agent.Event {
 	t.Helper()
 
 	var got []agent.Event
-	for ev := range sink {
-		got = append(got, *ev)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case ev, ok := <-sink:
+			if !ok {
+				return got
+			}
+			got = append(got, *ev)
+		case <-deadline:
+			t.Fatalf("drainSink: sink did not close within 1s (%d event(s) received so far) — the loop is not closing the sink it owns", len(got))
+			return nil
+		}
 	}
-	return got
 }
 
 // reconstructedLoopMessage is the AG-07 reconstruction helper's
@@ -797,11 +814,12 @@ func gitOutput(t *testing.T, root string, args ...string) (string, error) {
 }
 
 // filterOutLoopFiles strips entire file-level diff blocks whose path
-// matches loop.go or loop_test.go. A git diff is a sequence of
+// matches loop.go, loop_test.go, loop_hook_test.go, tool.go,
+// tool_test.go, or scheduler_test.go. A git diff is a sequence of
 // "diff --git a/<path> b/<path>" headers followed by hunks; the test
-// excludes loop files at file granularity, not at line granularity
-// (the latter would falsely drop content lines mentioning the file's
-// own name, etc.).
+// excludes the AG-07/AG-08/AG-09 loop+tool family at file granularity,
+// not at line granularity (the latter would falsely drop content
+// lines mentioning the file's own name, etc.).
 func filterOutLoopFiles(diff string) string {
 	if diff == "" {
 		return ""
@@ -812,9 +830,9 @@ func filterOutLoopFiles(diff string) string {
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
 			// Header line: detect whether this file block is for a
-			// loop file. Both sides of the diff carry the same path
-			// ("a/loop.go" and "b/loop.go"); the trailing segment
-			// after the last space identifies the file.
+			// loop or tool family file. Both sides of the diff
+			// carry the same path; the trailing segment after the
+			// last space identifies the file.
 			idx := strings.LastIndex(line, " b/")
 			path := line
 			if idx >= 0 {
@@ -822,7 +840,13 @@ func filterOutLoopFiles(diff string) string {
 			}
 			skip = strings.HasSuffix(path, "/loop.go") ||
 				strings.HasSuffix(path, "/loop_test.go") ||
-				strings.HasSuffix(path, "/loop_hook_test.go")
+				strings.HasSuffix(path, "/loop_hook_test.go") ||
+				strings.HasSuffix(path, "/loop_tool_dispatch_test.go") ||
+				strings.HasSuffix(path, "/tool.go") ||
+				strings.HasSuffix(path, "/tool_test.go") ||
+				strings.HasSuffix(path, "/scheduler.go") ||
+				strings.HasSuffix(path, "/scheduler_test.go") ||
+				strings.HasSuffix(path, "/scripted_tool_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

@@ -892,8 +892,12 @@ func gitOutputHook(t *testing.T, root string, args ...string) (string, error) {
 }
 
 // filterOutLoopHookFiles strips entire file-level diff blocks whose
-// path matches loop.go, loop_test.go, or loop_hook_test.go. Mirrors
-// loop_test.go's filter at file granularity.
+// path matches loop.go, loop_test.go, loop_hook_test.go, tool.go,
+// tool_test.go, or scheduler_test.go. Mirrors loop_test.go's filter
+// at file granularity. The widening to the tool family is the
+// AG-08 W3 pattern carried into AG-09 (NFR-TLS-003's 21-path
+// substrate list itself stays byte-untouched; the filter just
+// accommodates AG-09's new files).
 func filterOutLoopHookFiles(diff string) string {
 	if diff == "" {
 		return ""
@@ -910,7 +914,13 @@ func filterOutLoopHookFiles(diff string) string {
 			}
 			skip = strings.HasSuffix(path, "/loop.go") ||
 				strings.HasSuffix(path, "/loop_test.go") ||
-				strings.HasSuffix(path, "/loop_hook_test.go")
+				strings.HasSuffix(path, "/loop_hook_test.go") ||
+				strings.HasSuffix(path, "/loop_tool_dispatch_test.go") ||
+				strings.HasSuffix(path, "/tool.go") ||
+				strings.HasSuffix(path, "/tool_test.go") ||
+				strings.HasSuffix(path, "/scheduler.go") ||
+				strings.HasSuffix(path, "/scheduler_test.go") ||
+				strings.HasSuffix(path, "/scripted_tool_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
