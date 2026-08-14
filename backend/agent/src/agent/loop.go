@@ -239,7 +239,12 @@ func Turn(
 			msg, finish := turn.finalize()
 			if turn.finish == ai.FinishReasonToolCalls && len(turn.toolCalls) > 0 {
 				sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}
-				_ = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, stamper, sink)
+				// AG-10: pass nil policy to bypass the
+				// permission gate. Layer 3 supplies a real
+				// PermissionPolicy via TurnOptions when the
+				// upward path lands (AG-13). Until then, nil
+				// preserves AG-09 behavior byte-clean.
+				_ = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, nil, stamper, sink)
 			}
 			closeSink(sink)
 			return msg, finish, nil

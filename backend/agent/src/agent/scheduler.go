@@ -85,12 +85,25 @@ type emission struct {
 // read-class calls. A value of 0 or less falls back to
 // `maxReadFanOutDefault`. Mutating and execute classes are
 // serialized in call order, regardless of this value.
+//
+// `policy` is the Layer-2 permission gate (AG-10). A nil policy
+// bypasses the gate — every call is treated as AllowOnce, no events
+// are emitted, and the call runs as AG-09's pre-AG-10 scheduler
+// did. A non-nil policy consults `policy.Resolve` for every call;
+// a `Defer` verdict emits `permission_decision_required` and parks
+// the call on a per-call `chan struct{}` keyed by `callID` while
+// siblings continue. AG-10.1 covers the immediate-allow path
+// (sync allow/deny) and the defer path (park + wait for wake or
+// context cancel); AG-10.2 widens to four typed outcomes, AG-10.3
+// wires the cancellation wind-down, AG-10.4 wires remembered
+// resolutions.
 func (s *Scheduler) Schedule(
-	_ context.Context,
+	ctx context.Context,
 	calls []ai.ToolCall,
 	reg Registry,
 	runID RunID,
 	turnID TurnID,
+	policy PermissionPolicy,
 	stamper *LaneStamper,
 	sink chan<- *Event,
 ) []Result {
@@ -110,6 +123,14 @@ func (s *Scheduler) Schedule(
 	results := make([]Result, len(calls))
 	emissions := make(chan emission, len(calls)*2) // start + end per call, plus slack
 	dispatcherDone := make(chan struct{})
+
+	// Per-Schedule parked set for the AG-10 permission gate.
+	// Keyed by `callID`; each entry is a `chan struct{}` the
+	// call goroutine blocks on while parked, and the upward-path
+	// wake closes. The set is shared across all call goroutines
+	// in this Schedule call (R-LSK-002 carry: one Schedule call,
+	// one parked set).
+	parked := newParkedSet()
 
 	// Bounded fan-out for reads: a `chan struct{}` semaphore
 	// with capacity `maxReads`. A read call acquires a slot
@@ -143,12 +164,19 @@ func (s *Scheduler) Schedule(
 			wg.Done()
 			s.scheduleOrphan(i, call, runID, turnID, results, emissions)
 		case tool.EffectClass() == EffectClassRead:
-			go s.scheduleRead(i, call, tool, runID, turnID, results, emissions, readSem, &wg)
+			go s.scheduleRead(i, call, tool, runID, turnID, policy, parked, ctx, results, emissions, readSem, &wg)
 		default:
-			go s.scheduleSerialized(i, call, tool, runID, turnID, results, emissions, serialCh, &wg)
+			go s.scheduleSerialized(i, call, tool, runID, turnID, policy, parked, ctx, results, emissions, serialCh, &wg)
 		}
 	}
 	wg.Wait()
+	// Safety net: any call still parked at Schedule exit is
+	// unblocked via closeAll (a goroutine waiting on a parked
+	// channel observes the close and exits its select). The
+	// cancellation discipline (AG-10.3) is the production path;
+	// this is a defensive sweep so a missed close cannot leak
+	// goroutines.
+	parked.closeAll()
 	close(emissions)
 	<-dispatcherDone
 	close(sink)
@@ -181,12 +209,20 @@ func (s *Scheduler) runDispatcher(
 // capacity is the upper bound on concurrently running read-class
 // calls. An unbounded scheduler would let the counter exceed the
 // bound (S-TLS-005a's bite).
+//
+// `policy` and `parked` thread the AG-10 permission gate through
+// the call goroutine; `ctx` is the per-Schedule context used to
+// unblock parked calls on cancellation (AG-10.3). A nil `policy`
+// bypasses the gate (AG-09 behavior preserved).
 func (s *Scheduler) scheduleRead(
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
 	runID RunID,
 	turnID TurnID,
+	policy PermissionPolicy,
+	parked *parkedSet,
+	ctx context.Context,
 	results []Result,
 	emissions chan<- emission,
 	sem chan struct{},
@@ -195,19 +231,25 @@ func (s *Scheduler) scheduleRead(
 	defer wg.Done()
 	sem <- struct{}{}
 	defer func() { <-sem }()
-	s.executeCall(ordinal, call, tool, runID, turnID, results, emissions)
+	s.executeCall(ordinal, call, tool, runID, turnID, policy, parked, ctx, results, emissions)
 }
 
 // scheduleSerialized is the serialized entry for a mutating /
 // execute class call. It blocks on the serialized channel (capacity
 // 1) until the previous call's slot is free. Calls execute in
 // issuance order regardless of completion order.
+//
+// `policy` and `parked` thread the AG-10 permission gate; `ctx`
+// is the per-Schedule context (AG-10.3 cancellation).
 func (s *Scheduler) scheduleSerialized(
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
 	runID RunID,
 	turnID TurnID,
+	policy PermissionPolicy,
+	parked *parkedSet,
+	ctx context.Context,
 	results []Result,
 	emissions chan<- emission,
 	serial chan struct{},
@@ -216,7 +258,7 @@ func (s *Scheduler) scheduleSerialized(
 	defer wg.Done()
 	serial <- struct{}{}
 	defer func() { <-serial }()
-	s.executeCall(ordinal, call, tool, runID, turnID, results, emissions)
+	s.executeCall(ordinal, call, tool, runID, turnID, policy, parked, ctx, results, emissions)
 }
 
 // scheduleOrphan handles a call whose tool is not registered. It
@@ -252,12 +294,22 @@ func (s *Scheduler) scheduleOrphan(
 //     `ToolEndSuccess` or `ToolEndResultFailure` accordingly.
 //   - `(Result{}, err)` → emit `ToolEndExecutionFailure` with a
 //     typed `*Failure`.
+//
+// AG-10 extension: `policy`, `parked`, and `ctx` thread the
+// permission gate. A nil `policy` bypasses the gate (AG-09 behavior).
+// A non-nil policy consults `Resolve` for every call; sync verdicts
+// proceed, `Defer` parks the call on `parked.park(call.ID())` and
+// waits for wake OR ctx cancel. `ctx` is the Schedule-level
+// cancellation context (AG-10.3).
 func (s *Scheduler) executeCall(
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
 	runID RunID,
 	turnID TurnID,
+	policy PermissionPolicy,
+	parked *parkedSet,
+	ctx context.Context,
 	results []Result,
 	emissions chan<- emission,
 ) {
@@ -273,11 +325,42 @@ func (s *Scheduler) executeCall(
 	// sibling goroutines continue to run independently (R-TLS-011).
 	defer recoverCall(ordinal, results)
 
+	// AG-10 permission gate (R-APP-001..003). A nil policy
+	// bypasses the gate; a non-nil policy consults Resolve and
+	// may park the call until wake or ctx cancel. Commit 3
+	// covers the immediate-allow path and the defer path;
+	// Commit 4 widens to four typed outcomes.
+	gateProceed, modifiedArgs, abortFailure := s.runPermissionGate(
+		ctx, ordinal, call, runID, turnID, policy, parked, results, emissions,
+	)
+	if !gateProceed {
+		// Gate wrote a typed failure to the result slot and
+		// emitted the matching tool-end event. The call does
+		// not reach ToolStart or Run.
+		if abortFailure != nil {
+			// Re-emit the abort failure on the typed failure
+			// path (the gate's typed failure is already in the
+			// result slot; this is the no-op symmetry for the
+			// dispatcher's standard emit shape).
+			_ = abortFailure
+		}
+		return
+	}
+
 	// Emit `ToolStart` BEFORE calling `Run` (R-TLS-006: start
 	// events at execution start, not at rejoin). The emission
 	// is buffered by the dispatcher channel; the actual sink
 	// send happens on the dispatcher's goroutine.
+	//
+	// AG-10.2 modify-input transparency (R-APP-006): when the
+	// gate's verdict is `ModifyInput`, the tool runs with the
+	// substituted arguments and ToolStart carries the modified
+	// bytes. Commit 3 leaves `modifiedArgs` empty for the
+	// immediate-allow path; Commit 4 fills it for ModifyInput.
 	startEv, startErr := NewToolStart(runID, turnID, call.ID(), uint32(ordinal), call.Name(), call.Arguments())
+	if modifiedArgs != nil {
+		startEv, startErr = NewToolStart(runID, turnID, call.ID(), uint32(ordinal), call.Name(), modifiedArgs)
+	}
 	if startErr != nil {
 		// Constructor failure is a typed execution failure —
 		// a malformed arguments payload is a provider defect,
@@ -294,7 +377,11 @@ func (s *Scheduler) executeCall(
 	// it; the tool or a Layer 3 sandbox does. (For AG-09 we
 	// pass the call's id as a `string` policy; Layer 3 replaces
 	// this with its own sandbox descriptor at the seam.)
-	runRes, runErr := tool.Run(context.Background(), call.Arguments(), PolicySlot(call.ID()))
+	runArgs := call.Arguments()
+	if modifiedArgs != nil {
+		runArgs = modifiedArgs
+	}
+	runRes, runErr := tool.Run(context.Background(), runArgs, PolicySlot(call.ID()))
 
 	// Disjoint return channels: a non-nil `err` from `Run`
 	// means execution itself failed (R-TLS-010). The two channels
@@ -345,6 +432,117 @@ func (s *Scheduler) executeCall(
 			errBiteToolZeroOutcome)
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 	}
+}
+
+// runPermissionGate is the per-call AG-10 gate (R-APP-001..003,
+// AG-10.1 implementation). It consults `policy.Resolve` once per
+// call and dispatches the verdict:
+//
+//   - nil policy       → bypass (AG-09 behavior preserved; the
+//                        call proceeds as if the gate were absent).
+//   - PermissionDefer  → emit `permission_decision_required`,
+//                        park the call on `parked.park(callID)`,
+//                        wait for the wake hand-off OR ctx
+//                        cancellation. On wake (Commit 4 will
+//                        re-evaluate; Commit 3 proceeds), return
+//                        proceed=true with no modifications. On
+//                        ctx cancel, populate the result slot
+//                        with a typed abort failure and return
+//                        proceed=false.
+//   - AllowOnce        → no event, return proceed=true with no
+//                        modifications.
+//   - AllowAlways       → no event at this gate (Commit 4 will
+//                        emit `decision_made` after the tool
+//                        completes and consult `policy.Remember`
+//                        for the `resolution_remembered` emission),
+//                        return proceed=true with no modifications.
+//   - Deny             → (Commit 4 will implement) emit
+//                        `decision_made{Deny}`, populate the result
+//                        slot with `Result{ExecutionFailure,
+//                        typedDenial}`, return proceed=false.
+//   - ModifyInput      → (Commit 4 will implement) emit
+//                        `decision_made{ModifyInput}`, return
+//                        proceed=true with `modifiedArgs`
+//                        populated so executeCall rewrites the
+//                        ToolStart payload and the tool's Run
+//                        input.
+//
+// Commit 3 implements the bypass, AllowOnce, AllowAlways-stub,
+// and Defer paths. The Deny and ModifyInput branches are wired
+// in Commit 4; for now, an unrecognized non-Defer verdict
+// proceeds (defensive default for the four-outcome value space
+// that exists at this gate — `permissionOutcomeLimit` is not
+// reached because the typed enum's validator rejects it
+// upstream).
+func (s *Scheduler) runPermissionGate(
+	ctx context.Context,
+	ordinal int,
+	call ai.ToolCall,
+	runID RunID,
+	turnID TurnID,
+	policy PermissionPolicy,
+	parked *parkedSet,
+	results []Result,
+	emissions chan<- emission,
+) (proceed bool, modifiedArgs []byte, abortFailure *Failure) {
+	// Bypass: nil policy preserves AG-09 behavior byte-clean.
+	if policy == nil {
+		return true, nil, nil
+	}
+
+	verdict := policy.Resolve(ctx, call)
+
+	// Defer: emit decision_required, park, wait for wake OR
+	// ctx cancel. AG-10.3 cancellation discipline writes a typed
+	// abort failure into the result slot before returning, so
+	// the rejoin slice is fully populated even when the run is
+	// aborted mid-park (R-APP-009).
+	if verdict.Outcome == PermissionDefer {
+		reqEv, err := NewPermissionDecisionRequired(runID, turnID, call.ID(), call.Name(), call.Arguments())
+		if err != nil {
+			// Constructor failure is a typed execution failure
+			// (R-APP-001's identity requirements reject empty
+			// arguments, etc.). The result slot carries the typed
+			// failure; the dispatcher emits the matching
+			// tool_end_execution_failure.
+			results[ordinal] = typedExecutionFailureFromError(call.ID(), err)
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, nil
+		}
+		emissions <- emission{ev: reqEv}
+
+		parkCh := parked.park(call.ID())
+		select {
+		case <-parkCh:
+			// Woken. Commit 4 wires a second Resolve call
+			// here so the policy can re-evaluate with the
+			// human's decision; Commit 3's RED-then-GREEN
+			// shape proceeds without re-evaluation.
+			return true, nil, nil
+		case <-ctx.Done():
+			// Mid-park cancel: typed abort failure (AG-10.3
+			// R-APP-009). The rejoin slice is fully populated
+			// even when the run is aborted.
+			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
+		}
+	}
+
+	// AllowOnce / AllowAlways: synchronous, no event. AG-10.4
+	// will route AllowAlways through `policy.Remember` after the
+	// tool completes; the gate's responsibility here is just to
+	// proceed.
+	if verdict.Outcome == PermissionOutcomeAllowOnce ||
+		verdict.Outcome == PermissionOutcomeAllowAlways {
+		return true, nil, nil
+	}
+
+	// Deny and ModifyInput are implemented in Commit 4. Until
+	// then, the gate proceeds (defensive default). Commit 4's
+	// implementation replaces this branch.
+	return true, nil, nil
 }
 
 // emitOrphanExecutionFailure emits a `ToolEndExecutionFailure` for a

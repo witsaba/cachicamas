@@ -152,9 +152,9 @@ func runPermissionSchedulerAndCollect(
 	calls []scheduledPermissionCall,
 	reg agent.Registry,
 	policy agent.PermissionPolicy,
-	sink chan<- *agent.Event,
 ) ([]agent.Result, []*agent.Event) {
 	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
 	results := sched.Schedule(
 		context.Background(),
 		permissionCallsToAICalls(calls),
@@ -214,9 +214,8 @@ func TestPermission_ImmediateAllow_NoEvent(t *testing.T) {
 		{id: "imm_0", name: "read_file", args: []byte(`{}`)},
 	}
 
-	sink := make(chan *agent.Event, 64)
 	results, events := runPermissionSchedulerAndCollect(
-		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy, sink,
+		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
 	)
 
 	// (a) Zero permission_decision_required events: AllowOnce bypasses
