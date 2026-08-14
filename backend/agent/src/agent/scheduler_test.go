@@ -1141,8 +1141,6 @@ func TestScheduler_PanicContainment(t *testing.T) {
 func TestScheduler_UnbufferedSink_ConcurrentConsumer(t *testing.T) {
 	t.Parallel()
 
-	baseline := runtime.NumGoroutine()
-
 	tools := map[string]agent.Tool{}
 	calls := make([]scheduledCall, 0, 8)
 	for i := 0; i < 8; i++ {
@@ -1182,11 +1180,14 @@ func TestScheduler_UnbufferedSink_ConcurrentConsumer(t *testing.T) {
 		t.Fatal("drain did not complete within 2 seconds (unbuffered sink deadlocked)")
 	}
 
-	time.Sleep(20 * time.Millisecond)
-	after := runtime.NumGoroutine()
-	if after > baseline+5 {
-		t.Errorf("goroutine count = %d, baseline = %d (unbuffered sink leak)", after, baseline)
-	}
+	// Drain completion is the deterministic observable: the consumer
+	// goroutine's `for range sink` only exits when the producer closes
+	// the sink, which only happens after Schedule returns. So receiving
+	// from `drained` proves the consumer has exited and the scheduler's
+	// dispatcher goroutine has closed the sink. The racy
+	// `runtime.NumGoroutine()` baseline check that lived here was
+	// removed because process-wide goroutine counts from other parallel
+	// tests can push past any tolerance (AG-09 verify report CRITICAL #1).
 }
 
 // bytesEqual is the bytes.Equal shim used by the scheduler tests

@@ -53,7 +53,7 @@ Chain strategy: size-exception
 
 ## Phase 5: Verification + docs (commit 8 — `docs`)
 
-- [ ] 5.1 (commit 8) Update `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` line 3: `"5 of 24"` → `"9 of 24"`. Add AG-09 to shipped list. Reconcile `openspec/specs/agent-loop-skeleton/spec.md`: MODIFIED R-LSK-001 (Tools field) + R-LSK-005 (coverage + S-LSK-008) + ADDED R-LSK-008 (one cycle, wording trap). `make test` + `make lint` (cache clean) both GREEN.
+- [x] 5.1 (commit 8) Update `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` line 3: `"5 of 24"` → `"9 of 24"`. Add AG-09 to shipped list. Reconcile `openspec/specs/agent-loop-skeleton/spec.md`: MODIFIED R-LSK-001 (Tools field) + R-LSK-005 (coverage + S-LSK-008) + ADDED R-LSK-008 (one cycle, wording trap). `make test` + `make lint` (cache clean) both GREEN.
 
 ## Scenario count (AG-04 W9)
 
