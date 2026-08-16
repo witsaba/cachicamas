@@ -75,13 +75,44 @@ const (
 	_ TurnOutcome = iota // the zero value names no outcome
 
 	// TurnOutcomeFinished is the outcome for a turn the model finished
-	// normally.
+	// normally (ai.FinishReasonStop).
 	TurnOutcomeFinished
 
 	// TurnOutcomeAborted is the outcome for a turn that was aborted. A
 	// turn-end carrying this outcome MUST also carry a [Failure]; every
 	// other outcome MUST NOT (this file's own resolved design gap, above).
 	TurnOutcomeAborted
+
+	// TurnOutcomeLengthLimited is the outcome for a turn that ended
+	// because an output limit was reached (ai.FinishReasonLength). The
+	// response is truncated, not a complete answer (R-ATT-001).
+	TurnOutcomeLengthLimited
+
+	// TurnOutcomeToolCalls is the outcome for a turn that ended because
+	// the model requested one or more tool calls (ai.FinishReasonToolCalls).
+	TurnOutcomeToolCalls
+
+	// TurnOutcomeContentFiltered is the outcome for a turn that ended
+	// because a provider-side content filter intervened
+	// (ai.FinishReasonContentFilter).
+	TurnOutcomeContentFiltered
+
+	// TurnOutcomeRefused is the outcome for a turn the model declined to
+	// complete (ai.FinishReasonRefusal). The turn is over — a refusal is
+	// a complete answer of the form "no", not a resumable state
+	// (R-ATT-004).
+	TurnOutcomeRefused
+
+	// TurnOutcomePaused is the outcome for a turn suspended and expected
+	// to resume, with the content already received replayed verbatim
+	// (ai.FinishReasonPauseTurn). Acting on the pause is AG-13's, not
+	// this milestone's (R-ATT-004).
+	TurnOutcomePaused
+
+	// TurnOutcomeUnknown is the outcome for a turn that ended in a
+	// provider stop condition Layer 1's vocabulary does not recognise
+	// (ai.FinishReasonUnknown).
+	TurnOutcomeUnknown
 
 	// turnOutcomeLimit is the first value outside the vocabulary. It must
 	// stay last.
@@ -96,6 +127,18 @@ func (o TurnOutcome) String() string {
 		return "finished"
 	case TurnOutcomeAborted:
 		return "aborted"
+	case TurnOutcomeLengthLimited:
+		return "length_limited"
+	case TurnOutcomeToolCalls:
+		return "tool_calls"
+	case TurnOutcomeContentFiltered:
+		return "content_filtered"
+	case TurnOutcomeRefused:
+		return "refused"
+	case TurnOutcomePaused:
+		return "paused"
+	case TurnOutcomeUnknown:
+		return "unknown"
 	case 0:
 		return "unset"
 	default:

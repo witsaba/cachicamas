@@ -860,7 +860,18 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/permission_protocol_test.go") ||
 				// AG-10 remediation widening (verify-report W8/S4):
 				strings.HasSuffix(path, "/loop_permission_e2e_test.go") ||
-				strings.HasSuffix(path, "/permission_policy_helpers_test.go")
+				strings.HasSuffix(path, "/permission_policy_helpers_test.go") ||
+				// AG-11 widening (R-ATT-009/R-LSK-004/R-APP-012, D3):
+				// turn_events.go and failure.go are pre-existing
+				// substrate files released for AG-11 only (exact
+				// filename, no wildcard/prefix/directory pattern);
+				// the three suffixes after them are AG-11's new
+				// test files.
+				strings.HasSuffix(path, "/turn_events.go") ||
+				strings.HasSuffix(path, "/failure.go") ||
+				strings.HasSuffix(path, "/invariant_pin_test.go") ||
+				strings.HasSuffix(path, "/turn_termination_test.go") ||
+				strings.HasSuffix(path, "/turn_failure_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
