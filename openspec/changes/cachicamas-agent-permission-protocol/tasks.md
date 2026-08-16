@@ -59,7 +59,7 @@ Chain strategy: size-exception
 ## Phase 5: Verification
 
 - [x] 5.1 `cd backend/agent && make test` green with `-race`; 4 leaves + bites + R-TLS-008 pass. (verified: 1176 `--- PASS` lines, 0 `FAIL`, exit 0, whole module — not just `src/agent`)
-- [x] 5.2 `cd backend/agent && make lint` clean after `cache clean`. (verified: `0 issues.` across 4 independent cache-cleaned runs, whole module)
+- [x] 5.2 `cd backend/agent && make lint` clean after `cache clean`. (verified: `0 issues.` across 5 independent cache-cleaned runs, whole module. `ctx`-first reorder in `aaa5c7b4`; vestigial `_ = abortFailure` no-op branch removed `29a2dcfd`)
 - [x] 5.3 `cd backend/agent && make build` clean. (verified: `go build -trimpath ./...` exit 0)
 - [ ] 5.4 `cd backend/agent && make vuln-check` clean. **NOT clean — pre-existing, out of AG-10's scope.** 5 Go stdlib vulnerabilities at `go1.26.5` (GO-2026-6218, -6090, -6089, -5972, -5026), all fixed in `go1.26.6`, all traced exclusively through `src/ai/openaicompat/**` (Layer 1) — zero AG-10 files (`src/agent/**`) appear in any trace. A toolchain upgrade is out of scope for this milestone per explicit instruction; reported as an accepted WARNING, not fixed.
 - [x] 5.5 Zero edits to 10 substrate files (NFR-TLS-003 7th carry). (verified: `git diff main -- <10 files>` = 0 lines; `TestTurn_SubstrateUntouched` PASS)

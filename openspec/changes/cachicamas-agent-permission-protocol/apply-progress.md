@@ -25,6 +25,8 @@
 | `ba1e8777` | test(agent): AG-10 re-point remembered-cardinality bite at a real Schedule run (task 2.4) |
 | `52c8c9be` | refactor(agent): AG-10 table-driven t.Run skeleton for the four-outcome matrix (task 1.2) |
 | `e18095e5` | docs(agent): AG-10 pointer + NFR-TLS-003 substrate list in openspec/AGENTS.md (task 1.3) |
+| `2ec851c6` | chore(agent): AG-10 back-annotate tasks.md + record apply-progress |
+| `29a2dcfd` | refactor(agent): AG-10 remove vestigial abortFailure no-op branch (task 5.2) |
 
 Pre-session commits (already landed, re-validated, preserved byte-clean where the
 orchestrator's audit marked them DONE): `75ecd566`, `5f03d600`, `20b481a8`, `6ec55de7`.
@@ -96,7 +98,7 @@ deliverable behavior per the work-unit-commits discipline.
 | Gate | Result |
 |---|---|
 | `make test` (whole module, `-race`) | **PASS** — 1176 `--- PASS`, 0 `FAIL`, exit 0 |
-| `make lint` (after `cache clean`) | **PASS** — `0 issues.`, reproduced across 4 independent cache-cleaned runs (see Risks — one non-reproducing transient finding at session start) |
+| `make lint` (after `cache clean`) | **PASS** — `0 issues.`, reproduced across 5 independent cache-cleaned runs (see Risks — one non-reproducing transient finding at session start) |
 | `make build` | **PASS** — `go build -trimpath ./...` exit 0 |
 | `make vuln-check` | **FAIL — accepted, out of scope.** 5 Go stdlib vulnerabilities (`GO-2026-6218`, `-6090`, `-6089`, `-5972`, `-5026`) at `go1.26.5`, fixed in `go1.26.6`. Every trace runs exclusively through `src/ai/openaicompat/**` (Layer 1: `execute_once.go`, `stream.go`, `openrouter/transport.go`, `conformancetest/retry.go`) — zero AG-10 files (`src/agent/**`) appear in any trace. Per explicit instruction: no toolchain upgrade attempted. |
 | `TestTurn_SubstrateUntouched` (NFR-TLS-003) | **PASS** — `git diff main` against the 10 named substrate files is 0 lines |
