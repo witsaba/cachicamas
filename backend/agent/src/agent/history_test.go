@@ -12,6 +12,8 @@ package agent_test
 
 import (
 	"errors"
+	"fmt"
+	"go/ast"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -292,4 +294,261 @@ func TestHistory_TwoUnclosedCalls_NamesFirstOffendingPosition(t *testing.T) {
 
 	err := h.CloseTurn()
 	requireViolation(t, err, ai.ErrEmpty, "messages[0].content[0].result")
+}
+
+// fieldsOrNil returns fields.List, or nil when fields itself is nil — an
+// empty parameter/result list parses as a nil *ast.FieldList rather than
+// an empty one.
+func fieldsOrNil(fields *ast.FieldList) []*ast.Field {
+	if fields == nil {
+		return nil
+	}
+	return fields.List
+}
+
+func isIdentNamed(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+func isQualifiedIdent(expr ast.Expr, pkg, name string) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && ident.Name == pkg && sel.Sel.Name == name
+}
+
+// signatureTypeString renders a type expression for a failure message —
+// diagnostic only, mirroring agenttest_test's exprString.
+func signatureTypeString(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.StarExpr:
+		return "*" + signatureTypeString(e.X)
+	case *ast.ArrayType:
+		return "[]" + signatureTypeString(e.Elt)
+	case *ast.SelectorExpr:
+		if x, ok := e.X.(*ast.Ident); ok {
+			return x.Name + "." + e.Sel.Name
+		}
+		return "<selector>." + e.Sel.Name
+	default:
+		return fmt.Sprintf("%T", expr)
+	}
+}
+
+// TestNewSeededHistory_ValidSeed_Accepted (S-HIS-050) — a pre-existing
+// transcript in which every tool call has a matching result constructs
+// successfully, reads back equal to the seed and in order, with
+// ordinal-derived entry identities.
+func TestNewSeededHistory_ValidSeed_Accepted(t *testing.T) {
+	t.Parallel()
+
+	seed := []ai.Message{
+		mustMessage(t, ai.RoleUser, mustText(t, "hi")),
+		callMessage(t, "call-seed"),
+		resultMessage(t, "call-seed"),
+	}
+	h, err := agent.NewSeededHistory(seed)
+	if err != nil {
+		t.Fatalf("NewSeededHistory(seed) returned %v, want nil", err)
+	}
+	entries := h.Entries()
+	if len(entries) != len(seed) {
+		t.Fatalf("Entries() returned %d entries, want %d", len(entries), len(seed))
+	}
+	for i, entry := range entries {
+		if entry.ID() != agent.EntryID(i+1) {
+			t.Errorf("entries[%d].ID() = %v, want %v (1-based ordinal)", i, entry.ID(), agent.EntryID(i+1))
+		}
+		if !entry.Message().Equal(seed[i]) {
+			t.Errorf("entries[%d].Message() = %v, want %v", i, entry.Message(), seed[i])
+		}
+	}
+}
+
+// TestNewSeededHistory_OrphanedResult_RejectedFirstOffendingPosition
+// (S-HIS-051, result direction only) — a seed containing an orphaned
+// result fails with the same rule class the equivalent append would
+// produce, positioned at the first offending entry in seed order.
+func TestNewSeededHistory_OrphanedResult_RejectedFirstOffendingPosition(t *testing.T) {
+	t.Parallel()
+
+	seed := []ai.Message{
+		mustMessage(t, ai.RoleUser, mustText(t, "hi")),
+		resultMessage(t, "call-missing"), // index 1: no prior call in the seed
+	}
+	h, err := agent.NewSeededHistory(seed)
+	requireViolation(t, err, ai.ErrUnresolvedReference, "messages[1].content[0]")
+	if h != nil {
+		t.Error("NewSeededHistory returned a non-nil *History alongside an error, want nil")
+	}
+}
+
+// TestNewSeededHistory_RejectedSeed_ZeroValueUnusable (S-HIS-052) — a
+// rejected seeded construction's returned history is not usable as a
+// history through any public read or append route; the zero value never
+// behaves as an empty valid transcript.
+func TestNewSeededHistory_RejectedSeed_ZeroValueUnusable(t *testing.T) {
+	t.Parallel()
+
+	seed := []ai.Message{resultMessage(t, "call-missing")}
+	h, err := agent.NewSeededHistory(seed)
+	if err == nil {
+		t.Fatal("NewSeededHistory(seed) returned nil error, want a rejection")
+	}
+	if h != nil {
+		t.Fatalf("NewSeededHistory returned %v, want nil on rejection", h)
+	}
+
+	zero := new(agent.History)
+	if got := zero.Len(); got != 0 {
+		t.Errorf("new(History).Len() = %d, want 0", got)
+	}
+	if err := zero.Append(mustMessage(t, ai.RoleUser, mustText(t, "x"))); err == nil {
+		t.Error("new(History).Append(...) returned nil error, want a rejection — the zero value is not a usable history")
+	} else {
+		requireViolation(t, err, ai.ErrEmpty, "history")
+	}
+}
+
+// TestNewSeededHistory_SignatureAcceptsOnlyMessages (S-HIS-053) — the
+// seeded constructor's public signature accepts an ordered sequence of
+// Layer 1 messages and no other caller-supplied input: no parameter
+// through which an entry identity or an origin discriminator could be
+// provided.
+func TestNewSeededHistory_SignatureAcceptsOnlyMessages(t *testing.T) {
+	t.Parallel()
+
+	funcType := funcDeclSignature(t, "history.go", "NewSeededHistory")
+	if funcType == nil {
+		t.Fatal("history.go declares no top-level function named NewSeededHistory")
+	}
+
+	if len(fieldsOrNil(funcType.Params)) != 1 {
+		t.Fatalf("NewSeededHistory declares %d parameter field(s), want exactly 1 (an ordered sequence of Layer 1 messages and nothing else, S-HIS-053)", len(fieldsOrNil(funcType.Params)))
+	}
+	paramType := funcType.Params.List[0].Type
+	arrayType, ok := paramType.(*ast.ArrayType)
+	if !ok || arrayType.Len != nil {
+		t.Fatalf("NewSeededHistory's parameter type is %s, want a slice ([]ai.Message)", signatureTypeString(paramType))
+	}
+	if !isQualifiedIdent(arrayType.Elt, "ai", "Message") {
+		t.Errorf("NewSeededHistory's parameter element type is %s, want ai.Message", signatureTypeString(arrayType.Elt))
+	}
+
+	if len(fieldsOrNil(funcType.Results)) != 2 {
+		t.Fatalf("NewSeededHistory declares %d result field(s), want exactly 2 (a constructed history and an error)", len(fieldsOrNil(funcType.Results)))
+	}
+	first, second := funcType.Results.List[0].Type, funcType.Results.List[1].Type
+	star, ok := first.(*ast.StarExpr)
+	if !ok || !isIdentNamed(star.X, "History") {
+		t.Errorf("NewSeededHistory's first result type is %s, want *History", signatureTypeString(first))
+	}
+	if !isIdentNamed(second, "error") {
+		t.Errorf("NewSeededHistory's second result type is %s, want error", signatureTypeString(second))
+	}
+}
+
+// TestNewSeededHistory_EndsInOpenCall_AcceptedThenCloseTurnRejects
+// (S-HIS-054) — a seed ending in one or more open calls is ACCEPTED;
+// CloseTurn on that seeded history then rejects with the identical rule
+// class and positional shape S-HIS-020 produces on an appended history.
+// The unclosed-call rejection belongs to CloseTurn alone, on seeded and
+// appended histories alike — a seed is not additionally turn-closed.
+func TestNewSeededHistory_EndsInOpenCall_AcceptedThenCloseTurnRejects(t *testing.T) {
+	t.Parallel()
+
+	seed := []ai.Message{
+		mustMessage(t, ai.RoleUser, mustText(t, "hi")),
+		callMessage(t, "call-open"),
+	}
+	h, err := agent.NewSeededHistory(seed)
+	if err != nil {
+		t.Fatalf("NewSeededHistory(seed ending in an open call) returned %v, want nil (an open call is legal in a seed, R-HIS-006)", err)
+	}
+	entries := h.Entries()
+	if len(entries) != len(seed) {
+		t.Fatalf("Entries() returned %d entries, want %d — the seed reads back equal to the input", len(entries), len(seed))
+	}
+
+	err = h.CloseTurn()
+	requireViolation(t, err, ai.ErrEmpty, "messages[1].content[0].result")
+}
+
+// TestHistory_ReadBack_UnmodifiedValuesInOrder (S-HIS-040) — the
+// loop-facing view yields the committed Layer 1 values unmodified and in
+// order; each value equals the one committed, without re-serialisation or
+// field rewriting. Pinned explicitly even though Phase 1's GREEN already
+// established this shape, per the coverage table.
+func TestHistory_ReadBack_UnmodifiedValuesInOrder(t *testing.T) {
+	t.Parallel()
+
+	h := agent.NewHistory()
+	committed := []ai.Message{
+		mustMessage(t, ai.RoleUser, mustText(t, "one")),
+		mustMessage(t, ai.RoleAssistant, mustText(t, "two")),
+	}
+	for _, m := range committed {
+		if err := h.Append(m); err != nil {
+			t.Fatalf("Append(...) returned %v, want nil", err)
+		}
+	}
+
+	entries := h.Entries()
+	for i, entry := range entries {
+		if entry.Message().ID() != committed[i].ID() {
+			t.Errorf("entries[%d].Message().ID() = %v, want %v (the same committed value, not re-serialised)", i, entry.Message().ID(), committed[i].ID())
+		}
+		if entry.Message().Role() != committed[i].Role() {
+			t.Errorf("entries[%d].Message().Role() = %v, want %v", i, entry.Message().Role(), committed[i].Role())
+		}
+		if !entry.Message().Equal(committed[i]) {
+			t.Errorf("entries[%d].Message() = %v, want %v", i, entry.Message(), committed[i])
+		}
+	}
+}
+
+// TestHistory_EntryIdentity_StableAcrossReadsAndSeed (S-HIS-041) — an
+// entry's identity is equal across two reads of the same history, and
+// across a second history constructed via NewSeededHistory over the same
+// ordered seed — identity is a function of ordinal position alone.
+func TestHistory_EntryIdentity_StableAcrossReadsAndSeed(t *testing.T) {
+	t.Parallel()
+
+	seed := []ai.Message{
+		mustMessage(t, ai.RoleUser, mustText(t, "one")),
+		mustMessage(t, ai.RoleAssistant, mustText(t, "two")),
+	}
+	appended := agent.NewHistory()
+	for _, m := range seed {
+		if err := appended.Append(m); err != nil {
+			t.Fatalf("Append(...) returned %v, want nil", err)
+		}
+	}
+
+	firstRead := appended.Entries()
+	secondRead := appended.Entries()
+	for i := range firstRead {
+		if firstRead[i].ID() != secondRead[i].ID() {
+			t.Errorf("entries[%d].ID() = %v on first read, %v on second — identity must be stable across reads", i, firstRead[i].ID(), secondRead[i].ID())
+		}
+	}
+
+	seeded, err := agent.NewSeededHistory(seed)
+	if err != nil {
+		t.Fatalf("NewSeededHistory(seed) returned %v, want nil", err)
+	}
+	seededEntries := seeded.Entries()
+	if len(seededEntries) != len(firstRead) {
+		t.Fatalf("seeded Entries() returned %d entries, want %d", len(seededEntries), len(firstRead))
+	}
+	for i := range firstRead {
+		if seededEntries[i].ID() != firstRead[i].ID() {
+			t.Errorf("seeded entries[%d].ID() = %v, want %v (the appended original's identity — a function of ordinal position alone)", i, seededEntries[i].ID(), firstRead[i].ID())
+		}
+	}
 }

@@ -187,6 +187,41 @@ func NewHistory() *History {
 	return &History{constructed: true}
 }
 
+// NewSeededHistory constructs a history over a pre-existing transcript
+// (R-HIS-006), re-running the SAME append-time rules [History.Append]
+// runs over the whole seed, in order (decision 2, frozen at the AG-12
+// handoff — session resume and next-run model switching stand on this
+// seam). It accepts an ordered sequence of Layer 1 messages and nothing
+// else: no parameter accepts a caller-supplied entry identity or origin
+// discriminator (S-HIS-053) — the C1 back door stays closed here too.
+//
+// It ACCEPTS a seed that ends in one or more open calls. Seeding re-runs
+// only the append-time rules of [History.Append] (R-HIS-002); it never
+// applies the turn-close rule of [History.CloseTurn] (R-HIS-003). A
+// seeded history is constructed with its turn open, exactly as an
+// appended one is — this is what makes an interrupted transcript
+// reconstructable on resume, and it is the precondition
+// [History.SynthesizeOrphans] depends on (S-HIS-054).
+//
+// It rejects only a seed containing an orphaned RESULT — a tool-result
+// entry naming a call the seed does not declare at that point — with the
+// same rule class the equivalent append would produce, positioned at the
+// first offending entry via [History.commit]'s own would-be-index
+// positioning (S-HIS-051).
+//
+// On rejection it returns (nil, err): the zero history is never usable,
+// so a caller cannot mistake a rejected construction for an empty valid
+// transcript (S-HIS-052).
+func NewSeededHistory(messages []ai.Message) (*History, error) {
+	h := NewHistory()
+	for _, m := range messages {
+		if err := h.commit(commitAppend, m, EntryOriginAppended); err != nil {
+			return nil, err
+		}
+	}
+	return h, nil
+}
+
 // Append validates and commits message as the next transcript entry
 // (R-HIS-001), through [History.commit] (R-HIS-004). On rejection the
 // transcript is left byte-unchanged — a failed commit is not a partial
