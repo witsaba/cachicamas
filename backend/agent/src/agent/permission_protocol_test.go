@@ -1212,3 +1212,210 @@ func TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline(t *t
 		t.Errorf("no_deadline_tool invocations = %d, want 1", inv)
 	}
 }
+
+// --- AG-10.4 Remember tests -------------------------------------------
+
+// S-APP-008 — AllowAlways MUST invoke Policy.Remember (R-APP-007);
+// a true return emits exactly one permission_resolution_remembered,
+// a false return suppresses it. Both branches still execute the
+// call — Remember gates the EVENT, not execution.
+func TestPermission_AllowAlways_Remember_Branches(t *testing.T) {
+	t.Parallel()
+
+	type testCase struct {
+		name           string
+		remember       bool
+		wantRemembered int
+	}
+	cases := []testCase{
+		{name: "Remember=true emits resolution_remembered", remember: true, wantRemembered: 1},
+		{name: "Remember=false suppresses resolution_remembered", remember: false, wantRemembered: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var rememberCalledWith agent.PermissionOutcome
+			var rememberCalledName string
+			policy := &scriptedPermissionPolicy{
+				resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+					return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways}
+				},
+				remember: func(_ context.Context, toolName string, outcome agent.PermissionOutcome) bool {
+					rememberCalledName = toolName
+					rememberCalledWith = outcome
+					return tc.remember
+				},
+			}
+
+			tool := EchoScriptedTool("remember_branch_tool", agent.EffectClassRead)
+			reg := newMapRegistry(map[string]agent.Tool{"remember_branch_tool": tool})
+			calls := []scheduledPermissionCall{{id: "remember_0", name: "remember_branch_tool", args: []byte(`{}`)}}
+
+			results, events := runPermissionSchedulerAndCollect(
+				&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
+			)
+
+			if n := policy.rememberInvocations(); n != 1 {
+				t.Fatalf("policy.Remember invocation count = %d, want 1 (R-APP-007 MUST invoke Remember on AllowAlways)", n)
+			}
+			if rememberCalledName != "remember_branch_tool" {
+				t.Errorf("Remember called with toolName = %q, want %q", rememberCalledName, "remember_branch_tool")
+			}
+			if rememberCalledWith != agent.PermissionOutcomeAllowAlways {
+				t.Errorf("Remember called with outcome = %v, want AllowAlways", rememberCalledWith)
+			}
+
+			rememberedEvs := 0
+			for _, ev := range events {
+				if rem, ok := ev.PermissionResolutionRemembered(); ok {
+					rememberedEvs++
+					if rem.ToolName() != "remember_branch_tool" {
+						t.Errorf("resolution_remembered.ToolName() = %q, want %q", rem.ToolName(), "remember_branch_tool")
+					}
+					if rem.Outcome() != agent.PermissionOutcomeAllowAlways {
+						t.Errorf("resolution_remembered.Outcome() = %v, want AllowAlways", rem.Outcome())
+					}
+				}
+			}
+			if rememberedEvs != tc.wantRemembered {
+				t.Errorf("resolution_remembered count = %d, want %d", rememberedEvs, tc.wantRemembered)
+			}
+
+			// Remember gates the EVENT, not execution — the call
+			// runs in both branches.
+			if len(results) != 1 {
+				t.Fatalf("Schedule returned %d results, want 1", len(results))
+			}
+			if results[0].Outcome != agent.ToolOutcomeSuccess {
+				t.Errorf("results[0].Outcome = %v, want Success (Remember gates the event, not execution)", results[0].Outcome)
+			}
+			if inv := tool.Invocations(); inv != 1 {
+				t.Errorf("remember_branch_tool invocations = %d, want 1", inv)
+			}
+		})
+	}
+}
+
+// S-APP-011 — a remembered AllowAlways (Remember == true) silences
+// asking for identical subsequent calls in the SAME Schedule call
+// (R-APP-010): the second call to the same tool name is NOT
+// consulted at all (policy.Resolve is not invoked a second time for
+// it), while a call to a DIFFERENT tool name is still consulted
+// normally (the suppression is scoped per tool name, not global).
+//
+// The three calls are all EffectClassMutating (serialized, call-
+// order sequential) so the suppression state written after call_0
+// is guaranteed visible before call_1 starts — a concurrent
+// read-class scheduling of two identical-tool-name calls has a
+// genuine TOCTOU race between the pre-Resolve suppression check and
+// the post-Remember state write that this test deliberately avoids
+// by using the serialized lane (documented as a discovered risk in
+// the apply-progress artifact, not fixed here — R-APP-010 only
+// requires suppressing calls that occur temporally after the
+// remembering takes effect).
+func TestPermission_RememberedSuppressesSubsequentAsk(t *testing.T) {
+	t.Parallel()
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways}
+		},
+		remember: func(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
+			return true
+		},
+	}
+
+	toolA := EchoScriptedTool("remembered_tool", agent.EffectClassMutating)
+	toolB := EchoScriptedTool("other_tool", agent.EffectClassMutating)
+	reg := newMapRegistry(map[string]agent.Tool{
+		"remembered_tool": toolA,
+		"other_tool":      toolB,
+	})
+
+	calls := []scheduledPermissionCall{
+		{id: "first_0", name: "remembered_tool", args: []byte(`{}`)},
+		{id: "second_1", name: "remembered_tool", args: []byte(`{}`)},
+		{id: "third_2", name: "other_tool", args: []byte(`{}`)},
+	}
+
+	results, events := runPermissionSchedulerAndCollect(
+		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
+	)
+
+	// Resolve was consulted exactly twice: once for the first
+	// remembered_tool call (which remembers it), once for
+	// other_tool (a different tool name, never suppressed). The
+	// second remembered_tool call is NOT consulted at all.
+	if n := policy.resolveInvocations(); n != 2 {
+		t.Errorf("policy.Resolve invocation count = %d, want 2 (the second identical call must not be consulted, R-APP-010)", n)
+	}
+	seenNames := policy.seenResolveToolNames()
+	for _, name := range seenNames {
+		if name != "remembered_tool" && name != "other_tool" {
+			t.Errorf("policy.Resolve seen an unexpected tool name %q", name)
+		}
+	}
+	remCount := 0
+	for _, name := range seenNames {
+		if name == "remembered_tool" {
+			remCount++
+		}
+	}
+	if remCount != 1 {
+		t.Errorf("policy.Resolve saw remembered_tool %d time(s), want 1 (the suppressed second call skips Resolve entirely)", remCount)
+	}
+
+	// Remember invoked exactly twice — once per DISTINCT tool name
+	// that reaches an AllowAlways verdict (remembered_tool's first
+	// call, and other_tool, which is never suppressed since it is a
+	// different tool name). The suppressed second remembered_tool
+	// call contributes zero additional Remember invocations.
+	if n := policy.rememberInvocations(); n != 2 {
+		t.Errorf("policy.Remember invocation count = %d, want 2 (one per distinct tool name reaching AllowAlways)", n)
+	}
+
+	// Exactly one resolution_remembered PER distinct tool name —
+	// never two for the same tool name (CardinalityAtMostOne
+	// preserved by construction, not merely by the validator,
+	// S-APE-082 carry).
+	rememberedByTool := map[string]int{}
+	for _, ev := range events {
+		if rem, ok := ev.PermissionResolutionRemembered(); ok {
+			rememberedByTool[rem.ToolName()]++
+		}
+	}
+	if len(rememberedByTool) != 2 {
+		t.Errorf("resolution_remembered distinct tool names = %d, want 2, got %v", len(rememberedByTool), rememberedByTool)
+	}
+	if rememberedByTool["remembered_tool"] != 1 {
+		t.Errorf("resolution_remembered count for remembered_tool = %d, want exactly 1 (the suppressed second call must not re-trigger it)", rememberedByTool["remembered_tool"])
+	}
+	if rememberedByTool["other_tool"] != 1 {
+		t.Errorf("resolution_remembered count for other_tool = %d, want exactly 1", rememberedByTool["other_tool"])
+	}
+
+	// Zero permission_decision_required — no call ever defers in
+	// this scenario.
+	if got := countByKind(events)[agent.EventKindPermissionDecisionRequired]; got != 0 {
+		t.Errorf("decision_required count = %d, want 0", got)
+	}
+
+	// All three calls executed successfully — suppression bypasses
+	// asking, not execution.
+	if len(results) != 3 {
+		t.Fatalf("Schedule returned %d results, want 3", len(results))
+	}
+	for i, r := range results {
+		if r.Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[%d].Outcome = %v, want Success", i, r.Outcome)
+		}
+	}
+	if inv := toolA.Invocations(); inv != 2 {
+		t.Errorf("remembered_tool invocations = %d, want 2 (both calls still execute)", inv)
+	}
+	if inv := toolB.Invocations(); inv != 1 {
+		t.Errorf("other_tool invocations = %d, want 1", inv)
+	}
+}

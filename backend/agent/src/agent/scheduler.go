@@ -141,6 +141,13 @@ func (s *Scheduler) Schedule(
 	s.parked = parked
 	s.parkedMu.Unlock()
 
+	// Per-Schedule remembered-tool state for the AG-10.4 Remember
+	// gate (R-APP-010). Lives one Schedule call, exactly like
+	// parked (R-LSK-002 carry) — unlike parked it needs no external
+	// handle, so it stays a plain local threaded through the call
+	// goroutines.
+	remembered := newRememberedSet()
+
 	// Bounded fan-out for reads: a `chan struct{}` semaphore
 	// with capacity `maxReads`. A read call acquires a slot
 	// before executing; an over-quorum call blocks until a
@@ -173,9 +180,9 @@ func (s *Scheduler) Schedule(
 			wg.Done()
 			s.scheduleOrphan(i, call, runID, turnID, results, emissions)
 		case tool.EffectClass() == EffectClassRead:
-			go s.scheduleRead(i, call, tool, runID, turnID, policy, parked, ctx, results, emissions, readSem, &wg)
+			go s.scheduleRead(ctx, i, call, tool, runID, turnID, policy, parked, remembered, results, emissions, readSem, &wg)
 		default:
-			go s.scheduleSerialized(i, call, tool, runID, turnID, policy, parked, ctx, results, emissions, serialCh, &wg)
+			go s.scheduleSerialized(ctx, i, call, tool, runID, turnID, policy, parked, remembered, results, emissions, serialCh, &wg)
 		}
 	}
 	wg.Wait()
@@ -254,11 +261,12 @@ func (s *Scheduler) runDispatcher(
 // calls. An unbounded scheduler would let the counter exceed the
 // bound (S-TLS-005a's bite).
 //
-// `policy` and `parked` thread the AG-10 permission gate through
-// the call goroutine; `ctx` is the per-Schedule context used to
-// unblock parked calls on cancellation (AG-10.3). A nil `policy`
-// bypasses the gate (AG-09 behavior preserved).
+// `policy`, `parked` and `remembered` thread the AG-10 permission
+// gate through the call goroutine; `ctx` is the per-Schedule context
+// used to unblock parked calls on cancellation (AG-10.3). A nil
+// `policy` bypasses the gate (AG-09 behavior preserved).
 func (s *Scheduler) scheduleRead(
+	ctx context.Context,
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
@@ -266,7 +274,7 @@ func (s *Scheduler) scheduleRead(
 	turnID TurnID,
 	policy PermissionPolicy,
 	parked *parkedSet,
-	ctx context.Context,
+	remembered *rememberedSet,
 	results []Result,
 	emissions chan<- emission,
 	sem chan struct{},
@@ -275,7 +283,7 @@ func (s *Scheduler) scheduleRead(
 	defer wg.Done()
 	sem <- struct{}{}
 	defer func() { <-sem }()
-	s.executeCall(ordinal, call, tool, runID, turnID, policy, parked, ctx, results, emissions)
+	s.executeCall(ctx, ordinal, call, tool, runID, turnID, policy, parked, remembered, results, emissions)
 }
 
 // scheduleSerialized is the serialized entry for a mutating /
@@ -283,9 +291,10 @@ func (s *Scheduler) scheduleRead(
 // 1) until the previous call's slot is free. Calls execute in
 // issuance order regardless of completion order.
 //
-// `policy` and `parked` thread the AG-10 permission gate; `ctx`
-// is the per-Schedule context (AG-10.3 cancellation).
+// `policy`, `parked` and `remembered` thread the AG-10 permission
+// gate; `ctx` is the per-Schedule context (AG-10.3 cancellation).
 func (s *Scheduler) scheduleSerialized(
+	ctx context.Context,
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
@@ -293,7 +302,7 @@ func (s *Scheduler) scheduleSerialized(
 	turnID TurnID,
 	policy PermissionPolicy,
 	parked *parkedSet,
-	ctx context.Context,
+	remembered *rememberedSet,
 	results []Result,
 	emissions chan<- emission,
 	serial chan struct{},
@@ -302,7 +311,7 @@ func (s *Scheduler) scheduleSerialized(
 	defer wg.Done()
 	serial <- struct{}{}
 	defer func() { <-serial }()
-	s.executeCall(ordinal, call, tool, runID, turnID, policy, parked, ctx, results, emissions)
+	s.executeCall(ctx, ordinal, call, tool, runID, turnID, policy, parked, remembered, results, emissions)
 }
 
 // scheduleOrphan handles a call whose tool is not registered. It
@@ -339,13 +348,15 @@ func (s *Scheduler) scheduleOrphan(
 //   - `(Result{}, err)` → emit `ToolEndExecutionFailure` with a
 //     typed `*Failure`.
 //
-// AG-10 extension: `policy`, `parked`, and `ctx` thread the
-// permission gate. A nil `policy` bypasses the gate (AG-09 behavior).
-// A non-nil policy consults `Resolve` for every call; sync verdicts
-// proceed, `Defer` parks the call on `parked.park(call.ID())` and
-// waits for wake OR ctx cancel. `ctx` is the Schedule-level
+// AG-10 extension: `policy`, `parked`, `remembered`, and `ctx`
+// thread the permission gate. A nil `policy` bypasses the gate
+// (AG-09 behavior). A non-nil policy consults `Resolve` for every
+// call not already suppressed by `remembered` (R-APP-010); sync
+// verdicts proceed, `Defer` parks the call on `parked.park(call.ID())`
+// and waits for wake OR ctx cancel. `ctx` is the Schedule-level
 // cancellation context (AG-10.3).
 func (s *Scheduler) executeCall(
+	ctx context.Context,
 	ordinal int,
 	call ai.ToolCall,
 	tool Tool,
@@ -353,7 +364,7 @@ func (s *Scheduler) executeCall(
 	turnID TurnID,
 	policy PermissionPolicy,
 	parked *parkedSet,
-	ctx context.Context,
+	remembered *rememberedSet,
 	results []Result,
 	emissions chan<- emission,
 ) {
@@ -369,13 +380,12 @@ func (s *Scheduler) executeCall(
 	// sibling goroutines continue to run independently (R-TLS-011).
 	defer recoverCall(ordinal, results)
 
-	// AG-10 permission gate (R-APP-001..003). A nil policy
-	// bypasses the gate; a non-nil policy consults Resolve and
-	// may park the call until wake or ctx cancel. Commit 3
-	// covers the immediate-allow path and the defer path;
-	// Commit 4 widens to four typed outcomes.
+	// AG-10 permission gate (R-APP-001..010). A nil policy
+	// bypasses the gate; a non-nil policy consults Resolve — unless
+	// `remembered` already silences this call's tool name — and may
+	// park the call until wake or ctx cancel.
 	gateProceed, modifiedArgs, abortFailure := s.runPermissionGate(
-		ctx, ordinal, call, runID, turnID, policy, parked, results, emissions,
+		ctx, ordinal, call, runID, turnID, policy, parked, remembered, results, emissions,
 	)
 	if !gateProceed {
 		// Gate wrote a typed failure to the result slot and
@@ -478,29 +488,34 @@ func (s *Scheduler) executeCall(
 	}
 }
 
-// runPermissionGate is the per-call AG-10 gate (R-APP-001..007,
-// AG-10.1+AG-10.2 implementation). It consults `policy.Resolve`
-// once per call and dispatches the verdict:
+// runPermissionGate is the per-call AG-10 gate (R-APP-001..010). It
+// consults `policy.Resolve` once per call — unless `remembered`
+// already silences this call's tool name (R-APP-010) — and
+// dispatches the verdict:
 //
 //   - nil policy        → bypass (AG-09 behavior preserved; the
 //                         call proceeds as if the gate were absent).
+//   - remembered tool   → bypass without consulting Resolve at all
+//                         (R-APP-010: "not asked", not merely "not
+//                         told" — the suppression happens before
+//                         any Resolve call).
 //   - PermissionDefer   → emit `permission_decision_required`,
 //                         park the call on `parked.park(callID)`,
 //                         wait for the wake hand-off OR ctx
-//                         cancellation. On wake, proceed (Commit 4
-//                         stub; a later milestone re-evaluates the
-//                         verdict with the human's decision). On
-//                         ctx cancel, populate the result slot with
-//                         a typed abort failure and return
-//                         proceed=false.
+//                         cancellation. On wake, re-enter
+//                         policy.Resolve and process the fresh
+//                         verdict (D-A). On ctx cancel, populate
+//                         the result slot with a typed abort
+//                         failure and return proceed=false.
 //   - AllowOnce         → emit `permission_decision_made{outcome=
 //                         AllowOnce}` (R-APP-004), return
 //                         proceed=true with no modifications.
 //   - AllowAlways       → emit `permission_decision_made{outcome=
-//                         AllowAlways}` (R-APP-007), return
-//                         proceed=true with no modifications.
-//                         Commit 6 wires `policy.Remember` and the
-//                         `permission_resolution_remembered` emission.
+//                         AllowAlways}` (R-APP-007), invoke
+//                         `policy.Remember`; true records the tool
+//                         name in `remembered` and emits
+//                         `permission_resolution_remembered`, false
+//                         suppresses the emission (AG-10.4).
 //   - Deny              → emit `permission_decision_made{outcome=
 //                         Deny, failure=verdict.Failure}` (R-APP-005),
 //                         populate the result slot with
@@ -523,11 +538,20 @@ func (s *Scheduler) runPermissionGate(
 	turnID TurnID,
 	policy PermissionPolicy,
 	parked *parkedSet,
+	remembered *rememberedSet,
 	results []Result,
 	emissions chan<- emission,
 ) (proceed bool, modifiedArgs []byte, abortFailure *Failure) {
 	// Bypass: nil policy preserves AG-09 behavior byte-clean.
 	if policy == nil {
+		return true, nil, nil
+	}
+
+	// R-APP-010: a remembered AllowAlways silences subsequent
+	// identical calls for the rest of this Schedule call — the call
+	// proceeds WITHOUT ever consulting Resolve (not merely without
+	// emitting an event; "unasked", per the design data flow).
+	if remembered.remembered(call.Name()) {
 		return true, nil, nil
 	}
 
@@ -564,7 +588,7 @@ func (s *Scheduler) runPermissionGate(
 			// including the Defer branch (a policy that defers
 			// again on wake is a policy quirk, not a protocol
 			// bug: the call simply re-parks).
-			return s.runPermissionGate(ctx, ordinal, call, runID, turnID, policy, parked, results, emissions)
+			return s.runPermissionGate(ctx, ordinal, call, runID, turnID, policy, parked, remembered, results, emissions)
 		case <-ctx.Done():
 			// Mid-park cancel: typed abort failure (AG-10.3
 			// R-APP-009). The rejoin slice is fully populated
@@ -586,16 +610,33 @@ func (s *Scheduler) runPermissionGate(
 		return true, nil, nil
 	}
 
-	// AllowAlways: emit decision_made{AllowAlways}, proceed. The
-	// `policy.Remember` invocation and the conditional
-	// `permission_resolution_remembered` emission are wired in
-	// Commit 6 (R-APP-007). Commit 4 emits the decision_made;
-	// Commit 6 attaches the remembered emission.
+	// AllowAlways: emit decision_made{AllowAlways}, proceed, then
+	// MUST invoke policy.Remember (R-APP-007). A true return records
+	// the tool name in `remembered` (R-APP-010: silences subsequent
+	// identical calls for the rest of this Schedule call) and emits
+	// `permission_resolution_remembered`; a false return suppresses
+	// the emission (preserves CardinalityAtMostOne, R-APE-003).
 	if verdict.Outcome == PermissionOutcomeAllowAlways {
 		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
 			PermissionOutcomeAllowAlways, nil, nil)
 		if err == nil {
 			emissions <- emission{ev: madeEv}
+		}
+		if policy.Remember(ctx, call.Name(), PermissionOutcomeAllowAlways) {
+			remembered.remember(call.Name())
+			// A resolution_remembered constructor failure here does
+			// NOT abort the call: the decision (AllowAlways) is
+			// already made and the remembering already took local
+			// effect (`remembered.remember` above) — unlike the
+			// other constructor-failure sites in this function, this
+			// event is best-effort telemetry, not a precondition for
+			// proceeding. In practice `run` and `toolName` are always
+			// non-empty here, so this constructor does not fail for
+			// any real call.
+			rememberedEv, rerr := NewPermissionResolutionRemembered(runID, call.Name(), PermissionOutcomeAllowAlways)
+			if rerr == nil {
+				emissions <- emission{ev: rememberedEv}
+			}
 		}
 		return true, nil, nil
 	}

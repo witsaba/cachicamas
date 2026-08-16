@@ -201,3 +201,42 @@ func (p *parkedSet) parkedCount() int {
 	defer p.mu.Unlock()
 	return len(p.channels)
 }
+
+// rememberedSet is the per-Schedule state backing R-APP-010: once
+// Policy.Remember reports true for a toolName (AllowAlways branch,
+// AG-10.4), identical subsequent calls in the SAME Schedule call
+// MUST NOT be asked. The entry is consulted BEFORE policy.Resolve —
+// a suppressed call skips Resolve entirely, not merely its outcome
+// (design data flow's "unasked executions").
+//
+// Lives one Schedule call, mirroring parkedSet's lifetime
+// (R-LSK-002 carry) — it is NOT persisted across Schedule calls;
+// cross-run/cross-session memory of a remembered rule is Layer 3's
+// concern (design Migration section; spec non-req CO-16.1).
+type rememberedSet struct {
+	mu    sync.Mutex
+	names map[string]struct{}
+}
+
+// newRememberedSet constructs an empty rememberedSet. The caller
+// owns the set's lifetime (one Schedule call).
+func newRememberedSet() *rememberedSet {
+	return &rememberedSet{names: make(map[string]struct{})}
+}
+
+// remembered reports whether toolName has already been remembered
+// earlier in this Schedule call.
+func (r *rememberedSet) remembered(toolName string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.names[toolName]
+	return ok
+}
+
+// remember records that toolName is remembered for the remainder of
+// this Schedule call.
+func (r *rememberedSet) remember(toolName string) {
+	r.mu.Lock()
+	r.names[toolName] = struct{}{}
+	r.mu.Unlock()
+}
