@@ -195,3 +195,109 @@ reasons outside AG-10's scope (see Gates).
 ## Status
 
 20/20 tasks complete. Ready for `sdd-verify`.
+
+---
+
+# Remediation Round (post-verify)
+
+**Session**: scoped remediation on top of the FINAL state above (`c0fcc6e5`). `sdd-verify`
+returned PASS WITH WARNINGS (0 CRITICAL, 8 WARNING, 5 SUGGESTION; `verify-report.md`,
+Engram `#3040`). The orchestrator selected 5 of those items (W1, W2, W3, W4, W8, plus S1,
+S2, S4 — the sub-items those five decompose into) as real gaps to close now; W5/W6 (the
+archive-phase promoted-spec transform), W7 (accepted pre-existing `make vuln-check`
+stdlib advisories), and S3/S5 (accepted/cosmetic) were explicitly carried forward per the
+orchestrator's scoping, not fixed here. Nothing outside this list was touched.
+
+## Commits (this round, oldest first)
+
+| SHA | Message |
+|---|---|
+| `2fcf8fb4` | docs(agent): AG-10 track verify-report.md |
+| `c41ed864` | fix(agent): AG-10 close the wake-registration race and the concurrent-remember race (W1, W2, W3, W4, S1, S2) |
+| `9908313c` | test(agent): AG-10 add the Turn()-level permission E2E and a no-op policy helper (W8, S4) |
+| `b378cc76` | fix(agent): AG-10 widen the substrate filters for the two new remediation test files |
+
+## TDD Cycle Evidence
+
+| Item | RED (pre-fix) | GREEN (post-fix) | REFACTOR |
+|---|---|---|---|
+| W3 — wake-registration race | `TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry`: flaky, 8/30 FAIL against unfixed code (non-vacuous, though not the literal 100% the verify finding estimated) | 15/15 deterministic PASS after reordering `parked.park` before the emission | `wakeParkedWithRetry` helper deleted (no longer needed); 4 callers re-pointed at direct calls; `TestPermission_DeferEmitsBeforePark` re-targeted at the invariant that still holds |
+| W4 — `<-reqAck` not cancellation-aware | `TestPermission_AbandonedAckWithCancel_GateDeregistersPromptly`, isolated from W3 by temporarily reverting only the ack-select to a bare receive: 5/5 deterministic FAIL | 15/15 deterministic PASS after `select{<-reqAck;<-ctx.Done()}` + `parked.remove` | New `parkedSet.remove` also added to the pre-existing `parkCh`-select's cancel branch for exit-path completeness |
+| W1/W2 — concurrent-remember race | `TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission`: 10/10 deterministic FAIL (count=2) against pre-CAS code | 25/25 deterministic PASS (count=1) after `rememberedSet.rememberIfAbsent` (CAS) | Original hand-built `CheckStream` validator test restored byte-identical under its original name (S-PPB-004), so validator coverage is not lost |
+| S1 — S-PPB-001 vacuity | N/A — test-only strengthening of already-passing behavior, no production change | Confirmed still passing after the addition | — |
+| S2 — best-effort telemetry site | N/A — deliberate no-change decision, justified by code comment | Existing tests continue to pass | — |
+| W8 — Turn()-level E2E | N/A — pure test addition over already-implemented Schedule-level behavior (RTLS-008 already covers the mixed-outcome matrix at Schedule level) | `TestTurn_PermissionPolicy_E2E_DeferDenyModify` 10/10 deterministic PASS | — |
+| S4 — no-op policy decorator | N/A — pure test-support addition | `TestNoOpPermissionPolicy_AllowsEverySynchronously` PASS | — |
+| R7 — substrate filter (discovered, not assigned) | `TestTurn_SubstrateUntouched` / `TestTurn_PreRequestHook_SubstrateUntouched` FAIL after the W8/S4 commit landed | Both PASS after widening `filterOutLoopFiles` / `filterOutLoopHookFiles` | — |
+
+## Work Unit Evidence
+
+| Work unit | Focused test command / result | Runtime harness | Rollback boundary |
+|---|---|---|---|
+| `2fcf8fb4` (track verify-report) | N/A — docs only | N/A | revert commit |
+| `c41ed864` (W1–W4, S1, S2) | `go test -race -count=10 -run TestPermission ./src/agent/` — 230 `--- PASS`, 0 `FAIL`, 0 `DATA RACE`, exit 0 | Real `Schedule`/`Turn` calls via `agenttest`-free scripted policies (Schedule-level, no fake provider needed for these items) | revert commit — touches only `permission_protocol.go`, `scheduler.go`, `permission_protocol_test.go` |
+| `9908313c` (W8, S4) | `go test -race -count=10 ./src/agent/...` — all green | `agent.Turn` + `agenttest.NewProvider` scripted fake — genuine E2E through the loop's public surface | revert commit — two new files only, no existing file touched |
+| `b378cc76` (substrate filter) | `go test -race -run "TestTurn_SubstrateUntouched\|TestTurn_PreRequestHook_SubstrateUntouched" -v ./src/agent/...` — both PASS | N/A (a git-diff-based guard, not a runtime path) | revert commit — two filter functions only |
+
+## Gates (final re-verification, this round)
+
+| Gate | Result |
+|---|---|
+| `make test` (whole module, `-race`) | **PASS** — 1181 `--- PASS`, 0 `FAIL`, exit 0, 12 `ok` packages |
+| `make lint` (after `cache clean`) | **PASS** — `0 issues.` (one `revive` empty-block finding in the W4 test's drain loop found and fixed within this round, before the commit) |
+| `make build` | **PASS** — `go build -trimpath ./...` exit 0 |
+| `go test -race -count=10 -run TestPermission ./src/agent/` | **PASS** — 230 `--- PASS`, 0 `FAIL`, 0 `DATA RACE`, exit 0 |
+| `make vuln-check` | **FAIL — accepted, unchanged.** Same 5 pre-existing Go stdlib advisories at `go1.26.5`, zero `src/agent/` traces (verified: `grep -c "src/agent/"` over the output = 0) |
+| Substrate (10 named files) | **PASS** — `git diff --stat $(git merge-base main HEAD) -- <10 files>` = 0 lines against the true merge-base `6de08335`; `TestTurn_SubstrateUntouched` PASS |
+
+Note on the merge-base check: a PLAIN `git diff main -- <files>` in this worktree shows a
+non-zero diff on `Makefile`/`go.mod`, because the shared `main` branch advanced to
+`b7ec9906` (an unrelated upstream merge, PR #170) after this branch's base commit
+`6de08335` — NOT because of any edit made in this session. The correct, merge-base-relative
+diff (matching the method `verify-report.md` itself used) is the authoritative check and
+is 0 lines.
+
+## Design Deviations (this round)
+
+1. **W8's E2E does not include a wake-resume cycle for the deferred call.** `Turn()`
+   constructs its `*Scheduler` as an unexported local variable and returns only
+   `(ai.Message, ai.FinishReason, error)` — nothing outside the package can reach
+   `WakeParked` for a call parked inside a `Turn()` invocation. `loop.go`'s own comment
+   states this is deliberate: "the loop's own upward-path wake wiring
+   (`Scheduler.WakeParked`) is AG-13's scope." Widening `Turn`'s public surface to expose
+   a wake handle is an AG-13-scoped design decision this remediation round has no mandate
+   to make. The E2E instead proves all three outcomes reachable from `Turn()`: Deny and
+   ModifyInput complete fully with the exact stream shape design.md specifies; Defer
+   produces `decision_required` and aborts via context cancellation — the one release
+   path actually reachable from outside `Turn()` today.
+2. **S4's decorator lives in `agent_test` (package `agent_test`, file
+   `permission_policy_helpers_test.go`), not in `agenttest`.** `agenttest`'s own doc.go
+   states it "imports only the standard library and this module's own `src/ai`"
+   (R-STK-009), enforced as a build failure by `src/ai/import_boundary_test.go`'s Layer 1
+   closure guard. A `PermissionPolicy` implementation necessarily references Layer 2
+   types (`agent.PermissionVerdict`, `agent.PermissionOutcome`), so it cannot compile
+   inside `agenttest`. `scripted_tool_test.go` already documents the identical
+   constraint for `ScriptedTool`, verbatim: "Layer 1's `agenttest` package cannot import
+   the `agent` package."
+
+## Explicitly Out of Scope (per orchestrator instruction, not re-litigated)
+
+- **W5, W6** — the promoted-spec transform (`openspec/specs/agent-permission-protocol/spec.md`)
+  and its Given/When/Then scenarios. The archive phase owns this; no file was written
+  under `openspec/specs/` in this round.
+- **W7** — `make vuln-check`'s 5 pre-existing stdlib advisories at `go1.26.5`. Accepted;
+  no toolchain upgrade attempted.
+- **S3, S5** — accepted (design.md E2E note superseded by W8's delivery) / cosmetic
+  (PASS-line counting method).
+
+## Remaining Tasks
+
+None. All 5 assigned remediation items done, plus one necessarily-coupled substrate-filter
+fix discovered during gate re-verification. Ready for `sdd-verify` (re-run) or archive, at
+the orchestrator's discretion — this executor does not push, open a PR, or archive.
+
+## Status (remediation round)
+
+5/5 assigned items done (W1, W2, W3, W4 as one group; W8+S4 as one group), plus the
+substrate-filter correction. All gates green except the explicitly-accepted
+`make vuln-check`. Nothing left uncommitted.
