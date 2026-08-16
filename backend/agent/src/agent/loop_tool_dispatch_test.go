@@ -16,6 +16,7 @@ package agent_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -198,6 +199,129 @@ func TestTurn_ToolDispatch_OneCyclePerTurn_BiteReEnter(t *testing.T) {
 			got)
 	}
 }
+
+// AG-10 (D-C) — TurnOptions.PermissionPolicy reaches Schedule. Given
+// a non-nil policy set on TurnOptions, when Turn dispatches a tool
+// call, the loop forwards the policy byte-exact: Resolve is invoked
+// for the call, and a Deny verdict is visible in the rejoined result
+// as a typed ExecutionFailure — exactly the same observable a direct
+// Schedule(..., policy, ...) call would produce (scheduler_test.go /
+// permission_protocol_test.go), now proven reachable from the loop's
+// public surface.
+func TestTurn_PermissionPolicy_WiredToSchedule(t *testing.T) {
+	t.Parallel()
+
+	inner, err := ai.MidStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryUnavailable,
+	}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure: %v", err)
+	}
+	denial, err := agent.NewFailure(inner)
+	if err != nil {
+		t.Fatalf("agent.NewFailure: %v", err)
+	}
+
+	var resolvedNames []string
+	var mu sync.Mutex
+	policy := &wiringTestPolicy{
+		resolve: func(_ context.Context, call ai.ToolCall) agent.PermissionVerdict {
+			mu.Lock()
+			resolvedNames = append(resolvedNames, call.Name())
+			mu.Unlock()
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeDeny, Failure: denial}
+		},
+	}
+
+	guarded := EchoScriptedTool("guarded_tool", agent.EffectClassRead)
+	tools := map[string]agent.Tool{"guarded_tool": guarded}
+
+	tcStart, err := ai.NewToolCallStart(1, "call-1", "guarded_tool")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tcDelta, err := ai.NewToolCallDelta(1, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tcEnd, err := ai.NewToolCallEnd(1, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+
+	script := agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(tcStart),
+		agenttest.Emit(tcDelta),
+		agenttest.Emit(tcEnd),
+		agenttest.Emit(completion),
+	}}
+	provider := agenttest.NewProvider(script)
+	sink := make(chan *agent.Event, 256)
+
+	_, _, err = agent.Turn(
+		context.Background(),
+		provider,
+		"system for policy wiring",
+		firstMessageForTest(t),
+		agent.TurnOptions{
+			Tools:            agent.NewMapRegistry(tools),
+			PermissionPolicy: policy,
+		},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+
+	mu.Lock()
+	names := append([]string(nil), resolvedNames...)
+	mu.Unlock()
+	if len(names) != 1 || names[0] != "guarded_tool" {
+		t.Fatalf("policy.Resolve invocations = %v, want exactly one call for %q (TurnOptions.PermissionPolicy must reach Schedule, D-C)",
+			names, "guarded_tool")
+	}
+
+	// The tool must NOT have been invoked — Deny skips execution
+	// (R-APP-005), proving the loop's forwarded policy is the one
+	// actually driving the gate, not a bypassed nil.
+	if inv := guarded.Invocations(); inv != 0 {
+		t.Errorf("guarded_tool invocations = %d, want 0 (Deny skips execution)", inv)
+	}
+
+	events := drainSinkForTest(t, sink)
+	deniedMade := 0
+	for _, ev := range events {
+		if made, ok := ev.PermissionDecisionMade(); ok && made.Outcome() == agent.PermissionOutcomeDeny {
+			deniedMade++
+		}
+	}
+	if deniedMade != 1 {
+		t.Errorf("decision_made{Deny} count = %d, want 1 (the loop's forwarded policy drove the gate)", deniedMade)
+	}
+}
+
+// wiringTestPolicy is a minimal agent.PermissionPolicy for the D-C
+// wiring test — narrower than scriptedPermissionPolicy
+// (permission_protocol_test.go) which lives in this same
+// agent_test package but is themed around Schedule-level scenarios;
+// this type keeps the loop-wiring test self-contained.
+type wiringTestPolicy struct {
+	resolve func(ctx context.Context, call ai.ToolCall) agent.PermissionVerdict
+}
+
+func (p *wiringTestPolicy) Resolve(ctx context.Context, call ai.ToolCall) agent.PermissionVerdict {
+	return p.resolve(ctx, call)
+}
+
+func (p *wiringTestPolicy) Remember(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
+	return false
+}
+
+var _ agent.PermissionPolicy = (*wiringTestPolicy)(nil)
 
 // firstMessageForTest returns a minimal user message for the
 // dispatch tests. Lifted from the AG-07 helper to keep this

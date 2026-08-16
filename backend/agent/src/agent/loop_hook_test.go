@@ -898,6 +898,12 @@ func gitOutputHook(t *testing.T, root string, args ...string) (string, error) {
 // AG-08 W3 pattern carried into AG-09 (NFR-TLS-003's 21-path
 // substrate list itself stays byte-untouched; the filter just
 // accommodates AG-09's new files).
+//
+// AG-10 widens the filter to also exclude permission_protocol.go and
+// permission_protocol_test.go (the AG-10 file pair, owned by this
+// milestone; NFR-TLS-003 7th carry). The AG-10 remediation round
+// (verify-report W8/S4) widens it again to exclude
+// loop_permission_e2e_test.go and permission_policy_helpers_test.go.
 func filterOutLoopHookFiles(diff string) string {
 	if diff == "" {
 		return ""
@@ -920,7 +926,13 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/tool_test.go") ||
 				strings.HasSuffix(path, "/scheduler.go") ||
 				strings.HasSuffix(path, "/scheduler_test.go") ||
-				strings.HasSuffix(path, "/scripted_tool_test.go")
+				strings.HasSuffix(path, "/scripted_tool_test.go") ||
+				// AG-10 widening (NFR-TLS-003 7th carry):
+				strings.HasSuffix(path, "/permission_protocol.go") ||
+				strings.HasSuffix(path, "/permission_protocol_test.go") ||
+				// AG-10 remediation widening (verify-report W8/S4):
+				strings.HasSuffix(path, "/loop_permission_e2e_test.go") ||
+				strings.HasSuffix(path, "/permission_policy_helpers_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

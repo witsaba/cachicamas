@@ -91,6 +91,24 @@ Skills read full `SKILL.md` (source of truth) before task work.
 - **Do not skip the TDD red step** — a test written after the implementation does
   not satisfy this repo's discipline.
 
+## Substrate preservation in `backend/agent` (NFR-TLS-003)
+
+Ten files under `backend/agent/src/agent/` form the invariant substrate for
+the Layer-2 event system: `event_descriptor.go`, `stream_check.go`,
+`failure.go`, `sequence.go`, `event.go`, `go.mod`, `go.sum`, `Makefile`,
+`.golangci.yml`, `import_boundary_test.go`. A milestone that extends the
+event or scheduler surface MUST leave these ten files byte-unchanged and
+widen `TestTurn_SubstrateUntouched`'s (`loop_test.go`) exclusion filter to
+cover its own new file pair instead of editing them directly — verify with
+`git diff` against the list before opening a PR.
+
+**AG-10** (`cachicamas-agent-permission-protocol`) is the first milestone to
+record this pointer here; the convention itself predates it (carried
+byte-clean through AG-06.1, AG-07, AG-08, AG-09) but was never previously
+written into this file. Future milestones extending the same surface:
+append your own one-line pointer to this section rather than assuming the
+next agent already knows the list.
+
 ## Review checklist (for reviewers)
 
 - [ ] reviewer can confirm the Makefile targets listed above exist and match this file

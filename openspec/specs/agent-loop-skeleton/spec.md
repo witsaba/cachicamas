@@ -4,13 +4,13 @@
 > **Nodes**: AG-07.1 `[leaf]` (one text turn) · AG-07.2 `[leaf]` (statelessness + reasoning pass-through)
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario independently verifiable.
 > **IDs**: `R-LSK-0NN` / `S-LSK-0NN`. Append-only. Distinct from `R-AEV-`/`S-AEV-`, `R-AMT-`/`S-AMT-`, `R-APE-`/`S-APE-`, `R-AGE-`/`S-AGE-`.
-> **Scenario count** (AG-04 W9): **5 charter → 7 spec + 2 bites = 9 total** in 5 requirements (+ 1 cross-cut `S-LSK-008` + 1 bite `S-LSK-008a` added by AG-09, total **11**).
+> **Scenario count** (AG-04 W9): **5 charter → 7 spec + 2 bites = 9 total** in 5 requirements (+ 1 cross-cut `S-LSK-008` + 1 bite `S-LSK-008a` added by AG-09, + 1 cross-cut `S-LSK-010` added by AG-10, total **12**).
 
 ## Coverage
 
 | Charter | Requirements | Spec | Bites |
 |---|---|---|---|
-| **5 of 5** | 5 (`R-LSK-001`–`005`) + 1 added (`R-LSK-006` by AG-09) | **8** | **3** (`S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`) |
+| **5 of 5** | 5 (`R-LSK-001`–`005`) + 1 added (`R-LSK-006` by AG-09) | **9** | **3** (`S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`) |
 
 Charter → spec: AG-07.1#1 → `R-LSK-001`/`S-LSK-001`; AG-07.1#2 → `R-LSK-001`/`S-LSK-002`; AG-07.1#3 → `R-LSK-001`/`S-LSK-003` + bites; AG-07.2#4 → `R-LSK-002`/`S-LSK-004`; AG-07.2#5 → `R-LSK-003`/`S-LSK-005`. AG-09 adds: `R-LSK-006` (one cycle per turn, S-LSK-008 + S-LSK-008a). Cross-cuts → `R-LSK-004` (substrate, AG-07), `R-LSK-005` (coverage, AG-07), `R-LSK-006` (one cycle per turn, AG-09).
 
@@ -22,7 +22,9 @@ The first Layer 2 milestone where a live loop produces events. Per doc 0003:773:
 
 ### R-LSK-001 — Loop surface: single-turn function form (D1)
 
-The system SHALL expose `func Turn(ctx context.Context, provider ai.ModelProvider, system string, transcript []ai.Message, opts TurnOptions, sink chan<- *Event) (msg ai.Message, finish ai.FinishReason, err error)` as the only public surface for one assistant turn (per D1, D2, D3). AG-13 introduces a value-form `Harness` that wraps `Turn` without changing its signature. `TurnOptions` carries a `Tools map[string]Tool` field for AG-09 (non-breaking zero-value extension; nil `Tools` = the scheduler returns typed `ExecutionFailure` results in their ordinal slots, consistent with R-TLS-009 "one bad tool does not abort the turn"). `TurnOptions` also carries the AG-08 `PreRequestHook` field (nil = identity default).
+The system SHALL expose `func Turn(ctx context.Context, provider ai.ModelProvider, system string, transcript []ai.Message, opts TurnOptions, sink chan<- *Event) (msg ai.Message, finish ai.FinishReason, err error)` as the only public surface for one assistant turn (per D1, D2, D3). AG-13 introduces a value-form `Harness` that wraps `Turn` without changing its signature. `TurnOptions` carries a `Tools map[string]Tool` field for AG-09 (non-breaking zero-value extension; nil `Tools` = the scheduler returns typed `ExecutionFailure` results in their ordinal slots, consistent with R-TLS-009 "one bad tool does not abort the turn"). `TurnOptions` also carries the AG-08 `PreRequestHook` field (nil = identity default). `TurnOptions` further carries the AG-10 `PermissionPolicy PermissionPolicy` field (non-breaking zero-value extension). A **nil** `PermissionPolicy` is the identity default: the scheduler bypasses the permission gate, every call is treated as an immediate allow, no permission event is emitted, and the turn behaves exactly as it did before AG-10. A non-nil policy MUST be forwarded byte-exact to `Schedule` and consulted for every scheduled call. `Turn` MUST NOT expose the scheduler or any wake handle at this milestone — `Scheduler.WakeParked` is unreachable from a `Turn` caller, and wiring the upward-path wake is AG-13's scope.
+
+(Previously: `TurnOptions` carried the AG-08 `PreRequestHook` and the AG-09 `Tools` fields only; there was no permission-policy injection point, and `Schedule` was always called without a policy.)
 
 #### Scenarios
 
@@ -32,6 +34,7 @@ The system SHALL expose `func Turn(ctx context.Context, provider ai.ModelProvide
 - **S-LSK-003a** — **(bite)** Given a complete turn with three text deltas, when the loop's emitted event sequence is REWRITTEN to drop the middle delta, then the reconstructed message differs from the loop's returned `msg` — proving the property is non-vacuous. RED-recorded BEFORE `S-LSK-003` is GREEN.
 - **S-LSK-003b** — **(bite)** Given a complete turn with three text deltas, when the loop's emitted event sequence is REWRITTEN to double the middle delta, then the reconstructed message differs from the loop's returned `msg`. RED-recorded BEFORE `S-LSK-003` is GREEN.
 - **S-LSK-009** — AG-09 wire-up: `Turn` consumes AI-18 tool-call events and calls `Schedule`. Given a `TurnOptions{Tools: map[string]Tool{...}}` with one registered read-class tool and a provider that streams one `ToolCallStart` / `ToolCallDelta` / `ToolCallEnd` triplet followed by a `Completion{FinishReason: FinishReasonToolCalls}`, when `Turn` runs, then the loop converts the AI-18 events into a `[]ScheduledCall`, invokes `Schedule` exactly once between `provider.Stream` close and `finalize`, and emits the AG-05.2 tool events (`ToolStart`, `ToolEnd*`) on `sink` in rejoin order — proving the AG-09 wire-up.
+- **S-LSK-010** — AG-10 wire-up: `TurnOptions.PermissionPolicy` reaches the gate, and nil stays a bypass. Given a `TurnOptions{Tools: ..., PermissionPolicy: p}` where `p` defers one call, denies a second, and modifies the arguments of a third, when `Turn` runs against a provider streaming those three tool calls, then the deferred call resolves into a typed abort once the run context is cancelled, the denied call's ordinal slot carries `ExecutionFailure` with a typed `*Failure`, the modified call's `tool_start.Arguments()` byte-equals `decision_made.ModifiedArguments()` and the tool records those same bytes, and `Turn` returns without a Go error; and given the identical setup with `PermissionPolicy: nil`, when `Turn` runs, then no permission event appears on `sink` and every call executes as it did before AG-10. Verified by `TestTurn_PermissionPolicy_E2E_DeferDenyModify` and `TestNoOpPermissionPolicy_AllowsEverySynchronously`.
 
 ### R-LSK-002 — Statelessness: two sequential turns share nothing
 

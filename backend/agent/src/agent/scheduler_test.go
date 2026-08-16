@@ -528,9 +528,12 @@ func collectStartCallIDs(events []*agent.Event) []string {
 // sink after the rejoin; the helper's close is a safety net for
 // the bite state where the stub did not close. We synchronize
 // against a panic-on-double-close with a recover.
+//
+// AG-10: passes nil PermissionPolicy to bypass the gate (AG-09
+// behavior preserved).
 func runSchedulerAndClose(sched *agent.Scheduler, calls []scheduledCall, reg agent.Registry, sink chan *agent.Event) []agent.Result {
 	stamper := &agent.LaneStamper{}
-	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", stamper, sink)
+	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, stamper, sink)
 	// Drain remaining items in a goroutine; tolerate the
 	// double-close panic (the real scheduler closes first).
 	go func() {
@@ -547,9 +550,11 @@ func runSchedulerAndClose(sched *agent.Scheduler, calls []scheduledCall, reg age
 // slice for callers that want every event in arrival order
 // (e.g. the start-order assertion). Used by the
 // `BiteInverted` test where the drain order matters.
+//
+// AG-10: passes nil PermissionPolicy to bypass the gate.
 func runSchedulerAndCollect(sched *agent.Scheduler, calls []scheduledCall, reg agent.Registry, sink chan *agent.Event) ([]agent.Result, []*agent.Event) {
 	stamper := &agent.LaneStamper{}
-	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", stamper, sink)
+	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-bite", "turn-bite", nil, stamper, sink)
 	var events []*agent.Event
 	for ev := range sink {
 		evCopy := ev
@@ -1166,7 +1171,7 @@ func TestScheduler_UnbufferedSink_ConcurrentConsumer(t *testing.T) {
 	}()
 
 	results := sched.Schedule(context.Background(), callsToAICalls(calls), reg, "run-ub", "turn-ub",
-		&agent.LaneStamper{}, sink)
+		nil, &agent.LaneStamper{}, sink)
 
 	if len(results) != 8 {
 		t.Errorf("Schedule returned %d results, want 8", len(results))

@@ -42,6 +42,7 @@ package agent
 import (
 	"context"
 	"strconv"
+	"sync"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -215,8 +216,21 @@ var _ = ai.ToolCall{}
 // `scheduler.go` for the matching `Schedule` method on this type.
 //
 // R-TLS-004..011 — see `openspec/specs/agent-tool-scheduler/spec.md`.
+//
+// AG-10 (D-A carry): parkedMu guards parked, the handle `WakeParked`
+// (scheduler.go) reaches from outside the goroutine tree a `Schedule`
+// call spawns. parked is non-nil only while a `Schedule` call has
+// calls in flight — set at `Schedule` entry, cleared at `Schedule`
+// exit, so its lifetime is exactly one `Schedule` call (R-LSK-002
+// carry). The struct field is a separate publication of the same
+// `*parkedSet` `Schedule` already threads through its own call
+// goroutines; it exists solely so `WakeParked` — called from a
+// goroutine outside that tree — has somewhere to look.
 type Scheduler struct {
 	MaxConcurrentReads int
+
+	parkedMu sync.Mutex
+	parked   *parkedSet
 }
 
 // Registry resolves a tool name to its implementation. Map-backed or
