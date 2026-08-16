@@ -1,6 +1,6 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:7861db98a3c7ad09579cd7f622b94f7e746c24400bc69cfcc5dc963fd9f75ec7
+evidence_revision: sha256:d3e7cd770696ee7dc71d06d1c0ed31286f295ecd4abcd2d330bf42656331d21a
 verdict: pass_with_warnings
 blockers: 0
 critical_findings: 0
@@ -8,271 +8,286 @@ requirements: 12/12
 scenarios: 13/13
 test_command: cd backend/agent && make test
 test_exit_code: 0
-test_output_hash: sha256:5bb9d3b2f1d2b27bd8048448392695b01858e2ff7c5b9ddf82473dcd0ba9e708
+test_output_hash: sha256:448443e8b46f31818b8d2a9251c33f3cf501a9ba1b1a556175dc3a522b72a972
 build_command: cd backend/agent && make build
 build_exit_code: 0
 build_output_hash: sha256:617ff8b581dc1493b2d85d998e6171f774f2328ec65dc7264829b71cc7238495
 ```
 
-## Verification Report
+## Verification Report (TERMINAL — supersedes the `c0fcc6e5` report)
 
 **Change**: `cachicamas-agent-permission-protocol` (AG-10, Layer 2 Wave 2, milestone 10/24)
-**Worktree**: `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/agent-layer2-wave2-ag10` @ `c0fcc6e5` (clean), base `main` `6de08335`
-**Mode**: Strict TDD · **Store**: hybrid
-**Verdict**: **PASS WITH WARNINGS** — 0 CRITICAL, 8 WARNING, 5 SUGGESTION
+**Worktree**: `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/agent-layer2-wave2-ag10` @ `ecfebcd4` (clean), merge-base `main` `6de08335`
+**Mode**: Strict TDD · **Store**: hybrid · **RDD**: off (no `gentle-ai review` operations performed)
+**Scope**: focused re-verification of the 5-commit remediation round `c0fcc6e5..ecfebcd4`, plus a full regression sweep
+**Verdict**: **PASS WITH WARNINGS** — 0 CRITICAL, 4 WARNING, 3 SUGGESTION
+**Prior verdict**: PASS WITH WARNINGS — 0 CRITICAL, 8 WARNING, 5 SUGGESTION
 
-### Completeness
+---
 
-| Metric | Value |
-|--------|-------|
-| Tasks total | 20 |
-| Tasks complete (`[x]`) | 19 |
-| Tasks incomplete (`[ ]`) | 1 (5.4 — `make vuln-check`, out-of-scope with why-note) |
-| Requirements | 12 (`R-APP-001..012`) |
-| Scenarios | 13 (`S-APP-001..013`) + 4 bites (`S-PPB-001..004`) |
+## Remediation round — disposition of every prior finding
 
-Every checkbox state is justified by code re-verified by command. **No checkbox needs flipping.**
-Task 5.4 is correctly left `[ ]`: `make vuln-check` genuinely fails, and the annotation is accurate.
+| Prior | Title | Status | Proof |
+|---|---|---|---|
+| **W1** | Concurrent-remember race emits a `CardinalityAtMostOne`-violating stream | **CLOSED** | `rememberedSet.rememberIfAbsent` is a true CAS under the existing mutex. Defeat test (ignore the CAS return value): `TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission` FAILS with `count = 2, want exactly 1`. |
+| **W2** | The S-PPB-004 bite hard-coded the W1 defect as required behaviour | **CLOSED** | The `want 2` assertion is gone. The name `TestPermission_RememberedCardinality_SecondEmissionRejected` now holds the genuinely restored hand-built `CheckStream` validator test (constructs two events → asserts `ai.ErrDuplicate`); the real-`Schedule` forced race moved to a new, differently-named test asserting `want exactly 1`. Both exist — this is a restore, not a rename. |
+| **W3** | Structurally guaranteed lost wakeup on the wake surface | **CLOSED** | `parked.park(callID)` now precedes the `decision_required` emission. Defeat test (move registration back after the ack), full package, 20 separate processes: `TestPermission_DeferEmitsBeforePark` FAILS **20/20** deterministically. |
+| **W4** | `<-reqAck` not cancellation-aware | **CLOSED (as scoped)** | Now `select { case <-reqAck: ; case <-ctx.Done(): parked.remove(...); <typed abort> }`. Defeat test (bare `<-reqAck`, keeping W3's reorder): `TestPermission_AbandonedAckWithCancel_GateDeregistersPromptly` FAILS. One documented residual survives — see R1 below. |
+| **W5** | Delta spec is structurally unpromotable; target capability dir absent | **OPEN** — archive-phase work, unchanged | Re-confirmed by command below. |
+| **W6** | The delta spec's "Given/When/Then" format claim is false | **OPEN** — archive-phase work, unchanged | `grep` → 0 Given/When/Then lines. |
+| **W7** | `make vuln-check` fails on 5 pre-existing Go stdlib advisories | **OPEN** — accepted, out of scope, unchanged | Re-run: exit 2, same 5 IDs, `AGENT_TRACES=0`. |
+| **W8** | design.md's E2E row and `agenttest` decorator undelivered | **CLOSED, with two verified deviations** | Both deviation claims independently proven by command — see D1/D2 below. |
+| **S1** | S-PPB-001 survives deletion of the whole gate | **CLOSED** | `policy.resolveInvocations() == 1` added. Defeat test (delete the entire gate): FAILS with `invocation count = 0, want 1`. |
+| **S2** | Last swallowing `if rerr == nil { emit }` site un-cross-referenced | **CLOSED** | 18-line rationale added at the site, explicitly naming defect 6 and why this one site stays best-effort. Behaviour intentionally unchanged. |
+| **S3** | Add the `design.md:76` E2E or amend the design | **CLOSED via W8** — residual carried as S7 | `TestTurn_PermissionPolicy_E2E_DeferDenyModify` added; `design.md` itself was not back-annotated. |
+| **S4** | Add the `agenttest` no-op decorator or strike the line | **CLOSED** | `NoOpPermissionPolicy` added in `permission_policy_helpers_test.go`, with its own wiring test. Placement deviation proven forced — see D2. |
+| **S5** | `apply-progress` 1176 PASS vs verify 3138 PASS | **CLOSED — mechanism identified** | Pure counting-method difference on one output: `grep -c '^--- PASS'` → **1181** (top-level), `grep -c -- '--- PASS'` → **3143** (top-level + subtests), `grep -c '^ok '` → **12** packages. Both prior numbers measured the same kind of run correctly under different greps. |
+| **NEW W9** | The R-APP-002/D4 ack lost its only non-vacuous guard | **OPEN** | See W9 below. |
 
-### Build & Tests Execution (verbatim, re-run by this phase)
+**Prior warnings closed: 5 of 8 (W1, W2, W3, W4, W8). Prior suggestions closed: 5 of 5.
+One new WARNING (W9) and three new SUGGESTIONS (S6, S7, S8) introduced by this round.**
 
-**Tests**: PASS — 3138 `--- PASS`, 0 `FAIL`, 12/12 packages `ok`, 0 `DATA RACE`
+---
 
-```text
-$ cd backend/agent && make test
-TEST_EXIT=0
-PASS_LINES=3138
-FAIL_LINES=0
-OK_PKGS=12
-RACES=0
-```
-
-**Build**: PASS
-
-```text
-$ cd backend/agent && make build
-go build -trimpath ./...
-BUILD_EXIT=0
-```
-
-**Lint**: PASS (after `./bin/golangci-lint cache clean`)
+## Gates re-run by this phase (verbatim)
 
 ```text
-$ cd backend/agent && make lint
+$ cd backend/agent && ./bin/golangci-lint cache clean && make lint
 go vet ./...
 bin/golangci-lint run --config=.golangci.yml ./...
 0 issues.
 LINT_EXIT=0
-```
 
-**Vuln-check**: FAIL — accepted, out of AG-10 scope (see W7)
+$ cd backend/agent && make build
+go build -trimpath ./...
+BUILD_EXIT=0
 
-```text
+$ cd backend/agent && make test          # go test -race -v ./...
+TEST_EXIT=0
+PASS_LINES=3143       # grep -c -- '--- PASS'   (top-level + subtests)
+TOP_LEVEL_PASS=1181   # grep -c '^--- PASS'
+FAIL_LINES=0
+OK_PKGS=12
+RACES=0
+
+$ go test -race -count=15 ./src/agent/
+ok  	github.com/cachicamas/backend/agent/src/agent	6.040s
+COUNT15_EXIT=0
+
+$ go test -race -count=10 -run 'TestPermission|TestTurn_Permission|TestNoOp' ./src/agent/
+ok  	github.com/cachicamas/backend/agent/src/agent	3.514s
+
 $ cd backend/agent && make vuln-check
 VULN_EXIT=2
 GO-2026-5026 GO-2026-5972 GO-2026-6089 GO-2026-6090 GO-2026-6218
-AGENT_TRACES=0        # zero traces through src/agent/**
+AGENT_TRACES=0
+
+$ git diff --name-only $(git merge-base HEAD origin/main) -- backend/agent/src/agent/
+backend/agent/src/agent/loop.go
+backend/agent/src/agent/loop_hook_test.go
+backend/agent/src/agent/loop_permission_e2e_test.go
+backend/agent/src/agent/loop_test.go
+backend/agent/src/agent/loop_tool_dispatch_test.go
+backend/agent/src/agent/permission_policy_helpers_test.go
+backend/agent/src/agent/permission_protocol.go
+backend/agent/src/agent/permission_protocol_test.go
+backend/agent/src/agent/scheduler.go
+backend/agent/src/agent/scheduler_test.go
+backend/agent/src/agent/tool.go
+# 11 changed of 44 .go files; all 11 are allowlisted. 33 files byte-unchanged.
+
+$ git diff --stat $(git merge-base HEAD origin/main) -- backend/agent/go.mod backend/agent/go.sum
+(no output)
+
+$ go test -count=1 -v -run 'TestTurn_SubstrateUntouched|TestTurn_PreRequestHook_SubstrateUntouched' ./src/agent/
+--- PASS: TestTurn_PreRequestHook_SubstrateUntouched (0.06s)
+--- PASS: TestTurn_SubstrateUntouched (0.03s)
+ok  	github.com/cachicamas/backend/agent/src/agent	0.565s
 ```
 
-**Load / flakiness** (orchestrator-requested):
+**Coverage**: skipped — no coverage target wired into `make`; `test/cover` exists but is not part of the milestone's gate set.
+
+---
+
+## Adversarial verification of the remediation
+
+### R1 — W3: the park-registration reorder
+
+**R-APP-002 / D4 happens-before is preserved.** Registration (`parked.park`) is a mutex-guarded map insert that returns immediately; it is not the parked wait. The parked **wait** — `select { case <-parkCh: ; case <-ctx.Done(): }` — still runs strictly after `<-reqAck`, and `runDispatcher` still closes `em.ack` only after `sink <- &stamped` returns. The code preserves the distinction and the ack still gates the park. **Verified by reading `scheduler.go` `runPermissionGate` and `runDispatcher`.**
+
+**A wake arriving between registration and the park is not lost.** `parkedSet.wake` does lookup → delete → `close(ch)` under one lock acquisition. A `select` on an already-closed channel returns immediately, so a wake that lands during the ack wait is observed, not dropped.
+
+**Every exit path deregisters. No leaking path found.**
+
+| Exit | Deregistered by | Site |
+|---|---|---|
+| Upward-path wake | `parkedSet.wake` (lookup-then-delete before `close`) | `permission_protocol.go` |
+| Cancel while waiting for the ack | `parked.remove(call.ID())` | ack `select`, `ctx.Done()` arm |
+| Cancel while genuinely parked | `parked.remove(call.ID())` | park `select`, `ctx.Done()` arm |
+| Re-park after a wake (Defer twice) | `park()` overwrites the map entry with a fresh channel | tail recursion |
+| Simultaneous wake + cancel | `remove` is an unconditional no-op-safe delete | by construction |
+
+One residual, pre-existing and **not** a new leak class: the `emissions <- emission{ev: reqEv, ack: reqAck}` send now sits *between* registration and the ack wait, and that send is not cancellation-aware. If a consumer abandons `sink` **and** the `len(calls)*2` emissions buffer is already full, a gate goroutine blocks there with its parked entry registered. This is the same hazard class the prior report recorded as pre-AG-10.
+
+**`wakeParkedWithRetry` is deleted** (`grep` → absent) and no caller reintroduced an equivalent. All five wake sites are now single direct `sched.WakeParked(id)` calls. The one remaining poll loop is inside `TestPermission_DeferEmitsBeforePark` itself, where polling-without-reading-`sink` *is* the assertion mechanism, not a masking retry.
+
+### R2 — W4: cancellation-aware ack
+
+`<-reqAck` is now a two-arm `select` with `ctx.Done()`. The abort arm produces `typedExecutionFailureFromError(call.ID(), ctx.Err())` — **byte-identical in shape to the pre-existing mid-park cancellation arm** — writes `results[ordinal]`, calls `emitExecutionFailure`, and returns `abort.Failure`.
+
+**No blocking *receive* remains ahead of the cancellation select.** The only blocking operations ahead of it are `policy.Resolve(ctx, call)` (which takes `ctx`) and the `emissions <-` **send** described in R1.
+
+**Honest scoping of "genuinely returns rather than hanging".** Cancellation now releases the *gate goroutine* — proven by the defeat test — and therefore lets `wg.Wait()` return. It does **not** make `Schedule` return: `Schedule` then does `close(emissions)` followed by `<-dispatcherDone`, and the dispatcher is still blocked on its `sink <- &stamped` send. An abandoned `sink` still hangs `Schedule` until a reader appears. The remediation's own test comment states this explicitly and the test drains `sink` before asserting end-to-end completion. **W4 is closed for the narrowing AG-10 introduced (hang on the first deferred call, unreleasable by cancel); it is not a fix for the pre-existing abandoned-sink hazard, and the artifacts do not claim it is.**
+
+### R3 — W1/W2: concurrent-remember CAS
+
+- **True CAS**: `rememberIfAbsent` takes `r.mu`, checks membership, inserts, returns whether this caller inserted — one critical section, `defer`-unlocked.
+- **Read-class calls are not serialized.** The mutex covers only a map lookup and insert. `policy.Resolve`, the read semaphore (`scheduler.go` bounded fan-out), and tool execution are all outside it. AG-09.2 semantics are preserved, and the new test asserts it positively: `fs.write invocations = 2` (the CAS gates the *event*, not execution). `TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot` remains green.
+- **The new bite is not vacuous.** Defeat test — replace `if !remembered.rememberIfAbsent(...) { return }` with a discarded return value — makes `TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission` FAIL: `resolution_remembered count = 2, want exactly 1`. It also fails on `count == 0`, so it asserts the invariant in both directions rather than the defect.
+- **The hand-built `CheckStream` validator test was genuinely restored, not renamed.** The file now contains two distinct tests: `..._SecondEmissionRejected` builds `run_start / turn_start / remembered / remembered / turn_end / run_end` by hand and asserts `errors.Is(report.Violation(), ai.ErrDuplicate)`; `..._ConcurrentRace_AtMostOneEmission` is a separate function driving a real `Schedule`. Direct `CardinalityAtMostOne` coverage did not move — it came back.
+
+### D1 — W8 deviation 1: the E2E aborts its Defer leg by ctx-cancel
+
+**Claim verified.** `grep -n "WakeParked" src/agent/loop.go` returns only two comment lines (124, 264); there is no call and no exported handle. The `Scheduler` is constructed as an unexported local (`sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}`), `func Turn(...)` returns `(ai.Message, ai.FinishReason, error)`, and `TurnOptions` exposes no scheduler or wake field. **No caller can reach `WakeParked` for a call parked inside a `Turn()` invocation.** Building design.md's literal wake-resume E2E would require widening `Turn`'s public surface — correctly deferred to AG-13, and recorded as a deviation rather than silently dropped.
+
+### D2 — W8/S4 deviation 2: the no-op policy lives in `src/agent`, not `agenttest`
+
+**Claim verified empirically, not just by reading.** `src/ai/import_boundary_test.go` scans `src/ai/...`, `src/agenttest/...` and `src/handoff/...` as one `go list -deps -test` closure and lists `<module>/src/agent` in `forbiddenPrefixes` with rule *"ADR 0005 § D1 row 1: Layer 1 must not import Layer 2"*.
+
+Defeat test — an isolated copy of the module with one added file `src/agenttest/zz_probe.go` importing `src/agent`:
 
 ```text
-$ go test -race -count=10 -run TestPermission ./src/agent/
-ok  	github.com/cachicamas/backend/agent/src/agent	4.539s
-EXIT=0
+BASELINE (no probe):
+ok  	github.com/cachicamas/backend/agent/src/ai	0.567s
+
+DEFEAT (agenttest imports src/agent):
+--- FAIL: TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault (0.08s)
+    import_boundary_test.go:192: Layer 1 must not import "github.com/cachicamas/backend/agent/src/agent"
+      rule: ADR 0005 § D1 row 1: Layer 1 must not import Layer 2
 ```
 
-**Substrate (NFR-TLS-003 7th carry)**:
+`agenttest` genuinely cannot hold a `PermissionPolicy` implementation, and an import-boundary test enforces it as a hard build/test failure. The placement is forced, follows `scripted_tool_test.go`'s recorded AG-09 precedent, and is not drift.
+
+### R5 — the substrate-filter widening (`b378cc76`)
+
+Both `filterOutLoopFiles` (`loop_test.go`) and `filterOutLoopHookFiles` (`loop_hook_test.go`) gained exactly **two** entries each: `strings.HasSuffix(path, "/loop_permission_e2e_test.go")` and `strings.HasSuffix(path, "/permission_policy_helpers_test.go")`. These are exact filename suffixes — no wildcard, no directory-level or prefix widening — so they admit only those two files and nothing else.
+
+The guards are *allowlists of files permitted to change*; the substrate invariant is everything else in `backend/agent/src/agent/`. The empirical check confirms the invariant is intact: 11 of 44 `.go` files differ from the merge-base, all 11 are allowlisted, the remaining **33 files are byte-unchanged**, and `go.mod`/`go.sum` show a zero-line diff. Both substrate tests PASS. Neither modified file is itself one of the 10 protected substrate files.
+
+### R6 — regression sweep
+
+Everything the prior report certified still holds. All 12 requirements implemented, all 13 scenarios covered by a passing test. The prior round's non-vacuous bites remain non-vacuous (S-PPB-003 stray-decision typed rejection and S-PPB-004's validator clause were re-checked; S-PPB-001 went from weak to non-vacuous). The goroutine-leak machinery is untouched — `awaitGoroutineBaseline` still polls-until-settled, and exactly the same two tests (`..._PopulatesRejoinAndNoLeak`, `..._RTLS008_SourceGuard_...`) remain serial while every other test keeps `t.Parallel()`. `-race -count=15` on the whole package: clean.
+
+### R7 — empirical honesty: the "100%" vs "~27%" question
+
+Both figures were measured, and **both are right for different consumer shapes**; neither should stand unqualified.
 
 ```text
-$ git diff --stat main...HEAD -- <the 10 substrate files>
-(no output — zero substrate edits)
+Pre-fix (c0fcc6e5, unmodified), UNBUFFERED sink held by a synchronous consumer
+  — the exact shape the original W3 finding described:
+  20/20 runs, an early WakeParked was rejected for the entire 300 ms window
+  => early-wake failure rate 100%.  The prior report's "100%" is CORRECT
+     for a consumer that holds the event off an unbuffered sink.
 
-$ go test -run TestTurn_SubstrateUntouched -v ./src/agent/
---- PASS: TestTurn_SubstrateUntouched (0.04s)
-ok  	github.com/cachicamas/backend/agent/src/agent	0.486s
+Pre-fix ordering (W3 defeat), BUFFERED sink + drain goroutine + <-ready handoff
+  — the shape the remediation's own probe used, 20 full-package runs:
+    TestPermission_DeferEmitsBeforePark ............................ 20/20 FAIL
+    TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_...    2/20 FAIL
+    TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin .....   2/20 FAIL
+    TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry .  0/20 FAIL
+  => 10% for the racing shapes, same order as the remediation's ~27%.
 ```
 
-**Coverage**: skipped — no coverage target configured in `backend/agent/Makefile`.
+**Resolution**: the pre-fix lost-wakeup rate is a function of sink buffering and consumer topology, not a single constant. It is deterministic (100%) when the consumer receives from an unbuffered `sink` and wakes on receipt; it drops to the order of 10–30% when a buffered sink plus an extra goroutine handoff gives the gate time to register first. **The precise figure is not the point** — the defect was real and structural in the deterministic shape, which is precisely the shape AG-13's consumer is expected to take.
 
-### Spec Compliance Matrix
+---
+
+## Spec Compliance Matrix
 
 | Requirement | Scenario | Covering test | Result |
 |---|---|---|---|
-| R-APP-001 per-call gate | S-APP-001 sync AllowOnce → no event, executes | `permission_protocol_test.go:202` `TestPermission_ImmediateAllow_NoEvent` | COMPLIANT |
-| R-APP-001 | S-APP-002 Defer A + AllowOnce B → A parks, B completes | `:762` `TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot` | COMPLIANT |
-| R-APP-002 emit before park | S-APP-003 decision_required reaches sink BEFORE the parked wait blocks | `:272` `TestPermission_DeferEmitsBeforePark` | COMPLIANT |
-| R-APP-003 typed rejection | S-APP-004 wake unknown callID → typed rejection, no parked call touched | `:391` `TestPermission_StrayDecisionIsTypedError` + `:1137` `..._UnknownCallID_TypedRejection_NoTouch` | COMPLIANT |
-| R-APP-004 AllowOnce | S-APP-005 executes AND decision_made{AllowOnce} | `:566` `TestPermission_FourOutcomes/AllowOnce_EmitsDecisionMade` | COMPLIANT |
-| R-APP-005 Deny typed | S-APP-006 Deny (sync OR wake) → ExecutionFailure + typed `*Failure` | `:566` `.../Deny_TypedResultAndDecisionMade` (sync) + `:1554` RTLS-008 slot `rtls_2` (wake) | COMPLIANT |
-| R-APP-006 ModifyInput transparent | S-APP-007 `tool_start.Arguments()` byte-equals `decision_made.ModifiedArguments()` | `:566` `.../ModifyInput_SubstitutesArguments` + RTLS-008 `rtls_3`/`rtls_4` | COMPLIANT |
-| R-APP-007 AllowAlways + Remember gate | S-APP-008 Remember=true → 1 emission; false → 0 | `:1281` `TestPermission_AllowAlways_Remember_Branches` (2 subtests) | COMPLIANT |
-| R-APP-008 sibling isolation | S-APP-009 A parked, B read-class AllowOnce → B's Result in ordinal slot | `:762` `TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot` | COMPLIANT |
-| R-APP-009 cancel mid-park | S-APP-010 two parked, cancel → both typed abort, Schedule returns, no leak | `:892` `TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak` | COMPLIANT |
-| R-APP-010 remembered suppresses asks | S-APP-011 second identical call NOT consulted, no decision_required | `:1377` `TestPermission_RememberedSuppressesSubsequentAsk` | PARTIAL — sequential lane only (see W1) |
-| R-APP-011 Layer 2 owns protocol | S-APP-012 L3 impl consumed without naming the type | `:535` `var _ agent.PermissionPolicy = (*scriptedPermissionPolicy)(nil)`; `loop_tool_dispatch_test.go` `wiringTestPolicy` + `TestTurn_PermissionPolicy_WiredToSchedule` | COMPLIANT |
-| R-APP-012 substrate preservation | S-APP-013 10 files byte-unchanged; filter widened for the 2 new files | `loop_test.go` `TestTurn_SubstrateUntouched` + `git diff` = 0 lines | COMPLIANT |
+| R-APP-001 per-call gate | S-APP-001 sync `AllowOnce` → no event, executes | `TestPermission_ImmediateAllow_NoEvent` (now also asserts `resolveInvocations()==1`) | COMPLIANT |
+| R-APP-001 | S-APP-002 `Defer` A + `AllowOnce` B → A parks, B completes | `TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot` | COMPLIANT |
+| R-APP-002 emit before park | S-APP-003 `decision_required` reaches sink BEFORE the parked wait blocks | `TestPermission_DeferEmitsBeforePark` | **PARTIAL** — proves delivery + registration-before-emission; no longer proves the ack ordering (W9) |
+| R-APP-003 typed rejection | S-APP-004 wake unknown callID → typed rejection, no parked call touched | `TestPermission_StrayDecisionIsTypedError` + `..._UnknownCallID_TypedRejection_NoTouch` | COMPLIANT |
+| R-APP-004 AllowOnce | S-APP-005 executes AND `decision_made{AllowOnce}` | `TestPermission_FourOutcomes/AllowOnce_...`; also `TestNoOpPermissionPolicy_AllowsEverySynchronously` | COMPLIANT |
+| R-APP-005 Deny typed | S-APP-006 Deny → `ExecutionFailure` + typed `*Failure` | `TestPermission_FourOutcomes/Deny_...`, RTLS-008 `rtls_2`, and now `TestTurn_PermissionPolicy_E2E_DeferDenyModify` at `Turn()` level | COMPLIANT |
+| R-APP-006 ModifyInput transparent | S-APP-007 `tool_start.Arguments()` byte-equals `decision_made.ModifiedArguments()` | `TestPermission_FourOutcomes/ModifyInput_...`, RTLS-008 `rtls_3`/`rtls_4`, and the new E2E (asserts both the stream bytes and `RecordedArgs()[0]`) | COMPLIANT |
+| R-APP-007 AllowAlways + Remember | S-APP-008 `Remember=true` → 1 emission; `false` → 0 | `TestPermission_AllowAlways_Remember_Branches` (2 subtests) | COMPLIANT |
+| R-APP-008 sibling isolation | S-APP-009 A parked, B read-class → B's Result in ordinal slot | `TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot`; the new E2E extends it to `Turn()` | COMPLIANT |
+| R-APP-009 cancel mid-park | S-APP-010 parked + cancel → typed abort, Schedule returns, no leak | `TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak`; `..._AbandonedAckWithCancel_GateDeregistersPromptly` adds the ack-path arm | COMPLIANT — strengthened |
+| R-APP-010 remembered suppresses asks | S-APP-011 second identical call NOT consulted | `TestPermission_RememberedSuppressesSubsequentAsk` + `..._ConcurrentRace_AtMostOneEmission` | **COMPLIANT — upgraded from PARTIAL** (the concurrent lane is now correct by construction) |
+| R-APP-011 Layer 2 owns protocol | S-APP-012 L3 impl consumed without naming the type | compile guards on `scriptedPermissionPolicy`, `wiringTestPolicy`, `NoOpPermissionPolicy`; enforced from the other side by `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault` | COMPLIANT — strengthened |
+| R-APP-012 substrate preservation | S-APP-013 files byte-unchanged; filter widened for new files | `TestTurn_SubstrateUntouched` + `TestTurn_PreRequestHook_SubstrateUntouched` + merge-base diff = 0 | COMPLIANT |
 
-**Compliance summary**: 13/13 scenarios have a passing covering test; 1 (S-APP-011) is PARTIAL for the concurrent read-class lane.
+**Compliance summary**: 13/13 scenarios have a passing covering test. One is PARTIAL (S-APP-003, ordering half unguarded — W9). The prior round's PARTIAL (S-APP-011) is now fully COMPLIANT.
 
-### RED-bite non-vacuity audit (the audit-#3038 discriminating question)
+---
 
-The re-validation audit found 3 of 4 original bites vacuous under *"would this still pass if the implementation it guards were deleted?"*. Re-applying that test to the replacements:
+## RED-bite non-vacuity audit (defeat-tested by command, not by reading)
 
-| Bite | Guards | Survives deletion of what it guards? | Verdict |
+| Bite | Guards | Defeat test applied | Outcome |
 |---|---|---|---|
-| S-PPB-001 `TestPermission_ImmediateAllow_NoEvent` | AllowOnce bypasses the gate | **Yes** — deleting the whole gate (nil-policy bypass) also yields 0 `decision_required`, 1 invocation, Success. It never asserts `policy.Resolve` was called. | WEAK (see S1) — but the property is separately pinned by `TestPermission_FourOutcomes/AllowOnce_...` (asserts `decision_made`) and `TestTurn_PermissionPolicy_WiredToSchedule` (Deny policy → tool not invoked). No scenario loses coverage. |
-| S-PPB-002 `TestPermission_DeferEmitsBeforePark` | the R-APP-002 ack ordering | **No** — with the ack removed the gate parks while the dispatcher is still blocked on the unbuffered `sink`, so the 300 ms `WakeParked` poll succeeds and `t.Fatal` fires (`:308`). | NON-VACUOUS |
-| S-PPB-003 `TestPermission_StrayDecisionIsTypedError` | `Scheduler.WakeParked` typed rejection | **No** — re-pointed at the real production surface (`scheduler.go:235`); the deleted `ResolveStrayDecision` stub is gone. Its sibling `..._NoTouch` proves the second clause (a genuinely parked sibling stays parked). | NON-VACUOUS (defect 3 fixed) |
-| S-PPB-004 `TestPermission_RememberedCardinality_SecondEmissionRejected` | the `CardinalityAtMostOne` descriptor | **No** for the validator — deleting `Cardinality: CardinalityAtMostOne` (`event.go:322`) makes `CheckStream` accept and `t.Fatal` fires (`:525`). | NON-VACUOUS, but see W2 — it also asserts the *scheduler defect* still happens. |
+| S-PPB-001 `TestPermission_ImmediateAllow_NoEvent` | the gate runs at all | delete the whole gate (`return true,nil,nil` at entry) | **FAIL** — `invocation count = 0, want 1`. **NON-VACUOUS** (was WEAK) |
+| S-PPB-002 `TestPermission_DeferEmitsBeforePark` | registration-before-emission | move `park()` back after the ack | **FAIL 20/20** deterministically. **NON-VACUOUS** for the reorder |
+| S-PPB-002 (same test) | the R-APP-002/D4 **ack** | delete `reqAck` + the dispatcher's `close(em.ack)` dependency | **PASSES** — 0/15 separate full-package runs, `-race -count=10` clean. **VACUOUS for the ack → W9** |
+| S-PPB-003 `TestPermission_StrayDecisionIsTypedError` | `WakeParked` typed rejection | (unchanged this round) | NON-VACUOUS |
+| S-PPB-004 `..._SecondEmissionRejected` | the `CardinalityAtMostOne` descriptor | (restored hand-built form) | NON-VACUOUS |
+| NEW `..._ConcurrentRace_AtMostOneEmission` | the `rememberIfAbsent` CAS | ignore the CAS return value | **FAIL** — `count = 2, want exactly 1`. **NON-VACUOUS** |
+| NEW `..._AbandonedAckWithCancel_GateDeregistersPromptly` | the cancellation-aware ack select | revert to bare `<-reqAck` | **FAIL** — spurious `nil` instead of `ErrStrayDecision`. **NON-VACUOUS** |
+| NEW `..._SynchronousOnDecisionRequired_NoRetry` | (claims) the W3 reorder | move `park()` back after the ack | **PASSES 0/40 isolated, 0/20 full-package.** **VACUOUS → S6** |
 
-Defect 4 (`policy.Remember` never called) is fixed: `scheduler.go:658` is a real production call site, guarded by `TestPermission_AllowAlways_Remember_Branches` asserting `rememberInvocations() == 1` and the tool name/outcome arguments.
+---
 
-### Orchestrator-flagged scrutiny items
-
-#### 1. The deliberately-unfixed concurrent-remember race — the apply agent's argument only half-holds
-
-**R-APP-010's literal wording**: *"When `Policy.Remember` returned `true` for a `toolName`, identical **subsequent** calls in the same run MUST NOT be asked."*
-
-`subsequent` is temporal and predicated on `Remember` having already returned `true`. In the forced-race
-(`permission_protocol_test.go:430-454`) both goroutines pass `remembered.remembered()` (`scheduler.go:563`)
-*before* either `Remember` returns, so neither call is "subsequent" to the other's remembering.
-**On R-APP-010 alone, the apply agent is right: not a violation.** Likewise R-APP-007 (`scheduler.go:658-673`)
-literally says "`true` emits" and the code does exactly that.
-
-**But the `CardinalityAtMostOne` backstop claim is false in production.** Verified by command:
-
-```text
-$ grep -rn "CheckStream(" src/ | grep -v "_test.go"
-src/agenttest/fake_provider.go:105:     ...ai.CheckStream(stepEvents(steps))...
-src/agenttest/stream_kit_ordering.go:25: ...ai.CheckStream(events)...
-src/agent/stream_check.go:92:func CheckStream(events []Event) StreamReport {
-src/ai/stream_check.go:64:func CheckStream(events []Event) StreamReport {
-```
-
-Both non-definition call sites are inside `src/agenttest/**` — the **test harness**. `agent.CheckStream`
-has **zero production invocations**. So in a real run the invalid stream is not rejected, not logged, and
-not surfaced: it is emitted straight to the consumer. The backstop fires only when a test happens to call
-`CheckStream`. See W1.
-
-#### 2. Defect 6 — all four branches confirmed fixed by reading
-
-| Outcome | Site | Shape |
-|---|---|---|
-| `AllowOnce` | `scheduler.go:626-633` | `err != nil` → `typedExecutionFailureFromError` → `results[ordinal] = abort` → `emitExecutionFailure` → `return false` |
-| `AllowAlways` | `scheduler.go:645-656` | identical, and it returns **before** `policy.Remember` is invoked |
-| `Deny` | `scheduler.go:684-695` | identical |
-| `ModifyInput` | `scheduler.go:720-735` | identical — the one with a RED test (`:1720`) |
-
-All four are structurally identical five-line blocks. **The three untested branches are equivalent enough
-to be safe**: they share the same constructor (`NewPermissionDecisionMade`), the same error variable, and
-the same recovery statements in the same order. The apply agent's stated reason for not RED-testing them
-is also correct — only `ModifyInput` has a *policy-controlled* way to force the constructor to fail
-(empty `ModifiedArgs`); the others would need an empty `runID`/`turnID` from the `Schedule` **caller**,
-which no policy can inject. One residual asymmetry remains at `scheduler.go:669-672` (see S2).
-
-#### 3. The R-APP-002 ack — happens-before holds; **no deadlock is reachable**
-
-Mechanism: `emission.ack` (`scheduler.go:82`); dispatcher closes it only after `sink <- &stamped` returns
-(`scheduler.go:261-267`); the gate blocks on `<-reqAck` (`scheduler.go:592-594`) before `parked.park()`
-(`scheduler.go:596`).
-
-*Happens-before*: R-APP-002 requires "emission **reaches `sink`** before the parked wait blocks". A
-completed `sink <- &stamped` means the value is in `sink` (delivered for an unbuffered channel, enqueued
-for a buffered one). `close(ack)` is sequenced after it, and `<-reqAck` after that, and `park()` after
-that. **The required happens-before is genuinely established.**
-
-*Deadlock*: the complete wait graph for the new edge is
-
-```
-gate goroutine G  --(<-reqAck)-->  dispatcher D  --(sink <- ev)-->  external consumer C
-```
-
-`D` never waits on `G` (it only ranges over `emissions`, which it exclusively reads, and sends on `sink`).
-`G`'s earlier `emissions <- ...` can block only when the `len(calls)*2` buffer is full, which again waits
-on `D`, not the reverse. **There is no internal cycle, so no internal deadlock is reachable.** A hang
-requires `C` to stop consuming `sink` — a caller-contract violation that already hung `Schedule`
-pre-AG-10 (any emission would block `D` once the buffer filled). One genuine narrowing does exist: see W4.
-
-#### 4. The bounded retry — sound as a test primitive, but it documents a production hazard
-
-`wakeParkedWithRetry` (`permission_protocol_test.go:1011-1023`) is a **test helper**, bounded at 1 s, and
-it calls `t.Fatalf` if it never succeeds. It therefore cannot mask a genuine hang and is a legitimate
-test-side synchronization for an asynchronous registration — **not sleep-and-hope**.
-
-But it exists because of a real, and *structurally guaranteed*, production gap. Because `close(ack)`
-is sequenced **after** `sink <- &stamped`, at the instant a synchronous consumer holds the
-`decision_required` event the gate goroutine has provably **not yet** executed `parked.park()`. So a
-consumer that wakes immediately on receipt does not merely *sometimes* lose the wake — it loses it
-**every time**. No production retry exists; only the test has one. See W3.
-
-#### 5. The goroutine-leak baseline — not flaky
-
-Two tests drop `t.Parallel()` deliberately (`TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak:892`,
-`TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin:1554`); every other test in the file keeps it.
-The reasoning at `:1546-1553` is correct: Go parks top-level `t.Parallel()` tests until all sequential
-top-level tests have finished, so a serial test does run without sibling goroutine churn.
-`awaitGoroutineBaseline` (`:1520`) polls-until-settled rather than sampling once, which is the specific
-fix for what AG-09 reverted. Empirically confirmed: `go test -race -count=10 -run TestPermission ./src/agent/`
-→ `ok ... 4.539s`, exit 0, zero flakes. **The AG-09 raciness has not returned.**
-
-#### 6. The two design deviations — both acceptable, neither is drift
-
-| Deviation | Judgement |
-|---|---|
-| `Scheduler.parkedMu` / `parked` in `tool.go:230-233` rather than `scheduler.go` | **Acceptable.** `design.md`'s File Changes table assigns *behaviour* to `scheduler.go`, and `WakeParked` (the behaviour) is there (`scheduler.go:235`). The `Scheduler` **struct** is declared in `tool.go` (AG-09.1's file); Go requires fields to live with the declaration. Following the table literally was impossible. |
-| `openspec/AGENTS.md` had no AG-07/08/09 pointer precedent | **Acceptable, and the claim is verified.** `git show main:openspec/AGENTS.md \| grep "AG-0[6789]\|AG-1[0-9]"` returns nothing. The added section (18 lines) states honestly that AG-10 is the first such pointer rather than fabricating continuity. Task 1.3 is genuinely done. |
-
-### Correctness (Static Evidence)
+## Correctness (Static Evidence)
 
 | Requirement | Status | Notes |
 |---|---|---|
-| R-APP-001 | Implemented | `runPermissionGate` `scheduler.go:542`; called from `executeCall:401` for every scheduled call; nil-policy bypass at `:555` |
-| R-APP-002 | Implemented | ack channel `scheduler.go:82`, `:262-267`, `:592-596` |
-| R-APP-003 | Implemented | `ErrStrayDecision` `permission_protocol.go:58`; `WakeParked` `scheduler.go:235-243`; `parkedSet.wake` lookup-then-delete under one lock `permission_protocol.go:184-195` |
-| R-APP-004 | Implemented | `scheduler.go:625-636` |
-| R-APP-005 | Implemented | `scheduler.go:683-713`, incl. a defensive `errPermissionDeniedWithoutFailure` default at `:707` |
-| R-APP-006 | Implemented | `scheduler.go:719-738` + `executeCall:424-426, :443-446` (both `ToolStart` and `Run` input rewritten from the same `modifiedArgs`) |
-| R-APP-007 | Implemented | `scheduler.go:644-675` |
-| R-APP-008 | Implemented | bounded read semaphore is not exclusive (`scheduler.go:298`); park holds a slot but siblings acquire others |
-| R-APP-009 | Implemented | `select { <-parkCh; <-ctx.Done() }` `scheduler.go:597-617`; abort populates the ordinal slot at `:613-615` |
-| R-APP-010 | Implemented (sequential) | pre-`Resolve` suppression `scheduler.go:563-565`; `rememberedSet` `permission_protocol.go:208-234`. Concurrent lane: W1 |
-| R-APP-011 | Implemented | interface at `permission_protocol.go:80-94`; zero rule sets / mode flags in Layer 2; two external-package implementations consume it |
-| R-APP-012 | Implemented | zero-line diff on all ten files; filter widened in `loop_test.go` |
+| R-APP-001 | Implemented | `runPermissionGate`; nil-policy bypass preserved |
+| R-APP-002 | Implemented | ack channel + `close(em.ack)` after `sink <- &stamped`; park **wait** still strictly after the ack |
+| R-APP-003 | Implemented | `ErrStrayDecision`; `parkedSet.wake` lookup-then-delete under one lock |
+| R-APP-004 | Implemented | unchanged |
+| R-APP-005 | Implemented | unchanged, incl. the `errPermissionDeniedWithoutFailure` default |
+| R-APP-006 | Implemented | one `modifiedArgs` drives both `ToolStart` and `Run`; now also proven at `Turn()` level |
+| R-APP-007 | Implemented | `policy.Remember` → CAS-gated emission |
+| R-APP-008 | Implemented | bounded read semaphore untouched by the CAS |
+| R-APP-009 | Implemented | **strengthened** — cancellation now honoured on the ack path too; `parkedSet.remove` on every non-wake exit |
+| R-APP-010 | Implemented | **upgraded** — concurrent lane correct by construction, not by validator backstop |
+| R-APP-011 | Implemented | zero rule sets / mode flags in Layer 2; three external-package implementations |
+| R-APP-012 | Implemented | 33 of 44 `src/agent` files byte-unchanged; `go.mod`/`go.sum` zero-diff |
 
-**No requirement in the spec is silently unimplemented.** Every `R-APP-NNN` has a production code path
-and at least one passing test. The dead code the audit found (`ResolveStrayDecision`, `errParkedSetShutdown`,
-`closeAll()`, the `wakeErr != nil` branch, the literal `nil` policy at `loop.go:247`) is all gone —
-`make lint`'s `unused` checker reporting `0 issues.` is independent confirmation.
+`make lint`'s `unused` checker reporting `0 issues.` independently confirms no dead code was left behind by the `wakeParkedWithRetry` deletion or the `remember` → `rememberIfAbsent` replacement.
 
-### Coherence (Design)
+## Coherence (Design)
 
 | Decision | Followed? | Notes |
 |---|---|---|
-| D1 `PermissionPolicy` interface (`Resolve`+`Remember`) | Yes | `permission_protocol.go:80-94`, exact signatures |
-| D2 park locus inside scheduler | Yes | `parkedSet` per `Schedule` call |
-| D3 `SetCallID` before park (R-TLS-009) | Yes | `executeCall:389`, before the gate at `:401` |
-| D4 emit before park | Yes | strengthened with the ack; see item 3 |
-| D5 ModifyInput transparency | Yes | one `modifiedArgs` drives both `ToolStart` and `Run` |
-| D6 Deny → `Result{ExecutionFailure, typedDenial}`, not a Go error | Yes | `scheduler.go:697-712` |
-| D7 per-call abort on the threaded `ctx` | Yes | `ctx` is now a real parameter, not `_` |
-| D8 zero substrate edits | Yes | verified by `git diff` and by test |
-| Data flow "wake: re-evaluate verdict" | Yes | tail-recursion into `runPermissionGate` `scheduler.go:608` |
-| File Changes table (`scheduler.go` for the Scheduler fields) | Deviated | acceptable — Go declaration constraint, see item 6 |
-| Testing Strategy: E2E "scripted fake provider drives a turn" | Partially | `TestTurn_PermissionPolicy_WiredToSchedule` drives one Deny through a real `Turn` + `agenttest` provider, but not the "one each: deferred, denied, modified" full-stream E2E the table specifies. See S3. |
-| Migration: "a no-op pass-through decorator goes in `agenttest`" | Not done | no `agenttest` decorator was added; nil-policy bypass serves the same purpose. See S4. |
+| D1 `PermissionPolicy` interface | Yes | unchanged |
+| D2 park locus inside scheduler | Yes | `parkedSet` per `Schedule` call, now with `remove` |
+| D3 `SetCallID` before park | Yes | unchanged |
+| D4 emit before park | Yes (implementation) | ack intact and correct; its **test guard** was lost — W9 |
+| D5 ModifyInput transparency | Yes | now also proven through `Turn()` |
+| D6 Deny → typed `Result`, not a Go error | Yes | unchanged |
+| D7 per-call abort on the threaded `ctx` | Yes | **strengthened** — the ack wait now honours it too |
+| D8 zero substrate edits | Yes | verified against merge-base |
+| File Changes table (`Scheduler` fields in `scheduler.go`) | Deviated | accepted — Go declaration constraint, unchanged from prior report |
+| Testing Strategy E2E row | Yes, with a proven deviation | `TestTurn_PermissionPolicy_E2E_DeferDenyModify`; Defer leg aborts by ctx-cancel because `Turn()` exposes no wake handle (D1 above) |
+| Migration "no-op decorator in `agenttest`" | Delivered, relocated | `NoOpPermissionPolicy` in `package agent_test`; `agenttest` placement proven impossible (D2 above) |
+| design.md not back-annotated with either deviation | Deviated | S7 |
 
-### TDD Compliance
+---
+
+## TDD Compliance
 
 | Check | Result | Details |
 |---|---|---|
-| TDD Evidence reported | Pass | "TDD Cycle Evidence" present in Engram `#3039` and in `apply-progress.md` |
-| All tasks have tests | Pass | 19/19 completed tasks map to a test file or a verified gate |
-| RED confirmed (test files exist) | Pass | `permission_protocol.go` (235 L), `permission_protocol_test.go` (1761 L), `loop_tool_dispatch_test.go` (+124 L) all present |
-| GREEN confirmed (tests pass now) | Pass | 3138 `--- PASS`, 0 `FAIL`, re-run by this phase |
-| Triangulation adequate | Pass | `TestPermission_FourOutcomes` 4 subtests; `..._Remember_Branches` 2 subtests; RTLS-008 5 calls x 4 outcomes |
-| Safety net for modified files | Pass | `scheduler.go`/`loop.go`/`tool.go` modified with AG-09's existing suites green throughout |
-| RED-bite non-vacuity | Pass with 1 weak | 3/4 bites fail on deletion of what they guard; S-PPB-001 does not (S1) |
+| TDD Evidence reported | Pass | Phase 6 (R1–R7) in `tasks.md` and `apply-progress.md`, plus Engram `#3039` |
+| All tasks have tests | Pass | 26/26 completed tasks map to a test or a verified gate |
+| RED confirmed (test files exist) | Pass | `loop_permission_e2e_test.go` (292 L) and `permission_policy_helpers_test.go` (106 L) both present |
+| GREEN confirmed (tests pass now) | Pass | 3143 `--- PASS` / 1181 top-level, 0 `FAIL`, re-run by this phase |
+| Triangulation adequate | Pass | four-outcome matrix (4 subtests), Remember branches (2), RTLS-008 (5 calls × 4 outcomes), E2E (3 outcomes) |
+| Safety net for modified files | Pass | AG-09's suites green throughout; `-race -count=15` clean |
+| RED-bite non-vacuity | **Pass with 1 loss and 1 weak** | 6 of 8 defeat tests fire; the ack guard was lost (W9) and the new W3 bite is redundant (S6) |
 
 **TDD Compliance**: 6/7 checks fully passed, 1 partial.
 
@@ -280,116 +295,73 @@ and at least one passing test. The dead code the audit found (`ResolveStrayDecis
 
 | Layer | Tests | Files | Tools |
 |---|---|---|---|
-| Unit (`Schedule`-level, `package agent_test`) | 14 top-level (`TestPermission_*`), 8 subtests | `permission_protocol_test.go` | `go test -race` |
-| Integration (full `Turn` through `agenttest` provider) | 1 (`TestTurn_PermissionPolicy_WiredToSchedule`) | `loop_tool_dispatch_test.go` | `agenttest` |
-| E2E (real process/browser) | 0 | — | N/A for a Go library layer |
-| **Total (this change)** | **15 top-level** | **2** | |
+| Unit (`Schedule`-level, `package agent_test`) | 17 top-level | `permission_protocol_test.go` | `go test -race` |
+| Integration / E2E (full `Turn` through the `agenttest` scripted provider) | 3 top-level | `loop_permission_e2e_test.go`, `permission_policy_helpers_test.go`, `loop_tool_dispatch_test.go` | `agenttest` |
+| **Total (this change)** | **20 top-level** (was 15) | **4** | |
 
 ### Assertion Quality
 
 | File | Line | Assertion | Issue | Severity |
 |---|---|---|---|---|
-| `permission_protocol_test.go` | 225-242 | 0 `decision_required` + 1 invocation + Success | Bite does not assert `policy.Resolve` was reached; survives deletion of the whole gate | SUGGESTION (S1) |
-| `permission_protocol_test.go` | 503-505 | `rememberedCount != 2 → t.Fatalf` | Asserts the *defect* occurs; fixing W1 makes this test fail | WARNING (W2) |
+| `permission_protocol_test.go` | ~1108–1120 | single `WakeParked` == nil after `<-ready` | Passes identically with the reorder reverted — proves nothing the sibling tests do not | SUGGESTION (S6) |
+| `permission_protocol_test.go` | 1196, 1202 | `time.Sleep(100 * time.Millisecond)` ×2 | Wall-clock margins in a `t.Parallel()` test | SUGGESTION (S8) |
 
-No tautologies, no ghost loops, no orphan-empty assertions, no mock-heavy tests, no smoke-only tests found.
+The prior round's two entries are both resolved: `:225–242` gained the `resolveInvocations` assertion (S1) and `:503–505`'s `want 2` is gone (W2). No tautologies, no ghost loops, no orphan-empty assertions, no mock-heavy or smoke-only tests.
 
 ### Quality Metrics
 
-**Linter**: `0 issues.` (`go vet` + `golangci-lint`, after `cache clean`)
-**Type checker / build**: `go build -trimpath ./...` exit 0
-**Race detector**: 0 `DATA RACE` across 12 packages and a `-count=10` permission-suite run
+**Linter**: `0 issues.` (`go vet` + `golangci-lint`, after `cache clean`) · **Build**: exit 0 · **Race detector**: 0 `DATA RACE` across 12 packages, `-count=15` on `src/agent`
 
-### Issues Found
+---
+
+## Issues Found
 
 **CRITICAL**: None.
 
-**WARNING**:
+**WARNING (4)**:
 
-- **W1 — the concurrent-remember race emits a stream that violates the project's own event grammar, and nothing in production catches it.**
-  `scheduler.go:563` (pre-`Resolve` suppression check) and `scheduler.go:658-659` (`policy.Remember` → `remembered.remember`) are not atomic.
-  *Failure scenario*: a model returns two parallel `read_file` calls in one turn; both are read-class so both run concurrently (`scheduler.go:191`); both pass `remembered.remembered("read_file") == false`; both reach `AllowAlways`; a Layer 3 policy that persists the rule returns `true` twice; both emit `permission_resolution_remembered{tool_name:"read_file"}`. The turn's stream now carries two events of a kind declared `Cardinality: CardinalityAtMostOne` (`event.go:322`). `agent.CheckStream` has **zero production call sites**, so nothing rejects, logs, or surfaces it — the malformed stream reaches the consumer. The apply agent's claim that "the `CardinalityAtMostOne` validator backstops this" is therefore **incorrect for production**; the backstop is test-time only.
-  *Note on scope*: `R-APP-010`'s "subsequent" wording does not literally cover this, and `R-APP-007` literally says "`true` emits", so this is **not** a violation of the letter of either requirement — hence WARNING, not CRITICAL. It **is** in tension with the NFR block's "`CardinalityAtMostOne` bite (R-APE-003 / S-APE-082 carry)".
-  *On the stated reason for not fixing it*: the apply agent wrote that a fix "would risk changing AG-09.2's read-class concurrency semantics". That does not hold up. A compare-and-set inside the existing mutex in `rememberedSet` (`permission_protocol.go:230-234`) — return `false` when the name was already present, and emit only on `true` — is a two-line change that touches no scheduling code and no AG-09.2 lane. The real cost is W2.
+- **W9 — NEW REGRESSION: the R-APP-002 / D4 ack lost its only non-vacuous test guard.**
+  Deleting the ack outright — remove `reqAck`, send `emission{ev: reqEv}` with no ack, delete the wait — leaves the **entire `src/agent` package green**: `-race -count=10` in-process → `ok`, and 0/15 separate full-package processes failed. At `c0fcc6e5` the identical deletion failed deterministically:
+  ```text
+  permission_protocol_test.go:308: WakeParked succeeded before anything read from sink —
+    the call parked before decision_required could have reached sink (R-APP-002/D4 ordering violated)
+  --- FAIL: TestPermission_DeferEmitsBeforePark
+  ```
+  The rewrite of `TestPermission_DeferEmitsBeforePark` was *necessary* — its old proxy ("an early wake must keep failing") became the wrong invariant the moment registration moved ahead of emission — but the replacement asserts only that `decision_required` is still delivered. The ack ordering itself is now asserted by nothing.
+  *Not CRITICAL because*: the ack is present and correct in production (verified by reading `runDispatcher` and `runPermissionGate`), D4 still holds, and S-APP-003 retains a passing covering test for the delivery half. *Why it matters*: a future refactor can now delete the ack and every gate stays green. A replacement bite must observe the *wait*, not the registration — e.g. assert that `parkCh` is not selected on until after a `sink` reader has taken the event, or expose a test-only ordering probe.
 
-- **W2 — the S-PPB-004 bite hard-codes the W1 defect as required behaviour.**
-  `permission_protocol_test.go:503-505` fails with *"resolution_remembered count = %d, want 2"* whenever the count is not exactly 2. A correct scheduler that suppressed the duplicate would emit 1 and **fail this test**. The bite therefore prevents the W1 fix rather than merely documenting the gap. Any future fix must re-point this bite at hand-built events (which is what it did before commit `ba1e8777`) or at a policy-level double-emit.
+- **W5 — the delta spec is structurally unpromotable and the target capability directory does not exist.** Unchanged; archive-phase work. Re-confirmed by command: `ls openspec/specs/agent-permission-protocol` → *No such file or directory*, and `openspec/specs/` currently holds 67 capabilities, none of them `agent-permission-protocol`. The delta at `openspec/changes/cachicamas-agent-permission-protocol/specs/agent-permission-protocol/spec.md` is 32 lines with `### R-APP-NNN` headings = **0**, `#### Scenario` blocks = **0**, `## Coverage` sections = **0**, while all **12** `R-APP-NNN` and all **13** `S-APP-NNN` IDs are present. **Archive must produce**, not copy: (1) a new `openspec/specs/agent-permission-protocol/spec.md`; (2) one `### R-APP-NNN — <title>` heading per requirement, matching `openspec/specs/agent-tool-scheduler/spec.md`'s promoted form; (3) a `#### Scenarios` block under each requirement; (4) each requirement rewritten from a one-line table cell into a normative RFC 2119 paragraph; (5) a `## Coverage` charter→spec mapping table.
 
-- **W3 — the wake surface has a structurally guaranteed lost-wakeup window.**
-  `scheduler.go:261-267` closes the ack only after `sink <- &stamped` completes, and `scheduler.go:592-596` parks only after `<-reqAck`.
-  *Failure scenario*: a Layer 3 consumer reads `permission_decision_required` from `sink` and — being already-decided, e.g. an auto-approve policy or a replayed decision — immediately calls `sched.WakeParked(callID)`. At that instant the gate goroutine is still blocked on `<-reqAck`, so `s.parked.channels` has no entry, `WakeParked` returns `ErrStrayDecision` (`scheduler.go:239-241`), and the call then parks with no further wake pending. It stays parked until run-context cancellation. Because the ack ordering *forces* emission-strictly-before-park, this is not probabilistic — an immediate synchronous wake fails **100%** of the time.
-  *Why it is not a spec violation*: R-APP-003 requires exactly this typed rejection for a callID "not in the parked set", and the spec never promises that a wake issued after observing `decision_required` succeeds. But AG-13 will consume this surface, and the only mitigation that exists today is a helper inside the test file (`wakeParkedWithRetry:1011`). Record it so AG-13 does not rediscover it as a hang.
+- **W6 — the delta spec's own format claim is false.** Unchanged. Header line 3 states *"**Format**: RFC 2119 + Given/When/Then"*; `grep -ciE '^\s*-?\s*(given|when|then)\b'` over the file → **0**. `openspec/config.yaml` `rules.specs` mandates Given/When/Then and independently verifiable scenarios. Inherited byte-identically from the Engram spec artifact `#3034`, so it is a spec-phase defect surfacing at verify. Archive must author the Given/When/Then scenarios as part of the W5 transform.
 
-- **W4 — `<-reqAck` is not cancellation-aware, narrowing R-APP-009's "no goroutine waits forever".**
-  `scheduler.go:594` is a bare `<-reqAck` with no `case <-ctx.Done()`; the `select` that honours cancellation only begins at `:597`, *after* the ack.
-  *Failure scenario*: a consumer abandons `sink` (e.g. its own context is cancelled and it returns from its read loop) while a `Defer` verdict is in flight. The dispatcher blocks on `sink <- &stamped` (`:261`), the gate blocks on `<-reqAck` (`:594`), `wg.Wait()` (`:196`) never returns, `Schedule` never returns, `Turn` never returns. Cancelling the run context does **not** release it, because the goroutine is not yet in the `select`. Pre-AG-10 an abandoned `sink` also hung `Schedule` once the `len(calls)*2` buffer filled, so this narrows an existing hazard rather than creating a new class — but it now triggers on the **first** deferred call instead of after `2*len(calls)` emissions.
+- **W7 — `make vuln-check` fails on 5 pre-existing Go stdlib advisories.** Unchanged and correctly characterised. Re-run: exit 2; `GO-2026-5026 GO-2026-5972 GO-2026-6089 GO-2026-6090 GO-2026-6218`, all Go stdlib at go1.26.5, all fixed in go1.26.6; `grep -c 'src/agent/'` over the output → **0**; every trace runs through `src/ai/openaicompat/**` (Layer 1). Pre-existing on `main`. Task 5.4 remains correctly `[ ]` with an accurate why-note. Accepted, out of AG-10 scope.
 
-- **W5 — the on-disk delta spec is not in the form this repo promotes, and the target capability directory does not exist.**
-  `openspec/changes/cachicamas-agent-permission-protocol/specs/agent-permission-protocol/spec.md` is 32 lines; `openspec/specs/agent-permission-protocol/` does not exist (`ls` → *No such file or directory*).
-  Repo convention, verified against AG-09: commit `b2ab3867` ("AG-09 spec+design committed") wrote the **full 204-line capability spec directly to `openspec/specs/agent-tool-scheduler/spec.md`**, and the change folder's `specs/` held only the *cross-cut delta into a pre-existing capability* (`specs/agent-loop-skeleton/spec.md`, 45 lines). AG-06.1 followed the same shape (`specs/agent-event-envelope/spec.md` only).
-  *Content-wise the delta is complete*: all 12 `R-APP-NNN` and all 13 `S-APP-NNN` IDs are present. *Structurally it is not promotable.* Exactly what is missing for archive:
-  1. `openspec/specs/agent-permission-protocol/spec.md` does not exist and must be authored.
-  2. Zero `### R-APP-NNN — <title>` requirement headings (main specs use one per requirement — `specs/agent-tool-scheduler/spec.md:25`).
-  3. Zero `#### Scenarios` blocks (`grep -c "^#### Scenario"` → 0; AG-09's main spec has 11+).
-  4. Requirements are compressed into one markdown table row each rather than a normative RFC 2119 paragraph.
-  5. No `## Coverage` charter→spec mapping table (present in every promoted spec).
-  The archive phase cannot mechanically copy this file; it must perform a real transform.
+**SUGGESTION (3)**:
 
-- **W6 — the delta spec's own format claim is false.**
-  Its header (line 3) states **"Format: RFC 2119 + Given/When/Then"**, but the body contains no Given/When/Then scenario anywhere (`grep -ci "given\|when\|then"` → 3, all incidental prose). `openspec/config.yaml` `rules.specs` mandates *"Use Given/When/Then for scenarios"* and *"Each scenario MUST be independently verifiable"*. Scenario cells such as *"S-APP-001 sync `AllowOnce` A → no event, executes."* are shorthand, not verifiable Given/When/Then. Note this is inherited from the Engram spec artifact `#3034` (byte-identical content), so it is a spec-phase defect surfacing at verify, not an apply-phase regression.
+- **S6 — the test the remediation designates as the W3 RED bite does not actually catch the W3 revert.** `TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry` passed **0/40** isolated runs and **0/20** full-package runs with the reorder reverted. Its doc comment claims *"RED before the fix: fails on the first (only) attempt with ErrStrayDecision"*, and `tasks.md` R1 records *"~27% failure over 30 runs pre-fix"*; neither reproduces for the test as committed, because `drainUntilDecisionRequired`'s buffered sink plus the extra `<-ready` goroutine handoff reliably gives the gate time to register first. The reorder is nonetheless properly guarded — deterministically, 20/20 — by `TestPermission_DeferEmitsBeforePark`. Either re-shape the no-retry test to an unbuffered synchronous consumer (where the pre-fix failure is 100%) or correct its doc comment to say it is a regression guard, not the RED bite.
+- **S7 — `design.md` was not back-annotated with either accepted deviation.** Both deviations are well recorded in the test files and `tasks.md` Phase 6, but `design.md:76` still specifies a wake-resume E2E and `design.md:84` still says the decorator "goes in `agenttest`". Both are now provably impossible at this milestone (D1, D2). Two edited lines would stop the design table describing untakeable work.
+- **S8 — two 100 ms wall-clock sleeps in `..._AbandonedAckWithCancel_GateDeregistersPromptly`** (`:1196`, `:1202`). The defeat test proves the assertion is not masked by them, and the test's comment argues correctly that the ack cannot close regardless of timing. Still, fixed wall-clock margins in a `t.Parallel()` test are a flake surface under loaded CI; a poll-until-deregistered loop bounded by a deadline would carry the same proof without the fixed cost.
 
-- **W7 — `make vuln-check` fails (accepted, out of scope).**
-  Exit 2 with 5 Go **stdlib** advisories at go1.26.5 — `GO-2026-6218`, `GO-2026-6090`, `GO-2026-6089`, `GO-2026-5972`, `GO-2026-5026`, all fixed in go1.26.6. Independently confirmed: `grep -c "src/agent/"` over the vuln output → **0**; every trace runs through `src/ai/openaicompat/**` (Layer 1). Pre-existing on `main`, not introduced by AG-10, and the spec's NFR "Verify" line does list `make vuln-check` green — so this is a genuine, knowingly-unmet acceptance item, correctly recorded as `[ ]` on task 5.4. A toolchain bump is out of AG-10's scope per explicit instruction.
+---
 
-- **W8 — the design's E2E testing row and its `agenttest` decorator are not delivered.**
-  `design.md:76` specifies an E2E driving "one each: deferred, denied, modified" through a scripted fake provider and asserting the full stream `decision_required → decision_made → tool_start (modified args) → tool_end_*`. What exists is `TestTurn_PermissionPolicy_WiredToSchedule`, a single-Deny wiring proof. `design.md:84`'s "no-op pass-through decorator goes in `agenttest`" was also not added. Neither breaks a spec scenario (RTLS-008 covers the mixed-outcome matrix at `Schedule` level), hence WARNING not CRITICAL.
+## Task Checkbox Audit
 
-**SUGGESTION**:
+| Metric | Value |
+|--------|-------|
+| Checkbox items total | 27 (20 original + 7 Phase 6 remediation) |
+| Complete `[x]` | 26 |
+| Incomplete `[ ]` | 1 — task 5.4 (`make vuln-check`), correctly unchecked with an accurate why-note |
 
-- **S1** — Strengthen S-PPB-001 (`permission_protocol_test.go:202-243`) with `if n := policy.resolveInvocations(); n != 1 { ... }`. One line makes the bite fail when the gate is deleted. Today it does not.
-- **S2** — `scheduler.go:669-672` still uses the swallowing `if rerr == nil { emit }` shape that defect 6 removed from the other four sites. The inline rationale (best-effort telemetry, decision already made) is defensible, but it is the last instance of a pattern the milestone otherwise eliminated; a short comment cross-referencing defect 6 or a `slog` warn would close the inconsistency.
-- **S3** — Add the `design.md:76` E2E as a follow-up (or amend the design to record that RTLS-008 subsumes it), so the design table stops describing untaken work.
-- **S4** — Either add the `agenttest` no-op decorator `design.md:84` promises or strike the line; the nil-policy bypass already serves the purpose.
-- **S5** — `apply-progress` reports "1176 `--- PASS` lines"; this phase measured **3138** on a full uncached `make test`. Both runs exit 0 with 0 `FAIL`, so the discrepancy is almost certainly package caching during the apply run. Worth recording the counting method alongside the number in future artifacts.
+All 26 `[x]` states are supported by code and by commands re-run in this phase. The Phase 6 entries R1–R7 each map to a verified change: R1→W3 reorder, R2→W4 ack select + `parkedSet.remove`, R3→CAS + restored validator bite, R4→S1 assertion, R5→S2 rationale, R6→E2E + `NoOpPermissionPolicy`, R7→substrate filter widening. **Flip nothing.** Two claims inside those entries are overstated and are corrected in this report rather than in the tasks file: R1's "~27% failure pre-fix" for the no-retry test (S6) and the Phase 6 gate table's "1181 `--- PASS`" (correct for `^--- PASS`; the inclusive count is 3143 — S5's mechanism, now documented).
 
-### Task Checkbox Audit
+---
 
-All 20 checkbox states are supported by the code. **Flip nothing.**
+## Verdict
 
-| Task | State | Code support |
-|---|---|---|
-| 1.1 | `[x]` | `permission_protocol.go` exists with interface, verdict, `parkedSet`, `rememberedSet` |
-| 1.2 | `[x]` | `TestPermission_FourOutcomes` + `..._Remember_Branches` are both table-driven `t.Run` |
-| 1.3 | `[x]` | `openspec/AGENTS.md` +18 lines; the "no prior precedent" note is verified true |
-| 2.1 | `[x]` | test exists and passes (weak — S1, but present and honest) |
-| 2.2 | `[x]` | `TestPermission_DeferEmitsBeforePark`, non-vacuous |
-| 2.3 | `[x]` | re-pointed at real `WakeParked`; stub deleted |
-| 2.4 | `[x]` | re-pointed at a real `Schedule` run (but see W2) |
-| 3.1 | `[x]` | `runPermissionGate` immediate + defer + recursion on wake |
-| 3.2 | `[x]` | four outcomes implemented; defect 6 fixed on all four |
-| 3.3 | `[x]` | `select { <-parkCh; <-ctx.Done() }`; dead sweep removed |
-| 3.4 | `[x]` | `policy.Remember` called at `scheduler.go:658`; suppression at `:563` |
-| 4.1 | `[x]` | `Schedule` signature carries `policy`; AG-09 sub-paths byte-clean |
-| 4.2 | `[x]` | `loop.go:265` forwards `opts.PermissionPolicy`; the literal `nil` is gone |
-| 4.3 | `[x]` | `TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin`, `-count=10` clean |
-| 4.4 | `[x]` | `TestTurn_SubstrateUntouched` PASS with the widened filter |
-| 5.1 | `[x]` | re-run: exit 0, 3138 PASS, 0 FAIL, `-race` |
-| 5.2 | `[x]` | re-run after `cache clean`: `0 issues.` |
-| 5.3 | `[x]` | re-run: exit 0 |
-| 5.4 | `[ ]` | **correctly unchecked** — `make vuln-check` exit 2; the why-note is accurate |
-| 5.5 | `[x]` | `git diff main...HEAD` over the 10 files: 0 lines |
+**PASS WITH WARNINGS** — 0 CRITICAL, 4 WARNING, 3 SUGGESTION.
 
-### Verdict
+The remediation round did what it claimed for four of five assigned items and did it soundly: W1, W2, W3 and W8 are fully closed, W4 is closed for the narrowing AG-10 introduced with its residual honestly documented, and all five prior SUGGESTIONS are resolved. Every fix was defeat-tested by command — six of the eight bites in the suite fail when the implementation they guard is reverted. Both W8/S4 deviation claims were independently proven, the `agenttest` one by reproducing the Layer 1 boundary failure in an isolated module copy. All four gates AG-10 owns are green and were re-run by this phase; the substrate invariant holds with 33 of 44 files byte-unchanged.
 
-**PASS WITH WARNINGS** — 0 CRITICAL, 8 WARNING, 5 SUGGESTION.
+**Nothing blocks archive.** One new warning is worth an explicit decision before archiving: **W9** — the R-APP-002/D4 ack is still correct but is no longer guarded by any test, a capability the pre-remediation suite had. The orchestrator may accept it as a follow-up or spend one more scoped remediation on a replacement bite; it does not invalidate any requirement.
 
-Every one of the 12 requirements is implemented in production code and covered by a passing test; all
-four gates the milestone owns (`test`, `lint`, `build`, substrate) are green and were re-run by this
-phase; every defect the re-validation audit `#3038` listed is fixed and the three vacuous bites are now
-non-vacuous. **Nothing blocks archive.**
-
-The two warnings the archive phase must act on before promoting are **W5** (author
-`openspec/specs/agent-permission-protocol/spec.md` in the AG-09 promoted-spec form) and **W6**
-(supply the Given/When/Then scenarios `openspec/config.yaml` requires). **W1**, **W3**, and **W4** are
-correctness gaps that do not violate the letter of any `R-APP-NNN` requirement but should be carried
-forward as explicit inputs to AG-13, which owns the consumer side of this protocol.
+Archive must still act on **W5** (author `openspec/specs/agent-permission-protocol/spec.md` in the AG-09 promoted form — headings, `#### Scenarios`, RFC 2119 paragraphs, `## Coverage`) and **W6** (supply the Given/When/Then scenarios `openspec/config.yaml` requires). **W7** stays accepted and out of scope. **W9**, the residual abandoned-sink hazard in R1/R2, and the fact that `Turn()` exposes no wake handle are the three explicit inputs AG-13 should carry forward.
