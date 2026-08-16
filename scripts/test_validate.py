@@ -783,27 +783,71 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(findings[0].rule, "test 'has title'")
 
     def test_pnpm_audit(self) -> None:
+        # Real pnpm audit --json schema: ``advisories`` keyed by advisory id,
+        # each carrying ``module_name``, ``severity``, ``title``, ``findings``.
         raw = json.dumps({
-            "metadata": {},
-            "vulnerabilities": {
-                "lodash": {"severity": "high", "title": "Prototype Pollution",
-                           "url": "https://ghsa/foo", "via": [{"title": "x"}]},
+            "metadata": {"vulnerabilities": {"high": 1, "moderate": 0, "low": 0}},
+            "advisories": {
+                "1120680": {
+                    "id": 1120680,
+                    "module_name": "lodash",
+                    "severity": "high",
+                    "title": "Prototype Pollution in lodash",
+                    "url": "https://github.com/advisories/GHSA-xxxx",
+                    "findings": [{"version": "4.17.20", "paths": [".>lodash"], "dev": False}],
+                },
             },
         })
         findings = validate.parse_pnpm_audit(raw, scope="frontend")
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].severity, "high")
+        self.assertEqual(findings[0].rule, "lodash")
+        self.assertIn("Prototype Pollution", findings[0].message)
 
     def test_govulncheck(self) -> None:
-        # govulncheck emits NDJSON; only `osv == true` rows yield findings.
-        rows = [
-            json.dumps({"osv": False, "message": "module is called but no vuln"}),
-            json.dumps({"osv": True, "message": "vuln found",
-                        "finding": {"osv": "GHSA-x", "trace": [{"file": "src/x.go"}]}}),
-        ]
-        findings = validate.parse_govulncheck("\n".join(rows), scope="backend/db")
+        # govulncheck emits pretty-printed multi-line JSON; the parser must
+        # stream top-level objects (not splitlines + json.loads), distinguish
+        # reachable (``finding`` block with ``trace``) from unreachable
+        # (standalone ``osv`` record, no call site) advisories, and dedupe
+        # multi-call-site advisories to one finding per OSV.
+        raw = json.dumps({
+            "config": {"scanner_version": "v1.7.0"},
+        }) + "\n" + json.dumps({
+            "SBOM": {"modules": []},
+        }) + "\n" + json.dumps({
+            "osv": {"id": "GO-2020-0001", "summary": "unreachable"},
+        }) + "\n" + json.dumps({
+            "finding": {"osv": "GHSA-x",
+                        "trace": [{"position": {"filename": "src/x.go", "line": 42, "column": 7}}]},
+        }) + "\n" + json.dumps({
+            "finding": {"osv": "GHSA-x",
+                        "trace": [{"position": {"filename": "src/y.go", "line": 1, "column": 1}}]},
+        }) + "\n" + json.dumps({
+            "finding": {"osv": "GHSA-y",
+                        "trace": [{"position": {"filename": "src/z.go", "line": 9, "column": 3}}]},
+        })
+        findings = validate.parse_govulncheck(raw, scope="backend/db")
+        # GHSA-x deduped (two call sites collapsed to one finding with a count);
+        # GHSA-y has one call site; the unreachable GO-2020-0001 is dropped.
+        self.assertEqual(len(findings), 2)
+        by_rule = {f.rule: f for f in findings}
+        self.assertEqual(by_rule["GHSA-x"].file, "src/x.go")
+        self.assertEqual(by_rule["GHSA-x"].line, 42)
+        self.assertIn("2 reachable call sites", by_rule["GHSA-x"].message)
+        self.assertNotIn("2 reachable call sites", by_rule["GHSA-y"].message)
+        # SBOM, config, and unreachable-osv records produce no findings.
+        self.assertNotIn("GO-2020-0001", by_rule)
+
+    def test_govulncheck_skips_non_json_preamble(self) -> None:
+        # Defense in depth: if a Makefile echo slips into stdout (it shouldn't,
+        # but cheap to guard), the parser must skip past it to the first '{'.
+        raw = ">> running govulncheck v1.1.4\n" + json.dumps({
+            "finding": {"osv": "GHSA-z",
+                        "trace": [{"position": {"filename": "a.go", "line": 1}}]},
+        })
+        findings = validate.parse_govulncheck(raw, scope="x")
         self.assertEqual(len(findings), 1)
-        self.assertIn("vuln found", findings[0].message)
+        self.assertEqual(findings[0].rule, "GHSA-z")
 
     def test_go_work(self) -> None:
         # Sanity that check_go_work_drift walks go.work for `use` entries.

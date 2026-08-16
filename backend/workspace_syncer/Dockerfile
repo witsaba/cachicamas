@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.6
 
-# Triple-pinned: Go 1.26.3 + alpine 3.22 + sha256 digest. The ':1.26.3-alpine'
+# Triple-pinned: Go 1.26.6 + alpine 3.24 + sha256 digest. The ':1.26.6-alpine'
 # (or ':latest') tag would silently roll forward to whatever alpine the
 # upstream maintainers publish next. Pin explicitly so security upgrades
 # are a visible commit.
 #
 # PR-2a installs the `git` binary in the runtime stage; PR-2b uses it for
 # the actual clone work.
-FROM golang:1.26.3-alpine3.22 AS build
+FROM golang:1.26.6-alpine3.24 AS build
 
 WORKDIR /src
 
