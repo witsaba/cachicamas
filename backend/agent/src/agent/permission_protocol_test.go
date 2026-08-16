@@ -403,56 +403,126 @@ func TestPermission_StrayDecisionIsTypedError(t *testing.T) {
 	}
 }
 
-// S-PPB-004 — RED bite (recorded at Commit 2). The
-// CardinalityAtMostOne rule on permission_resolution_remembered
-// rejects a second event for the same toolName. The bite
-// constructs a hand-built stream with two resolution_remembered
-// events for "fs.write" and asserts that CheckStream rejects the
-// second one at its 0-based slice index with ai.ErrDuplicate.
+// S-PPB-004 / task 2.4 — re-pointed at a real Schedule run. The
+// original bite hand-built two permission_resolution_remembered
+// events and called CheckStream directly, exercising zero AG-10
+// code — it duplicated permission_events_test.go:263-317's S-APE-082
+// bite verbatim. This version drives the same CardinalityAtMostOne
+// rejection from events a real Schedule call actually emits.
 //
-// RED at write time: nothing. This bite is runtime RED — it
-// drives the validator against the documented descriptor
-// (event.go:320-323) and asserts the rejection rule bites. The
-// production code being defended is AG-10.4's single-emission
-// discipline: any future scheduler implementation that emits two
-// resolution_remembered events for the same toolName triggers
-// the validator's rule, surfacing the bug at validation time.
-//
-// Mirrors S-APE-082 (permission_events_test.go:263-317) — AG-10
-// re-asserts the seam from the apply-phase perspective.
+// R-APP-010's suppression check runs BEFORE policy.Resolve and the
+// remembered-write happens AFTER policy.Remember returns — for two
+// SEQUENTIAL calls to the same tool name (the ordinary case,
+// TestPermission_RememberedSuppressesSubsequentAsk) that ordering
+// prevents a second ask entirely, so a single well-behaved Schedule
+// call cannot naturally reach two resolution_remembered emissions
+// for the same tool name. Two calls racing TRULY CONCURRENTLY for an
+// identical tool name is a narrower, documented gap this bite proves
+// the validator backstops rather than a gap AG-10.4 closes: both
+// goroutines can pass the "not yet remembered" check before either's
+// write lands, independently reach AllowAlways, and each
+// independently emit resolution_remembered. A synchronization
+// barrier forces that race deterministically (not by goroutine-
+// scheduling luck), so the bite is neither flaky nor vacuous.
 func TestPermission_RememberedCardinality_SecondEmissionRejected(t *testing.T) {
 	t.Parallel()
 
-	runID := agent.RunID("run-app-082")
-	turnID := agent.TurnID("turn-app-082")
+	var enteredResolve sync.WaitGroup
+	enteredResolve.Add(2)
+	release := make(chan struct{})
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			enteredResolve.Done()
+			<-release // rendezvous: force both calls to pass the suppression check before either can record it
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways}
+		},
+		remember: func(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
+			return true
+		},
+	}
 
-	first, err := agent.NewPermissionResolutionRemembered(runID, "fs.write", agent.PermissionOutcomeAllowAlways)
+	tool := EchoScriptedTool("fs.write", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"fs.write": tool})
+	calls := []scheduledPermissionCall{
+		{id: "race_0", name: "fs.write", args: []byte(`{}`)},
+		{id: "race_1", name: "fs.write", args: []byte(`{}`)},
+	}
+
+	go func() {
+		enteredResolve.Wait()
+		close(release)
+	}()
+
+	runID := agent.RunID("run-app-082-real")
+	turnID := agent.TurnID("turn-app-082-real")
+
+	// One shared LaneStamper across the caller-built brackets and
+	// Schedule's own emissions — exactly how Turn() assembles a
+	// stream in production (loop.go: the stamper is minted once,
+	// used for run_start/turn_start, handed to Schedule, then reused
+	// for turn_end/run_end). A per-section stamper would produce a
+	// non-contiguous sequence and CheckStream would reject the
+	// stream for the wrong reason.
+	stamper := &agent.LaneStamper{}
+	runStart, err := agent.NewRunStart(runID)
 	if err != nil {
-		t.Fatalf("first NewPermissionResolutionRemembered: %v", err)
+		t.Fatalf("agent.NewRunStart: %v", err)
 	}
-	second, err := agent.NewPermissionResolutionRemembered(runID, "fs.write", agent.PermissionOutcomeAllowAlways)
+	turnStart, err := agent.NewTurnStart(runID, turnID)
 	if err != nil {
-		t.Fatalf("second NewPermissionResolutionRemembered: %v", err)
+		t.Fatalf("agent.NewTurnStart: %v", err)
+	}
+	stampedRunStart := stamper.Stamp(runStart)
+	stampedTurnStart := stamper.Stamp(turnStart)
+
+	sink := make(chan *agent.Event, 64)
+	results := (&agent.Scheduler{MaxConcurrentReads: 4}).Schedule(
+		context.Background(),
+		permissionCallsToAICalls(calls),
+		reg,
+		runID,
+		turnID,
+		policy,
+		stamper,
+		sink,
+	)
+	var scheduleEvents []agent.Event
+	for ev := range sink {
+		scheduleEvents = append(scheduleEvents, *ev)
 	}
 
-	runStart, _ := agent.NewRunStart(runID)
-	turnStart, _ := agent.NewTurnStart(runID, turnID)
-	turnEnd, _ := agent.NewTurnEnd(runID, turnID, agent.TurnOutcomeFinished, nil)
-	runEnd, _ := agent.NewRunEnd(runID, agent.RunOutcomeCompleted, nil)
-
-	var lane agent.LaneStamper
-	stream := []agent.Event{
-		lane.Stamp(runStart),
-		lane.Stamp(turnStart),
-		lane.Stamp(first),
-		lane.Stamp(second),
-		lane.Stamp(turnEnd),
-		lane.Stamp(runEnd),
+	if len(results) != 2 {
+		t.Fatalf("Schedule returned %d results, want 2", len(results))
 	}
+	rememberedCount := 0
+	for _, ev := range scheduleEvents {
+		if _, ok := ev.PermissionResolutionRemembered(); ok {
+			rememberedCount++
+		}
+	}
+	if rememberedCount != 2 {
+		t.Fatalf("resolution_remembered count = %d, want 2 (the forced race must make both calls independently remember for this bite to exercise anything — the property under test is that the VALIDATOR then rejects the resulting stream, not that the scheduler prevents the race)", rememberedCount)
+	}
+
+	turnEnd, err := agent.NewTurnEnd(runID, turnID, agent.TurnOutcomeFinished, nil)
+	if err != nil {
+		t.Fatalf("agent.NewTurnEnd: %v", err)
+	}
+	runEnd, err := agent.NewRunEnd(runID, agent.RunOutcomeCompleted, nil)
+	if err != nil {
+		t.Fatalf("agent.NewRunEnd: %v", err)
+	}
+	stampedTurnEnd := stamper.Stamp(turnEnd)
+	stampedRunEnd := stamper.Stamp(runEnd)
+
+	stream := make([]agent.Event, 0, len(scheduleEvents)+4)
+	stream = append(stream, stampedRunStart, stampedTurnStart)
+	stream = append(stream, scheduleEvents...)
+	stream = append(stream, stampedTurnEnd, stampedRunEnd)
 
 	report := agent.CheckStream(stream)
 	if report.Violation() == nil {
-		t.Fatalf("CheckStream accepted two permission_resolution_remembered events for the same tool name; CardinalityAtMostOne seam (R-APE-003, S-APE-082) MUST reject the second — AG-10.4's single-emission discipline defends this rule")
+		t.Fatalf("CheckStream accepted two permission_resolution_remembered events for the same tool name; CardinalityAtMostOne seam (R-APE-003, S-APE-082) MUST reject the second — the validator is the backstop for AG-10's documented concurrent-remember race")
 	}
 	if !errors.Is(report.Violation(), ai.ErrDuplicate) {
 		t.Errorf("rejection error = %v, want errors.Is to match ai.ErrDuplicate (CardinalityAtMostOne seam)", report.Violation())
