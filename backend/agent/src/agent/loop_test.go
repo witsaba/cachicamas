@@ -871,7 +871,26 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/failure.go") ||
 				strings.HasSuffix(path, "/invariant_pin_test.go") ||
 				strings.HasSuffix(path, "/turn_termination_test.go") ||
-				strings.HasSuffix(path, "/turn_failure_test.go")
+				strings.HasSuffix(path, "/turn_failure_test.go") ||
+				// AG-12 widening (NFR-HIS-004, R-HIS-004): history.go is
+				// the new transcript-store file; the three suffixes
+				// after it are AG-12's new test files (behavior tests
+				// plus the closed-route surface guard). Exact
+				// filenames, no wildcard/prefix/directory pattern (the
+				// AG-11 recorded lesson).
+				strings.HasSuffix(path, "/history.go") ||
+				strings.HasSuffix(path, "/history_test.go") ||
+				strings.HasSuffix(path, "/history_synthesis_test.go") ||
+				strings.HasSuffix(path, "/history_surface_guard_test.go") ||
+				// AG-12 widening (R-HIS-009, R-AGP-002): doc.go and
+				// doc_contract_guard_test.go are pre-existing substrate
+				// files released for AG-12 only, mirroring AG-11's
+				// turn_events.go/failure.go precedent above — AG-12
+				// lands the L2C-07 row and its expectedLayer2ContractRows
+				// entry, the first doc-row amendment since this guard
+				// was introduced at AG-08 (AG-04/05/06 predate it).
+				strings.HasSuffix(path, "/doc.go") ||
+				strings.HasSuffix(path, "/doc_contract_guard_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
