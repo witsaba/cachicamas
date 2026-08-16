@@ -141,8 +141,8 @@ is a pure in-memory type, no I/O (Threat Matrix: N/A, design.md).
 
 ## Phase 12: Docs and archive
 
-- [ ] 12.1 `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` — flip the AG-12.1 and AG-12.2 acceptance checkboxes, sole owner AG-12; bump the Layer 2 wave/milestone status counters (11/24 → 12/24); do NOT flip any sibling milestone's unrelated checkbox.
-- [ ] 12.2 openspec archive — move `openspec/changes/cachicamas-agent-history/` to `openspec/changes/archive/<merge-date>-cachicamas-agent-history/` per AG-09/AG-10/AG-11 precedent naming, AFTER `sdd-verify` (not mid-apply, per AG-11's recorded deviation).
+- [x] 12.1 `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` — flip the AG-12.1 and AG-12.2 acceptance checkboxes, sole owner AG-12; bump the Layer 2 wave/milestone status counters (11/24 → 12/24); do NOT flip any sibling milestone's unrelated checkbox. Status line bumped to "Wave 3 opens with AG-12 — **12 of 24**" (wave-2 counter and AG-07…AG-11 wave-2 roster left untouched — AG-12 is wave 3, not wave 2, per the apply launch's explicit correction) and records what AG-12 closes (R-07's boundary enforcement). Line 2169's sole-owner completion checklist item flipped to `[x]`. Diff verified: exactly 2 lines changed in the file, no sibling checkbox touched.
+- [ ] 12.2 openspec archive — move `openspec/changes/cachicamas-agent-history/` to `openspec/changes/archive/<merge-date>-cachicamas-agent-history/` per AG-09/AG-10/AG-11 precedent naming, AFTER `sdd-verify` (not mid-apply, per AG-11's recorded deviation). **Deliberately NOT performed by this apply session** — owned by `sdd-archive` after `sdd-verify` passes, per this launch's explicit scope.
 
 ## Phase 13: Final gates
 
