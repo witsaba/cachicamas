@@ -113,7 +113,7 @@ The `PermissionPolicy` port MUST be declared in Layer 2 (`backend/agent/src/agen
 
 - **S-APP-012** — Layer boundary holds from both sides. Given the `PermissionPolicy` interface declared in `permission_protocol.go` and at least one implementation living in an external package, when the scheduler drives that implementation end to end, then it is consumed solely through the interface with no type assertion on a concrete policy type, Layer 2's sources contain zero rule sets or mode flags, and a probe that makes a Layer 1 package import Layer 2 fails the boundary guard. Verified by the external-package compile guards on `scriptedPermissionPolicy`, `wiringTestPolicy`, and `NoOpPermissionPolicy`, and from the other side by `TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault`.
 
-### Requirement: Substrate preservation, 7th consecutive milestone (D8, NFR-TLS-003 carry) — R-APP-012
+### R-APP-012 — Substrate preservation, 7th consecutive milestone (D8, NFR-TLS-003 carry)
 
 The system MUST NOT modify any of `event.go`, `event_descriptor.go`, `stream_check.go`, `sequence.go`, `import_boundary_test.go`, `backend/agent/go.mod`, `backend/agent/go.sum`, `Makefile`, or `.golangci.yml`. The substrate-untouched guards (`TestTurn_SubstrateUntouched` and `TestTurn_PreRequestHook_SubstrateUntouched`) SHALL widen their allowlists by exactly four exact-filename suffixes for the files AG-10 introduces — `permission_protocol.go`, `permission_protocol_test.go`, `loop_permission_e2e_test.go`, and `permission_policy_helpers_test.go` — with no wildcard, prefix, or directory-level widening.
 

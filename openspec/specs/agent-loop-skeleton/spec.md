@@ -20,7 +20,7 @@ The first Layer 2 milestone where a live loop produces events. Per doc 0003:773:
 
 ## Requirements
 
-### Requirement: Loop surface: single-turn function form (D1) — R-LSK-001
+### R-LSK-001 — Loop surface: single-turn function form (D1)
 
 The system SHALL expose `func Turn(ctx context.Context, provider ai.ModelProvider, system string, transcript []ai.Message, opts TurnOptions, sink chan<- *Event) (msg ai.Message, finish ai.FinishReason, err error)` as the only public surface for one assistant turn (per D1, D2, D3). AG-13 introduces a value-form `Harness` that wraps `Turn` without changing its signature. `TurnOptions` carries a `Tools map[string]Tool` field for AG-09 (non-breaking zero-value extension; nil `Tools` = the scheduler returns typed `ExecutionFailure` results in their ordinal slots, consistent with R-TLS-009 "one bad tool does not abort the turn"). `TurnOptions` also carries the AG-08 `PreRequestHook` field (nil = identity default). `TurnOptions` further carries the AG-10 `PermissionPolicy PermissionPolicy` field (non-breaking zero-value extension). A **nil** `PermissionPolicy` is the identity default: the scheduler bypasses the permission gate, every call is treated as an immediate allow, no permission event is emitted, and the turn behaves exactly as it did before AG-10. A non-nil policy MUST be forwarded byte-exact to `Schedule` and consulted for every scheduled call. `Turn` MUST NOT expose the scheduler or any wake handle at this milestone — `Scheduler.WakeParked` is unreachable from a `Turn` caller, and wiring the upward-path wake is AG-13's scope.
 
@@ -55,7 +55,7 @@ The system SHALL distinguish reasoning from text events by kind (`message_start_
 
 - **S-LSK-005** — AG-07.2 reasoning flows through distinguished, byte-exact. Given a scripted response interleaving reasoning and text deltas (reasoning → text → reasoning → text per D4), with a non-empty `[]byte` reasoning round-trip token on each reasoning end, when the loop re-emits it via `Turn(...)`, then reasoning and text are emitted as separate bracket kinds, and the assistant message's reasoning-content round-trip token is byte-equal to the script's token, and the event order matches the script's emit calls.
 
-### Requirement: Substrate untouched, with AG-11's recorded exact-filename release — R-LSK-004
+### R-LSK-004 — Substrate untouched, with AG-11's recorded exact-filename release
 
 The system SHALL NOT modify any of: `event.go`, `event_descriptor.go`, `stream_check.go`, `sequence.go`, `run_events.go`, `message_text.go`, `message_reasoning.go`, `permission_events.go`, `cost_events.go`, `delegation_events.go`, `compaction_events.go`, `tool_event.go`, `event_registry_test.go`, `doc.go`, `doc_contract_guard_test.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `reconstruction_test.go`, `go.mod`, `go.sum`.
 

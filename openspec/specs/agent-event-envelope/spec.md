@@ -123,7 +123,7 @@ AG-04 registers no message family, so this requirement is a **structural pin on 
 - **S-AEV-060** — Given the envelope's public construction surface, when every exported route from a delta kind to a payload is enumerated, then none accepts or produces an accumulated-message payload, and the pin is asserted mechanically rather than by comment.
 - **S-AEV-061** — Given the package documentation, when the delta rule is read, then it states that a delta carries an index and the new fragment only, and that the absence of an accumulated-snapshot route is the mechanism AG-05 inherits.
 
-### Requirement: Invariant pin 4 — a failure payload is a typed value, never a message string — R-AEV-008
+### R-AEV-008 — Invariant pin 4 — a failure payload is a typed value, never a message string
 
 A failure carried by the envelope MUST be reachable through a **typed-failure surface** on which the failure's **category** and its **cause** are inspectable as values (`VL2-EVT-15`, envelope invariant 4, `decision.md:176`). The category vocabulary MUST be aligned with Layer 1's failure taxonomy — `ai.FailureCategory` (`backend/agent/src/ai/provider_failure.go:49`) and `(*ai.Failure).Category()` (`provider_failure.go:432`) — as a **wrap**, not a reuse-as-is (`S-AGV-020`).
 

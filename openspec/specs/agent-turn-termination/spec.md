@@ -1,6 +1,6 @@
 # Spec — Complete turn termination and typed failure reporting (`agent-turn-termination`)
 
-> **Change**: `cachicamas-agent-turn-termination` · **AG-11** (Layer 2, Wave 2, milestone 11 of 24) of [doc 0003](../../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-11--complete-turn-termination-and-typed-failure-reporting), `0003:1113-1176`
+> **Change**: `cachicamas-agent-turn-termination` · **AG-11** (Layer 2, Wave 2, milestone 11 of 24) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-11--complete-turn-termination-and-typed-failure-reporting), `0003:1113-1176`
 > **Nodes**: AG-11.1 `[leaf]` (finish-reason dispatch, `0003:1132-1151`) · AG-11.2 `[leaf]` (typed failure upward, `0003:1153-1170`)
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. Every scenario independently verifiable by `cd backend/agent && make test`.
 > **IDs**: `R-ATT-0NN` / `S-ATT-0NN`, bites `S-TTB-0NN`. Append-only. Distinct from `R-AEV-`/`R-AMT-`/`R-APE-`/`R-AGE-`/`R-LSK-`/`R-TLS-`/`R-APP-`.
