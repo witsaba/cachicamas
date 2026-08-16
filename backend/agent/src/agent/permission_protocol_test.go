@@ -1204,25 +1204,41 @@ func drainUntilDecisionRequired(sink <-chan *agent.Event, wantCallID string) (re
 // lost wakeup. Before this fix, runDispatcher closed the
 // decision_required ack strictly AFTER `sink <- &stamped` completed,
 // and runPermissionGate called parked.park(callID) strictly AFTER
-// that ack. The ack only proves the EVENT reached sink — it says
-// nothing about whether the gate goroutine has since had a
-// scheduling turn to actually register the parked entry. A consumer
-// already blocked on <-sink (as every drain helper in this file is)
-// is handed the value directly the instant the dispatcher sends it,
-// and typically resumes and calls WakeParked before the sender's OWN
-// goroutine gets scheduled again — so a synchronous, no-retry
-// WakeParked the instant decision_required is observed failed with
-// ErrStrayDecision essentially every run, not occasionally.
+// that ack.
 //
-// This test drives exactly that: ONE attempt, no polling, no sleep,
-// the moment decision_required is observed on sink.
+// CORRECTED (verify-report AG-10, terminal re-verification round,
+// finding S6): this test does NOT reproduce that pre-fix failure and
+// is NOT the reorder's RED bite, despite what this comment used to
+// claim. Its consumer — drainUntilDecisionRequired — buffers sink
+// (capacity 64) and hands the "ready" signal through a separate
+// goroutine plus a sync.Once-gated channel close; that extra
+// scheduling latency reliably gives park() enough of a head start to
+// have already run by the time this test's WakeParked call actually
+// executes, REGARDLESS of whether registration precedes or follows the
+// emission. Measured directly: reverting the reorder (moving
+// parked.park back to AFTER the ack, keeping everything else as-is)
+// makes this exact test PASS 0/40 in isolation and 0/20 against the
+// full package — VACUOUS for the reorder, re-confirmed in the S6
+// remediation round.
 //
-// RED before the fix: fails on the first (only) attempt with
-// ErrStrayDecision. GREEN after: registration now precedes emission,
-// so by the time ANY consumer can possibly observe decision_required
-// on sink, parked.park(callID) has PROVABLY already run (a genuine
-// happens-before chain through the emissions channel and the ack —
-// not a scheduling coincidence to win).
+// The reorder IS guarded, deterministically, by
+// TestPermission_DeferEmitsBeforePark (S-PPB-002): its early wake runs
+// directly in the polling loop's own goroutine against an unbuffered
+// sink, no buffering and no extra hop, so pre-fix it reliably loses —
+// rejected for the entire poll window, because the old ordering gates
+// park() behind an ack that cannot close while sink stays unbuffered
+// and unread — and post-fix it reliably wins. 20/20 FAIL when
+// reverted, confirmed by the original remediation round and
+// re-confirmed by this one (full package, unfiltered).
+//
+// What THIS test still legitimately proves, and is kept for: given the
+// realistic buffered/async consumption pattern most real consumers
+// will actually use, a SINGLE WakeParked attempt made immediately upon
+// observing decision_required succeeds with no retry needed — i.e.
+// there is no steady-state flakiness in the ordinary (non-adversarial)
+// wake path. It is a regression/latency characterization test, not a
+// defeat test for the W3 reorder; see
+// TestPermission_DeferEmitsBeforePark for that guarantee.
 func TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry(t *testing.T) {
 	t.Parallel()
 
