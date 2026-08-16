@@ -194,6 +194,22 @@ func (p *parkedSet) wake(callID string) bool {
 	return true
 }
 
+// remove deregisters callID's parked entry WITHOUT waking it — used
+// when a call exits through a path other than an upward-path wake:
+// context cancellation while genuinely parked, or an abort while
+// still waiting for the decision_required ack (W4 remediation,
+// AG-10). It does not close the channel: no goroutine is ever going
+// to read it once the call itself has already decided to abort, and
+// not closing it avoids racing WakeParked's own close of the same
+// entry. A no-op if callID is already gone (already woken, already
+// removed by a concurrent caller) — so every exit path can call this
+// unconditionally without coordinating with the others.
+func (p *parkedSet) remove(callID string) {
+	p.mu.Lock()
+	delete(p.channels, callID)
+	p.mu.Unlock()
+}
+
 // rememberedSet is the per-Schedule state backing R-APP-010: once
 // Policy.Remember reports true for a toolName (AllowAlways branch,
 // AG-10.4), identical subsequent calls in the SAME Schedule call
@@ -225,10 +241,34 @@ func (r *rememberedSet) remembered(toolName string) bool {
 	return ok
 }
 
-// remember records that toolName is remembered for the remainder of
-// this Schedule call.
-func (r *rememberedSet) remember(toolName string) {
+// rememberIfAbsent atomically records toolName as remembered and
+// reports whether THIS call was the one that recorded it — true only
+// for the first caller to remember a given toolName, false for every
+// later caller, including a concurrent racer that reaches this call
+// before the winner's write is visible to it (W1 remediation,
+// verify-report AG-10).
+//
+// This closes the concurrent-remember race: two parallel read-class
+// calls for the identical tool name can both pass the pre-Resolve
+// `remembered` check (both observe "not yet remembered") and both
+// independently reach AllowAlways — but they can no longer BOTH win
+// here. The loser's false return lets the caller suppress its own
+// resolution_remembered emission, preserving CardinalityAtMostOne
+// (R-APE-003) BY CONSTRUCTION rather than relying on
+// agent.CheckStream to reject the malformed stream after the fact
+// (CheckStream has zero production call sites — nothing downstream
+// of Schedule was actually catching this).
+//
+// This does not serialize Resolve, defer either call, or otherwise
+// touch AG-09.2's read-class concurrency policy: both calls still
+// run concurrently and both still execute the tool. Only the SECOND
+// of the two racing emissions is suppressed.
+func (r *rememberedSet) rememberIfAbsent(toolName string) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.names[toolName]; ok {
+		return false
+	}
 	r.names[toolName] = struct{}{}
-	r.mu.Unlock()
+	return true
 }

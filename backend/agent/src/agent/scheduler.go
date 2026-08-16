@@ -583,17 +583,50 @@ func (s *Scheduler) runPermissionGate(
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, nil
 		}
+		// W3 remediation: register the parked entry BEFORE emitting
+		// decision_required, not after. The prior ordering emitted
+		// first and parked second, so a consumer that read
+		// decision_required off sink and immediately called
+		// WakeParked(callID) could race ahead of registration — the
+		// entry did not exist yet, and the wake was rejected with
+		// ErrStrayDecision even though the call was genuinely about
+		// to park. Registration is NOT the parked wait: parked.park
+		// only inserts a channel into a map and returns — it does
+		// not block — so R-APP-002/D4 ("emission reaches sink
+		// before the parked wait blocks") still holds: the parked
+		// WAIT is the select below, which still only runs after the
+		// ack confirms the emission reached sink.
+		parkCh := parked.park(call.ID())
+
 		// R-APP-002/D4: "emission reaches sink before the parked
 		// wait blocks" — a stronger guarantee than "enqueued onto
-		// this buffered channel". Block on the ack the dispatcher
-		// closes only after sink <- &stamped completes, so
-		// parked.park() below cannot run until the event has
-		// genuinely reached sink.
+		// this buffered channel". Wait for the ack the dispatcher
+		// closes only after sink <- &stamped completes, so the
+		// select below cannot run until the event has genuinely
+		// reached sink.
+		//
+		// W4 remediation: this wait is cancellation-aware. A bare
+		// <-reqAck receive meant an abandoned sink (dispatcher
+		// blocked forever on sink <- &stamped) hung this goroutine
+		// — and, transitively, wg.Wait() and Schedule — with
+		// cancelling the run context unable to release it. On
+		// ctx.Done() here the parked entry is deregistered (it can
+		// never be woken; this goroutine will never reach the
+		// select on parkCh below) and the call aborts with the same
+		// typed failure the mid-park cancellation path below
+		// produces.
 		reqAck := make(chan struct{})
 		emissions <- emission{ev: reqEv, ack: reqAck}
-		<-reqAck
+		select {
+		case <-reqAck:
+		case <-ctx.Done():
+			parked.remove(call.ID())
+			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
+		}
 
-		parkCh := parked.park(call.ID())
 		select {
 		case <-parkCh:
 			// Upward-path wake (D-A) — the ONLY producer that
@@ -609,7 +642,11 @@ func (s *Scheduler) runPermissionGate(
 		case <-ctx.Done():
 			// Mid-park cancel: typed abort failure (AG-10.3
 			// R-APP-009). The rejoin slice is fully populated
-			// even when the run is aborted.
+			// even when the run is aborted. Deregister (W3/W4:
+			// every exit path removes the parked entry) so a late
+			// WakeParked observes ErrStrayDecision rather than
+			// spuriously closing a channel nothing will ever read.
+			parked.remove(call.ID())
 			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
 			results[ordinal] = abort
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
@@ -656,16 +693,43 @@ func (s *Scheduler) runPermissionGate(
 		}
 		emissions <- emission{ev: madeEv}
 		if policy.Remember(ctx, call.Name(), PermissionOutcomeAllowAlways) {
-			remembered.remember(call.Name())
-			// A resolution_remembered constructor failure here does
-			// NOT abort the call: the decision (AllowAlways) is
-			// already made and the remembering already took local
-			// effect (`remembered.remember` above) — unlike the
-			// other constructor-failure sites in this function, this
-			// event is best-effort telemetry, not a precondition for
-			// proceeding. In practice `run` and `toolName` are always
-			// non-empty here, so this constructor does not fail for
-			// any real call.
+			// W1 fix: rememberIfAbsent is a compare-and-set under
+			// rememberedSet's own mutex. Two parallel calls to the
+			// identical tool name can both pass the pre-Resolve
+			// suppression check above (both observed "not yet
+			// remembered") and both independently reach this branch
+			// — but only the FIRST to call rememberIfAbsent gets
+			// true; the loser gets false and suppresses its own
+			// emission below, so at most one resolution_remembered
+			// reaches the stream per tool name (R-APE-003
+			// CardinalityAtMostOne) by construction. This does not
+			// serialize Resolve or otherwise touch AG-09.2's
+			// read-class concurrency policy — both calls still run
+			// concurrently and both still execute; only the SECOND
+			// emission is suppressed.
+			if !remembered.rememberIfAbsent(call.Name()) {
+				return true, nil, nil
+			}
+			// S2 (verify-report SUGGESTION): unlike defect 6's other
+			// four constructor-failure sites in this function, a
+			// resolution_remembered constructor failure here is
+			// intentionally left best-effort, not upgraded to a
+			// typed abort. By this point the primary decision is
+			// ALREADY durably recorded (decision_made{AllowAlways}
+			// above succeeded) and the state change already took
+			// effect (rememberIfAbsent above already ran and won).
+			// Treating this constructor failure as an abort would
+			// retract execution of a call the stream has already
+			// told the model is allowed — a strictly worse outcome
+			// than dropping one best-effort telemetry event. The
+			// failure is also unreachable in practice:
+			// NewPermissionResolutionRemembered rejects only an
+			// empty run, an empty toolName, or an out-of-vocabulary
+			// outcome; run is the SAME value NewPermissionDecisionMade
+			// already validated non-empty three lines above, toolName
+			// is call.Name() (ai.ToolCall's own non-empty invariant),
+			// and outcome is the hardcoded, always-valid
+			// PermissionOutcomeAllowAlways constant.
 			rememberedEv, rerr := NewPermissionResolutionRemembered(runID, call.Name(), PermissionOutcomeAllowAlways)
 			if rerr == nil {
 				emissions <- emission{ev: rememberedEv}

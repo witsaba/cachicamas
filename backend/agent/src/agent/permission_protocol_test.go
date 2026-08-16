@@ -227,6 +227,16 @@ func TestPermission_ImmediateAllow_NoEvent(t *testing.T) {
 			got)
 	}
 
+	// (verify-report S1) The gate actually ran policy.Resolve exactly
+	// once. Without this, a scheduler that deleted the gate entirely
+	// (never calling Resolve, never emitting decision_required, tool
+	// still invoked once via some other path) would pass every other
+	// assertion in this bite — this is what makes the bite fail if
+	// the gate itself is removed, not merely if its OUTPUT changes.
+	if n := policy.resolveInvocations(); n != 1 {
+		t.Errorf("policy.Resolve invocation count = %d, want 1 (the gate must actually run, not merely produce gate-shaped output)", n)
+	}
+
 	// (b) The tool was invoked exactly once — synchronous AllowOnce
 	// does not park the call.
 	if inv := tool.Invocations(); inv != 1 {
@@ -242,33 +252,38 @@ func TestPermission_ImmediateAllow_NoEvent(t *testing.T) {
 	}
 }
 
-// R-APP-002 / D4 — task 2.2. Deferring a call MUST emit
+// R-APP-002 / D4 — task 2.2, re-verified under the W3 remediation
+// (verify-report AG-10). Deferring a call MUST emit
 // permission_decision_required and that emission MUST reach `sink`
-// BEFORE the parked wait blocks — the spec's exact words ("emission
-// reaches sink before the parked wait blocks"), not merely "before
-// the call goroutine enqueues onto an internal buffer".
+// BEFORE the parked WAIT blocks — the spec's exact words ("emission
+// reaches sink before the parked wait blocks"). "The parked wait" is
+// the blocking select a goroutine actually suspends on; it is NOT
+// the (non-blocking) act of registering the parked entry.
 //
-// Renamed from TestPermission_DeferEmitsAndParks: the old name
-// described what the test drove, not the property it proved (and
-// the old body never established the ordering at all — see below).
+// Renamed from TestPermission_DeferEmitsAndParks; this doc comment
+// was rewritten again for W3 (previously it asserted the OPPOSITE of
+// what registration-before-emission requires — see below).
 //
-// The old implementation could not honor this: the gate sent the
-// decision_required onto a BUFFERED internal `emissions` channel and
-// immediately proceeded to `parked.park()` + the parked `select`,
-// entirely decoupled from whether a separate dispatcher goroutine
-// had actually forwarded the event to `sink` yet. That gap is fixed
-// (this milestone) by giving the decision_required emission an ack
-// channel the dispatcher closes only after `sink <- &stamped`
-// completes; the gate now blocks on that ack before calling
-// `parked.park()`.
+// Before W3, registration (parked.park) ran AFTER the ack, so an
+// early WakeParked reliably failed (ErrStrayDecision) and THAT
+// failure was this test's proxy for "the event has not reached sink
+// yet". W3 moved registration BEFORE the emission specifically so a
+// consumer that reads decision_required and immediately calls
+// WakeParked no longer loses the race (verify-report W3: this used
+// to fail essentially every run). That makes the OLD proxy invalid
+// by design: WakeParked can now legitimately succeed before ANYTHING
+// has been read from sink, because the entry exists from the moment
+// parked.park runs, well before the emission is even sent.
 //
-// This test defeats the gap directly rather than trusting the fix:
-// with `sink` UNBUFFERED and nothing reading from it, WakeParked on
-// the deferred call's ID MUST keep failing (ErrStrayDecision —
-// nothing registered yet) for as long as nothing reads from sink,
-// because an unbuffered channel cannot have delivered the event
-// without a reader. Only once the event is actually read does the
-// call become parked (and only then does WakeParked succeed).
+// What R-APP-002/D4 actually still requires, and what could still
+// silently break by a future change: decision_required must still
+// genuinely reach sink — not be skipped, faked, or silently dropped
+// — even when a wake races ahead of it and closes parkCh before the
+// gate ever reaches the select that reads it. This test proves
+// exactly that: sink stays UNBUFFERED and unread until after the
+// early wake, so if decision_required had been skipped or corrupted
+// by the early-wake path, the drain below would either time out or
+// see the wrong first event.
 func TestPermission_DeferEmitsBeforePark(t *testing.T) {
 	t.Parallel()
 
@@ -289,7 +304,7 @@ func TestPermission_DeferEmitsBeforePark(t *testing.T) {
 
 	sched := &agent.Scheduler{MaxConcurrentReads: 4}
 	stamper := &agent.LaneStamper{}
-	sink := make(chan *agent.Event) // UNBUFFERED — no room to hide an undelivered event.
+	sink := make(chan *agent.Event) // UNBUFFERED — no room to hide a skipped or corrupted event.
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -299,39 +314,11 @@ func TestPermission_DeferEmitsBeforePark(t *testing.T) {
 		doneCh <- sched.Schedule(ctx, permissionCallsToAICalls(calls), reg, "run-order", "turn-order", policy, stamper, sink)
 	}()
 
-	// Poll WakeParked WITHOUT reading from sink at all. A premature
-	// success would prove the call parked before decision_required
-	// could possibly have reached sink.
-	pollDeadline := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(pollDeadline) {
-		if err := sched.WakeParked("order_0"); err == nil {
-			t.Fatal("WakeParked succeeded before anything read from sink — the call parked before decision_required could have reached sink (R-APP-002/D4 ordering violated)")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-
-	// The only possible next readable event, since nothing has been
-	// read yet and sink is unbuffered: decision_required for order_0.
-	var ev *agent.Event
-	select {
-	case ev = <-sink:
-	case <-time.After(1 * time.Second):
-		t.Fatal("no event reached sink within 1s (decision_required for order_0 was never delivered)")
-	}
-	req, ok := ev.PermissionDecisionRequired()
-	if !ok || req.CallID() != "order_0" {
-		t.Fatalf("first event on sink = %#v, want permission_decision_required for order_0", ev)
-	}
-
-	// NOW the call must be parked — its event has been delivered.
-	// The ack only proves the dispatcher's send has completed; the
-	// call goroutine still needs a scheduling turn to run
-	// parked.park() after waking from <-reqAck, so poll briefly
-	// rather than asserting on a single attempt (this is ordinary
-	// goroutine-scheduling latency, not the R-APP-002/D4 ordering
-	// this test defends — that property is the lower bound already
-	// proven above: WakeParked never succeeds before the event is
-	// read).
+	// Settle: give the gate a scheduling turn to reach parked.park
+	// (registration is fast and non-blocking — it does not need the
+	// emission to have gone anywhere). Then wake it — WITHOUT ever
+	// having read from sink. Post-W3 this MUST succeed: registration
+	// precedes emission, so the entry already exists.
 	registerDeadline := time.Now().Add(500 * time.Millisecond)
 	var wakeErr error
 	for time.Now().Before(registerDeadline) {
@@ -342,7 +329,24 @@ func TestPermission_DeferEmitsBeforePark(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	if wakeErr != nil {
-		t.Fatalf("WakeParked(%q) = %v, want nil now that decision_required has been delivered", "order_0", wakeErr)
+		t.Fatalf("WakeParked(%q) = %v, want nil (W3: registration precedes emission, so the entry exists before anything reads sink)", "order_0", wakeErr)
+	}
+
+	// The wake above raced ahead of the emission entirely. The
+	// invariant this test defends is that decision_required is STILL
+	// genuinely delivered regardless — sink is unbuffered, so this
+	// receive can only complete once the dispatcher actually sends
+	// it, proving the event was neither skipped nor silently
+	// dropped by the early-wake path.
+	var ev *agent.Event
+	select {
+	case ev = <-sink:
+	case <-time.After(1 * time.Second):
+		t.Fatal("no event reached sink within 1s (decision_required for order_0 was never delivered, even though the early wake already succeeded)")
+	}
+	req, ok := ev.PermissionDecisionRequired()
+	if !ok || req.CallID() != "order_0" {
+		t.Fatalf("first event on sink = %#v, want permission_decision_required for order_0", ev)
 	}
 
 	drainDone := make(chan struct{})
@@ -403,28 +407,99 @@ func TestPermission_StrayDecisionIsTypedError(t *testing.T) {
 	}
 }
 
-// S-PPB-004 / task 2.4 — re-pointed at a real Schedule run. The
-// original bite hand-built two permission_resolution_remembered
-// events and called CheckStream directly, exercising zero AG-10
-// code — it duplicated permission_events_test.go:263-317's S-APE-082
-// bite verbatim. This version drives the same CardinalityAtMostOne
-// rejection from events a real Schedule call actually emits.
+// S-PPB-004 — RED bite (recorded at Commit 2), RESTORED (W1/W2
+// remediation, verify-report AG-10). The CardinalityAtMostOne rule
+// on permission_resolution_remembered rejects a second event for the
+// same toolName. The bite constructs a hand-built stream with two
+// resolution_remembered events for "fs.write" and asserts that
+// CheckStream rejects the second one with ai.ErrDuplicate.
 //
-// R-APP-010's suppression check runs BEFORE policy.Resolve and the
-// remembered-write happens AFTER policy.Remember returns — for two
-// SEQUENTIAL calls to the same tool name (the ordinary case,
-// TestPermission_RememberedSuppressesSubsequentAsk) that ordering
-// prevents a second ask entirely, so a single well-behaved Schedule
-// call cannot naturally reach two resolution_remembered emissions
-// for the same tool name. Two calls racing TRULY CONCURRENTLY for an
-// identical tool name is a narrower, documented gap this bite proves
-// the validator backstops rather than a gap AG-10.4 closes: both
-// goroutines can pass the "not yet remembered" check before either's
-// write lands, independently reach AllowAlways, and each
-// independently emit resolution_remembered. A synchronization
-// barrier forces that race deterministically (not by goroutine-
-// scheduling luck), so the bite is neither flaky nor vacuous.
+// This is byte-identical to the bite's original form before commit
+// ba1e8777 re-pointed it at a real Schedule run (duplicating
+// permission_events_test.go:263-317's S-APE-082 bite verbatim, per
+// that commit's own message). It was correct to re-point what
+// exercises AG-10 CODE at a real Schedule run — see
+// TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission
+// below — but doing so by REPLACING this hand-built test rather than
+// adding alongside it silently dropped direct validator coverage:
+// once the scheduler's own compare-and-set (rememberIfAbsent) makes
+// two resolution_remembered emissions for one tool name unreachable
+// in practice, nothing else in this file drives CheckStream against
+// a malformed two-emission stream directly. Restored here so
+// CardinalityAtMostOne itself — not just the scheduler's avoidance
+// of triggering it — stays under direct test.
+//
+// Mirrors S-APE-082 (permission_events_test.go:263-317) — AG-10
+// re-asserts the seam from the apply-phase perspective.
 func TestPermission_RememberedCardinality_SecondEmissionRejected(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("run-app-082")
+	turnID := agent.TurnID("turn-app-082")
+
+	first, err := agent.NewPermissionResolutionRemembered(runID, "fs.write", agent.PermissionOutcomeAllowAlways)
+	if err != nil {
+		t.Fatalf("first NewPermissionResolutionRemembered: %v", err)
+	}
+	second, err := agent.NewPermissionResolutionRemembered(runID, "fs.write", agent.PermissionOutcomeAllowAlways)
+	if err != nil {
+		t.Fatalf("second NewPermissionResolutionRemembered: %v", err)
+	}
+
+	runStart, _ := agent.NewRunStart(runID)
+	turnStart, _ := agent.NewTurnStart(runID, turnID)
+	turnEnd, _ := agent.NewTurnEnd(runID, turnID, agent.TurnOutcomeFinished, nil)
+	runEnd, _ := agent.NewRunEnd(runID, agent.RunOutcomeCompleted, nil)
+
+	var lane agent.LaneStamper
+	stream := []agent.Event{
+		lane.Stamp(runStart),
+		lane.Stamp(turnStart),
+		lane.Stamp(first),
+		lane.Stamp(second),
+		lane.Stamp(turnEnd),
+		lane.Stamp(runEnd),
+	}
+
+	report := agent.CheckStream(stream)
+	if report.Violation() == nil {
+		t.Fatalf("CheckStream accepted two permission_resolution_remembered events for the same tool name; CardinalityAtMostOne seam (R-APE-003, S-APE-082) MUST reject the second — AG-10.4's single-emission discipline defends this rule")
+	}
+	if !errors.Is(report.Violation(), ai.ErrDuplicate) {
+		t.Errorf("rejection error = %v, want errors.Is to match ai.ErrDuplicate (CardinalityAtMostOne seam)", report.Violation())
+	}
+}
+
+// W1/W2 remediation (verify-report AG-10) — the concurrent-remember
+// race, re-pointed at the REAL invariant. Two parallel calls to the
+// IDENTICAL tool name, both read-class so both run concurrently
+// (AG-09.2), both reaching AllowAlways: R-APP-010's suppression check
+// (remembered.remembered) runs BEFORE policy.Resolve and the
+// remembered-write happens AFTER policy.Remember returns, so both
+// goroutines can pass the "not yet remembered" check before either's
+// write lands — a synchronization barrier forces this deterministically
+// rather than by goroutine-scheduling luck.
+//
+// Before the fix, the scheduler let BOTH goroutines win, producing two
+// permission_resolution_remembered events for "fs.write" — a stream
+// violating the project's own CardinalityAtMostOne rule
+// (R-APE-003, event.go:322) that reached the sink unrejected: grep
+// confirms agent.CheckStream has ZERO production call sites, so
+// nothing downstream of Schedule actually backstops this. The fix is
+// a compare-and-set inside rememberedSet's own mutex
+// (rememberedSet.rememberIfAbsent): only the winner of the race
+// records the entry AND emits; the loser's call still executes (this
+// does not serialize read-class concurrency, defer Resolve, or touch
+// AG-09.2's concurrency policy in any way) but suppresses its own
+// emission.
+//
+// The assertion is written to fail in BOTH directions of regression:
+// more than one emission (the CAS removed / lost its race) and zero
+// emissions (the remembering mechanism itself broke) are both wrong.
+//
+// RED before the fix: the forced race reliably makes both goroutines
+// win, so rememberedCount == 2 and this test's `!= 1` check fails.
+func TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission(t *testing.T) {
 	t.Parallel()
 
 	var enteredResolve sync.WaitGroup
@@ -453,79 +528,32 @@ func TestPermission_RememberedCardinality_SecondEmissionRejected(t *testing.T) {
 		close(release)
 	}()
 
-	runID := agent.RunID("run-app-082-real")
-	turnID := agent.TurnID("turn-app-082-real")
-
-	// One shared LaneStamper across the caller-built brackets and
-	// Schedule's own emissions — exactly how Turn() assembles a
-	// stream in production (loop.go: the stamper is minted once,
-	// used for run_start/turn_start, handed to Schedule, then reused
-	// for turn_end/run_end). A per-section stamper would produce a
-	// non-contiguous sequence and CheckStream would reject the
-	// stream for the wrong reason.
-	stamper := &agent.LaneStamper{}
-	runStart, err := agent.NewRunStart(runID)
-	if err != nil {
-		t.Fatalf("agent.NewRunStart: %v", err)
-	}
-	turnStart, err := agent.NewTurnStart(runID, turnID)
-	if err != nil {
-		t.Fatalf("agent.NewTurnStart: %v", err)
-	}
-	stampedRunStart := stamper.Stamp(runStart)
-	stampedTurnStart := stamper.Stamp(turnStart)
-
-	sink := make(chan *agent.Event, 64)
-	results := (&agent.Scheduler{MaxConcurrentReads: 4}).Schedule(
-		context.Background(),
-		permissionCallsToAICalls(calls),
-		reg,
-		runID,
-		turnID,
-		policy,
-		stamper,
-		sink,
+	results, events := runPermissionSchedulerAndCollect(
+		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
 	)
-	var scheduleEvents []agent.Event
-	for ev := range sink {
-		scheduleEvents = append(scheduleEvents, *ev)
-	}
 
 	if len(results) != 2 {
 		t.Fatalf("Schedule returned %d results, want 2", len(results))
 	}
+	// Both calls still execute — the CAS gates the EVENT, not
+	// execution (mirrors AllowAlways_Remember_Branches).
+	for i, r := range results {
+		if r.Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[%d].Outcome = %v, want Success", i, r.Outcome)
+		}
+	}
+	if inv := tool.Invocations(); inv != 2 {
+		t.Errorf("fs.write invocations = %d, want 2 (the CAS suppresses the LOSER's event, not its execution)", inv)
+	}
+
 	rememberedCount := 0
-	for _, ev := range scheduleEvents {
+	for _, ev := range events {
 		if _, ok := ev.PermissionResolutionRemembered(); ok {
 			rememberedCount++
 		}
 	}
-	if rememberedCount != 2 {
-		t.Fatalf("resolution_remembered count = %d, want 2 (the forced race must make both calls independently remember for this bite to exercise anything — the property under test is that the VALIDATOR then rejects the resulting stream, not that the scheduler prevents the race)", rememberedCount)
-	}
-
-	turnEnd, err := agent.NewTurnEnd(runID, turnID, agent.TurnOutcomeFinished, nil)
-	if err != nil {
-		t.Fatalf("agent.NewTurnEnd: %v", err)
-	}
-	runEnd, err := agent.NewRunEnd(runID, agent.RunOutcomeCompleted, nil)
-	if err != nil {
-		t.Fatalf("agent.NewRunEnd: %v", err)
-	}
-	stampedTurnEnd := stamper.Stamp(turnEnd)
-	stampedRunEnd := stamper.Stamp(runEnd)
-
-	stream := make([]agent.Event, 0, len(scheduleEvents)+4)
-	stream = append(stream, stampedRunStart, stampedTurnStart)
-	stream = append(stream, scheduleEvents...)
-	stream = append(stream, stampedTurnEnd, stampedRunEnd)
-
-	report := agent.CheckStream(stream)
-	if report.Violation() == nil {
-		t.Fatalf("CheckStream accepted two permission_resolution_remembered events for the same tool name; CardinalityAtMostOne seam (R-APE-003, S-APE-082) MUST reject the second — the validator is the backstop for AG-10's documented concurrent-remember race")
-	}
-	if !errors.Is(report.Violation(), ai.ErrDuplicate) {
-		t.Errorf("rejection error = %v, want errors.Is to match ai.ErrDuplicate (CardinalityAtMostOne seam)", report.Violation())
+	if rememberedCount != 1 {
+		t.Fatalf("resolution_remembered count = %d, want exactly 1 — two parallel same-tool-name AllowAlways calls raced for the SAME remembered-entry write; the scheduler's compare-and-set MUST let exactly one win (R-APE-003 CardinalityAtMostOne) by construction, not rely on agent.CheckStream to reject an already-malformed stream (CheckStream has zero production call sites)", rememberedCount)
 	}
 }
 
@@ -995,33 +1023,6 @@ func TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak(t *testing.T) {
 
 // --- D-A wake-path tests ---------------------------------------------
 
-// wakeParkedWithRetry calls sched.WakeParked(callID) until it
-// succeeds or timeout elapses, failing the test if it never does.
-//
-// A single immediate attempt right after observing decision_required
-// on sink can race: the ack that unblocks the decision_required
-// sender's own goroutine (R-APP-002/D4) only proves the EVENT
-// reached sink — it says nothing about whether that same goroutine
-// has since had a scheduling turn to actually execute
-// parked.park(callID) afterward. Retrying absorbs that ordinary
-// goroutine-scheduling latency without weakening the ordering
-// guarantee itself, which TestPermission_DeferEmitsBeforePark proves
-// directly (with no retry: WakeParked must never succeed before the
-// event is read at all).
-func wakeParkedWithRetry(t *testing.T, sched *agent.Scheduler, callID string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var err error
-	for time.Now().Before(deadline) {
-		err = sched.WakeParked(callID)
-		if err == nil {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("WakeParked(%q) = %v after retrying for %s, want nil", callID, err, timeout)
-}
-
 // drainUntilDecisionRequired starts a goroutine draining sink into
 // the returned drainedEvents, closing readyCh the first time a
 // permission_decision_required event for wantCallID is observed
@@ -1051,6 +1052,188 @@ func drainUntilDecisionRequired(sink <-chan *agent.Event, wantCallID string) (re
 		}
 	}()
 	return ready, done, &events
+}
+
+// W3 remediation (verify-report AG-10) — the structurally guaranteed
+// lost wakeup. Before this fix, runDispatcher closed the
+// decision_required ack strictly AFTER `sink <- &stamped` completed,
+// and runPermissionGate called parked.park(callID) strictly AFTER
+// that ack. The ack only proves the EVENT reached sink — it says
+// nothing about whether the gate goroutine has since had a
+// scheduling turn to actually register the parked entry. A consumer
+// already blocked on <-sink (as every drain helper in this file is)
+// is handed the value directly the instant the dispatcher sends it,
+// and typically resumes and calls WakeParked before the sender's OWN
+// goroutine gets scheduled again — so a synchronous, no-retry
+// WakeParked the instant decision_required is observed failed with
+// ErrStrayDecision essentially every run, not occasionally.
+//
+// This test drives exactly that: ONE attempt, no polling, no sleep,
+// the moment decision_required is observed on sink.
+//
+// RED before the fix: fails on the first (only) attempt with
+// ErrStrayDecision. GREEN after: registration now precedes emission,
+// so by the time ANY consumer can possibly observe decision_required
+// on sink, parked.park(callID) has PROVABLY already run (a genuine
+// happens-before chain through the emissions channel and the ack —
+// not a scheduling coincidence to win).
+func TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry(t *testing.T) {
+	t.Parallel()
+
+	var resolveN atomic.Int64
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			if resolveN.Add(1) == 1 {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			// Wake's re-evaluation (D-A): finish as AllowOnce.
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+
+	tool := EchoScriptedTool("sync_wake_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"sync_wake_tool": tool})
+	calls := []scheduledPermissionCall{{id: "sync_wake_0", name: "sync_wake_tool", args: []byte(`{}`)}}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	ready, drainDone, _ := drainUntilDecisionRequired(sink, "sync_wake_0")
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(context.Background(), permissionCallsToAICalls(calls), reg, "run-sync-wake", "turn-sync-wake", policy, stamper, sink)
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("decision_required for sync_wake_0 not observed within 2s")
+	}
+
+	// The exact scenario the fix closes: exactly one WakeParked call,
+	// synchronously, with nothing else in between.
+	if err := sched.WakeParked("sync_wake_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v on the FIRST attempt immediately after observing decision_required, want nil (W3: registration must precede emission, not follow it)", "sync_wake_0", err)
+	}
+
+	var results []agent.Result
+	select {
+	case results = <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s after WakeParked")
+	}
+	<-drainDone
+
+	if len(results) != 1 {
+		t.Fatalf("Schedule returned %d results, want 1", len(results))
+	}
+	if results[0].Outcome != agent.ToolOutcomeSuccess {
+		t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
+	}
+	if inv := tool.Invocations(); inv != 1 {
+		t.Errorf("sync_wake_tool invocations = %d, want 1", inv)
+	}
+}
+
+// W4 remediation (verify-report AG-10) — <-reqAck was a bare receive:
+// cancelling the run context could not release a gate stuck waiting
+// for the dispatcher's ack. Schedule's own eventual return is not a
+// useful signal in isolation here: Schedule cannot return until the
+// dispatcher's pending send to sink drains, which needs an actual
+// reader — an existing, accepted, pre-AG-10 characteristic ("an
+// abandoned sink already hung Schedule", verify report W4) this fix
+// does not touch. The discriminating signal is the GATE's own
+// response to cancellation: this test withholds every reader from
+// sink (so the ack is PROVABLY, structurally still pending — not a
+// timing race) for a margin far larger than ordinary CPU-bound
+// goroutine-scheduling latency, cancels, and checks whether the
+// parked entry was already deregistered — proof the gate processed
+// the cancellation without ever needing the ack to close. Only
+// afterward does the test drain sink (releasing the dispatcher) and
+// confirm Schedule completes end-to-end with the typed abort.
+//
+// RED before the fix: at the check point the entry is still present
+// (the gate never reached anything that would remove it, since it is
+// still parked on the bare <-reqAck), so WakeParked spuriously
+// "succeeds" (nil, not ErrStrayDecision) — this test asserts the
+// opposite and fails.
+func TestPermission_AbandonedAckWithCancel_GateDeregistersPromptly(t *testing.T) {
+	t.Parallel()
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+		},
+	}
+
+	tool := EchoScriptedTool("abandoned_ack_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"abandoned_ack_tool": tool})
+	calls := []scheduledPermissionCall{{id: "abandoned_ack_0", name: "abandoned_ack_tool", args: []byte(`{}`)}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	// UNBUFFERED and deliberately not read from until AFTER the check
+	// below: the dispatcher's `sink <- &stamped` for decision_required
+	// is therefore PROVABLY still pending (no buffer slack, no
+	// reader) at the moment this test cancels — not a timing race, a
+	// structural guarantee given this exact setup.
+	sink := make(chan *agent.Event)
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(ctx, permissionCallsToAICalls(calls), reg, "run-abandoned-ack", "turn-abandoned-ack", policy, stamper, sink)
+	}()
+
+	// Settle: give the gate goroutine a scheduling turn to reach
+	// emissions<-/<-reqAck and the dispatcher a turn to reach its
+	// blocked sink<- send. Not load-bearing for correctness — the ack
+	// cannot close regardless, since nothing ever reads sink — only
+	// for making the reproduction deterministic rather than racing
+	// cancel against goroutine startup.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	// Generous margin over ordinary goroutine-scheduling latency: the
+	// deregistration this proves is CPU-bound (a mutex-guarded map
+	// delete), not I/O-bound.
+	time.Sleep(100 * time.Millisecond)
+
+	if err := sched.WakeParked("abandoned_ack_0"); !errors.Is(err, agent.ErrStrayDecision) {
+		t.Fatalf("WakeParked(%q) = %v after cancelling ctx while the gate was blocked on the ack (sink never read), want errors.Is to match agent.ErrStrayDecision — the gate must deregister on an ack-path abort without waiting for the ack (W4)", "abandoned_ack_0", err)
+	}
+
+	// Now release the dispatcher so Schedule can complete end-to-end.
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for range sink {
+			// Drain to completion so the dispatcher's stuck send
+			// finally completes and Schedule can return.
+			_ = struct{}{}
+		}
+	}()
+
+	select {
+	case results := <-doneCh:
+		if len(results) != 1 {
+			t.Fatalf("Schedule returned %d results, want 1", len(results))
+		}
+		if results[0].Outcome != agent.ToolOutcomeExecutionFailure {
+			t.Errorf("results[0].Outcome = %v, want ExecutionFailure (ctx cancel while waiting for the ack)", results[0].Outcome)
+		}
+		if results[0].Failure == nil {
+			t.Errorf("results[0].Failure = nil, want typed *Failure")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s of draining sink after cancel")
+	}
+	<-drainDone
+	if inv := tool.Invocations(); inv != 0 {
+		t.Errorf("abandoned_ack_tool invocations = %d, want 0 (never reached execution)", inv)
+	}
 }
 
 // D-A property 1 — waking the call parked under callID resumes it:
@@ -1095,7 +1278,12 @@ func TestPermission_WakeParked_ResumesAndCompletes(t *testing.T) {
 		t.Fatal("decision_required for wake_0 not observed within 2s")
 	}
 
-	wakeParkedWithRetry(t, sched, "wake_0", time.Second)
+	// W3 remediation: registration now precedes emission, so the
+	// entry is guaranteed present by the time decision_required has
+	// been observed — a single direct call, no retry needed.
+	if err := sched.WakeParked("wake_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "wake_0", err)
+	}
 
 	var results []agent.Result
 	select {
@@ -1183,7 +1371,9 @@ func TestPermission_WakeParked_UnknownCallID_TypedRejection_NoTouch(t *testing.T
 
 	// Now wake the real one so the goroutine finishes cleanly.
 	close(releaseTool)
-	wakeParkedWithRetry(t, sched, "parked_real_0", time.Second)
+	if err := sched.WakeParked("parked_real_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "parked_real_0", err)
+	}
 
 	select {
 	case results := <-doneCh:
@@ -1253,7 +1443,9 @@ func TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline(t *t
 		t.Fatal("decision_required for no_deadline_0 not observed within 2s")
 	}
 
-	wakeParkedWithRetry(t, sched, "no_deadline_0", time.Second)
+	if err := sched.WakeParked("no_deadline_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "no_deadline_0", err)
+	}
 
 	select {
 	case results := <-doneCh:
@@ -1633,7 +1825,9 @@ func TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin(t *testing.T) {
 	}
 
 	for _, id := range []string{"rtls_0", "rtls_2", "rtls_4"} {
-		wakeParkedWithRetry(t, sched, id, time.Second)
+		if err := sched.WakeParked(id); err != nil {
+			t.Fatalf("WakeParked(%q) = %v, want nil", id, err)
+		}
 	}
 
 	var results []agent.Result
