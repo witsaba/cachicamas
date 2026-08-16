@@ -71,8 +71,8 @@ vuln-check:  ## Scan this module for known vulnerabilities (govulncheck, auto-in
 		$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
 		mv $$($(GO) env GOPATH)/bin/govulncheck $(LOCALBIN)/govulncheck 2>/dev/null || true; \
 	}
-	@echo ">> running govulncheck $(GOVULNCHECK_VERSION) against ./..."
-	@$(GOVULNCHECK) ./...
+	@echo ">> running govulncheck $(GOVULNCHECK_VERSION) against ./..." >&2
+	@$(GOVULNCHECK) -json ./...
 
 ## vuln-check/ci: alias of vuln-check for explicit CI workflow wiring
 .PHONY: vuln-check/ci

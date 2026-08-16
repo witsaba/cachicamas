@@ -837,35 +837,88 @@ def parse_pnpm_audit(raw: str, scope: str) -> list[Finding]:
 
 
 def parse_govulncheck(raw: str, scope: str) -> list[Finding]:
-    findings: list[Finding] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    """Parse govulncheck JSON output (v1.0.0 protocol).
+
+    The scanner emits a stream of top-level JSON objects: a ``config`` block, an
+    ``SBOM`` block, one ``{"osv": {...}}`` record per known-but-unreached
+    advisory, and one ``{"finding": {"osv": "GO-...", "trace": [...]}}`` per
+    *reachable* advisory. Objects are pretty-printed across multiple lines, so
+    we stream with ``json.JSONDecoder().raw_decode`` rather than splitting on
+    newlines. Only reachable findings (those carrying a non-empty ``trace``)
+    become findings; unreachable advisories are surfaced indirectly via
+    govulncheck's own stdout/exit code and do not warrant per-advisory findings.
+
+    govulncheck emits one ``finding`` block per reachable call chain, so a
+    single advisory with N call sites produces N findings. We deduplicate to
+    one finding per OSV, keeping the first call site as the canonical
+    location and recording the count in the evidence blob.
+    """
+    by_osv: dict[str, dict[str, Any]] = {}
+    decoder = json.JSONDecoder()
+    # Defense in depth: if a tool emits a non-JSON preamble on stdout
+    # (e.g. a Makefile @echo that wasn't redirected), skip forward to the
+    # first '{' so the streaming decode can proceed.
+    start = 0
+    while start < len(raw) and raw[start] != "{":
+        start += 1
+    idx = start
+    n = len(raw)
+    while idx < n:
+        # Skip whitespace between top-level objects.
+        while idx < n and raw[idx] in " \t\n\r":
+            idx += 1
+        if idx >= n:
+            break
         try:
-            doc = json.loads(line)
+            doc, end = decoder.raw_decode(raw, idx)
         except json.JSONDecodeError:
+            break
+        idx = end
+        if not isinstance(doc, dict):
             continue
-        if not doc.get("osv"):
+        finding = doc.get("finding")
+        if not isinstance(finding, dict):
             continue
-        finding = doc.get("finding") or {}
         trace = finding.get("trace") or []
-        file = None
-        line_no = None
-        if trace:
-            entry = trace[0] if isinstance(trace[0], dict) else {}
-            file = entry.get("file")
-            pos = entry.get("pos") or {}
-            line_no = pos.get("line")
+        if not trace:
+            continue
+        osv_id = finding.get("osv")
+        if not isinstance(osv_id, str):
+            continue
+        existing = by_osv.get(osv_id)
+        if existing is None:
+            by_osv[osv_id] = {"doc": doc, "first_trace": trace[0]}
+        else:
+            existing["_call_sites"] = existing.get("_call_sites", 1) + 1
+    findings: list[Finding] = []
+    for osv_id, info in by_osv.items():
+        doc = info["doc"]
+        first = info["first_trace"] if isinstance(info["first_trace"], dict) else {}
+        pos = first.get("position") if isinstance(first.get("position"), dict) else {}
+        file = pos.get("filename")
+        line_no = pos.get("line")
+        column = pos.get("column")
+        call_sites = info.get("_call_sites", 1)
+        suffix = (
+            f" ({call_sites} reachable call sites)"
+            if call_sites > 1
+            else ""
+        )
+        # The advisory summary is in the separate ``{"osv": {...}}`` record;
+        # ``doc.get("message")`` here returns the OSV id string only, not the
+        # human-readable title. Keep the message concise and put the URL in
+        # fix_hint where it's already exposed.
+        message = f"{osv_id}: reachable vulnerability{suffix}"
+        evidence_blob = json.dumps(doc, ensure_ascii=False)[:4096]
         findings.append(_finding_from_tool(
             tool="govulncheck", scope=scope,
             severity="high", category="vuln",
-            rule=finding.get("osv"),
-            file=file, line=line_no, column=None,
-            message=doc.get("message") or "vulnerability found",
-            evidence=line,
-            reproduce=f"cd {scope} && bin/govulncheck ./...",
-            fix_hint=f"See {finding.get('osv')} for remediation.",
+            rule=osv_id,
+            file=file, line=line_no, column=column,
+            message=message[:200],
+            evidence=evidence_blob,
+            reproduce=f"cd {scope} && bin/govulncheck -json ./...",
+            fix_hint=f"See https://pkg.go.dev/vuln/{osv_id} for remediation.",
         ))
     return findings
 
