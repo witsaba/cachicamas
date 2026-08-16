@@ -194,14 +194,6 @@ func (p *parkedSet) wake(callID string) bool {
 	return true
 }
 
-// parkedCount reports how many calls are currently parked. Test
-// inspection surface (R-TLS-008 source-guard bite).
-func (p *parkedSet) parkedCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.channels)
-}
-
 // rememberedSet is the per-Schedule state backing R-APP-010: once
 // Policy.Remember reports true for a toolName (AllowAlways branch,
 // AG-10.4), identical subsequent calls in the SAME Schedule call

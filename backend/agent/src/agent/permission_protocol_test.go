@@ -34,6 +34,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1417,5 +1418,231 @@ func TestPermission_RememberedSuppressesSubsequentAsk(t *testing.T) {
 	}
 	if inv := toolB.Invocations(); inv != 1 {
 		t.Errorf("other_tool invocations = %d, want 1", inv)
+	}
+}
+
+// --- Task 4.3 — R-TLS-008 source guard --------------------------------
+
+// drainUntilNDecisionsRequired starts a goroutine draining sink into
+// the returned drainedEvents, closing readyCh once at least n
+// distinct permission_decision_required events have been observed.
+// Mirrors drainUntilDecisionRequired's synchronization discipline
+// (readers must only inspect *drainedEvents after doneCh closes).
+func drainUntilNDecisionsRequired(sink <-chan *agent.Event, n int) (readyCh <-chan struct{}, doneCh <-chan struct{}, drainedEvents *[]*agent.Event) {
+	events := make([]*agent.Event, 0, 32)
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	var readyOnce sync.Once
+	go func() {
+		defer close(done)
+		seen := 0
+		for ev := range sink {
+			events = append(events, ev)
+			if _, ok := ev.PermissionDecisionRequired(); ok {
+				seen++
+				if seen >= n {
+					readyOnce.Do(func() { close(ready) })
+				}
+			}
+		}
+	}()
+	return ready, done, &events
+}
+
+// awaitGoroutineBaseline polls runtime.NumGoroutine() until it
+// settles at or below baseline, or timeout elapses. Deterministic
+// under -race's extra scheduling overhead: goroutine teardown after
+// a channel close / wg.Done() is not synchronous, so the caller must
+// poll rather than sample once immediately (a prior milestone,
+// AG-09, dropped a single-sample goroutine-baseline check for being
+// racy against t.Parallel() siblings — see scheduler_test.go:439,
+// :1046 — this helper's polling-until-settled approach, combined
+// with the caller NOT calling t.Parallel(), is what makes the
+// baseline in this file's R-TLS-008 test deterministic instead).
+func awaitGoroutineBaseline(baseline int, timeout time.Duration) (last int, settled bool) {
+	deadline := time.Now().Add(timeout)
+	for {
+		runtime.Gosched()
+		last = runtime.NumGoroutine()
+		if last <= baseline {
+			return last, true
+		}
+		if time.Now().After(deadline) {
+			return last, false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// R-TLS-008 source guard (task 4.3) — one Schedule call driving 5
+// calls (3 Defer + 2 immediate) through all four typed outcomes
+// (AllowOnce, AllowAlways, Deny, ModifyInput), asserting:
+//
+//  1. full ordinal-order rejoin — results[i] carries call i's
+//     identity and outcome regardless of completion order or which
+//     calls were parked;
+//  2. correct per-slot outcomes for every one of the 5 calls;
+//  3. no goroutine leak under -race (a settled runtime.NumGoroutine()
+//     baseline, not a single racy sample).
+//
+// This test does NOT call t.Parallel() — deliberately, unlike every
+// other test in this file. Go's test runner only releases
+// t.Parallel() siblings to run concurrently once every top-level
+// test in the binary has been started; a serial test therefore runs
+// in true isolation from them (no sibling goroutine churn pollutes
+// its NumGoroutine() samples). This is what makes the goroutine
+// check below deterministic rather than the flaky pattern AG-09
+// discovered and reverted.
+func TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin(t *testing.T) {
+	// runtime.GC() + a Gosched settle lets any goroutines left over
+	// from earlier sequential tests in this run finish tearing down
+	// before the baseline is captured.
+	runtime.GC()
+	baseline, _ := awaitGoroutineBaseline(runtime.NumGoroutine(), 200*time.Millisecond)
+
+	denialInner, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure: %v", err)
+	}
+	denial, err := agent.NewFailure(denialInner)
+	if err != nil {
+		t.Fatalf("agent.NewFailure: %v", err)
+	}
+	const modifiedArgs3 = `{"slot":"3-modified"}`
+	const modifiedArgs4 = `{"slot":"4-modified"}`
+
+	type plan struct {
+		first agent.PermissionVerdict
+		wake  agent.PermissionVerdict // consulted only if first.Outcome == PermissionDefer
+	}
+	plans := map[string]plan{
+		"rtls_0": {first: agent.PermissionVerdict{Outcome: agent.PermissionDefer},
+			wake: agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}},
+		"rtls_1": {first: agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways}},
+		"rtls_2": {first: agent.PermissionVerdict{Outcome: agent.PermissionDefer},
+			wake: agent.PermissionVerdict{Outcome: agent.PermissionOutcomeDeny, Failure: denial}},
+		"rtls_3": {first: agent.PermissionVerdict{Outcome: agent.PermissionOutcomeModifyInput, ModifiedArgs: []byte(modifiedArgs3)}},
+		"rtls_4": {first: agent.PermissionVerdict{Outcome: agent.PermissionDefer},
+			wake: agent.PermissionVerdict{Outcome: agent.PermissionOutcomeModifyInput, ModifiedArgs: []byte(modifiedArgs4)}},
+	}
+	attempts := map[string]*atomic.Int64{
+		"rtls_0": {}, "rtls_1": {}, "rtls_2": {}, "rtls_3": {}, "rtls_4": {},
+	}
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, call ai.ToolCall) agent.PermissionVerdict {
+			p := plans[call.ID()]
+			if attempts[call.ID()].Add(1) == 1 {
+				return p.first
+			}
+			return p.wake
+		},
+		remember: func(_ context.Context, _ string, _ agent.PermissionOutcome) bool { return false },
+	}
+
+	tool0 := EchoScriptedTool("rtls_tool_0", agent.EffectClassRead)
+	tool1 := EchoScriptedTool("rtls_tool_1", agent.EffectClassRead)
+	tool2 := EchoScriptedTool("rtls_tool_2", agent.EffectClassMutating)
+	tool3 := EchoScriptedTool("rtls_tool_3", agent.EffectClassMutating)
+	tool4 := EchoScriptedTool("rtls_tool_4", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{
+		"rtls_tool_0": tool0, "rtls_tool_1": tool1, "rtls_tool_2": tool2,
+		"rtls_tool_3": tool3, "rtls_tool_4": tool4,
+	})
+
+	calls := []scheduledPermissionCall{
+		{id: "rtls_0", name: "rtls_tool_0", args: []byte(`{}`)},
+		{id: "rtls_1", name: "rtls_tool_1", args: []byte(`{}`)},
+		{id: "rtls_2", name: "rtls_tool_2", args: []byte(`{}`)},
+		{id: "rtls_3", name: "rtls_tool_3", args: []byte(`{"slot":"3-original"}`)},
+		{id: "rtls_4", name: "rtls_tool_4", args: []byte(`{}`)},
+	}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 128)
+	ready, drainDone, drained := drainUntilNDecisionsRequired(sink, 3)
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(context.Background(), permissionCallsToAICalls(calls), reg, "run-rtls008", "turn-rtls008", policy, stamper, sink)
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not observe 3 decision_required events within 2s")
+	}
+
+	for _, id := range []string{"rtls_0", "rtls_2", "rtls_4"} {
+		if err := sched.WakeParked(id); err != nil {
+			t.Fatalf("WakeParked(%q) = %v, want nil", id, err)
+		}
+	}
+
+	var results []agent.Result
+	select {
+	case results = <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s after waking all 3 parked calls")
+	}
+	<-drainDone
+	_ = drained
+
+	// (1) + (2): full ordinal-order rejoin, correct per-slot outcomes.
+	if len(results) != 5 {
+		t.Fatalf("Schedule returned %d results, want 5", len(results))
+	}
+	wantCallIDs := []string{"rtls_0", "rtls_1", "rtls_2", "rtls_3", "rtls_4"}
+	for i, want := range wantCallIDs {
+		if got := results[i].CallID(); got != want {
+			t.Errorf("results[%d].CallID() = %q, want %q (ordinal-order rejoin)", i, got, want)
+		}
+	}
+	wantOutcomes := []agent.ToolOutcome{
+		agent.ToolOutcomeSuccess,          // rtls_0: Defer -> wake -> AllowOnce
+		agent.ToolOutcomeSuccess,          // rtls_1: immediate AllowAlways
+		agent.ToolOutcomeExecutionFailure, // rtls_2: Defer -> wake -> Deny
+		agent.ToolOutcomeSuccess,          // rtls_3: immediate ModifyInput
+		agent.ToolOutcomeSuccess,          // rtls_4: Defer -> wake -> ModifyInput
+	}
+	for i, want := range wantOutcomes {
+		if results[i].Outcome != want {
+			t.Errorf("results[%d].Outcome = %v, want %v", i, results[i].Outcome, want)
+		}
+	}
+	if results[2].Failure == nil {
+		t.Error("results[2].Failure = nil, want the typed denial (rtls_2, Deny via wake)")
+	}
+
+	// Each tool invoked exactly once (no double-execution, no
+	// missed execution across the mixed defer/immediate paths).
+	for name, tool := range map[string]*ScriptedTool{
+		"rtls_tool_0": tool0, "rtls_tool_1": tool1, "rtls_tool_3": tool3, "rtls_tool_4": tool4,
+	} {
+		if inv := tool.Invocations(); inv != 1 {
+			t.Errorf("%s invocations = %d, want 1", name, inv)
+		}
+	}
+	if inv := tool2.Invocations(); inv != 0 {
+		t.Errorf("rtls_tool_2 invocations = %d, want 0 (Deny skips execution)", inv)
+	}
+
+	// ModifyInput transparency for both the immediate (rtls_3) and
+	// wake-resolved (rtls_4) ModifyInput calls: the tool received
+	// exactly the modified bytes.
+	if got := string(tool3.RecordedArgs()[0]); got != modifiedArgs3 {
+		t.Errorf("rtls_tool_3 received args = %q, want %q", got, modifiedArgs3)
+	}
+	if got := string(tool4.RecordedArgs()[0]); got != modifiedArgs4 {
+		t.Errorf("rtls_tool_4 received args = %q, want %q", got, modifiedArgs4)
+	}
+
+	// (3) no goroutine leak: settle-then-sample, not a single racy
+	// snapshot. This test's own goroutines (the Schedule-launching
+	// goroutine, the drain goroutine) have both signaled completion
+	// above (doneCh, drainDone) before this check runs.
+	if last, settled := awaitGoroutineBaseline(baseline, 2*time.Second); !settled {
+		t.Errorf("goroutine count did not settle back to baseline %d within 2s (last observed %d) — possible leak", baseline, last)
 	}
 }
