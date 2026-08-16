@@ -510,11 +510,22 @@ func (s *Scheduler) runPermissionGate(
 
 		parkCh := parked.park(call.ID())
 		select {
-		case <-parkCh:
-			// Woken. Commit 4 stub proceeds without re-evaluation;
-			// a later milestone will call policy.Resolve again to
-			// surface the human's decision. For AG-10.2, the
-			// woken call's verdict is treated as AllowOnce.
+		case wakeErr := <-parkCh:
+			// Woken via upward-path (nil error) OR schedule
+			// shutdown sweep (non-nil error). The parked
+			// channel's value distinguishes the two paths:
+			// wake → proceed, shutdown → abort.
+			if wakeErr != nil {
+				abort := typedExecutionFailureFromError(call.ID(), wakeErr)
+				results[ordinal] = abort
+				emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+				return false, nil, abort.Failure
+			}
+			// Upward-path wake. Commit 4 stub proceeds without
+			// re-evaluation; a later milestone will call
+			// policy.Resolve again to surface the human's
+			// decision. For AG-10.2 / AG-10.3, the woken call's
+			// verdict is treated as AllowOnce.
 			return true, nil, nil
 		case <-ctx.Done():
 			// Mid-park cancel: typed abort failure (AG-10.3

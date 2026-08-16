@@ -755,3 +755,207 @@ func TestPermission_FourOutcomes_AllowAlways_EmitsDecisionMade(t *testing.T) {
 		t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
 	}
 }
+
+// --- AG-10.3 sibling isolation + cancellation tests ------------------
+
+// S-APP-009 (AG-10.3 sibling isolation) — a parked call MUST NOT
+// block sibling calls (R-APP-008). The parked call's goroutine
+// holds its semaphore/serialize slot, but other goroutines can
+// still acquire other slots and execute. The sibling reaches its
+// result slot in call order regardless of the parked call's state.
+//
+// RED-recorded at Commit 5 (the parked-call goroutine holds the
+// read-semaphore slot until wake; sibling reads can still proceed
+// because the semaphore is bounded, not exclusive). GREEN at this
+// commit.
+func TestPermission_SuspensionDoesNotBlock_SiblingReachesOrdinalSlot(t *testing.T) {
+	t.Parallel()
+
+	// The parked call uses a tool that blocks on a channel — it
+	// only proceeds when woken. The sibling has a different tool
+	// that returns success. We expect: parked call never invokes
+	// its tool; sibling invokes its tool exactly once and reaches
+	// success; Schedule returns both results in call order.
+	parkRelease := make(chan struct{})
+	defer close(parkRelease) // safety net for the parked tool
+	parkedTool := BlockingScriptedTool("parked_tool", agent.EffectClassRead, parkRelease)
+	siblingTool := EchoScriptedTool("sibling_tool", agent.EffectClassRead)
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, call ai.ToolCall) agent.PermissionVerdict {
+			if call.Name() == "parked_tool" {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+
+	reg := newMapRegistry(map[string]agent.Tool{
+		"parked_tool": parkedTool,
+		"sibling_tool": siblingTool,
+	})
+
+	calls := []scheduledPermissionCall{
+		{id: "parked_0", name: "parked_tool", args: []byte(`{}`)},
+		{id: "sibling_1", name: "sibling_tool", args: []byte(`{}`)},
+	}
+
+	// The parked call waits forever (parkRelease is closed only at
+	// test end). The test cancels ctx to unblock Schedule exit so
+	// the parked call aborts via the AG-10.3 cancellation path.
+	// A timeout ensures the test fails loudly if the parked
+	// call fails to observe ctx.Done() within the test's budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	// Drain goroutine MUST be set up BEFORE Schedule blocks; otherwise
+	// the sink sits unread while the parked call waits, and the
+	// dispatcher is stuck on its emissions send.
+	drained := []*agent.Event{}
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for ev := range sink {
+			drained = append(drained, ev)
+		}
+	}()
+	results := (&agent.Scheduler{MaxConcurrentReads: 4}).Schedule(
+		ctx,
+		permissionCallsToAICalls(calls),
+		reg,
+		"run-sibling",
+		"turn-sibling",
+		policy,
+		stamper,
+		sink,
+	)
+	// Cancel ctx to unblock the parked call (AG-10.3 path) — the
+	// timeout above also serves as a safety net.
+	cancel()
+	<-drainDone
+
+	// Two results, in call order.
+	if len(results) != 2 {
+		t.Fatalf("Schedule returned %d results, want 2 (parked + sibling)", len(results))
+	}
+	// The parked call's ordinal slot is a typed abort failure
+	// (AG-10.3 R-APP-009: cancellation discipline).
+	if results[0].Outcome != agent.ToolOutcomeExecutionFailure {
+		t.Errorf("parked result.Outcome = %v, want ExecutionFailure (AG-10.3 cancellation path)",
+			results[0].Outcome)
+	}
+	if results[0].Failure == nil {
+		t.Errorf("parked result.Failure = nil, want typed *Failure")
+	}
+	// The sibling call succeeded (R-APP-008 sibling isolation).
+	if results[1].Outcome != agent.ToolOutcomeSuccess {
+		t.Errorf("sibling result.Outcome = %v, want Success (R-APP-008 sibling isolation)",
+			results[1].Outcome)
+	}
+	// The parked call's tool was never invoked (parking blocked it).
+	if inv := parkedTool.Invocations(); inv != 0 {
+		t.Errorf("parked_tool invocations = %d, want 0 (parked before wake)", inv)
+	}
+	// The sibling's tool was invoked exactly once.
+	if inv := siblingTool.Invocations(); inv != 1 {
+		t.Errorf("sibling_tool invocations = %d, want 1", inv)
+	}
+	// decision_required for the parked call, decision_made{AllowOnce}
+	// for the sibling — but no decision_made for the parked call
+	// (the parked call never wakes).
+	if got := countByKind(drained)[agent.EventKindPermissionDecisionRequired]; got != 1 {
+		t.Errorf("decision_required count = %d, want 1 (one parked call)", got)
+	}
+}
+
+// S-APP-010 (AG-10.3 cancellation wind-down) — on ctx cancel mid-
+// park, BOTH parked calls observe ctx.Done() and write typed
+// ExecutionFailure{aborted} into their ordinal slots. The rejoin
+// slice is fully populated; Schedule returns without leaking
+// goroutines (R-APP-009).
+//
+// RED-recorded at Commit 5. GREEN at this commit.
+func TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak(t *testing.T) {
+	t.Parallel()
+
+	// Two parked calls; both block on per-call channels that
+	// nothing will close (the test cancels ctx to unblock them).
+	parkedA := BlockingScriptedTool("parked_a", agent.EffectClassRead, make(chan struct{}))
+	parkedB := BlockingScriptedTool("parked_b", agent.EffectClassRead, make(chan struct{}))
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+		},
+	}
+
+	reg := newMapRegistry(map[string]agent.Tool{
+		"parked_a": parkedA,
+		"parked_b": parkedB,
+	})
+
+	calls := []scheduledPermissionCall{
+		{id: "parked_a_0", name: "parked_a", args: []byte(`{}`)},
+		{id: "parked_b_1", name: "parked_b", args: []byte(`{}`)},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	// Drain goroutine MUST be set up BEFORE Schedule blocks.
+	drained := []*agent.Event{}
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for ev := range sink {
+			drained = append(drained, ev)
+		}
+	}()
+	results := (&agent.Scheduler{MaxConcurrentReads: 4}).Schedule(
+		ctx,
+		permissionCallsToAICalls(calls),
+		reg,
+		"run-cancel",
+		"turn-cancel",
+		policy,
+		stamper,
+		sink,
+	)
+	cancel()
+	<-drainDone
+
+	// Two results, both typed ExecutionFailure (AG-10.3 R-APP-009).
+	if len(results) != 2 {
+		t.Fatalf("Schedule returned %d results, want 2 (full rejoin even on cancel)", len(results))
+	}
+	for i := range results {
+		if results[i].Outcome != agent.ToolOutcomeExecutionFailure {
+			t.Errorf("results[%d].Outcome = %v, want ExecutionFailure (AG-10.3 cancellation path)",
+				i, results[i].Outcome)
+		}
+		if results[i].Failure == nil {
+			t.Errorf("results[%d].Failure = nil, want typed *Failure", i)
+		}
+	}
+
+	// Two decision_required events (one per parked call); zero
+	// decision_made events (no wake before cancel).
+	if got := countByKind(drained)[agent.EventKindPermissionDecisionRequired]; got != 2 {
+		t.Errorf("decision_required count = %d, want 2 (one per parked call)", got)
+	}
+	if got := countByKind(drained)[agent.EventKindPermissionDecisionMade]; got != 0 {
+		t.Errorf("decision_made count = %d, want 0 (no wake before cancel)", got)
+	}
+
+	// No tool invocations (parked calls never reached Tool.Run).
+	if inv := parkedA.Invocations(); inv != 0 {
+		t.Errorf("parked_a invocations = %d, want 0", inv)
+	}
+	if inv := parkedB.Invocations(); inv != 0 {
+		t.Errorf("parked_b invocations = %d, want 0", inv)
+	}
+}
