@@ -376,6 +376,152 @@ func TestPermission_DeferEmitsBeforePark(t *testing.T) {
 	}
 }
 
+// W9 remediation (verify-report AG-10, terminal re-verification round).
+// TestPermission_DeferEmitsBeforePark's W3 rewrite proves decision_required
+// is genuinely delivered even when a wake races ahead of it — but that
+// early wake wins purely because parked.park(callID) now runs BEFORE the
+// emission (W3), unconditionally, ack or no ack. Deleting reqAck outright
+// (no ack field, no wait, straight from `emissions <-` to the parkCh
+// select) therefore left the entire package green: the ack's own guard
+// was lost, not merely weakened (verify-report W9).
+//
+// What the ack still uniquely guards, post-W3: registration always
+// precedes delivery to sink regardless of the ack, so an early wake
+// always succeeds either way — that is NOT what the ack protects. The
+// ack's job comes AFTER registration: it keeps the gate goroutine from
+// reaching the parked-WAIT select — and therefore from completing an
+// already-arrived wake's re-Resolve, emitting decision_made, and letting
+// the tool run — until decision_required has actually reached sink.
+// Remove the ack and that whole sequence can run to completion (tool
+// invoked, Schedule able to return) while decision_required is still
+// stuck, undelivered, behind an unread sink — exactly the ordering
+// R-APP-002/D4 forbids ("emission reaches sink before the parked wait
+// blocks").
+//
+// This test proves it directly, not via a proxy: wake early (the same
+// technique TestPermission_DeferEmitsBeforePark uses — post-W3
+// registration is fast enough that polling for it, without ever reading
+// sink, reliably succeeds), then — BEFORE reading anything from the
+// still-unbuffered, still-unread sink — poll for a window asserting the
+// tool has NOT run and Schedule has NOT returned. With the ack present
+// this is not a timing race to get lucky on: the dispatcher is
+// structurally blocked on `sink <- &stamped` (nothing has read it), so
+// `close(reqAck)` cannot have happened, so the gate goroutine cannot have
+// left the ack-select, so the tool cannot have run — true for the entire
+// window, however long it is, not merely likely. Only afterward does the
+// test read decision_required off sink, which is what finally unblocks
+// the dispatcher's ack close and lets the already-woken gate complete.
+//
+// RED (ack deleted): the tool runs and Schedule completes during the
+// poll window, before sink is ever read — this test fails immediately.
+// GREEN (ack present, current code): the poll window elapses with zero
+// invocations and Schedule still pending; the test then reads sink and
+// confirms normal completion.
+func TestPermission_WakeParked_AckGatesCompletion_NoRunBeforeSinkDelivery(t *testing.T) {
+	t.Parallel()
+
+	var resolveN atomic.Int64
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			if resolveN.Add(1) == 1 {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			// Wake's re-evaluation (D-A): finish as AllowOnce.
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+
+	tool := EchoScriptedTool("ack_gate_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"ack_gate_tool": tool})
+	calls := []scheduledPermissionCall{{id: "ack_gate_0", name: "ack_gate_tool", args: []byte(`{}`)}}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event) // UNBUFFERED — no room to hide a premature completion.
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(ctx, permissionCallsToAICalls(calls), reg, "run-ack-gate", "turn-ack-gate", policy, stamper, sink)
+	}()
+
+	// Wake as soon as registered, WITHOUT ever reading sink first — the
+	// same technique TestPermission_DeferEmitsBeforePark uses. Post-W3
+	// this succeeds fast: registration precedes emission unconditionally.
+	registerDeadline := time.Now().Add(500 * time.Millisecond)
+	var wakeErr error
+	for time.Now().Before(registerDeadline) {
+		wakeErr = sched.WakeParked("ack_gate_0")
+		if wakeErr == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if wakeErr != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil (registration precedes emission)", "ack_gate_0", wakeErr)
+	}
+
+	// THE ACK GUARD: even though the wake already succeeded, nothing
+	// downstream of it may complete until decision_required reaches
+	// sink. Poll for a generous window WITHOUT reading sink at all; a
+	// single hit disproves the invariant immediately, a full window with
+	// nothing observed is the correct — and, with the ack present,
+	// structurally guaranteed, not merely likely — outcome.
+	guardDeadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(guardDeadline) {
+		if inv := tool.Invocations(); inv != 0 {
+			t.Fatalf("ack_gate_tool invocations = %d, want 0 before decision_required reached sink — the tool ran ahead of its own decision_required event (R-APP-002/D4 ack ordering violated)", inv)
+		}
+		select {
+		case results := <-doneCh:
+			t.Fatalf("Schedule returned %d result(s) before decision_required was read from sink — the ack did not gate completion (R-APP-002/D4 violated)", len(results))
+		default:
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Only now read decision_required — this is what unblocks the
+	// dispatcher's close(reqAck), releasing the already-woken gate.
+	var ev *agent.Event
+	select {
+	case ev = <-sink:
+	case <-time.After(1 * time.Second):
+		t.Fatal("no event reached sink within 1s (decision_required for ack_gate_0 was never delivered)")
+	}
+	req, ok := ev.PermissionDecisionRequired()
+	if !ok || req.CallID() != "ack_gate_0" {
+		t.Fatalf("first event on sink = %#v, want permission_decision_required for ack_gate_0", ev)
+	}
+
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for range sink {
+			// Drain to completion so Schedule's dispatcher never
+			// blocks on a full sink.
+			_ = struct{}{}
+		}
+	}()
+
+	select {
+	case results := <-doneCh:
+		if len(results) != 1 {
+			t.Fatalf("Schedule returned %d results, want 1", len(results))
+		}
+		if results[0].Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Schedule did not return within 1s after decision_required was read")
+	}
+	<-drainDone
+	if inv := tool.Invocations(); inv != 1 {
+		t.Errorf("ack_gate_tool invocations = %d, want 1", inv)
+	}
+}
+
 // S-PPB-003 — re-pointed at the real production wake surface (D-A).
 // The original bite exercised a vacuous helper (`ResolveStrayDecision`,
 // deleted) that discarded its parameter and always returned the
