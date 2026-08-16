@@ -944,7 +944,16 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/failure.go") ||
 				strings.HasSuffix(path, "/invariant_pin_test.go") ||
 				strings.HasSuffix(path, "/turn_termination_test.go") ||
-				strings.HasSuffix(path, "/turn_failure_test.go")
+				strings.HasSuffix(path, "/turn_failure_test.go") ||
+				// AG-12 widening (NFR-HIS-004, R-HIS-004): history.go is
+				// the new transcript-store file; the three suffixes
+				// after it are AG-12's new test files (behavior tests
+				// plus the closed-route surface guard). Byte-in-sync
+				// with loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/history.go") ||
+				strings.HasSuffix(path, "/history_test.go") ||
+				strings.HasSuffix(path, "/history_synthesis_test.go") ||
+				strings.HasSuffix(path, "/history_surface_guard_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
