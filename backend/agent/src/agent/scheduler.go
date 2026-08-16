@@ -600,13 +600,21 @@ func (s *Scheduler) runPermissionGate(
 		}
 	}
 
-	// AllowOnce: emit decision_made{AllowOnce}, proceed.
+	// AllowOnce: emit decision_made{AllowOnce}, proceed. A
+	// constructor failure is a typed execution failure — the same
+	// not-a-silent-drop posture as the decision_required constructor
+	// above (defect 6 fix): a dropped decision_made must not let the
+	// call proceed as though nothing happened.
 	if verdict.Outcome == PermissionOutcomeAllowOnce {
 		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
 			PermissionOutcomeAllowOnce, nil, nil)
-		if err == nil {
-			emissions <- emission{ev: madeEv}
+		if err != nil {
+			abort := typedExecutionFailureFromError(call.ID(), err)
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
 		}
+		emissions <- emission{ev: madeEv}
 		return true, nil, nil
 	}
 
@@ -619,9 +627,17 @@ func (s *Scheduler) runPermissionGate(
 	if verdict.Outcome == PermissionOutcomeAllowAlways {
 		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
 			PermissionOutcomeAllowAlways, nil, nil)
-		if err == nil {
-			emissions <- emission{ev: madeEv}
+		if err != nil {
+			// Defect 6 fix: do not silently proceed (and, in
+			// particular, do not silently invoke policy.Remember)
+			// when the decision cannot even be recorded on the
+			// stream.
+			abort := typedExecutionFailureFromError(call.ID(), err)
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
 		}
+		emissions <- emission{ev: madeEv}
 		if policy.Remember(ctx, call.Name(), PermissionOutcomeAllowAlways) {
 			remembered.remember(call.Name())
 			// A resolution_remembered constructor failure here does
@@ -650,9 +666,17 @@ func (s *Scheduler) runPermissionGate(
 	if verdict.Outcome == PermissionOutcomeDeny {
 		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
 			PermissionOutcomeDeny, nil, verdict.Failure)
-		if err == nil {
-			emissions <- emission{ev: madeEv}
+		if err != nil {
+			// Defect 6 fix: a dropped decision_made must not be
+			// silently absorbed into "proceed=false with no
+			// explanation" — surface the constructor failure itself
+			// as the typed execution failure.
+			abort := typedExecutionFailureFromError(call.ID(), err)
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
 		}
+		emissions <- emission{ev: madeEv}
 		var failRes Result
 		if verdict.Failure != nil {
 			failRes = Result{Outcome: ToolOutcomeExecutionFailure, Failure: verdict.Failure}
@@ -678,9 +702,21 @@ func (s *Scheduler) runPermissionGate(
 	if verdict.Outcome == PermissionOutcomeModifyInput {
 		madeEv, err := NewPermissionDecisionMade(runID, turnID, call.ID(),
 			PermissionOutcomeModifyInput, verdict.ModifiedArgs, nil)
-		if err == nil {
-			emissions <- emission{ev: madeEv}
+		if err != nil {
+			// Defect 6 fix: a policy that returns ModifyInput without
+			// populating ModifiedArgs (or otherwise producing an
+			// invalid decision_made) must not silently execute with
+			// the ORIGINAL arguments while the stream stays silent —
+			// that breaks R-APP-006's transparency guarantee exactly
+			// when it matters most (nobody can tell what actually
+			// ran). Surface the constructor failure as a typed
+			// execution failure instead.
+			abort := typedExecutionFailureFromError(call.ID(), err)
+			results[ordinal] = abort
+			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			return false, nil, abort.Failure
 		}
+		emissions <- emission{ev: madeEv}
 		return true, append([]byte(nil), verdict.ModifiedArgs...), nil
 	}
 

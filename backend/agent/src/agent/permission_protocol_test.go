@@ -1646,3 +1646,60 @@ func TestPermission_RTLS008_SourceGuard_MixedOutcomesFullRejoin(t *testing.T) {
 		t.Errorf("goroutine count did not settle back to baseline %d within 2s (last observed %d) — possible leak", baseline, last)
 	}
 }
+
+// --- Defect 6 — swallowed decision_made constructor errors -----------
+
+// A ModifyInput verdict with empty ModifiedArgs makes
+// NewPermissionDecisionMade fail construction (modified_arguments
+// MUST be non-empty for that outcome). Before the fix, the gate
+// silently swallowed the constructor error (`if err == nil { emit }`)
+// and STILL let the call proceed — with the call's ORIGINAL,
+// unmodified arguments (a nil modifiedArgs falls back to
+// call.Arguments() in executeCall) and with NO decision_made event
+// on the stream at all. That silently broke R-APP-006: nobody can
+// tell from the stream what the policy actually decided, or that
+// modify-input transparency failed, while the tool still ran. The
+// fix treats a decision_made constructor failure as a typed
+// execution failure — the call does not proceed.
+func TestPermission_ModifyInput_ConstructorFailure_DoesNotSilentlyProceed(t *testing.T) {
+	t.Parallel()
+
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			// Malformed verdict: ModifyInput without modified args.
+			// NewPermissionDecisionMade rejects empty
+			// modified_arguments for this outcome.
+			return agent.PermissionVerdict{
+				Outcome:      agent.PermissionOutcomeModifyInput,
+				ModifiedArgs: nil,
+			}
+		},
+	}
+
+	tool := EchoScriptedTool("modify_bad", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"modify_bad": tool})
+	calls := []scheduledPermissionCall{{id: "modify_bad_0", name: "modify_bad", args: []byte(`{}`)}}
+
+	results, events := runPermissionSchedulerAndCollect(
+		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
+	)
+
+	if len(results) != 1 {
+		t.Fatalf("Schedule returned %d results, want 1", len(results))
+	}
+	if results[0].Outcome != agent.ToolOutcomeExecutionFailure {
+		t.Errorf("results[0].Outcome = %v, want ExecutionFailure (a decision_made constructor failure MUST NOT silently proceed, defect 6 fix)",
+			results[0].Outcome)
+	}
+	if results[0].Failure == nil {
+		t.Errorf("results[0].Failure = nil, want typed *Failure describing the constructor error")
+	}
+	if inv := tool.Invocations(); inv != 0 {
+		t.Errorf("modify_bad invocations = %d, want 0 (the call must not silently execute when decision_made cannot be constructed)", inv)
+	}
+	for _, ev := range events {
+		if _, ok := ev.PermissionDecisionMade(); ok {
+			t.Errorf("decision_made event present despite a construction failure — the event must not be fabricated from a failed constructor")
+		}
+	}
+}
