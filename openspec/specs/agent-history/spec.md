@@ -1,8 +1,7 @@
 # Spec — History and the pairing invariant (`agent-history`)
 
-> **Change**: `cachicamas-agent-history` · **AG-12** (Layer 2, Wave 3, milestone 12 of 24) of [doc 0003](../../../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-12--implement-history-and-the-pairing-invariant), `0003:1227-1292`
+> **Change**: `cachicamas-agent-history` · **AG-12** (Layer 2, Wave 3, milestone 12 of 24) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-12--implement-history-and-the-pairing-invariant), `0003:1227-1292`
 > **Nodes**: AG-12.1 `[leaf]` (append + boundary validation, `0003:1247-1274`) · AG-12.2 `[leaf]` (orphan synthesis, `0003:1276-1292`)
-> **Status**: **new capability**. This file is the normative text; per the AG-09 (`b2ab3867`) / AG-10 (`09617ab4`) / AG-11 precedent it is promoted to `openspec/specs/agent-history/spec.md` during apply/archive. Cross-cut deltas into two pre-existing capabilities live beside it in `../agent-event-envelope/` and `../agent-package-scaffold/`.
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable by `cd backend/agent && make test`.
 > **Identifier convention**: requirements `R-HIS-0NN`, scenarios `S-HIS-0NN` (bites carry the same `S-HIS-` prefix and are marked **(bite)**). Append-only. Distinct from `R-AEV-`/`R-AGE-`/`R-AGP-`/`R-AGM-`/`R-AGV-`/`R-ATT-`/`R-TLS-`/`R-APE-`/`R-PRH-`/`R-LSK-`/`R-AMT-`; the `HIS` prefix was verified collision-free repo-wide before minting.
 > **Evidence gate**: `cd backend/agent && make test` (`go test -race -v ./...`), plus `make lint`, `make build` and `make vuln-check`. No CI exists.
