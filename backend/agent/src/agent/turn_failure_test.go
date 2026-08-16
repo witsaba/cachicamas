@@ -13,6 +13,10 @@
 package agent_test
 
 import (
+	"go/ast"
+	"go/printer"
+	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -348,4 +352,97 @@ func TestTurn_TypedFailureFullyInspectable(t *testing.T) {
 			t.Errorf("%s failure.PartialOutput() = false, want true", name)
 		}
 	}
+}
+
+// exprString renders an ast.Expr back to source text, from the same
+// parsed *ast.File funcDeclSignature already produced — used to prove a
+// declaration's parameter/result types directly from source, never by
+// importing the package (agent_test_helpers_test.go's own posture,
+// extended).
+func exprString(t *testing.T, expr ast.Expr) string {
+	t.Helper()
+	var buf strings.Builder
+	if err := printer.Fprint(&buf, token.NewFileSet(), expr); err != nil {
+		t.Fatalf("printer.Fprint returned %v, want no failure", err)
+	}
+	return buf.String()
+}
+
+// fieldTypeStrings flattens a *ast.FieldList into one type string per
+// name (an unnamed field contributes its type string once; a field
+// declaring N names contributes its type string N times) — positional
+// comparison against an expected parameter or result list.
+func fieldTypeStrings(t *testing.T, fields *ast.FieldList) []string {
+	t.Helper()
+	if fields == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range fields.List {
+		ts := exprString(t, f.Type)
+		n := len(f.Names)
+		if n == 0 {
+			n = 1
+		}
+		for i := 0; i < n; i++ {
+			out = append(out, ts)
+		}
+	}
+	return out
+}
+
+// S-LSK-011 — AG-11's return contract on the fatal path, cross-referenced
+// to R-ATT-007/S-ATT-009: Turn's exported signature is unchanged (proven
+// structurally from source, funcDeclSignature's documented-contract-guard
+// posture — not merely "it still compiles"), and the mid-stream-fatal
+// returned msg carries content while err is non-nil.
+func TestTurn_SignatureUnchanged(t *testing.T) {
+	t.Parallel()
+
+	sig := funcDeclSignature(t, "loop.go", "Turn")
+	if sig == nil {
+		t.Fatal(`funcDeclSignature(t, "loop.go", "Turn") returned nil — Turn's top-level declaration was not found`)
+	}
+
+	wantParams := []string{"context.Context", "ai.ModelProvider", "string", "[]ai.Message", "TurnOptions", "chan<- *Event"}
+	gotParams := fieldTypeStrings(t, sig.Params)
+	if len(gotParams) != len(wantParams) {
+		t.Fatalf("Turn has %d parameter(s) %v, want %d %v", len(gotParams), gotParams, len(wantParams), wantParams)
+	}
+	for i, want := range wantParams {
+		if gotParams[i] != want {
+			t.Errorf("Turn parameter[%d] type = %q, want %q — the exported signature must not change (S-LSK-011)", i, gotParams[i], want)
+		}
+	}
+
+	wantResults := []string{"ai.Message", "ai.FinishReason", "error"}
+	gotResults := fieldTypeStrings(t, sig.Results)
+	if len(gotResults) != len(wantResults) {
+		t.Fatalf("Turn has %d result(s) %v, want %d %v", len(gotResults), gotResults, len(wantResults), wantResults)
+	}
+	for i, want := range wantResults {
+		if gotResults[i] != want {
+			t.Errorf("Turn result[%d] type = %q, want %q — the exported signature must not change (S-LSK-011)", i, gotResults[i], want)
+		}
+	}
+
+	// Behavioral half: the mid-stream-fatal returned msg carries content
+	// (not the zero ai.Message{}) and err is non-nil.
+	provider := agenttest.NewProvider(scriptTextThenTerminalFailure(t, ai.FailureCategoryUnavailable, true))
+	sink := make(chan *agent.Event, 16)
+	msg, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for signature guard",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err == nil {
+		t.Fatal("agent.Turn returned err = nil, want non-nil (mid-stream terminal failure)")
+	}
+	if len(msg.Content()) == 0 {
+		t.Error("msg has no content, want the delivered content byte-for-byte rather than the zero ai.Message{}")
+	}
+	_ = drainSink(t, sink)
 }
