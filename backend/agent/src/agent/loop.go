@@ -271,6 +271,36 @@ func Turn(
 			// Mid-stream terminal error: drain whatever is left so
 			// the producer's goroutine is not stranded (S-LSK-002).
 			_ = drainProvider(pCh)
+
+			// D1's type fork: a typed *ai.Failure — the
+			// ev.ErrorPayload() arm of translate()'s
+			// EventKindError case — gets the typed-Aborted
+			// treatment (R-ATT-005..008). An internal
+			// construction error (a plain Go error from one of
+			// the loop's own event constructors) stays
+			// byte-unchanged from pre-AG-11: no emission, drain,
+			// close, return.
+			if pf, ok := turn.fatal.(*ai.Failure); ok {
+				if failure, ferr := NewFailure(pf); ferr == nil {
+					// One NewFailure call feeds both
+					// emissions (task 5.3's identity pin):
+					// turnEnd.Failure() == runEnd.Failure()
+					// by pointer, proving single
+					// construction, not two independent
+					// wraps.
+					if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
+						emitStamped(sink, stamper, turnEnd)
+					}
+					if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+						emitStamped(sink, stamper, runEnd)
+					}
+				}
+				// D7: no second provider.Stream call — the
+				// turn winds down here, after exactly one.
+				msg := turn.reconstructMessage()
+				closeSink(sink)
+				return msg, 0, turn.fatal
+			}
 			closeSink(sink)
 			return ai.Message{}, 0, turn.fatal
 		}
