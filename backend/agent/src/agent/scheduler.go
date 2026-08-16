@@ -72,6 +72,14 @@ const maxReadFanOutDefault = 8
 // directly (D6b's single-writer invariant).
 type emission struct {
 	ev Event
+
+	// ack is optional (nil for every emission except
+	// permission_decision_required, AG-10 R-APP-002/D4). When
+	// non-nil, the dispatcher closes it immediately after
+	// `sink <- &stamped` completes, so a sender that blocks on
+	// `<-ack` is guaranteed the event has actually reached `sink` —
+	// not merely that it was enqueued onto this buffered channel.
+	ack chan struct{}
 }
 
 // Schedule runs a slice of tool calls under the AG-09.2 / AG-09.3 /
@@ -251,6 +259,12 @@ func (s *Scheduler) runDispatcher(
 	for em := range emissions {
 		stamped := stamper.Stamp(em.ev)
 		sink <- &stamped
+		if em.ack != nil {
+			// R-APP-002/D4: the sender waiting on ack now has proof
+			// the event reached sink, not merely that it reached
+			// this dispatcher's internal buffer.
+			close(em.ack)
+		}
 	}
 }
 
@@ -574,7 +588,15 @@ func (s *Scheduler) runPermissionGate(
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, nil
 		}
-		emissions <- emission{ev: reqEv}
+		// R-APP-002/D4: "emission reaches sink before the parked
+		// wait blocks" — a stronger guarantee than "enqueued onto
+		// this buffered channel". Block on the ack the dispatcher
+		// closes only after sink <- &stamped completes, so
+		// parked.park() below cannot run until the event has
+		// genuinely reached sink.
+		reqAck := make(chan struct{})
+		emissions <- emission{ev: reqEv, ack: reqAck}
+		<-reqAck
 
 		parkCh := parked.park(call.ID())
 		select {
