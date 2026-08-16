@@ -1137,3 +1137,78 @@ func TestPermission_WakeParked_UnknownCallID_TypedRejection_NoTouch(t *testing.T
 	}
 	<-drainDone
 }
+
+// --- D-B shutdown-ordering approval test -----------------------------
+
+// D-B — park release has exactly TWO production paths: WakeParked
+// (close by callID) and ctx.Done(). This test drives a context with
+// NO deadline at all (plain context.Background(), no WithTimeout /
+// WithCancel) — the ONLY way Schedule can possibly return is the
+// explicit WakeParked call below. If Schedule ever came to depend on
+// a defensive sweep at Schedule exit (a wg.Wait()-then-closeAll
+// ordering can never fire — a parked goroutine never calls wg.Done()
+// until it is released, so by the time such a sweep would run, every
+// goroutine has already exited through one of the two real paths),
+// this test would hang and fail on the deadline below.
+//
+// Approval test (strict-tdd.md "Approval Testing for refactoring"):
+// written to capture and freeze this already-correct contract BEFORE
+// the D-B cleanup deletes the unreachable closeAll sweep, the dead
+// wakeErr-non-nil branch, and errParkedSetShutdown — it passes
+// identically before and after, proving the deletion changed no
+// observable behavior.
+func TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline(t *testing.T) {
+	t.Parallel()
+
+	var resolveN atomic.Int64
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			if resolveN.Add(1) == 1 {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+
+	tool := EchoScriptedTool("no_deadline_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"no_deadline_tool": tool})
+	calls := []scheduledPermissionCall{{id: "no_deadline_0", name: "no_deadline_tool", args: []byte(`{}`)}}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	ready, drainDone, _ := drainUntilDecisionRequired(sink, "no_deadline_0")
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		// context.Background(): no deadline, no cancel. Nothing but
+		// an explicit WakeParked can ever unblock this call.
+		doneCh <- sched.Schedule(context.Background(), permissionCallsToAICalls(calls), reg, "run-no-deadline", "turn-no-deadline", policy, stamper, sink)
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("decision_required for no_deadline_0 not observed within 2s")
+	}
+
+	if err := sched.WakeParked("no_deadline_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "no_deadline_0", err)
+	}
+
+	select {
+	case results := <-doneCh:
+		if len(results) != 1 {
+			t.Fatalf("Schedule returned %d results, want 1", len(results))
+		}
+		if results[0].Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s on a deadline-less context — the only release path (WakeParked) was called explicitly above")
+	}
+	<-drainDone
+	if inv := tool.Invocations(); inv != 1 {
+		t.Errorf("no_deadline_tool invocations = %d, want 1", inv)
+	}
+}

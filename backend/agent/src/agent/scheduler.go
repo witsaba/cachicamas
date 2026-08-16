@@ -125,9 +125,9 @@ func (s *Scheduler) Schedule(
 	dispatcherDone := make(chan struct{})
 
 	// Per-Schedule parked set for the AG-10 permission gate.
-	// Keyed by `callID`; each entry is a `chan error` the call
+	// Keyed by `callID`; each entry is a `chan struct{}` the call
 	// goroutine blocks on while parked, and the upward-path wake
-	// resolves. The set is shared across all call goroutines in
+	// closes. The set is shared across all call goroutines in
 	// this Schedule call (R-LSK-002 carry: one Schedule call, one
 	// parked set).
 	//
@@ -179,6 +179,18 @@ func (s *Scheduler) Schedule(
 		}
 	}
 	wg.Wait()
+	// D-B: by the time wg.Wait() returns, every call goroutine —
+	// including any that were parked — has already exited through
+	// one of park release's exactly two production paths:
+	// WakeParked (upward-path wake) or ctx.Done() (cancellation,
+	// AG-10.3 R-APP-009). A parked goroutine never calls wg.Done()
+	// until it is released, so a defensive sweep placed here would
+	// run only after every parked call has already gone through one
+	// of those two paths — it would be provably unreachable-with-
+	// effect. AG-10.3 originally carried such a sweep
+	// (parked.closeAll()); it was deleted (D-B) once this ordering
+	// was shown to make it dead code, not a safety net.
+	//
 	// D-A: the parked set's external handle is only valid while
 	// calls from this Schedule call may still be in flight — clear
 	// it now so a WakeParked racing the tail of this call observes
@@ -187,13 +199,6 @@ func (s *Scheduler) Schedule(
 	s.parkedMu.Lock()
 	s.parked = nil
 	s.parkedMu.Unlock()
-	// Safety net: any call still parked at Schedule exit is
-	// unblocked via closeAll (a goroutine waiting on a parked
-	// channel observes the close and exits its select). The
-	// cancellation discipline (AG-10.3) is the production path;
-	// this is a defensive sweep so a missed close cannot leak
-	// goroutines.
-	parked.closeAll()
 	close(emissions)
 	<-dispatcherDone
 	close(sink)
@@ -549,18 +554,11 @@ func (s *Scheduler) runPermissionGate(
 
 		parkCh := parked.park(call.ID())
 		select {
-		case wakeErr := <-parkCh:
-			// Woken via upward-path (nil error) OR schedule
-			// shutdown sweep (non-nil error). The parked
-			// channel's value distinguishes the two paths:
-			// wake → proceed, shutdown → abort.
-			if wakeErr != nil {
-				abort := typedExecutionFailureFromError(call.ID(), wakeErr)
-				results[ordinal] = abort
-				emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
-				return false, nil, abort.Failure
-			}
-			// Upward-path wake (D-A): re-enter policy.Resolve and
+		case <-parkCh:
+			// Upward-path wake (D-A) — the ONLY producer that
+			// closes this channel is Scheduler.WakeParked (D-B:
+			// park release has exactly two production paths, this
+			// and ctx.Done() below). Re-enter policy.Resolve and
 			// process the fresh verdict — the recursive call
 			// reuses this same function's full outcome dispatch,
 			// including the Defer branch (a policy that defers

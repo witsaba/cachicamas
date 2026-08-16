@@ -133,65 +133,54 @@ type PermissionVerdict struct {
 const PermissionDefer PermissionOutcome = 0
 
 // parkedSet is the per-Schedule coordination primitive for calls
-// that the policy wants to defer. Keyed by `callID`; the value is
-// a per-call `chan error` the call goroutine blocks on. The
-// channel carries one error value: nil means "wake (proceed)",
-// non-nil means "abort (schedule shutdown or typed rejection).
+// that the policy wants to defer. Keyed by `callID`; the value is a
+// per-call `chan struct{}` the call goroutine blocks on — the close
+// itself is the signal.
 //
-// The set lives one Schedule call (R-LSK-002 carry); the scheduler
-// closes any channels left at shutdown so parked goroutines
-// observe the close and exit cleanly. Owned by `Scheduler.Schedule`
-// per the design (Approach 1).
-//
-// # Why chan error
-//
-// The original AG-10.1 design used `chan struct{}` — the close
-// itself was the signal, and the receiver's `ctx.Err()` check
-// distinguished "wake" from "cancel". AG-10.3's defensive
-// closeAll at Schedule exit (a non-cancel shutdown path) broke
-// that distinction: a close from closeAll was indistinguishable
-// from a wake. AG-10.3 wires the channel to `chan error` so the
-// shutdown path can send a non-nil sentinel and the wake path
-// can send nil — the receiver reads the value, not the close.
+// The set lives one Schedule call (R-LSK-002 carry). D-B: park
+// release has exactly two production paths — Scheduler.WakeParked
+// (closes the specific callID's channel) and the gate's own
+// `case <-ctx.Done()` branch (AG-10.3 cancellation, R-APP-009). A
+// parked goroutine that observes neither never calls wg.Done(), so
+// `Schedule` cannot return while it is still parked — by
+// construction there is nothing for a defensive close-everything
+// sweep at Schedule exit to ever unblock (an earlier AG-10.3 draft
+// carried one; deleted, D-B, once this was shown).
 //
 // # Concurrency
 //
 // The set is shared across all call goroutines spawned by one
 // `Schedule` call (R-TLS-009's three sub-paths + AG-10's parked
-// set). Accesses are guarded by a `sync.Mutex` (D6b carry):
-// every map mutation (park / wake / closeAll) acquires the
-// lock, every read (parkedCount / wake lookup) acquires the
-// lock. The `chan error` itself is a one-shot signaling
-// primitive — once a sender has written its value and closed
-// the channel, the receiver reads exactly once and the entry
-// is removed.
+// set). Accesses are guarded by a `sync.Mutex` (D6b carry): every
+// map mutation (park / wake) acquires the lock, every read
+// (parkedCount / wake lookup) acquires the lock.
 type parkedSet struct {
 	mu       sync.Mutex
-	channels map[string]chan error
+	channels map[string]chan struct{}
 }
 
 // newParkedSet constructs an empty parkedSet. The caller owns the
 // set's lifetime (one Schedule call).
 func newParkedSet() *parkedSet {
-	return &parkedSet{channels: make(map[string]chan error)}
+	return &parkedSet{channels: make(map[string]chan struct{})}
 }
 
 // park returns a fresh per-call channel registered under callID.
-// The returned channel is the one the call goroutine blocks on;
-// the upward-path wake sends nil, the schedule shutdown sweep
-// sends a non-nil abort sentinel.
-func (p *parkedSet) park(callID string) chan error {
-	ch := make(chan error, 1) // buffered so closeAll's send is non-blocking
+// The returned channel is the one the call goroutine blocks on; the
+// upward-path wake (Scheduler.WakeParked) closes it.
+func (p *parkedSet) park(callID string) chan struct{} {
+	ch := make(chan struct{})
 	p.mu.Lock()
 	p.channels[callID] = ch
 	p.mu.Unlock()
 	return ch
 }
 
-// wake sends nil on the channel registered under callID and
-// returns whether one was registered. A wake to an unknown
-// callID is the typed rejection AG-10.1 commits to (R-APP-003,
-// S-PPB-003 bite).
+// wake closes the channel registered under callID and returns
+// whether one was registered. A wake to an unknown callID is the
+// typed rejection AG-10.1 commits to (R-APP-003, S-PPB-003 bite) —
+// and, per the lookup-then-delete ordering under one lock
+// acquisition, touches no other entry in the set (S-APP-004).
 func (p *parkedSet) wake(callID string) bool {
 	p.mu.Lock()
 	ch, ok := p.channels[callID]
@@ -201,34 +190,8 @@ func (p *parkedSet) wake(callID string) bool {
 	}
 	delete(p.channels, callID)
 	p.mu.Unlock()
-	ch <- nil
 	close(ch)
 	return true
-}
-
-// closeAll sends a non-nil abort sentinel on every registered
-// channel. Used at Schedule shutdown (AG-10.3 cancellation
-// discipline — same effect as a context cancel walk, but
-// distinguishable from an upward-path wake). Safe to call on an
-// empty set.
-//
-// The set's mutex is released BEFORE the sends — sending on the
-// per-call channel may block briefly (the receiver is parked in
-// a select), but releasing the lock first lets concurrent
-// `wake` calls interleave correctly (the production code never
-// interleaves wake + closeAll, but the test path does).
-func (p *parkedSet) closeAll() {
-	p.mu.Lock()
-	pending := make([]chan error, 0, len(p.channels))
-	for id, ch := range p.channels {
-		pending = append(pending, ch)
-		delete(p.channels, id)
-	}
-	p.mu.Unlock()
-	for _, ch := range pending {
-		ch <- errParkedSetShutdown
-		close(ch)
-	}
 }
 
 // parkedCount reports how many calls are currently parked. Test
@@ -237,18 +200,4 @@ func (p *parkedSet) parkedCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.channels)
-}
-
-// errParkedSetShutdown is the typed sentinel closeAll sends to
-// every registered parked call when Schedule exits with parked
-// calls remaining. The receiver (gate's select) treats a
-// non-nil value as "abort" — a typed execution failure is
-// written into the call's ordinal slot, matching AG-10.3's
-// cancellation discipline (R-APP-009).
-var errParkedSetShutdown = parkedSetShutdown{}
-
-type parkedSetShutdown struct{}
-
-func (parkedSetShutdown) Error() string {
-	return "agent: parked set closed at schedule exit (AG-10.3 abort)"
 }
