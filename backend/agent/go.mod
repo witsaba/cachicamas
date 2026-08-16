@@ -1,6 +1,6 @@
 module github.com/cachicamas/backend/agent
 
-go 1.26.5
+go 1.26.6
 
 require (
 	go.opentelemetry.io/otel v1.44.0

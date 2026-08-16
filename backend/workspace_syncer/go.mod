@@ -1,6 +1,6 @@
 module github.com/cachicamas/backend/workspace_syncer
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/labstack/echo/v5 v5.2.1
