@@ -226,6 +226,45 @@ func TestSuite_NeverAssertsOnFailureMessageStringContent(t *testing.T) {
 	}
 }
 
+// S-ATT-008 / S-AEV-074 — AG-11.2 co-closure: the partial-output
+// discriminator is reachable through Layer 2's typed-failure surface,
+// nil-safe, mirroring Category() / Delivery() / Retryable(). Lands in
+// this file's family per R-ATT-006, so the joint invariant-4 closure
+// claim this file's own header comment states ("invariant 4 closes
+// jointly with AG-11.2") stays auditable in one place.
+func TestFailure_PartialOutput_ReachableAsTypedValue(t *testing.T) {
+	t.Parallel()
+
+	precededInner, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout}, true)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure() error = %v, want nil", err)
+	}
+	preceded, err := agent.NewFailure(precededInner)
+	if err != nil {
+		t.Fatalf("agent.NewFailure() error = %v, want nil", err)
+	}
+	if got := preceded.PartialOutput(); !got {
+		t.Errorf("preceded.PartialOutput() = %v, want true — content preceded this failure", got)
+	}
+
+	noneInner, err := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryTimeout}, false)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure() error = %v, want nil", err)
+	}
+	none, err := agent.NewFailure(noneInner)
+	if err != nil {
+		t.Fatalf("agent.NewFailure() error = %v, want nil", err)
+	}
+	if got := none.PartialOutput(); got {
+		t.Errorf("none.PartialOutput() = %v, want false — nothing preceded this failure", got)
+	}
+
+	var nilFailure *agent.Failure
+	if got := nilFailure.PartialOutput(); got {
+		t.Errorf("nilFailure.PartialOutput() = %v, want false — nil-safe, mirroring Category()/Delivery()/Retryable()", got)
+	}
+}
+
 // S-AEV-100 — the package documentation states that ordering is per
 // consumer lane, independent, contiguous and 1-based, and that Layer 2's
 // counter is not Layer 1's per-stream sequence.

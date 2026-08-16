@@ -109,6 +109,14 @@ written into this file. Future milestones extending the same surface:
 append your own one-line pointer to this section rather than assuming the
 next agent already knows the list.
 
+**AG-11** (`cachicamas-agent-turn-termination`) is the first milestone
+since AG-10's own pointer above to actually modify one of these ten
+files: `failure.go` gains a nil-safe `PartialOutput() bool` accessor
+(R-ATT-006), for the same structural reason `R-LSK-004`/`R-APP-012`
+record — the accessor set is local to `failure.go`. The release is
+scoped to AG-11 only, exact-filename, and does not extend to any later
+milestone without its own recorded delta.
+
 ## Review checklist (for reviewers)
 
 - [ ] reviewer can confirm the Makefile targets listed above exist and match this file

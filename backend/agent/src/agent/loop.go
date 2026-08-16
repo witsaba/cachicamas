@@ -271,24 +271,82 @@ func Turn(
 			// Mid-stream terminal error: drain whatever is left so
 			// the producer's goroutine is not stranded (S-LSK-002).
 			_ = drainProvider(pCh)
+
+			// D1's type fork: a typed *ai.Failure — the
+			// ev.ErrorPayload() arm of translate()'s
+			// EventKindError case — gets the typed-Aborted
+			// treatment (R-ATT-005..008). An internal
+			// construction error (a plain Go error from one of
+			// the loop's own event constructors) stays
+			// byte-unchanged from pre-AG-11: no emission, drain,
+			// close, return.
+			if pf, ok := turn.fatal.(*ai.Failure); ok {
+				if failure, ferr := NewFailure(pf); ferr == nil {
+					// One NewFailure call feeds both
+					// emissions (task 5.3's identity pin):
+					// turnEnd.Failure() == runEnd.Failure()
+					// by pointer, proving single
+					// construction, not two independent
+					// wraps.
+					if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
+						emitStamped(sink, stamper, turnEnd)
+					}
+					if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+						emitStamped(sink, stamper, runEnd)
+					}
+				}
+				// D7: no second provider.Stream call — the
+				// turn winds down here, after exactly one.
+				msg := turn.reconstructMessage()
+				closeSink(sink)
+				return msg, 0, turn.fatal
+			}
 			closeSink(sink)
 			return ai.Message{}, 0, turn.fatal
 		}
 	}
 
 	// Provider closed without a Completion: walking-skeleton scope
-	// treats this as a "ran to empty" turn — close the brackets
-	// (turn_end + run_end), reconstruct msg from accumulated
-	// fragments, return FinishReasonStop as the documented fallback
-	// for a stream that finished without a Completion event (per
-	// AI-13.1's unknown-stop semantics: the absence is recorded,
-	// not corrected).
+	// treats this as a "ran to empty" turn — normalize the finish
+	// reason to FinishReasonStop, the documented fallback for a
+	// stream that finished without a Completion event (per AI-13.1's
+	// unknown-stop semantics: the absence is recorded, not
+	// corrected), BEFORE finalize() dispatches on it (D2). Without
+	// this the dispatch would see the zero FinishReason, which is not
+	// a vocabulary member.
+	if turn.finish == 0 {
+		turn.finish = ai.FinishReasonStop
+	}
 	msg, finish := turn.finalize()
 	closeSink(sink)
-	if finish == 0 {
-		finish = ai.FinishReasonStop
-	}
 	return msg, finish, nil
+}
+
+// outcomeForFinish maps a normalized ai.FinishReason to its TurnOutcome
+// (R-ATT-001/002, D4). Total over the finish-reason vocabulary — the
+// default case is defensive and unreachable in production: both call
+// sites (the completion path, validated non-zero by ai.NewCompletion,
+// and the no-completion path, normalized by Turn ahead of the call per
+// D2) hand this function a member value.
+func outcomeForFinish(finish ai.FinishReason) TurnOutcome {
+	switch finish {
+	case ai.FinishReasonStop:
+		return TurnOutcomeFinished
+	case ai.FinishReasonLength:
+		return TurnOutcomeLengthLimited
+	case ai.FinishReasonToolCalls:
+		return TurnOutcomeToolCalls
+	case ai.FinishReasonContentFilter:
+		return TurnOutcomeContentFiltered
+	case ai.FinishReasonRefusal:
+		return TurnOutcomeRefused
+	case ai.FinishReasonPauseTurn:
+		return TurnOutcomePaused
+	case ai.FinishReasonUnknown:
+		return TurnOutcomeUnknown
+	default:
+		return 0 // no outcome; NewTurnEnd rejects it.
+	}
 }
 
 // emitStamped stamps ev through the LaneStamper and sends it on sink.
@@ -606,11 +664,14 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 // scope: text-only reconstruction. Phase 3 widens to reasoning parts
 // (S-LSK-005).
 func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
-	// Emit turn_end (TurnOutcomeFinished) and run_end (RunOutcomeCompleted).
-	// The walking skeleton's happy path is the only outcome handled
-	// at this layer — failures beyond typed pass-through are
-	// AG-08…AG-18.
-	turnEnd, terr := NewTurnEnd(t.runID, t.turnID, TurnOutcomeFinished, nil)
+	// Emit turn_end (dispatched from t.finish via outcomeForFinish,
+	// R-ATT-002) and run_end (RunOutcomeCompleted — refusal, pause and
+	// unknown are turn-level distinctions only; D5). Failures beyond
+	// typed pass-through on this, the non-fatal path, are out of
+	// scope: they never reach finalize (the fatal path returns
+	// earlier, before the drain loop's normal exit).
+	outcome := outcomeForFinish(t.finish)
+	turnEnd, terr := NewTurnEnd(t.runID, t.turnID, outcome, nil)
 	if terr == nil {
 		emitStamped(t.sink, t.stamper, turnEnd)
 	}
@@ -619,11 +680,22 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 		emitStamped(t.sink, t.stamper, runEnd)
 	}
 
-	// Reconstruct the assistant message from accumulated fragments.
-	// Walking-skeleton scope: one text Part per complete text bracket,
-	// one reasoning Part per complete reasoning bracket (carrying the
-	// round-trip token byte-exact per R-ARE-010). Order: reasoning
-	// before text (the order the walking skeleton handles them at).
+	return t.reconstructMessage(), t.finish
+}
+
+// reconstructMessage rebuilds the assistant message from the fragments
+// accumulated so far (D6): one text Part per complete text bracket, one
+// reasoning Part per complete reasoning bracket (carrying the
+// round-trip token byte-exact per R-ARE-010), and one text Part per
+// tool result. Order: reasoning before text before tool results — the
+// order the walking skeleton handles them at.
+//
+// Both finalize() (the normal-completion path) and Turn's mid-stream
+// fatal branch (R-ATT-007) call this — one reconstruction, two callers,
+// no semantic fork. On the fatal path a bracket left open (started but
+// not ended) still drops, matching finalize()'s existing rule
+// unchanged.
+func (t *turnAccumulator) reconstructMessage() ai.Message {
 	var parts []ai.Part
 	if t.reasoningBracket.started && t.reasoningBracket.ended {
 		text := string(t.reasoningBracket.fragments)
@@ -667,11 +739,11 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 		}
 	}
 	if len(parts) == 0 {
-		return ai.Message{}, t.finish
+		return ai.Message{}
 	}
 	msg, mErr := ai.NewMessage(ai.RoleAssistant, parts...)
 	if mErr != nil {
-		return ai.Message{}, t.finish
+		return ai.Message{}
 	}
-	return msg, t.finish
+	return msg
 }

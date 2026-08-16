@@ -68,6 +68,18 @@ func (f *Failure) Retryable() bool {
 	return f.wrapped.Retryable()
 }
 
+// PartialOutput reports whether output preceded this failure —
+// Layer 1's discriminator (ai.Failure.PartialOutput,
+// provider_failure.go:515-520), delegated unchanged (R-ATT-006). A nil
+// *Failure reports false rather than panicking, mirroring
+// Category()/Delivery()/Retryable().
+func (f *Failure) PartialOutput() bool {
+	if f == nil {
+		return false
+	}
+	return f.wrapped.PartialOutput()
+}
+
 // Unwrap returns the wrapped `*ai.Failure` as an error, keeping the whole
 // `errors.Is`/`errors.As` sentinel chain of Layer 1's provider-failure
 // taxonomy reachable through the envelope. A nil *Failure unwraps to nil
