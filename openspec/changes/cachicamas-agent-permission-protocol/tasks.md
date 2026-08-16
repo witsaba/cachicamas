@@ -74,13 +74,17 @@ explicitly carried forward, not fixed here.
 
 - [x] R1 (W3) — structurally guaranteed lost wakeup on the wake surface.
   `parked.park(callID)` now runs BEFORE the `decision_required` emission, not after
-  (`scheduler.go`'s `runPermissionGate` Defer branch reordered). RED:
-  `TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry` — a synchronous,
-  no-retry `WakeParked` the instant `decision_required` is observed, ~27% failure over 30
-  runs pre-fix (flaky, not the literal 100% the verify finding estimated, but real
-  non-vacuous evidence), deterministic 15/15 GREEN post-fix (a genuine happens-before
-  chain, not a scheduling race, now guarantees this). `wakeParkedWithRetry` deleted — the
-  helper that existed only to paper over this gap — and its 4 callers re-pointed at
+  (`scheduler.go`'s `runPermissionGate` Defer branch reordered).
+  **CORRECTED in Phase 7 R9 below (verify-report S6)**: the RED test originally cited
+  here, `TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry`, does NOT
+  reliably reproduce RED against a reverted reorder — measured at 0/40 isolated, 0/20
+  full-package by the terminal verify pass, and 3/4 spurious PASS when re-measured in
+  Phase 7 — because its `drainUntilDecisionRequired` consumer's buffering + extra
+  goroutine hop gives `park()` enough head start to win regardless of ordering. The
+  reorder's actual, deterministic RED/GREEN bite is `TestPermission_DeferEmitsBeforePark`
+  (S-PPB-002) — FAIL 20/20 (original round) and 4/4 (Phase 7 re-confirmation) when the
+  reorder is reverted. `wakeParkedWithRetry` deleted — the helper that existed only to
+  paper over this gap — and its 4 callers re-pointed at
   direct `sched.WakeParked(id)` calls.
   `TestPermission_DeferEmitsBeforePark` (S-PPB-002) rewritten: its OLD assertion
   ("WakeParked must keep failing until sink delivers the event") is now the WRONG
@@ -161,3 +165,73 @@ explicitly carried forward, not fixed here.
 | `go test -race -count=10 -run TestPermission ./src/agent/` | PASS — 230 `--- PASS`, 0 `FAIL`, 0 `DATA RACE`, exit 0 |
 | `make vuln-check` | FAIL — accepted, unchanged: same 5 pre-existing Go stdlib advisories at `go1.26.5`, zero `src/agent/` traces |
 | `TestTurn_SubstrateUntouched` + merge-base diff | PASS — 0 lines changed across all 10 substrate files against merge-base `6de08335` |
+
+## Phase 7: Second remediation round (W9, S6 — terminal re-verification)
+
+The terminal re-verification (`verify-report.md`, PASS WITH WARNINGS — 0 CRITICAL, 4
+WARNING, 3 SUGGESTION) closed 5 of the 8 prior warnings and all 5 prior suggestions, but
+introduced two new findings from the Phase 6 round's own changes: **W9** (a new
+WARNING — the R-APP-002/D4 ack lost its only non-vacuous test guard) and **S6** (a
+SUGGESTION — the test Phase 6's R1 designated as the W3 RED bite does not actually catch
+a reverted reorder). The orchestrator scoped this round to exactly those two findings.
+W5/W6 (archive-phase promoted-spec transform), W7 (accepted pre-existing `vuln-check`
+stdlib advisories), and S7/S8 (cosmetic) were explicitly carried forward, not fixed here.
+No production-code behavior change was made or required — both items are test-only
+(one new test, one doc-comment correction).
+
+- [x] R8 (W9) — the R-APP-002/D4 ack lost its only non-vacuous test guard.
+  `TestPermission_DeferEmitsBeforePark`'s W3 rewrite proves decision_required delivery
+  and registration-before-emission, but no longer proves the ack's own ordering: post-W3
+  an early wake succeeds purely from registration timing, ack or no ack, so that test
+  cannot distinguish the two. Deleting `reqAck` entirely (no ack field, no wait) left the
+  whole package green. New test:
+  `TestPermission_WakeParked_AckGatesCompletion_NoRunBeforeSinkDelivery` — wakes early
+  (same technique as `TestPermission_DeferEmitsBeforePark`), then — BEFORE ever reading
+  sink — polls for 300ms asserting zero tool invocations and a still-pending `Schedule`;
+  only then reads `decision_required` off the still-unbuffered sink. With the ack present
+  this window is not a race: the dispatcher is structurally blocked on
+  `sink <- &stamped` (unread), so `close(reqAck)` cannot have run, so the gate cannot have
+  left the ack-select, so the tool cannot have run — true for the entire window, not
+  merely likely. RED (ack deleted, full package, unfiltered): FAIL deterministically — 1
+  in-process run + 5 separate full-package process invocations, all 6 failed with
+  `ack_gate_tool invocations = 1, want 0`. GREEN (ack restored via `git restore`, full
+  package): PASS — 1 in-process run + 3 separate full-package process invocations, all 4
+  clean; `go test -race -count=15 ./src/agent/` also clean. (90fde05f)
+- [x] R9 (S6) — the designated W3 bite does not actually catch the W3 revert.
+  `TestPermission_WakeParked_SynchronousOnDecisionRequired_NoRetry` (cited by R1 above as
+  the W3 RED bite) does not reproduce that failure: its `drainUntilDecisionRequired`
+  consumer buffers sink (capacity 64) and hands the ready signal through a separate
+  goroutine plus a `sync.Once`-gated channel close, and that extra scheduling latency
+  reliably gives `park()` enough head start to win the race regardless of ordering.
+  Re-measured this round (full package, unfiltered, reorder reverted): the test passed 3
+  of 4 runs and failed only 1 of 4 — an unreliable, probabilistic guard, not the
+  deterministic bite R1's text and this test's own doc comment claimed.
+  `TestPermission_DeferEmitsBeforePark` (S-PPB-002) IS the reorder's actual, deterministic
+  guard: its early wake runs directly in the polling loop's own goroutine against an
+  unbuffered sink with no extra hop, so it reliably loses pre-fix and reliably wins
+  post-fix — FAIL 4/4 full-package runs this round when the reorder is reverted (matching
+  the original round's 20/20), PASS 3/3 fresh full-package runs when restored. Chose the
+  documentation-correction route over strengthening the test's own harness: the
+  invariant is inherently better pinned by `TestPermission_DeferEmitsBeforePark`, so
+  duplicating a second race-shaped test would only add another probabilistic assertion
+  next to a deterministic one. Corrected this test's doc comment to drop the false
+  RED/GREEN claim, name `TestPermission_DeferEmitsBeforePark` as the real guard, and
+  describe what this test legitimately still proves (no-retry latency characterization
+  for the realistic buffered-consumer path). Also corrected R1's claim above in this same
+  file. No test body or production code changed. (7ab11679)
+
+### Gates re-verified after the second remediation round (W9, S6)
+
+| Gate | Result |
+|---|---|
+| `make test` (whole module, `-race`) | PASS — 1182 `--- PASS`, 0 `FAIL`, exit 0, 12 `ok` packages |
+| `make lint` (after `cache clean`) | PASS — `0 issues.` |
+| `make build` | PASS — `go build -trimpath ./...` exit 0 |
+| `go test -race -count=15 ./src/agent/` | PASS — zero flakes, 7.596s |
+| `make vuln-check` | FAIL — accepted, unchanged: same 5 pre-existing Go stdlib advisories (`GO-2026-5026`, `-5972`, `-6089`, `-6090`, `-6218`) at `go1.26.5`, zero `src/agent/` traces |
+| `TestTurn_SubstrateUntouched` + `TestTurn_PreRequestHook_SubstrateUntouched` + merge-base diff | PASS — 0 lines changed across all 10 substrate files against merge-base `6de08335`; no new test file added this round, so no filter widening was needed |
+
+Second remediation round commits: `e7073a19` (verify-report.md tracking), `90fde05f`
+(R8/W9), `7ab11679` (R9/S6), plus this docs commit. Nothing left uncommitted. Ready for
+`sdd-verify` re-run or archive at the orchestrator's discretion — this executor does not
+push, open a PR, or archive.
