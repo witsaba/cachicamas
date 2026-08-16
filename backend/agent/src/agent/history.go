@@ -242,6 +242,62 @@ func (h *History) CloseTurn() error {
 	return h.commit(commitCloseTurn, ai.Message{}, 0)
 }
 
+// synthesizedInterruptionContent is the fixed content every synthesized
+// interruption result carries. It informs the model but is NOT the
+// discriminator: a real tool can emit the identical bytes, so
+// distinguishability rides the entry envelope's origin alone (R-HIS-007,
+// proposal decision 4's corollary).
+const synthesizedInterruptionContent = "tool call interrupted before a result arrived; this result was synthesized by the harness"
+
+// SynthesizeOrphans completes every orphaned tool call with a result
+// recorded as an interruption artifact (R-HIS-007), routed through
+// [History.commit] like every other mutating route (R-HIS-004) — this is
+// not a second, unaudited door.
+//
+// The open set is snapshotted in issuance order and every synthesized
+// message is built BEFORE any commit is attempted, so a construction
+// failure — impossible in practice, since a call's identity is
+// non-empty by ai.NewToolCall's own invariant, but still handled rather
+// than panicked — commits nothing rather than half-repairing the
+// transcript.
+//
+// It is idempotent and total (R-HIS-008): the first application closes
+// exactly N pairs and returns (N, nil); a second application finds no
+// orphans, commits nothing, and returns (0, nil) with a byte-identical
+// transcript. `new(History)` is rejected before anything is built or
+// committed (S-HIS-030's zero-value proof for this route).
+func (h *History) SynthesizeOrphans() (int, error) {
+	if err := h.checkConstructed(); err != nil {
+		return 0, err
+	}
+
+	orphans := make([]openCall, len(h.open))
+	copy(orphans, h.open)
+	if len(orphans) == 0 {
+		return 0, nil
+	}
+
+	messages := make([]ai.Message, 0, len(orphans))
+	for _, orphan := range orphans {
+		part, err := ai.NewToolFailure(orphan.callID, synthesizedInterruptionContent)
+		if err != nil {
+			return 0, err
+		}
+		message, err := ai.NewMessage(ai.RoleTool, part)
+		if err != nil {
+			return 0, err
+		}
+		messages = append(messages, message)
+	}
+
+	for _, message := range messages {
+		if err := h.commit(commitAppend, message, EntryOriginSynthesized); err != nil {
+			return 0, err
+		}
+	}
+	return len(messages), nil
+}
+
 // Entries returns a freshly allocated snapshot of the transcript, in
 // order. Mutating the result cannot touch internal storage (S-HIS-002):
 // the slice is copied, and [Entry]'s own fields are unexported value
