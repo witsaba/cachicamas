@@ -125,12 +125,21 @@ func (s *Scheduler) Schedule(
 	dispatcherDone := make(chan struct{})
 
 	// Per-Schedule parked set for the AG-10 permission gate.
-	// Keyed by `callID`; each entry is a `chan struct{}` the
-	// call goroutine blocks on while parked, and the upward-path
-	// wake closes. The set is shared across all call goroutines
-	// in this Schedule call (R-LSK-002 carry: one Schedule call,
-	// one parked set).
+	// Keyed by `callID`; each entry is a `chan error` the call
+	// goroutine blocks on while parked, and the upward-path wake
+	// resolves. The set is shared across all call goroutines in
+	// this Schedule call (R-LSK-002 carry: one Schedule call, one
+	// parked set).
+	//
+	// D-A: also published to `s.parked` (guarded by `s.parkedMu`)
+	// so `WakeParked`, called from a goroutine outside this
+	// Schedule call's own tree, can reach it. Cleared back to nil
+	// at Schedule exit (below) so the field's lifetime matches the
+	// parked set's — exactly one Schedule call (R-LSK-002 carry).
 	parked := newParkedSet()
+	s.parkedMu.Lock()
+	s.parked = parked
+	s.parkedMu.Unlock()
 
 	// Bounded fan-out for reads: a `chan struct{}` semaphore
 	// with capacity `maxReads`. A read call acquires a slot
@@ -170,6 +179,14 @@ func (s *Scheduler) Schedule(
 		}
 	}
 	wg.Wait()
+	// D-A: the parked set's external handle is only valid while
+	// calls from this Schedule call may still be in flight — clear
+	// it now so a WakeParked racing the tail of this call observes
+	// "no active parked set" (ErrStrayDecision) rather than a set
+	// whose entries can no longer matter (R-LSK-002 carry).
+	s.parkedMu.Lock()
+	s.parked = nil
+	s.parkedMu.Unlock()
 	// Safety net: any call still parked at Schedule exit is
 	// unblocked via closeAll (a goroutine waiting on a parked
 	// channel observes the close and exits its select). The
@@ -181,6 +198,28 @@ func (s *Scheduler) Schedule(
 	<-dispatcherDone
 	close(sink)
 	return results
+}
+
+// WakeParked is the upward-path hand-off (D-A: "the loop owns the
+// upward-path wake (close by callID); the scheduler owns the parked
+// set"). It delivers a decision to the call parked under callID: the
+// parked goroutine's `select` in `runPermissionGate` unblocks and
+// re-enters `policy.Resolve`, processing the fresh verdict exactly as
+// it would a first-time synchronous verdict (design data flow "wake:
+// re-evaluate verdict").
+//
+// Returns ErrStrayDecision — and touches no parked call — when callID
+// is not currently parked: either no Schedule call has calls in
+// flight right now, or callID was never parked (or has already been
+// woken / resolved) (R-APP-003, S-APP-003/S-APP-004).
+func (s *Scheduler) WakeParked(callID string) error {
+	s.parkedMu.Lock()
+	parked := s.parked
+	s.parkedMu.Unlock()
+	if parked == nil || !parked.wake(callID) {
+		return ErrStrayDecision
+	}
+	return nil
 }
 
 // runDispatcher is the single goroutine that owns the `LaneStamper`
@@ -521,12 +560,13 @@ func (s *Scheduler) runPermissionGate(
 				emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 				return false, nil, abort.Failure
 			}
-			// Upward-path wake. Commit 4 stub proceeds without
-			// re-evaluation; a later milestone will call
-			// policy.Resolve again to surface the human's
-			// decision. For AG-10.2 / AG-10.3, the woken call's
-			// verdict is treated as AllowOnce.
-			return true, nil, nil
+			// Upward-path wake (D-A): re-enter policy.Resolve and
+			// process the fresh verdict — the recursive call
+			// reuses this same function's full outcome dispatch,
+			// including the Defer branch (a policy that defers
+			// again on wake is a policy quirk, not a protocol
+			// bug: the call simply re-parks).
+			return s.runPermissionGate(ctx, ordinal, call, runID, turnID, policy, parked, results, emissions)
 		case <-ctx.Done():
 			// Mid-park cancel: typed abort failure (AG-10.3
 			// R-APP-009). The rejoin slice is fully populated

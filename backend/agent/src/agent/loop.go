@@ -106,6 +106,24 @@ type TurnOptions struct {
 	// completion carries `FinishReasonToolCalls` (R-TLS-008 wording
 	// trap; AG-13 owns iteration).
 	Tools Registry
+
+	// PermissionPolicy is the Layer-2 permission gate (AG-10,
+	// R-APP-001..011, D-C). The loop forwards it byte-exact to
+	// `Schedule`.
+	//
+	// Nil is the identity default: `Schedule` bypasses the gate —
+	// every call is treated as AllowOnce, no permission events are
+	// emitted, and the call runs exactly as AG-09's pre-AG-10
+	// scheduler did. This is a legitimate, permanent bypass (not a
+	// placeholder): AG-07/AG-08/AG-09's existing nil-policy tests
+	// stay byte-stable (R-LSK-002 carry).
+	//
+	// A non-nil policy is consulted for every scheduled call.
+	// Layer 3 supplies the implementation (doc 0004 CO-03,
+	// R-APP-011); Layer 2 owns only the protocol that drives it.
+	// The loop's own upward-path wake (`Scheduler.WakeParked`,
+	// D-A) is AG-13's wiring — out of scope here.
+	PermissionPolicy PermissionPolicy
 }
 
 // lastLoopRunIDCounter and lastLoopTurnIDCounter are the sources of
@@ -239,12 +257,12 @@ func Turn(
 			msg, finish := turn.finalize()
 			if turn.finish == ai.FinishReasonToolCalls && len(turn.toolCalls) > 0 {
 				sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}
-				// AG-10: pass nil policy to bypass the
-				// permission gate. Layer 3 supplies a real
-				// PermissionPolicy via TurnOptions when the
-				// upward path lands (AG-13). Until then, nil
-				// preserves AG-09 behavior byte-clean.
-				_ = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, nil, stamper, sink)
+				// AG-10 (D-C): forward the caller's policy
+				// byte-exact. Nil remains a legitimate bypass
+				// (TurnOptions.PermissionPolicy doc comment);
+				// the loop's own upward-path wake wiring
+				// (Scheduler.WakeParked) is AG-13's scope.
+				_ = sched.Schedule(ctx, turn.toolCalls, opts.Tools, runID, turnID, opts.PermissionPolicy, stamper, sink)
 			}
 			closeSink(sink)
 			return msg, finish, nil

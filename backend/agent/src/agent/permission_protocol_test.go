@@ -356,38 +356,33 @@ func TestPermission_DeferEmitsAndParks(t *testing.T) {
 	}
 }
 
-// S-PPB-003 — RED bite (recorded at Commit 2). Given an empty
-// parked set, when the upward-path wake hand-off fires for an
-// unknown callID, then the wake returns a typed ErrStrayDecision
-// error — NOT silently drops, NOT panic.
+// S-PPB-003 — re-pointed at the real production wake surface (D-A).
+// The original bite exercised a vacuous helper (`ResolveStrayDecision`,
+// deleted) that discarded its parameter and always returned the
+// sentinel — it would have passed identically for a KNOWN callID
+// too. This version drives `Scheduler.WakeParked`, the actual
+// upward-path hand-off: given an idle Scheduler with no Schedule
+// call in flight (there is no parked set to search, let alone the
+// unknown callID), when WakeParked fires for an unknown callID, then
+// it returns the typed ErrStrayDecision error — NOT a silent drop,
+// NOT a panic.
 //
-// RED at write time: ErrStrayDecision does not exist; the
-// parkedSet.wake signature returns bool (no error path). Compile-
-// error RED.
+// The complementary scenario — a stray wake against a Schedule call
+// that DOES have a genuinely parked call, proving the stray wake
+// touches nothing (S-APP-004's second clause) — is
+// TestPermission_WakeParked_UnknownCallID_TypedRejection_NoTouch
+// below.
 func TestPermission_StrayDecisionIsTypedError(t *testing.T) {
 	t.Parallel()
 
-	// We don't construct a parkedSet here — the parkedSet type is
-	// unexported. The bite is asserted through the upward-path
-	// contract: a future loop helper Wake(parkedSet, callID)
-	// returns ErrStrayDecision for unknown IDs. To keep the bite
-	// in the external package, the loop exposes the helper as
-	// `agent.WakeParkedCall(set, callID) error` (the API surface
-	// will be defined in Commit 3; the bite references the
-	// signature it commits to).
-	//
-	// The bite here uses the lower-level helper exported by
-	// agent (introduced in Commit 3): `agent.ResolveStrayDecision`
-	// accepts a parked-set view (a sentinel) and reports the
-	// typed error. Until Commit 3 lands this helper, the bite
-	// does not compile — RED.
+	sched := &agent.Scheduler{}
 	const strayID = "call-id-X"
-	err := agent.ResolveStrayDecision(strayID)
+	err := sched.WakeParked(strayID)
 	if err == nil {
-		t.Fatalf("ResolveStrayDecision(%q) returned nil, want a non-nil typed error", strayID)
+		t.Fatalf("WakeParked(%q) returned nil, want a non-nil typed error", strayID)
 	}
 	if !errors.Is(err, agent.ErrStrayDecision) {
-		t.Errorf("ResolveStrayDecision(%q) = %v, want errors.Is to match agent.ErrStrayDecision",
+		t.Errorf("WakeParked(%q) = %v, want errors.Is to match agent.ErrStrayDecision",
 			strayID, err)
 	}
 }
@@ -958,4 +953,187 @@ func TestPermission_CancellationMidPark_PopulatesRejoinAndNoLeak(t *testing.T) {
 	if inv := parkedB.Invocations(); inv != 0 {
 		t.Errorf("parked_b invocations = %d, want 0", inv)
 	}
+}
+
+// --- D-A wake-path tests ---------------------------------------------
+
+// drainUntilDecisionRequired starts a goroutine draining sink into
+// the returned drainedEvents, closing readyCh the first time a
+// permission_decision_required event for wantCallID is observed
+// (wantCallID == "" matches the first decision_required of any
+// call). doneCh closes once sink itself closes (drain complete).
+//
+// Callers use readyCh to synchronize a concurrent WakeParked/cancel
+// with the park — NEVER after Schedule has already returned (that
+// anti-pattern turns a "wake" or "cancel" test into a "deadline
+// expired" test; defects 8/9 fixed this exact bug in three existing
+// tests). Callers must only read *drainedEvents after receiving from
+// doneCh (the goroutine still appends to it until sink closes).
+func drainUntilDecisionRequired(sink <-chan *agent.Event, wantCallID string) (readyCh <-chan struct{}, doneCh <-chan struct{}, drainedEvents *[]*agent.Event) {
+	events := make([]*agent.Event, 0, 16)
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	var readyOnce sync.Once
+	go func() {
+		defer close(done)
+		for ev := range sink {
+			events = append(events, ev)
+			if req, ok := ev.PermissionDecisionRequired(); ok {
+				if wantCallID == "" || req.CallID() == wantCallID {
+					readyOnce.Do(func() { close(ready) })
+				}
+			}
+		}
+	}()
+	return ready, done, &events
+}
+
+// D-A property 1 — waking the call parked under callID resumes it:
+// the parked goroutine's select unblocks, re-enters policy.Resolve
+// (design data flow "wake: re-evaluate verdict"), and the call
+// completes using the fresh verdict.
+//
+// RED at write time: Scheduler.WakeParked does not exist yet —
+// compile-error RED (the established convention in this file,
+// AG-05 W1 defense).
+func TestPermission_WakeParked_ResumesAndCompletes(t *testing.T) {
+	t.Parallel()
+
+	var resolveN atomic.Int64
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			if resolveN.Add(1) == 1 {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			// Second Resolve is the wake's re-evaluation (D-A).
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+
+	tool := EchoScriptedTool("waking_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"waking_tool": tool})
+	calls := []scheduledPermissionCall{{id: "wake_0", name: "waking_tool", args: []byte(`{}`)}}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	ready, drainDone, drained := drainUntilDecisionRequired(sink, "wake_0")
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(context.Background(), permissionCallsToAICalls(calls), reg, "run-wake", "turn-wake", policy, stamper, sink)
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("decision_required for wake_0 not observed within 2s")
+	}
+
+	if err := sched.WakeParked("wake_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "wake_0", err)
+	}
+
+	var results []agent.Result
+	select {
+	case results = <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s after WakeParked")
+	}
+	<-drainDone
+
+	if len(results) != 1 {
+		t.Fatalf("Schedule returned %d results, want 1", len(results))
+	}
+	if results[0].Outcome != agent.ToolOutcomeSuccess {
+		t.Errorf("results[0].Outcome = %v, want Success (the woken call resumed and completed)", results[0].Outcome)
+	}
+	if inv := tool.Invocations(); inv != 1 {
+		t.Errorf("waking_tool invocations = %d, want 1 (wake resumed the call)", inv)
+	}
+	if n := resolveN.Load(); n != 2 {
+		t.Errorf("policy.Resolve invocation count = %d, want 2 (wake re-enters Resolve and processes the fresh verdict, design data flow)", n)
+	}
+	madeAllowOnce := 0
+	for _, ev := range *drained {
+		if made, ok := ev.PermissionDecisionMade(); ok && made.CallID() == "wake_0" && made.Outcome() == agent.PermissionOutcomeAllowOnce {
+			madeAllowOnce++
+		}
+	}
+	if madeAllowOnce != 1 {
+		t.Errorf("decision_made{AllowOnce} for wake_0 count = %d, want 1 (the fresh verdict from the re-evaluation)", madeAllowOnce)
+	}
+}
+
+// D-A property 2 — waking an unknown callID is a typed rejection
+// AND touches no parked call (S-APP-004's second clause: the
+// original bite never asserted this half). A genuinely parked
+// sibling call is proven untouched — still parked, tool not
+// invoked — before it is correctly woken so the test does not leak
+// a goroutine.
+func TestPermission_WakeParked_UnknownCallID_TypedRejection_NoTouch(t *testing.T) {
+	t.Parallel()
+
+	releaseTool := make(chan struct{})
+	parkedTool := BlockingScriptedTool("parked_tool", agent.EffectClassRead, releaseTool)
+
+	var resolveN atomic.Int64
+	policy := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			if resolveN.Add(1) == 1 {
+				return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+			}
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+		},
+	}
+	reg := newMapRegistry(map[string]agent.Tool{"parked_tool": parkedTool})
+	calls := []scheduledPermissionCall{{id: "parked_real_0", name: "parked_tool", args: []byte(`{}`)}}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	stamper := &agent.LaneStamper{}
+	sink := make(chan *agent.Event, 64)
+	ready, drainDone, _ := drainUntilDecisionRequired(sink, "parked_real_0")
+
+	doneCh := make(chan []agent.Result, 1)
+	go func() {
+		doneCh <- sched.Schedule(context.Background(), permissionCallsToAICalls(calls), reg, "run-stray", "turn-stray", policy, stamper, sink)
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("decision_required for parked_real_0 not observed within 2s")
+	}
+
+	// Wake an unrelated, unknown callID. Must be rejected AND must
+	// not touch the genuinely parked call.
+	err := sched.WakeParked("call-id-X")
+	if err == nil {
+		t.Fatalf("WakeParked(%q) = nil, want a non-nil typed error", "call-id-X")
+	}
+	if !errors.Is(err, agent.ErrStrayDecision) {
+		t.Errorf("WakeParked(%q) = %v, want errors.Is to match agent.ErrStrayDecision", "call-id-X", err)
+	}
+	if inv := parkedTool.Invocations(); inv != 0 {
+		t.Errorf("parked_tool invocations = %d, want 0 (a stray wake to an unrelated callID must not touch the genuinely parked call, S-APP-004)", inv)
+	}
+
+	// Now wake the real one so the goroutine finishes cleanly.
+	close(releaseTool)
+	if err := sched.WakeParked("parked_real_0"); err != nil {
+		t.Fatalf("WakeParked(%q) = %v, want nil", "parked_real_0", err)
+	}
+
+	select {
+	case results := <-doneCh:
+		if len(results) != 1 {
+			t.Fatalf("Schedule returned %d results, want 1", len(results))
+		}
+		if results[0].Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[0].Outcome = %v, want Success (the real call still resumes after the stray wake)", results[0].Outcome)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Schedule did not return within 2s after waking the real parked call")
+	}
+	<-drainDone
 }

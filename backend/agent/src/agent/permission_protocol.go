@@ -57,21 +57,6 @@ var _ = ai.ToolCall{}
 // is a protocol-layer rejection, not a tool-execution-layer rejection.
 var ErrStrayDecision = errors.New("agent: stray permission decision for non-parked callID")
 
-// ResolveStrayDecision reports the typed protocol rejection for a wake
-// hand-off addressed to a non-parked callID. The signature mirrors the
-// production wake pathway (`Scheduler.WakeParked(callID)`) — the helper
-// exists so external tests can assert the typed-rejection property
-// without driving a full Schedule scenario (R-APP-003, S-PPB-003 bite).
-//
-// strayID is the call identity the upward path attempted to wake.
-// Returns ErrStrayDecision; the parameter is reserved for future
-// disambiguation (e.g., distinguishing "unknown ID" from "ID already
-// resolved").
-func ResolveStrayDecision(strayID string) error {
-	_ = strayID
-	return ErrStrayDecision
-}
-
 // PermissionPolicy is the ask–suspend–resume seam AG-10 introduces
 // (doc 0001 § 5.1 "PermissionPolicy" port; Layer 3-implemented).
 //
