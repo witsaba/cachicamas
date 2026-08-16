@@ -398,20 +398,15 @@ func (s *Scheduler) executeCall(
 	// bypasses the gate; a non-nil policy consults Resolve — unless
 	// `remembered` already silences this call's tool name — and may
 	// park the call until wake or ctx cancel.
-	gateProceed, modifiedArgs, abortFailure := s.runPermissionGate(
+	gateProceed, modifiedArgs, _ := s.runPermissionGate(
 		ctx, ordinal, call, runID, turnID, policy, parked, remembered, results, emissions,
 	)
 	if !gateProceed {
-		// Gate wrote a typed failure to the result slot and
-		// emitted the matching tool-end event. The call does
-		// not reach ToolStart or Run.
-		if abortFailure != nil {
-			// Re-emit the abort failure on the typed failure
-			// path (the gate's typed failure is already in the
-			// result slot; this is the no-op symmetry for the
-			// dispatcher's standard emit shape).
-			_ = abortFailure
-		}
+		// Gate already wrote the typed failure to the result slot
+		// and emitted the matching tool-end event (defensive default
+		// / Deny / ModifyInput-constructor-failure / cancellation-
+		// abort — every proceed=false path). The call does not reach
+		// ToolStart or Run; nothing further to do here.
 		return
 	}
 
