@@ -176,6 +176,9 @@ type commitOp uint8
 const (
 	// commitAppend validates and appends one message (rules 1-3).
 	commitAppend commitOp = iota + 1
+
+	// commitCloseTurn validates that no call is left unanswered (rule 4).
+	commitCloseTurn
 )
 
 // NewHistory constructs an empty, usable history. An empty transcript is
@@ -190,6 +193,18 @@ func NewHistory() *History {
 // commit.
 func (h *History) Append(message ai.Message) error {
 	return h.commit(commitAppend, message, EntryOriginAppended)
+}
+
+// CloseTurn validates that every tool call in the transcript has a
+// matching result and, if so, closes the turn (R-HIS-003), through
+// [History.commit] (R-HIS-004). "Once the turn closes", concretely: the
+// turn closes when the caller invokes this method. History detects
+// nothing itself — AG-13's run driver will call it when a provider turn
+// ends; in AG-12 only tests exercise it. An empty open set is a no-op:
+// closing an already-closed turn succeeds and changes nothing
+// (idempotent).
+func (h *History) CloseTurn() error {
+	return h.commit(commitCloseTurn, ai.Message{}, 0)
 }
 
 // Entries returns a freshly allocated snapshot of the transcript, in
@@ -229,18 +244,40 @@ func (h *History) commit(op commitOp, message ai.Message, origin EntryOrigin) er
 	switch op {
 	case commitAppend:
 		return h.commitAppendOp(message, origin)
+	case commitCloseTurn:
+		return h.commitCloseTurnOp()
 	default:
 		return nil
 	}
 }
 
+// commitCloseTurnOp runs rule 4: the open set must be empty, else the
+// first-issued open call's result slot is missing (R-HIS-003, S-HIS-022's
+// determinism). commitCloseTurn never writes h.entries or h.open — closing
+// a turn commits no new entry, it only validates the ones already there.
+func (h *History) commitCloseTurnOp() error {
+	if len(h.open) == 0 {
+		return nil
+	}
+	first := h.open[0]
+	return ai.Invalid(ai.ErrEmpty, ai.AtIndex("messages", first.entryIndex), ai.AtIndex("content", first.partIndex), ai.At("result"))
+}
+
 // commitAppendOp runs rule 2 (the message was built through
-// `ai.NewMessage`) then commits. Composed with `ai.FirstFailure` so the
-// documented order — which rule wins — is data a reviewer reads rather
-// than control flow to trace, the convention this package's other
-// constructors already use (run_events.go, event.go).
+// `ai.NewMessage`) and rule 3 (every `ToolResult` part resolves to an open
+// call) then commits. Composed with `ai.FirstFailure` so the documented
+// order — which rule wins — is data a reviewer reads rather than control
+// flow to trace, the convention this package's other constructors already
+// use (run_events.go, event.go).
+//
+// Rule 3's open-set delta is computed by [resolveOpenSet] into a local
+// variable and only assigned to h.open after every rule has passed: state
+// is written only once the whole message is proven valid (all-or-nothing —
+// a violation on part 3 of 5 must not half-commit parts 0-2's pairing
+// effects either).
 func (h *History) commitAppendOp(message ai.Message, origin EntryOrigin) error {
 	entryIndex := len(h.entries)
+	var nextOpen []openCall
 
 	if err := ai.FirstFailure(
 		func() *ai.Violation {
@@ -249,10 +286,55 @@ func (h *History) commitAppendOp(message ai.Message, origin EntryOrigin) error {
 			}
 			return nil
 		},
+		func() *ai.Violation {
+			resolved, violation := resolveOpenSet(h.open, message, entryIndex)
+			nextOpen = resolved
+			return violation
+		},
 	); err != nil {
 		return err
 	}
 
 	h.entries = append(h.entries, Entry{id: EntryID(entryIndex + 1), message: message, origin: origin})
+	h.open = nextOpen
 	return nil
+}
+
+// resolveOpenSet computes the open set that would result from committing
+// message at entryIndex, without mutating current (R-HIS-002, R-HIS-004:
+// the caller commits the result only after every rule has passed). It
+// walks message's content in order, per V-FAIL-04:
+//
+//   - a ToolResult part must name a call current (or an earlier part of
+//     this same message) declares open, else the first such part fails
+//     with ai.ErrUnresolvedReference at its own position, and the call is
+//     removed from the returned set — "the open set is what the
+//     transcript declares", so a second result for the same call is no
+//     longer declared and fails by the same rule (no ErrDuplicate, no
+//     third rule);
+//   - a ToolCall part joins the returned set, in issuance order.
+func resolveOpenSet(current []openCall, message ai.Message, entryIndex int) ([]openCall, *ai.Violation) {
+	next := make([]openCall, len(current))
+	copy(next, current)
+
+	for partIndex, part := range message.Content() {
+		if result, ok := part.ToolResult(); ok {
+			answered := -1
+			for i, oc := range next {
+				if oc.callID == result.CallID() {
+					answered = i
+					break
+				}
+			}
+			if answered < 0 {
+				return nil, ai.Invalid(ai.ErrUnresolvedReference, ai.AtIndex("messages", entryIndex), ai.AtIndex("content", partIndex))
+			}
+			next = append(next[:answered], next[answered+1:]...)
+			continue
+		}
+		if call, ok := part.ToolCall(); ok {
+			next = append(next, openCall{callID: call.ID(), entryIndex: entryIndex, partIndex: partIndex})
+		}
+	}
+	return next, nil
 }
