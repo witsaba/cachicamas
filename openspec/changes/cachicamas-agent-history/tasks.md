@@ -24,6 +24,16 @@ remediation (`loop_permission_e2e_test.go`/`permission_policy_helpers_test.go`) 
 four-entry list with an AG-12 widening comment mirroring the existing AG-10 comment block. Land in the SAME
 commit as the file that first needs it.
 
+**Apply-phase correction (Phase 9)**: this planning section under-scoped the closure by two entries. Landing
+`L2C-07` (Phase 9) modifies the PRE-EXISTING substrate files `doc.go` and `doc_contract_guard_test.go` — not
+merely adds new ones — and both `TestTurn_SubstrateUntouched` and `TestTurn_PreRequestHook_SubstrateUntouched`
+genuinely FAILED against the unwidened filters (verbatim diffs recorded in `apply-progress.md`). This is the
+first doc-row amendment since these substrate guards were introduced at AG-08 (AG-04/05/06 predate them), so the
+tension was untested by any prior milestone. The fix mirrors AG-11's own established precedent exactly
+(`turn_events.go`/`failure.go`, "pre-existing substrate files released for AG-11 only") — both filters are
+additionally widened by `/doc.go` and `/doc_contract_guard_test.go`, "released for AG-12 only", landed in the
+SAME commit as the Phase 9 doc-row change.
+
 ## Review Workload Forecast
 
 | Field | Value |
@@ -60,61 +70,61 @@ is a pure in-memory type, no I/O (Threat Matrix: N/A, design.md).
 
 ## Phase 1: Foundation — package skeleton, order preservation, substrate registration
 
-- [ ] 1.1 RED — create `history_test.go` (`package agent_test`): `TestHistory_OrderPreserved` (S-HIS-001), `TestHistory_ReadDoesNotAliasInternalStorage` (S-HIS-002). Expect FAIL: compile error, `agent.History`/`NewHistory`/`Append`/`Entries` undefined.
-- [ ] 1.2 GREEN — create `history.go`: `EntryOrigin`, `EntryID`, `Entry` + read-only accessors, `openCall`, `History`, `commitOp`, `commit` (rules 1–2 only: `!constructed` → `ai.ErrEmpty` at `"history"`; message not `ai.NewMessage`-constructed → `ai.ErrEmpty` at `messages[i]`), `NewHistory()`, `Append()`, `Entries()` (fresh slice each call), `Len()`.
-- [ ] 1.3 Register substrate filters — SAME commit as 1.1/1.2: widen `filterOutLoopFiles` and `filterOutLoopHookFiles` per the Substrate Filter Closure section, byte-in-sync.
-- [ ] 1.4 GREEN confirm — `go test -run "TestHistory_OrderPreserved|TestHistory_ReadDoesNotAlias" -race ./src/agent/...` passes; `TestTurn_SubstrateUntouched`/`TestTurn_PreRequestHook_SubstrateUntouched` still pass.
+- [x] 1.1 RED — create `history_test.go` (`package agent_test`): `TestHistory_OrderPreserved` (S-HIS-001), `TestHistory_ReadDoesNotAliasInternalStorage` (S-HIS-002). Expect FAIL: compile error, `agent.History`/`NewHistory`/`Append`/`Entries` undefined.
+- [x] 1.2 GREEN — create `history.go`: `EntryOrigin`, `EntryID`, `Entry` + read-only accessors, `openCall`, `History`, `commitOp`, `commit` (rules 1–2 only: `!constructed` → `ai.ErrEmpty` at `"history"`; message not `ai.NewMessage`-constructed → `ai.ErrEmpty` at `messages[i]`), `NewHistory()`, `Append()`, `Entries()` (fresh slice each call), `Len()`.
+- [x] 1.3 Register substrate filters — SAME commit as 1.1/1.2: widen `filterOutLoopFiles` and `filterOutLoopHookFiles` per the Substrate Filter Closure section, byte-in-sync.
+- [x] 1.4 GREEN confirm — `go test -run "TestHistory_OrderPreserved|TestHistory_ReadDoesNotAlias" -race ./src/agent/...` passes; `TestTurn_SubstrateUntouched`/`TestTurn_PreRequestHook_SubstrateUntouched` still pass.
 
 ## Phase 2: Orphan-result rejection (`R-HIS-002`)
 
-- [ ] 2.1 RED — `history_test.go`: `TestHistory_OrphanedResult_RejectedTyped` (S-HIS-010), `TestHistory_ResultAfterMatchingCall_Accepted` (S-HIS-011). Expect FAIL: no pairing rule yet, orphan silently accepted.
-- [ ] 2.2 GREEN — `commit` rule 3: track the open set; a `ToolCall` part joins it; a `ToolResult` part must name an open call, else `ai.Invalid(ai.ErrUnresolvedReference, ai.At("messages"), ai.AtIndex(i), ai.At("content"), ai.AtIndex(j))`; a duplicate result for an already-answered call fails by the same rule.
-- [ ] 2.3 RED bite S-HIS-012 — scratch-weaken rule 3 to accept any result once ≥1 call exists (ignore identity); rerun `TestHistory_OrphanedResult_RejectedTyped`; confirm FAIL reporting the accepted orphan; record output in `apply-progress.md`; revert.
-- [ ] 2.4 GREEN confirm — `go test -run "TestHistory_OrphanedResult|TestHistory_ResultAfterMatchingCall" -race ./src/agent/...`.
+- [x] 2.1 RED — `history_test.go`: `TestHistory_OrphanedResult_RejectedTyped` (S-HIS-010), `TestHistory_ResultAfterMatchingCall_Accepted` (S-HIS-011). Expect FAIL: no pairing rule yet, orphan silently accepted.
+- [x] 2.2 GREEN — `commit` rule 3: track the open set; a `ToolCall` part joins it; a `ToolResult` part must name an open call, else `ai.Invalid(ai.ErrUnresolvedReference, ai.At("messages"), ai.AtIndex(i), ai.At("content"), ai.AtIndex(j))`; a duplicate result for an already-answered call fails by the same rule.
+- [x] 2.3 RED bite S-HIS-012 — scratch-weaken rule 3 to accept any result once ≥1 call exists (ignore identity); rerun `TestHistory_OrphanedResult_RejectedTyped`; confirm FAIL reporting the accepted orphan; record output in `apply-progress.md`; revert.
+- [x] 2.4 GREEN confirm — `go test -run "TestHistory_OrphanedResult|TestHistory_ResultAfterMatchingCall" -race ./src/agent/...`.
 
 ## Phase 3: Turn-close rejection (`R-HIS-003`)
 
-- [ ] 3.1 RED — `TestHistory_UnclosedCallAtTurnClose_RejectedTyped` (S-HIS-020), `TestHistory_AllCallsClosed_TurnCloseSucceeds` (S-HIS-021), `TestHistory_TwoUnclosedCalls_NamesFirstOffendingPosition` (S-HIS-022). Expect FAIL: `CloseTurn` undefined.
-- [ ] 3.2 GREEN — `history.go`: `commitCloseTurn` op, `CloseTurn()` method, rule 4 (open set must be empty, else `ai.Invalid(ai.ErrEmpty, ai.At("messages"), ai.AtIndex(i), ai.At("content"), ai.AtIndex(j), ai.At("result"))` at the first-issued open call); empty open set → no-op, returns nil.
-- [ ] 3.3 GREEN confirm — `go test -run "TestHistory_UnclosedCallAtTurnClose|TestHistory_AllCallsClosed|TestHistory_TwoUnclosedCalls" -race ./src/agent/...`.
+- [x] 3.1 RED — `TestHistory_UnclosedCallAtTurnClose_RejectedTyped` (S-HIS-020), `TestHistory_AllCallsClosed_TurnCloseSucceeds` (S-HIS-021), `TestHistory_TwoUnclosedCalls_NamesFirstOffendingPosition` (S-HIS-022). Expect FAIL: `CloseTurn` undefined.
+- [x] 3.2 GREEN — `history.go`: `commitCloseTurn` op, `CloseTurn()` method, rule 4 (open set must be empty, else `ai.Invalid(ai.ErrEmpty, ai.At("messages"), ai.AtIndex(i), ai.At("content"), ai.AtIndex(j), ai.At("result"))` at the first-issued open call); empty open set → no-op, returns nil.
+- [x] 3.3 GREEN confirm — `go test -run "TestHistory_UnclosedCallAtTurnClose|TestHistory_AllCallsClosed|TestHistory_TwoUnclosedCalls" -race ./src/agent/...`.
 
 ## Phase 4: Seeded construction (`R-HIS-006`)
 
-- [ ] 4.1 RED — `TestNewSeededHistory_ValidSeed_Accepted` (S-HIS-050), `TestNewSeededHistory_OrphanedResult_RejectedFirstOffendingPosition` (S-HIS-051, result direction only), `TestNewSeededHistory_RejectedSeed_ZeroValueUnusable` (S-HIS-052), `TestNewSeededHistory_SignatureAcceptsOnlyMessages` (S-HIS-053), `TestNewSeededHistory_EndsInOpenCall_AcceptedThenCloseTurnRejects` (S-HIS-054). Expect FAIL: `NewSeededHistory` undefined.
-- [ ] 4.2 GREEN — `history.go`: `NewSeededHistory(messages []ai.Message) (*History, error)` — `NewHistory()`, then `commit(commitAppend, m, EntryOriginAppended)` per message in order; first violation aborts and returns `(nil, err)`, positioned via `ai.AtIndex(i)`; accepts a seed ending in open calls (rule 3 only — `commitCloseTurn`/rule 4 is NEVER applied at seed time); rejects only an orphaned RESULT.
-- [ ] 4.3 Pin S-HIS-054 against the corrected reading: a seed ending in an open call is ACCEPTED; `CloseTurn` on that seeded history THEN rejects with the identical rule class and positional shape as S-HIS-020.
-- [ ] 4.4 GREEN confirm — `go test -run "TestNewSeededHistory_" -race ./src/agent/...`.
+- [x] 4.1 RED — `TestNewSeededHistory_ValidSeed_Accepted` (S-HIS-050), `TestNewSeededHistory_OrphanedResult_RejectedFirstOffendingPosition` (S-HIS-051, result direction only), `TestNewSeededHistory_RejectedSeed_ZeroValueUnusable` (S-HIS-052), `TestNewSeededHistory_SignatureAcceptsOnlyMessages` (S-HIS-053), `TestNewSeededHistory_EndsInOpenCall_AcceptedThenCloseTurnRejects` (S-HIS-054). Expect FAIL: `NewSeededHistory` undefined.
+- [x] 4.2 GREEN — `history.go`: `NewSeededHistory(messages []ai.Message) (*History, error)` — `NewHistory()`, then `commit(commitAppend, m, EntryOriginAppended)` per message in order; first violation aborts and returns `(nil, err)`, positioned via `ai.AtIndex(i)`; accepts a seed ending in open calls (rule 3 only — `commitCloseTurn`/rule 4 is NEVER applied at seed time); rejects only an orphaned RESULT.
+- [x] 4.3 Pin S-HIS-054 against the corrected reading: a seed ending in an open call is ACCEPTED; `CloseTurn` on that seeded history THEN rejects with the identical rule class and positional shape as S-HIS-020.
+- [x] 4.4 GREEN confirm — `go test -run "TestNewSeededHistory_" -race ./src/agent/...`.
 
 ## Phase 5: Read-only views, stable identity (`R-HIS-005`, excl. S-HIS-042)
 
-- [ ] 5.1 RED — `TestHistory_ReadBack_UnmodifiedValuesInOrder` (S-HIS-040), `TestHistory_EntryIdentity_StableAcrossReadsAndSeed` (S-HIS-041 — mutate a returned `Entries()` slice, re-read unchanged; construct a second `History` via `NewSeededHistory` over the same ordered seed, assert identical `EntryID`s to the appended original). Pin explicitly even if already GREEN from 1.2/4.2.
-- [ ] 5.2 GREEN confirm — `go test -run "TestHistory_ReadBack|TestHistory_EntryIdentity" -race ./src/agent/...`.
+- [x] 5.1 RED — `TestHistory_ReadBack_UnmodifiedValuesInOrder` (S-HIS-040), `TestHistory_EntryIdentity_StableAcrossReadsAndSeed` (S-HIS-041 — mutate a returned `Entries()` slice, re-read unchanged; construct a second `History` via `NewSeededHistory` over the same ordered seed, assert identical `EntryID`s to the appended original). Pin explicitly even if already GREEN from 1.2/4.2.
+- [x] 5.2 GREEN confirm — `go test -run "TestHistory_ReadBack|TestHistory_EntryIdentity" -race ./src/agent/...`.
 
 ## Phase 6: Orphan synthesis (`R-HIS-007`)
 
-- [ ] 6.1 RED — create `history_synthesis_test.go` (`package agent_test`): `TestHistory_SynthesizeOrphans_ClosesEveryOrphanDistinguishableByOrigin` (S-HIS-060), `TestHistory_SynthesizedVsReal_DistinguishableByOriginOnly` (S-HIS-061 — byte-identical content, `Failed()` set identically on both, only `Origin()` differs; assertion reads neither content nor `Failed()`), `TestHistory_SynthesizeOrphans_TurnClosesAfterSynthesis` (S-HIS-062). Expect FAIL: `SynthesizeOrphans` undefined.
-- [ ] 6.2 GREEN — `history.go`: `SynthesizeOrphans() (int, error)` — snapshot the open set in issuance order; build ALL N `ai.NewToolFailure(callID, synthesizedInterruptionContent)` wrapped in `ai.RoleTool` messages BEFORE committing any; commit each via `commit(commitAppend, m, EntryOriginSynthesized)`; add the unexported `synthesizedInterruptionContent` constant.
-- [ ] 6.3 GREEN confirm — `go test -run "TestHistory_SynthesizeOrphans|TestHistory_SynthesizedVsReal" -race ./src/agent/...`.
+- [x] 6.1 RED — create `history_synthesis_test.go` (`package agent_test`): `TestHistory_SynthesizeOrphans_ClosesEveryOrphanDistinguishableByOrigin` (S-HIS-060), `TestHistory_SynthesizedVsReal_DistinguishableByOriginOnly` (S-HIS-061 — byte-identical content, `Failed()` set identically on both, only `Origin()` differs; assertion reads neither content nor `Failed()`), `TestHistory_SynthesizeOrphans_TurnClosesAfterSynthesis` (S-HIS-062). Expect FAIL: `SynthesizeOrphans` undefined.
+- [x] 6.2 GREEN — `history.go`: `SynthesizeOrphans() (int, error)` — snapshot the open set in issuance order; build ALL N `ai.NewToolFailure(callID, synthesizedInterruptionContent)` wrapped in `ai.RoleTool` messages BEFORE committing any; commit each via `commit(commitAppend, m, EntryOriginSynthesized)`; add the unexported `synthesizedInterruptionContent` constant.
+- [x] 6.3 GREEN confirm — `go test -run "TestHistory_SynthesizeOrphans|TestHistory_SynthesizedVsReal" -race ./src/agent/...`.
 
 ## Phase 7: Idempotent and total synthesis (`R-HIS-008`)
 
-- [ ] 7.1 RED — `TestHistory_SynthesizeOrphans_ClosesExactlyN` (S-HIS-070, N≥2 orphans interleaved with already-matched calls), `TestHistory_SynthesizeOrphans_SecondApplicationNoOp` (S-HIS-071). Pin explicitly even if already GREEN from 6.2's open-set logic.
-- [ ] 7.2 GREEN confirm — `go test -run "TestHistory_SynthesizeOrphans_ClosesExactlyN|SecondApplicationNoOp" -race ./src/agent/...`.
+- [x] 7.1 RED — `TestHistory_SynthesizeOrphans_ClosesExactlyN` (S-HIS-070, N≥2 orphans interleaved with already-matched calls), `TestHistory_SynthesizeOrphans_SecondApplicationNoOp` (S-HIS-071). Pin explicitly even if already GREEN from 6.2's open-set logic.
+- [x] 7.2 GREEN confirm — `go test -run "TestHistory_SynthesizeOrphans_ClosesExactlyN|SecondApplicationNoOp" -race ./src/agent/...`.
 
 ## Phase 8: Closed-route guard (`R-HIS-004`, `S-HIS-042`)
 
-- [ ] 8.1 RED — create `history_surface_guard_test.go` (`package agent_test`): `routeClass`/`historyRoute` types, `expectedHistoryRoutes` (11 rows per `design.md`), method-set enumeration via `reflect.TypeOf(*History)`/`reflect.TypeOf(Entry)`, package-function enumeration via `go/parser` + `runtime.Caller(0)`. `TestHistoryRouteGuard_SurfaceMatchesExpectedTable` — set-equal diff both directions, plus asserting every `method:Entry` row is `routeReadOnly`-only (closes S-HIS-042).
-- [ ] 8.2 RED — same file: `TestHistory_NoBypass_EveryMutatingRouteRejectsOrphaningSequence` (S-HIS-030) — driver map keyed off `expectedHistoryRoutes`' `routeMutating` rows (`Append`, `NewSeededHistory`, `CloseTurn`, `SynthesizeOrphans`); each driver builds an orphaning sequence through that route and asserts typed rejection plus byte-unchanged state; also drives `new(History)` through each route; fails naming any mutating row with no driver.
-- [ ] 8.3 GREEN confirm — both tests pass against the complete surface (Phases 1–7 already implement every route).
-- [ ] 8.4 RED bite S-HIS-031 — scratch-add `func (h *History) ScratchAppend(m ai.Message) error { h.entries = append(h.entries, Entry{message: m}); return nil }` bypassing `commit`; rerun `TestHistoryRouteGuard_SurfaceMatchesExpectedTable`; confirm FAILS naming `ScratchAppend` as an unenumerated surface route; record output in `apply-progress.md`; revert.
-- [ ] 8.5 GREEN confirm — guard file green after revert.
+- [x] 8.1 RED — create `history_surface_guard_test.go` (`package agent_test`): `routeClass`/`historyRoute` types, `expectedHistoryRoutes` (11 rows per `design.md`), method-set enumeration via `reflect.TypeOf(*History)`/`reflect.TypeOf(Entry)`, package-function enumeration via `go/parser` + `runtime.Caller(0)`. `TestHistoryRouteGuard_SurfaceMatchesExpectedTable` — set-equal diff both directions, plus asserting every `method:Entry` row is `routeReadOnly`-only (closes S-HIS-042).
+- [x] 8.2 RED — same file: `TestHistory_NoBypass_EveryMutatingRouteRejectsOrphaningSequence` (S-HIS-030) — driver map keyed off `expectedHistoryRoutes`' `routeMutating` rows (`Append`, `NewSeededHistory`, `CloseTurn`, `SynthesizeOrphans`); each driver builds an orphaning sequence through that route and asserts typed rejection plus byte-unchanged state; also drives `new(History)` through each route; fails naming any mutating row with no driver.
+- [x] 8.3 GREEN confirm — both tests pass against the complete surface (Phases 1–7 already implement every route). No production RED was possible here (no new production code — a closed-audit test over an already-complete surface); recorded honestly as an immediate pass, mirroring the Phase 5/7 pin pattern.
+- [x] 8.4 RED bite S-HIS-031 — scratch-add `func (h *History) ScratchAppend(m ai.Message) error { h.entries = append(h.entries, Entry{message: m}); return nil }` bypassing `commit`; rerun `TestHistoryRouteGuard_SurfaceMatchesExpectedTable`; confirm FAILS naming `ScratchAppend` as an unenumerated surface route; record output in `apply-progress.md`; revert.
+- [x] 8.5 GREEN confirm — guard file green after revert; `git diff` against the prior commit for `history.go` is byte-empty, confirming a clean revert.
 
 ## Phase 9: `L2C-07` doc-contract row (`R-HIS-009`)
 
-- [ ] 9.1 RED — `doc_contract_guard_test.go`: append the 7th entry `{id: "L2C-07", text: "..."}` (exact text from `design.md`'s "The `L2C-07` Row" section) to `expectedLayer2ContractRows`. Expect FAIL: `TestLayer2DocContract_MatchesTheCommittedTable` reports "found 6 of 7 rows" — `doc.go` still has 6 rows.
-- [ ] 9.2 GREEN — `doc.go`: append the `L2C-07` tab-indented row (identical exact text) to the guarded doc-comment table, in the SAME PR as 9.1 (`R-AGP-002`).
-- [ ] 9.3 GREEN confirm — `TestLayer2DocContract_MatchesTheCommittedTable` passes at 7 rows.
-- [ ] 9.4 RED bite S-HIS-081 — scratch-strip the `L2C-07` entry from `expectedLayer2ContractRows` while `doc.go`'s row remains; rerun the guard; confirm FAILS naming the unexpected `doc.go` row; record output; restore the table entry.
+- [x] 9.1 RED — `doc_contract_guard_test.go`: append the 7th entry `{id: "L2C-07", text: "..."}` (exact text from `design.md`'s "The `L2C-07` Row" section) to `expectedLayer2ContractRows`. Expect FAIL: `TestLayer2DocContract_MatchesTheCommittedTable` reports "found 6 of 7 rows" — `doc.go` still has 6 rows.
+- [x] 9.2 GREEN — `doc.go`: append the `L2C-07` tab-indented row (identical exact text) to the guarded doc-comment table, in the SAME PR as 9.1 (`R-AGP-002`).
+- [x] 9.3 GREEN confirm — `TestLayer2DocContract_MatchesTheCommittedTable` passes at 7 rows.
+- [x] 9.4 RED bite S-HIS-081 — scratch-strip the `L2C-07` entry from `expectedLayer2ContractRows` while `doc.go`'s row remains; rerun the guard; confirm FAILS naming the unexpected `doc.go` row; record output; restore the table entry.
 
 ## Phase 10: Cross-cut substrate invariants
 
