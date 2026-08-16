@@ -65,6 +65,7 @@
 // `ai/validation.go` — every typed rejection reuses `ai.Invalid` /
 // `ai.At` / `ai.AtIndex` / `ai.FirstFailure` with the existing
 // `ai.ErrUnresolvedReference` and `ai.ErrEmpty` classes.
+
 package agent
 
 import (

@@ -146,10 +146,10 @@ is a pure in-memory type, no I/O (Threat Matrix: N/A, design.md).
 
 ## Phase 13: Final gates
 
-- [ ] 13.1 `cd backend/agent && make test` (race-gated) — all 22 scenarios + 3 bites recorded evidence, whole module green.
-- [ ] 13.2 `cd backend/agent && make lint` after `golangci-lint cache clean` — 0 issues.
-- [ ] 13.3 `cd backend/agent && make build` — clean.
-- [ ] 13.4 `cd backend/agent && make vuln-check` (NOT in `make all`) — record result; accept pre-existing stdlib advisories outside `src/agent/**` as WARNING per AG-10/AG-11 precedent, not a blocker.
+- [x] 13.1 `cd backend/agent && make test` (race-gated) — all 22 scenarios + 3 bites recorded evidence, whole module green. Confirmed via `go test -race -count=1 -v ./src/agent/...` (every test in the package, 200+, not just the History ones) and `make test` (whole module, 12/12 packages ok).
+- [x] 13.2 `cd backend/agent && make lint` after `golangci-lint cache clean` — 0 issues. First run surfaced 2 real (not cache-stale) findings: `revive: package-comments` on `history.go` (missing the blank line separating its file comment from `package agent`, which is what keeps run_events.go/event.go's own file comments from being treated as `file.Doc` package-comment candidates — added the blank line to match) and `unused` on the `mustToolFailure` helper (dead because `history_synthesis_test.go` had inlined the equivalent `ai.NewToolFailure` + error-check instead of calling it — replaced the inline call with the helper). Re-ran clean: `0 issues.`
+- [x] 13.3 `cd backend/agent && make build` — clean.
+- [x] 13.4 `cd backend/agent && make vuln-check` (NOT in `make all`) — exit code 0, zero `finding` entries in the JSON stream across the whole `./...` closure (govulncheck's `-json` mode still returns non-zero on an actual detection). Cleaner than the AG-10/AG-11 precedent's "pre-existing stdlib advisories" WARNING, plausibly because of the earlier go1.26.5→1.26.6 bump (commit `d2b8222d`) that already cleared 8 stdlib `GO-2026-*` advisories.
 
 ## Coverage Table — every `S-HIS-` scenario mapped to a task
 

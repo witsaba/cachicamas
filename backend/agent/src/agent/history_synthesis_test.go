@@ -91,10 +91,7 @@ func TestHistory_SynthesizedVsReal_DistinguishableByOriginOnly(t *testing.T) {
 	if err := h.Append(callMessage(t, "call-real")); err != nil {
 		t.Fatalf("Append(real call) returned %v, want nil", err)
 	}
-	realPart, err := ai.NewToolFailure("call-real", synthesizedResult.Content())
-	if err != nil {
-		t.Fatalf("ai.NewToolFailure(...) returned %v, want nil", err)
-	}
+	realPart := mustToolFailure(t, "call-real", synthesizedResult.Content())
 	if err := h.Append(mustMessage(t, ai.RoleTool, realPart)); err != nil {
 		t.Fatalf("Append(real result) returned %v, want nil", err)
 	}
