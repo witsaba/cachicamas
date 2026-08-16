@@ -2164,7 +2164,7 @@ Scenario: examples compile under the normal test run
 - [ ] The pre-request hook can rebuild the outgoing request; the identity default changes nothing; unchanged inputs yield byte-identical prefix regions across turns — closed by AG-08.
 - [ ] Tools execute with read-parallel/write-serial policy, bounded fan-out, and call-ordered rejoin — closed by AG-09.
 - [ ] Permission is a suspension on the stream with all four outcomes; suspension blocks nothing else — closed by AG-10.
-- [ ] Refusal, pause, and unknown finish reasons produce three distinct behaviors — closed by AG-11.1.
+- [x] Refusal, pause, and unknown finish reasons produce three distinct behaviors — closed by AG-11.1.
 - [ ] The loop never retries and never decides policy; the guards and tests that prove it stay green — closed by AG-11.2, AG-10.1, AG-03.3.
 - [ ] History cannot orphan a tool call; interruption synthesizes results; enforcement is at the boundary — closed by AG-12.
 - [ ] A multi-turn run completes with steering, pause resumption, and a complete event story — closed by AG-13.
