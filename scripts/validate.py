@@ -885,6 +885,16 @@ def parse_govulncheck(raw: str, scope: str) -> list[Finding]:
         osv_id = finding.get("osv")
         if not isinstance(osv_id, str):
             continue
+        # Module-level findings carry only ``{module, version}`` in the trace
+        # entry — no source ``position``. They are imported-but-not-called;
+        # govulncheck's text mode counts them separately ("modules you
+        # require, but your code doesn't appear to call"). We do the same:
+        # they are not reachable from your code path, so they don't belong in
+        # the report. The first trace entry's ``position`` (when present)
+        # distinguishes the two.
+        first = trace[0] if isinstance(trace[0], dict) else {}
+        if not isinstance(first.get("position"), dict):
+            continue
         existing = by_osv.get(osv_id)
         if existing is None:
             by_osv[osv_id] = {"doc": doc, "first_trace": trace[0]}
