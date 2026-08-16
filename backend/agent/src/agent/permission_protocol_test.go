@@ -536,304 +536,207 @@ var _ agent.PermissionPolicy = (*scriptedPermissionPolicy)(nil)
 
 // --- AG-10.2 four-outcome tests -------------------------------------
 
-// S-APP-005 (AG-10.2 AllowOnce) — sync AllowOnce emits a
-// permission_decision_made{outcome=AllowOnce} BEFORE the tool runs
-// (R-APP-004). The decision event rides through the existing
-// emissions channel; the tool executes with the original arguments;
-// the result is success.
+// Task 1.2 — table-driven t.Run skeleton for the AG-10.2 four-outcome
+// matrix (S-APP-005..008): AllowOnce, Deny, ModifyInput, AllowAlways.
+// Consolidates four formerly-separate top-level test functions
+// (TestPermission_FourOutcomes_{AllowOnce_EmitsDecisionMade,
+// Deny_TypedResultAndDecisionMade, ModifyInput_SubstitutesArguments,
+// AllowAlways_EmitsDecisionMade}) into one table, one shared
+// assertion body, and a `checkExtra` hook for the outcome-specific
+// properties (Deny's typed-failure category, ModifyInput's
+// transparency byte-equality) that a fully generic table would
+// otherwise force awkwardly into shared fields. Subtest names keep
+// each case's original function-name suffix for grep-discoverability
+// (`-run "TestPermission_FourOutcomes/Deny_TypedResultAndDecisionMade"`
+// still finds it).
 //
-// RED-recorded at Commit 4 (the AG-10.1 implementation did not emit
-// decision_made on sync paths — that was the immediate-allow
-// property). GREEN at this commit.
-func TestPermission_FourOutcomes_AllowOnce_EmitsDecisionMade(t *testing.T) {
+//   - AllowOnce (R-APP-004): sync verdict, zero decision_required,
+//     one decision_made, tool runs, result success.
+//   - Deny (R-APP-005): typed denial in the result slot AND on
+//     decision_made — never a Go error; tool does not run.
+//   - ModifyInput (R-APP-006): decision_made carries the modified
+//     bytes; Tool.Run receives those same bytes byte-exact
+//     (ScriptedTool.RecordedArgs() — no bespoke capture channel
+//     needed, unlike the original test).
+//   - AllowAlways (R-APP-007): decision_made alone at this
+//     milestone's boundary; the resolution_remembered emission and
+//     suppression behavior are AG-10.4's own dedicated tests
+//     (TestPermission_AllowAlways_Remember_Branches,
+//     TestPermission_RememberedSuppressesSubsequentAsk).
+func TestPermission_FourOutcomes(t *testing.T) {
 	t.Parallel()
 
-	policy := &scriptedPermissionPolicy{
-		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
-			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
-		},
-	}
-
-	tool := EchoScriptedTool("read_file", agent.EffectClassRead)
-	reg := newMapRegistry(map[string]agent.Tool{"read_file": tool})
-
-	calls := []scheduledPermissionCall{
-		{id: "allow_once_0", name: "read_file", args: []byte(`{"path":"/x"}`)},
-	}
-
-	results, events := runPermissionSchedulerAndCollect(
-		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
-	)
-
-	// No decision_required (sync verdict).
-	if got := countByKind(events)[agent.EventKindPermissionDecisionRequired]; got != 0 {
-		t.Errorf("decision_required count = %d, want 0 (AllowOnce is sync, R-APP-001)", got)
-	}
-	// One decision_made{AllowOnce}.
-	madeEvs := []agent.PermissionDecisionMade{}
-	for _, ev := range events {
-		if made, ok := ev.PermissionDecisionMade(); ok {
-			madeEvs = append(madeEvs, made)
-		}
-	}
-	if len(madeEvs) != 1 {
-		t.Fatalf("decision_made count = %d, want 1 (R-APP-004)", len(madeEvs))
-	}
-	if madeEvs[0].Outcome() != agent.PermissionOutcomeAllowOnce {
-		t.Errorf("decision_made outcome = %v, want AllowOnce", madeEvs[0].Outcome())
-	}
-	if madeEvs[0].CallID() != "allow_once_0" {
-		t.Errorf("decision_made callID = %q, want %q", madeEvs[0].CallID(), "allow_once_0")
-	}
-	// Tool ran and result is success.
-	if inv := tool.Invocations(); inv != 1 {
-		t.Errorf("read_file invocations = %d, want 1", inv)
-	}
-	if len(results) != 1 {
-		t.Fatalf("Schedule returned %d results, want 1", len(results))
-	}
-	if results[0].Outcome != agent.ToolOutcomeSuccess {
-		t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
-	}
-}
-
-// S-APP-006 (AG-10.2 Deny) — Deny populates the ordinal Result slot
-// with `Result{Outcome: ExecutionFailure, Failure: <typed denial>}`
-// (R-APP-005). The denial is visible to the model via the typed
-// Result. The decision_made{Deny} event carries the typed failure.
-//
-// RED-recorded at Commit 4 (AG-10.1 stubbed Deny to "proceed").
-// GREEN at this commit.
-func TestPermission_FourOutcomes_Deny_TypedResultAndDecisionMade(t *testing.T) {
-	t.Parallel()
-
-	// Construct a typed *agent.Failure the test can identify.
-	inner, err := ai.MidStreamFailure(ai.FailureReport{
+	// Shared fixture for the Deny case's typed denial.
+	denialInner, err := ai.MidStreamFailure(ai.FailureReport{
 		Category: ai.FailureCategoryUnavailable,
 	}, false)
 	if err != nil {
 		t.Fatalf("ai.MidStreamFailure: %v", err)
 	}
-	denial, err := agent.NewFailure(inner)
+	denial, err := agent.NewFailure(denialInner)
 	if err != nil {
 		t.Fatalf("agent.NewFailure: %v", err)
 	}
-
-	policy := &scriptedPermissionPolicy{
-		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
-			return agent.PermissionVerdict{
-				Outcome: agent.PermissionOutcomeDeny,
-				Failure: denial,
-			}
-		},
-	}
-
-	tool := EchoScriptedTool("dangerous_tool", agent.EffectClassRead)
-	reg := newMapRegistry(map[string]agent.Tool{"dangerous_tool": tool})
-
-	calls := []scheduledPermissionCall{
-		{id: "deny_0", name: "dangerous_tool", args: []byte(`{"cmd":"rm -rf /"}`)},
-	}
-
-	results, events := runPermissionSchedulerAndCollect(
-		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
-	)
-
-	// Result slot is a typed ExecutionFailure (R-APP-005).
-	if len(results) != 1 {
-		t.Fatalf("Schedule returned %d results, want 1", len(results))
-	}
-	if results[0].Outcome != agent.ToolOutcomeExecutionFailure {
-		t.Errorf("results[0].Outcome = %v, want ExecutionFailure (Deny surfaces as typed outcome, NOT Go error)",
-			results[0].Outcome)
-	}
-	if results[0].Failure == nil {
-		t.Fatal("results[0].Failure = nil, want typed *Failure carrying the denial")
-	}
-	if results[0].Failure.Category() != ai.FailureCategoryUnavailable {
-		t.Errorf("results[0].Failure.Category = %v, want Unavailable", results[0].Failure.Category())
-	}
-
-	// Tool was NOT invoked — Deny skips execution.
-	if inv := tool.Invocations(); inv != 0 {
-		t.Errorf("dangerous_tool invocations = %d, want 0 (Deny skips execution)", inv)
-	}
-
-	// decision_made{Deny} event with the typed failure (R-APP-005).
-	madeEvs := []agent.PermissionDecisionMade{}
-	for _, ev := range events {
-		if made, ok := ev.PermissionDecisionMade(); ok {
-			madeEvs = append(madeEvs, made)
-		}
-	}
-	if len(madeEvs) != 1 {
-		t.Fatalf("decision_made count = %d, want 1", len(madeEvs))
-	}
-	if madeEvs[0].Outcome() != agent.PermissionOutcomeDeny {
-		t.Errorf("decision_made outcome = %v, want Deny", madeEvs[0].Outcome())
-	}
-	if madeEvs[0].CallID() != "deny_0" {
-		t.Errorf("decision_made callID = %q, want %q", madeEvs[0].CallID(), "deny_0")
-	}
-	f, ok := madeEvs[0].Failure()
-	if !ok {
-		t.Errorf("decision_made{Failure} returned no failure")
-	} else if f != denial {
-		t.Errorf("decision_made failure = %v, want the typed denial passed to Resolve", f)
-	}
-}
-
-// S-APP-007 (AG-10.2 ModifyInput transparency) — ModifyInput
-// substitutes the arguments before ToolStart emission and Tool.Run;
-// `ToolStart.Arguments()` byte-equals `decision_made.ModifiedArguments()`.
-// The session log reconstructs "what ran" from the modified bytes.
-//
-// RED-recorded at Commit 4 (AG-10.1 stubbed ModifyInput to proceed
-// without substitution). GREEN at this commit.
-func TestPermission_FourOutcomes_ModifyInput_SubstitutesArguments(t *testing.T) {
-	t.Parallel()
-
 	const modifiedArgs = `{"cmd":"ls"}`
 
-	policy := &scriptedPermissionPolicy{
-		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
-			return agent.PermissionVerdict{
-				Outcome:      agent.PermissionOutcomeModifyInput,
-				ModifiedArgs: []byte(modifiedArgs),
+	type outcomeCase struct {
+		name              string
+		callID            string
+		toolName          string
+		originalArgs      string
+		verdict           agent.PermissionVerdict
+		wantResultOutcome agent.ToolOutcome
+		wantInvocations   int64
+		wantMadeOutcome   agent.PermissionOutcome
+		checkExtra        func(t *testing.T, results []agent.Result, events []*agent.Event, made agent.PermissionDecisionMade, tool *ScriptedTool)
+	}
+
+	cases := []outcomeCase{
+		{
+			name:              "AllowOnce_EmitsDecisionMade",
+			callID:            "allow_once_0",
+			toolName:          "read_file",
+			originalArgs:      `{"path":"/x"}`,
+			verdict:           agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce},
+			wantResultOutcome: agent.ToolOutcomeSuccess,
+			wantInvocations:   1,
+			wantMadeOutcome:   agent.PermissionOutcomeAllowOnce,
+		},
+		{
+			name:              "Deny_TypedResultAndDecisionMade",
+			callID:            "deny_0",
+			toolName:          "dangerous_tool",
+			originalArgs:      `{"cmd":"rm -rf /"}`,
+			verdict:           agent.PermissionVerdict{Outcome: agent.PermissionOutcomeDeny, Failure: denial},
+			wantResultOutcome: agent.ToolOutcomeExecutionFailure,
+			wantInvocations:   0,
+			wantMadeOutcome:   agent.PermissionOutcomeDeny,
+			checkExtra: func(t *testing.T, results []agent.Result, _ []*agent.Event, made agent.PermissionDecisionMade, _ *ScriptedTool) {
+				if results[0].Failure == nil {
+					t.Fatal("results[0].Failure = nil, want typed *Failure carrying the denial")
+				}
+				if results[0].Failure.Category() != ai.FailureCategoryUnavailable {
+					t.Errorf("results[0].Failure.Category = %v, want Unavailable", results[0].Failure.Category())
+				}
+				f, ok := made.Failure()
+				if !ok {
+					t.Error("decision_made{Failure} returned no failure")
+				} else if f != denial {
+					t.Errorf("decision_made failure = %v, want the typed denial passed to Resolve", f)
+				}
+			},
+		},
+		{
+			name:              "ModifyInput_SubstitutesArguments",
+			callID:            "modify_0",
+			toolName:          "modify_tool",
+			originalArgs:      `{"cmd":"rm -rf /"}`,
+			verdict:           agent.PermissionVerdict{Outcome: agent.PermissionOutcomeModifyInput, ModifiedArgs: []byte(modifiedArgs)},
+			wantResultOutcome: agent.ToolOutcomeSuccess,
+			wantInvocations:   1,
+			wantMadeOutcome:   agent.PermissionOutcomeModifyInput,
+			checkExtra: func(t *testing.T, _ []agent.Result, events []*agent.Event, made agent.PermissionDecisionMade, tool *ScriptedTool) {
+				if string(made.ModifiedArguments()) != modifiedArgs {
+					t.Errorf("decision_made modified args = %q, want %q (R-APP-006 transparency)",
+						made.ModifiedArguments(), modifiedArgs)
+				}
+				// ToolStart.Arguments() byte-equals
+				// decision_made.ModifiedArguments() — the stream
+				// itself carries the modified bytes, not just Run().
+				var startEvs []agent.ToolStart
+				for _, ev := range events {
+					if start, ok := ev.ToolStart(); ok {
+						startEvs = append(startEvs, start)
+					}
+				}
+				if len(startEvs) != 1 {
+					t.Fatalf("ToolStart count = %d, want 1", len(startEvs))
+				}
+				if string(startEvs[0].Arguments()) != modifiedArgs {
+					t.Errorf("ToolStart.Arguments() = %q, want %q (modify-input transparency, R-APP-006)",
+						startEvs[0].Arguments(), modifiedArgs)
+				}
+				// Tool.Run received the substituted bytes byte-exact.
+				got := tool.RecordedArgs()
+				if len(got) != 1 {
+					t.Fatalf("tool RecordedArgs count = %d, want 1", len(got))
+				}
+				if string(got[0]) != modifiedArgs {
+					t.Errorf("tool received args = %q, want %q (the substituted bytes)", got[0], modifiedArgs)
+				}
+			},
+		},
+		{
+			name:              "AllowAlways_EmitsDecisionMade",
+			callID:            "always_0",
+			toolName:          "remember_tool",
+			originalArgs:      `{}`,
+			verdict:           agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways},
+			wantResultOutcome: agent.ToolOutcomeSuccess,
+			wantInvocations:   1,
+			wantMadeOutcome:   agent.PermissionOutcomeAllowAlways,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			policy := &scriptedPermissionPolicy{
+				resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+					return c.verdict
+				},
+				remember: func(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
+					return false // AG-10.4's Remember branches are covered by their own dedicated tests.
+				},
 			}
-		},
-	}
 
-	// Capture what arguments the tool actually sees.
-	receivedArgsCh := make(chan []byte, 1)
-	tool := NewScriptedTool("modify_tool", agent.EffectClassRead,
-		agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte("ok")},
-	)
-	tool.Script = func(_ context.Context, args []byte, _ agent.PolicySlot) (agent.Result, error) {
-		// Copy because the scheduler reuses buffers.
-		cp := append([]byte(nil), args...)
-		select {
-		case receivedArgsCh <- cp:
-		default:
-		}
-		return agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte("ok")}, nil
-	}
-	reg := newMapRegistry(map[string]agent.Tool{"modify_tool": tool})
+			tool := EchoScriptedTool(c.toolName, agent.EffectClassRead)
+			reg := newMapRegistry(map[string]agent.Tool{c.toolName: tool})
+			calls := []scheduledPermissionCall{{id: c.callID, name: c.toolName, args: []byte(c.originalArgs)}}
 
-	calls := []scheduledPermissionCall{
-		{id: "modify_0", name: "modify_tool", args: []byte(`{"cmd":"rm -rf /"}`)},
-	}
+			results, events := runPermissionSchedulerAndCollect(
+				&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
+			)
 
-	results, events := runPermissionSchedulerAndCollect(
-		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
-	)
+			if len(results) != 1 {
+				t.Fatalf("Schedule returned %d results, want 1", len(results))
+			}
+			if results[0].Outcome != c.wantResultOutcome {
+				t.Errorf("results[0].Outcome = %v, want %v", results[0].Outcome, c.wantResultOutcome)
+			}
+			if inv := tool.Invocations(); inv != c.wantInvocations {
+				t.Errorf("%s invocations = %d, want %d", c.toolName, inv, c.wantInvocations)
+			}
 
-	// decision_made{ModifyInput, modifiedArgs}.
-	madeEvs := []agent.PermissionDecisionMade{}
-	for _, ev := range events {
-		if made, ok := ev.PermissionDecisionMade(); ok {
-			madeEvs = append(madeEvs, made)
-		}
-	}
-	if len(madeEvs) != 1 {
-		t.Fatalf("decision_made count = %d, want 1", len(madeEvs))
-	}
-	if madeEvs[0].Outcome() != agent.PermissionOutcomeModifyInput {
-		t.Errorf("decision_made outcome = %v, want ModifyInput", madeEvs[0].Outcome())
-	}
-	if string(madeEvs[0].ModifiedArguments()) != modifiedArgs {
-		t.Errorf("decision_made modified args = %q, want %q (R-APP-006 transparency)",
-			madeEvs[0].ModifiedArguments(), modifiedArgs)
-	}
+			madeEvs := []agent.PermissionDecisionMade{}
+			for _, ev := range events {
+				if made, ok := ev.PermissionDecisionMade(); ok {
+					madeEvs = append(madeEvs, made)
+				}
+			}
+			if len(madeEvs) != 1 {
+				t.Fatalf("decision_made count = %d, want 1", len(madeEvs))
+			}
+			if madeEvs[0].Outcome() != c.wantMadeOutcome {
+				t.Errorf("decision_made outcome = %v, want %v", madeEvs[0].Outcome(), c.wantMadeOutcome)
+			}
+			if madeEvs[0].CallID() != c.callID {
+				t.Errorf("decision_made callID = %q, want %q", madeEvs[0].CallID(), c.callID)
+			}
 
-	// ToolStart.Arguments() byte-equals decision_made.ModifiedArguments().
-	var startEvs []agent.ToolStart
-	for _, ev := range events {
-		if start, ok := ev.ToolStart(); ok {
-			startEvs = append(startEvs, start)
-		}
-	}
-	if len(startEvs) != 1 {
-		t.Fatalf("ToolStart count = %d, want 1", len(startEvs))
-	}
-	if string(startEvs[0].Arguments()) != modifiedArgs {
-		t.Errorf("ToolStart.Arguments() = %q, want %q (modify-input transparency, R-APP-006)",
-			startEvs[0].Arguments(), modifiedArgs)
-	}
+			// AllowOnce is the one sync outcome that must not look
+			// like a defer (R-APP-001).
+			if c.verdict.Outcome == agent.PermissionOutcomeAllowOnce {
+				if got := countByKind(events)[agent.EventKindPermissionDecisionRequired]; got != 0 {
+					t.Errorf("decision_required count = %d, want 0 (AllowOnce is sync, R-APP-001)", got)
+				}
+			}
 
-	// Tool ran with modified args.
-	select {
-	case got := <-receivedArgsCh:
-		if string(got) != modifiedArgs {
-			t.Errorf("tool received args = %q, want %q (the substituted bytes)", got, modifiedArgs)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("tool did not receive any args within 1s")
-	}
-
-	// Result is success.
-	if len(results) != 1 {
-		t.Fatalf("Schedule returned %d results, want 1", len(results))
-	}
-	if results[0].Outcome != agent.ToolOutcomeSuccess {
-		t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
-	}
-}
-
-// S-APP-008 (AG-10.2 AllowAlways, AG-10.4 emission) — AllowAlways
-// emits decision_made{AllowAlways}. The `permission_resolution_remembered`
-// emission depends on policy.Remember's boolean return — wired in
-// Commit 6 (R-APP-007). For Commit 4, the assertion is the
-// decision_made event alone.
-//
-// RED-recorded at Commit 4 (AG-10.1 stubbed AllowAlways to no-event).
-// GREEN at this commit (the AllowAlways emit).
-func TestPermission_FourOutcomes_AllowAlways_EmitsDecisionMade(t *testing.T) {
-	t.Parallel()
-
-	policy := &scriptedPermissionPolicy{
-		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
-			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowAlways}
-		},
-		remember: func(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
-			return false // Commit 6 wires the resolution_remembered emission.
-		},
-	}
-
-	tool := EchoScriptedTool("remember_tool", agent.EffectClassRead)
-	reg := newMapRegistry(map[string]agent.Tool{"remember_tool": tool})
-
-	calls := []scheduledPermissionCall{
-		{id: "always_0", name: "remember_tool", args: []byte(`{}`)},
-	}
-
-	results, events := runPermissionSchedulerAndCollect(
-		&agent.Scheduler{MaxConcurrentReads: 4}, calls, reg, policy,
-	)
-
-	// One decision_made{AllowAlways}.
-	madeEvs := []agent.PermissionDecisionMade{}
-	for _, ev := range events {
-		if made, ok := ev.PermissionDecisionMade(); ok {
-			madeEvs = append(madeEvs, made)
-		}
-	}
-	if len(madeEvs) != 1 {
-		t.Fatalf("decision_made count = %d, want 1", len(madeEvs))
-	}
-	if madeEvs[0].Outcome() != agent.PermissionOutcomeAllowAlways {
-		t.Errorf("decision_made outcome = %v, want AllowAlways", madeEvs[0].Outcome())
-	}
-
-	// Tool ran and result is success.
-	if inv := tool.Invocations(); inv != 1 {
-		t.Errorf("remember_tool invocations = %d, want 1", inv)
-	}
-	if len(results) != 1 {
-		t.Fatalf("Schedule returned %d results, want 1", len(results))
-	}
-	if results[0].Outcome != agent.ToolOutcomeSuccess {
-		t.Errorf("results[0].Outcome = %v, want Success", results[0].Outcome)
+			if c.checkExtra != nil {
+				c.checkExtra(t, results, events, madeEvs[0], tool)
+			}
+		})
 	}
 }
 
