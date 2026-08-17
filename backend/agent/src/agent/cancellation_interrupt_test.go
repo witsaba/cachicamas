@@ -1,10 +1,17 @@
 // AG-14 — Phase 2: the interrupt core (R-CAN-001, R-CAN-002, R-CAN-003
-// groundwork, R-RUN-011 carve-out, R-HIS-007 back-annotation).
+// groundwork, R-RUN-011 carve-out, R-HIS-007 back-annotation). Widened
+// at Phase 5 (R-CAN-003 itself: interrupt during a permission
+// suspension) and Phase 6 (R-CAN-004: a second signal is a no-op) —
+// both land in this file per design.md's Testing Strategy table (test
+// 3 and test 4 are both "same file" as test 1).
 package agent_test
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -360,5 +367,218 @@ func TestHarness_Interrupt_SameHarnessRunsNextPrompt(t *testing.T) {
 	}
 	if !foundInTranscript {
 		t.Error("steered message not found in the transcript — zero-drop guarantee violated")
+	}
+}
+
+// readUntilDecisionRequired reads events off sink, in arrival order,
+// until a permission_decision_required event is observed (inclusive),
+// returning every event read so far and the decision's own payload.
+// AG-14 Phase 5 (R-CAN-003): the stream itself is the synchronization
+// point for firing a signal mid-suspension — no agenttest.Gate, no
+// wall clock beyond this helper's own defensive deadline (which never
+// gates the signal itself, only guards a genuinely stuck test).
+// Mirrors permission_protocol_test.go's own drainUntilDecisionRequired,
+// adapted to the harness's already-stamped agent.Event values: no
+// separate goroutine is needed here because sink is buffered and a
+// parked call emits nothing further until a signal fires, so a direct
+// sequential read cannot deadlock the caller.
+func readUntilDecisionRequired(t *testing.T, sink <-chan *agent.Event) ([]agent.Event, agent.PermissionDecisionRequired) {
+	t.Helper()
+	var events []agent.Event
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev, ok := <-sink:
+			if !ok {
+				t.Fatal("readUntilDecisionRequired: sink closed before a permission_decision_required event was observed")
+				return nil, agent.PermissionDecisionRequired{}
+			}
+			events = append(events, *ev)
+			if req, ok := ev.PermissionDecisionRequired(); ok {
+				return events, req
+			}
+		case <-deadline:
+			t.Fatal("readUntilDecisionRequired: no permission_decision_required event observed within 2s")
+			return nil, agent.PermissionDecisionRequired{}
+		}
+	}
+}
+
+// AG-14 — Phase 5: interrupt during a permission suspension aborts it
+// typed (R-CAN-003, S-CAN-003; jointly S-APP-017's interrupt half,
+// agent-permission-protocol delta). Given a run whose permission
+// policy defers a call, and a consumer that has read the
+// decision-required event off the run stream (the stream is the
+// synchronization; no wall clock), when the interrupt signal fires,
+// then the parked call's abort — read back through the emitted
+// tool_end_execution_failure event, since the harness surface itself
+// never returns []Result directly — carries a typed *Failure reporting
+// category Cancellation whose unwrap chain satisfies errors.Is against
+// the interrupt sentinel; a subsequent wake for that call identity
+// returns ErrStrayDecision; the transcript reads back with no open
+// call after the wind-down; and CheckStream accepts the stream
+// unmodified.
+func TestHarness_Interrupt_DuringSuspensionAbortsTyped(t *testing.T) {
+	t.Parallel()
+
+	deferring := &scriptedPermissionPolicy{
+		resolve: func(_ context.Context, _ ai.ToolCall) agent.PermissionVerdict {
+			return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+		},
+	}
+	// Never released: the call must never reach Run — the gate aborts
+	// it before executeCall ever calls tool.Run.
+	tool := BlockingScriptedTool("read_can_003", agent.EffectClassRead, make(chan struct{}))
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_can_003": tool})
+
+	provider := agenttest.NewProvider(scriptToolCallResponse(t, "call-can-003", "read_can_003", []byte(`{}`)))
+	hist := agent.NewHistory()
+	sched := &agent.Scheduler{}
+	h := agent.Harness{
+		Provider:  provider,
+		System:    "system prompt for can-003-interrupt",
+		Turn:      agent.TurnOptions{Tools: reg, PermissionPolicy: deferring},
+		History:   hist,
+		Scheduler: sched,
+	}
+
+	sink := make(chan *agent.Event, 256)
+	type runOutcome struct {
+		msg    ai.Message
+		finish ai.FinishReason
+		err    error
+	}
+	resultCh := make(chan runOutcome, 1)
+	go func() {
+		msg, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+		resultCh <- runOutcome{msg, finish, err}
+	}()
+
+	events, decision := readUntilDecisionRequired(t, sink)
+	if decision.CallID() != "call-can-003" {
+		t.Fatalf("permission_decision_required.CallID() = %q, want %q", decision.CallID(), "call-can-003")
+	}
+	h.Interrupt()
+
+	events = append(events, drainSink(t, sink)...)
+	got := <-resultCh
+
+	if got.err == nil {
+		t.Fatal("Run returned err = nil, want a non-nil error satisfying errors.Is against the interrupt sentinel")
+	}
+	if !errors.Is(got.err, agent.ErrInterrupted) {
+		t.Errorf("Run error = %v, want errors.Is(err, agent.ErrInterrupted)", got.err)
+	}
+
+	var failureEv agent.ToolEndExecutionFailure
+	var found bool
+	for _, ev := range events {
+		if tef, ok := ev.ToolEndExecutionFailure(); ok && tef.CallID() == "call-can-003" {
+			failureEv, found = tef, true
+		}
+	}
+	if !found {
+		t.Fatal("no tool_end_execution_failure observed for call-can-003")
+	}
+	failure, hasFailure := failureEv.Failure()
+	if !hasFailure {
+		t.Fatal("tool_end_execution_failure carries no *Failure")
+	}
+	if failure.Category() != ai.FailureCategoryCancellation {
+		t.Errorf("failure.Category() = %v, want ai.FailureCategoryCancellation", failure.Category())
+	}
+	if !errors.Is(failure.Unwrap(), agent.ErrInterrupted) {
+		t.Error("failure does not unwrap to errors.Is-match agent.ErrInterrupted")
+	}
+
+	if err := sched.WakeParked("call-can-003"); !errors.Is(err, agent.ErrStrayDecision) {
+		t.Errorf("WakeParked(%q) after wind-down = %v, want errors.Is to match agent.ErrStrayDecision", "call-can-003", err)
+	}
+
+	if err := hist.CloseTurn(); err != nil {
+		t.Errorf("history.CloseTurn() after wind-down = %v, want nil (no open call remains)", err)
+	}
+
+	if report := agent.CheckStream(events); report.Violation() != nil {
+		t.Errorf("agent.CheckStream(emitted stream) = %v, want no violation (unmodified acceptance)", report.Violation())
+	}
+}
+
+// AG-14 — Phase 6: a second signal changes nothing and panics nothing
+// (R-CAN-004, S-CAN-004, charter AG-14.1 scenario 3). Given a run
+// already winding down from an interrupt, when a second interrupt
+// fires from a separate goroutine concurrent with the first's
+// wind-down and the suite runs under -race, then the test process
+// reports no panic and no data race, the run-end outcome and the
+// returned error are the same values S-CAN-001's Arm A observed, and
+// the emitted event sequence is accepted by CheckStream unmodified.
+// Both signal calls are launched from their own goroutines,
+// synchronized only by a WaitGroup — never sequenced relative to each
+// other — so either can race the other AND the Run goroutine's own
+// wind-down; the composition this proves is 2.2's signalMu-guarded
+// {cancelRun, shutdown} state plus Go's own documented no-op semantics
+// for an already-cancelled context's cancel-cause function. No new
+// production code: confirmed genuinely, not assumed, by running under
+// -race -count=10 (see apply-progress.md).
+func TestHarness_Interrupt_SecondInterruptIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	gate := agenttest.NewGate()
+	provider := agenttest.NewProvider(heldTurnScript(t, gate))
+	h := agent.Harness{Provider: provider, System: "system prompt for can-004"}
+
+	sink := make(chan *agent.Event, 256)
+	type runOutcome struct {
+		msg    ai.Message
+		finish ai.FinishReason
+		err    error
+	}
+	resultCh := make(chan runOutcome, 1)
+	go func() {
+		msg, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+		resultCh <- runOutcome{msg, finish, err}
+	}()
+
+	<-gate.Reached()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); h.Interrupt() }()
+	go func() { defer wg.Done(); h.Interrupt() }()
+	wg.Wait()
+
+	events := drainSink(t, sink)
+	got := <-resultCh
+
+	if got.err == nil {
+		t.Fatal("Run returned err = nil, want a non-nil error satisfying errors.Is against the interrupt sentinel")
+	}
+	if !errors.Is(got.err, agent.ErrInterrupted) {
+		t.Errorf("Run error = %v, want errors.Is(err, agent.ErrInterrupted)", got.err)
+	}
+	if errors.Is(got.err, agent.ErrShutdown) {
+		t.Error("Run error unexpectedly satisfies errors.Is against agent.ErrShutdown too — the two signals must stay distinguishable")
+	}
+
+	if len(events) == 0 {
+		t.Fatal("zero events observed")
+	}
+	last := events[len(events)-1]
+	runEnd, ok := last.RunEnd()
+	if !ok {
+		t.Fatalf("last event kind = %v, want run_end", last.Kind())
+	}
+	if runEnd.Outcome() != agent.RunOutcomeInterrupted {
+		t.Errorf("run_end outcome = %v, want RunOutcomeInterrupted", runEnd.Outcome())
+	}
+	if runEnd.Outcome() == agent.RunOutcomeFailed {
+		t.Error("run_end outcome = RunOutcomeFailed, want never Failed for an interrupted run")
+	}
+	if _, hasFailure := runEnd.Failure(); hasFailure {
+		t.Error("run_end carries a *Failure, want none for an interrupted run")
+	}
+
+	if report := agent.CheckStream(events); report.Violation() != nil {
+		t.Errorf("agent.CheckStream(emitted stream) = %v, want no violation (unmodified acceptance)", report.Violation())
 	}
 }

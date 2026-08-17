@@ -335,11 +335,25 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	// clear, so a signal racing the very end of Run never dereferences
 	// a stale func.
 	h.signalMu.Lock()
+	// AG-14 (R-CAN-005): a value already shut down refuses every
+	// subsequent Run typed, before any identity is minted and before
+	// any event is emitted — the terminal, one-way flag Shutdown
+	// latches. Checked first in this critical section, ahead of the
+	// queue reopen and the cancel-cause derivation below, neither of
+	// which this path reaches: the queue stays exactly as the prior
+	// run's wind-down left it (closed), and no cancelRun is ever
+	// registered for a run that never starts.
+	if h.shutdown {
+		h.signalMu.Unlock()
+		close(sink)
+		return ai.Message{}, 0, ErrPromptAfterShutdown
+	}
 	// AG-14 (R-CAN-002 delta, R-RUN-001): reopen the steering queue in
 	// the SAME critical section as the cancel-cause derivation below,
 	// unless the terminal shutdown flag is already set — that half
-	// (the typed post-shutdown refusal) is Phase 7's wiring; this is
-	// only the reopen a serially-reused, non-shutdown value needs.
+	// (the typed post-shutdown refusal) is Phase 7's wiring above;
+	// this is only the reopen a serially-reused, non-shutdown value
+	// needs.
 	if !h.shutdown {
 		h.queue.reopen()
 	}

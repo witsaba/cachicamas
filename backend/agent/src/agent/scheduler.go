@@ -56,6 +56,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -645,7 +646,11 @@ func (s *Scheduler) runPermissionGate(
 		case <-reqAck:
 		case <-ctx.Done():
 			parked.remove(call.ID())
-			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			// AG-14 (R-CAN-003, agent-permission-protocol R-APP-009
+			// delta): the typed abort is derived from the
+			// cancellation CAUSE, not the bare context error, so it
+			// names *which signal* aborted the call.
+			abort := typedCancellationFailureFromError(call.ID(), context.Cause(ctx))
 			results[ordinal] = abort
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, abort.Failure
@@ -671,7 +676,10 @@ func (s *Scheduler) runPermissionGate(
 			// WakeParked observes ErrStrayDecision rather than
 			// spuriously closing a channel nothing will ever read.
 			parked.remove(call.ID())
-			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			// AG-14 (R-CAN-003, agent-permission-protocol R-APP-009
+			// delta): same cause-derived typed abort as the
+			// acknowledgement-wait arm above.
+			abort := typedCancellationFailureFromError(call.ID(), context.Cause(ctx))
 			results[ordinal] = abort
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, abort.Failure
@@ -948,6 +956,48 @@ func typedFailureFromError(err error) (*Failure, error) {
 	report := ai.FailureReport{
 		Category: ai.FailureCategoryUnavailable,
 		Cause:    err,
+	}
+	aiFailure, ferr := ai.MidStreamFailure(report, false)
+	if ferr != nil {
+		return nil, ferr
+	}
+	return NewFailure(aiFailure)
+}
+
+// typedCancellationFailureFromError wraps a context's cancellation
+// cause as a typed `*Failure` and constructs a `Result` for it — the
+// permission gate's two abort arms' own counterpart to
+// typedExecutionFailureFromError (AG-14, R-CAN-003; the
+// agent-permission-protocol delta at R-APP-009). When cause matches
+// one of the two harness cancellation sentinels (R-CAN-001), the
+// `*Failure` reports `ai.FailureCategoryCancellation` and keeps cause
+// reachable by `errors.Is` through its preserved unwrap chain, so a
+// caller can tell interrupt from shutdown at the call level, not only
+// at the run level. A cause matching neither sentinel — a bare
+// cancellation of the caller's own context, never routed through
+// Interrupt/Shutdown (R-CAN-001's scope line) — keeps the pre-AG-14
+// Unavailable wrap unchanged, via typedExecutionFailureFromError
+// itself.
+func typedCancellationFailureFromError(callID string, cause error) Result {
+	if !errors.Is(cause, ErrInterrupted) && !errors.Is(cause, ErrShutdown) {
+		return typedExecutionFailureFromError(callID, cause)
+	}
+	failure, _ := typedCancellationFailure(cause)
+	res := Result{
+		Outcome: ToolOutcomeExecutionFailure,
+		Failure: failure,
+	}
+	res.SetCallID(callID)
+	return res
+}
+
+// typedCancellationFailure constructs a typed `*Failure` carrying
+// `ai.FailureCategoryCancellation` for cause — typedFailureFromError's
+// sibling, which hardcodes `ai.FailureCategoryUnavailable` instead.
+func typedCancellationFailure(cause error) (*Failure, error) {
+	report := ai.FailureReport{
+		Category: ai.FailureCategoryCancellation,
+		Cause:    cause,
 	}
 	aiFailure, ferr := ai.MidStreamFailure(report, false)
 	if ferr != nil {
