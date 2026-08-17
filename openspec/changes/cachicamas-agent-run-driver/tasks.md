@@ -78,10 +78,10 @@ ONE PR (`size:exception` pre-authorized by the user for this milestone). Runtime
 
 ## Phase 2: AG-13.1 — Harness run to completion (`R-RUN-001..007`, `R-RUN-011`)
 
-- [ ] 2.1 RED — `TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged` (`S-RUN-001`). Expect FAIL: compile error, `agent.Harness` undefined.
-- [ ] 2.2 GREEN — create `harness.go`: `Harness{Provider ai.ModelProvider; System string; Turn TurnOptions; Scheduler *Scheduler; History *History; queue steeringQueue}`; method stubs `Run(ctx, prompt, sink) (ai.Message, ai.FinishReason, error)` / `Steer(msg) error`. Minimal `Run`: resolve nil defaults into locals (construct `Scheduler` with `LeaveSinkOpen: true` if nil, `NewHistory()` if nil), mint `run-hrn-<n>` via a package-local atomic counter, emit `run_start` via `NewRunStart` + shared `stamper.Stamp`, append `prompt`, call `Turn` once with continuation, emit `run_end`, return — single-turn happy path only at this increment.
-- [ ] 2.3 GREEN confirm — `S-RUN-001`: no constructor call, caller fields unchanged except the recorded `LeaveSinkOpen` exception, exactly two exported methods.
-- [ ] 2.4 RED — `TestHarness_SteerAfterTerminal_TypedRejectionNoSilentDrop` (`S-RUN-002`).
+- [x] 2.1 RED — `TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged` (`S-RUN-001`). Expect FAIL: compile error, `agent.Harness` undefined.
+- [x] 2.2 GREEN — create `harness.go`: `Harness{Provider ai.ModelProvider; System string; Turn TurnOptions; Scheduler *Scheduler; History *History; queue steeringQueue}`; method stubs `Run(ctx, prompt, sink) (ai.Message, ai.FinishReason, error)` / `Steer(msg) error`. Minimal `Run`: resolve nil defaults into locals (construct `Scheduler` with `LeaveSinkOpen: true` if nil, `NewHistory()` if nil), mint `run-hrn-<n>` via a package-local atomic counter, emit `run_start` via `NewRunStart` + shared `stamper.Stamp`, append `prompt`, call `Turn` once with continuation, emit `run_end`, return — single-turn happy path only at this increment.
+- [x] 2.3 GREEN confirm — `S-RUN-001`: no constructor call, caller fields unchanged except the recorded `LeaveSinkOpen` exception, exactly two exported methods.
+- [x] 2.4 RED — `TestHarness_SteerAfterTerminal_TypedRejectionNoSilentDrop` (`S-RUN-002`).
 - [x] 2.5 GREEN — implement `steeringQueue` closed-check + typed rejection `ai.Invalid(ai.ErrMisplaced, ai.At("steering"))`.
 - [x] 2.6 GREEN confirm — `S-RUN-002`.
 - [x] 2.7 RED — **charter AG-13.1 sc.1**: `TestHarness_TwoTurnRun_CompletesToTerminal` (`S-RUN-010`) — two-script fake provider (tool call, then final text); consumer drains sink; asserts full kind order + `Run`'s returned values.
