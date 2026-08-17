@@ -48,33 +48,33 @@ ONE PR (`size:exception` pre-authorized by the user for this milestone). Runtime
 
 ## Phase 0: Seams, RED-first (`R-LSK-001`, `R-TLS-012`)
 
-- [ ] 0.1 RED — create `harness_test.go` (`package agent_test`): `TestTurn_ContinuationHalfConfigured_RejectedTypedNoEmission` (`S-LSK-014`). Land in the SAME commit as widening both substrate filters with `/harness.go` and `/harness_test.go`. Expect FAIL: `agent.TurnContinuation` undefined.
-- [ ] 0.2 GREEN — `loop.go`: add exported `TurnContinuation{Run RunID; Stamper *LaneStamper; Scheduler *Scheduler; History *History}` and `TurnOptions.Continuation *TurnContinuation`; validate all-or-nothing at `Turn` entry, before any emission — half-configured returns `ai.Invalid(ai.ErrEmpty, ai.At("continuation", …))` naming the absent member, sink left as given, zero events emitted.
-- [ ] 0.3 GREEN confirm — `S-LSK-014` passes; sink observably received nothing.
-- [ ] 0.4 RED — `harness_test.go`: `TestSchedule_LeaveSinkOpenZeroDefault_ClosesSinkUnchanged` (`S-TLS-013`), `TestSchedule_LeaveSinkOpenSet_CallerOwnsClose` (`S-TLS-014`). Expect FAIL: `Scheduler.LeaveSinkOpen` undefined.
-- [ ] 0.5 GREEN — `tool.go`: add `Scheduler.LeaveSinkOpen bool` (zero = false = AG-09 behavior) to the struct at `:229`. `scheduler.go`: make the close-third-step at `:219` conditional on `!LeaveSinkOpen`; every other `Schedule` step (parked-set clear, emissions close, dispatcher join, ordered rejoin) unchanged in behavior and order.
-- [ ] 0.6 GREEN confirm — `S-TLS-013`/`S-TLS-014` pass; keyed-literal AG-09/AG-10 scheduler tests still construct `Scheduler{...}` and stay green file-unchanged (early check for `S-TLS-015`, re-confirmed at 6.6).
+- [x] 0.1 RED — create `harness_test.go` (`package agent_test`): `TestTurn_ContinuationHalfConfigured_RejectedTypedNoEmission` (`S-LSK-014`). Land in the SAME commit as widening both substrate filters with `/harness.go` and `/harness_test.go`. Expect FAIL: `agent.TurnContinuation` undefined.
+- [x] 0.2 GREEN — `loop.go`: add exported `TurnContinuation{Run RunID; Stamper *LaneStamper; Scheduler *Scheduler; History *History}` and `TurnOptions.Continuation *TurnContinuation`; validate all-or-nothing at `Turn` entry, before any emission — half-configured returns `ai.Invalid(ai.ErrEmpty, ai.At("continuation", …))` naming the absent member, sink left as given, zero events emitted.
+- [x] 0.3 GREEN confirm — `S-LSK-014` passes; sink observably received nothing.
+- [x] 0.4 RED — `harness_test.go`: `TestSchedule_LeaveSinkOpenZeroDefault_ClosesSinkUnchanged` (`S-TLS-013`), `TestSchedule_LeaveSinkOpenSet_CallerOwnsClose` (`S-TLS-014`). Expect FAIL: `Scheduler.LeaveSinkOpen` undefined.
+- [x] 0.5 GREEN — `tool.go`: add `Scheduler.LeaveSinkOpen bool` (zero = false = AG-09 behavior) to the struct at `:229`. `scheduler.go`: make the close-third-step at `:219` conditional on `!LeaveSinkOpen`; every other `Schedule` step (parked-set clear, emissions close, dispatcher join, ordered rejoin) unchanged in behavior and order.
+- [x] 0.6 GREEN confirm — `S-TLS-013`/`S-TLS-014` pass; keyed-literal AG-09/AG-10 scheduler tests still construct `Scheduler{...}` and stay green file-unchanged (early check for `S-TLS-015`, re-confirmed at 6.6).
 
 ## Phase 1: Loop continuation path (`R-LSK-001`, `R-HIS-010`)
 
-- [ ] 1.1 RED — `harness_test.go`: `TestTurn_ContinuationNonNil_NoRunBracketsSharedIdentityAndLane` (`S-LSK-013`, non-nil half: text-only turn). Expect FAIL: continuation is validated but ignored — brackets still emitted, identity still minted fresh.
-- [ ] 1.2 GREEN — `loop.go`: gated on `opts.Continuation != nil` — join `cont.Run` as `runID` instead of minting, use `cont.Stamper` instead of a fresh one (`loop.go:187-189` locals); emit **no** `run_start`/`run_end` on any path including the mid-stream fatal path (`turn_end(Aborted)` still emitted); `TurnID` still minted fresh per call.
-- [ ] 1.3 GREEN confirm — `S-LSK-013` non-nil half passes; nil-continuation half (zero-value `TurnOptions`) still emits brackets and mints fresh identity, byte-stable.
-- [ ] 1.4 RED — own task, per design's flagged reorder risk: `TestTurn_ContinuationToolCall_ScheduleBeforeFinalize_EventsInsideTurnBracket` (`S-LSK-013` tool-calling half) — asserts tool/permission events land **inside** the open turn bracket and **before** `turn_end`, and `CheckStream` accepts. Expect FAIL: today's finalize-first ordering puts tool events after `turn_end`, and `CheckStream` rejects a `PlacementTurn` event outside an open turn / after a Terminal `run_end`.
-- [ ] 1.5 GREEN — `loop.go`, continuation path only: call `results := sched.Schedule(...)` **before** `finalize()` (capturing the rejoin instead of the `_ =` discard at `:265`); `reconstructMessage` (continuation only) additionally appends `ai.ToolCall` parts from `t.toolCalls` with provider-exact bytes. Nil path keeps finalize-first byte-stable.
-- [ ] 1.6 GREEN confirm — `S-LSK-013` tool-calling half passes; `CheckStream` accepts the continuation-path event slice unmodified.
-- [ ] 1.7 RED — `harness_test.go`: `TestTurn_ContinuationCommitsAssistantAndToolResults_OpenSetEmptyAtClose` (`S-HIS-090`). Expect FAIL: no transcript commit exists yet — `CloseTurn` would reject an open call.
-- [ ] 1.8 GREEN — `loop.go`, continuation path, after finalize+rejoin: append the turn's assistant message (skip if zero content); append one `ai.RoleTool` result message per rejoin result in call order (`ai.NewToolResult` success / `ai.NewToolFailure` both failure outcomes). `Turn` does NOT call `CloseTurn` — that stays the run driver's.
-- [ ] 1.9 GREEN confirm — `S-HIS-090`: store holds assistant message with tool-call args + matching result; a subsequent `CloseTurn` on that history succeeds because no call is open.
-- [ ] 1.10 RED — `TestTurn_ContinuationEmptyContent_AppendsNothing` (`S-HIS-091`).
-- [ ] 1.11 GREEN confirm — covered by 1.8's skip-if-zero-content branch; store unchanged, `Turn` returns no error.
-- [ ] 1.12 RED — `TestTurn_ContinuationMixedOutcomes_OneResultPerCallInOrder` (`S-HIS-092`, success + both failure outcomes mixed).
-- [ ] 1.13 GREEN confirm — covered by 1.8; each failure outcome carried by the Layer 1 failure form, none by a content sentinel.
-- [ ] 1.14 RED — `TestTurn_ContinuationAppendFailure_TypedErrorReturned` (`S-HIS-093`) — construct a continuation `History` already holding an unresolved state so the commit append is rejected.
-- [ ] 1.15 GREEN — `loop.go`: an append failure on the continuation path returns a non-nil typed error from `Turn`; it MUST NOT be swallowed and the turn MUST NOT be reported successful.
-- [ ] 1.16 GREEN confirm — `S-HIS-093` passes; the caller's run terminates through `R-RUN-011`'s failure path (cross-checked again at 2.29-2.31).
-- [ ] 1.17 RED — `TestTurn_ContinuationNil_HistorySurfaceGuardStaysGreen` (`S-HIS-094`).
-- [ ] 1.18 GREEN confirm — nil continuation touches no transcript store; `history_surface_guard_test.go` passes source-unchanged.
+- [x] 1.1 RED — `harness_test.go`: `TestTurn_ContinuationNonNil_NoRunBracketsSharedIdentityAndLane` (`S-LSK-013`, non-nil half: text-only turn). Expect FAIL: continuation is validated but ignored — brackets still emitted, identity still minted fresh.
+- [x] 1.2 GREEN — `loop.go`: gated on `opts.Continuation != nil` — join `cont.Run` as `runID` instead of minting, use `cont.Stamper` instead of a fresh one (`loop.go:187-189` locals); emit **no** `run_start`/`run_end` on any path including the mid-stream fatal path (`turn_end(Aborted)` still emitted); `TurnID` still minted fresh per call.
+- [x] 1.3 GREEN confirm — `S-LSK-013` non-nil half passes; nil-continuation half (zero-value `TurnOptions`) still emits brackets and mints fresh identity, byte-stable.
+- [x] 1.4 RED — own task, per design's flagged reorder risk: `TestTurn_ContinuationToolCall_ScheduleBeforeFinalize_EventsInsideTurnBracket` (`S-LSK-013` tool-calling half) — asserts tool/permission events land **inside** the open turn bracket and **before** `turn_end`, and `CheckStream` accepts. Expect FAIL: today's finalize-first ordering puts tool events after `turn_end`, and `CheckStream` rejects a `PlacementTurn` event outside an open turn / after a Terminal `run_end`.
+- [x] 1.5 GREEN — `loop.go`, continuation path only: call `results := sched.Schedule(...)` **before** `finalize()` (capturing the rejoin instead of the `_ =` discard at `:265`); `reconstructMessage` (continuation only) additionally appends `ai.ToolCall` parts from `t.toolCalls` with provider-exact bytes. Nil path keeps finalize-first byte-stable.
+- [x] 1.6 GREEN confirm — `S-LSK-013` tool-calling half passes; `CheckStream` accepts the continuation-path event slice unmodified.
+- [x] 1.7 RED — `harness_test.go`: `TestTurn_ContinuationCommitsAssistantAndToolResults_OpenSetEmptyAtClose` (`S-HIS-090`). Expect FAIL: no transcript commit exists yet — `CloseTurn` would reject an open call.
+- [x] 1.8 GREEN — `loop.go`, continuation path, after finalize+rejoin: append the turn's assistant message (skip if zero content); append one `ai.RoleTool` result message per rejoin result in call order (`ai.NewToolResult` success / `ai.NewToolFailure` both failure outcomes). `Turn` does NOT call `CloseTurn` — that stays the run driver's.
+- [x] 1.9 GREEN confirm — `S-HIS-090`: store holds assistant message with tool-call args + matching result; a subsequent `CloseTurn` on that history succeeds because no call is open.
+- [x] 1.10 RED — `TestTurn_ContinuationEmptyContent_AppendsNothing` (`S-HIS-091`).
+- [x] 1.11 GREEN confirm — covered by 1.8's skip-if-zero-content branch; store unchanged, `Turn` returns no error.
+- [x] 1.12 RED — `TestTurn_ContinuationMixedOutcomes_OneResultPerCallInOrder` (`S-HIS-092`, success + both failure outcomes mixed).
+- [x] 1.13 GREEN confirm — covered by 1.8; each failure outcome carried by the Layer 1 failure form, none by a content sentinel.
+- [x] 1.14 RED — `TestTurn_ContinuationAppendFailure_TypedErrorReturned` (`S-HIS-093`) — construct a continuation `History` already holding an unresolved state so the commit append is rejected.
+- [x] 1.15 GREEN — `loop.go`: an append failure on the continuation path returns a non-nil typed error from `Turn`; it MUST NOT be swallowed and the turn MUST NOT be reported successful.
+- [x] 1.16 GREEN confirm — `S-HIS-093` passes; the caller's run terminates through `R-RUN-011`'s failure path (cross-checked again at 2.29-2.31).
+- [x] 1.17 RED — `TestTurn_ContinuationNil_HistorySurfaceGuardStaysGreen` (`S-HIS-094`).
+- [x] 1.18 GREEN confirm — nil continuation touches no transcript store; `history_surface_guard_test.go` passes source-unchanged.
 
 ## Phase 2: AG-13.1 — Harness run to completion (`R-RUN-001..007`, `R-RUN-011`)
 
