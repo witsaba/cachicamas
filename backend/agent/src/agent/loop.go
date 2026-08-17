@@ -34,6 +34,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -414,6 +415,40 @@ func Turn(
 		}
 	}
 
+	// AG-14 (R-CAN-001): Turn's first-ever cancellation observation,
+	// checked BEFORE the "ran to empty" normalization below so a
+	// cancelled run is never misread as a quietly completed one. A
+	// provider stream that closes bare because ctx was cancelled
+	// through a harness signal (R-CNF-011/R-CNF-012: the fake's
+	// producer selects on ctx.Done() and returns with no terminal
+	// event) is architecturally identical, at this point, to one that
+	// simply ran out of events — context.Cause is what tells the two
+	// apart. A bare cancellation of the caller's own context, not
+	// routed through a harness signal, does not match either sentinel
+	// here and falls through to the existing normalization unchanged
+	// (the scope line, R-CAN-001).
+	//
+	// Turn still owns its own turn bracket on this path, exactly as
+	// the existing mid-stream-fatal branch below does for a genuine
+	// provider error: CheckStream rejects a run-close while a turn is
+	// still open (BracketRoleClosesRun's own rule), so turn_end MUST
+	// close it before Run's wind-down closes the run bracket. The
+	// outcome is TurnOutcomeAborted — the closest existing member, no
+	// new one introduced — carrying a typed *Failure built with
+	// ai.FailureCategoryCancellation (a pre-existing Layer 1
+	// vocabulary member, not new here). This is the TURN's own
+	// bracket only; R-CAN-002's "no *Failure" rule governs the RUN's
+	// run_end, which windDownRun builds separately with none.
+	if cause := context.Cause(ctx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+		if failure, ferr := cancellationTurnFailure(cause); ferr == nil {
+			if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
+				emitStamped(sink, stamper, turnEnd)
+			}
+		}
+		closeSink(sink)
+		return ai.Message{}, 0, cause
+	}
+
 	// Provider closed without a Completion: walking-skeleton scope
 	// treats this as a "ran to empty" turn — normalize the finish
 	// reason to FinishReasonStop, the documented fallback for a
@@ -519,6 +554,24 @@ func toolResultMessage(r Result) (ai.Message, error) {
 		return ai.Message{}, err
 	}
 	return ai.NewMessage(ai.RoleTool, part)
+}
+
+// cancellationTurnFailure wraps cause as the typed *Failure the
+// cause-check branch's turn_end(Aborted) carries (AG-14, R-CAN-001).
+// ai.FailureCategoryCancellation is a pre-existing Layer 1 vocabulary
+// member (provider_failure.go), not introduced by this change; the
+// construction mirrors harness.go's own wrapHarnessFailure, through
+// the same public constructors, with the cancellation category in
+// place of Unavailable.
+func cancellationTurnFailure(cause error) (*Failure, error) {
+	aiFailure, ferr := ai.MidStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryCancellation,
+		Cause:    cause,
+	}, false)
+	if ferr != nil {
+		return nil, ferr
+	}
+	return NewFailure(aiFailure)
 }
 
 // outcomeForFinish maps a normalized ai.FinishReason to its TurnOutcome

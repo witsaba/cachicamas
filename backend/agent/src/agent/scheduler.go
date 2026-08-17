@@ -455,11 +455,20 @@ func (s *Scheduler) executeCall(
 	// it; the tool or a Layer 3 sandbox does. (For AG-09 we
 	// pass the call's id as a `string` policy; Layer 3 replaces
 	// this with its own sandbox descriptor at the seam.)
+	//
+	// AG-14 (R-TLS-013): `ctx` is the real run context, no longer
+	// `context.Background()` — a tool that reads its context now
+	// returns early on cancellation where it previously ran to
+	// completion. That is the intent (design.md Decision 2). The
+	// disjoint-return-channel rule below is unaffected: a
+	// ctx-observing tool's non-nil `err` still routes through the
+	// existing `runErr != nil` branch, exactly as any other tool
+	// error does (R-TLS-010).
 	runArgs := call.Arguments()
 	if modifiedArgs != nil {
 		runArgs = modifiedArgs
 	}
-	runRes, runErr := tool.Run(context.Background(), runArgs, PolicySlot(call.ID()))
+	runRes, runErr := tool.Run(ctx, runArgs, PolicySlot(call.ID()))
 
 	// Disjoint return channels: a non-nil `err` from `Run`
 	// means execution itself failed (R-TLS-010). The two channels

@@ -19,6 +19,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -70,6 +71,59 @@ type Harness struct {
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
 	queue steeringQueue
+
+	// signalMu guards cancelRun and shutdown (AG-14, R-CAN-001,
+	// R-CAN-004). One mutex, not sync.Once: a shut-down-then-reused
+	// harness (R-CAN-002) needs a FRESH cancel registration on each
+	// Run call, which sync.Once cannot give back once fired; atomics
+	// cannot couple "read the flag" with "invoke the cancel func"
+	// atomically the way this mutex does.
+	signalMu sync.Mutex
+
+	// cancelRun is the current run's cancel-cause function, live only
+	// while a Run call is in flight (set at Run entry, cleared at Run
+	// exit, both under signalMu). Interrupt/Shutdown invoke it under
+	// the same mutex; between runs it is nil, so a signal fired with
+	// no run in flight is a documented no-op.
+	cancelRun context.CancelCauseFunc
+
+	// shutdown is the terminal, one-way refusal flag Shutdown latches
+	// (R-CAN-005). It is per-value bookkeeping only — no transcript,
+	// never resumed — and does not pre-empt AG-21's cross-run state
+	// (agent-run-driver/spec.md:72). Not yet consulted at Run entry;
+	// that wiring is Phase 7.
+	shutdown bool
+}
+
+// Interrupt fires the interrupt signal (R-CAN-001, R-CAN-002): under
+// signalMu, if a run is in flight it invokes that run's cancel-cause
+// function with ErrInterrupted. A second Interrupt during the first's
+// wind-down, or an Interrupt with no run in flight, observes either a
+// live cancel func — invoking it again is Go's documented no-op on an
+// already-cancelled context — or nil, and either way does nothing
+// further (R-CAN-004): no channel is ever closed by a signal, so
+// there is no double-close to race.
+func (h *Harness) Interrupt() {
+	h.signalMu.Lock()
+	defer h.signalMu.Unlock()
+	if h.cancelRun != nil {
+		h.cancelRun(ErrInterrupted)
+	}
+}
+
+// Shutdown fires the shutdown signal (R-CAN-001, R-CAN-005): under
+// signalMu, it invokes the in-flight run's cancel-cause function with
+// ErrShutdown (the same no-op-safe posture as Interrupt) and latches
+// the terminal, one-way shutdown flag. The flag's consequence at Run
+// entry (the typed post-shutdown refusal) is wired in Phase 7; this
+// method only sets it.
+func (h *Harness) Shutdown() {
+	h.signalMu.Lock()
+	defer h.signalMu.Unlock()
+	h.shutdown = true
+	if h.cancelRun != nil {
+		h.cancelRun(ErrShutdown)
+	}
 }
 
 // steeringQueue is Harness's own FIFO mailbox for Steer (R-RUN-008).
@@ -141,6 +195,19 @@ func (q *steeringQueue) close() {
 	q.closed = true
 }
 
+// reopen clears the closed flag under the same critical section every
+// other queue operation uses (AG-14, R-CAN-002 delta, R-RUN-001).
+// Called at Run entry, unless the terminal shutdown flag is set
+// (R-CAN-005, wired in Phase 7): a value whose prior run ended —
+// completed, failed, or interrupted — left the queue closed, and a
+// new run on that same value must accept Steer again rather than
+// meeting the state the prior run left behind.
+func (q *steeringQueue) reopen() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closed = false
+}
+
 // Steer offers msg to the in-flight run (R-RUN-001, R-RUN-008). A nil
 // return guarantees msg enters the transcript before the run's next
 // provider call — zero drops. After the run's terminal decision it
@@ -191,6 +258,32 @@ func wrapHarnessFailure(cause error) (*Failure, error) {
 	return NewFailure(aiFailure)
 }
 
+// windDownRun is the cancellation counterpart to failRun (R-CAN-002,
+// R-CAN-005, the R-RUN-011 carve-out): synthesize orphans over the
+// transcript (R-HIS-007's first production caller — idempotent per
+// R-HIS-008, so a turn whose results were already committed
+// synthesizes nothing), close the turn, emit run_end carrying the
+// firing signal's own outcome with no *Failure, then return cause
+// unwrapped as Run's own error — the caller's errors.Is/errors.As
+// chain reaches the sentinel directly, mirroring failRun's own
+// posture for its typed rejection. Best-effort on the two history
+// calls' own errors, exactly as failRun is best-effort on
+// wrapHarnessFailure/NewRunEnd: cause is the authoritative return
+// value regardless.
+func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, hist *History, cause error) (ai.Message, ai.FinishReason, error) {
+	_, _ = hist.SynthesizeOrphans()
+	_ = hist.CloseTurn()
+
+	outcome := RunOutcomeInterrupted
+	if errors.Is(cause, ErrShutdown) {
+		outcome = RunOutcomeShutdown
+	}
+	if runEnd, rerr := NewRunEnd(runID, outcome, nil); rerr == nil {
+		sendStamped(sink, stamper, runEnd)
+	}
+	return ai.Message{}, 0, cause
+}
+
 // failRun is R-RUN-011's failure path: on a non-nil Turn error, emit
 // run_end(RunOutcomeFailed, failure) built through the public
 // constructors, then return — no append, no CloseTurn, no retry or
@@ -230,6 +323,36 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		hist = NewHistory()
 	}
 
+	// AG-14 (R-CAN-001): derive this run's own cancel-cause context
+	// once, under signalMu, and store the cancel func so
+	// Interrupt/Shutdown can reach it. runCtx — not the caller's bare
+	// ctx — is threaded into every downstream call (Turn, and through
+	// it Schedule and tool.Run), so a signal reaches the whole tree
+	// through the existing ctx parameters with zero signature changes.
+	// Cleared at Run exit under the same mutex, then cancelled with a
+	// nil cause (Go's documented no-op semantics for an
+	// already-terminated run) — the deferred call runs last, after the
+	// clear, so a signal racing the very end of Run never dereferences
+	// a stale func.
+	h.signalMu.Lock()
+	// AG-14 (R-CAN-002 delta, R-RUN-001): reopen the steering queue in
+	// the SAME critical section as the cancel-cause derivation below,
+	// unless the terminal shutdown flag is already set — that half
+	// (the typed post-shutdown refusal) is Phase 7's wiring; this is
+	// only the reopen a serially-reused, non-shutdown value needs.
+	if !h.shutdown {
+		h.queue.reopen()
+	}
+	runCtx, cancel := context.WithCancelCause(ctx)
+	h.cancelRun = cancel
+	h.signalMu.Unlock()
+	defer func() {
+		h.signalMu.Lock()
+		h.cancelRun = nil
+		h.signalMu.Unlock()
+		cancel(nil)
+	}()
+
 	defer close(sink)
 
 	// Every exit from this function — the terminal-decision success
@@ -261,6 +384,18 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	var lastFinish ai.FinishReason
 
 	for {
+		// AG-14 (R-CAN-001, R-RUN-011 carve-out): the iteration
+		// boundary consults the cause before starting another Turn,
+		// so a run whose signal fired between turns winds down
+		// instead of making a futile provider call on an
+		// already-cancelled context. Checked first in the loop body,
+		// every iteration including the first (always uncancelled
+		// there, since Interrupt/Shutdown can only reach a live
+		// cancelRun, set above).
+		if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+			return h.windDownRun(sink, stamper, runID, hist, cause)
+		}
+
 		for _, m := range h.queue.drain() {
 			if err := hist.Append(m); err != nil {
 				return h.failRun(sink, stamper, runID, err)
@@ -286,10 +421,22 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			History:   hist,
 		}
 
-		msg, finish, terr := Turn(ctx, h.Provider, h.System, transcript, turnOpts, turnSink)
+		msg, finish, terr := Turn(runCtx, h.Provider, h.System, transcript, turnOpts, turnSink)
 		<-forwarderDone
 
 		if terr != nil {
+			// AG-14 (R-RUN-011 carve-out): a Turn error caused by a
+			// harness signal takes the wind-down path, not the
+			// failure path — re-checked against context.Cause(runCtx)
+			// directly (not by unwrapping terr) so the routing
+			// decision is independent of exactly how Turn surfaced the
+			// cause. A bare cancellation of the caller's own context,
+			// not routed through Interrupt/Shutdown, matches neither
+			// sentinel and falls through to the failure path
+			// unchanged (the scope line, R-CAN-001).
+			if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+				return h.windDownRun(sink, stamper, runID, hist, cause)
+			}
 			// R-RUN-011: a failed turn ends the run typed, with no
 			// append, no CloseTurn, and no retry or fallback. The
 			// turn's own typed closing brackets (turn_end(Aborted), or

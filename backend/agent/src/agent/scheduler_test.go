@@ -17,6 +17,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"regexp"
 	"runtime"
@@ -1208,4 +1209,87 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// AG-14 — S-TLS-016. Given a scripted tool that returns a
+// distinguishable typed error as soon as its context is done, and a
+// run cancelled while that call executes, when the scheduler runs,
+// then the call's ordinal slot carries an execution-failure result
+// attributable to the tool's own early return, the tool's recorded
+// work-completed flag is false, and its sibling call still occupies
+// its own ordinal slot — the context reached the tool and the
+// scheduler did not abort the batch (R-TLS-013).
+//
+// `release` is deliberately never closed: this test isolates
+// ctx.Done() as the ONLY channel that can end the observing call, so
+// a pass here is attributable to context propagation alone, never to
+// a race with a second escape hatch.
+func TestSchedule_ToolReceivesRunContext_EarlyReturnOnCancel(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	observing, started, completed := CancellationObservingScriptedTool("read_tls_016_observing", agent.EffectClassRead, release)
+
+	sibling := newScriptedBiteTool(t, "read_tls_016_sibling", agent.EffectClassRead)
+	sibling.result = agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte("sibling-ok")}
+
+	reg := newMapRegistry(map[string]agent.Tool{
+		"read_tls_016_observing": observing,
+		"read_tls_016_sibling":   sibling,
+	})
+	calls := []scheduledCall{
+		{id: "call-tls-016-observing", name: "read_tls_016_observing", args: []byte(`{}`), effect: agent.EffectClassRead},
+		{id: "call-tls-016-sibling", name: "read_tls_016_sibling", args: []byte(`{}`), effect: agent.EffectClassRead},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched := &agent.Scheduler{MaxConcurrentReads: 4}
+	sink := make(chan *agent.Event, 64)
+
+	resultCh := make(chan []agent.Result, 1)
+	go func() {
+		stamper := &agent.LaneStamper{}
+		resultCh <- sched.Schedule(ctx, callsToAICalls(calls), reg, "run-tls-016", "turn-tls-016", nil, stamper, sink)
+	}()
+	go func() {
+		defer func() { _ = recover() }()
+		for range sink {
+			_ = struct{}{}
+		}
+	}()
+
+	<-started
+	cancel()
+
+	results := <-resultCh
+
+	if len(results) != 2 {
+		t.Fatalf("Schedule returned %d result(s), want 2", len(results))
+	}
+
+	observingResult := results[0]
+	if observingResult.Outcome != agent.ToolOutcomeExecutionFailure {
+		t.Errorf("results[0].Outcome = %v, want ToolOutcomeExecutionFailure (early return on ctx.Done())", observingResult.Outcome)
+	}
+	if observingResult.Failure == nil {
+		t.Fatal("results[0].Failure = nil, want a typed *Failure attributable to the tool's own early return")
+	}
+	if !errors.Is(observingResult.Failure.Unwrap(), ErrScriptedToolCancelled) {
+		t.Errorf("results[0].Failure does not unwrap to ErrScriptedToolCancelled — not attributable to the tool's own early return")
+	}
+	if completed() {
+		t.Error("completed() = true, want false — the tool must not have observed release")
+	}
+	if observingResult.CallID() != "call-tls-016-observing" {
+		t.Errorf("results[0].CallID() = %q, want %q", observingResult.CallID(), "call-tls-016-observing")
+	}
+
+	sibResult := results[1]
+	if sibResult.Outcome != agent.ToolOutcomeSuccess {
+		t.Errorf("results[1].Outcome = %v, want ToolOutcomeSuccess — sibling call must still occupy its own ordinal slot", sibResult.Outcome)
+	}
+	if sibResult.CallID() != "call-tls-016-sibling" {
+		t.Errorf("results[1].CallID() = %q, want %q", sibResult.CallID(), "call-tls-016-sibling")
+	}
 }

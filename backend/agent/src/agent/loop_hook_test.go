@@ -978,7 +978,22 @@ func filterOutLoopHookFiles(diff string) string {
 				// harness_suspension_test.go, the fifth and final
 				// /harness*.go suffix. Byte-in-sync with loop_test.go's
 				// filterOutLoopFiles.
-				strings.HasSuffix(path, "/harness_suspension_test.go")
+				strings.HasSuffix(path, "/harness_suspension_test.go") ||
+				// AG-14 widening (R-LSK-004 "AG-14's release scope",
+				// R-CAN-008 L2C-08): run_events.go is a pre-existing
+				// substrate file released for AG-14 only, mirroring
+				// AG-11's turn_events.go/failure.go and AG-12's
+				// doc.go/doc_contract_guard_test.go precedent above —
+				// exact filename, no wildcard/prefix/directory pattern.
+				// cancellation.go is AG-14's new production file; the
+				// four suffixes after it are AG-14's new test files.
+				// Byte-in-sync with loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/run_events.go") ||
+				strings.HasSuffix(path, "/cancellation.go") ||
+				strings.HasSuffix(path, "/cancellation_interrupt_test.go") ||
+				strings.HasSuffix(path, "/cancellation_shutdown_test.go") ||
+				strings.HasSuffix(path, "/cancellation_winddown_test.go") ||
+				strings.HasSuffix(path, "/cancellation_events_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

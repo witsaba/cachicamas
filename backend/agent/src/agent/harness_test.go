@@ -1015,7 +1015,14 @@ func TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged(t *testing.T) {
 		}
 	})
 
-	t.Run("exactly two exported methods", func(t *testing.T) {
+	// AG-14 (R-RUN-001 delta): the public surface widens from two
+	// methods to four — Interrupt and Shutdown sit beside Run and
+	// Steer on the same non-privileged upward path (R-RUN-006). This
+	// edit is conscious and delta-backed, not incidental (design.md
+	// "A consequence stated so sdd-apply is not read as a silent test
+	// rewrite"); the subtest no longer claims a count, only the exact
+	// named set.
+	t.Run("exported methods are exactly Interrupt, Run, Shutdown, Steer", func(t *testing.T) {
 		t.Parallel()
 
 		typ := reflect.TypeOf(&agent.Harness{})
@@ -1024,7 +1031,7 @@ func TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged(t *testing.T) {
 			names = append(names, typ.Method(i).Name)
 		}
 		sort.Strings(names)
-		want := []string{"Run", "Steer"}
+		want := []string{"Interrupt", "Run", "Shutdown", "Steer"}
 		if !reflect.DeepEqual(names, want) {
 			t.Errorf("*Harness exported methods = %v, want exactly %v", names, want)
 		}
