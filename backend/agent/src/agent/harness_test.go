@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -242,5 +243,168 @@ func TestSchedule_LeaveSinkOpenSet_CallerOwnsClose(t *testing.T) {
 	}()
 	if _, ok := <-sink; ok {
 		t.Error("sink still reports open after the caller's own close")
+	}
+}
+
+// AG-13.1 — S-LSK-013 (non-nil half, text-only turn). Given a
+// TurnOptions carrying a fully configured continuation, when Turn
+// runs a text-only turn (no tool calls), then no run-open and no
+// run-close appears on sink, the emitted events are stamped from the
+// supplied stamper continuing its existing lane, and every emitted
+// event carries the continuation's run identity — proven across two
+// turns sharing one continuation so "shared identity and lane" is a
+// real cross-call property, not an artifact of a single call.
+func TestTurn_ContinuationNonNil_NoRunBracketsSharedIdentityAndLane(t *testing.T) {
+	t.Parallel()
+
+	stamper := &agent.LaneStamper{}
+	cont := &agent.TurnContinuation{
+		Run:       "run-lsk-013-shared",
+		Stamper:   stamper,
+		Scheduler: &agent.Scheduler{},
+		History:   agent.NewHistory(),
+	}
+
+	// First turn: text-only, continuation mode.
+	firstProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	firstSink := make(chan *agent.Event, 16)
+	_, finish, err := agent.Turn(
+		contextBackground(),
+		firstProvider,
+		"system prompt for lsk-013 first",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Continuation: cont},
+		firstSink,
+	)
+	if err != nil {
+		t.Fatalf("first Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonStop)
+	}
+	firstEvents := drainSink(t, firstSink)
+	if len(firstEvents) == 0 {
+		t.Fatal("first turn emitted zero events")
+	}
+
+	// No run-open, no run-close: only turn_start .. turn_end.
+	for _, ev := range firstEvents {
+		if ev.Kind() == agent.EventKindRunStart || ev.Kind() == agent.EventKindRunEnd {
+			t.Errorf("continuation-path event kind = %v, want no run_start/run_end (the caller's run owns the bracket)", ev.Kind())
+		}
+	}
+	if got := firstEvents[0].Kind(); got != agent.EventKindTurnStart {
+		t.Errorf("first event kind = %v, want %v (turn_start, no run_start)", got, agent.EventKindTurnStart)
+	}
+	if got := firstEvents[len(firstEvents)-1].Kind(); got != agent.EventKindTurnEnd {
+		t.Errorf("last event kind = %v, want %v (turn_end, no run_end)", got, agent.EventKindTurnEnd)
+	}
+
+	// Every event carries the continuation's run identity, not a
+	// freshly minted one.
+	for i, ev := range firstEvents {
+		if ev.Run() != cont.Run {
+			t.Errorf("event[%d].Run() = %q, want %q (continuation.Run, not a minted identity)", i, ev.Run(), cont.Run)
+		}
+	}
+
+	// Sequence starts at 1 for the first turn sharing a fresh stamper.
+	if firstEvents[0].Sequence() != 1 {
+		t.Errorf("first turn's first event sequence = %v, want 1", firstEvents[0].Sequence())
+	}
+	lastSeq := firstEvents[len(firstEvents)-1].Sequence()
+
+	// Second turn: same continuation (same Run, same Stamper) — the
+	// lane must continue, not restart, proving "shared identity and
+	// lane" (R-LSK-001 point 1).
+	secondProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	secondSink := make(chan *agent.Event, 16)
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for lsk-013 second",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Continuation: cont},
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	secondEvents := drainSink(t, secondSink)
+	if len(secondEvents) == 0 {
+		t.Fatal("second turn emitted zero events")
+	}
+
+	if got := secondEvents[0].Sequence(); got != lastSeq+1 {
+		t.Errorf("second turn's first event sequence = %v, want %v (one contiguous lane across turns, not a restart)", got, lastSeq+1)
+	}
+	for i, ev := range secondEvents {
+		if ev.Run() != cont.Run {
+			t.Errorf("second turn event[%d].Run() = %q, want %q (shared run identity)", i, ev.Run(), cont.Run)
+		}
+	}
+
+	// TurnID is still minted fresh per call: the two turns must NOT
+	// share a turn identity (R-LSK-001 point 1 carry — N distinct
+	// turn brackets need N identities).
+	firstTurnID, _ := firstEvents[0].Turn()
+	secondTurnID, _ := secondEvents[0].Turn()
+	if firstTurnID == secondTurnID {
+		t.Errorf("first and second continuation turns share turnID %q, want distinct fresh identities per call", firstTurnID)
+	}
+}
+
+// AG-13.1 — R-LSK-001 point 2, the mid-stream fatal path. Given a
+// TurnOptions carrying a fully configured continuation, when the
+// provider stream ends in a terminal mid-stream error, then
+// turn_end(Aborted) is still emitted but no run_end appears — the
+// caller's run owns the run bracket on every path, including this
+// one. Not a charter scenario on its own; a coverage/evidence test
+// for R-LSK-001 point 2's explicit "on any path" clause, mirroring
+// loop_test.go's own non-charter coverage-helper precedent
+// (TestTurn_MidStreamErrorSurfacesOnReturn et al.).
+func TestTurn_ContinuationMidStreamFatal_TurnEndAbortedNoRunEnd(t *testing.T) {
+	t.Parallel()
+
+	cont := &agent.TurnContinuation{
+		Run:       "run-lsk-013-fatal",
+		Stamper:   &agent.LaneStamper{},
+		Scheduler: &agent.Scheduler{},
+		History:   agent.NewHistory(),
+	}
+	provider := agenttest.NewProvider(scriptTextThenMidStreamError(t))
+	sink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-013 fatal",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Continuation: cont},
+		sink,
+	)
+	if err == nil {
+		t.Fatal("Turn returned err = nil, want a non-nil typed failure (mid-stream terminal error)")
+	}
+
+	events := drainSink(t, sink)
+	if len(events) == 0 {
+		t.Fatal("sink was empty, want at least turn_start + turn_end(Aborted)")
+	}
+	for _, ev := range events {
+		if ev.Kind() == agent.EventKindRunStart || ev.Kind() == agent.EventKindRunEnd {
+			t.Errorf("continuation-path fatal event kind = %v, want no run_start/run_end even on the mid-stream fatal path", ev.Kind())
+		}
+	}
+	last := events[len(events)-1]
+	turnEnd, ok := last.TurnEnd()
+	if !ok {
+		t.Fatalf("last event kind = %v, want turn_end", last.Kind())
+	}
+	if turnEnd.Outcome() != agent.TurnOutcomeAborted {
+		t.Errorf("turn_end.Outcome() = %v, want TurnOutcomeAborted (still emitted on the continuation path)", turnEnd.Outcome())
+	}
+	if _, hasFailure := turnEnd.Failure(); !hasFailure {
+		t.Error("turn_end carries no Failure, want a non-nil *agent.Failure")
 	}
 }

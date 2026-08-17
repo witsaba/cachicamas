@@ -337,7 +337,7 @@ func Turn(
 		return ai.Message{}, 0, streamErr
 	}
 
-	turn := newTurnAccumulator(runID, turnID, stamper, sink)
+	turn := newTurnAccumulator(runID, turnID, stamper, sink, opts.Continuation != nil)
 	for ev := range pCh {
 		if done := turn.translate(ev); done {
 			// Completion: capture the finish reason and exit the loop.
@@ -377,17 +377,22 @@ func Turn(
 			// close, return.
 			if pf, ok := turn.fatal.(*ai.Failure); ok {
 				if failure, ferr := NewFailure(pf); ferr == nil {
-					// One NewFailure call feeds both
-					// emissions (task 5.3's identity pin):
-					// turnEnd.Failure() == runEnd.Failure()
-					// by pointer, proving single
-					// construction, not two independent
-					// wraps.
+					// On the nil path, one NewFailure call feeds
+					// both emissions (task 5.3's identity pin):
+					// turnEnd.Failure() == runEnd.Failure() by
+					// pointer, proving single construction, not
+					// two independent wraps. AG-13 continuation
+					// path: turn_end(Aborted) is still emitted,
+					// but no run_end — the caller's run owns
+					// that bracket on every path, including this
+					// one (R-LSK-001 point 2).
 					if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
 						emitStamped(sink, stamper, turnEnd)
 					}
-					if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
-						emitStamped(sink, stamper, runEnd)
+					if opts.Continuation == nil {
+						if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+							emitStamped(sink, stamper, runEnd)
+						}
 					}
 				}
 				// D7: no second provider.Stream call — the
@@ -540,6 +545,13 @@ type turnAccumulator struct {
 	turnID  TurnID
 	stamper *LaneStamper
 	sink    chan<- *Event
+	// continuation reports whether this turn runs on AG-13's
+	// continuation path (opts.Continuation != nil, R-LSK-001 point 2):
+	// finalize skips the run-close bracket (the caller's run owns
+	// it), and reconstructMessage additionally carries the turn's own
+	// ai.ToolCall parts (R-LSK-001 point 5, R-HIS-010 point 1). Never
+	// set on the nil path, so nil-path behavior stays byte-stable.
+	continuation bool
 	textBracket struct {
 		msgID     ai.MessageID
 		started   bool
@@ -572,13 +584,16 @@ type turnAccumulator struct {
 	fatal           error
 }
 
-// newTurnAccumulator constructs a fresh per-turn walker.
-func newTurnAccumulator(runID RunID, turnID TurnID, stamper *LaneStamper, sink chan<- *Event) *turnAccumulator {
+// newTurnAccumulator constructs a fresh per-turn walker. continuation
+// reports whether this turn runs on AG-13's continuation path
+// (opts.Continuation != nil) — see turnAccumulator.continuation.
+func newTurnAccumulator(runID RunID, turnID TurnID, stamper *LaneStamper, sink chan<- *Event, continuation bool) *turnAccumulator {
 	return &turnAccumulator{
-		runID:   runID,
-		turnID:  turnID,
-		stamper: stamper,
-		sink:    sink,
+		runID:        runID,
+		turnID:       turnID,
+		stamper:      stamper,
+		sink:         sink,
+		continuation: continuation,
 	}
 }
 
@@ -770,9 +785,15 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 	if terr == nil {
 		emitStamped(t.sink, t.stamper, turnEnd)
 	}
-	runEnd, rerr := NewRunEnd(t.runID, RunOutcomeCompleted, nil)
-	if rerr == nil {
-		emitStamped(t.sink, t.stamper, runEnd)
+	// AG-13 (R-LSK-001 point 2): the continuation path emits no
+	// run-close — the caller's run owns that bracket; a terminal
+	// finish reason with a queued steering message must not close the
+	// run. The nil path stays byte-stable (S-LSK-015).
+	if !t.continuation {
+		runEnd, rerr := NewRunEnd(t.runID, RunOutcomeCompleted, nil)
+		if rerr == nil {
+			emitStamped(t.sink, t.stamper, runEnd)
+		}
 	}
 
 	return t.reconstructMessage(), t.finish
