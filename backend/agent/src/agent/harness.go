@@ -163,9 +163,10 @@ func transcriptFromHistory(hist *History) []ai.Message {
 // finish reason with an empty steering queue (R-RUN-002, R-RUN-003). See
 // design.md's run algorithm for the full description.
 //
-// Phase 2 increment: single-turn happy path only — the loop iterates
-// exactly once regardless of finish reason. Iteration and the failure
-// path land in later increments of this same file.
+// Phase 2 increment: the loop iterates on ToolCalls/PauseTurn and
+// resolves every other finish reason atomically against the steering
+// queue. The failure path (a non-nil Turn error) lands in a later
+// increment of this same file.
 func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event) (ai.Message, ai.FinishReason, error) {
 	sched := h.Scheduler
 	if sched == nil {
@@ -196,39 +197,71 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		return ai.Message{}, 0, err
 	}
 
-	transcript := transcriptFromHistory(hist)
+	var lastMsg ai.Message
+	var lastFinish ai.FinishReason
 
-	turnSink := make(chan *Event)
-	forwarderDone := make(chan struct{})
-	go func() {
-		defer close(forwarderDone)
-		for ev := range turnSink {
-			sink <- ev
+	for {
+		for _, m := range h.queue.drain() {
+			if err := hist.Append(m); err != nil {
+				return ai.Message{}, 0, err
+			}
 		}
-	}()
 
-	turnOpts := h.Turn
-	turnOpts.Continuation = &TurnContinuation{
-		Run:       runID,
-		Stamper:   stamper,
-		Scheduler: sched,
-		History:   hist,
+		transcript := transcriptFromHistory(hist)
+
+		turnSink := make(chan *Event)
+		forwarderDone := make(chan struct{})
+		go func() {
+			defer close(forwarderDone)
+			for ev := range turnSink {
+				sink <- ev
+			}
+		}()
+
+		turnOpts := h.Turn
+		turnOpts.Continuation = &TurnContinuation{
+			Run:       runID,
+			Stamper:   stamper,
+			Scheduler: sched,
+			History:   hist,
+		}
+
+		msg, finish, terr := Turn(ctx, h.Provider, h.System, transcript, turnOpts, turnSink)
+		<-forwarderDone
+
+		if terr != nil {
+			// Phase 2 increment: the real typed failure path (R-RUN-011)
+			// lands in a later increment. For now the run reports the
+			// turn's own error unwrapped, with no further event.
+			return ai.Message{}, 0, terr
+		}
+
+		if err := hist.CloseTurn(); err != nil {
+			return ai.Message{}, 0, err
+		}
+
+		lastMsg, lastFinish = msg, finish
+
+		switch finish {
+		case ai.FinishReasonToolCalls, ai.FinishReasonPauseTurn:
+			continue
+		default:
+			took, queued := h.queue.takeOrClose()
+			if took {
+				for _, m := range queued {
+					if err := hist.Append(m); err != nil {
+						return ai.Message{}, 0, err
+					}
+				}
+				continue
+			}
+		}
+		break
 	}
-
-	msg, finish, _ := Turn(ctx, h.Provider, h.System, transcript, turnOpts, turnSink)
-	<-forwarderDone
-
-	_ = hist.CloseTurn()
-
-	// Phase 2 increment: the terminal decision is always taken after
-	// exactly one turn — iteration lands in a later increment. The
-	// atomic take-or-close step still runs so a post-terminal Steer is
-	// rejected typed rather than silently accepted (R-RUN-001).
-	h.queue.takeOrClose()
 
 	runEnd, rerr := NewRunEnd(runID, RunOutcomeCompleted, nil)
 	if rerr == nil {
 		sendStamped(sink, stamper, runEnd)
 	}
-	return msg, finish, nil
+	return lastMsg, lastFinish, nil
 }

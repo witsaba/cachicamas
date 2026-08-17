@@ -1071,3 +1071,301 @@ func TestHarness_SteerAfterTerminal_TypedRejectionNoSilentDrop(t *testing.T) {
 		t.Errorf("history.Len() after rejected Steer = %d, want unchanged %d", got, lenBefore)
 	}
 }
+
+// scriptToolCallResponse builds a scripted stream requesting one tool
+// call (start/delta/end for callID/toolName/args) then completing with
+// FinishReasonToolCalls — Phase 2's shared fixture for a tool-calling
+// turn.
+func scriptToolCallResponse(t *testing.T, callID, toolName string, args []byte) agenttest.Script {
+	t.Helper()
+
+	start, err := ai.NewToolCallStart(1, callID, toolName)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	delta, err := ai.NewToolCallDelta(1, args)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	end, err := ai.NewToolCallEnd(1, args)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	return agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(start),
+		agenttest.Emit(delta),
+		agenttest.Emit(end),
+		agenttest.Emit(completion),
+	}}
+}
+
+// AG-13.1 — S-RUN-010. Charter AG-13.1 sc.1. Given a fake provider
+// scripted with turn one requesting a tool call and turn two answering
+// with final text, when one prompt drives the run and the consumer
+// drains the sink to close, then the consumer observes, in order: run
+// open, turn one open, turn one's message and tool events including the
+// tool's execution and result, turn one close carrying the tool-calls
+// outcome, turn two open, turn two's message events, turn two close
+// carrying the finished outcome, run close carrying the completed
+// outcome; and Run returns the second turn's message and finish reason
+// with a nil error.
+func TestHarness_TwoTurnRun_CompletesToTerminal(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_run_010", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_run_010": tool})
+
+	turnOneScript := scriptToolCallResponse(t, "call-run-010", "read_run_010", []byte(`{"x":1}`))
+	turnTwoScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	h := agent.Harness{Provider: provider, System: "system prompt for run-010", Turn: agent.TurnOptions{Tools: reg}}
+
+	sink := make(chan *agent.Event, 256)
+	msg, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v (turn two's finish reason)", finish, ai.FinishReasonStop)
+	}
+	if len(msg.Content()) == 0 {
+		t.Error("Run returned a message with zero content parts, want turn two's text")
+	}
+
+	events := drainSink(t, sink)
+	if len(events) == 0 {
+		t.Fatal("zero events observed")
+	}
+
+	var kinds []agent.EventKind
+	for _, ev := range events {
+		kinds = append(kinds, ev.Kind())
+	}
+	if kinds[0] != agent.EventKindRunStart {
+		t.Errorf("first event kind = %v, want run_start", kinds[0])
+	}
+	if kinds[len(kinds)-1] != agent.EventKindRunEnd {
+		t.Errorf("last event kind = %v, want run_end", kinds[len(kinds)-1])
+	}
+
+	var runStarts, runEnds, turnStarts, turnEnds int
+	var turnEndOutcomes []agent.TurnOutcome
+	var sawToolStart, sawToolEnd bool
+	for _, ev := range events {
+		switch ev.Kind() {
+		case agent.EventKindRunStart:
+			runStarts++
+		case agent.EventKindRunEnd:
+			runEnds++
+		case agent.EventKindTurnStart:
+			turnStarts++
+		case agent.EventKindTurnEnd:
+			turnEnds++
+			te, _ := ev.TurnEnd()
+			turnEndOutcomes = append(turnEndOutcomes, te.Outcome())
+		case agent.EventKindToolStart:
+			sawToolStart = true
+		case agent.EventKindToolEndSuccess:
+			sawToolEnd = true
+		}
+	}
+	if runStarts != 1 || runEnds != 1 {
+		t.Errorf("run_start count = %d, run_end count = %d, want exactly 1 each (one run bracket)", runStarts, runEnds)
+	}
+	if turnStarts != 2 || turnEnds != 2 {
+		t.Errorf("turn_start count = %d, turn_end count = %d, want exactly 2 each (N turn brackets)", turnStarts, turnEnds)
+	}
+	if len(turnEndOutcomes) == 2 {
+		if turnEndOutcomes[0] != agent.TurnOutcomeToolCalls {
+			t.Errorf("turn one's turn_end outcome = %v, want TurnOutcomeToolCalls", turnEndOutcomes[0])
+		}
+		if turnEndOutcomes[1] != agent.TurnOutcomeFinished {
+			t.Errorf("turn two's turn_end outcome = %v, want TurnOutcomeFinished", turnEndOutcomes[1])
+		}
+	}
+	if !sawToolStart || !sawToolEnd {
+		t.Errorf("tool events missing: toolStart=%v toolEnd=%v — want the tool's execution and result inside turn one", sawToolStart, sawToolEnd)
+	}
+	if got := tool.Invocations(); got != 1 {
+		t.Errorf("tool invocations = %d, want 1", got)
+	}
+
+	runEnd, ok := events[len(events)-1].RunEnd()
+	if !ok {
+		t.Fatal("last event carries no RunEnd payload")
+	}
+	if runEnd.Outcome() != agent.RunOutcomeCompleted {
+		t.Errorf("run_end outcome = %v, want RunOutcomeCompleted", runEnd.Outcome())
+	}
+}
+
+// AG-13.1 — S-RUN-011. Given a fake provider scripted so that a single
+// turn ends in each terminal-candidate member of ai.FinishReason's
+// vocabulary in turn, when each run is driven with an empty steering
+// queue, then each run ends after exactly one turn, the run-close event
+// carries the completed outcome, and no candidate falls through to a
+// second provider call.
+func TestHarness_EachTerminalCandidateFinishReason_EndsAfterOneTurn(t *testing.T) {
+	t.Parallel()
+
+	candidates := []ai.FinishReason{
+		ai.FinishReasonStop,
+		ai.FinishReasonLength,
+		ai.FinishReasonContentFilter,
+		ai.FinishReasonRefusal,
+		ai.FinishReasonUnknown,
+	}
+
+	for _, fr := range candidates {
+		fr := fr
+		t.Run(fr.String(), func(t *testing.T) {
+			t.Parallel()
+
+			provider := agenttest.NewProvider(scriptTerminationResponse(t, fr))
+			h := agent.Harness{Provider: provider, System: "system prompt for run-011"}
+
+			sink := make(chan *agent.Event, 64)
+			_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+			if err != nil {
+				t.Fatalf("Run returned err = %v, want nil", err)
+			}
+			if finish != fr {
+				t.Errorf("finish = %v, want %v", finish, fr)
+			}
+
+			events := drainSink(t, sink)
+			var turnStarts, turnEnds int
+			for _, ev := range events {
+				switch ev.Kind() {
+				case agent.EventKindTurnStart:
+					turnStarts++
+				case agent.EventKindTurnEnd:
+					turnEnds++
+				}
+			}
+			if turnStarts != 1 || turnEnds != 1 {
+				t.Errorf("turn_start count = %d, turn_end count = %d, want exactly 1 each — %v must end after exactly one turn", turnStarts, turnEnds, fr)
+			}
+
+			if len(events) == 0 {
+				t.Fatal("zero events observed")
+			}
+			last := events[len(events)-1]
+			runEnd, ok := last.RunEnd()
+			if !ok {
+				t.Fatalf("last event kind = %v, want run_end", last.Kind())
+			}
+			if runEnd.Outcome() != agent.RunOutcomeCompleted {
+				t.Errorf("run_end outcome = %v, want RunOutcomeCompleted", runEnd.Outcome())
+			}
+
+			if got := len(provider.Requests()); got != 1 {
+				t.Errorf("provider recorded %d request(s), want exactly 1 — no candidate falls through to a second provider call", got)
+			}
+		})
+	}
+}
+
+// AG-13.1 — S-RUN-012. Given a run whose final turn is held at an
+// agenttest.Gate and a user message offered through Steer while that
+// turn is in flight, when the gate is released and the turn returns a
+// terminal candidate, then Steer had returned nil, the queued message is
+// appended, an additional turn bracket appears on the stream, and the
+// run terminates only after that additional turn — proving the terminal
+// decision and the queue close are one atomic step.
+func TestHarness_SteerNearTerminal_AtomicQueueCheckYieldsAdditionalTurn(t *testing.T) {
+	t.Parallel()
+
+	gate := agenttest.NewGate()
+	textStart, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart: %v", err)
+	}
+	textDelta, err := ai.NewTextDelta(1, "turn one text")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta: %v", err)
+	}
+	textEnd, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockEnd: %v", err)
+	}
+	completion1, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	heldScript := agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Hold(gate),
+		agenttest.Emit(textStart),
+		agenttest.Emit(textDelta),
+		agenttest.Emit(textEnd),
+		agenttest.Emit(completion1),
+	}}
+	secondScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(heldScript, secondScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-012", History: hist}
+
+	sink := make(chan *agent.Event, 256)
+	type runResult struct {
+		finish ai.FinishReason
+		err    error
+	}
+	resultCh := make(chan runResult, 1)
+	go func() {
+		_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+		resultCh <- runResult{finish, err}
+	}()
+
+	<-gate.Reached()
+
+	steered, err := ai.NewMessage(ai.RoleUser, mustText(t, "steered near terminal"))
+	if err != nil {
+		t.Fatalf("ai.NewMessage: %v", err)
+	}
+	if err := h.Steer(steered); err != nil {
+		t.Fatalf("Steer returned %v, want nil (accepted before the run's terminal decision)", err)
+	}
+
+	gate.Release()
+
+	events := drainSink(t, sink)
+	res := <-resultCh
+	if res.err != nil {
+		t.Fatalf("Run returned err = %v, want nil", res.err)
+	}
+
+	var turnStarts, turnEnds int
+	for _, ev := range events {
+		switch ev.Kind() {
+		case agent.EventKindTurnStart:
+			turnStarts++
+		case agent.EventKindTurnEnd:
+			turnEnds++
+		}
+	}
+	if turnStarts != 2 || turnEnds != 2 {
+		t.Errorf("turn_start count = %d, turn_end count = %d, want exactly 2 each — the steered message must yield an ADDITIONAL turn, not a dropped message", turnStarts, turnEnds)
+	}
+
+	entries := hist.Entries()
+	var foundSteered bool
+	for _, e := range entries {
+		if e.Message().Role() != ai.RoleUser {
+			continue
+		}
+		for _, part := range e.Message().Content() {
+			if text, ok := part.Text(); ok && text == "steered near terminal" {
+				foundSteered = true
+			}
+		}
+	}
+	if !foundSteered {
+		t.Error("steered message not found in the transcript — it must have been appended, not dropped")
+	}
+}
