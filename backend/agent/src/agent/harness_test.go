@@ -12,8 +12,11 @@ package agent_test
 
 import (
 	"errors"
+	"os"
 	"reflect"
+	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -1367,5 +1370,260 @@ func TestHarness_SteerNearTerminal_AtomicQueueCheckYieldsAdditionalTurn(t *testi
 	}
 	if !foundSteered {
 		t.Error("steered message not found in the transcript — it must have been appended, not dropped")
+	}
+}
+
+// AG-13.1 — S-RUN-020. Given the complete event slice recorded from a
+// two-turn run, when it is passed to CheckStream unmodified from an
+// external test package, then it is accepted with no violation; and when
+// the slice is walked, then it contains exactly one run-open and exactly
+// one run-close, exactly two turn-open/turn-close brackets both nested
+// between them, and a sequence that starts at 1 and increases by exactly
+// 1 with no gap, no repeat and no restart across the whole run. Pins the
+// composition of Phases 0-1 plus the iterating Run above — no new
+// production code is expected here (design.md).
+func TestHarness_EventStream_OneRunBracketContiguousLane_CheckStreamAccepts(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_run_020", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_run_020": tool})
+	turnOneScript := scriptToolCallResponse(t, "call-run-020", "read_run_020", []byte(`{}`))
+	turnTwoScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	h := agent.Harness{Provider: provider, System: "system prompt for run-020", Turn: agent.TurnOptions{Tools: reg}}
+
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+
+	if report := agent.CheckStream(events); report.Violation() != nil {
+		t.Fatalf("CheckStream rejected the run stream: %v", report.Violation())
+	}
+
+	var runStarts, runEnds, turnStarts, turnEnds int
+	var lastSeq agent.Sequence
+	for i, ev := range events {
+		wantSeq := agent.Sequence(i + 1)
+		if ev.Sequence() != wantSeq {
+			t.Errorf("event[%d] sequence = %v, want %v (contiguous 1-based lane)", i, ev.Sequence(), wantSeq)
+		}
+		lastSeq = ev.Sequence()
+		switch ev.Kind() {
+		case agent.EventKindRunStart:
+			runStarts++
+		case agent.EventKindRunEnd:
+			runEnds++
+		case agent.EventKindTurnStart:
+			turnStarts++
+		case agent.EventKindTurnEnd:
+			turnEnds++
+		}
+	}
+	if runStarts != 1 || runEnds != 1 {
+		t.Errorf("run_start=%d run_end=%d, want exactly 1 each", runStarts, runEnds)
+	}
+	if turnStarts != 2 || turnEnds != 2 {
+		t.Errorf("turn_start=%d turn_end=%d, want exactly 2 each", turnStarts, turnEnds)
+	}
+	if int(lastSeq) != len(events) {
+		t.Errorf("last sequence = %d, want %d (no gap, no repeat, no restart)", lastSeq, len(events))
+	}
+}
+
+// AG-13.1 — S-RUN-030 / S-RUN-031. Given the complete event slice
+// recorded from a multi-turn run, when every event's run identity is
+// read, then all values are equal to one another and equal to the
+// identity carried by the run-open event, asserted by this capability's
+// own test rather than by CheckStream; and given a harness-driven run
+// and a bare Turn invocation recorded side by side, when their run
+// identities are read, then the harness-driven identity carries the
+// run-hrn- prefix, the bare invocation's carries the loop's own prefix,
+// and the two prefixes are different.
+func TestHarness_RunIdentity_ConsistentAcrossEventsAndProvenanceDistinct(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_run_030", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_run_030": tool})
+	turnOneScript := scriptToolCallResponse(t, "call-run-030", "read_run_030", []byte(`{}`))
+	turnTwoScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	h := agent.Harness{Provider: provider, System: "system prompt for run-030", Turn: agent.TurnOptions{Tools: reg}}
+
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+	if len(events) == 0 {
+		t.Fatal("zero events observed")
+	}
+
+	want := events[0].Run()
+	if !strings.HasPrefix(string(want), "run-hrn-") {
+		t.Errorf("harness-driven run identity = %q, want run-hrn- prefix", want)
+	}
+	for i, ev := range events {
+		if ev.Run() != want {
+			t.Errorf("event[%d].Run() = %q, want %q (same value across every event in one run)", i, ev.Run(), want)
+		}
+	}
+
+	// A bare Turn invocation carries the loop's own, different prefix
+	// (provenance-distinct — R-RUN-004).
+	bareProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	bareSink := make(chan *agent.Event, 16)
+	_, _, err := agent.Turn(contextBackground(), bareProvider, "bare turn system prompt", []ai.Message{firstMessage(t)}, agent.TurnOptions{}, bareSink)
+	if err != nil {
+		t.Fatalf("agent.Turn returned err = %v, want nil", err)
+	}
+	bareEvents := drainSink(t, bareSink)
+	if len(bareEvents) == 0 {
+		t.Fatal("zero bare-turn events observed")
+	}
+	bareRunID := bareEvents[0].Run()
+	if strings.HasPrefix(string(bareRunID), "run-hrn-") {
+		t.Errorf("bare Turn invocation's run identity = %q, want the loop's own prefix, not run-hrn-", bareRunID)
+	}
+	if bareRunID == want {
+		t.Error("harness-driven and bare-Turn run identities are equal, want distinct prefixes/values")
+	}
+}
+
+// AG-13.1 — S-RUN-040. Charter AG-13.1 sc.1, second Then. Given the
+// completed two-turn run, when the transcript is read back through the
+// public read route, then it holds, in order, the prompt, turn one's
+// assistant message carrying the tool call, the tool result message for
+// that call, and turn two's assistant message; every tool call has a
+// matching result; and the read-back sequence contains no duplicated and
+// no missing message.
+func TestHarness_History_AlternatingTranscriptEveryPairMatched(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_run_040", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_run_040": tool})
+	turnOneScript := scriptToolCallResponse(t, "call-run-040", "read_run_040", []byte(`{"y":2}`))
+	turnTwoScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-040", Turn: agent.TurnOptions{Tools: reg}, History: hist}
+
+	sink := make(chan *agent.Event, 256)
+	prompt := firstMessage(t)
+	if _, _, err := h.Run(contextBackground(), prompt, sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	entries := hist.Entries()
+	if len(entries) != 4 {
+		t.Fatalf("history has %d entries, want 4 (prompt, turn-one assistant+call, tool result, turn-two assistant)", len(entries))
+	}
+
+	if !entries[0].Message().Equal(prompt) {
+		t.Error("entries[0] is not the prompt")
+	}
+	if entries[1].Message().Role() != ai.RoleAssistant {
+		t.Errorf("entries[1].Role() = %v, want RoleAssistant (turn one)", entries[1].Message().Role())
+	}
+	var foundCall bool
+	for _, part := range entries[1].Message().Content() {
+		if call, ok := part.ToolCall(); ok {
+			foundCall = true
+			if call.ID() != "call-run-040" {
+				t.Errorf("committed ToolCall.ID() = %q, want %q", call.ID(), "call-run-040")
+			}
+		}
+	}
+	if !foundCall {
+		t.Error("entries[1] carries no ToolCall part")
+	}
+	if entries[2].Message().Role() != ai.RoleTool {
+		t.Errorf("entries[2].Role() = %v, want RoleTool", entries[2].Message().Role())
+	}
+	var foundResult bool
+	for _, part := range entries[2].Message().Content() {
+		if tr, ok := part.ToolResult(); ok {
+			foundResult = true
+			if tr.CallID() != "call-run-040" {
+				t.Errorf("committed ToolResult.CallID() = %q, want %q", tr.CallID(), "call-run-040")
+			}
+		}
+	}
+	if !foundResult {
+		t.Error("entries[2] carries no ToolResult part")
+	}
+	if entries[3].Message().Role() != ai.RoleAssistant {
+		t.Errorf("entries[3].Role() = %v, want RoleAssistant (turn two)", entries[3].Message().Role())
+	}
+
+	if err := hist.CloseTurn(); err != nil {
+		t.Errorf("history.CloseTurn() after the run = %v, want nil (every call matched)", err)
+	}
+}
+
+// AG-13.1 — S-RUN-050 / S-LSK-017 (first half). Given the run driver's
+// production source read as raw bytes by a source-scan guard (the
+// scheduler_test.go regex precedent), when it is scanned, then it
+// contains no reference to any enumerated loop internal — the turn
+// accumulator, the loop's identity minters, its stamped-emission helper,
+// its sink-close helper, its request builder, or its finish-reason
+// mapper — and no Schedule call site (the R-LSK-006 reconciliation); and
+// given the capability's behavioral tests, when their package clause is
+// read, then every one of them is in an external test package.
+func TestHarness_LoopAccess_PublicOneTurnSurfaceOnly_SourceScanGuard(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("harness.go")
+	if err != nil {
+		t.Fatalf("os.ReadFile(\"harness.go\") error = %v, want nil", err)
+	}
+	text := stripGoComments(string(src))
+
+	forbidden := []string{
+		"turnAccumulator",
+		"mintLoopRunID",
+		"mintLoopTurnID",
+		"mintLoopMessageID",
+		"emitStamped",
+		"closeSink",
+		"buildLoopRequest",
+		"outcomeForFinish",
+	}
+	for _, name := range forbidden {
+		if strings.Contains(text, name) {
+			t.Errorf("source-guard violation: harness.go references %q — the harness MUST reach the loop through no channel but Turn's own public one-turn surface (R-RUN-006)", name)
+		}
+	}
+
+	scheduleCall := regexp.MustCompile(`\.\s*Schedule\s*\(`)
+	if loc := scheduleCall.FindStringIndex(text); loc != nil {
+		t.Errorf("source-guard violation: %q found at offset %d in harness.go — the harness MUST NOT call Schedule directly (R-LSK-006 reconciliation, design.md); only Turn may invoke it", scheduleCall.String(), loc[0])
+	}
+
+	// Every capability test lives in an external test package: this
+	// very file (and every harness_*_test.go sibling) declares
+	// `package agent_test` — grep-verified, not merely asserted, so a
+	// future file added in-package would be caught.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("os.ReadDir(\".\") error = %v, want nil", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "harness") || !strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		testSrc, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("os.ReadFile(%q) error = %v, want nil", name, err)
+		}
+		if !strings.Contains(string(testSrc), "package agent_test") {
+			t.Errorf("%s does not declare package agent_test — every harness capability test MUST live in an external test package (R-RUN-006, NFR-RUN-001)", name)
+		}
 	}
 }
