@@ -124,6 +124,74 @@ type TurnOptions struct {
 	// The loop's own upward-path wake (`Scheduler.WakeParked`,
 	// D-A) is AG-13's wiring — out of scope here.
 	PermissionPolicy PermissionPolicy
+
+	// Continuation is AG-13's run-continuation seam (R-LSK-001,
+	// design "Decision 1"). Nil is the identity default: every path
+	// through Turn is byte-stable pre-AG-13 behavior — identity
+	// minted fresh, run brackets emitted unconditionally, a fresh
+	// per-call lane, a locally constructed scheduler, finalize-first
+	// ordering, and no transcript wiring. This is the whole of
+	// AG-13's compatibility claim (R-LSK-002 carry, S-LSK-015).
+	//
+	// Non-nil requires every member of TurnContinuation set: a
+	// half-configured continuation is rejected typed, before any
+	// event is emitted (validateContinuation, S-LSK-014).
+	Continuation *TurnContinuation
+}
+
+// TurnContinuation is AG-13's run-continuation seam: the four things a
+// multi-turn run must share across turns, as one all-or-nothing group
+// (design "Decision 1"). Nil TurnOptions.Continuation is pre-AG-13
+// behavior, byte-stable on every path.
+type TurnContinuation struct {
+	// Run is the caller-minted run identity; Turn joins it instead of
+	// minting one (loop.go:132's forecast — AG-13's Harness mints
+	// identities in caller-supplied groups).
+	Run RunID
+
+	// Stamper is the caller-owned lane stamper; Turn uses it instead
+	// of creating a fresh one, so N invocations share one contiguous
+	// 1-based lane.
+	Stamper *LaneStamper
+
+	// Scheduler is the caller-owned scheduler; injecting it (rather
+	// than handing one back) is what makes WakeParked reachable while
+	// Turn is blocked (design "Decision 2"). The caller is
+	// responsible for the scheduler's LeaveSinkOpen field: Turn emits
+	// the turn-close event after Schedule returns on this path
+	// (R-LSK-001 point 3), which would be a send on a closed channel
+	// unless the caller set it.
+	Scheduler *Scheduler
+
+	// History is the caller-owned transcript store; Turn appends this
+	// turn's own messages to it — the assistant message and its tool
+	// results (R-HIS-010).
+	History *History
+}
+
+// validateContinuation reports whether cont is well-formed: nil is
+// always valid (the identity default); non-nil requires every member
+// set, checked in field-declaration order so the first absent member
+// is the one reported (V-FAIL-04 carry). A half-configured
+// continuation must be caught before Turn emits anything at all
+// (S-LSK-014) — there is no "run brackets replayed" fallback path.
+func validateContinuation(cont *TurnContinuation) error {
+	if cont == nil {
+		return nil
+	}
+	if cont.Run == "" {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("run"))
+	}
+	if cont.Stamper == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("stamper"))
+	}
+	if cont.Scheduler == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("scheduler"))
+	}
+	if cont.History == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("history"))
+	}
+	return nil
 }
 
 // lastLoopRunIDCounter and lastLoopTurnIDCounter are the sources of
@@ -184,18 +252,45 @@ func Turn(
 	opts TurnOptions,
 	sink chan<- *Event,
 ) (ai.Message, ai.FinishReason, error) {
-	runID := mintLoopRunID()
-	turnID := mintLoopTurnID()
-	stamper := &LaneStamper{}
-
-	// Emit run_start and turn_start (R-AEV-002: stamped, contiguous,
-	// 1-based; R-LSK-002: per-call stamper, no shared state).
-	runStart, err := NewRunStart(runID)
-	if err != nil {
-		closeSink(sink)
+	// AG-13 (R-LSK-001, S-LSK-014): a half-configured continuation is
+	// rejected before ANY emission and before the sink is touched at
+	// all — no closeSink, no partial stream. This check MUST run
+	// before identity minting or the run bracket, so it is the first
+	// statement in the function body.
+	if err := validateContinuation(opts.Continuation); err != nil {
 		return ai.Message{}, 0, err
 	}
-	emitStamped(sink, stamper, runStart)
+
+	var runID RunID
+	var stamper *LaneStamper
+	if opts.Continuation != nil {
+		// AG-13 continuation path (R-LSK-001 point 1): join the
+		// caller-supplied run identity and lane stamper instead of
+		// minting/constructing fresh ones, so N invocations share one
+		// contiguous 1-based lane.
+		runID = opts.Continuation.Run
+		stamper = opts.Continuation.Stamper
+	} else {
+		runID = mintLoopRunID()
+		stamper = &LaneStamper{}
+	}
+	// TurnID is still minted fresh per call on every path — N distinct
+	// turn brackets need N identities (R-LSK-001 point 1 carry).
+	turnID := mintLoopTurnID()
+
+	// Emit turn_start unconditionally; run_start ONLY on the nil path
+	// (R-AEV-002: stamped, contiguous, 1-based; R-LSK-002: per-call
+	// stamper on the nil path, no shared state). AG-13 continuation
+	// path: the caller's run owns the run bracket (R-LSK-001 point 2)
+	// — Turn emits no run-open and no run-close on any path.
+	if opts.Continuation == nil {
+		runStart, err := NewRunStart(runID)
+		if err != nil {
+			closeSink(sink)
+			return ai.Message{}, 0, err
+		}
+		emitStamped(sink, stamper, runStart)
+	}
 
 	turnStart, err := NewTurnStart(runID, turnID)
 	if err != nil {

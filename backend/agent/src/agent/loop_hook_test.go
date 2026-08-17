@@ -963,7 +963,15 @@ func filterOutLoopHookFiles(diff string) string {
 				// was introduced at AG-08 (AG-04/05/06 predate it).
 				// Byte-in-sync with loop_test.go's filterOutLoopFiles.
 				strings.HasSuffix(path, "/doc.go") ||
-				strings.HasSuffix(path, "/doc_contract_guard_test.go")
+				strings.HasSuffix(path, "/doc_contract_guard_test.go") ||
+				// AG-13 widening (R-RUN-012/S-RUN-111, R-LSK-004
+				// "AG-13 needs no release"): harness.go is the new
+				// run-driver production file; harness_test.go is its
+				// first test file. Exact filenames, no
+				// wildcard/prefix/directory pattern. Byte-in-sync with
+				// loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/harness.go") ||
+				strings.HasSuffix(path, "/harness_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
