@@ -158,6 +158,39 @@ func transcriptFromHistory(hist *History) []ai.Message {
 	return out
 }
 
+// wrapHarnessFailure wraps an arbitrary error as the typed *Failure a
+// run_end(RunOutcomeFailed) event carries (R-RUN-011), through the
+// package's own public constructors only — ai.MidStreamFailure (Layer 1)
+// then NewFailure (this package's own typed-failure surface). Kept local
+// to harness.go rather than reusing scheduler.go's own equivalent
+// helper, so this file's failure path never reaches past what R-RUN-006's
+// source-scan guard already permits.
+func wrapHarnessFailure(cause error) (*Failure, error) {
+	aiFailure, ferr := ai.MidStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryUnavailable,
+		Cause:    cause,
+	}, false)
+	if ferr != nil {
+		return nil, ferr
+	}
+	return NewFailure(aiFailure)
+}
+
+// failRun is R-RUN-011's failure path: on a non-nil Turn error, emit
+// run_end(RunOutcomeFailed, failure) built through the public
+// constructors, then return — no append, no CloseTurn, no retry or
+// fallback. cause is returned unwrapped as Run's own error, so the
+// caller's errors.Is/errors.As chain reaches the turn's own typed
+// rejection; the wrapped *Failure is used only for the event payload.
+func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, cause error) (ai.Message, ai.FinishReason, error) {
+	if failure, ferr := wrapHarnessFailure(cause); ferr == nil {
+		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+			sendStamped(sink, stamper, runEnd)
+		}
+	}
+	return ai.Message{}, 0, cause
+}
+
 // Run drives one run to its terminal decision: repeated Turn calls
 // sharing one run identity and one contiguous lane, until a terminal
 // finish reason with an empty steering queue (R-RUN-002, R-RUN-003). See
@@ -194,7 +227,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	sendStamped(sink, stamper, runStart)
 
 	if err := hist.Append(prompt); err != nil {
-		return ai.Message{}, 0, err
+		return h.failRun(sink, stamper, runID, err)
 	}
 
 	var lastMsg ai.Message
@@ -203,7 +236,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	for {
 		for _, m := range h.queue.drain() {
 			if err := hist.Append(m); err != nil {
-				return ai.Message{}, 0, err
+				return h.failRun(sink, stamper, runID, err)
 			}
 		}
 
@@ -230,14 +263,17 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		<-forwarderDone
 
 		if terr != nil {
-			// Phase 2 increment: the real typed failure path (R-RUN-011)
-			// lands in a later increment. For now the run reports the
-			// turn's own error unwrapped, with no further event.
-			return ai.Message{}, 0, terr
+			// R-RUN-011: a failed turn ends the run typed, with no
+			// append, no CloseTurn, and no retry or fallback. The
+			// turn's own typed closing brackets (turn_end(Aborted), or
+			// nothing at all on a pre-stream failure) were already
+			// forwarded by the loop above, inside the still-open turn
+			// bracket; failRun closes the run's own bracket.
+			return h.failRun(sink, stamper, runID, terr)
 		}
 
 		if err := hist.CloseTurn(); err != nil {
-			return ai.Message{}, 0, err
+			return h.failRun(sink, stamper, runID, err)
 		}
 
 		lastMsg, lastFinish = msg, finish
@@ -250,7 +286,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			if took {
 				for _, m := range queued {
 					if err := hist.Append(m); err != nil {
-						return ai.Message{}, 0, err
+						return h.failRun(sink, stamper, runID, err)
 					}
 				}
 				continue

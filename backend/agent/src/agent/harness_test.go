@@ -1851,3 +1851,62 @@ func TestHarness_RunStream_ReconstructionBiteDropsTurnTwoEvent(t *testing.T) {
 		t.Fatal("run-scope reconstruction did NOT report divergence after a turn-two event was dropped — the property is vacuous (AG-05 W1 failure mode)")
 	}
 }
+
+// AG-13.1 — S-RUN-100. Given a provider scripted with a terminal
+// mid-stream failure on turn one and a further script available so that
+// a retry would be observable, when the run is driven, then the
+// consumer observes the turn's typed closing brackets followed by a
+// run-close carrying the failed run outcome with a non-nil failure and
+// then the sink close; Run returns a non-nil error; the transcript holds
+// only what was committed before the failure, with no entry appended
+// after it; and the provider recorded exactly one request.
+func TestHarness_TurnError_RunEndsTypedNoAppendNoCloseNoRetry(t *testing.T) {
+	t.Parallel()
+
+	turnOneScript := scriptTextThenMidStreamError(t)
+	neverConsumedScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, neverConsumedScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-100", History: hist}
+
+	sink := make(chan *agent.Event, 64)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err == nil {
+		t.Fatal("Run returned err = nil, want a non-nil error (the turn's mid-stream failure)")
+	}
+
+	events := drainSink(t, sink)
+	if len(events) == 0 {
+		t.Fatal("zero events observed, want at least turn_start..turn_end(Aborted), run_end(Failed)")
+	}
+	last := events[len(events)-1]
+	runEnd, ok := last.RunEnd()
+	if !ok {
+		t.Fatalf("last event kind = %v, want run_end", last.Kind())
+	}
+	if runEnd.Outcome() != agent.RunOutcomeFailed {
+		t.Errorf("run_end outcome = %v, want RunOutcomeFailed", runEnd.Outcome())
+	}
+	if _, hasFailure := runEnd.Failure(); !hasFailure {
+		t.Error("run_end carries no Failure, want a non-nil *agent.Failure")
+	}
+
+	var sawTurnEndAborted bool
+	for _, ev := range events {
+		if te, ok := ev.TurnEnd(); ok && te.Outcome() == agent.TurnOutcomeAborted {
+			sawTurnEndAborted = true
+		}
+	}
+	if !sawTurnEndAborted {
+		t.Error("no turn_end(Aborted) observed before the run's failed close — want the turn's own typed closing brackets first")
+	}
+
+	if got := hist.Len(); got != 1 {
+		t.Errorf("history.Len() = %d, want 1 (only the prompt committed before the turn ran — no append after the failure, no CloseTurn)", got)
+	}
+
+	if got := len(provider.Requests()); got != 1 {
+		t.Errorf("provider recorded %d request(s), want exactly 1 (no retry, no fallback)", got)
+	}
+}
