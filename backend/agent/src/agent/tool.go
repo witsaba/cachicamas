@@ -246,7 +246,7 @@ type Scheduler struct {
 // Registry resolves a tool name to its implementation. Map-backed or
 // any source; resolution miss yields a typed `Result{ExecutionFailure}`
 // in the call's ordinal slot (consistent with R-TLS-010 "one bad
-// tool, siblings complete"). `ToolSource` port (G6) is AG-13's
+// tool, siblings complete"). `ToolSource` port (G6) is AG-20's
 // widening.
 type Registry interface {
 	Resolve(name string) (Tool, bool)
