@@ -973,7 +973,12 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/harness.go") ||
 				strings.HasSuffix(path, "/harness_test.go") ||
 				strings.HasSuffix(path, "/harness_steering_test.go") ||
-				strings.HasSuffix(path, "/harness_pause_test.go")
+				strings.HasSuffix(path, "/harness_pause_test.go") ||
+				// Phase 5 widening (R-RUN-010, S-RUN-091/S-APP-016):
+				// harness_suspension_test.go, the fifth and final
+				// /harness*.go suffix. Byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/harness_suspension_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
