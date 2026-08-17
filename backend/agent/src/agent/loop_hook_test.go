@@ -971,7 +971,8 @@ func filterOutLoopHookFiles(diff string) string {
 				// wildcard/prefix/directory pattern. Byte-in-sync with
 				// loop_test.go's filterOutLoopFiles.
 				strings.HasSuffix(path, "/harness.go") ||
-				strings.HasSuffix(path, "/harness_test.go")
+				strings.HasSuffix(path, "/harness_test.go") ||
+				strings.HasSuffix(path, "/harness_steering_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

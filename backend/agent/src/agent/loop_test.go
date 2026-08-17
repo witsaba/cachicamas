@@ -900,7 +900,8 @@ func filterOutLoopFiles(diff string) string {
 				// that first needs it — this pair lands in Phase 0's
 				// first commit alongside harness_test.go itself.
 				strings.HasSuffix(path, "/harness.go") ||
-				strings.HasSuffix(path, "/harness_test.go")
+				strings.HasSuffix(path, "/harness_test.go") ||
+				strings.HasSuffix(path, "/harness_steering_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
