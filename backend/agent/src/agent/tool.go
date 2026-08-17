@@ -43,6 +43,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -238,6 +239,21 @@ type Scheduler struct {
 	// (R-LSK-001 point 3), which would otherwise be a send on a
 	// channel Schedule already closed.
 	LeaveSinkOpen bool
+
+	// WindDownBound is AG-14's per-call wind-down bound (R-CAN-006,
+	// R-TLS-014). Zero value resolves to the documented package
+	// default (defaultWindDownBound, cancellation.go): a caller that
+	// never sets this field gets the default; a caller that sets it
+	// gets its own value. The bound is armed ONLY once a call's ctx
+	// is done (executeCall's detach select, scheduler.go, design.md
+	// Decision 3) — on an uncancelled path no timer is ever created,
+	// so this field changes nothing about Schedule's existing
+	// behavior for a run nobody cancelled (R-RUN-010). A field, not a
+	// new Schedule parameter, mirrors LeaveSinkOpen's own precedent:
+	// every existing keyed-struct-literal construction site is
+	// unaffected, and a test can inject a small value (the leak
+	// test's 50 repeats need one) without new plumbing.
+	WindDownBound time.Duration
 
 	parkedMu sync.Mutex
 	parked   *parkedSet

@@ -1,4 +1,6 @@
-// AG-14 — the cancellation vocabulary (R-CAN-001, R-CAN-006).
+// Package agent is Layer 2 of the cachicamas agent stack. This file
+// (cancellation.go) hosts AG-14 — the cancellation vocabulary
+// (R-CAN-001, R-CAN-006).
 //
 // This file declares pure vocabulary only: two errors.Is sentinels
 // (ErrInterrupted, ErrShutdown), a typed post-shutdown prompt refusal

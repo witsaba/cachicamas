@@ -236,3 +236,120 @@ Batch B diff: 289 insertions + 5 deletions across 3 modified tracked files, plus
 ### Remaining (Phases 9–13, NOT this batch)
 
 Phase 9 (wind-down bound, detach select, `Scheduler.WindDownBound`, `R-CAN-006`/`R-TLS-014`), Phase 10 (goroutine-leak proof), Phase 11 (bite S-CAN-012), Phase 12 (remaining guards/cross-cut confirmations — `12.1` already done, see batch A above), Phase 13 (final gates, docs, promotion prep).
+
+## Batch C — Phases 9–13 (23 tasks: 9.1–9.8, 10.1–10.2, 11.1, 12.2–12.6, 13.1–13.4) — COMPLETE
+
+**Status**: All 23 assigned tasks complete (task 13.5 is explicitly `sdd-archive`'s job, left `[ ]`). Full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint including the final one (1262 `--- PASS` / 0 `--- FAIL` across all 12 module packages in the final `make test`).
+
+**Mode**: Strict TDD. Every behavior RED-recorded (real command run, real failure captured) before its GREEN, with two documented, task-flagged composition-proof exceptions (9.6, 10.1) and one genuine, unpredicted RED (9.7) whose real failure mode diverged from — and corrected — the design/spec's own prose, recorded rather than silently reconciled.
+
+### Files changed
+
+| File | Action | What |
+|---|---|---|
+| `backend/agent/src/agent/tool.go` | Modify | `Scheduler.WindDownBound time.Duration` field (zero-default, `LeaveSinkOpen` precedent), `"time"` import (9.1) |
+| `backend/agent/src/agent/scheduler.go` | Modify | `toolRunReply` type; `runToolWithWindDown` (new sub-method: inner-goroutine detach select, bound armed only on `ctx.Done()`); `executeCall`'s tool-invocation section rewritten to call it; `typedDetachedCallFailure` (new helper, siblings of `typedCancellationFailure`); `"time"` import (9.3–9.4) |
+| `backend/agent/src/agent/cancellation_winddown_test.go` | Create | `smallWindDownBound` const, `readUntilToolStart` helper, `TestHarness_WindDown_DeafToolCannotHoldRunHostage` (S-CAN-006 Thens 1–2, 9.2/9.5), `TestHarness_WindDown_NoHarnessGoroutineRemains` (R-CAN-006 Then 3, serial-only, 10.1/10.2) |
+| `backend/agent/src/agent/scheduler_test.go` | Modify | `TestSchedule_UncancelledZeroBoundDoesNotArmTimer` (S-TLS-018, 9.6), `TestSchedule_MixedCancellationBatch_DisjointResultsPerCall` (S-TLS-019, 9.7/9.8) — both purely additive, zero pre-existing lines touched |
+| `backend/agent/src/agent/cancellation.go` | Modify | Package comment reworded to the file's own established `"Package agent is Layer 2..."` convention (real `make lint` finding on AG-14's own batch-A file, not pre-existing drift — task 13.4) |
+| `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` | Modify | `:2171` exit-gate row ticked `[x]`; status paragraph at `:3` bumped "13 of 24" → "14 of 24", "AG-12…AG-13" → "AG-12…AG-14", new AG-14 sentence appended mirroring AG-13's own shape (task 13.2) |
+| `openspec/changes/cachicamas-agent-cancellation-tree/tasks.md` | Modify | Tasks 9.1–9.8, 10.1–10.2, 11.1, 12.2–12.6, 13.1–13.4 marked `[x]` with apply notes |
+
+**Forbidden-list compliance** (re-verified against merge-base `52701436` via `git diff --name-only`/`--stat` and `git status`, combining tracked-diff and untracked-new-file views since `cancellation_winddown_test.go` is untracked): the complete changed-file set under `backend/agent/src/agent/` is 17 files — `{doc.go, harness.go, loop.go, run_events.go, scheduler.go, tool.go}` (6, pre-existing non-test, **exactly** `S-LSK-018`'s pinned set — no seventh), `cancellation.go` (1, new non-test, confirmed absent at merge-base via `git show`), `{doc_contract_guard_test.go, harness_test.go, loop_hook_test.go, loop_test.go, scheduler_test.go, scripted_tool_test.go}` (6, pre-existing test, modified — `scheduler_test.go`'s own diff independently confirmed purely additive, zero `^-` lines), `{cancellation_events_test.go, cancellation_interrupt_test.go, cancellation_shutdown_test.go, cancellation_winddown_test.go}` (4, new test). Every forbidden-list file (`turn_events.go`, `failure.go`, `stream_check.go`, `stream_check_test.go`, `event.go`, `event_descriptor.go`, `event_registry_test.go`, `reconstruction_test.go`, `history.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `go.mod`, `go.sum`) re-verified byte-unchanged (0-line diff vs `origin/main`, each checked individually). Every file under `backend/agent/src/ai/**` byte-unchanged (empty `git diff --stat` over the whole subtree). `permission_protocol_test.go` byte-unchanged (0-line diff) and its pinned `TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline` passes 5/5 under `-race`. `run_events.go`'s diff (unchanged from batch A, re-verified) adds only `RunOutcomeShutdown` + its `String()` case — `RunEnd.validate`/`NewRunEnd` untouched.
+
+### TDD Cycle Evidence
+
+| Task | Test | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|---|---|---|---|---|---|---|---|
+| 9.1–9.5 | `TestHarness_WindDown_DeafToolCannotHoldRunHostage` | Integration (Harness+Scheduler) | ✅ full suite green pre-edit | ✅ Written, real bounded-hang FAIL captured (`drainSink`'s own 1s guard, not the outer `-timeout`) | ✅ Passed, stable ×10 under `-race` | ➖ Single scenario (S-CAN-006 Thens 1–2 share one Given) | ➖ None needed |
+| 9.6 | `TestSchedule_UncancelledZeroBoundDoesNotArmTimer` | Integration (Scheduler) | ✅ full suite green | ⚠️ Composition proof, GREEN-on-first-run (9.1–9.4's mechanism already correctly leaves `ctx.Done()`'s nil channel unreachable for `context.Background()`) | ✅ Passed | ➖ Single scenario | ➖ None needed |
+| 9.7–9.8 | `TestSchedule_MixedCancellationBatch_DisjointResultsPerCall` | Integration (Scheduler) | ✅ full suite green pre-edit | ✅ Written, real failure captured — genuinely unpredicted (category mismatch, not the task's own silence about which failure mode); test corrected, re-run | ✅ Passed, stable ×10 under `-race` | ➖ Single scenario (3 ordinal slots inspected together) | ➖ None needed |
+| 10.1–10.2 | `TestHarness_WindDown_NoHarnessGoroutineRemains` | Integration (Harness, serial-only) | ✅ full suite green | ⚠️ Composition proof, GREEN-on-first-run (Phase 9's mechanism, confirmed correct by 9.5, composes with `RequireNoGoroutineLeak`'s amplitude check without new production code) | ✅ Passed, stable ×3 under `-race` | ➖ Single scenario | ➖ None needed |
+| 11.1 | bite `S-CAN-012` (scratch-remove the armed bound in `runToolWithWindDown`) | Integration (Harness+Scheduler) | ✅ full suite green before/after | ✅ Real failure captured: `TestHarness_WindDown_DeafToolCannotHoldRunHostage` FAILs via `drainSink`'s 1s guard, same symptom as 9.2's own original RED | ➖ (bite, reverted, not landed) | ➖ N/A | ➖ N/A |
+
+### Test Summary
+- **Total tests written this batch**: 4 top-level test functions (`TestHarness_WindDown_DeafToolCannotHoldRunHostage`, `TestHarness_WindDown_NoHarnessGoroutineRemains`, `TestSchedule_UncancelledZeroBoundDoesNotArmTimer`, `TestSchedule_MixedCancellationBatch_DisjointResultsPerCall`), covering `S-CAN-006` (both Thens 1–2 and Then 3), `S-TLS-018`, `S-TLS-019`/`R-TLS-010` restated.
+- **Total tests passing**: full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint; 1262 `--- PASS` / 0 `--- FAIL` in the final `make test` run across all 12 module packages.
+- **Layers used**: Integration via `agenttest`-scripted `Harness`/`Scheduler` (4 new top-level tests, all this layer; no unit or E2E layer needed this batch).
+- **Bites (RED-record → revert)**: 1 (task 11.1 / `S-CAN-012`).
+- **Pure functions created**: `typedDetachedCallFailure` (scheduler.go — deterministic, no side effects, sibling of `typedCancellationFailure`).
+- **New production mechanism**: `runToolWithWindDown` (scheduler.go) — the per-call detach select, extracted as a named sub-method rather than inlined into `executeCall` (design decision 9 below).
+
+### RED/bite evidence (verbatim, captured)
+
+**Task 9.2 RED** (`go test -race -timeout 8s -run TestHarness_WindDown_DeafToolCannotHoldRunHostage -v ./src/agent/...`, before scheduler.go's 9.3/9.4 detach select landed):
+```
+=== RUN   TestHarness_WindDown_DeafToolCannotHoldRunHostage
+=== PAUSE TestHarness_WindDown_DeafToolCannotHoldRunHostage
+=== CONT  TestHarness_WindDown_DeafToolCannotHoldRunHostage
+    cancellation_winddown_test.go:100: drainSink: sink did not close within 1s (0 event(s) received so far) — the loop is not closing the sink it owns
+--- FAIL: TestHarness_WindDown_DeafToolCannotHoldRunHostage (1.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agent	1.580s
+```
+**Root-cause note** (divergence from `tasks.md`'s own prediction — "compile error, `WindDownBound` unread" — recorded per this project's established discipline of not silently treating a task's predictive prose as ground truth): task 9.1 (adding the field) landed first per the task's own ordering, so there was no compile error; the genuine RED is behavioral — `executeCall` still calls `tool.Run(ctx, …)` **synchronously**, so the never-closed `release` channel blocks the call goroutine forever, `wg.Wait()` in `Schedule` never returns, and the test's own `drainSink` helper's pre-existing 1-second bounded guard (not the outer `-timeout 8s`) is what actually catches the hang — a real, deterministic, captured FAIL either way.
+
+**Task 9.2 GREEN** (same command, after 9.3/9.4 landed): `--- PASS`, stable ×10 under `-race -count=10`.
+
+**Task 9.7 RED** (`go test -race -timeout 20s -run TestSchedule_MixedCancellationBatch_DisjointResultsPerCall -v ./src/agent/...`, first draft, before correction):
+```
+=== RUN   TestSchedule_MixedCancellationBatch_DisjointResultsPerCall
+=== PAUSE TestSchedule_MixedCancellationBatch_DisjointResultsPerCall
+=== CONT  TestSchedule_MixedCancellationBatch_DisjointResultsPerCall
+    scheduler_test.go:1430: results[0].Failure.Category() = unavailable, want ai.FailureCategoryCancellation
+--- FAIL: TestSchedule_MixedCancellationBatch_DisjointResultsPerCall (0.02s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agent	0.313s
+```
+**Root-cause note (a genuine finding, not a production bug)**: the first draft asserted `ai.FailureCategoryCancellation` for BOTH the cancellation-observing tool's own slot AND the cancellation-deaf tool's slot. Empirically only the DEAF tool's slot is scheduler-detected cancellation (`runToolWithWindDown`'s timer arm → `typedDetachedCallFailure`, a structurally different code path from `runErr != nil`). The OBSERVING tool's own self-reported early-return error (`ErrScriptedToolCancelled`) reaches the scheduler as an ordinary non-nil `error` from `tool.Run` — the exact same pre-existing, unmodified `runErr != nil` branch any tool error takes, wrapped by `typedExecutionFailureFromError`/`typedFailureFromError`, which hardcodes `ai.FailureCategoryUnavailable`. This is not new to AG-14: `TestSchedule_ToolReceivesRunContext_EarlyReturnOnCancel` (S-TLS-016, batch A, unmodified) already asserts only `errors.Is` against the tool's own sentinel for this exact call — it never checks Category, precisely because the scheduler cannot distinguish "this tool errored because it observed cancellation" from "this tool errored for any other reason." **Second finding, also recorded**: the spec's restated `R-TLS-010` (`agent-tool-scheduler/spec.md`) names `ai.FailureCategoryExecution` as the category for "an ordinary tool error" — this member **does not exist** anywhere in `ai.FailureCategory`'s nine-member vocabulary (`Authentication, Authorization, RateLimit, Unavailable, Timeout, Cancellation, MalformedResponse, UnsupportedCapability, Unknown`; verified directly against `provider_failure.go`, not merely cited) — a spec-authoring defect distinct from `R-TLS-014`'s own unambiguous, correctly-implemented text (independently confirmed by task 9.2/9.5's own test). `backend/agent/src/ai/**` being off-limits this milestone forbids "fixing" this by inventing a tenth vocabulary member; the correction is to the test's own expectation, matching the codebase's actual, correct, pre-existing behavior. The test was also narrowed from 4 tools to the scenario's literal 3-tool Given (observing, deaf, succeeding) — the fourth "ordinary failing" tool was never named in `S-TLS-019`'s own Given clause.
+
+**Task 9.7 GREEN** (corrected test, same command): `--- PASS`, stable ×10 under `-race -count=10`.
+
+**Task 11.1 bite (S-CAN-012) — scratch-mutation evidence**: `runToolWithWindDown`'s `select` block (the `case <-ctx.Done(): ... timer := time.NewTimer(bound) ...` arm) reverted to an unconditional `reply = <-resCh; return reply, false` — no `ctx.Done()` arm at all, matching the removal of the now-unused `"time"` import (mirrors task 3.1's own precedent of removing a now-dead import as part of the scratch mutation):
+```
+go build ./... → BUILD_DONE (compiles cleanly — the bite is a behavioral regression, not a build failure)
+
+go test -race -timeout 8s -run TestHarness_WindDown_DeafToolCannotHoldRunHostage -v ./src/agent/...
+=== RUN   TestHarness_WindDown_DeafToolCannotHoldRunHostage
+=== PAUSE TestHarness_WindDown_DeafToolCannotHoldRunHostage
+=== CONT  TestHarness_WindDown_DeafToolCannotHoldRunHostage
+    cancellation_winddown_test.go:100: drainSink: sink did not close within 1s (0 event(s) received so far) — the loop is not closing the sink it owns
+--- FAIL: TestHarness_WindDown_DeafToolCannotHoldRunHostage (1.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agent	1.458s
+```
+Same divergence from the task's own prediction as 9.2's RED: `drainSink`'s own 1s bounded guard catches the hang before the outer `go test -timeout 8s` ever would — a real, deterministic, captured FAIL that proves the armed bound (not some other mechanism) is what ends the run, exactly what the bite exists to isolate. Reverted via `cp scheduler.go scheduler.go.bak` before mutating, `cp scheduler.go.bak scheduler.go` after, `diff` confirmed byte-identical, backup removed; `git diff -- scheduler.go` against HEAD afterward shows only Phase 9's real, permanent changes (128 insertions, 1 deletion) — zero bite residue. `go build`, and the full test re-run (`go test -race ./src/agent/...`) both green afterward.
+
+### Design decisions (recorded, not silent) — continuing batches A/B's numbering
+
+8. **`typedDetachedCallFailure` calls `typedCancellationFailure` directly, never `typedCancellationFailureFromError`.** The latter checks `errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown)` and falls back to the pre-AG-14 `Unavailable` wrap when neither matches — correct for the permission-gate's abort arms (whose cause genuinely is one of the two harness sentinels), but wrong here: a `*DetachedCallError` is its own cause, never wrapping either sentinel, so routing it through the sentinel-checking wrapper would silently mis-categorize every bound-overrun report as `Unavailable` instead of `Cancellation` — directly contradicting `R-CAN-006`'s own unambiguous text. Caught during implementation (not by a failing test — this is a design choice made correctly the first time, recorded so a future reader does not "simplify" it into the wrong helper).
+9. **`runToolWithWindDown` is a named, documented sub-method, not an inline block inside `executeCall`.** Design.md's own code sketch shows the mechanism inlined; extracting it keeps `executeCall`'s existing structure (gate → start event → run → disjoint-channel handling) readable, matches the file's own established sub-method pattern (`scheduleRead`, `scheduleSerialized`, `runPermissionGate` are all named siblings), and gives the "own RED-first task" framing (task 9.3) a single, isolable unit whose own doc comment carries the full rationale (why per-call, why not `wg.Wait()`, why the buffered channel, why panic re-propagation) rather than scattering it through `executeCall`'s body.
+10. **`S-TLS-019`'s test scope corrected to the scenario's own literal 3-tool Given, and its category split corrected to match verified, unmodified production behavior — not the spec's own (defective) category name.** Both findings are recorded verbatim in the RED evidence above rather than silently reconciled; they are spec-text/task-prose imprecisions, not production defects, and no `ai/**` edit was made or considered to "fix" the nonexistent category name.
+11. **`docs/.../0003-...md:2207`'s R-09 row left untouched.** It already cites `AG-14.1` (Interrupt) as consuming `R-09`'s upward path; `AG-14.2` (Shutdown) uses the exact same mechanism (`signalMu`/`cancelRun`) and is arguably equally-valid evidence, but the table's own citation granularity varies elsewhere (some rows cite a whole milestone, others cite specific sub-nodes), so omitting `AG-14.2` here is a stylistic choice, not a factual error — left as-is per the batch's own conservative instruction ("back-annotate only if a discrepancy is found — do not rewrite a correct row"). `:2257`'s traceability row (`AG-14 | R-08 (wind-down), v2 § 4.2`) was also verified correct: `R-08`'s "typed mid-stream failure path" step is exactly what `loop.go:442-449`'s cause check extends to the cancellation case, mirroring the pre-existing mid-stream-fatal branch's own precedent.
+12. **`gofmt -l` drift (`loop.go:704`, `scheduler.go:635+`, plus a dozen-plus files this milestone never touched) independently re-verified pre-existing at `origin/main`**, not by trusting the brief's own claim but by extracting standalone copies of five representative files (including three on the hard forbidden list) directly from `origin/main` via `git show` and running `gofmt -l` on them in isolation — all five flagged, confirming the drift predates AG-14 entirely. `make fmt`/`gofmt -w` were never run, per the hard constraint; this is recorded as a maintainer decision for a separate change, not fixed here.
+13. **`cancellation.go`'s package comment fixed** (batch A's own file, not this batch's new code) — a real, in-scope `golangci-lint` `revive` finding (`package-comments`), not pre-existing repo-wide drift: the file's opening comment read `"AG-14 — the cancellation vocabulary..."` where every sibling production file (`tool.go`, `harness.go`, `loop.go`, `scheduler.go`) opens with `"Package agent is Layer 2 of the cachicamas agent stack. This file (X.go) hosts ..."`. Fixed via a targeted, minimal reword of the opening lines only — the rest of the comment block, and every other line in the file, is untouched. This is not the `gofmt -w` reformatting the hard constraint forbids; it is a single, deliberate content edit to satisfy a real lint rule on a file within this change's own scope.
+
+### Confirmations against the specs (task 13.3, evidence beyond what's already in Phases 9–12 above)
+
+- **`R-TLS-013`** ("MUST pass the context it was called with down into `tool.Run`. MUST NOT substitute a background or otherwise detached context"): `scheduler.go`'s `runToolWithWindDown` receives `ctx` from `executeCall` (itself receiving the real run `ctx`, Phase 1) and passes it unmodified to `tool.Run(ctx, args, policy)` inside the inner goroutine — confirmed by direct code reading, not inference.
+- **`R-TLS-014`**: every normative clause (zero-default field resolving to the package default; not a new `Schedule` parameter; armed only by cancellation, no timer on the uncancelled path; per-call detachment, not around the join; the third-party frame's freedom to complete its send after detachment; the typed report via the existing execution-failure path with no new `EventKind`/`Result` outcome; `Schedule`'s remaining steps unchanged in order; panic containment on both sides of the bound) verified directly against `runToolWithWindDown`'s and `typedDetachedCallFailure`'s own implementation, each independently confirmed by a passing test (9.5, 9.6, or the panic-containment re-panic path, which the pre-existing `S-TLS-011` panic test — file-unchanged — continues to exercise through the now-detached-but-unchanged-in-contract `recoverCall`).
+- **`R-TLS-010` restated**: confirmed via `S-TLS-019`'s corrected test (task 9.7/9.8) — every populated slot's `Outcome`/`Failure` pairing verified disjoint; the category split (`Cancellation` only for scheduler-detected bound overrun, `Unavailable` for a tool's own self-reported error, matching pre-existing behavior) is the ONE place this batch found the restated spec prose imprecise (design decision 10 above).
+- **`R-RUN-010`** ("the wind-down bound of `R-CAN-006` is NOT the third path... part of path (b)... no timer on the uncancelled path"): both of the requirement's own "two independent reasons, both checkable" are directly confirmed by this batch's own work — reason 1 (part of path (b)) by `runToolWithWindDown`'s own structure (the timer only ever exists inside the `ctx.Done()` arm); reason 2 (no timer on the uncancelled path) by `S-TLS-018`'s own test (task 9.6) AND by the unmodified `TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline` (task 12.2).
+- **`R-LSK-004`, `R-RUN-001`, `R-RUN-011`, `R-APP-009`, `R-HIS-007`**: closed in batches A/B; this batch's own changes never touch `harness.go`'s signal/queue/wind-down logic, `loop.go`'s cause check, or `scheduler.go`'s permission-gate abort arms — confirmed unaffected by the full green suite (every S-CAN-00x/S-APP-01x test from batches A/B still passing unmodified this batch) and by the byte-unchanged/purely-additive file-diff checks above.
+
+### Review budget
+
+Batch C diff: `tool.go` +16/-0, `scheduler.go` +129/-2 (net across the whole file's cumulative diff, includes the executeCall rewrite), `scheduler_test.go` +192/-0 (purely additive), `cancellation.go` +4/-2 (comment fix), plus 1 new file `cancellation_winddown_test.go` (196 lines), plus doc updates (`0003-....md` +2/-2, `tasks.md` +20/-20 as `[x]` marks + apply notes) ≈ 579 changed lines. Cumulative with batch A (~1028) and batch B (~530) ≈ 2137 lines — within the pre-authorized `size:exception` (1800–2900 total estimate across all 14 phases).
+
+### Final gates (task 13.4, full evidence)
+
+- **`make test`** (`go test -race -v ./...`): 1262 `--- PASS` / 0 `--- FAIL`, all 12 module packages report `ok`.
+- **`loop.go` coverage** (task 13.1): 88.01% (257/292 statements) via `go test -race -coverprofile=... -covermode=atomic ./src/agent/...` then `go tool cover -func`, cross-checked against the raw profile's per-statement hit counts for the new cancellation branch (`loop.go:442-449`) — all non-zero.
+- **`golangci-lint cache clean && make lint`**: found and fixed one real issue (design decision 13 above); re-run after the fix: `go vet ./...` clean, `golangci-lint run --config=.golangci.yml ./...` → `0 issues.`
+- **`make build`** (`go build -trimpath ./...`): clean, no output.
+- **`make vuln-check`** (`govulncheck -json ./...`, explicit — not part of `make all`): exit code 0; JSON stream parsed (via `jq`) for `finding` entries — **zero** findings; ~180 `osv` entries were scanned against the module's stdlib-only dependency closure (this module carries zero third-party `require`s per its own `go.mod`/Makefile documentation), none reachable.
+- **`make fmt`/`gofmt -w`**: never run, per the hard constraint — the existing `gofmt -l` drift (design decision 12 above) is independently re-confirmed pre-existing at `origin/main`, not AG-14-introduced.
+
+### Remaining (Phase 13.5 only, NOT this batch, explicitly `sdd-archive`'s)
+
+Promote `agent-cancellation-tree/spec.md` to `openspec/specs/agent-cancellation-tree/spec.md`; apply the five deltas into their canonical specs; archive the change folder after `sdd-verify` passes, per AG-09..AG-13 precedent. **All 57 tasks across Phases 0–13 are otherwise complete (56 `[x]`, only 13.5 `[ ]`).**
