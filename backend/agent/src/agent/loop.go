@@ -340,6 +340,14 @@ func Turn(
 	turn := newTurnAccumulator(runID, turnID, stamper, sink, opts.Continuation != nil)
 	for ev := range pCh {
 		if done := turn.translate(ev); done {
+			// AG-13 (R-LSK-001 point 3): the continuation path
+			// reorders to schedule-before-finalize, so tool and
+			// permission events land inside the still-open turn
+			// bracket. The nil path below keeps the original
+			// finalize-first order byte-stable (S-LSK-015).
+			if opts.Continuation != nil {
+				return finishContinuationTurn(ctx, turn, opts, runID, turnID, stamper, sink)
+			}
 			// Completion: capture the finish reason and exit the loop.
 			// If the completion carries tool calls, dispatch them
 			// through the scheduler (AG-09 wire-up, R-TLS-001..011).
@@ -420,6 +428,97 @@ func Turn(
 	msg, finish := turn.finalize()
 	closeSink(sink)
 	return msg, finish, nil
+}
+
+// finishContinuationTurn runs the continuation path's completion,
+// once the provider stream ends in a Completion (R-LSK-001 points
+// 2-5, R-HIS-010). Unlike the nil path, this schedules BEFORE
+// finalize: the turn's tool and permission events must land inside
+// the still-open turn bracket, because CheckStream rejects a
+// PlacementTurn event outside an open turn or after the terminal
+// run_end (which finalize-first would produce, since the nil path's
+// finalize also fires the loop's own turn-close before Schedule
+// runs). It captures the rejoin (the `_ =` discard ends here, on this
+// path only), lets reconstructMessage additionally carry the turn's
+// own ai.ToolCall parts, and then commits the turn's own messages —
+// the assistant message and one tool-result message per rejoin
+// result, in call order — to the continuation's History. Turn does
+// NOT call CloseTurn: that stays the run driver's, at the turn
+// boundary (R-RUN-005).
+func finishContinuationTurn(
+	ctx context.Context,
+	t *turnAccumulator,
+	opts TurnOptions,
+	runID RunID,
+	turnID TurnID,
+	stamper *LaneStamper,
+	sink chan<- *Event,
+) (ai.Message, ai.FinishReason, error) {
+	var results []Result
+	if t.finish == ai.FinishReasonToolCalls && len(t.toolCalls) > 0 {
+		// AG-10 (D-C carry): forward the caller's policy byte-exact;
+		// nil remains a legitimate bypass. The caller's injected
+		// scheduler is used (not a locally constructed one), so its
+		// LeaveSinkOpen setting governs whether this call closes
+		// sink — it MUST NOT, since finalize below still needs to
+		// emit turn_end on it.
+		results = opts.Continuation.Scheduler.Schedule(ctx, t.toolCalls, opts.Tools, runID, turnID, opts.PermissionPolicy, stamper, sink)
+	}
+
+	msg, finish := t.finalize()
+
+	if !msg.ID().IsZero() {
+		if err := opts.Continuation.History.Append(msg); err != nil {
+			closeSink(sink)
+			return msg, finish, err
+		}
+	}
+	for _, r := range results {
+		resultMsg, err := toolResultMessage(r)
+		if err == nil {
+			err = opts.Continuation.History.Append(resultMsg)
+		}
+		if err != nil {
+			closeSink(sink)
+			return msg, finish, err
+		}
+	}
+
+	closeSink(sink)
+	return msg, finish, nil
+}
+
+// toolResultMessage builds the ai.RoleTool message the continuation
+// path appends for one rejoin result (R-HIS-010 point 2): the success
+// form for ToolOutcomeSuccess, the failure form for both failure
+// outcomes — verified ai/tool_result.go:77,105. The outcome rides the
+// Layer 1 failure form itself (Part.ToolResult().Failed()), never a
+// content sentinel. ToolOutcomeResultFailure carries the tool's own
+// failure output in Content (tool.go's Result doc);
+// ToolOutcomeExecutionFailure carries none, so its typed *Failure's
+// redacted diagnostic renders the content instead — still content the
+// model can reason about.
+func toolResultMessage(r Result) (ai.Message, error) {
+	var part ai.Part
+	var err error
+	switch r.Outcome {
+	case ToolOutcomeSuccess:
+		part, err = ai.NewToolResult(r.CallID(), string(r.Content))
+	case ToolOutcomeResultFailure:
+		part, err = ai.NewToolFailure(r.CallID(), string(r.Content))
+	case ToolOutcomeExecutionFailure:
+		content := ""
+		if f := r.FailureFor(); f != nil {
+			content = f.Unwrap().Error()
+		}
+		part, err = ai.NewToolFailure(r.CallID(), content)
+	default:
+		part, err = ai.NewToolFailure(r.CallID(), "")
+	}
+	if err != nil {
+		return ai.Message{}, err
+	}
+	return ai.NewMessage(ai.RoleTool, part)
 }
 
 // outcomeForFinish maps a normalized ai.FinishReason to its TurnOutcome
@@ -832,6 +931,22 @@ func (t *turnAccumulator) reconstructMessage() ai.Message {
 		part, perr := ai.NewText(joined)
 		if perr == nil {
 			parts = append(parts, part)
+		}
+	}
+	// AG-13 (R-LSK-001 point 5, R-HIS-010 point 1) — continuation
+	// path only: append the turn's own tool-call parts, provider-
+	// exact bytes (re-derived from each ai.ToolCall's own accessors,
+	// which return byte-equal bytes to what NewToolCall was given),
+	// so a pure-tool turn yields a constructible assistant message
+	// whose calls the transcript's pairing invariant can match. The
+	// nil path never sets t.continuation, so this stays unreachable
+	// there (S-LSK-015 byte-stability).
+	if t.continuation {
+		for _, tc := range t.toolCalls {
+			part, perr := ai.NewToolCall(tc.ID(), tc.Name(), tc.Arguments())
+			if perr == nil {
+				parts = append(parts, part)
+			}
 		}
 	}
 	// AG-09 — append tool-result parts when the turn carries

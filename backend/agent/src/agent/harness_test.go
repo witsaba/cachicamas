@@ -408,3 +408,122 @@ func TestTurn_ContinuationMidStreamFatal_TurnEndAbortedNoRunEnd(t *testing.T) {
 		t.Error("turn_end carries no Failure, want a non-nil *agent.Failure")
 	}
 }
+
+// AG-13.1 — S-LSK-013 (tool-calling half), the schedule-before-
+// finalize reorder. Given a TurnOptions carrying a fully configured
+// continuation, when Turn runs a tool-calling turn, then the turn's
+// tool events land INSIDE the open turn bracket and BEFORE turn_end,
+// and CheckStream accepts the resulting stream once framed with the
+// run bracket the caller (AG-13.1's Harness) supplies around it —
+// design.md's run algorithm step 2: NewRunStart + the SAME shared
+// stamper. Expect FAIL today: the nil path's finalize-first ordering
+// puts tool events after turn_end, which CheckStream rejects (a
+// PlacementTurn event outside an open turn, or after the terminal
+// run_end).
+func TestTurn_ContinuationToolCall_ScheduleBeforeFinalize_EventsInsideTurnBracket(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_lsk_013_tool", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_lsk_013_tool": tool})
+
+	stamper := &agent.LaneStamper{}
+	cont := &agent.TurnContinuation{
+		Run:       "run-lsk-013-tool",
+		Stamper:   stamper,
+		Scheduler: &agent.Scheduler{MaxConcurrentReads: 4, LeaveSinkOpen: true},
+		History:   agent.NewHistory(),
+	}
+
+	tcStart, err := ai.NewToolCallStart(1, "call-lsk-013", "read_lsk_013_tool")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tcDelta, err := ai.NewToolCallDelta(1, []byte(`{"n":1}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tcEnd, err := ai.NewToolCallEnd(1, []byte(`{"n":1}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	script := agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(tcStart),
+		agenttest.Emit(tcDelta),
+		agenttest.Emit(tcEnd),
+		agenttest.Emit(completion),
+	}}
+	provider := agenttest.NewProvider(script)
+	sink := make(chan *agent.Event, 256)
+
+	// The caller (AG-13.1's Harness, simulated here) owns the run
+	// bracket and shares its stamper with Turn — design.md's run
+	// algorithm step 2 (NewRunStart + stamper.Stamp, sequence 1).
+	runStart, err := agent.NewRunStart(cont.Run)
+	if err != nil {
+		t.Fatalf("agent.NewRunStart: %v", err)
+	}
+	stampedRunStart := stamper.Stamp(runStart)
+
+	_, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for lsk-013 tool",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Tools: reg, Continuation: cont},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonToolCalls {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonToolCalls)
+	}
+	if got := tool.Invocations(); got != 1 {
+		t.Errorf("tool invocations = %d, want 1", got)
+	}
+
+	turnEvents := drainSink(t, sink)
+
+	runEnd, err := agent.NewRunEnd(cont.Run, agent.RunOutcomeCompleted, nil)
+	if err != nil {
+		t.Fatalf("agent.NewRunEnd: %v", err)
+	}
+	stampedRunEnd := stamper.Stamp(runEnd)
+
+	// Tool events must land BEFORE turn_end, inside the still-open
+	// turn bracket — the reorder under test.
+	turnEndIdx, toolStartIdx, toolEndIdx := -1, -1, -1
+	for i, ev := range turnEvents {
+		switch ev.Kind() {
+		case agent.EventKindTurnEnd:
+			turnEndIdx = i
+		case agent.EventKindToolStart:
+			toolStartIdx = i
+		case agent.EventKindToolEndSuccess:
+			toolEndIdx = i
+		}
+	}
+	if turnEndIdx < 0 {
+		t.Fatal("no turn_end found in the emitted stream")
+	}
+	if toolStartIdx < 0 || toolEndIdx < 0 {
+		t.Fatalf("tool_start/tool_end_success not both found (start=%d, end=%d)", toolStartIdx, toolEndIdx)
+	}
+	if toolStartIdx > turnEndIdx || toolEndIdx > turnEndIdx {
+		t.Errorf("tool events at [start=%d end=%d] land after turn_end at [%d], want both BEFORE it (inside the open turn bracket)", toolStartIdx, toolEndIdx, turnEndIdx)
+	}
+
+	// CheckStream must accept the framed stream unmodified — the
+	// concrete evidence the reorder is required, not cosmetic: a
+	// PlacementTurn tool event outside an open turn (or after the
+	// terminal run_end) is exactly what CheckStream rejects.
+	framed := append([]agent.Event{stampedRunStart}, turnEvents...)
+	framed = append(framed, stampedRunEnd)
+	if report := agent.CheckStream(framed); report.Violation() != nil {
+		t.Errorf("CheckStream rejected the continuation-path stream: %v", report.Violation())
+	}
+}
