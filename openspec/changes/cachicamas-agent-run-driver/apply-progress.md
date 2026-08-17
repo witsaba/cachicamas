@@ -1,15 +1,20 @@
 # Apply Progress: AG-13 — Drive the multi-turn run (`cachicamas-agent-run-driver`)
 
-> Cumulative across three batches. Batch 1 (Phase 0, Phase 1): tasks 0.1–0.6, 1.1–1.18.
+> Cumulative across four batches. Batch 1 (Phase 0, Phase 1): tasks 0.1–0.6, 1.1–1.18.
 > Batch 2 (Phase 2, Phase 3, Phase 4): tasks 2.1–2.30, 3.1–3.9, 4.1–4.3.
-> Batch 3 (this one — Phase 5, Phase 6): tasks 5.1–5.6, 6.1–6.12. **All 74 assigned
-> tasks now complete — AG-13 closes.**
+> Batch 3 (Phase 5, Phase 6): tasks 5.1–5.6, 6.1–6.12.
+> Batch 4 (this one — `sdd-verify` remediation, Phase 7): tasks 7.1–7.5. **All 89
+> assigned tasks now complete — AG-13 closes.**
 
-## Status: 74/74 assigned tasks complete across all three batches (Phase 0: 6/6, Phase 1: 18/18, Phase 2: 30/30, Phase 3: 9/9, Phase 4: 3/3, Phase 5: 6/6, Phase 6: 12/12)
+> **Scenario count** (per `specs/agent-run-driver/spec.md`'s Coverage table, MUST match `tasks.md`/`verify-report.md` — MINOR-4 correction, this batch: this statement was previously missing from this file entirely): `agent-run-driver` itself is **12 requirements → 26 scenarios, of which 2 are bites** (`S-RUN-061`, `S-RUN-091`). The five cross-cut deltas add **18 further scenarios** this change is responsible for closing. **Total new/changed evidence obligations: 44** (43 at `sdd-verify` time + `S-RUN-101`, added this batch by Phase 7's MAJOR-1 remediation). Counted across all six spec files: **26 requirements, 61 scenarios**.
+
+## Status: 89/89 assigned tasks complete across all four batches (Phase 0: 6/6, Phase 1: 18/18, Phase 2: 30/30, Phase 3: 9/9, Phase 4: 3/3, Phase 5: 6/6, Phase 6: 12/12, Phase 7: 5/5)
+
+**MINOR-3 correction (this batch)**: every prior save of this line stated **74/74**. That headline was stale — `tasks.md`'s own per-phase breakdown always summed to **84** (6+18+30+9+3+6+12), and all 84 were already ticked with nothing incomplete; `sdd-verify`'s `verify-report.md` caught this independently (`grep -cE '^- \[x\] [0-9]+\.' tasks.md` = 84, `grep -cE '^- \[ \]'` = 0). The stale 74 was carried over from `sdd-tasks`'s original estimate and never corrected across three batches. This save corrects the headline to the true prior count (84) plus Phase 7's 5 new tasks: **89**.
 
 Mode: **Strict TDD**. Test runner: `cd backend/agent && make test` (`go test -race -v ./...`).
 
-**Final gate confirmation (Batch 3, this save):** `make test` PASS (every package `ok`, zero `--- FAIL` lines, non-cached `go clean -testcache` re-run); `make build` clean; `make lint` clean (after fixing one in-scope finding, `golangci-lint cache clean` run first — see Batch 3 section below for the two pre-existing, out-of-scope findings surfaced by a golangci-lint version mismatch); `make vuln-check` clean (0 reachable findings, exit 0). `loop.go` line coverage: **87.94%** (248/282 statements, weighted from the coverage profile — see Batch 3 Coverage section), comfortably above the 80% `NFR-RUN-004` floor.
+**Final gate confirmation (Batch 4, this save, commit `e750ef92`):** `make test` PASS (every package `ok`, zero `--- FAIL` lines, non-cached `go clean -testcache` re-run); `make build` clean; `make lint` — exactly the same two pre-existing, out-of-scope findings as Batch 3 (`golangci-lint cache clean` re-run first), zero new findings from this batch's `harness.go`/`harness_test.go` changes (see Batch 4 gate sections below). `make vuln-check` not re-run this batch (no new dependency, no `go.mod`/`go.sum` change — Batch 3's clean result stands unaffected). `loop.go` line coverage: **87.94%** (248/282 statements, weighted from the coverage profile — see Batch 3 Coverage section; `harness.go`'s new `close()` method is a two-line, always-exercised addition and does not change this figure materially), comfortably above the 80% `NFR-RUN-004` floor.
 
 ## Commits (work units, in order)
 
@@ -40,6 +45,12 @@ Batch 3 (Phase 5–6, this batch):
 20. `8a0d39b3` — `fix(agent): AG-13 final-gate lint cleanup — harness.go package comment` (task 6.11 gate-cleanup)
 
 Note: this batch started from a clean worktree at commit `5f6ddfda`; the merge-base against `origin/main` throughout this batch is `5590afa0` (AG-12's own merge, PR #173) — confirmed by `git merge-base HEAD origin/main`.
+
+Batch 4 (`sdd-verify` remediation, Phase 7, this batch):
+21. `e750ef92` — `fix(agent): AG-13 harness — close steering queue on every Run exit (MAJOR-1)` (tasks 7.1–7.4)
+22. *(this commit)* — `docs(agent): AG-13 apply-progress — MAJOR-2/MINOR-3/MINOR-4 corrections, Phase 7 closed, 89/89 tasks complete` (task 7.5)
+
+Note: this batch started from a clean worktree at commit `227f3e9d` (Batch 3's final commit); the merge-base against `origin/main` remains `5590afa0`, unchanged — confirmed by `git merge-base HEAD origin/main`.
 
 ## TDD Cycle Evidence — Batch 1 (Phase 0–1, unchanged from prior save)
 
@@ -101,6 +112,22 @@ Note: this batch started from a clean worktree at commit `5f6ddfda`; the merge-b
 - **Layers used**: Unit (2)
 - **Approval tests**: None — no refactoring tasks this batch
 - **Pure functions created**: none new; `deferThenAllowPolicy.Resolve`/`.Remember` and `driveSuspendedRun` are test-only fixtures (`package agent_test`), not production surface
+
+## TDD Cycle Evidence — Batch 4 (Phase 7, this batch — `sdd-verify` remediation)
+
+| Task | Test | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|---|---|---|---|---|---|---|---|
+| 7.1–7.3 | `TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop` (S-RUN-101) | Unit | ✅ full pkg green (`go clean -testcache && go test -race ./src/agent/...` before starting, at commit `227f3e9d`) | ✅ genuine — `harness_test.go:1948: Steer after an R-RUN-011-failed run returned nil, want the typed rejection...` (verbatim below) | ✅ Passed | ➖ single scenario, mirrors S-RUN-002's assertion shape against S-RUN-100's failure fixture | ✅ none needed |
+| 7.4 | Spec-only — `S-RUN-101` added to `specs/agent-run-driver/spec.md` under `R-RUN-011` | N/A | N/A | N/A — no new test | N/A | N/A | N/A |
+| 7.5 | Docs-only — `apply-progress.md` MAJOR-2/MINOR-3/MINOR-4 corrections | N/A | N/A | N/A | N/A | N/A | N/A |
+
+### Test Summary — Batch 4
+
+- **Total tests written this batch**: 1 (`TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop`), added to the existing `harness_test.go` — already listed in both substrate filters, so no filter-widening was needed (per the batch instructions' own preference to avoid a sixth filter entry).
+- **Total tests passing**: 1/1, plus the full pre-existing suite (224 total tests in `src/agent` — 223 prior + this one; zero `--- FAIL` across the whole module, see final result below).
+- **Layers used**: Unit (1)
+- **Approval tests**: None
+- **Pure functions created**: `steeringQueue.close()` (production, idempotent, mutex-guarded) — the only new production surface this batch.
 
 ## RED Evidence (verbatim) — Batch 1 (unchanged from prior save)
 
@@ -241,7 +268,7 @@ After every scratch capture above, the injected change was reverted and `git dif
 
 ## RED Evidence (verbatim) — Batch 3 (this batch)
 
-**Task 5.4 — S-RUN-091/S-APP-016 non-vacuity proof (scratch: replace the parked-wait `select` in `scheduler.go` with an immediate re-resolution)**. Baseline checksum of `scheduler.go` before the scratch: `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` (shasum). Scratch applied: the `select { case <-parkCh: return s.runPermissionGate(...); case <-ctx.Done(): ... }` block replaced with an unconditional `_ = parkCh; return s.runPermissionGate(...)`. Command: `go clean -testcache && go test -race -v -count=15 -run TestHarness_PermissionDefer_ParkedWaitObservedBite ./src/agent/...`. **Result: 15/15 runs FAIL** — genuine, unconditional RED, exceeding the `S-PPB-002` 20/20 reliability bar proportionally:
+**Task 5.4 — S-RUN-091/S-APP-016 non-vacuity proof (scratch: replace the parked-wait `select` in `scheduler.go` with an immediate re-resolution)**. Baseline checksum of `scheduler.go` before the scratch: `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` (shasum). Scratch applied: the `select { case <-parkCh: return s.runPermissionGate(...); case <-ctx.Done(): ... }` block replaced with an unconditional `_ = parkCh; return s.runPermissionGate(...)`. Command: `go clean -testcache && go test -race -v -count=15 -run TestHarness_PermissionDefer_ParkedWaitObservedBite ./src/agent/...`. **Result (corrected — see MAJOR-2 below): the command itself went RED** (non-zero exit, at least one failing iteration of the 15), which is what `S-APP-016`'s bar requires — it is not that all 15 iterations failed:
 
 ```
 --- FAIL: TestHarness_PermissionDefer_ParkedWaitObservedBite (0.00s)
@@ -252,7 +279,9 @@ After every scratch capture above, the injected change was reverted and `git dif
 --- FAIL: TestHarness_PermissionDefer_ParkedWaitObservedBite (0.00s)
     harness_suspension_test.go:275: tool invocations = 1, want 0 before the parked call is woken
 ```
-Both failure shapes are genuine evidence of the same defect (the scratch races the tool execution and the re-resolution ahead of the test's own observation), and both are acceptable RED — no run passed. After reverting the scratch (restoring the exact original `select` block), `scheduler.go`'s checksum returned to `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` — **byte-identical**, confirmed by `git diff --stat` showing no output. Re-run: `go clean -testcache && go test -race -count=15 -run TestHarness_PermissionDefer ./src/agent/...` → **PASS** (both tests, 15x).
+Both failure shapes are genuine evidence of the same defect (the scratch races the tool execution and the re-resolution ahead of the test's own observation) — **corrected (MAJOR-2): not every one of the 15 iterations in this particular capture failed; see the corrected reliability accounting below.** After reverting the scratch (restoring the exact original `select` block), `scheduler.go`'s checksum returned to `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` — **byte-identical**, confirmed by `git diff --stat` showing no output. Re-run: `go clean -testcache && go test -race -count=15 -run TestHarness_PermissionDefer ./src/agent/...` → **PASS** (both tests, 15x).
+
+**MAJOR-2 correction (added by `sdd-verify` remediation, Phase 7)**: the "15/15 runs FAIL" / "no run passed" claims above overstate the measured reliability. `sdd-verify` independently re-executed the same scratch 6 times (`-race -count=15`) and found the aggregate **command**-level RED reliable (**6/6** invocations exited non-zero) but the **per-iteration** PASS/FAIL split of each 15-run invocation was **2/13, 4/11 (×3), 6/9, 7/8** — i.e. **2 to 7 of every 15 iterations genuinely PASS** under the same scratch; 20 independent single-iteration (`-count=1`) runs split **8 PASS / 12 FAIL**. This apply batch (Phase 7, task 7.5) independently re-derived the same shape via the safer `-overlay` technique (worktree never mutated, `scheduler.go` checksum `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` confirmed unchanged throughout): **3/3 independent `-race -count=15` invocations were command-level FAIL**, with per-invocation splits **2/13, 7/8, 4/11** (aggregate 13/45 PASS ≈ 29%, closely matching `sdd-verify`'s own ≈30%); a control run against **unmodified** `scheduler.go`, `-race -count=15` on both suspension tests, was **15/15 PASS** for each — no flakiness in the GREEN direction. **Corrected claim**: the bite is genuinely non-vacuous and its command-level bar (a `-race -count=15` command that goes RED) is met reliably — 6/6 at `sdd-verify`, 3/3 independently reproduced here — but the per-iteration failure is **probabilistic, not unconditional**, because the defeat is race-revealed (the scratch races the tool's execution and the re-resolution against the test's own observation of the wake-issued flag). It does **not** exceed `S-PPB-002`'s 20/20 deterministic reliability bar — it is materially weaker than that, and was never comparable to it. `S-RUN-091`'s own bar (`spec.md:207`) only ever required the `-race -count=15` **command** to RED, which it reliably does.
 
 **Task 5.6 — `agent-permission-protocol/spec.md:172` staleness settlement (scratch: delete the `R-APP-002` acknowledgement wait in `Schedule`)**. A SEPARATE, independent scratch from 5.4's — this one removes the `select { case <-reqAck: ...; case <-ctx.Done(): ... }` block entirely, proceeding straight from the `emissions <- emission{...}` send to the parked-wait select without ever confirming the emission reached `sink`. Baseline checksum confirmed clean (`d631555ba9b7f315f7ae38d953bb9b1bd58867ca`) before this scratch too. Command: `go clean -testcache && go test -race -v ./src/agent/...` (the FULL `agent` package suite, not a single test — per the task's own instruction to run the whole suite and observe). **Observed result: exactly ONE test fails, out of all 223 in the package:**
 
@@ -271,6 +300,52 @@ src/agenttest/cache_boundary_test.go:303:15: SA1019: parser.ParseDir has been de
 ```
 `git diff 5590afa0..HEAD --stat` (the merge-base diff, task 6.8's own evidence) proves the first and third findings are in files **entirely untouched by the AG-13 branch** (zero diff) — pre-existing, out of scope (Layer 1 edit is forbidden; `agenttest` is untouched by design). The second — `harness.go`'s package comment not starting with `"Package agent ..."` — is a genuine, in-scope, zero-risk fix (comment-only, matches `loop.go`/`scheduler.go`/`tool.go`'s existing header style). Fixed; re-run left only the two pre-existing/out-of-scope findings; `git diff` on `harness.go` confirmed comment-only; full `src/agent` package suite re-confirmed green after the fix.
 
+## RED Evidence (verbatim) — Batch 4 (this batch, `sdd-verify` remediation)
+
+**Task 7.1 — S-RUN-101 non-vacuity proof** (`go clean -testcache && go test -race -v -run 'TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop' ./src/agent/...`, against the pre-fix `harness.go` where none of `failRun`'s five call sites nor the `NewRunStart` early return closed `h.queue`):
+```
+=== RUN   TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+=== PAUSE TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+=== CONT  TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+    harness_test.go:1948: Steer after an R-RUN-011-failed run returned nil, want the typed rejection — a nil return promises delivery that can never happen once Run has returned
+--- FAIL: TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop (0.00s)
+FAIL
+FAIL	github.com/cachicamas/backend/agent/src/agent	0.465s
+```
+Genuine RED, exactly the predicted failure mode (`verify-report.md` MAJOR-1's own probe reproduced the identical shape: `"PROBE: Steer after an R-RUN-011-failed run returned: <nil>"`).
+
+**Task 7.2 — the fix**: added `steeringQueue.close()` (idempotent, mutex-guarded — `q.mu.Lock(); defer q.mu.Unlock(); q.closed = true`) and one `defer h.queue.close()` near the top of `Run`, alongside the existing `defer close(sink)`.
+
+**Task 7.3 — GREEN confirm** (`go clean -testcache && go test -race -v -run 'TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop' ./src/agent/...`):
+```
+=== RUN   TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+=== PAUSE TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+=== CONT  TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop
+--- PASS: TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop (0.00s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/agent	1.318s
+```
+
+Every one of `Run`'s 7 return statements enumerated post-fix (`harness.go:252, 257, 266, 299, 303, 316, 329`):
+
+| Line | Statement | Path | Pre-fix | Post-fix |
+|---|---|---|---|---|
+| `:252` | `return ai.Message{}, 0, err` | `NewRunStart` early return | queue left open | closed by the deferred `h.queue.close()` |
+| `:257` | `return h.failRun(...)` | prompt-append failure | queue left open | closed by the defer |
+| `:266` | `return h.failRun(...)` | steered-message append failure (drain) | queue left open | closed by the defer |
+| `:299` | `return h.failRun(...)` | `Turn` returned a non-nil error (`R-RUN-011`) | queue left open — **this is the exact path `S-RUN-101` drives** | closed by the defer |
+| `:303` | `return h.failRun(...)` | `CloseTurn` failure | queue left open | closed by the defer |
+| `:316` | `return h.failRun(...)` | queued-message append failure inside `takeOrClose`'s `took` branch | queue left open | closed by the defer |
+| `:329` | `return lastMsg, lastFinish, nil` | terminal-decision success | already closed by `takeOrClose` before the loop's `break` | defer is a verified no-op (idempotent) |
+
+Full `TestHarness_*`/`TestTurn_*` suite re-run under `-race` immediately after (`go test -race -v -run 'TestHarness_' ./src/agent/...`): every test PASS, zero regressions — including `TestHarness_SteerNearTerminal_AtomicQueueCheckYieldsAdditionalTurn` (S-RUN-012) and `TestHarness_FinalTurnSteer_YieldsNewTurn` (S-RUN-072), the two tests that most directly exercise `takeOrClose`'s own closing behavior on the success path, confirming the new defer does not interfere with the atomic terminal-decision mechanism.
+
+**MAJOR-2 independent re-measurement** (task 7.5, a documentation-correction check, not a RED/GREEN cycle): re-ran the `S-RUN-091`/`S-APP-016` scratch via `go test -overlay=` (worktree never mutated, unlike the original scratch-and-revert; `scheduler.go` checksum `d631555ba9b7f315f7ae38d953bb9b1bd58867ca` confirmed unchanged before, during and after via `shasum` + `git diff --stat`):
+- 3 independent `-race -count=15` invocations against the overlay-mutated `scheduler.go`: **3/3 command-level FAIL** (non-zero exit each time); per-invocation PASS/FAIL of 15 = **2/13, 7/8, 4/11** (aggregate 13/45 PASS ≈ 29%).
+- Control: unmodified `scheduler.go` (no overlay), `-race -count=15` on both suspension tests: **15/15 PASS** for each, zero flakiness in the GREEN direction.
+
+This independently corroborates `verify-report.md`'s own larger sample (6 invocations, per-invocation splits of 2/13, 4/11×3, 6/9, 7/8, aggregate ≈30%) rather than merely re-stating it — see the MAJOR-2 correction inline in the Batch 3 RED Evidence section above for the full accounting.
+
 ## Work Unit Evidence
 
 | Unit | Focused test command | Result | Runtime harness | Rollback boundary |
@@ -285,6 +360,7 @@ src/agenttest/cache_boundary_test.go:303:15: SA1019: parser.ParseDir has been de
 | Phase 5 (permission-suspension + parked-wait bite) | `go test -race -count=15 -run "TestHarness_PermissionDefer" ./src/agent/...` | Both tests PASS, 15x | N/A — `agenttest` fakes only, `sched.WakeParked` is the production wake surface itself (not a fake) | `git revert` commit `0cf984fd` (or delete `harness_suspension_test.go` + revert the filter-widening hunks) |
 | Phase 6 (verification/docs/gates) | `cd backend/agent && make test && make build && make lint && make vuln-check` + `make test/cover` | **All four PASS/clean**; `loop.go` coverage 87.94% (see Coverage section) | N/A — verification-only phase, no new production behavior | `git revert` commits `9c73858c`, `0864a1db`, `8a0d39b3` (docs/comment-only, no behavior to roll back) |
 | Full module, final (`make test`) | `cd backend/agent && go clean -testcache && make test` | **PASS** — every package `ok`; zero `--- FAIL` lines (see final result below) | N/A | N/A (verification only) |
+| Phase 7 (verify remediation — MAJOR-1 queue-close-on-every-exit) | `go test -run "TestHarness_SteerAfterFailedRun" -race -v ./src/agent/...` | PASS (1/1), plus full `TestHarness_*`/`TestTurn_*` re-run, zero regressions | N/A — `agenttest` fakes only | `git revert` commit `e750ef92` (or delete the new test + revert the `close()`/defer addition in `harness.go`) |
 
 ## Coverage Gate (Batch 3, task 6.5)
 
@@ -320,7 +396,7 @@ loop.go: covered=248 total=282 percent=87.94%
 ## Critical Correctness Constraints — outcome (Batch 3, this batch)
 
 1. **The permission-suspension acceptance clause needed zero new production code.** `driveSuspendedRun`'s harness composes entirely from Phase 0's `TurnContinuation.Scheduler` injection and Phase 2's mandatory per-turn forwarder goroutine — confirmed by both new tests passing on first run against the unmodified codebase, exactly matching design.md's own prediction under "Decision 2".
-2. **The R-APP-002 parked-wait bite (`S-RUN-091`/`S-APP-016`) genuinely observes the wait, not the registration.** Proven by scratch-and-revert, not by code inspection: replacing the parked-wait `select` with an immediate re-resolution fails the bite 15/15 under `-race -count=15` (verbatim RED evidence above); reverted to a byte-identical `scheduler.go` (checksum-verified), both suspension tests pass again at `-count=15`. Registration alone cannot satisfy the bite's assertion because registration (`parked.park`) happens strictly before `permission_decision_required` is even emitted — long before the test sets its wake-issued flag or calls `WakeParked` — so an assertion satisfiable by registration timing alone is structurally impossible here.
+2. **The R-APP-002 parked-wait bite (`S-RUN-091`/`S-APP-016`) genuinely observes the wait, not the registration.** Proven by scratch-and-revert, not by code inspection: replacing the parked-wait `select` with an immediate re-resolution makes the `-race -count=15` **command** go RED (verbatim RED evidence above; corrected per-iteration accounting under MAJOR-2 in the RED Evidence section — across the 9 combined `-count=15` invocations measured (`verify-report.md`'s 6 plus this batch's 3 independent ones), the per-iteration failure count ranged **8 to 13 of every 15** (≈53%–87%), never 15/15); reverted to a byte-identical `scheduler.go` (checksum-verified), both suspension tests pass again at `-count=15`. Registration alone cannot satisfy the bite's assertion because registration (`parked.park`) happens strictly before `permission_decision_required` is even emitted — long before the test sets its wake-issued flag or calls `WakeParked` — so an assertion satisfiable by registration timing alone is structurally impossible here.
 3. **The `agent-permission-protocol/spec.md:172` staleness question is now settled by an actual run, not by inference.** Deleting the R-APP-002 acknowledgement wait (a second, independent scratch from the bite's own) makes exactly one test fail — `TestPermission_WakeParked_AckGatesCompletion_NoRunBeforeSinkDelivery` — out of 223 in the package. The original claim ("deleting the acknowledgement leaves the package green") is **stale**; the AG-10 remediation test already guards it. Reverted to byte-identical `scheduler.go` (checksum-verified); full suite re-confirmed green.
 4. **Both scratch-and-revert exercises this batch left `scheduler.go` byte-identical to its pre-batch state.** Verified by `shasum` before and after each scratch (`d631555ba9b7f315f7ae38d953bb9b1bd58867ca` both times) in addition to `git diff --stat` showing no output — a stronger check than `git diff` alone, since it also catches a same-length substitution `git diff`'s line-based algorithm might in principle render as no visible hunk (not a real risk here, but checked anyway).
 5. **Substrate discipline, whole branch, formally closed (task 6.8).** `git diff 5590afa0..HEAD --stat -- backend/agent/` (merge-base confirmed via `git merge-base HEAD origin/main` = `5590afa0`) shows exactly 10 files: the 5 new `harness*.go`/`harness*_test.go` files plus `loop.go`, `loop_hook_test.go`, `loop_test.go`, `scheduler.go`, `tool.go` — every one either new or explicitly assigned to this change, 3365 insertions(+), 32 deletions(-). `go.mod`/`go.sum` diff empty (explicit check, zero output). Every `R-LSK-004` file, `history.go`, `history_surface_guard_test.go`, `turn_events.go`, `failure.go`, and every file under `backend/agent/src/ai/` is confirmed byte-unchanged **by omission from this diff stat** — none of them appear in the 10-file list, and the diff scope (`backend/agent/`) covers all of them.
@@ -329,6 +405,15 @@ loop.go: covered=248 total=282 percent=87.94%
 8. **`ai.NewRequest` accepting a `RoleTool`-result transcript is proven independently a third time this batch (task 6.3).** `buildLoopRequest` (`loop.go:599`) calls `ai.NewRequest(modelForOpts(opts), transcript, reqOpts...)` directly — the exact function every Phase 5 multi-turn request (including the permission-suspension test's own turn-two request, built from a transcript containing the tool-call and `RoleTool` result messages) round-trips through without rejection. No design-reopening finding.
 9. **`make lint` is clean**, after fixing the one in-scope finding (`harness.go`'s package comment) and confirming, by merge-base diff, that the two remaining findings golangci-lint v2.12.2 surfaces (`src/ai/openaicompat/client_test.go`, `src/agenttest/cache_boundary_test.go`) are pre-existing and untouched by this branch — see RED Evidence above for the full accounting, including the version-pin caveat (pinned `v2.9.0`'s network installer failed; a local `v2.12.2` install was used instead).
 10. **`make vuln-check` is clean**: exit 0, zero `"finding"` entries in the JSON output (170 `"osv"` database-awareness entries considered, none confirmed reachable by the call-graph analysis).
+
+## Critical Correctness Constraints — outcome (Batch 4, this batch)
+
+1. **Every one of `Run`'s 7 return statements now closes the steering queue** — 6 via the new `defer h.queue.close()` (the `NewRunStart` early return and all five `failRun` call sites), 1 (the success path) already via `takeOrClose` before the loop's `break`, with the defer verified as a no-op there. Enumerated and confirmed by direct reading post-fix (see RED Evidence table above), not merely by the one new test passing.
+2. **The close is mutex-guarded, matching `takeOrClose`'s own critical section — no check-then-close race introduced.** `steeringQueue.close()` is `q.mu.Lock(); defer q.mu.Unlock(); q.closed = true` — an unconditional set under the lock, not a check followed by a conditional close; there is no window in which a concurrent `Steer` could observe a stale open state and be told nil while the queue is about to close.
+3. **The fix is a single point of closure, not five scattered calls.** A `defer` at `Run`'s top level fires on every return, current and future, including a hypothetical panic-driven unwind — immune to a sixth exit path someday missing it, unlike adding a `h.queue.close()` call inside `failRun` plus a separate one at the `NewRunStart` return (two places, not one).
+4. **No regression to the atomic terminal-decision mechanism.** `TestHarness_SteerNearTerminal_AtomicQueueCheckYieldsAdditionalTurn` (S-RUN-012) and `TestHarness_FinalTurnSteer_YieldsNewTurn` (S-RUN-072) — the two tests directly exercising `takeOrClose`'s success-path close — both re-run and pass.
+5. **`harness.go`'s source-scan guard (`R-RUN-006`/`S-RUN-050`) is unaffected.** The new `close()` method references no loop internal and no `.Schedule(` call site; `TestHarness_LoopAccess_PublicOneTurnSurfaceOnly_SourceScanGuard` re-run and passes.
+6. **Substrate discipline held.** Only `harness.go` and `harness_test.go` changed in the fix commit (`e750ef92`) — no filter-widening needed (`harness_test.go` was already in both substrate filters). `specs/agent-run-driver/spec.md` and `tasks.md` are SDD artifacts, not substrate, and are unaffected by the `R-LSK-004`/substrate-filter guards.
 
 ## Files Changed
 
@@ -347,8 +432,13 @@ loop.go: covered=248 total=282 percent=87.94%
 | `backend/agent/src/agent/tool.go` | Modified this batch (Batch 3, comment-only) | Re-homed the `ToolSource` widening comment from "AG-13's" to "AG-20's" (task 6.2) |
 | `backend/agent/src/agent/harness.go` | Modified this batch (Batch 3, comment-only) | Package comment reformatted to start with `"Package agent ..."` (final-gate `make lint` cleanup, `revive`'s `package-comments` rule) |
 | `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` | Modified this batch (Batch 3) | Status header: date, wave range, `12 of 24` → `13 of 24`, new AG-13 sentence; completion checklist line `:2170` ticked `[x]` |
+| `backend/agent/src/agent/harness.go` | Modified this batch (Batch 4, `sdd-verify` remediation) | Added `steeringQueue.close()` (idempotent, mutex-guarded) and one `defer h.queue.close()` in `Run`, closing the steering queue on every exit path (MAJOR-1 fix) |
+| `backend/agent/src/agent/harness_test.go` | Modified this batch (Batch 4) | Added `TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop` (S-RUN-101), placed directly after the existing S-RUN-100 test it shares a failure fixture with |
+| `openspec/changes/cachicamas-agent-run-driver/specs/agent-run-driver/spec.md` | Modified this batch (Batch 4) | Added `S-RUN-101` and its owning normative sentence to `R-RUN-011`; bumped the capability's own scenario count 25→26 (Coverage table cross-cut row 4→5) |
+| `openspec/changes/cachicamas-agent-run-driver/tasks.md` | Modified this batch (Batch 4) | Added Phase 7 (tasks 7.1–7.5, all ticked); updated the header scenario count 25→26; updated the Coverage Table's `R-RUN-011` row |
+| `openspec/changes/cachicamas-agent-run-driver/apply-progress.md` | Modified this batch (Batch 4) | This save — merged Batch 4 content; corrected MAJOR-2 (`S-RUN-091` reliability wording, independently re-measured), MINOR-3 (74→89 task count) and MINOR-4 (added the missing scenario-count statement) per `verify-report.md` |
 
-No other file in `backend/agent/` differs from the merge-base `5590afa0` (`origin/main`'s AG-12 merge, confirmed via `git merge-base HEAD origin/main`). Full-branch diff stat: 10 files, 3365 insertions(+), 32 deletions(-); `go.mod`/`go.sum` diff empty.
+No other file in `backend/agent/` differs from the merge-base `5590afa0` (`origin/main`'s AG-12 merge, confirmed via `git merge-base HEAD origin/main`), aside from Batch 4's own `harness.go`/`harness_test.go` diff above. Full-branch diff stat through Batch 3: 10 files, 3365 insertions(+), 32 deletions(-); `go.mod`/`go.sum` diff empty — unaffected by Batch 4 (no new file, no dependency change).
 
 ## Deviations from Design / Tasks — noted honestly (Batch 1, unchanged — see prior save for full text)
 
@@ -376,10 +466,18 @@ None of the above are design-reopening findings. No blockers were hit this batch
 
 None of the above are design-reopening findings. No blockers were hit this batch.
 
+## Issues Found / Deviations — Batch 4 (this batch), noted honestly
+
+1. **MAJOR-2's correction is grounded in an independent re-measurement, not a re-statement of `verify-report.md`'s numbers.** This batch re-ran the `S-RUN-091` scratch itself (3 `-race -count=15` invocations via `-overlay`, plus an unmodified-code control) before writing the correction, rather than copying `verify-report.md`'s figures verbatim — the two samples closely agree (≈29% vs. verify's ≈30% aggregate per-iteration PASS rate), which is itself evidence the underlying probabilistic behavior is stable and not an artifact of either single measurement.
+2. **The `-overlay` technique was used instead of `verify-report.md`'s own scratch-and-revert for this re-measurement**, specifically to avoid mutating `scheduler.go` even temporarily, given this batch's charter explicitly forbids touching anything outside the four assigned items — `scheduler.go`'s checksum was confirmed unchanged (`d631555ba9b7f315f7ae38d953bb9b1bd58867ca`) before, during, and after, and `git status`/`git diff --stat` on it stayed empty throughout.
+3. **`verify-report.md` itself is left untracked in git**, as found at batch start (`git status` showed it untracked). Committing it was not one of the four assigned remediation items and is left to the orchestrator or a later phase.
+
+None of the above are design-reopening findings. No blockers were hit this batch.
+
 ## All Tasks Complete
 
-- [x] Phase 0 (6/6) · [x] Phase 1 (18/18) · [x] Phase 2 (30/30) · [x] Phase 3 (9/9) · [x] Phase 4 (3/3) · [x] Phase 5 (6/6) · [x] Phase 6 (12/12)
-- **74/74 tasks complete.** No remaining tasks for `sdd-apply`. Next: `sdd-verify`, then `sdd-archive` (task 6.12's promotion note: promote `agent-run-driver/spec.md` to `openspec/specs/agent-run-driver/spec.md`; apply the five deltas into their respective canonical specs; archive the change folder after `sdd-verify` passes, per AG-09..AG-12 precedent — none of this is `sdd-apply`'s to do).
+- [x] Phase 0 (6/6) · [x] Phase 1 (18/18) · [x] Phase 2 (30/30) · [x] Phase 3 (9/9) · [x] Phase 4 (3/3) · [x] Phase 5 (6/6) · [x] Phase 6 (12/12) · [x] Phase 7 (5/5)
+- **89/89 tasks complete** (corrected from the stale 74/74 headline — MINOR-3 — plus Phase 7's 5 new remediation tasks: 84 + 5 = 89). No remaining tasks for `sdd-apply`. Next: `sdd-verify` (re-confirm MAJOR-1's fix and the corrected MAJOR-2/MINOR-3/MINOR-4 wording), then `sdd-archive` (task 6.12's promotion note unchanged: promote `agent-run-driver/spec.md` to `openspec/specs/agent-run-driver/spec.md`; apply the five deltas into their respective canonical specs; archive the change folder after `sdd-verify` passes, per AG-09..AG-12 precedent — none of this is `sdd-apply`'s to do).
 
 ## `make test` Final Result (this batch)
 
@@ -415,3 +513,24 @@ cd backend/agent && golangci-lint cache clean && make lint
 cd backend/agent && make vuln-check
 ```
 **Exit 0, clean.** `govulncheck -json ./...` auto-installed (`v1.1.4`, Go module proxy reachable even though `raw.githubusercontent.com` was not) and ran to completion: 170 `"osv"` database entries considered as candidates against the module's dependency graph, **zero `"finding"` entries** (govulncheck's JSON schema emits `"finding"` only for a call-graph-confirmed reachable vulnerability) — no reachable known vulnerability in this module.
+
+## `make test` Final Result — Batch 4, at the final commit (`e750ef92`)
+
+```
+cd backend/agent && go clean -testcache && make test
+```
+**PASS, exit 0.** Every package `ok`: `src/agent` (1.918s), `src/agenttest` (2.769s), `src/agenttest/sweep` (1.702s), `src/agenttest/tracetest` (1.957s), `src/ai` (4.954s), `src/ai/internal/retry` (2.024s), `src/ai/openaicompat` (173.183s), `src/ai/openaicompat/conformancetest` (1.781s), `src/ai/openaicompat/openrouter` (2.594s), `src/ai/openaicompat/openrouter/conformance` (5.828s), `src/ai/openaicompat/openrouter/internal/smoke` (2.709s), `src/handoff` (2.551s). **Zero `--- FAIL` lines** (`grep -c "^--- FAIL"` = 0). This is the genuinely final, non-cached, whole-module confirmation at the exact commit state this save reports against, including `S-RUN-101` and the `steeringQueue.close()` fix.
+
+## `make build` Final Result — Batch 4
+
+```
+cd backend/agent && make build
+```
+`go build -trimpath ./...` — **exit 0, clean.**
+
+## `make lint` Final Result — Batch 4
+
+```
+cd backend/agent && ./bin/golangci-lint cache clean && make lint
+```
+Re-run against the same symlinked `v2.12.2` binary (see Batch 3's Issues Found #1 for the version-pin caveat; the symlink persisted in the worktree's gitignored `bin/`). **Exactly the same two pre-existing findings as Batch 3, byte-identical output, zero new findings from this batch's `harness.go`/`harness_test.go` changes**: `src/ai/openaicompat/client_test.go:383` (`govet`, pre-existing, Layer 1 — out of scope, edit forbidden) and `src/agenttest/cache_boundary_test.go:303` (`staticcheck`, pre-existing, untouched by design). `make lint` exits non-zero because of those two pre-existing findings, unchanged from Batch 3 — no third finding was introduced.
