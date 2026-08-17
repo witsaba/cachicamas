@@ -972,7 +972,8 @@ func filterOutLoopHookFiles(diff string) string {
 				// loop_test.go's filterOutLoopFiles.
 				strings.HasSuffix(path, "/harness.go") ||
 				strings.HasSuffix(path, "/harness_test.go") ||
-				strings.HasSuffix(path, "/harness_steering_test.go")
+				strings.HasSuffix(path, "/harness_steering_test.go") ||
+				strings.HasSuffix(path, "/harness_pause_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
