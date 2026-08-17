@@ -360,14 +360,23 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	runCtx, cancel := context.WithCancelCause(ctx)
 	h.cancelRun = cancel
 	h.signalMu.Unlock()
+
+	// AG-14 remediation (verify-report.md MINOR-3): close(sink) MUST be
+	// registered BEFORE the cancelRun-clearing defer below, so LIFO
+	// execution clears cancelRun FIRST and closes the sink SECOND. A
+	// stream-only consumer that starts run #2 the instant it observes
+	// this sink close (R-CAN-005's own shape) can then never observe the
+	// close before cancelRun has already been cleared — closing the
+	// window where run #2's own registration could be overwritten by
+	// this run's own still-pending clear.
+	defer close(sink)
+
 	defer func() {
 		h.signalMu.Lock()
 		h.cancelRun = nil
 		h.signalMu.Unlock()
 		cancel(nil)
 	}()
-
-	defer close(sink)
 
 	// Every exit from this function — the terminal-decision success
 	// path below, every failRun call site on the R-RUN-011 failure

@@ -9,7 +9,9 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,6 +114,34 @@ func TestHarness_Interrupt_MidTurnEndsInterruptedWithOrphansSynthesized(t *testi
 
 		if report := agent.CheckStream(events); report.Violation() != nil {
 			t.Errorf("agent.CheckStream(emitted stream) = %v, want no violation (unmodified acceptance)", report.Violation())
+		}
+
+		// AG-14 remediation (verify-report.md MAJOR-3): R-CAN-002's
+		// turn-bracket clause is normative, not merely a well-formed
+		// bracket CheckStream already pins — the aborted turn's own
+		// turn_end (loop.go:442-449) MUST carry TurnOutcomeAborted and a
+		// *Failure of category ai.FailureCategoryCancellation. A
+		// regression to a different outcome or category (e.g.
+		// ai.FailureCategoryUnavailable) would otherwise stay green.
+		var turnEnd agent.TurnEnd
+		var turnEndFound bool
+		for _, ev := range events {
+			if payload, ok := ev.TurnEnd(); ok {
+				turnEnd, turnEndFound = payload, true
+			}
+		}
+		if !turnEndFound {
+			t.Fatal("no turn_end event observed, want the aborted turn's own turn_end")
+		}
+		if turnEnd.Outcome() != agent.TurnOutcomeAborted {
+			t.Errorf("turn_end outcome = %v, want agent.TurnOutcomeAborted", turnEnd.Outcome())
+		}
+		turnFailure, hasTurnFailure := turnEnd.Failure()
+		if !hasTurnFailure {
+			t.Fatal("turn_end carries no *Failure, want one for an aborted turn")
+		}
+		if turnFailure.Category() != ai.FailureCategoryCancellation {
+			t.Errorf("turn_end failure.Category() = %v, want ai.FailureCategoryCancellation", turnFailure.Category())
 		}
 
 		entries := seeded.Entries()
@@ -580,5 +610,117 @@ func TestHarness_Interrupt_SecondInterruptIsNoOp(t *testing.T) {
 
 	if report := agent.CheckStream(events); report.Violation() != nil {
 		t.Errorf("agent.CheckStream(emitted stream) = %v, want no violation (unmodified acceptance)", report.Violation())
+	}
+}
+
+// AG-14 remediation (verify-report.md MINOR-3). harness.go's Run
+// registers `defer close(sink)` BEFORE the `cancelRun`-clearing defer,
+// so LIFO execution closes the sink FIRST and clears `h.cancelRun`
+// SECOND. A stream-only consumer — exactly R-CAN-005's own shape, and
+// S-CAN-002's serial-reuse pattern — that starts run #2 the instant it
+// observes run #1's sink close can therefore have run #2 register its
+// own cancelRun BEFORE run #1's still-pending defer nulls it back out,
+// silently making a subsequent Interrupt() on run #2 a no-op. Both
+// writes are signalMu-guarded, so -race reports nothing here: this is a
+// scheduling-dependent ordering defect, not a data race.
+//
+// On an otherwise-idle machine the window is vanishingly narrow — run
+// #1's remaining cleanup (a mutex lock, a nil-assignment, an unlock, an
+// already-cancelled cancel() no-op) is structurally cheaper than run
+// #2's path back into it (wake, get scheduled, run Run()'s own
+// preamble). Reliably widening the window, with no sleep anywhere,
+// takes two techniques together, both verified empirically
+// (apply-progress.md records the calibration): (1) GOMAXPROCS
+// temporarily lowered so run #1's goroutine has real scheduling
+// competition instead of an idle core it can run straight through, and
+// (2) parking many extra "noise" receivers on run #1's own sink AHEAD
+// of a dedicated, front-of-queue real observer — sink1 is provably
+// empty until Interrupt() fires below (heldTurnScript's Hold is the
+// producer's first step), so every one of these calls is guaranteed to
+// park rather than race a real event — which widens close(sink)'s own
+// synchronous wake loop (run entirely on run #1's goroutine, before it
+// can reach its next deferred call). Under the buggy order this
+// combination reproduces a real, non-vacuous failure within the
+// attempts budget below; against the fix the identical construction
+// produced zero hits across 900+ attempts.
+//
+// Deliberately NOT t.Parallel(): it mutates the process-wide
+// GOMAXPROCS for its own duration and must not run concurrently with
+// unrelated tests.
+func TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prevProcs)
+
+	const attempts = 2000
+	const noiseWaiters = 2000
+
+	for attempt := 0; attempt < attempts; attempt++ {
+		gate1 := agenttest.NewGate()
+		gate2 := agenttest.NewGate()
+		provider := agenttest.NewProvider(heldTurnScript(t, gate1), heldTurnScript(t, gate2))
+		h := agent.Harness{Provider: provider, System: "system prompt for can-minor-3"}
+
+		sink1 := make(chan *agent.Event, 256)
+		resultCh1 := make(chan error, 1)
+		go func() {
+			_, _, err := h.Run(contextBackground(), firstMessage(t), sink1)
+			resultCh1 <- err
+		}()
+
+		// The real observer: registered as sink1's FIRST receiver, so it
+		// sits at the front of sink1's FIFO recvq and is therefore the
+		// first goroutine closechan's wake loop marks runnable — it
+		// starts run #2 the instant it observes run #1's sink close,
+		// never reading the events for their content.
+		sink2 := make(chan *agent.Event, 256)
+		resultCh2 := make(chan error, 1)
+		started2 := make(chan struct{})
+		go func() {
+			for {
+				_, ok := <-sink1
+				if !ok {
+					break
+				}
+			}
+			close(started2)
+			_, _, err := h.Run(contextBackground(), firstMessage(t), sink2)
+			resultCh2 <- err
+		}()
+
+		// Noise receivers, parked AFTER the real observer above. sink1
+		// is provably empty until Interrupt() fires below, so every one
+		// of these calls is guaranteed to park in recvq rather than race
+		// a real event.
+		var parked atomic.Int64
+		for n := 0; n < noiseWaiters; n++ {
+			go func() {
+				parked.Add(1)
+				<-sink1
+			}()
+		}
+		for parked.Load() < noiseWaiters {
+			runtime.Gosched()
+		}
+
+		<-gate1.Reached()
+		h.Interrupt()
+
+		<-started2
+		<-gate2.Reached()
+		h.Interrupt()
+
+		select {
+		case err2 := <-resultCh2:
+			if !errors.Is(err2, agent.ErrInterrupted) {
+				t.Fatalf("attempt %d: run #2 error = %v, want errors.Is(err, agent.ErrInterrupted) — run #1's still-pending cancelRun-clearing defer clobbered run #2's registration", attempt, err2)
+			}
+		case <-time.After(500 * time.Millisecond):
+			gate2.Release()
+			<-resultCh2
+			t.Fatalf("attempt %d: run #2 did not end within 500ms of Interrupt() — the interrupt was silently swallowed, run #1's still-pending cancelRun-clearing defer clobbered run #2's registration", attempt)
+		}
+
+		<-resultCh1
+		drainSink(t, sink2)
 	}
 }

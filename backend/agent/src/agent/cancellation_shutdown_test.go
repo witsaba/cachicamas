@@ -205,6 +205,33 @@ func TestHarness_Shutdown_WindsDownAndRefusesNewPrompts(t *testing.T) {
 		t.Errorf("agent.CheckStream(first run's emitted stream) = %v, want no violation (unmodified acceptance)", report.Violation())
 	}
 
+	// AG-14 remediation (verify-report.md MAJOR-3): this test shares
+	// S-CAN-001 Arm A's exact heldTurnScript+gate shape, so it exercises
+	// the SAME turn-close path (loop.go:442-449) with the shutdown
+	// sentinel instead of the interrupt one — the turn-level outcome and
+	// failure category must be identical, only the run-level outcome
+	// differs (RunOutcomeShutdown here vs RunOutcomeInterrupted there).
+	var turnEnd agent.TurnEnd
+	var turnEndFound bool
+	for _, ev := range events {
+		if payload, ok := ev.TurnEnd(); ok {
+			turnEnd, turnEndFound = payload, true
+		}
+	}
+	if !turnEndFound {
+		t.Fatal("no turn_end event observed, want the aborted turn's own turn_end")
+	}
+	if turnEnd.Outcome() != agent.TurnOutcomeAborted {
+		t.Errorf("turn_end outcome = %v, want agent.TurnOutcomeAborted", turnEnd.Outcome())
+	}
+	turnFailure, hasTurnFailure := turnEnd.Failure()
+	if !hasTurnFailure {
+		t.Fatal("turn_end carries no *Failure, want one for an aborted turn")
+	}
+	if turnFailure.Category() != ai.FailureCategoryCancellation {
+		t.Errorf("turn_end failure.Category() = %v, want ai.FailureCategoryCancellation", turnFailure.Category())
+	}
+
 	entries := seeded.Entries()
 	if len(entries) != 3 {
 		t.Fatalf("history has %d entries, want 3 (seeded call, run's own prompt, synthesized result)", len(entries))

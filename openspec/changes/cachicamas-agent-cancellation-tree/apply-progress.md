@@ -353,3 +353,97 @@ Batch C diff: `tool.go` +16/-0, `scheduler.go` +129/-2 (net across the whole fil
 ### Remaining (Phase 13.5 only, NOT this batch, explicitly `sdd-archive`'s)
 
 Promote `agent-cancellation-tree/spec.md` to `openspec/specs/agent-cancellation-tree/spec.md`; apply the five deltas into their canonical specs; archive the change folder after `sdd-verify` passes, per AG-09..AG-13 precedent. **All 57 tasks across Phases 0–13 are otherwise complete (56 `[x]`, only 13.5 `[ ]`).**
+
+## Remediation — sdd-verify findings MAJOR-3 and MINOR-3 (bounded pass, post-verify)
+
+**Scope**: exactly the two findings named below, per the orchestrator's bounded remediation brief. No other content in this file was touched; batches A/B/C above are preserved verbatim.
+
+### MAJOR-3 — turn-close failure category untested, now pinned
+
+**Finding** (verify-report.md): `R-CAN-002`'s turn-bracket clause requires the cancelled turn's own `turn_end` to carry `TurnOutcomeAborted` with a `*Failure` of category `ai.FailureCategoryCancellation` (`loop.go:442-449`), but no test in the package read a `turn_end`'s outcome or failure category — `CheckStream` only pinned the bracket's existence/well-formedness. A regression to `ai.FailureCategoryUnavailable`, or a different outcome, would have stayed green.
+
+**Fix**: added assertions locating the `turn_end` event in the captured stream and checking outcome == `agent.TurnOutcomeAborted`, `*Failure` non-nil, category == `ai.FailureCategoryCancellation`, to:
+- `cancellation_interrupt_test.go`, `TestHarness_Interrupt_MidTurnEndsInterruptedWithOrphansSynthesized`'s Arm A subtest ("provider cancelled mid-stream...") — the subtest whose own doc comment identifies it as the one that fires loop.go's closed-channel cause check.
+- `cancellation_shutdown_test.go`, `TestHarness_Shutdown_WindsDownAndRefusesNewPrompts` — verified first (by tracing `heldTurnScript`+gate+`Hold`'s own "blocks until released or ctx cancelled" contract) to share Arm A's exact shape, hence to exercise the SAME `loop.go:442-449` path with the shutdown sentinel instead of the interrupt one. `TestHarness_Shutdown_DuringSuspensionAbortsTypedNamesShutdownSignal` was checked and found NOT to exercise this path (its abort routes through the scheduler's suspension mechanism, reporting via `tool_end_execution_failure`, never producing a `turn_end(Aborted)`) — skipped, not force-covered, per the brief's own instruction.
+
+**RED discipline (real, captured)**: mutated `loop.go:568` (`cancellationTurnFailure`)'s `Category: ai.FailureCategoryCancellation` to `ai.FailureCategoryUnavailable`. Ran the two focused tests:
+
+```
+$ go test -race -v -count=1 -run 'TestHarness_Interrupt_MidTurnEndsInterruptedWithOrphansSynthesized|TestHarness_Shutdown_WindsDownAndRefusesNewPrompts' ./src/agent/...
+cancellation_interrupt_test.go:142: turn_end failure.Category() = unavailable, want ai.FailureCategoryCancellation
+cancellation_shutdown_test.go:232: turn_end failure.Category() = unavailable, want ai.FailureCategoryCancellation
+--- FAIL: TestHarness_Shutdown_WindsDownAndRefusesNewPrompts (0.00s)
+--- FAIL: TestHarness_Interrupt_MidTurnEndsInterruptedWithOrphansSynthesized (0.00s)
+    --- PASS: .../in-flight_tool_call_observes_cancellation_through_the_harness (0.00s)
+    --- FAIL: .../provider_cancelled_mid-stream,_a_genuinely_pre-existing_open_call_is_synthesized (0.00s)
+FAIL
+```
+
+Arm B ("in-flight tool call observes...") correctly stayed PASS — independent confirmation it does not exercise this branch (matches the design's own routing: Arm B winds down through the iteration-boundary check, never loop.go's closed-channel cause check). Reverted the mutation; `git diff -- backend/agent/src/agent/loop.go` produced zero output (byte-identical revert, confirmed both immediately after reverting and again at the very end of this remediation pass). Re-ran the same focused command: both tests GREEN.
+
+### MINOR-3 — harness.go defer-order fix (`Run`'s cancelRun/close(sink) ordering)
+
+**Finding** (verify-report.md): `harness.go:362-370` registered `defer func(){ cancelRun=nil; cancel(nil) }()` BEFORE `defer close(sink)`. LIFO execution therefore closed `sink` FIRST and cleared `h.cancelRun` SECOND. A stream-only consumer (R-CAN-005's own shape) that starts run #2 the instant it observes run #1's sink close could have run #2 register its own `cancelRun`, then have run #1's still-pending defer null it back to `nil` — silently making a subsequent `Interrupt()` on run #2 a no-op. Both writes are `signalMu`-guarded, so `-race` reports nothing (a scheduling-dependent ordering defect, not a data race).
+
+**Investigation before forcing anything**: traced every exit path in `Run`. The post-shutdown early return (`harness.go:346-350`) explicitly `close(sink)`s itself and returns BEFORE either defer is registered (registration happens later, at what are now lines 372/374) — confirmed the reorder cannot double-close it. `defer h.queue.close()` (unaffected, left in its original registration position, still LIFO-executes first both before and after the fix, since it was already registered after both other defers) has no coupling to `sink`/`cancelRun`. No unsafe interaction found — proceeded with the fix.
+
+**Fix** (`harness.go`): swapped registration order — `defer close(sink)` now registers BEFORE the `cancelRun`-clearing defer, so LIFO clears `cancelRun` FIRST and closes `sink` SECOND. A stream-only consumer starting run #2 from the sink-close observation can therefore never observe the close before `cancelRun` has already been cleared. Added a doc comment at the swap explaining why the order is load-bearing (this exact class of regression is otherwise invisible to `-race`). Net diff: +13/-2 lines (comment + reorder).
+
+**RED discipline — empirical calibration (recorded honestly, including what did NOT work)**: this is a genuine scheduling race, not a deterministic ordering bug — run #1's remaining cleanup (a mutex lock, a nil-assignment, an unlock, an already-cancelled `cancel(nil)` no-op) is structurally far cheaper than run #2's path back into contention (wake, get scheduled, run all of `Run`'s own preamble including a heap allocation for the new `context.WithCancelCause`). Naive constructions, tried first, did NOT reproduce it:
+- Tight non-blocking spin-poll of `sink1`'s closure, launching run #2 in a fresh goroutine on detection: **0/500 and separately 0/20000 attempts**.
+- Pre-spawned, already-running run #2 launcher goroutine (removing goroutine-creation latency from the critical path): **0/20000 attempts**.
+- Widening `close(sink1)`'s own synchronous wake-loop alone, at default `GOMAXPROCS`, by parking up to 100,000 extra "noise" receivers ahead of nothing: **0/20 and 0/5 attempts**, even at 100,000 noise waiters.
+
+Reproducing it reliably required TWO techniques together, calibrated empirically before being written into the real test:
+1. `runtime.GOMAXPROCS` temporarily lowered (tried 3, then 2) so run #1's goroutine has real scheduling competition instead of an idle core it runs straight through uninterrupted.
+2. A dedicated, front-of-queue real observer parked FIRST on `sink1`, with many (2000) extra "noise" receivers parked immediately after it. `sink1` is provably empty until `Interrupt()` fires (`heldTurnScript`'s `Hold` is the producer's first script step), so every one of these calls is guaranteed to park in `sink1`'s FIFO `recvq` rather than race a real event — widening `close(sink1)`'s own wake loop, which runs synchronously on run #1's own goroutine, before it can reach its next deferred call.
+
+Calibration results against the THEN-CURRENT buggy order (`GOMAXPROCS=2`, 2000 noise waiters, 300 attempts per run, three separate runs): 2/300, 3/300, 6/300 — small but consistently non-zero. Against a temporarily-applied fix (identical harness and technique): 0/300 three times running (900/900 zero). This confirmed the technique discriminates correctly BEFORE it was written into the real, permanent test.
+
+**Real test**: `cancellation_interrupt_test.go`, new `TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration` (2000-attempt budget, fails fast via `t.Fatalf` on the first attempt that reproduces the bug; deliberately NOT `t.Parallel()` since it mutates process-wide `GOMAXPROCS` for its own duration and must not race unrelated tests). No sleep anywhere — synchronized entirely on channel reads (`sink1`/`sink2`/gates) plus one bounded `select`+`time.After(500ms)` deadline guard for detecting "the interrupt was silently swallowed" without hanging forever, mirroring this same package's own `drainSink`/`readUntilDecisionRequired` idiom (`time.After` as a deadline guard, not a pacing sleep).
+
+**RED — real captured output, against the (then still) buggy defer order**, 3 separate runs:
+
+```
+cancellation_interrupt_test.go:720: attempt 90: run #2 did not end within 500ms of Interrupt() — the interrupt was silently swallowed, run #1's still-pending cancelRun-clearing defer clobbered run #2's registration
+--- FAIL: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.55s)
+```
+```
+cancellation_interrupt_test.go:720: attempt 26: run #2 did not end within 500ms of Interrupt() — ...
+--- FAIL: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.52s)
+```
+```
+cancellation_interrupt_test.go:720: attempt 81: run #2 did not end within 500ms of Interrupt() — ...
+--- FAIL: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.54s)
+```
+
+All three failures reproduce the EXACT predicted failure mode (Interrupt() silently doing nothing on run #2), well inside the 2000-attempt budget (hit at attempt 26-90 each time).
+
+**GREEN — after the one-line-plus-comment fix**, 3 plain runs plus 1 run under `-race`, all PASS:
+
+```
+--- PASS: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.79s)
+--- PASS: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.80s)
+--- PASS: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (0.80s)
+--- PASS: TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration (4.26s)   [-race]
+```
+
+### Substrate/pin compliance (re-verified at the end of this remediation pass)
+
+- Files touched this pass: `cancellation_interrupt_test.go` (MAJOR-3 assertions + the new MINOR-3 test), `cancellation_shutdown_test.go` (MAJOR-3 mirrored assertions), `harness.go` (MINOR-3 fix). `git diff --stat`: **180 insertions(+), 2 deletions(-)** across the three files.
+- `loop.go`: byte-identical (`git diff` empty) — the MAJOR-3 RED mutation was fully reverted before this pass's real test-writing began, and re-confirmed empty at the end.
+- `permission_protocol_test.go` and every file on `R-LSK-004`'s forbidden list (`turn_events.go`, `failure.go`, `stream_check.go`, `stream_check_test.go`, `event.go`, `event_descriptor.go`, `event_registry_test.go`, `reconstruction_test.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `history.go`, `go.mod`, `go.sum`): all byte-identical (`git diff` empty for every one, checked together in one command).
+- `S-LSK-018` pin: diffing the full branch against `origin/main` (merge-base `52701436`), the pre-existing non-test `.go` files that differ under `src/agent/` are EXACTLY `{run_events.go, doc.go, harness.go, loop.go, scheduler.go, tool.go}` — the six pinned files, no seventh — plus the one already-known new file `cancellation.go`. No new test file was added this pass; both edits extended existing, already-substrate-listed test files.
+- `make fmt`/`gofmt -w`: never run.
+- A throwaway scratch prototype file (`zzz_scratch_race_test.go`) was used to calibrate the MINOR-3 racing technique outside the deliverable; deleted before the real test was written, confirmed absent from `git status` (no untracked files).
+
+### Closing gates (this remediation pass, real output)
+
+- **`make test`** equivalent (`go clean -testcache && go test -race -v -count=1 ./...`): exit 0, all 12 module packages `ok` (`ai/openaicompat` alone accounts for ~175s of the ~2m56s wall-clock total — pre-existing, unrelated to this pass). Verbose count across the WHOLE suite: **3267 `--- PASS`** (3266 baseline + 1 new top-level test — MAJOR-3 only added assertions to existing subtests, contributing no new count) / **0 `--- FAIL`** / **0 `DATA RACE`**. The `src/agent` package alone, isolated: **383 `--- PASS`** / **0 `--- FAIL`**, exit 0.
+- **`golangci-lint cache clean && make lint`**: `go vet ./...` clean, `golangci-lint run --config=.golangci.yml ./...` → `0 issues.`
+- **`make build`** (`go build -trimpath ./...`): exit 0, no output.
+- **`make vuln-check`** (`govulncheck -json ./...`, `jq`-parsed): exit 0; 170 `osv` entries scanned (module's dependency set drifted slightly since the original apply's ~180-entry count — expected over time, not itself a finding); **0** entries carry any populated `finding.trace` (i.e., zero reachable vulnerabilities).
+
+### Status
+
+Both findings closed, scope held to exactly the two named items — no other code, spec, or task content touched. `openspec/changes/cachicamas-agent-cancellation-tree/tasks.md` unchanged (this was a post-verify remediation pass, not a tasks-phase batch; all 57 tasks' `[x]`/`[ ]` state from batch C stands as-is, 56/57 with only 13.5 reserved for archive).
