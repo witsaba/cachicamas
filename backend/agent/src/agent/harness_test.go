@@ -527,3 +527,377 @@ func TestTurn_ContinuationToolCall_ScheduleBeforeFinalize_EventsInsideTurnBracke
 		t.Errorf("CheckStream rejected the continuation-path stream: %v", report.Violation())
 	}
 }
+
+// AG-13.1 — S-HIS-090. Given a continuation carrying a transcript
+// store and a provider scripted with a turn that emits assistant text
+// and one tool call whose tool succeeds, when Turn runs, then the
+// store holds, in order, the turn's assistant message carrying the
+// tool call with provider-exact argument bytes, followed by one
+// tool-result message correlated to that call; and when the caller
+// then closes the turn, the close succeeds because no call is open.
+//
+// This test also discharges task 6.3's forwarded obligation: it
+// proves — by actually running ai.NewRequest over the committed
+// transcript, not by inspecting source — that Layer 1 accepts a
+// transcript containing a RoleTool result message. design.md and the
+// spec both flag this as expected but unproven until run.
+func TestTurn_ContinuationCommitsAssistantAndToolResults_OpenSetEmptyAtClose(t *testing.T) {
+	t.Parallel()
+
+	tool := EchoScriptedTool("read_his_090", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_his_090": tool})
+
+	history := agent.NewHistory()
+	cont := &agent.TurnContinuation{
+		Run:       "run-his-090",
+		Stamper:   &agent.LaneStamper{},
+		Scheduler: &agent.Scheduler{MaxConcurrentReads: 4, LeaveSinkOpen: true},
+		History:   history,
+	}
+
+	start, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart: %v", err)
+	}
+	delta, err := ai.NewTextDelta(1, "checking the file")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta: %v", err)
+	}
+	end, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockEnd: %v", err)
+	}
+	tcStart, err := ai.NewToolCallStart(2, "call-his-090", "read_his_090")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tcDelta, err := ai.NewToolCallDelta(2, []byte(`{"path":"a"}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tcEnd, err := ai.NewToolCallEnd(2, []byte(`{"path":"a"}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	script := agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(start),
+		agenttest.Emit(delta),
+		agenttest.Emit(end),
+		agenttest.Emit(tcStart),
+		agenttest.Emit(tcDelta),
+		agenttest.Emit(tcEnd),
+		agenttest.Emit(completion),
+	}}
+	provider := agenttest.NewProvider(script)
+	sink := make(chan *agent.Event, 256)
+
+	msg, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for his-090",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Tools: reg, Continuation: cont},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonToolCalls {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonToolCalls)
+	}
+	drainSink(t, sink)
+
+	entries := history.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("history has %d entries, want 2 (assistant message + one tool-result message)", len(entries))
+	}
+
+	assistantMsg := entries[0].Message()
+	if assistantMsg.Role() != ai.RoleAssistant {
+		t.Errorf("entries[0].Message().Role() = %v, want RoleAssistant", assistantMsg.Role())
+	}
+	if !assistantMsg.Equal(msg) {
+		t.Error("entries[0].Message() != Turn's own returned msg — one source of truth is violated")
+	}
+	var foundCall bool
+	for _, part := range assistantMsg.Content() {
+		if call, ok := part.ToolCall(); ok {
+			foundCall = true
+			if call.ID() != "call-his-090" {
+				t.Errorf("committed ToolCall.ID() = %q, want %q", call.ID(), "call-his-090")
+			}
+			if got := string(call.Arguments()); got != `{"path":"a"}` {
+				t.Errorf("committed ToolCall.Arguments() = %q, want %q (provider-exact bytes)", got, `{"path":"a"}`)
+			}
+		}
+	}
+	if !foundCall {
+		t.Error("assistant message carries no ToolCall part")
+	}
+
+	resultMsg := entries[1].Message()
+	if resultMsg.Role() != ai.RoleTool {
+		t.Errorf("entries[1].Message().Role() = %v, want RoleTool", resultMsg.Role())
+	}
+	var foundResult bool
+	for _, part := range resultMsg.Content() {
+		if tr, ok := part.ToolResult(); ok {
+			foundResult = true
+			if tr.CallID() != "call-his-090" {
+				t.Errorf("committed ToolResult.CallID() = %q, want %q", tr.CallID(), "call-his-090")
+			}
+			if tr.Failed() {
+				t.Error("committed ToolResult.Failed() = true, want false (the tool succeeded)")
+			}
+		}
+	}
+	if !foundResult {
+		t.Error("tool-result message carries no ToolResult part")
+	}
+
+	if err := history.CloseTurn(); err != nil {
+		t.Errorf("history.CloseTurn() = %v, want nil (no call is open)", err)
+	}
+
+	// Task 6.3's forwarded obligation, discharged by running it: a
+	// transcript built from history.Entries() — the call message,
+	// then the RoleTool result message — must round-trip through
+	// ai.NewRequest without rejection.
+	transcript := make([]ai.Message, len(entries))
+	for i, e := range entries {
+		transcript[i] = e.Message()
+	}
+	if _, err := ai.NewRequest("model-his-090", transcript); err != nil {
+		t.Fatalf("ai.NewRequest rejected a transcript containing a RoleTool result message: %v — this is a design-reopening finding (design.md Decision 1, spec's forwarded obligation), not a test bug", err)
+	}
+}
+
+// AG-13.1 — S-HIS-091. Given a continuation and a provider scripted
+// with a turn producing no content and no tool call, when Turn runs,
+// then nothing is appended to the store, a subsequent read returns
+// the store unchanged, and Turn returns without error. Covered by the
+// same skip-if-zero-content branch S-HIS-090 exercises for the
+// non-empty case (tasks.md 1.11: "covered by 1.8's skip-if-zero-
+// content branch") — GREEN-confirmed here, not independently RED
+// (nothing appended is also what an unwired implementation would
+// produce for a content-less turn, so this scenario alone cannot
+// distinguish the two; S-HIS-090/092/093 are what the scratch-revert
+// evidence below exercises).
+func TestTurn_ContinuationEmptyContent_AppendsNothing(t *testing.T) {
+	t.Parallel()
+
+	history := agent.NewHistory()
+	cont := &agent.TurnContinuation{
+		Run:       "run-his-091",
+		Stamper:   &agent.LaneStamper{},
+		Scheduler: &agent.Scheduler{},
+		History:   history,
+	}
+
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	script := agenttest.Script{Steps: []agenttest.Step{agenttest.Emit(completion)}}
+	provider := agenttest.NewProvider(script)
+	sink := make(chan *agent.Event, 16)
+
+	msg, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for his-091",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Continuation: cont},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v", finish, ai.FinishReasonStop)
+	}
+	if len(msg.Content()) != 0 {
+		t.Errorf("Turn returned msg with %d content part(s), want 0 (the turn produced no content)", len(msg.Content()))
+	}
+	drainSink(t, sink)
+
+	if got := history.Len(); got != 0 {
+		t.Errorf("history.Len() = %d, want 0 (a ran-to-empty turn appends nothing, not an empty message)", got)
+	}
+}
+
+// AG-13.1 — S-HIS-092. Given a continuation and a turn whose
+// scheduled calls resolve to a mix of success and both failure
+// outcomes, when Turn runs, then exactly one tool-result message is
+// appended per rejoin result, in call order, each correlated to its
+// own call identity, and each failure outcome is carried by the
+// Layer 1 failure form (ToolResult.Failed()) rather than by a content
+// sentinel. Three calls: one registered tool that succeeds, one
+// registered tool that returns ToolOutcomeResultFailure, and one
+// UNREGISTERED name that takes the R-TLS-009/010 orphan path
+// (ToolOutcomeExecutionFailure) — both failure outcomes covered.
+func TestTurn_ContinuationMixedOutcomes_OneResultPerCallInOrder(t *testing.T) {
+	t.Parallel()
+
+	okTool := EchoScriptedTool("ok_his_092", agent.EffectClassRead)
+	resultFailTool := NewScriptedTool("result_fail_his_092", agent.EffectClassRead, agent.Result{
+		Outcome: agent.ToolOutcomeResultFailure,
+		Content: []byte("tool reported failure"),
+	})
+	reg := agent.NewMapRegistry(map[string]agent.Tool{
+		"ok_his_092":          okTool,
+		"result_fail_his_092": resultFailTool,
+		// "missing_his_092" is deliberately unregistered — the
+		// R-TLS-009/010 orphan path yields ToolOutcomeExecutionFailure.
+	})
+
+	history := agent.NewHistory()
+	cont := &agent.TurnContinuation{
+		Run:       "run-his-092",
+		Stamper:   &agent.LaneStamper{},
+		Scheduler: &agent.Scheduler{MaxConcurrentReads: 4, LeaveSinkOpen: true},
+		History:   history,
+	}
+
+	tc1Start, err := ai.NewToolCallStart(1, "call-his-092-a", "ok_his_092")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tc1Delta, err := ai.NewToolCallDelta(1, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tc1End, err := ai.NewToolCallEnd(1, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	tc2Start, err := ai.NewToolCallStart(2, "call-his-092-b", "result_fail_his_092")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tc2Delta, err := ai.NewToolCallDelta(2, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tc2End, err := ai.NewToolCallEnd(2, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	tc3Start, err := ai.NewToolCallStart(3, "call-his-092-c", "missing_his_092")
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart: %v", err)
+	}
+	tc3Delta, err := ai.NewToolCallDelta(3, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta: %v", err)
+	}
+	tc3End, err := ai.NewToolCallEnd(3, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd: %v", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion: %v", err)
+	}
+	script := agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(tc1Start), agenttest.Emit(tc1Delta), agenttest.Emit(tc1End),
+		agenttest.Emit(tc2Start), agenttest.Emit(tc2Delta), agenttest.Emit(tc2End),
+		agenttest.Emit(tc3Start), agenttest.Emit(tc3Delta), agenttest.Emit(tc3End),
+		agenttest.Emit(completion),
+	}}
+	provider := agenttest.NewProvider(script)
+	sink := make(chan *agent.Event, 256)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for his-092",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Tools: reg, Continuation: cont},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	entries := history.Entries()
+	if len(entries) != 4 {
+		t.Fatalf("history has %d entries, want 4 (assistant message + 3 tool-result messages)", len(entries))
+	}
+
+	wantIDs := []string{"call-his-092-a", "call-his-092-b", "call-his-092-c"}
+	wantFailed := []bool{false, true, true}
+	for i, wantID := range wantIDs {
+		resultMsg := entries[i+1].Message()
+		if resultMsg.Role() != ai.RoleTool {
+			t.Errorf("entries[%d].Message().Role() = %v, want RoleTool", i+1, resultMsg.Role())
+		}
+		content := resultMsg.Content()
+		if len(content) != 1 {
+			t.Fatalf("entries[%d] message carries %d part(s), want 1 (exactly one tool-result message per rejoin result)", i+1, len(content))
+		}
+		tr, ok := content[0].ToolResult()
+		if !ok {
+			t.Fatalf("entries[%d] part is not a ToolResult", i+1)
+		}
+		if tr.CallID() != wantID {
+			t.Errorf("entries[%d].CallID() = %q, want %q (call order preserved)", i+1, tr.CallID(), wantID)
+		}
+		if tr.Failed() != wantFailed[i] {
+			t.Errorf("entries[%d].Failed() = %v, want %v — the outcome must ride the Layer 1 failure form, not a content sentinel", i+1, tr.Failed(), wantFailed[i])
+		}
+	}
+
+	if err := history.CloseTurn(); err != nil {
+		t.Errorf("history.CloseTurn() = %v, want nil", err)
+	}
+}
+
+// AG-13.1 — S-HIS-093. Given a continuation whose transcript store
+// rejects the append, when Turn runs, then it returns a non-nil typed
+// error carrying that rejection, and the caller's run terminates
+// through the failure path of R-RUN-011 (Phase 2, cross-checked
+// there) rather than reporting a successful turn. The deterministic
+// way to make ANY commit fail without depending on the pairing rules'
+// own (already AG-12-tested) rejection paths: an unconstructed
+// History (never passed through NewHistory/NewSeededHistory) rejects
+// its first commit via the closed zero-value door (S-HIS-030).
+func TestTurn_ContinuationAppendFailure_TypedErrorReturned(t *testing.T) {
+	t.Parallel()
+
+	brokenHistory := &agent.History{}
+	cont := &agent.TurnContinuation{
+		Run:       "run-his-093",
+		Stamper:   &agent.LaneStamper{},
+		Scheduler: &agent.Scheduler{},
+		History:   brokenHistory,
+	}
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for his-093",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{Continuation: cont},
+		sink,
+	)
+	if err == nil {
+		t.Fatal("Turn returned err = nil, want a non-nil typed rejection (the transcript store rejects the append)")
+	}
+	var violation *ai.Violation
+	if !errors.As(err, &violation) {
+		t.Fatalf("Turn error = %T, want errors.As to reach *ai.Violation (History.Append's own typed rejection propagated, not swallowed)", err)
+	}
+
+	// Turn still honors its own invariant (closes sink) even on this
+	// failure path.
+	drainSink(t, sink)
+}
