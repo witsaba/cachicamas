@@ -229,6 +229,16 @@ var _ = ai.ToolCall{}
 type Scheduler struct {
 	MaxConcurrentReads int
 
+	// LeaveSinkOpen is AG-13's sink-ownership seam (R-TLS-012).
+	// Zero value (false) preserves AG-09 behavior exactly: Schedule
+	// closes sink after the rejoin. Set true, Schedule leaves sink
+	// open after the rejoin and the caller becomes responsible for
+	// closing it exactly once — needed on AG-13's continuation path,
+	// where Turn emits the turn-close event AFTER Schedule returns
+	// (R-LSK-001 point 3), which would otherwise be a send on a
+	// channel Schedule already closed.
+	LeaveSinkOpen bool
+
 	parkedMu sync.Mutex
 	parked   *parkedSet
 }

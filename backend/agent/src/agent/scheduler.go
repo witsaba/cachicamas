@@ -86,8 +86,17 @@ type emission struct {
 // AG-09.4 rules. It returns the rejoin slice in call order. The
 // caller passes a `Registry` (named `reg`), the run/turn identities
 // (`runID`, `turnID`), the per-turn `LaneStamper`, and the `sink`
-// channel the loop owns. The scheduler closes `sink` after the
-// rejoin. The caller MUST NOT close `sink` from outside.
+// channel the loop owns.
+//
+// Sink ownership (AG-13, R-TLS-012, `s.LeaveSinkOpen`): with the flag
+// at its zero value (false), the scheduler closes `sink` after the
+// rejoin, exactly as AG-09 always did — the caller MUST NOT close
+// `sink` from outside. With the flag set, the scheduler leaves `sink`
+// open after the rejoin and the caller becomes responsible for
+// closing it exactly once. Every other step below — the parked-set
+// clear, the emissions close, the dispatcher join, the ordered
+// rejoin — is unchanged in behavior and in order; only the close is
+// conditional.
 //
 // `MaxConcurrentReads` is the upper bound on concurrently running
 // read-class calls. A value of 0 or less falls back to
@@ -216,7 +225,13 @@ func (s *Scheduler) Schedule(
 	s.parkedMu.Unlock()
 	close(emissions)
 	<-dispatcherDone
-	close(sink)
+	// AG-13 (R-TLS-012): the close is the one conditional step: the
+	// zero-value default (false) preserves AG-09 behavior exactly;
+	// LeaveSinkOpen: true hands sink-close ownership to the caller,
+	// who MUST close it exactly once.
+	if !s.LeaveSinkOpen {
+		close(sink)
+	}
 	return results
 }
 
