@@ -12,6 +12,8 @@ package agent_test
 
 import (
 	"errors"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -935,5 +937,137 @@ func TestTurn_ContinuationNil_HistorySurfaceGuardStaysGreen(t *testing.T) {
 
 	if got := sentinel.Len(); got != 0 {
 		t.Errorf("sentinel history.Len() = %d, want 0 — a nil-continuation Turn call must never reach any transcript store", got)
+	}
+}
+
+// ============================================================================
+// Phase 2 — AG-13.1: Harness run to completion (R-RUN-001..007, R-RUN-011)
+// ============================================================================
+
+// AG-13.1 — S-RUN-001. Given a harness value constructed as a struct
+// literal with only its required provider field set, when Run drives a
+// scripted single-turn conversation from an external test package, then
+// the run completes without any constructor call, the caller-visible
+// field values are unchanged after Run returns except for the recorded
+// sink-ownership flag, and the type exposes no third exported method
+// beyond Run and Steer.
+func TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil optional fields resolve to locals, caller struct untouched", func(t *testing.T) {
+		t.Parallel()
+
+		provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		h := agent.Harness{Provider: provider, System: "system prompt for run-001"} // struct literal — no constructor call.
+
+		sink := make(chan *agent.Event, 64)
+		msg, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+		if err != nil {
+			t.Fatalf("Run returned err = %v, want nil", err)
+		}
+		if finish != ai.FinishReasonStop {
+			t.Errorf("finish = %v, want %v", finish, ai.FinishReasonStop)
+		}
+		if len(msg.Content()) == 0 {
+			t.Error("Run returned a message with zero content parts, want the scripted text")
+		}
+		drainSink(t, sink)
+
+		if h.System != "system prompt for run-001" {
+			t.Errorf("h.System = %q, want unchanged", h.System)
+		}
+		if h.History != nil {
+			t.Error("h.History changed from nil — Run must resolve nil defaults into LOCALS, never write them back onto the caller's struct")
+		}
+		if h.Scheduler != nil {
+			t.Error("h.Scheduler changed from nil — Run must resolve nil defaults into LOCALS, never write them back onto the caller's struct")
+		}
+	})
+
+	t.Run("supplied Scheduler gets LeaveSinkOpen set - the one recorded exception", func(t *testing.T) {
+		t.Parallel()
+
+		provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		sched := &agent.Scheduler{MaxConcurrentReads: 3}
+		hist := agent.NewHistory()
+		h := agent.Harness{Provider: provider, System: "system prompt for run-001b", Scheduler: sched, History: hist}
+
+		sink := make(chan *agent.Event, 64)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+			t.Fatalf("Run returned err = %v, want nil", err)
+		}
+		drainSink(t, sink)
+
+		if !sched.LeaveSinkOpen {
+			t.Error("sched.LeaveSinkOpen = false after Run, want true — the one recorded caller-field mutation exception")
+		}
+		if sched.MaxConcurrentReads != 3 {
+			t.Errorf("sched.MaxConcurrentReads = %d, want unchanged 3", sched.MaxConcurrentReads)
+		}
+		if h.Scheduler != sched {
+			t.Error("h.Scheduler pointer changed — Run must use the caller's scheduler in place, never replace it")
+		}
+		if h.History != hist {
+			t.Error("h.History pointer changed — Run must use the caller's history in place, never replace it")
+		}
+	})
+
+	t.Run("exactly two exported methods", func(t *testing.T) {
+		t.Parallel()
+
+		typ := reflect.TypeOf(&agent.Harness{})
+		var names []string
+		for i := 0; i < typ.NumMethod(); i++ {
+			names = append(names, typ.Method(i).Name)
+		}
+		sort.Strings(names)
+		want := []string{"Run", "Steer"}
+		if !reflect.DeepEqual(names, want) {
+			t.Errorf("*Harness exported methods = %v, want exactly %v", names, want)
+		}
+	})
+}
+
+// AG-13.1 — S-RUN-002. Given a run that has taken its terminal decision
+// and returned, when Steer is called with a well-formed user message,
+// then it returns an error that satisfies the typed rejection
+// ai.Invalid(ai.ErrMisplaced, ai.At("steering")), the transcript is
+// unchanged, and no further event reaches the consumer sink.
+func TestHarness_SteerAfterTerminal_TypedRejectionNoSilentDrop(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-002", History: hist}
+
+	sink := make(chan *agent.Event, 64)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	lenBefore := hist.Len()
+
+	steered, err := ai.NewMessage(ai.RoleUser, mustText(t, "too late"))
+	if err != nil {
+		t.Fatalf("ai.NewMessage: %v", err)
+	}
+	err = h.Steer(steered)
+	if err == nil {
+		t.Fatal("Steer after the run's terminal decision returned nil, want a typed rejection")
+	}
+	if !errors.Is(err, ai.ErrMisplaced) {
+		t.Errorf("Steer error rule class = %v, want errors.Is(err, ai.ErrMisplaced)", err)
+	}
+	var violation *ai.Violation
+	if !errors.As(err, &violation) {
+		t.Fatalf("Steer error = %T, want errors.As to reach *ai.Violation", err)
+	}
+	if got := violation.Path().String(); got != "steering" {
+		t.Errorf("violation position = %q, want %q", got, "steering")
+	}
+
+	if got := hist.Len(); got != lenBefore {
+		t.Errorf("history.Len() after rejected Steer = %d, want unchanged %d", got, lenBefore)
 	}
 }
