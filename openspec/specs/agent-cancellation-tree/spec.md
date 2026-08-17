@@ -1,10 +1,35 @@
-# `agent-cancellation-tree` Specification
+# Spec — The cancellation tree (`agent-cancellation-tree`)
 
-> **Change**: `cachicamas-agent-cancellation-tree` · **AG-14** (Layer 2, Wave 3), `0003:1371-1442`
-> **New capability.** Becomes `openspec/specs/agent-cancellation-tree/spec.md` at archive. IDs `R-CAN-0NN` / `S-CAN-0NN`.
+> **Change**: `cachicamas-agent-cancellation-tree` · **AG-14** (Layer 2, Wave 3) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-14--build-the-cancellation-tree), `0003:1371-1442`
+> **Nodes**: AG-14.1 `[leaf]` interrupt (`0003:1391-1414`) · AG-14.2 `[leaf]` shutdown (`0003:1415-1428`) · AG-14.3 `[leaf]` bounded wind-down (`0003:1429-1442`)
+> **Status**: **new capability**. This file is the normative text; per the AG-09 / AG-10 / AG-11 / AG-12 / AG-13 precedent it is promoted to `openspec/specs/agent-cancellation-tree/spec.md` at archive. Five cross-cut deltas ship beside it and are promoted into [`../agent-loop-skeleton/spec.md`](../agent-loop-skeleton/spec.md), [`../agent-run-driver/spec.md`](../agent-run-driver/spec.md), [`../agent-permission-protocol/spec.md`](../agent-permission-protocol/spec.md), [`../agent-tool-scheduler/spec.md`](../agent-tool-scheduler/spec.md) and [`../agent-history/spec.md`](../agent-history/spec.md).
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable by `cd backend/agent && make test`.
-> **Sources**: charter `0003:1371-1442`; [`../../proposal.md`](../../proposal.md); [`../../design.md`](../../design.md), whose three decisions are closed and are not re-opened here.
+> **IDs**: requirements `R-CAN-0NN`, scenarios `S-CAN-0NN` (bites carry the same `S-CAN-` prefix and are marked **(bite)**). Append-only. Distinct from `R-AEV-`/`R-AGE-`/`R-AGP-`/`R-AGM-`/`R-AGV-`/`R-ATT-`/`R-TLS-`/`R-APE-`/`R-PRH-`/`R-LSK-`/`R-AMT-`/`R-APP-`/`R-HIS-`/`R-RUN-`.
+> **Allocated IDs**: `R-CAN-001` through `R-CAN-008`, and `S-CAN-001` through `S-CAN-008` plus the bites `S-CAN-010`, `S-CAN-011` and `S-CAN-012`. This header states the **allocated range and never a total**, because a total is defended by no test and goes silently false the moment a later milestone appends. Coverage per requirement is stated at each requirement, which is where a reader can check it against that requirement's own scenarios.
+> **Evidence gate**: `cd backend/agent && make test`, plus `make lint` (after `golangci-lint cache clean`), `make build` and `make vuln-check` (`vuln-check` is **not** in `make all`). No CI exists.
+> **Sources**: charter `0003:1371-1442`; this change's SDD proposal and design document, whose three decisions are closed and are not re-opened here.
 > **Ownership boundary**: this capability owns the cancellation *signals*, their propagation, the wind-down algorithm and its bound. It does not own the harness's ordinary run algorithm (`agent-run-driver`), the tool-scheduler's rejoin (`agent-tool-scheduler`), the permission protocol (`agent-permission-protocol`) or the transcript (`agent-history`); it amends each of those through its own delta in this change's `specs/` tree.
+
+## Coverage
+
+| Charter leaf | Requirements | Scenarios |
+|---|---|---|
+| AG-14.1 interrupt (`0003:1391-1414`) | `R-CAN-001`…`R-CAN-004` | `S-CAN-001`, `S-CAN-002`, `S-CAN-003`, `S-CAN-004`, plus bites `S-CAN-010`, `S-CAN-011` |
+| AG-14.2 shutdown (`0003:1415-1428`) | `R-CAN-005`, `R-CAN-007` | `S-CAN-005`, `S-CAN-007` |
+| AG-14.3 bounded wind-down (`0003:1429-1442`) | `R-CAN-006` | `S-CAN-006`, plus bite `S-CAN-012` |
+| Cross-cut (package-wide contract row) | `R-CAN-008` | `S-CAN-008` |
+
+The Requirements and Scenarios columns name IDs rather than counts, for the reason the **Allocated IDs** header line records.
+
+**Charter Gherkin → spec** (all five charter scenarios mapped, none reduced):
+
+| Charter scenario | Owning requirement | Scenario(s) |
+|---|---|---|
+| `0003:1396-1400` "interrupt aborts the turn and keeps the session" | `R-CAN-001` (first Then), `R-CAN-002` (second Then) | `S-CAN-001` + bite `S-CAN-010`; `S-CAN-002` + bite `S-CAN-011` |
+| `0003:1402-1405` "interrupt during a suspension aborts it typed" | `R-CAN-003` | `S-CAN-003` |
+| `0003:1407-1410` "interrupt is idempotent" | `R-CAN-004` | `S-CAN-004` |
+| `0003:1420-1424` "shutdown winds down and then refuses new work" | `R-CAN-005`, `R-CAN-007` | `S-CAN-005`, `S-CAN-007` |
+| `0003:1434-1439` "a cancellation-deaf tool cannot hold the run hostage" | `R-CAN-006` | `S-CAN-006` + bite `S-CAN-012` |
 
 ## Purpose
 
