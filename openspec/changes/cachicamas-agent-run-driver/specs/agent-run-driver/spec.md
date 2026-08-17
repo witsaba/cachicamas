@@ -17,9 +17,11 @@
 | AG-13.2 (`0003:1338-1355`) | `R-RUN-008` | 4 | 0 |
 | AG-13.3 (`0003:1357-1369`) | `R-RUN-009` | 2 | 0 |
 | Fourth acceptance clause (`0003:1302`) | `R-RUN-010` | 1 | 1 |
-| Cross-cut (failure path, seams) | `R-RUN-011`…`012` | 4 | 0 |
+| Cross-cut (failure path, seams) | `R-RUN-011`…`012` | 5 | 0 |
 
-**This capability: 12 requirements → 25 scenarios, of which 2 are bites** (`S-RUN-061`, `S-RUN-091`). This count MUST be stated identically in `tasks.md`, `apply-progress.md` and `verify-report.md`.
+**This capability: 12 requirements → 26 scenarios, of which 2 are bites** (`S-RUN-061`, `S-RUN-091`). This count MUST be stated identically in `tasks.md`, `apply-progress.md` and `verify-report.md`.
+
+> **Verify remediation (MAJOR-1)**: `S-RUN-101` was added under `R-RUN-011` after `sdd-verify` found the harness's `Run` left the steering queue open on every failure exit, so `Steer` returned nil forever after an `R-RUN-011` failure instead of `R-RUN-001`'s typed rejection. See `R-RUN-011`'s own text below.
 
 **Charter Gherkin → spec** (all six charter scenarios mapped, none reduced):
 
@@ -212,9 +214,12 @@ When a `Turn` invocation returns a non-nil error, the harness MUST emit a run-cl
 
 On that path the harness MUST NOT append anything to the transcript, MUST NOT call `CloseTurn`, and MUST NOT retry, back off, or route to a fallback provider. Retry and failover are **AG-15**'s, and this requirement is what makes that separation checkable rather than asserted.
 
+This failure path MUST also close the run's steering queue as part of the same termination, under the queue's own mutex — the same critical section `R-RUN-002`'s atomic terminal decision uses. Every `Run` exit — this failure path, a rejected prompt or steered-message append that reaches it, and the terminal-decision success path — MUST leave the queue closed before `Run` returns, so a `Steer` call that reaches the harness afterward always observes it closed and receives `R-RUN-001`'s typed rejection `ai.Invalid(ai.ErrMisplaced, ai.At("steering"))`. A `Run` exit that leaves the queue open makes every later `Steer` return nil forever — indistinguishable, from the caller's side, from the silent drop `R-RUN-001` forbids.
+
 #### Scenarios
 
 - **S-RUN-100** — Given a provider scripted with a terminal mid-stream failure on turn one and a further script available so that a retry would be observable, when the run is driven, then the consumer observes the turn's typed closing brackets followed by a run-close carrying the failed run outcome with a non-nil failure and then the sink close; `Run` returns a non-nil error; the transcript holds only what was committed before the failure, with no entry appended after it; and the provider recorded exactly one request.
+- **S-RUN-101** — Given a run that has ended through this requirement's failure path, when `Steer` is called after `Run` has returned, then it returns `R-RUN-001`'s typed rejection `ai.Invalid(ai.ErrMisplaced, ai.At("steering"))`, never nil — the queue closes on every `Run` exit, not only the terminal-decision success path.
 
 ### R-RUN-012 — The seams are nil/zero-default and the substrate holds
 

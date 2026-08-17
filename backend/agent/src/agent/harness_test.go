@@ -1910,3 +1910,51 @@ func TestHarness_TurnError_RunEndsTypedNoAppendNoCloseNoRetry(t *testing.T) {
 		t.Errorf("provider recorded %d request(s), want exactly 1 (no retry, no fallback)", got)
 	}
 }
+
+// AG-13 verify-remediation — S-RUN-101. Given a run that has ended
+// through R-RUN-011's failure path, when Steer is called with a
+// well-formed user message after Run has returned, then it returns the
+// typed rejection ai.Invalid(ai.ErrMisplaced, ai.At("steering")) of
+// R-RUN-001 — never nil, and never a silent drop. R-RUN-001's zero-drop
+// guarantee does not carve out an exception for the failure path: a nil
+// Steer return is always a promise that the message enters the
+// transcript before a subsequent provider call, and R-RUN-011 makes
+// that provider call impossible once Run has returned. Mirrors
+// TestHarness_SteerAfterTerminal_TypedRejectionNoSilentDrop's assertion
+// shape (S-RUN-002) against TestHarness_TurnError_RunEndsTypedNoAppendNoCloseNoRetry's
+// failure fixture (S-RUN-100) — verify-report.md MAJOR-1.
+func TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop(t *testing.T) {
+	t.Parallel()
+
+	turnOneScript := scriptTextThenMidStreamError(t)
+	provider := agenttest.NewProvider(turnOneScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-101", History: hist}
+
+	sink := make(chan *agent.Event, 64)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err == nil {
+		t.Fatal("Run returned err = nil, want a non-nil error (the turn's mid-stream failure)")
+	}
+	drainSink(t, sink)
+
+	steered, err := ai.NewMessage(ai.RoleUser, mustText(t, "too late, the run already failed"))
+	if err != nil {
+		t.Fatalf("ai.NewMessage: %v", err)
+	}
+	steerErr := h.Steer(steered)
+	if steerErr == nil {
+		t.Fatal("Steer after an R-RUN-011-failed run returned nil, want the typed rejection — a nil return promises delivery that can never happen once Run has returned")
+	}
+	if !errors.Is(steerErr, ai.ErrMisplaced) {
+		t.Errorf("Steer error rule class = %v, want errors.Is(err, ai.ErrMisplaced)", steerErr)
+	}
+	var violation *ai.Violation
+	if !errors.As(steerErr, &violation) {
+		t.Fatalf("Steer error = %T, want errors.As to reach *ai.Violation", steerErr)
+	}
+	if got := violation.Path().String(); got != "steering" {
+		t.Errorf("violation position = %q, want %q", got, "steering")
+	}
+}

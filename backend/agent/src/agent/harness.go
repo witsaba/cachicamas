@@ -128,6 +128,19 @@ func (q *steeringQueue) takeOrClose() (took bool, messages []ai.Message) {
 	return false, nil
 }
 
+// close marks the queue closed under the same critical section every
+// other queue operation uses. It is idempotent — closing an
+// already-closed queue (the ordinary takeOrClose success path) is a
+// no-op — so every exit from Run can call it unconditionally, including
+// the R-RUN-011 failure path, without a check-then-close window that
+// spec.md:89 forbids. See Run's own deferred call for why this is the
+// single place every termination path flows through.
+func (q *steeringQueue) close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closed = true
+}
+
 // Steer offers msg to the in-flight run (R-RUN-001, R-RUN-008). A nil
 // return guarantees msg enters the transcript before the run's next
 // provider call — zero drops. After the run's terminal decision it
@@ -218,6 +231,18 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	}
 
 	defer close(sink)
+
+	// Every exit from this function — the terminal-decision success
+	// path below, every failRun call site on the R-RUN-011 failure
+	// path, and the NewRunStart early return that follows — MUST leave
+	// the queue closed, so a Steer reaching the harness after Run has
+	// returned always gets R-RUN-001's typed rejection, never a nil
+	// return promising a delivery that can no longer happen. One
+	// deferred, idempotent close covers every current return statement
+	// AND every future one a later change might add; the success path
+	// already closes the queue itself via takeOrClose, so this is then
+	// a verified no-op there (verify-report.md MAJOR-1).
+	defer h.queue.close()
 
 	runID := mintHarnessRunID()
 	stamper := &LaneStamper{}

@@ -1,6 +1,6 @@
 # Tasks: AG-13 — Drive the multi-turn run (`cachicamas-agent-run-driver`)
 
-> **Scenario count** (per `spec.md`'s Coverage table, MUST match `apply-progress.md`/`verify-report.md`): `agent-run-driver` itself is **12 requirements → 25 scenarios, of which 2 are bites** (`S-RUN-061`, `S-RUN-091`). The five cross-cut deltas add **18 further scenarios** this change is responsible for closing: `agent-loop-skeleton` +5 (`S-LSK-013..017`), `agent-permission-protocol` +2 incl. 1 bite (`S-APP-015/016`, jointly owned with `S-RUN-090/091`), `agent-history` +7 (`S-HIS-090..096`), `agent-turn-termination` +1 (`S-ATT-013`, jointly owned with `S-RUN-009`/`S-RUN-080/081`), `agent-tool-scheduler` +3 (`S-TLS-013..015`). **Total new/changed evidence obligations: 43.** Design decisions in `design.md` are binding; this file does not re-derive them.
+> **Scenario count** (per `spec.md`'s Coverage table, MUST match `apply-progress.md`/`verify-report.md`): `agent-run-driver` itself is **12 requirements → 26 scenarios, of which 2 are bites** (`S-RUN-061`, `S-RUN-091`). The five cross-cut deltas add **18 further scenarios** this change is responsible for closing: `agent-loop-skeleton` +5 (`S-LSK-013..017`), `agent-permission-protocol` +2 incl. 1 bite (`S-APP-015/016`, jointly owned with `S-RUN-090/091`), `agent-history` +7 (`S-HIS-090..096`), `agent-turn-termination` +1 (`S-ATT-013`, jointly owned with `S-RUN-009`/`S-RUN-080/081`), `agent-tool-scheduler` +3 (`S-TLS-013..015`). **Total new/changed evidence obligations: 44** (43 at `sdd-verify` time + `S-RUN-101`, added by Phase 7's verify remediation below). Design decisions in `design.md` are binding; this file does not re-derive them.
 
 ## Substrate Filter Closure (authoritative — closes `R-LSK-004`/`R-RUN-012`)
 
@@ -151,6 +151,16 @@ ONE PR (`size:exception` pre-authorized by the user for this milestone). Runtime
 - [x] 6.11 **Final gates.** `cd backend/agent && make test` green under `-race` — all 25 `agent-run-driver` scenarios + 2 bites + 18 delta scenarios recorded; `golangci-lint cache clean && make lint` clean; `make build` clean; `make vuln-check` clean (explicit — not in `make all`).
 - [x] 6.12 Note for `sdd-archive` (not this phase): promote `agent-run-driver/spec.md` to `openspec/specs/agent-run-driver/spec.md`; apply the five deltas into their respective canonical specs; archive the change folder after `sdd-verify` passes, per AG-09..AG-12 precedent.
 
+## Phase 7: Verify remediation — MAJOR-1 queue closes on every `Run` exit (`R-RUN-001`, `R-RUN-011`)
+
+`sdd-verify`'s `verify-report.md` (MAJOR-1) found that `failRun`'s five call sites (`:232`, `:241`, `:274`, `:278`, `:291` at verify time) and the `NewRunStart` early return (`:225-228`) never closed `h.queue`; only `takeOrClose`, reachable solely on the success path, ever did. After any `R-RUN-011` failure, `Steer` therefore returned nil forever — a silent drop `R-RUN-001` forbids. Narrow remediation only; no other apply-time work reopened.
+
+- [x] 7.1 RED — `harness_test.go`: `TestHarness_SteerAfterFailedRun_TypedRejectionNoSilentDrop` (`S-RUN-101`, new). Confirmed FAIL: `harness_test.go:1948: Steer after an R-RUN-011-failed run returned nil, want the typed rejection...`.
+- [x] 7.2 GREEN — `harness.go`: added `steeringQueue.close()` (idempotent, mutex-guarded, same critical section as `takeOrClose`) and one `defer h.queue.close()` near the top of `Run`, positioned so it fires on every current and future return statement — not five scattered calls at each `failRun` site that a sixth path could later miss.
+- [x] 7.3 GREEN confirm — `S-RUN-101` passes. Enumerated all 7 return statements in `Run` post-fix (`harness.go:252, 257, 266, 299, 303, 316, 329`): the six that previously left the queue open are now covered by the deferred close; the success path (`:329`) already closes it via `takeOrClose` before the loop's `break`, so the deferred close is a verified no-op there. Full `TestHarness_*`/`TestTurn_*` suite re-run under `-race`: zero regressions.
+- [x] 7.4 Spec — `specs/agent-run-driver/spec.md`: added `S-RUN-101` and its owning normative sentence to `R-RUN-011`; bumped the capability's own scenario count 25→26 (Coverage table cross-cut row 4→5).
+- [x] 7.5 Docs — corrected `apply-progress.md`'s MAJOR-1 (this remediation), MAJOR-2 (`S-RUN-091` reliability wording, independently re-measured via `-overlay`, not merely re-copied from `verify-report.md`), MINOR-3 (74→84+5 task count) and MINOR-4 (added the missing scenario-count statement), per `verify-report.md`'s findings.
+
 ## Coverage Table
 
 | Requirement | Scenario(s) | Task(s) |
@@ -165,7 +175,7 @@ ONE PR (`size:exception` pre-authorized by the user for this milestone). Runtime
 | R-RUN-008 | S-RUN-070, S-RUN-071, S-RUN-072, S-RUN-073 | 3.1–3.9 |
 | R-RUN-009 | S-RUN-080, S-RUN-081 | 4.1–4.3 |
 | R-RUN-010 | S-RUN-090, S-RUN-091 (bite) | 5.1–5.6 |
-| R-RUN-011 | S-RUN-100 | 2.28–2.30 |
+| R-RUN-011 | S-RUN-100, S-RUN-101 | 2.28–2.30, 7.1–7.3 |
 | R-RUN-012 | S-RUN-110, S-RUN-111, S-RUN-112 | 6.1, 6.4, 6.8 |
 | R-LSK-001 | S-LSK-013, S-LSK-014 | 0.1–0.3, 1.1–1.6 |
 | R-LSK-002 | S-LSK-015 | 6.4 |
