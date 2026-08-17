@@ -124,6 +124,74 @@ type TurnOptions struct {
 	// The loop's own upward-path wake (`Scheduler.WakeParked`,
 	// D-A) is AG-13's wiring — out of scope here.
 	PermissionPolicy PermissionPolicy
+
+	// Continuation is AG-13's run-continuation seam (R-LSK-001,
+	// design "Decision 1"). Nil is the identity default: every path
+	// through Turn is byte-stable pre-AG-13 behavior — identity
+	// minted fresh, run brackets emitted unconditionally, a fresh
+	// per-call lane, a locally constructed scheduler, finalize-first
+	// ordering, and no transcript wiring. This is the whole of
+	// AG-13's compatibility claim (R-LSK-002 carry, S-LSK-015).
+	//
+	// Non-nil requires every member of TurnContinuation set: a
+	// half-configured continuation is rejected typed, before any
+	// event is emitted (validateContinuation, S-LSK-014).
+	Continuation *TurnContinuation
+}
+
+// TurnContinuation is AG-13's run-continuation seam: the four things a
+// multi-turn run must share across turns, as one all-or-nothing group
+// (design "Decision 1"). Nil TurnOptions.Continuation is pre-AG-13
+// behavior, byte-stable on every path.
+type TurnContinuation struct {
+	// Run is the caller-minted run identity; Turn joins it instead of
+	// minting one (loop.go:132's forecast — AG-13's Harness mints
+	// identities in caller-supplied groups).
+	Run RunID
+
+	// Stamper is the caller-owned lane stamper; Turn uses it instead
+	// of creating a fresh one, so N invocations share one contiguous
+	// 1-based lane.
+	Stamper *LaneStamper
+
+	// Scheduler is the caller-owned scheduler; injecting it (rather
+	// than handing one back) is what makes WakeParked reachable while
+	// Turn is blocked (design "Decision 2"). The caller is
+	// responsible for the scheduler's LeaveSinkOpen field: Turn emits
+	// the turn-close event after Schedule returns on this path
+	// (R-LSK-001 point 3), which would be a send on a closed channel
+	// unless the caller set it.
+	Scheduler *Scheduler
+
+	// History is the caller-owned transcript store; Turn appends this
+	// turn's own messages to it — the assistant message and its tool
+	// results (R-HIS-010).
+	History *History
+}
+
+// validateContinuation reports whether cont is well-formed: nil is
+// always valid (the identity default); non-nil requires every member
+// set, checked in field-declaration order so the first absent member
+// is the one reported (V-FAIL-04 carry). A half-configured
+// continuation must be caught before Turn emits anything at all
+// (S-LSK-014) — there is no "run brackets replayed" fallback path.
+func validateContinuation(cont *TurnContinuation) error {
+	if cont == nil {
+		return nil
+	}
+	if cont.Run == "" {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("run"))
+	}
+	if cont.Stamper == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("stamper"))
+	}
+	if cont.Scheduler == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("scheduler"))
+	}
+	if cont.History == nil {
+		return ai.Invalid(ai.ErrEmpty, ai.At("continuation"), ai.At("history"))
+	}
+	return nil
 }
 
 // lastLoopRunIDCounter and lastLoopTurnIDCounter are the sources of
@@ -184,18 +252,45 @@ func Turn(
 	opts TurnOptions,
 	sink chan<- *Event,
 ) (ai.Message, ai.FinishReason, error) {
-	runID := mintLoopRunID()
-	turnID := mintLoopTurnID()
-	stamper := &LaneStamper{}
-
-	// Emit run_start and turn_start (R-AEV-002: stamped, contiguous,
-	// 1-based; R-LSK-002: per-call stamper, no shared state).
-	runStart, err := NewRunStart(runID)
-	if err != nil {
-		closeSink(sink)
+	// AG-13 (R-LSK-001, S-LSK-014): a half-configured continuation is
+	// rejected before ANY emission and before the sink is touched at
+	// all — no closeSink, no partial stream. This check MUST run
+	// before identity minting or the run bracket, so it is the first
+	// statement in the function body.
+	if err := validateContinuation(opts.Continuation); err != nil {
 		return ai.Message{}, 0, err
 	}
-	emitStamped(sink, stamper, runStart)
+
+	var runID RunID
+	var stamper *LaneStamper
+	if opts.Continuation != nil {
+		// AG-13 continuation path (R-LSK-001 point 1): join the
+		// caller-supplied run identity and lane stamper instead of
+		// minting/constructing fresh ones, so N invocations share one
+		// contiguous 1-based lane.
+		runID = opts.Continuation.Run
+		stamper = opts.Continuation.Stamper
+	} else {
+		runID = mintLoopRunID()
+		stamper = &LaneStamper{}
+	}
+	// TurnID is still minted fresh per call on every path — N distinct
+	// turn brackets need N identities (R-LSK-001 point 1 carry).
+	turnID := mintLoopTurnID()
+
+	// Emit turn_start unconditionally; run_start ONLY on the nil path
+	// (R-AEV-002: stamped, contiguous, 1-based; R-LSK-002: per-call
+	// stamper on the nil path, no shared state). AG-13 continuation
+	// path: the caller's run owns the run bracket (R-LSK-001 point 2)
+	// — Turn emits no run-open and no run-close on any path.
+	if opts.Continuation == nil {
+		runStart, err := NewRunStart(runID)
+		if err != nil {
+			closeSink(sink)
+			return ai.Message{}, 0, err
+		}
+		emitStamped(sink, stamper, runStart)
+	}
 
 	turnStart, err := NewTurnStart(runID, turnID)
 	if err != nil {
@@ -242,9 +337,17 @@ func Turn(
 		return ai.Message{}, 0, streamErr
 	}
 
-	turn := newTurnAccumulator(runID, turnID, stamper, sink)
+	turn := newTurnAccumulator(runID, turnID, stamper, sink, opts.Continuation != nil)
 	for ev := range pCh {
 		if done := turn.translate(ev); done {
+			// AG-13 (R-LSK-001 point 3): the continuation path
+			// reorders to schedule-before-finalize, so tool and
+			// permission events land inside the still-open turn
+			// bracket. The nil path below keeps the original
+			// finalize-first order byte-stable (S-LSK-015).
+			if opts.Continuation != nil {
+				return finishContinuationTurn(ctx, turn, opts, runID, turnID, stamper, sink)
+			}
 			// Completion: capture the finish reason and exit the loop.
 			// If the completion carries tool calls, dispatch them
 			// through the scheduler (AG-09 wire-up, R-TLS-001..011).
@@ -282,17 +385,22 @@ func Turn(
 			// close, return.
 			if pf, ok := turn.fatal.(*ai.Failure); ok {
 				if failure, ferr := NewFailure(pf); ferr == nil {
-					// One NewFailure call feeds both
-					// emissions (task 5.3's identity pin):
-					// turnEnd.Failure() == runEnd.Failure()
-					// by pointer, proving single
-					// construction, not two independent
-					// wraps.
+					// On the nil path, one NewFailure call feeds
+					// both emissions (task 5.3's identity pin):
+					// turnEnd.Failure() == runEnd.Failure() by
+					// pointer, proving single construction, not
+					// two independent wraps. AG-13 continuation
+					// path: turn_end(Aborted) is still emitted,
+					// but no run_end — the caller's run owns
+					// that bracket on every path, including this
+					// one (R-LSK-001 point 2).
 					if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
 						emitStamped(sink, stamper, turnEnd)
 					}
-					if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
-						emitStamped(sink, stamper, runEnd)
+					if opts.Continuation == nil {
+						if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+							emitStamped(sink, stamper, runEnd)
+						}
 					}
 				}
 				// D7: no second provider.Stream call — the
@@ -320,6 +428,97 @@ func Turn(
 	msg, finish := turn.finalize()
 	closeSink(sink)
 	return msg, finish, nil
+}
+
+// finishContinuationTurn runs the continuation path's completion,
+// once the provider stream ends in a Completion (R-LSK-001 points
+// 2-5, R-HIS-010). Unlike the nil path, this schedules BEFORE
+// finalize: the turn's tool and permission events must land inside
+// the still-open turn bracket, because CheckStream rejects a
+// PlacementTurn event outside an open turn or after the terminal
+// run_end (which finalize-first would produce, since the nil path's
+// finalize also fires the loop's own turn-close before Schedule
+// runs). It captures the rejoin (the `_ =` discard ends here, on this
+// path only), lets reconstructMessage additionally carry the turn's
+// own ai.ToolCall parts, and then commits the turn's own messages —
+// the assistant message and one tool-result message per rejoin
+// result, in call order — to the continuation's History. Turn does
+// NOT call CloseTurn: that stays the run driver's, at the turn
+// boundary (R-RUN-005).
+func finishContinuationTurn(
+	ctx context.Context,
+	t *turnAccumulator,
+	opts TurnOptions,
+	runID RunID,
+	turnID TurnID,
+	stamper *LaneStamper,
+	sink chan<- *Event,
+) (ai.Message, ai.FinishReason, error) {
+	var results []Result
+	if t.finish == ai.FinishReasonToolCalls && len(t.toolCalls) > 0 {
+		// AG-10 (D-C carry): forward the caller's policy byte-exact;
+		// nil remains a legitimate bypass. The caller's injected
+		// scheduler is used (not a locally constructed one), so its
+		// LeaveSinkOpen setting governs whether this call closes
+		// sink — it MUST NOT, since finalize below still needs to
+		// emit turn_end on it.
+		results = opts.Continuation.Scheduler.Schedule(ctx, t.toolCalls, opts.Tools, runID, turnID, opts.PermissionPolicy, stamper, sink)
+	}
+
+	msg, finish := t.finalize()
+
+	if !msg.ID().IsZero() {
+		if err := opts.Continuation.History.Append(msg); err != nil {
+			closeSink(sink)
+			return msg, finish, err
+		}
+	}
+	for _, r := range results {
+		resultMsg, err := toolResultMessage(r)
+		if err == nil {
+			err = opts.Continuation.History.Append(resultMsg)
+		}
+		if err != nil {
+			closeSink(sink)
+			return msg, finish, err
+		}
+	}
+
+	closeSink(sink)
+	return msg, finish, nil
+}
+
+// toolResultMessage builds the ai.RoleTool message the continuation
+// path appends for one rejoin result (R-HIS-010 point 2): the success
+// form for ToolOutcomeSuccess, the failure form for both failure
+// outcomes — verified ai/tool_result.go:77,105. The outcome rides the
+// Layer 1 failure form itself (Part.ToolResult().Failed()), never a
+// content sentinel. ToolOutcomeResultFailure carries the tool's own
+// failure output in Content (tool.go's Result doc);
+// ToolOutcomeExecutionFailure carries none, so its typed *Failure's
+// redacted diagnostic renders the content instead — still content the
+// model can reason about.
+func toolResultMessage(r Result) (ai.Message, error) {
+	var part ai.Part
+	var err error
+	switch r.Outcome {
+	case ToolOutcomeSuccess:
+		part, err = ai.NewToolResult(r.CallID(), string(r.Content))
+	case ToolOutcomeResultFailure:
+		part, err = ai.NewToolFailure(r.CallID(), string(r.Content))
+	case ToolOutcomeExecutionFailure:
+		content := ""
+		if f := r.FailureFor(); f != nil {
+			content = f.Unwrap().Error()
+		}
+		part, err = ai.NewToolFailure(r.CallID(), content)
+	default:
+		part, err = ai.NewToolFailure(r.CallID(), "")
+	}
+	if err != nil {
+		return ai.Message{}, err
+	}
+	return ai.NewMessage(ai.RoleTool, part)
 }
 
 // outcomeForFinish maps a normalized ai.FinishReason to its TurnOutcome
@@ -445,6 +644,13 @@ type turnAccumulator struct {
 	turnID  TurnID
 	stamper *LaneStamper
 	sink    chan<- *Event
+	// continuation reports whether this turn runs on AG-13's
+	// continuation path (opts.Continuation != nil, R-LSK-001 point 2):
+	// finalize skips the run-close bracket (the caller's run owns
+	// it), and reconstructMessage additionally carries the turn's own
+	// ai.ToolCall parts (R-LSK-001 point 5, R-HIS-010 point 1). Never
+	// set on the nil path, so nil-path behavior stays byte-stable.
+	continuation bool
 	textBracket struct {
 		msgID     ai.MessageID
 		started   bool
@@ -477,13 +683,16 @@ type turnAccumulator struct {
 	fatal           error
 }
 
-// newTurnAccumulator constructs a fresh per-turn walker.
-func newTurnAccumulator(runID RunID, turnID TurnID, stamper *LaneStamper, sink chan<- *Event) *turnAccumulator {
+// newTurnAccumulator constructs a fresh per-turn walker. continuation
+// reports whether this turn runs on AG-13's continuation path
+// (opts.Continuation != nil) — see turnAccumulator.continuation.
+func newTurnAccumulator(runID RunID, turnID TurnID, stamper *LaneStamper, sink chan<- *Event, continuation bool) *turnAccumulator {
 	return &turnAccumulator{
-		runID:   runID,
-		turnID:  turnID,
-		stamper: stamper,
-		sink:    sink,
+		runID:        runID,
+		turnID:       turnID,
+		stamper:      stamper,
+		sink:         sink,
+		continuation: continuation,
 	}
 }
 
@@ -675,9 +884,15 @@ func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
 	if terr == nil {
 		emitStamped(t.sink, t.stamper, turnEnd)
 	}
-	runEnd, rerr := NewRunEnd(t.runID, RunOutcomeCompleted, nil)
-	if rerr == nil {
-		emitStamped(t.sink, t.stamper, runEnd)
+	// AG-13 (R-LSK-001 point 2): the continuation path emits no
+	// run-close — the caller's run owns that bracket; a terminal
+	// finish reason with a queued steering message must not close the
+	// run. The nil path stays byte-stable (S-LSK-015).
+	if !t.continuation {
+		runEnd, rerr := NewRunEnd(t.runID, RunOutcomeCompleted, nil)
+		if rerr == nil {
+			emitStamped(t.sink, t.stamper, runEnd)
+		}
 	}
 
 	return t.reconstructMessage(), t.finish
@@ -716,6 +931,22 @@ func (t *turnAccumulator) reconstructMessage() ai.Message {
 		part, perr := ai.NewText(joined)
 		if perr == nil {
 			parts = append(parts, part)
+		}
+	}
+	// AG-13 (R-LSK-001 point 5, R-HIS-010 point 1) — continuation
+	// path only: append the turn's own tool-call parts, provider-
+	// exact bytes (re-derived from each ai.ToolCall's own accessors,
+	// which return byte-equal bytes to what NewToolCall was given),
+	// so a pure-tool turn yields a constructible assistant message
+	// whose calls the transcript's pairing invariant can match. The
+	// nil path never sets t.continuation, so this stays unreachable
+	// there (S-LSK-015 byte-stability).
+	if t.continuation {
+		for _, tc := range t.toolCalls {
+			part, perr := ai.NewToolCall(tc.ID(), tc.Name(), tc.Arguments())
+			if perr == nil {
+				parts = append(parts, part)
+			}
 		}
 	}
 	// AG-09 — append tool-result parts when the turn carries

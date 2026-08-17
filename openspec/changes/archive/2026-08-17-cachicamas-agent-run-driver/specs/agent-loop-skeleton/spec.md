@@ -1,26 +1,14 @@
-# Spec — The one-turn walking skeleton (`agent-loop-skeleton`)
+# Delta for `agent-loop-skeleton` — AG-13 opens the continuation seam and reconciles the `Schedule` sentence
 
-> **Change**: `cachicamas-agent-loop-skeleton` · **AG-07** (Layer 2, Wave 2 opening) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-07--build-the-one-turn-walking-skeleton), `0003:771-832`
-> **Nodes**: AG-07.1 `[leaf]` (one text turn) · AG-07.2 `[leaf]` (statelessness + reasoning pass-through)
-> **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario independently verifiable.
-> **IDs**: `R-LSK-0NN` / `S-LSK-0NN`. Append-only. Distinct from `R-AEV-`/`S-AEV-`, `R-AMT-`/`S-AMT-`, `R-APE-`/`S-APE-`, `R-AGE-`/`S-AGE-`.
-> **Scenario count** (AG-04 W9): **5 charter → 7 spec + 2 bites = 9 total** in 5 requirements (+ 1 cross-cut `S-LSK-008` + 1 bite `S-LSK-008a` added by AG-09, + 1 cross-cut `S-LSK-010` added by AG-10, total **12**).
+> **Change**: `cachicamas-agent-run-driver` · **AG-13** (Layer 2, Wave 3), `0003:1294-1370`
+> **Modifies**: `agent-loop-skeleton` ([`../../../../specs/agent-loop-skeleton/spec.md`](../../../../specs/agent-loop-skeleton/spec.md)) — `R-LSK-001`, `R-LSK-002`, `R-LSK-004`, `R-LSK-006`, and the Explicit non-requirements list.
+> **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. The archive step REPLACES each block in the main spec with the MODIFIED block below; **full-block preservation is mandatory** and every scenario of every touched requirement is reproduced here verbatim unless explicitly amended.
+> **Why this delta**: the run-continuation seam (`TurnOptions.Continuation`), the conditional run-bracket emission it gates, and the continuation-path schedule-before-finalize reorder are all **loop-skeleton surface**, not run-driver surface. `R-LSK-002`'s scope needs stating for the nil-default path. `R-LSK-004` must record AG-13's release scope and its exact-filename filter widening. `R-LSK-006`'s seam sentence loses its "callable from `Harness`" clause to the reconciliation binding on this phase ([`../../design.md`](../../design.md) §"The Reconciliation"). Two non-requirement lines close.
+> **Ownership**: the `Harness` itself, its run algorithm, its brackets and its steering/pause/suspension behavior are owned by [`../agent-run-driver/spec.md`](../agent-run-driver/spec.md) (`R-RUN-001`…`012`), never here. This delta owns only what `Turn` and `TurnOptions` do.
 
-## Coverage
+## MODIFIED Requirements
 
-| Charter | Requirements | Spec | Bites |
-|---|---|---|---|
-| **5 of 5** | 5 (`R-LSK-001`–`005`) + 1 added (`R-LSK-006` by AG-09) | **9** | **3** (`S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`) |
-
-Charter → spec: AG-07.1#1 → `R-LSK-001`/`S-LSK-001`; AG-07.1#2 → `R-LSK-001`/`S-LSK-002`; AG-07.1#3 → `R-LSK-001`/`S-LSK-003` + bites; AG-07.2#4 → `R-LSK-002`/`S-LSK-004`; AG-07.2#5 → `R-LSK-003`/`S-LSK-005`. AG-09 adds: `R-LSK-006` (one cycle per turn, S-LSK-008 + S-LSK-008a). Cross-cuts → `R-LSK-004` (substrate, AG-07), `R-LSK-005` (coverage, AG-07), `R-LSK-006` (one cycle per turn, AG-09).
-
-## Purpose
-
-The first Layer 2 milestone where a live loop produces events. Per doc 0003:773: "the single most important node in this document: the first time Layer 1 and Layer 2 meet." AG-07 owns the producer side of AG-01's carrier decision (D2a) and gives AG-08/AG-09/AG-11 the surface they wrap. Bites defend the AG-05.1 reconstruction property against the AG-05 W1 vacuous-helper failure mode. AG-09 adds the wording-trap boundary with AG-13: the loop schedules, it does not iterate.
-
-## Requirements
-
-### R-LSK-001 — Loop surface: single-turn function form (D1)
+### Requirement: Loop surface: single-turn function form (D1) — `R-LSK-001`
 
 The system SHALL expose `func Turn(ctx context.Context, provider ai.ModelProvider, system string, transcript []ai.Message, opts TurnOptions, sink chan<- *Event) (msg ai.Message, finish ai.FinishReason, err error)` as the only public surface for one assistant turn (per D1, D2, D3). AG-13 introduces a value-form `Harness` that wraps `Turn` without changing its signature. `TurnOptions` carries a `Tools map[string]Tool` field for AG-09 (non-breaking zero-value extension; nil `Tools` = the scheduler returns typed `ExecutionFailure` results in their ordinal slots, consistent with R-TLS-009 "one bad tool does not abort the turn"). `TurnOptions` also carries the AG-08 `PreRequestHook` field (nil = identity default). `TurnOptions` further carries the AG-10 `PermissionPolicy PermissionPolicy` field (non-breaking zero-value extension). A **nil** `PermissionPolicy` is the identity default: the scheduler bypasses the permission gate, every call is treated as an immediate allow, no permission event is emitted, and the turn behaves exactly as it did before AG-10.  A non-nil policy MUST be forwarded byte-exact to `Schedule` and consulted for every scheduled call.
 
@@ -56,7 +44,7 @@ The **signature is unchanged by AG-11**, but the returned-value contract on the 
 - **S-LSK-013** — **AG-13 continuation seam, nil-default and non-nil behavior.** Given a `TurnOptions` whose continuation is nil, when `Turn` runs any of the scripted shapes above, then its emitted event sequence is byte-identical to the pre-AG-13 sequence for that shape — run brackets present, lane restarting at 1, schedule after finalize; and given a `TurnOptions` carrying a fully configured continuation, when `Turn` runs a tool-calling turn, then no run-open and no run-close appears on `sink`, the emitted events are stamped from the supplied stamper continuing its existing lane, the turn's tool and permission events appear **inside** the turn bracket and **before** the turn-close, and the rejoin results are returned to the caller's transcript store rather than discarded.
 - **S-LSK-014** — **AG-13 continuation is all-or-nothing.** Given a `TurnOptions` carrying a continuation with any one member absent, when `Turn` runs, then it returns a typed rejection naming the absent member's position, **no event whatsoever is emitted on `sink`**, and the sink is left in the state the caller gave it — a half-configured continuation never produces a partial stream.
 
-### R-LSK-002 — Statelessness: two sequential turns share nothing
+### Requirement: Statelessness: two sequential turns share nothing — `R-LSK-002`
 
 The system SHALL treat `Turn` as stateless across calls **on the nil-continuation path**; the second call's event sequence SHALL be independent of the first's, with fresh per-stream ordering starting at 1 (per D1, U3 path-a).
 
@@ -71,15 +59,7 @@ The compatibility claim is discharged by enumeration, not by assertion. Exactly 
 - **S-LSK-004** — AG-07.2 two sequential turns share nothing. Given one `Turn` function value that has already run a turn, when a second turn runs via a second `Turn(...)` invocation (fresh slices, fresh `opts`, fresh `sink`, fresh `provider` script), then the second turn's emitted events carry fresh per-stream ordering starting at 1, and the second turn's events do not depend on any state from the first turn (no closure captures over first-turn results, no shared `LaneStamper`).
 - **S-LSK-015** — **AG-13 compatibility, by enumeration.** Given the three enumerated tests above and the full loop, hook, dispatch, termination and permission suites, when the suite runs against the AG-13 change, then every one of them passes and `git diff` shows the three enumerated tests' source **byte-unchanged** — the nil-continuation path preserved statelessness rather than the tests being re-scoped.
 
-### R-LSK-003 — Reasoning pass-through: byte-exact round-trip token
-
-The system SHALL distinguish reasoning from text events by kind (`message_start_reasoning`/`message_delta_reasoning`/`message_end_reasoning` vs `message_start_text`/`message_delta_text`/`message_end_text` per AG-05.1), and SHALL preserve the reasoning round-trip token byte-exact into the assistant message.
-
-#### Scenarios
-
-- **S-LSK-005** — AG-07.2 reasoning flows through distinguished, byte-exact. Given a scripted response interleaving reasoning and text deltas (reasoning → text → reasoning → text per D4), with a non-empty `[]byte` reasoning round-trip token on each reasoning end, when the loop re-emits it via `Turn(...)`, then reasoning and text are emitted as separate bracket kinds, and the assistant message's reasoning-content round-trip token is byte-equal to the script's token, and the event order matches the script's emit calls.
-
-### R-LSK-004 — Substrate untouched, with AG-11's recorded exact-filename release
+### Requirement: Substrate untouched, with AG-11's recorded exact-filename release — `R-LSK-004`
 
 The system SHALL NOT modify any of: `event.go`, `event_descriptor.go`, `stream_check.go`, `sequence.go`, `run_events.go`, `message_text.go`, `message_reasoning.go`, `permission_events.go`, `cost_events.go`, `delegation_events.go`, `compaction_events.go`, `tool_event.go`, `event_registry_test.go`, `doc.go`, `doc_contract_guard_test.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `reconstruction_test.go`, `go.mod`, `go.sum`.
 
@@ -99,15 +79,7 @@ The same discipline binds AG-13. `loop.go`, `scheduler.go` and `tool.go` are **a
 - **S-LSK-012** — AG-11 release is bounded and exact. Given the merge base of the AG-11 branch with `origin/main`, when `git diff` is taken over `backend/agent/src/agent/`, then the only pre-existing non-test files that differ are `turn_events.go`, `failure.go` and `loop.go`; every file still named forbidden above is byte-unchanged; `go.mod`/`go.sum` are byte-unchanged; `NewTurnEnd`'s signature and `TurnEnd.validate`'s failure-iff-aborted rule are unchanged; the two filter functions carry an identical set of exact-filename entries containing no wildcard, prefix, or directory pattern; and both substrate guards pass. Cross-referenced to `R-ATT-009` / `S-ATT-011`.
 - **S-LSK-016** — **AG-13 needs no release and widens exactly.** Given the merge base of the AG-13 branch with `origin/main`, when `git diff` is taken over `backend/agent/src/agent/` and over `go.mod`/`go.sum`, then the only pre-existing non-test files that differ are `loop.go`, `scheduler.go` and `tool.go`; every file named forbidden above is byte-unchanged, `history.go` included; the `go.mod`/`go.sum` diff is empty; the every-kind-constructible guard still passes at its committed kind count (AG-13 adds zero); and when the two filters' entry sets are compared, then they are identical to each other, contain one exact-filename suffix per file AG-13 introduces, and contain no wildcard, prefix or directory pattern. Cross-referenced to `R-RUN-012` / `S-RUN-110` / `S-RUN-111`.
 
-### R-LSK-005 — Test coverage on `loop.go`
-
-The system SHALL achieve ≥ 80% line coverage on `backend/agent/src/agent/loop.go` per `make test` race-gated run, satisfying AG-04 W8. The coverage SHALL include the AG-09 wire-up: the path from `provider.Stream` close through `Schedule` invocation through tool-event emission SHALL be covered; the "loop schedules; does not iterate" invariant (`S-LSK-008`) SHALL be covered by a test that asserts `Schedule` is invoked exactly once per `Turn` even when tool results would warrant a follow-up model call.
-
-#### Scenarios
-
-- **S-LSK-007** — Given `make test` green in `backend/agent/`, when the coverage report is read for `backend/agent/src/agent/loop.go`, then the line coverage is ≥ 80%, and `loop_tool_dispatch_test.go` is part of the covered surface.
-
-### R-LSK-006 — One cycle per turn (AG-09 wording-trap boundary with AG-13)
+### Requirement: One cycle per turn (AG-09 wording-trap boundary with AG-13) — `R-LSK-006`
 
 The loop SHALL schedule at most one cycle of `model → tools → finalize` per `Turn` invocation. Iteration across cycles (`model → tools → model`) is **AG-13's `Harness` contract**; AG-09 MUST NOT loop the cycle within `Turn`. This is the wording trap from `0003:107-112` — the loop schedules, it does not iterate.
 
@@ -125,16 +97,6 @@ The loop SHALL schedule at most one cycle of `model → tools → finalize` per 
 - **S-LSK-008a** — **(bite)** RED-first. Given a `Turn` whose post-`Schedule` path erroneously re-invokes `Schedule`, when the cycle-count scenario runs, then the per-tool invocation counter reports > 1 — proves the one-cycle invariant is non-vacuous. RED-recorded BEFORE `S-LSK-008` is GREEN.
 - **S-LSK-017** — **AG-13 honours the reconciled seam.** Given the run driver's production source read as raw bytes, when it is scanned by the source guard of `R-RUN-006`, then it contains **no `Schedule` call site**; and given a harness-driven multi-turn run with a tool-calling turn, when the per-tool schedule-invocation counter is read, then it reports exactly one invocation per turn and no invocation attributable to the harness itself.
 
-## Non-functional requirements
-
-| ID | Requirement |
-|---|---|
-| **NFR-LSK-001** | External-package verifiability: every scenario verifiable by `cd backend/agent && make test`. Every behavioral test in `package agent_test` or another external package. |
-| **NFR-LSK-002** | Determinism and race cleanliness: every test MUST be deterministic, hermetic, and pass under `-race`. |
-| **NFR-LSK-003** | Substrate byte-unchanged: the 21 files in `R-LSK-004` are byte-unchanged. 6th consecutive extensibility demonstration. |
-| **NFR-LSK-004** | Boundary guards stay green untouched: AG-03's `import_boundary_test.go` and `ambient_authority_test.go` pass with zero changes. |
-| **NFR-LSK-005** | Review budget: single PR under pre-authorised `size:exception` against 1000-line budget, forecast 400–700 lines. |
-
 ## MODIFIED Explicit non-requirements
 
 The list is reproduced in full; two lines are back-annotated as closed and none is removed.
@@ -147,40 +109,3 @@ The list is reproduced in full; two lines are back-annotated as closed and none 
 - **Iteration of the model ↔ tools ↔ model cycle** — AG-13. AG-09 ships ONE cycle; AG-13 iterates. **CLOSED by AG-13**: iteration ships here, in the harness, by repeated `Turn` invocation — owned by `R-RUN-002`. `Turn` itself still schedules exactly one cycle per invocation (`R-LSK-006`, unweakened).
 - **Test-convenience wrappers** in `backend/agent/src/agenttest` — AG-23. AG-07 uses `agenttest.Script` directly (per D4).
 - **CI** — every gate runs when a human runs `make test` in `backend/agent/`.
-
-## Evidence discipline
-
-`openspec/config.yaml` `apply.tdd: true`; strict TDD active (`openspec/AGENTS.md`).
-
-- Both leaves are behavior, so RED-first.
-- **`R-LSK-001` closes only on its recorded bites** (`S-LSK-003a`, `S-LSK-003b`): the reconstruction helper bites RED twice BEFORE `S-LSK-003` is GREEN. Mirrors AG-05 `S-AMT-071`/`S-AMT-072` (`reconstruction_test.go:180-277`).
-- **AG-09 adds `R-LSK-006`** with bite `S-LSK-008a`: the one-cycle-per-turn invariant bites RED with an invocation-counter scenario BEFORE `S-LSK-008` is GREEN.
-- **No new event kinds** registered by AG-07 — the every-kind-constructible guard stays at 25.
-- **AG-09 adds zero event kinds** — the every-kind-constructible guard stays at 25.
-- **Scope-fence remains at 25.** AG-07 + AG-08 + AG-09 extend via `R-LSK-004`'s 6th consecutive extensibility demonstration, not by editing the registry.
-- **Strict TDD skill gap** — `openspec/AGENTS.md` `## Strict TDD is on` is the inline fallback.
-
-## Acceptance criteria
-
-1. Every `S-LSK-001`…`S-LSK-009` has recorded evidence.
-2. `cd backend/agent && make test`, `make lint` (after `cache clean`), `make build`, and `make vuln-check` are all green.
-3. `backend/agent/go.mod` and `go.sum` byte-unchanged.
-4. The 21 substrate files in `R-LSK-004` are byte-unchanged.
-5. `loop.go` line coverage ≥ 80% (AG-04 W8).
-6. The every-kind-constructible guard still passes at 25 kinds; AG-03's two boundary guards pass with zero changes.
-7. The 5 charter `AG-07.1`/`AG-07.2` Gherkin scenarios are covered; none reduced.
-8. All 3 bites (`S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`) RED-recorded with failing output in `apply-progress.md`.
-9. `5 charter → 7 spec + 2 bites = 9 total` (AG-07) + 1 cross-cut `S-LSK-008` + 1 bite `S-LSK-008a` (AG-09) = **11 total** scenario count stated identically with the proposal, tasks, apply-progress, and verify-report.
-10. The `Turn` does not iterate (one cycle per turn, `S-LSK-008`) — the wording trap from `0003:107-112` is asserted mechanically in `loop_tool_dispatch_test.go`.
-
-## Traceability
-
-| Requirement | Charter node | Decisions cited | Charter scenario (`0003`) |
-|---|---|---|---|
-| `R-LSK-001` | AG-07.1 | D1, D2, D3, D5 | `:794-805` |
-| `R-LSK-002` | AG-07.2 | D1, U3 path-a | `:821-825` |
-| `R-LSK-003` | AG-07.2 | D4 | `:827-829` |
-| `R-LSK-004` | AG-07 cross-cut | — | substrate preservation |
-| `R-LSK-005` | AG-07 cross-cut | — | AG-04 W8 carry |
-| `R-LSK-006` | AG-09 (one-cycle) | D8 (AG-09) | wording trap `0003:107-112` |
-| `S-LSK-009` | AG-09 (wire-up) | D8, D9a (AG-09) | new end-to-end dispatch |

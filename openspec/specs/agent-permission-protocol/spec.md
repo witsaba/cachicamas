@@ -37,9 +37,17 @@ The system SHALL consult an injected `PermissionPolicy` exactly once per schedul
 
 On a `PermissionDefer` verdict the system MUST register the call in the parked set **before** emitting `permission_decision_required`, so a consumer that reads the event off `sink` and immediately wakes the call cannot race ahead of registration. Registration MUST NOT block — it is a mutex-guarded map insert, not the parked wait. The system MUST then wait for an acknowledgement the dispatcher closes only **after** `sink <- &stamped` has returned, so the parked **wait** begins strictly after the emission has genuinely reached `sink` rather than merely entering an internal buffer. That acknowledgement wait MUST be cancellation-aware: on `ctx.Done()` the system MUST deregister the parked entry, write a typed abort `Result` into the call's ordinal slot, emit the matching `tool_end_execution_failure`, and return without parking.
 
+The behavior above is **unchanged by AG-13**. What AG-13 changes is that the ordering is, for the first time, **observable from outside a `Schedule` call**: a run driver holding the same `*Scheduler` the in-flight turn is blocked inside can read `permission_decision_required` off the run stream and wake the call while that turn has not returned. The consequence is stated as a contract so no reader has to re-derive it: because registration precedes emission and the acknowledgement precedes the parked wait, a consumer that has read the event off the run stream may call `WakeParked` against a **guaranteed-live** entry. **The stream is the synchronization.** No test of this ordering may use a wall clock, a sleep, or a timeout.
+
+The **non-vacuous guard this requirement lacked is now constructible and MUST be built** — see the known gap under Evidence discipline below. The guard MUST observe the parked **wait**, not the registration. A guard that asserts only that the entry is registered when the event is readable re-encodes the very gap it exists to close and MUST be rejected. The guard's defeat test is a scratch edit that replaces the parked wait with an immediate re-resolution; under that edit the guard MUST fail.
+
+(Previously: identical normative text with no statement that the ordering becomes externally observable once a caller owns the scheduler, and with the missing non-vacuous guard recorded only as a known gap under Evidence discipline with no requirement to build it.)
+
 #### Scenarios
 
 - **S-APP-003** — AG-10.1 the event reaches `sink` before the parked wait blocks. Given one call whose policy returns `PermissionDefer` and a consumer holding `sink`, when `Schedule` runs, then `permission_decision_required` for that `callID` is delivered on `sink`, the call is already registered in the parked set at the moment the event is readable (a wake issued immediately on receipt succeeds rather than returning `ErrStrayDecision`), and the tool's `Run` has not been invoked. Verified by `TestPermission_DeferEmitsBeforePark`, with the acknowledgement half exercised by `TestPermission_WakeParked_AckGatesCompletion_NoRunBeforeSinkDelivery` and the resume half by `TestPermission_WakeParked_ResumesAndCompletes`.
+- **S-APP-015** — **AG-13, the parked wait observed from a run.** Given a harness-driven run whose policy defers the first resolution and allows the second, a caller-owned scheduler injected into the run, and a test reading the run's consumer sink event by event, when `permission_decision_required` is read, then the run has not returned and the tool has not been invoked; and when the test sets a `wake-issued` flag and immediately calls `WakeParked` for that call identity, then the wake returns nil and the policy's second resolution observes the flag **set** — the flag read is happens-after the wake through the parked channel's close, which is only true if the call genuinely **waited**. Owned jointly with `R-RUN-010` / `S-RUN-090`.
+- **S-APP-016** — **(bite)** Given a scratch edit that replaces the parked wait with an immediate re-resolution, when `S-APP-015` runs under `go test -race -count=15 ./src/agent/` per `NFR-APP-002`'s repeated-run discipline, then it FAILS because the second resolution observes the flag unset — proving the assertion observes the **wait** rather than the registration. RED-recorded before GREEN, then reverted. Owned jointly with `R-RUN-010` / `S-RUN-091`.
 
 ### R-APP-003 — A stray wake is a typed rejection, never a silent drop (D-A, D-B)
 
@@ -137,14 +145,16 @@ AG-11 SHALL widen both guards' allowlists further by **exact filename suffixes o
 | **NFR-APP-003** | Substrate byte-unchanged, 7th consecutive milestone (R-APP-012 / NFR-TLS-003 carry). |
 | **NFR-APP-004** | No new top-level Go dependency, no new `EventKind`, no new `PermissionOutcome` member — AG-06.1's event family stays byte-clean. |
 
-## Explicit non-requirements
+## MODIFIED Explicit non-requirements
 
-- **Policy content, mode flags, rule sets** — Layer 3 (doc 0004 CO-03). AG-10 ships the protocol only.
-- **Cross-session or cross-run persistence of a remembered rule** (CO-16.1) — the remembered set lives exactly one `Schedule` call.
-- **The upward-path wake wired into `Turn`** — AG-13. `Turn()` deliberately exposes no scheduler handle and no wake surface at AG-10.
+The list is reproduced in full; one line is back-annotated as closed and none is removed.
+
+- **Policy content, mode flags, rule sets** — Layer 3 (doc 0004 CO-03). AG-10 ships the protocol only. *(Still open at AG-13: the run driver supplies no policy content either; it forwards whatever policy its caller configured.)*
+- **Cross-session or cross-run persistence of a remembered rule** (CO-16.1) — the remembered set lives exactly one `Schedule` call. *(Still open. AG-13 does not widen it: a harness-driven run makes N `Schedule` calls, one per tool-calling turn, and a rule remembered in one is not carried into the next. Cross-turn memory is not claimed by any milestone yet.)*
+- **The upward-path wake wired into `Turn`** — AG-13. `Turn()` deliberately exposes no scheduler handle and no wake surface at AG-10. **CLOSED by AG-13**: the wake is wired here, and the shape matters. `Turn` still **returns** no scheduler and still **exposes** no wake handle; the caller instead **injects** a `*Scheduler` it already owns through the nil-default continuation seam (`R-LSK-001`) and calls `WakeParked` on its own value. A caller that supplies no continuation still cannot reach a scheduler, so AG-10's guarantee is preserved rather than revoked. Owned by `R-RUN-010`.
 - **Subagent tool scope** — AG-19.3.
-- **The full cancellation tree** — AG-14. AG-10 owns per-call abort on the already-threaded `ctx` only.
-- **Making `Schedule` return against a permanently abandoned `sink`** — a pre-existing AG-09 hazard. AG-10 releases the gate goroutine on cancellation; the dispatcher's `sink <- &stamped` send still requires a reader.
+- **The full cancellation tree** — AG-14. AG-10 owns per-call abort on the already-threaded `ctx` only. *(Still open. AG-13 propagates the run context unmodified into every turn and adds no third resolution path and no timeout: a suspension resolves by an external `WakeParked` or by context cancellation, and by nothing else.)*
+- **Making `Schedule` return against a permanently abandoned `sink`** — a pre-existing AG-09 hazard. AG-10 releases the gate goroutine on cancellation; the dispatcher's `sink <- &stamped` send still requires a reader. *(Still open, and AG-13 depends on it being handled correctly by the caller: the run driver keeps a forwarder relaying each turn's events to the consumer sink while the turn is in flight, so the dispatcher always has a reader. That is a run-driver obligation, `R-RUN-002`, not a change to this hazard.)*
 
 ## Dependencies
 
@@ -160,7 +170,9 @@ AG-11 SHALL widen both guards' allowlists further by **exact filename suffixes o
 - `go test -race -count=15 ./src/agent/` — repeated-run stability for the park/wake and cancellation paths.
 - Substrate-untouched check against `git merge-base HEAD origin/main`, with the `AG09_BASE_REF` env-var fallback.
 
-## Evidence discipline
+## MODIFIED Evidence discipline
+
+The list is reproduced in full; the final line is amended.
 
 `openspec/config.yaml` `apply.tdd: true`; strict TDD active.
 
@@ -169,7 +181,9 @@ AG-11 SHALL widen both guards' allowlists further by **exact filename suffixes o
 - **`S-PPB-002`** — registration before emission: reverting the ordering makes `TestPermission_DeferEmitsBeforePark` fail deterministically (20/20 full-package runs).
 - **`S-PPB-003`** — the stray-wake typed rejection: removing the typed sentinel makes `TestPermission_StrayDecisionIsTypedError` fail.
 - **`S-PPB-004`** — `CardinalityAtMostOne`: a hand-built stream with two `permission_resolution_remembered` events is rejected by `CheckStream` with `ai.ErrDuplicate`, and ignoring the compare-and-set return value makes `TestPermission_RememberedCardinality_ConcurrentRace_AtMostOneEmission` fail with `count = 2, want exactly 1`.
-- **Known gap (carried to AG-13)**: the `R-APP-002` acknowledgement itself currently has no non-vacuous guard — deleting the acknowledgement leaves the package green. The behaviour is present and correct in production; the missing bite must observe the parked **wait**, not the registration.
+- **Known gap — CLAIMED AND CLOSED BY AG-13.** The gap is quoted verbatim, not paraphrased, because its second sentence is the acceptance criterion for the fix: "**Known gap (carried to AG-13)**: the `R-APP-002` acknowledgement itself currently has no non-vacuous guard — deleting the acknowledgement leaves the package green. The behaviour is present and correct in production; the missing bite must observe the parked **wait**, not the registration."
+  AG-13 discharges it with `S-APP-015` and its bite `S-APP-016`, which observe the **wait** through a happens-after flag read on the second resolution.
+  **Staleness finding, recorded rather than assumed.** The AG-10 remediation round added `TestPermission_WakeParked_AckGatesCompletion_NoRunBeforeSinkDelivery`, which already guards the acknowledgement at `Schedule` level. The gap's claim that "deleting the acknowledgement leaves the package green" may therefore already have been stale when it was written into this spec. That existing test is hereby recorded as the **acknowledgement** guard; `S-APP-016` is the **loop-level parked-wait** observation, which is a different bite and remains required either way. Which of the two claims about package greenness is true MUST be settled by **actually running the deletion scratch at apply time** and recording the observed result — it MUST NOT be assumed in either direction, and a `sdd-apply` or `sdd-verify` report that asserts staleness without the run is not evidence.
 
 ## Acceptance criteria
 

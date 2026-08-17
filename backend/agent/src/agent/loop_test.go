@@ -890,7 +890,25 @@ func filterOutLoopFiles(diff string) string {
 				// entry, the first doc-row amendment since this guard
 				// was introduced at AG-08 (AG-04/05/06 predate it).
 				strings.HasSuffix(path, "/doc.go") ||
-				strings.HasSuffix(path, "/doc_contract_guard_test.go")
+				strings.HasSuffix(path, "/doc_contract_guard_test.go") ||
+				// AG-13 widening (R-RUN-012/S-RUN-111, R-LSK-004
+				// "AG-13 needs no release"): harness.go is the new
+				// run-driver production file; harness_test.go is its
+				// first test file. Exact filenames, no
+				// wildcard/prefix/directory pattern. Land each
+				// new-file suffix pair in the same commit as the file
+				// that first needs it — this pair lands in Phase 0's
+				// first commit alongside harness_test.go itself.
+				strings.HasSuffix(path, "/harness.go") ||
+				strings.HasSuffix(path, "/harness_test.go") ||
+				strings.HasSuffix(path, "/harness_steering_test.go") ||
+				strings.HasSuffix(path, "/harness_pause_test.go") ||
+				// Phase 5 widening (R-RUN-010, S-RUN-091/S-APP-016):
+				// harness_suspension_test.go is the permission-suspension
+				// acceptance clause plus the inherited R-APP-002
+				// parked-wait bite — the fifth and final /harness*.go
+				// suffix design.md's file layout names.
+				strings.HasSuffix(path, "/harness_suspension_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
