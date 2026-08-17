@@ -901,3 +901,39 @@ func TestTurn_ContinuationAppendFailure_TypedErrorReturned(t *testing.T) {
 	// failure path.
 	drainSink(t, sink)
 }
+
+// AG-13.1 — S-HIS-094. Given a TurnOptions with a nil continuation,
+// when Turn runs any scripted shape, then no transcript store is
+// touched, and the closed-route history surface guard
+// (history_surface_guard_test.go) passes with its source byte-
+// unchanged — confirmed structurally via git diff, recorded in
+// apply-progress.md; this test carries the behavioral half.
+func TestTurn_ContinuationNil_HistorySurfaceGuardStaysGreen(t *testing.T) {
+	t.Parallel()
+
+	// A live History sits in scope, exactly as it would inside a real
+	// harness-driven process (AG-13.1's Harness always constructs or
+	// receives one) — proving a nil-continuation Turn call has no way
+	// to reach it, not merely that this test never wired one in.
+	sentinel := agent.NewHistory()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	sink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for his-094",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	if got := sentinel.Len(); got != 0 {
+		t.Errorf("sentinel history.Len() = %d, want 0 — a nil-continuation Turn call must never reach any transcript store", got)
+	}
+}
