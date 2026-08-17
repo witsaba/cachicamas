@@ -1,10 +1,24 @@
 # Delta for `agent-loop-skeleton` — AG-14 records its substrate release and widens both filters
 
 > **Change**: `cachicamas-agent-cancellation-tree` · **AG-14** (Layer 2, Wave 3), `0003:1371-1442`
-> **Modifies**: `agent-loop-skeleton` ([`../../../../specs/agent-loop-skeleton/spec.md`](../../../../specs/agent-loop-skeleton/spec.md)) — `R-LSK-004` only (`spec.md:82-100`).
+> **Modifies**: `agent-loop-skeleton` ([`../../../../specs/agent-loop-skeleton/spec.md`](../../../../specs/agent-loop-skeleton/spec.md)) — `R-LSK-004` (`spec.md:82-100`), and the document's scenario-count header (`spec.md:7`) and Coverage table (`spec.md:13`).
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. The archive step REPLACES the requirement block in the main spec with the MODIFIED block below; **full-block preservation is mandatory** and every existing paragraph and scenario is reproduced verbatim except where this delta amends it.
 > **Why this delta**: `run_events.go` is a member of `R-LSK-004`'s forbidden list (`spec.md:84`) and has **never been released** — AG-11's release covered `turn_events.go` and `failure.go` only (`spec.md:86`). AG-14 must add one `RunOutcome` member (`R-CAN-007`), so it needs its own recorded release, scoped as tightly as AG-11's. The `L2C-08` answer (`R-CAN-008`) additionally requires `doc.go` and `doc_contract_guard_test.go`, both also on the forbidden list. AG-14 also introduces new files, so the exact-filename filter-widening rule extends to them.
 > **Ownership**: `Turn`'s cancellation-cause observation at `loop.go:417-427` is *behavior*, owned by `R-CAN-001` in [`../agent-cancellation-tree/spec.md`](../agent-cancellation-tree/spec.md), not by this capability. This delta owns only the substrate release and the filter rule. `loop.go` is not on the forbidden list and needs no release.
+
+## MODIFIED Document Header — the scenario count is retired, not re-baselined
+
+The document's **Scenario count** line (`spec.md:7`) and the **Spec**/**Bites** cells of its Coverage table (`spec.md:13`) are a count assertion, and the count has already gone silently false: the line claims `total **12**` and the table claims `9` spec + `3` bites, while the file carries scenario bullets `S-LSK-001`…`S-LSK-017` plus the lettered bites `S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a` — twenty in all. Nothing failed when AG-09, AG-10, AG-11 and AG-13 each appended, because no test reads those numbers; a count that no observation defends drifts the moment the next milestone appends.
+
+AG-14 therefore **retires the count rather than re-baselining it to twenty-two**, which would only go false again at AG-15. The archive step SHALL replace both with a range statement carrying no total:
+
+> **Scenario IDs**: `S-LSK-0NN`, **append-only** — allocated `S-LSK-001` through `S-LSK-019`, plus the lettered bites `S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`. Each milestone that appends records its own additions in its delta; this header states the allocated range and never a total, because a total is defended by no test and goes silently false on the next append. Coverage per requirement is stated at each requirement, which is where a reader can check it against the requirement's own scenarios.
+
+The Coverage table's **Charter** and **Requirements** columns are unaffected and stay as written; only the numeric **Spec** and **Bites** cells are replaced, by the words `see each requirement`.
+
+#### Scenarios
+
+- **S-LSK-020** — **The retired count cannot come back.** Given the promoted `agent-loop-skeleton` spec after this change, when its header and Coverage table are read, then neither states a scenario total, the header states the allocated ID range and names the three lettered bites, and the Coverage table's spec and bite cells defer to each requirement; and when a later milestone appends a scenario without touching the header, then no statement in the document has become false as a result — which is the property the retired count did not have.
 
 ## MODIFIED Requirements
 
