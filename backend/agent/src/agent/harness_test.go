@@ -1627,3 +1627,227 @@ func TestHarness_LoopAccess_PublicOneTurnSurfaceOnly_SourceScanGuard(t *testing.
 		}
 	}
 }
+
+// transcriptMessagesForTest reads back hist's committed entries as a
+// []ai.Message slice — the test-side mirror of harness.go's own
+// unexported transcriptFromHistory, rebuilt here because this file lives
+// in the external agent_test package and cannot reach that symbol.
+func transcriptMessagesForTest(hist *agent.History) []ai.Message {
+	entries := hist.Entries()
+	out := make([]ai.Message, len(entries))
+	for i, e := range entries {
+		out[i] = e.Message()
+	}
+	return out
+}
+
+// messagesEqual reports whether a and b are the same length and every
+// pair is content-equal via ai.Message.Equal — the documented exclusion
+// of the minted MessageID (V-REQ-03), because a message reconstructed
+// from replayed events mints a fresh identity distinct from the one the
+// loop's own accumulator minted for the same content.
+func messagesEqual(a, b []ai.Message) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !a[i].Equal(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// reconstructRunScope partitions events by turn bracket and rebuilds
+// each turn's own transcript entries — the assistant message (a text
+// part when the turn produced text, followed by tool-call parts in
+// issuance-ordinal order when the turn requested any) followed by one
+// tool-result message per resolved tool_end_* event, in ordinal order —
+// entirely from the event stream, through only its own public accessors
+// (R-RUN-007). A turn that produced no text and no tool call contributes
+// no assistant message (mirrors R-HIS-010 point 1). Reasoning is
+// deliberately out of this reconstruction's scope: agent's own
+// message_end_reasoning event carries no round-trip token (only the
+// returned ai.Message does), so a reasoning bracket is not
+// event-stream-reconstructable byte-exact — Phase 4's pause test
+// compares the returned message directly instead, never via this
+// helper.
+func reconstructRunScope(events []agent.Event) []ai.Message {
+	var out []ai.Message
+	var textFragments []string
+
+	type callInfo struct {
+		ordinal  uint32
+		id, name string
+		args     []byte
+	}
+	var calls []callInfo
+
+	type resultInfo struct {
+		ordinal uint32
+		callID  string
+		content []byte
+		failed  bool
+	}
+	var results []resultInfo
+
+	flushTurn := func() {
+		var parts []ai.Part
+		if len(textFragments) > 0 {
+			joined := strings.Join(textFragments, "")
+			if part, err := ai.NewText(joined); err == nil {
+				parts = append(parts, part)
+			}
+		}
+		sort.Slice(calls, func(i, j int) bool { return calls[i].ordinal < calls[j].ordinal })
+		for _, c := range calls {
+			if part, err := ai.NewToolCall(c.id, c.name, c.args); err == nil {
+				parts = append(parts, part)
+			}
+		}
+		if len(parts) > 0 {
+			if msg, err := ai.NewMessage(ai.RoleAssistant, parts...); err == nil {
+				out = append(out, msg)
+			}
+		}
+
+		sort.Slice(results, func(i, j int) bool { return results[i].ordinal < results[j].ordinal })
+		for _, r := range results {
+			var part ai.Part
+			var err error
+			if r.failed {
+				part, err = ai.NewToolFailure(r.callID, string(r.content))
+			} else {
+				part, err = ai.NewToolResult(r.callID, string(r.content))
+			}
+			if err != nil {
+				continue
+			}
+			if msg, merr := ai.NewMessage(ai.RoleTool, part); merr == nil {
+				out = append(out, msg)
+			}
+		}
+
+		textFragments = nil
+		calls = nil
+		results = nil
+	}
+
+	for _, ev := range events {
+		switch ev.Kind() {
+		case agent.EventKindTurnStart:
+			textFragments = nil
+			calls = nil
+			results = nil
+		case agent.EventKindTurnEnd:
+			flushTurn()
+		case agent.EventKindMessageDeltaText:
+			p, _ := ev.MessageDeltaText()
+			textFragments = append(textFragments, p.Fragment())
+		case agent.EventKindToolStart:
+			p, _ := ev.ToolStart()
+			calls = append(calls, callInfo{ordinal: p.Ordinal(), id: p.CallID(), name: p.Name(), args: p.Arguments()})
+		case agent.EventKindToolEndSuccess:
+			p, _ := ev.ToolEndSuccess()
+			results = append(results, resultInfo{ordinal: p.Ordinal(), callID: p.CallID(), content: p.Result(), failed: false})
+		case agent.EventKindToolEndResultFailure:
+			p, _ := ev.ToolEndResultFailure()
+			results = append(results, resultInfo{ordinal: p.Ordinal(), callID: p.CallID(), content: p.Result(), failed: true})
+		case agent.EventKindToolEndExecutionFailure:
+			p, _ := ev.ToolEndExecutionFailure()
+			content := ""
+			if f, ok := p.Failure(); ok {
+				content = f.Unwrap().Error()
+			}
+			results = append(results, resultInfo{ordinal: p.Ordinal(), callID: p.CallID(), content: []byte(content), failed: true})
+		}
+	}
+	return out
+}
+
+// runTwoTurnScenarioForReconstruction drives one two-turn run (tool call
+// then final text — the S-RUN-010 shape) and returns the complete
+// emitted event slice alongside the History it populated. Shared fixture
+// for S-RUN-060 and its bite S-RUN-061.
+func runTwoTurnScenarioForReconstruction(t *testing.T) ([]agent.Event, *agent.History) {
+	t.Helper()
+
+	tool := EchoScriptedTool("read_run_060", agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{"read_run_060": tool})
+	turnOneScript := scriptToolCallResponse(t, "call-run-060", "read_run_060", []byte(`{"z":3}`))
+	turnTwoScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for run-060", Turn: agent.TurnOptions{Tools: reg}, History: hist}
+
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+	return events, hist
+}
+
+// AG-13.1 — S-RUN-060. Charter AG-13.1 sc.2. Given a completed
+// multi-turn run and the complete slice of events it emitted, when the
+// events are partitioned by turn bracket and each turn's messages and
+// tool outcomes are reconstructed from them, then the reconstructed
+// run-scope result is deep-equal to the transcript read back through the
+// public route, message for message and outcome for outcome. Scoping
+// recorded explicitly: the comparison covers the loop-contributed
+// portion of the transcript (excludes the run's initial prompt, which is
+// run-level seed data the harness appends directly and which — like any
+// steered message — is never itself emitted as an event; "each turn's
+// messages" is by construction never a claim about pre-turn seed data).
+func TestHarness_RunStream_ReconstructsHistoryAtRunScope(t *testing.T) {
+	t.Parallel()
+
+	events, hist := runTwoTurnScenarioForReconstruction(t)
+
+	reconstructed := reconstructRunScope(events)
+	want := transcriptMessagesForTest(hist)[1:] // exclude the prompt.
+
+	if !messagesEqual(reconstructed, want) {
+		t.Errorf("run-scope reconstruction diverges from the transcript: reconstructed %d message(s), want %d message(s) (deep-equal, message for message)", len(reconstructed), len(want))
+	}
+}
+
+// AG-13.1 — S-RUN-061 (bite). Given a copy of that event slice with
+// exactly one turn-two event removed, when the run-scope reconstruction
+// of S-RUN-060 runs against it, then the comparator REPORTS divergence
+// and the scenario FAILS-to-match — proving the run-scope assertion is
+// non-vacuous rather than passing on turn one alone. Mirrors
+// S-LSK-003a/S-LSK-003b; RED-recorded before S-RUN-060 is GREEN (see
+// apply-progress.md for the verbatim RED capture).
+func TestHarness_RunStream_ReconstructionBiteDropsTurnTwoEvent(t *testing.T) {
+	t.Parallel()
+
+	events, hist := runTwoTurnScenarioForReconstruction(t)
+
+	turnIndex := -1
+	dropIdx := -1
+	for i, ev := range events {
+		if ev.Kind() == agent.EventKindTurnStart {
+			turnIndex++
+		}
+		if turnIndex == 1 && ev.Kind() == agent.EventKindMessageDeltaText {
+			dropIdx = i
+			break
+		}
+	}
+	if dropIdx < 0 {
+		t.Fatal("test fixture defect: could not locate a turn-two text delta event to drop")
+	}
+
+	damaged := make([]agent.Event, 0, len(events)-1)
+	damaged = append(damaged, events[:dropIdx]...)
+	damaged = append(damaged, events[dropIdx+1:]...)
+
+	reconstructed := reconstructRunScope(damaged)
+	want := transcriptMessagesForTest(hist)[1:]
+
+	if messagesEqual(reconstructed, want) {
+		t.Fatal("run-scope reconstruction did NOT report divergence after a turn-two event was dropped — the property is vacuous (AG-05 W1 failure mode)")
+	}
+}
