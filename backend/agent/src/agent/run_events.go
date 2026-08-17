@@ -112,6 +112,13 @@ const (
 	// (R-AEV-004); every other outcome MUST NOT.
 	RunOutcomeFailed
 
+	// RunOutcomeShutdown is the outcome for a run wound down by the
+	// harness's shutdown signal (AG-14, R-CAN-005, R-CAN-007). Distinct
+	// from [RunOutcomeInterrupted] so a stream consumer holding no Go
+	// error can tell the two cancellation-tree signals apart. Like
+	// [RunOutcomeInterrupted], it MUST NOT carry a [Failure].
+	RunOutcomeShutdown
+
 	// runOutcomeLimit is the first value outside the vocabulary. It must
 	// stay last.
 	runOutcomeLimit
@@ -128,6 +135,8 @@ func (o RunOutcome) String() string {
 		return "interrupted"
 	case RunOutcomeFailed:
 		return "failed"
+	case RunOutcomeShutdown:
+		return "shutdown"
 	case 0:
 		return "unset"
 	default:

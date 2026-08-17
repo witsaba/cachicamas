@@ -10,6 +10,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,54 @@ func BlockingScriptedTool(name string, effect agent.EffectClass, release <-chan 
 			<-release
 			return agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte("released")}, nil
 		},
+	}
+}
+
+// ErrScriptedToolCancelled is the distinguishable typed error
+// CancellationObservingScriptedTool's `Run` returns when it observes
+// `ctx.Done()` before `release` closes (AG-14, R-TLS-013, S-TLS-016).
+var ErrScriptedToolCancelled = errors.New("agenttest: scripted tool returned early on ctx.Done()")
+
+// CancellationObservingScriptedTool constructs a scripted tool whose
+// `Run` blocks until `release` closes or its context is done,
+// whichever comes first — the ctx-aware counterpart to
+// `BlockingScriptedTool`'s ctx-deaf block (AG-14, R-TLS-013,
+// R-CAN-001): sibling of `BlockingScriptedTool`. On cancellation it
+// returns early with `ErrScriptedToolCancelled` rather than running to
+// completion.
+//
+// `started` closes the moment `Run` is entered, before the select —
+// callers that must know the call is genuinely in flight (rather than
+// merely scheduled) read it instead of guessing. `completed` reports
+// whether the most recent `Run` call observed `release` (ran to
+// completion, true) rather than `ctx.Done()` (returned early, false) —
+// the work-completed flag S-TLS-016 reads.
+func CancellationObservingScriptedTool(name string, effect agent.EffectClass, release <-chan struct{}) (tool *ScriptedTool, started <-chan struct{}, completed func() bool) {
+	startedCh := make(chan struct{})
+	var startedOnce sync.Once
+	var mu sync.Mutex
+	var ran bool
+
+	tool = &ScriptedTool{
+		toolName: name,
+		Effect:   effect,
+		Script: func(ctx context.Context, _ []byte, _ agent.PolicySlot) (agent.Result, error) {
+			startedOnce.Do(func() { close(startedCh) })
+			select {
+			case <-release:
+				mu.Lock()
+				ran = true
+				mu.Unlock()
+				return agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte("released")}, nil
+			case <-ctx.Done():
+				return agent.Result{}, ErrScriptedToolCancelled
+			}
+		},
+	}
+	return tool, startedCh, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return ran
 	}
 }
 

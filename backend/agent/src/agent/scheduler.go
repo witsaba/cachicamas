@@ -56,7 +56,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -80,6 +82,18 @@ type emission struct {
 	// `<-ack` is guaranteed the event has actually reached `sink` —
 	// not merely that it was enqueued onto this buffered channel.
 	ack chan struct{}
+}
+
+// toolRunReply is the wire shape the inner goroutine spawned by
+// `runToolWithWindDown` sends on its buffered capacity-1 channel
+// (AG-14, R-CAN-006, R-TLS-014, design.md Decision 3): either a
+// completed `(Result, error)` pair from `tool.Run`, or a recovered
+// panic value — never both. The zero value (used when the wind-down
+// timer wins the race instead) carries neither.
+type toolRunReply struct {
+	res      Result
+	err      error
+	panicVal any
 }
 
 // Schedule runs a slice of tool calls under the AG-09.2 / AG-09.3 /
@@ -455,11 +469,36 @@ func (s *Scheduler) executeCall(
 	// it; the tool or a Layer 3 sandbox does. (For AG-09 we
 	// pass the call's id as a `string` policy; Layer 3 replaces
 	// this with its own sandbox descriptor at the seam.)
+	//
+	// AG-14 (R-TLS-013): `ctx` is the real run context, no longer
+	// `context.Background()` — a tool that reads its context now
+	// returns early on cancellation where it previously ran to
+	// completion. That is the intent (design.md Decision 2). The
+	// disjoint-return-channel rule below is unaffected: a
+	// ctx-observing tool's non-nil `err` still routes through the
+	// existing `runErr != nil` branch, exactly as any other tool
+	// error does (R-TLS-010).
+	//
+	// AG-14 (R-CAN-006, R-TLS-014): `tool.Run` no longer runs
+	// in-line — `runToolWithWindDown` detaches it into its own
+	// goroutine and bounds the wait only once `ctx` is done. A
+	// `detached` overrun is reported typed rather than treated as an
+	// ordinary execution error; `reply.panicVal` re-panics into the
+	// `defer recoverCall` above unchanged (R-TLS-011/S-TLS-011).
 	runArgs := call.Arguments()
 	if modifiedArgs != nil {
 		runArgs = modifiedArgs
 	}
-	runRes, runErr := tool.Run(context.Background(), runArgs, PolicySlot(call.ID()))
+	reply, detached := s.runToolWithWindDown(ctx, tool, runArgs, PolicySlot(call.ID()))
+	if reply.panicVal != nil {
+		panic(reply.panicVal)
+	}
+	if detached {
+		results[ordinal] = typedDetachedCallFailure(call.ID(), call.Name())
+		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		return
+	}
+	runRes, runErr := reply.res, reply.err
 
 	// Disjoint return channels: a non-nil `err` from `Run`
 	// means execution itself failed (R-TLS-010). The two channels
@@ -509,6 +548,84 @@ func (s *Scheduler) executeCall(
 		results[ordinal] = typedExecutionFailureFromError(call.ID(),
 			errBiteToolZeroOutcome)
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+	}
+}
+
+// runToolWithWindDown runs `tool.Run(ctx, args, policy)` in an inner
+// goroutine and returns once either it replies, or — only once `ctx`
+// is done — the scheduler's own wind-down bound expires (AG-14,
+// R-CAN-006, R-TLS-014, design.md Decision 3). `detached` reports the
+// timer-overrun case: the tool's own goroutine may still be running,
+// third-party code this scheduler cannot end; the caller MUST report
+// it typed rather than treat `reply` as a completed result.
+//
+// On the uncancelled path — `ctx.Done()` never becomes ready — `resCh`
+// is the ONLY arm the outer select can ever take: no timer is created,
+// so an uncancelled `Schedule` call behaves exactly as it always has
+// (R-RUN-010). This is why
+// `TestPermission_WakeParked_SchedulerReturnsAfterExplicitWake_NoDeadline`,
+// which drives `Schedule` with a bare `context.Background()`, passes
+// with its source file-unchanged.
+//
+// `resCh` is buffered at capacity 1 so the inner goroutine can always
+// complete its send and exit whenever the third-party code eventually
+// returns, even after this function has already returned on the timer
+// arm — it never writes to `results` or `emissions` itself, and
+// nothing reads `resCh` again once this function returns detached.
+// Every writer of `results`/`emissions` therefore remains a
+// scheduler-owned goroutine that provably exits within the bound —
+// abandoning `wg.Wait()`'s join instead (a bound placed around it
+// rather than per call) would race the still-running call's later
+// slot write and could send on a closed `emissions` channel
+// (`scheduler.go:227`), which is why the bound is armed here, not
+// there (design.md Decision 3's rejected alternative).
+//
+// A panic raised inside the inner goroutine is recovered there and
+// carried back on `resCh` as `panicVal`, never crashing the process by
+// itself; the caller (`executeCall`) re-panics it so the existing
+// `defer recoverCall(ordinal, results)` handles it identically whether
+// or not the call was ever detached (R-TLS-011/S-TLS-011).
+func (s *Scheduler) runToolWithWindDown(
+	ctx context.Context,
+	tool Tool,
+	args []byte,
+	policy PolicySlot,
+) (reply toolRunReply, detached bool) {
+	resCh := make(chan toolRunReply, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resCh <- toolRunReply{panicVal: r}
+			}
+		}()
+		res, err := tool.Run(ctx, args, policy)
+		resCh <- toolRunReply{res: res, err: err}
+	}()
+
+	select {
+	case reply = <-resCh:
+		// Uncancelled path: the ONLY arm that can fire. No timer is
+		// ever created here (R-CAN-006, R-RUN-010).
+		return reply, false
+	case <-ctx.Done():
+		bound := s.WindDownBound
+		if bound <= 0 {
+			bound = defaultWindDownBound
+		}
+		timer := time.NewTimer(bound)
+		defer timer.Stop()
+		select {
+		case reply = <-resCh:
+			// The tool honored cancellation within the bound.
+			return reply, false
+		case <-timer.C:
+			// Overrun: the tool's own tool.Run frame is detached —
+			// third-party code the scheduler cannot end (R-CAN-006's
+			// "detached and named" scope distinction). It is named
+			// by the typed report the caller constructs, never
+			// silently abandoned.
+			return toolRunReply{}, true
+		}
 	}
 }
 
@@ -636,7 +753,11 @@ func (s *Scheduler) runPermissionGate(
 		case <-reqAck:
 		case <-ctx.Done():
 			parked.remove(call.ID())
-			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			// AG-14 (R-CAN-003, agent-permission-protocol R-APP-009
+			// delta): the typed abort is derived from the
+			// cancellation CAUSE, not the bare context error, so it
+			// names *which signal* aborted the call.
+			abort := typedCancellationFailureFromError(call.ID(), context.Cause(ctx))
 			results[ordinal] = abort
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, abort.Failure
@@ -662,7 +783,10 @@ func (s *Scheduler) runPermissionGate(
 			// WakeParked observes ErrStrayDecision rather than
 			// spuriously closing a channel nothing will ever read.
 			parked.remove(call.ID())
-			abort := typedExecutionFailureFromError(call.ID(), ctx.Err())
+			// AG-14 (R-CAN-003, agent-permission-protocol R-APP-009
+			// delta): same cause-derived typed abort as the
+			// acknowledgement-wait arm above.
+			abort := typedCancellationFailureFromError(call.ID(), context.Cause(ctx))
 			results[ordinal] = abort
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
 			return false, nil, abort.Failure
@@ -945,6 +1069,68 @@ func typedFailureFromError(err error) (*Failure, error) {
 		return nil, ferr
 	}
 	return NewFailure(aiFailure)
+}
+
+// typedCancellationFailureFromError wraps a context's cancellation
+// cause as a typed `*Failure` and constructs a `Result` for it — the
+// permission gate's two abort arms' own counterpart to
+// typedExecutionFailureFromError (AG-14, R-CAN-003; the
+// agent-permission-protocol delta at R-APP-009). When cause matches
+// one of the two harness cancellation sentinels (R-CAN-001), the
+// `*Failure` reports `ai.FailureCategoryCancellation` and keeps cause
+// reachable by `errors.Is` through its preserved unwrap chain, so a
+// caller can tell interrupt from shutdown at the call level, not only
+// at the run level. A cause matching neither sentinel — a bare
+// cancellation of the caller's own context, never routed through
+// Interrupt/Shutdown (R-CAN-001's scope line) — keeps the pre-AG-14
+// Unavailable wrap unchanged, via typedExecutionFailureFromError
+// itself.
+func typedCancellationFailureFromError(callID string, cause error) Result {
+	if !errors.Is(cause, ErrInterrupted) && !errors.Is(cause, ErrShutdown) {
+		return typedExecutionFailureFromError(callID, cause)
+	}
+	failure, _ := typedCancellationFailure(cause)
+	res := Result{
+		Outcome: ToolOutcomeExecutionFailure,
+		Failure: failure,
+	}
+	res.SetCallID(callID)
+	return res
+}
+
+// typedCancellationFailure constructs a typed `*Failure` carrying
+// `ai.FailureCategoryCancellation` for cause — typedFailureFromError's
+// sibling, which hardcodes `ai.FailureCategoryUnavailable` instead.
+func typedCancellationFailure(cause error) (*Failure, error) {
+	report := ai.FailureReport{
+		Category: ai.FailureCategoryCancellation,
+		Cause:    cause,
+	}
+	aiFailure, ferr := ai.MidStreamFailure(report, false)
+	if ferr != nil {
+		return nil, ferr
+	}
+	return NewFailure(aiFailure)
+}
+
+// typedDetachedCallFailure builds the typed execution failure a call
+// still running past the wind-down bound is reported with (AG-14,
+// R-CAN-006, R-TLS-014): `ai.FailureCategoryCancellation`, cause
+// `*DetachedCallError` naming the tool and the call identity,
+// `errors.As`-extractable through the failure's preserved unwrap
+// chain. Unlike `typedCancellationFailureFromError`, a detached-call
+// carrier never matches either harness sentinel by `errors.Is` — it is
+// its own cause, not a wrapped signal — so this calls
+// `typedCancellationFailure` directly rather than through the
+// sentinel-checking wrapper.
+func typedDetachedCallFailure(callID, toolName string) Result {
+	failure, _ := typedCancellationFailure(&DetachedCallError{Tool: toolName, CallID: callID})
+	res := Result{
+		Outcome: ToolOutcomeExecutionFailure,
+		Failure: failure,
+	}
+	res.SetCallID(callID)
+	return res
 }
 
 // typedFailureFromRecover constructs a typed `*Failure` for a recovered

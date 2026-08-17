@@ -140,11 +140,23 @@ Distinguishability MUST NOT depend on result content and MUST NOT depend on `ai.
 
 Synthesis MUST route through the commit path of `R-HIS-004`; it is not a second door.
 
+**AG-14 back-annotation: synthesis now has a production caller.** The harness's cancellation wind-down invokes it as its first step, before closing the turn and before emitting the run-close (`R-CAN-002`). Three consequences, recorded so no reader has to re-derive them:
+
+1. **No behavior of this requirement changes.** The production caller uses the existing exported surface; `history.go` is byte-unchanged and no exported route is added.
+2. **Idempotency is load-bearing, not merely nice.** `R-HIS-008` is what makes the wind-down safe to run on every cancellation path regardless of how far the turn got: a turn whose results were already committed synthesizes nothing, so the wind-down needs no special case for "were we mid-turn or between turns".
+3. **The interruption this artifact was designed for is now real.** From AG-14 onward, a transcript carrying `synthesized`-origin entries is the ordinary observable outcome of an interrupted or shut-down run, not only a test fixture, and the run-driver carve-out of `R-RUN-011` is what routes to it.
+
+(Previously: the requirement described synthesis with no statement of who calls it in production; the AG-12/AG-13 reading was that nothing did.)
+
 #### Scenarios
 
 - **S-HIS-060** — Given a transcript interrupted after tool calls were issued but before their results arrived, when synthesis runs, then every orphaned call has a matching result in the transcript, each such entry reports origin `synthesized`, and every pre-existing entry still reports origin `appended`.
 - **S-HIS-061** — Given a synthesized result and a real appended result constructed with byte-identical content and with `Failed()` set identically, when each entry's origin is read, then the two are distinguished correctly, and the assertion reads neither content nor `Failed()`.
 - **S-HIS-062** — Given a history over which synthesis has run, when the turn is closed, then the close succeeds — synthesis produced a transcript the pairing invariant of `R-HIS-003` accepts, through the same commit path.
+- **S-HIS-097** — **AG-14: the production caller.** Given a harness-driven run whose transcript carries a tool call left **open** by an earlier turn, when an interrupt or shutdown signal fires and the run has returned, then the transcript read back through the existing surface holds a matching result for that open call, its entry reports origin `synthesized`, every entry committed before the signal still reports origin `appended`, and the turn is closed — no test invoked synthesis directly. Cross-referenced to `S-CAN-001` Arm A.
+
+  **The Given says *open*, not *in flight*, and the distinction is load-bearing.** A call that reached the scheduler is always rejoined — the scheduler fills every ordinal slot, and the wind-down bound guarantees it does so even against a cancellation-deaf tool (`R-CAN-006`) — and `finishContinuationTurn` then commits those results synchronously (`loop.go:493-513`), so an in-flight call's entry origin is `appended`: it was resolved, not orphaned. Synthesis exists for calls that never obtained a result at all. A scenario worded "interrupted while a tool call is in flight" would demand an observation that path cannot produce, and could be made to pass only by breaking the rejoin.
+- **S-HIS-098** — Given the AG-14 branch, when the suite runs and `git diff` is taken against the merge base, then `history.go` is **byte-unchanged**, `history_surface_guard_test.go` is byte-unchanged and passes, and its enumerated exported route set is equal in both directions — AG-14 added no route and removed none.
 
 ### R-HIS-008 — Synthesis is idempotent and total
 
@@ -244,7 +256,7 @@ Stated so that no test, guard or acceptance line is written as if AG-12 closes m
 | History is wired into `Turn` / `Schedule` | AG-13 (run driver). **CLOSED by AG-13**: `Turn` commits the turn's assistant message and its tool-result messages on the continuation path (`R-HIS-010`); the run driver commits the user-side messages and closes each turn (`R-RUN-005`). `Schedule` itself still commits nothing — it returns the rejoin and `Turn` commits from it |
 | A transcript is persisted or reloaded across processes | Layer 3 |
 | The invariant holds after compaction removes entries | AG-18.2, which re-proves it — ordinal-derived identity is a known, named constraint AG-18 inherits |
-| Cancellation semantics that *produce* an interruption | AG-14. AG-12 repairs the transcript an interruption left; it neither detects nor causes one. *(Still open at AG-13: the run driver propagates its context unmodified and defines no cancellation vocabulary.)* |
+| Cancellation semantics that *produce* an interruption | AG-14. AG-12 repairs the transcript an interruption left; it neither detects nor causes one. **CLOSED by AG-14**: interrupt and shutdown ship in the `agent-cancellation-tree` capability, and the harness's wind-down is orphan synthesis's first production caller (`R-HIS-007` back-annotation, `R-CAN-002`). History itself needed **no change** to accept it — no new route, no `history.go` edit. The **deadline** signal remains unclaimed by any milestone |
 | Context-window accounting over the transcript | AG-17 |
 | Steering-message queueing at turn boundaries | AG-13.2. **CLOSED by AG-13**: the queue, its arrival ordering, its zero-drop guarantee and its typed post-terminal rejection are owned by `R-RUN-008`. History needed no change to accept it — `commitAppendOp` carries no role-alternation check, so consecutive same-role entries were already legal |
-| A new rule class in `ai/validation.go` | Not this milestone, and forbidden under this change. *(Still true at AG-13: the continuation's typed rejections and `Steer`'s typed rejection reuse existing `ai` rule classes.)* |
+| A new rule class in `ai/validation.go` | Not this milestone, and forbidden under this change. *(Still true at AG-14: the cancellation sentinels are Go error values, not `ai` rule classes, and the typed aborts reuse existing ones.)* |
