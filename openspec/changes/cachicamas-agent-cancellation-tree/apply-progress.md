@@ -239,7 +239,7 @@ Phase 9 (wind-down bound, detach select, `Scheduler.WindDownBound`, `R-CAN-006`/
 
 ## Batch C — Phases 9–13 (23 tasks: 9.1–9.8, 10.1–10.2, 11.1, 12.2–12.6, 13.1–13.4) — COMPLETE
 
-**Status**: All 23 assigned tasks complete (task 13.5 is explicitly `sdd-archive`'s job, left `[ ]`). Full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint including the final one (1262 `--- PASS` / 0 `--- FAIL` across all 12 module packages in the final `make test`).
+**Status**: All 23 assigned tasks complete (task 13.5 is explicitly `sdd-archive`'s job, left `[ ]`). Full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint including the final one (0 `--- FAIL` across all 12 module packages in the final `make test`; the passing-test total is deliberately not recorded — later work appends tests and a frozen number would go silently false).
 
 **Mode**: Strict TDD. Every behavior RED-recorded (real command run, real failure captured) before its GREEN, with two documented, task-flagged composition-proof exceptions (9.6, 10.1) and one genuine, unpredicted RED (9.7) whose real failure mode diverged from — and corrected — the design/spec's own prose, recorded rather than silently reconciled.
 
@@ -269,7 +269,7 @@ Phase 9 (wind-down bound, detach select, `Scheduler.WindDownBound`, `R-CAN-006`/
 
 ### Test Summary
 - **Total tests written this batch**: 4 top-level test functions (`TestHarness_WindDown_DeafToolCannotHoldRunHostage`, `TestHarness_WindDown_NoHarnessGoroutineRemains`, `TestSchedule_UncancelledZeroBoundDoesNotArmTimer`, `TestSchedule_MixedCancellationBatch_DisjointResultsPerCall`), covering `S-CAN-006` (both Thens 1–2 and Then 3), `S-TLS-018`, `S-TLS-019`/`R-TLS-010` restated.
-- **Total tests passing**: full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint; 1262 `--- PASS` / 0 `--- FAIL` in the final `make test` run across all 12 module packages.
+- **Total tests passing**: full `./src/agent/...` suite green (`go test -race`, and `make test`) at every checkpoint; 0 `--- FAIL` in the final `make test` run across all 12 module packages. The passing-test total is deliberately not recorded: it changes with every later append and a frozen number defends nothing.
 - **Layers used**: Integration via `agenttest`-scripted `Harness`/`Scheduler` (4 new top-level tests, all this layer; no unit or E2E layer needed this batch).
 - **Bites (RED-record → revert)**: 1 (task 11.1 / `S-CAN-012`).
 - **Pure functions created**: `typedDetachedCallFailure` (scheduler.go — deterministic, no side effects, sibling of `typedCancellationFailure`).
@@ -343,7 +343,7 @@ Batch C diff: `tool.go` +16/-0, `scheduler.go` +129/-2 (net across the whole fil
 
 ### Final gates (task 13.4, full evidence)
 
-- **`make test`** (`go test -race -v ./...`): 1262 `--- PASS` / 0 `--- FAIL`, all 12 module packages report `ok`.
+- **`make test`** (`go test -race -v ./...`): 0 `--- FAIL`, all 12 module packages report `ok`. The passing-test total is deliberately not recorded — it moves with every later append.
 - **`loop.go` coverage** (task 13.1): 88.01% (257/292 statements) via `go test -race -coverprofile=... -covermode=atomic ./src/agent/...` then `go tool cover -func`, cross-checked against the raw profile's per-statement hit counts for the new cancellation branch (`loop.go:442-449`) — all non-zero.
 - **`golangci-lint cache clean && make lint`**: found and fixed one real issue (design decision 13 above); re-run after the fix: `go vet ./...` clean, `golangci-lint run --config=.golangci.yml ./...` → `0 issues.`
 - **`make build`** (`go build -trimpath ./...`): clean, no output.

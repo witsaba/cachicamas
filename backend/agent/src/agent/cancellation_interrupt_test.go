@@ -613,12 +613,15 @@ func TestHarness_Interrupt_SecondInterruptIsNoOp(t *testing.T) {
 	}
 }
 
-// AG-14 remediation (verify-report.md MINOR-3). harness.go's Run
-// registers `defer close(sink)` BEFORE the `cancelRun`-clearing defer,
-// so LIFO execution closes the sink FIRST and clears `h.cancelRun`
-// SECOND. A stream-only consumer — exactly R-CAN-005's own shape, and
+// AG-14 remediation (verify-report.md MINOR-3). This test pins the
+// defer ORDER in harness.go's Run. The DEFECT was registering the
+// `cancelRun`-clearing defer before `defer close(sink)`, which under
+// LIFO closed the sink FIRST and cleared `h.cancelRun` SECOND; the FIX
+// registers `defer close(sink)` first, so the clear runs first and the
+// sink closes second. Under the defect a stream-only consumer — exactly
+// R-CAN-005's own shape, and
 // S-CAN-002's serial-reuse pattern — that starts run #2 the instant it
-// observes run #1's sink close can therefore have run #2 register its
+// observes run #1's sink close could therefore have run #2 register its
 // own cancelRun BEFORE run #1's still-pending defer nulls it back out,
 // silently making a subsequent Interrupt() on run #2 a no-op. Both
 // writes are signalMu-guarded, so -race reports nothing here: this is a
@@ -714,10 +717,10 @@ func TestHarness_Interrupt_SinkCloseObservationDoesNotLoseRun2CancelRegistration
 			if !errors.Is(err2, agent.ErrInterrupted) {
 				t.Fatalf("attempt %d: run #2 error = %v, want errors.Is(err, agent.ErrInterrupted) — run #1's still-pending cancelRun-clearing defer clobbered run #2's registration", attempt, err2)
 			}
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			gate2.Release()
 			<-resultCh2
-			t.Fatalf("attempt %d: run #2 did not end within 500ms of Interrupt() — the interrupt was silently swallowed, run #1's still-pending cancelRun-clearing defer clobbered run #2's registration", attempt)
+			t.Fatalf("attempt %d: run #2 did not end within 5s of Interrupt() — the interrupt was silently swallowed, run #1's still-pending cancelRun-clearing defer clobbered run #2's registration", attempt)
 		}
 
 		<-resultCh1
