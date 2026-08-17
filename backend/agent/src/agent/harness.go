@@ -1,4 +1,6 @@
-// AG-13.1/AG-13.2/AG-13.3 — the multi-turn run driver (R-RUN-001..012).
+// Package agent is Layer 2 of the cachicamas agent stack. This file
+// (harness.go) hosts AG-13.1/AG-13.2/AG-13.3 — the multi-turn run driver
+// (R-RUN-001..012).
 //
 // `Harness` drives `Turn` (loop.go) N times to a run's terminal decision,
 // through the same public one-turn surface the skeleton's external tests
