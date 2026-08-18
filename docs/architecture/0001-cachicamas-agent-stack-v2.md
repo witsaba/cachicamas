@@ -38,6 +38,20 @@
 > first application). Both keep their numbers — identifiers are append-only across this stack,
 > and four documents link to them.
 
+> [!NOTE]
+> **Amended 2026-08-17 — Layer 3 is the archetype layer ([ADR 0009](../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)), no design change.**
+> "The application layer" is renamed **"the archetype layer"**, and an *application* at Layer 3
+> is now called an **archetype** — the implementation of one specialist agent. The substance of
+> the 2026-08-10 amendment above survives entire: Layer 3 remains a position, not a program, and
+> the **coding archetype** (`cachicamas_coding`) is the first archetype to occupy it, not its
+> definition. The body below has been renamed to match; the 2026-08-10 note above keeps its
+> historical wording. Two § 8 non-goals are amended in place: the `database_administrator` entry
+> (a Database Administrator archetype is now *planned*, consuming the service through an MCP
+> client — ADR 0009 D5) and the MCP half of the sandboxing/MCP/subagents entry (MCP is now the
+> standard business-system integration pattern — ADR 0009 D4). The product identity above this
+> stack is now ADR 0009's: cachicamas is a multiplayer agentic system for building and running a
+> company.
+
 > [!IMPORTANT]
 > **Authoring constraint.** This document states *seams* and *what must be expressible*. It never
 > states Go type names, field names, or method signatures. The Layer 1 roadmap deliberately
@@ -53,7 +67,7 @@
 | --- | --- | --- |
 | [1](#1-why-v2) | Why this document exists | The split is a good dependency rule and an incomplete architecture |
 | [2.1](#21-module-view) | Module boundaries | Three modules; the agent imports nobody |
-| [2.2](#22-layer-view) | Layer boundaries | One composition root per application; resources fan in at Layer 3 |
+| [2.2](#22-layer-view) | Layer boundaries | One composition root per archetype; resources fan in at Layer 3 |
 | [2.3](#23-turn-sequence) | What one turn actually does | Six things happen per turn that the v1 sequence diagram omits |
 | [3.1](#31-what-is-frozen-today) | The retired Layer 1 surface | Four self-contradicting contracts, now prevented rather than corrected |
 | [3.2](#32-what-must-change-before-a-vendor-adapter-exists) | Layer 1 work remaining | Five contract requirements, all cheaper before the first adapter |
@@ -61,8 +75,8 @@
 | [4.1](#41-the-loop--stateless) | Loop responsibilities | The loop owns scheduling, not policy |
 | [4.2](#42-the-harness--stateful) | Harness responsibilities | History, suspension, cancellation tree, delegation |
 | [4.3](#43-the-agent-event-envelope) | The Layer 2 contract | Six event families, three of them absent from v1 |
-| [5.1](#51-the-ports-an-application-defines) | Application ports | Five ports the coding application defines; each is where a v1 gap becomes implementable |
-| [5.2](#52-what-the-composition-root-wires) | Startup | One root per application — the only place policy meets mechanism |
+| [5.1](#51-the-ports-an-archetype-defines) | Archetype ports | Five ports the coding archetype defines; each is where a v1 gap becomes implementable |
+| [5.2](#52-what-the-composition-root-wires) | Startup | One root per archetype — the only place policy meets mechanism |
 
 ## Full TOC
 
@@ -79,8 +93,8 @@
   - [4.1 The loop — stateless](#41-the-loop--stateless)
   - [4.2 The harness — stateful](#42-the-harness--stateful)
   - [4.3 The agent event envelope](#43-the-agent-event-envelope)
-- [5. Layer 3 — the application layer](#5-layer-3--the-application-layer)
-  - [5.1 The ports an application defines](#51-the-ports-an-application-defines)
+- [5. Layer 3 — the archetype layer](#5-layer-3--the-archetype-layer)
+  - [5.1 The ports an archetype defines](#51-the-ports-an-archetype-defines)
   - [5.2 What the composition root wires](#52-what-the-composition-root-wires)
 
 ---
@@ -135,8 +149,8 @@ direction. All four are working, and this document keeps every one of them.
 flowchart LR
     subgraph AGENTMOD["backend/agent  (module: github.com/cachicamas/backend/agent)"]
         direction TB
-        CMD["src/cmd/cachicamas<br/>package main<br/>this application's root"]
-        COD["src/coding<br/>Layer 3 — first application"]
+        CMD["src/cmd/cachicamas<br/>package main<br/>this archetype's root"]
+        COD["src/coding<br/>Layer 3 — first archetype"]
         AGT["src/agent<br/>Layer 2 — the runtime"]
         AIL["src/ai<br/>Layer 1"]
         CMD --> COD --> AGT --> AIL
@@ -174,12 +188,12 @@ flowchart LR
 deliberately *not* imports. The agent module imports nothing from the other two — and because these
 are separate Go modules, that is a compiler-enforced invariant rather than a convention.
 
-**`src/coding` and `src/cmd/cachicamas` are one application, not the whole of Layer 3.** The
-column is drawn as a straight line because today there is exactly one application; the shape that
-matters is `<app> → src/agent → src/ai`, and a second Layer 3 application would appear as a
-sibling pair — its own `src/<app>` package and its own `src/cmd/<app>` root — attaching to the
-*same* `src/agent`. Nothing about the runtime changes when that happens, which is the entire point
-of § 4's no-I/O rule. See [§ 5](#5-layer-3--the-application-layer).
+**`src/coding` and `src/cmd/cachicamas` are one archetype, not the whole of Layer 3.** The
+column is drawn as a straight line because today there is exactly one archetype; the shape that
+matters is `<archetype> → src/agent → src/ai`, and a second Layer 3 archetype would appear as a
+sibling pair — its own `src/<archetype>` package and its own `src/cmd/<archetype>` root —
+attaching to the *same* `src/agent`. Nothing about the runtime changes when that happens, which is
+the entire point of § 4's no-I/O rule. See [§ 5](#5-layer-3--the-archetype-layer).
 
 The dotted arrow from the hexagon up to Layer 2 is the honest form of ADR 0004's "any package can
 drive an agent session": permitted by
@@ -196,9 +210,9 @@ flowchart TB
         CUSTOM["Future: IDE / RPC"]
     end
 
-    subgraph L3["Layer 3 — the application layer<br/>shown: coding, the FIRST application"]
+    subgraph L3["Layer 3 — the archetype layer<br/>shown: coding, the FIRST archetype"]
         CS["CodingSession<br/>slash commands · session persistence<br/>project instructions · price table"]
-        PORTS["Ports this application defines<br/>ToolSource · SkillSource · PromptSource<br/>Sandbox · PermissionPolicy"]
+        PORTS["Ports this archetype defines<br/>ToolSource · SkillSource · PromptSource<br/>Sandbox · PermissionPolicy"]
         CSE["CodingSessionEvent<br/>extends AgentEvent"]
     end
 
@@ -216,7 +230,7 @@ flowchart TB
     SRC["Skill / prompt sources<br/>repo FS › user FS › org catalog"]
     TOOLS["Tool sources<br/>built-ins · MCP servers"]
     VEND["LLM vendors"]
-    MAIN["cmd/cachicamas — this application's ONLY composition root<br/>installs the OTel SDK · builds every port · picks a frontend"]
+    MAIN["cmd/cachicamas — this archetype's ONLY composition root<br/>installs the OTel SDK · builds every port · picks a frontend"]
 
     MAIN -.->|wires| CS
     MAIN -.->|wires| SRC
@@ -253,23 +267,23 @@ flowchart TB
     class SRC,TOOLS,VEND,MAIN ext
 ```
 
-**What is drawn here is one application's slice of the stack.** Layers 1 and 2 are the whole of
+**What is drawn here is one archetype's slice of the stack.** Layers 1 and 2 are the whole of
 their layers — there is one runtime and one model-adapter contract for everybody. The Layer 3 box
-is not: it is `cachicamas_coding`, the first application to stand on the runtime. A second
-application substitutes its own box and its own root, keeps everything below unchanged, and that
+is not: it is `cachicamas_coding`, the first archetype to stand on the runtime. A second
+archetype substitutes its own box and its own root, keeps everything below unchanged, and that
 substitutability *is* the architecture. Read every "Layer 3" in the rest of this document as "the
-application at Layer 3", and § 5 will tell you which statements bind the layer and which bind this
-application.
+archetype at Layer 3", and § 5 will tell you which statements bind the layer and which bind this
+archetype.
 
 Three differences from ADR 0004's diagram, each closing a review finding:
 
-- **`cmd/cachicamas` is drawn, and it is the only composition root — for this application.**
+- **`cmd/cachicamas` is drawn, and it is the only composition root — for this archetype.**
   ADR 0004's diagram had no `main`, which is how Layer 3 quietly became one (finding S2). The
-  invariant is one root *per application*, and nothing may import it; a second application brings
+  invariant is one root *per archetype*, and nothing may import it; a second archetype brings
   a second root rather than extending this one.
 - **Resources fan in through ports, not through direct filesystem reads.** Skills and prompts
   arrive from three sources per [ADR 0006](../adr/0006-resolve-skill-and-prompt-source-of-truth.md);
-  tools arrive from built-ins and MCP servers. The application defines the ports; its composition
+  tools arrive from built-ins and MCP servers. The archetype defines the ports; its composition
   root chooses the implementations.
 - **There is an upward arrow from the frontend, and it is the only one.** A permission decision
   resumes a suspended turn. It is not the frontend driving the loop — the harness suspended and is
@@ -461,8 +475,8 @@ never…").
 
 *Portable* is the load-bearing adjective and it is a testable property, not a compliment: the
 runtime performs no I/O, reads no environment, touches no filesystem, renders nothing, and cannot
-name a frontend. That is what lets the same Layer 2 serve the coding application, a future
-review agent, and a `database_administrator`-driven session without a line changing — and it is
+name a frontend. That is what lets the same Layer 2 serve the coding archetype, a future
+review archetype, and the Database Administrator archetype without a line changing — and it is
 mechanically guarded, not merely intended
 ([doc 0003 AG-03.2, AG-03.3](./milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-03--package-scaffold-and-boundary-guards)).
 
@@ -551,23 +565,24 @@ Four invariants the envelope must satisfy:
 
 ---
 
-## 5. Layer 3 — the application layer
+## 5. Layer 3 — the archetype layer
 
 Layer 3 is a **position in the stack**, not a program. It is where policy lives: the layer that
 decides what the runtime is allowed to do, supplies it with resources, persists what happened, and
-shows it to a human. An *application* is one concrete occupant of that position — a coherent set of
-policy answers, tools, resources and a frontend, plus the composition root that assembles them.
+shows it to a human. An *archetype* is one concrete occupant of that position — the implementation
+of one specialist agent: a coherent set of policy answers, tools, resources and a frontend, plus
+the composition root that assembles them.
 
-**`cachicamas_coding` is the first such application, and only the first.** It is a coding agent: it
+**`cachicamas_coding` is the first such archetype, and only the first.** It is a coding agent: it
 reads and writes files, runs shell commands, loads skills and project instructions, and prints a
 session to a terminal. Every one of those is a choice *a coding agent* makes, not a requirement of
-the layer. A review agent, a migration agent, or a `database_administrator`-driven session would
+the layer. A review archetype, a migration archetype, or the Database Administrator archetype would
 occupy the same position with different tools, a different permission posture and a different
 frontend — standing on an unchanged Layer 2, because § 4 made the runtime incapable of caring.
 
 The distinction is worth the paragraph because it decides where things belong:
 
-| The **layer** obliges every application to… | This **application** answers… |
+| The **layer** obliges every archetype to… | This **archetype** answers… |
 | --- | --- |
 | Fill every seam Layer 2 names — an unfilled seam is not a default, it is an unbuildable session | Which tools exist: read, write, edit, bash |
 | Define the ports it needs as *its own* contracts; never reach into runtime internals | Which policies ship: always-ask, allow-all, rule sets |
@@ -578,22 +593,22 @@ The distinction is worth the paragraph because it decides where things belong:
 Two consequences follow, and both are already true of the plan in
 [doc 0004](./milestones/0004-cachicamas-coding-layer-3-task-graph.md):
 
-- **The ports are the application's, not the layer's.** § 5.1's five rows exist because a coding
+- **The ports are the archetype's, not the layer's.** § 5.1's five rows exist because a coding
   agent needs them. The layer's rule is "define ports for the seams you fill"; the *set* is an
-  application's design. A second application will reuse most of these — the seams are the same —
+  archetype's design. A second archetype will reuse most of these — the seams are the same —
   and will add its own, and that is not a violation of anything.
-- **A second application is an additive change, not a refactor.** It brings `src/<app>/` and
-  `src/cmd/<app>/`, implements the same Layer 2 seams, and changes no existing file. If it ever
-  cannot, the defect is in Layer 2's seam set, and the fix is a doc 0003 amendment.
+- **A second archetype is an additive change, not a refactor.** It brings `src/<archetype>/` and
+  `src/cmd/<archetype>/`, implements the same Layer 2 seams, and changes no existing file. If it
+  ever cannot, the defect is in Layer 2's seam set, and the fix is a doc 0003 amendment.
 
 The rest of § 5 describes `cachicamas_coding` specifically. Where a statement binds *any*
-application, it says so.
+archetype, it says so.
 
-### 5.1 The ports an application defines
+### 5.1 The ports an archetype defines
 
 Each port below is the seam at which one of the review's gaps becomes implementable — which is why
 they are named now, before Layer 2 is written, even though several will have exactly one
-implementation for a long time. **This is the coding application's set**; the obligation the layer
+implementation for a long time. **This is the coding archetype's set**; the obligation the layer
 imposes is to define ports for the seams it fills, not to define these five.
 
 | Port | Answers | Implementations foreseen | Gap it closes |
@@ -617,8 +632,8 @@ Two notes that determine whether these ports work at all:
 
 ### 5.2 What the composition root wires
 
-**Every application has exactly one composition root, and nothing imports it.** That is the layer's
-rule. `cmd/cachicamas` is the coding application's: the only place where policy meets mechanism,
+**Every archetype has exactly one composition root, and nothing imports it.** That is the layer's
+rule. `cmd/cachicamas` is the coding archetype's: the only place where policy meets mechanism,
 and the only package permitted to install the OpenTelemetry SDK
 ([ADR 0005 § D3](../adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) —
 the permission belongs to composition roots as a class, and today there is one).
@@ -629,7 +644,7 @@ constructs the session; and attaches exactly one frontend.
 Everything below it receives its dependencies. Nothing below it reads the environment, opens a
 configuration file, or decides a policy — which is what makes the layers testable in isolation and
 what keeps `cachicamas_agent` genuinely portable. Note which way that last clause runs: the
-runtime is portable *because* every root does this work, so a second application inherits the
+runtime is portable *because* every root does this work, so a second archetype inherits the
 property only by accepting the same discipline.
 
 Sessions remain append-only records with parent chains for branching, under the user's home
@@ -740,10 +755,20 @@ Recorded so that their absence reads as a decision rather than an oversight.
   both expensive.
 - **`database_administrator` driving an agent session.** Permitted by
   [ADR 0005 § D1 row 5](../adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2),
-  unexercised, and priced there.
+  unexercised, and priced there. **Amended 2026-08-17
+  ([ADR 0009 D5](../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md#d5--the-database-administrator-archetype-is-planned)):
+  a Database Administrator archetype is now *planned* — it will consume the service through an
+  MCP client, the D1 row 3 network direction, not the in-process row 5 direction, which stays
+  unexercised and keeps its priced cost.**
 - **A TUI.** Print mode is the minimum viable frontend and the one that proves the event stream is
   sufficient. A TUI that is written first tends to acquire state the stream does not carry.
 - **Sandboxing, MCP, and subagents.** Seams 3, 4 and 12 exist; the implementations do not.
+  **Amended 2026-08-17
+  ([ADR 0009 D4](../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md#d4--mcp-is-the-standard-business-system-integration-pattern)),
+  for the MCP half only: MCP is now the standard business-system integration pattern — each
+  business system runs its own MCP server with one owning archetype — rather than a deferred
+  seam. The implementations still do not exist, so this remains a v1 non-goal; the sandboxing
+  and subagent halves are untouched.**
 - **Session branching UI.** The append-only session format with parent chains supports it; nothing
   in v1 exposes it.
 - **Multimodal content beyond text.** Image and audio discriminators exist in the content
@@ -764,7 +789,8 @@ For anyone reviewing a milestone that touches the agent stack.
 - [ ] Layer 1 imports only stdlib, `net/http`, a vendor SDK, and the OpenTelemetry **API**. No SDK,
       no exporter, no `otelslog`.
 - [ ] Layer 2 performs no I/O of its own, reads no environment, and touches no filesystem.
-- [ ] Layer 3 reaches other modules over HTTP only, never by import.
+- [ ] Layer 3 reaches other modules over HTTP only, never by import (the seam an MCP client
+      will use — ADR 0009).
 - [ ] Both import guards still run, and the reverse guard still covers the whole module.
 
 **Contracts**

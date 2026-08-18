@@ -8,7 +8,7 @@
     />
     <img
       src="docs/assets/cachicamas-logo.png"
-      alt="cachicamas — Witsaba Software Development Framework"
+      alt="cachicamas — a multiplayer agentic system for building and running a company"
       width="280"
       height="280"
       loading="eager"
@@ -18,7 +18,7 @@
   </picture>
 </div>
 
-> **Witsaba's Software Development Framework** — an agent-first, PRD-driven orchestrator that wraps the existing SDD pipeline so any team inside the org can ship a project from intake to merged PR without leaving the framework. v0.0.1 is a thin slice: schema + PRD intake + metadata analysis + simple milestone decomposition. The framework is the product; the SDD pipeline is its execution engine.
+> **cachicamas is a multiplayer agentic system for building and running a company.** Everything a company needs — database administration, finance, marketing, ticketing, software development — exists as cooperating specialist agents that employees talk and work with. It is usable by any company; [Witsaba](https://witsaba.com/) is its first user, not its boundary. Identity ratified in [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md).
 
 ---
 
@@ -30,7 +30,7 @@ This README follows an **Agent-First** pattern so an agent (or a human in a hurr
 2. **Table of Contents** — the full structured index with anchors. Read this to jump to a specific section.
 3. **Content** — the actual sections, each self-contained and reviewable.
 
-The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-agent-first-doc-pattern) explains how to reuse it in any doc and how to adapt it to code (file-level summary → symbol index → implementation).
+The pattern is **portable**: section [12. The Agent-First Doc Pattern](#12-the-agent-first-doc-pattern) explains how to reuse it in any doc and how to adapt it to code (file-level summary → symbol index → implementation).
 
 ---
 
@@ -38,19 +38,20 @@ The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-a
 
 | # | Topic | TL;DR |
 | --- | ------- | ------- |
-| 1 | [What is cachicamas?](#1-what-is-cachicamas) | Witsaba's SDLC framework, v0.0.1, wraps `/sdd-*` as its per-task engine. |
-| 2 | [Why does it exist?](#2-why-does-it-exist) | To enable a competitive engineering org with many internal companies, all running the same playbook. |
-| 3 | [v0.0.1 Scope](#3-v001-scope) | Thin slice: schema + PRD intake + metadata analysis + 1:1 milestone→task decomposition. |
+| 1 | [What is cachicamas?](#1-what-is-cachicamas) | A multiplayer agentic system for building and running a company ([ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). |
+| 2 | [Why does it exist?](#2-why-does-it-exist) | Every company function as cooperating specialist agents; any company can run it — Witsaba is the first user. |
+| 3 | [The Agent Stack](#3-the-agent-stack) | Layer 1 model adapter (complete, 42/42) · Layer 2 portable agent runtime (14/24) · Layer 3 archetype layer (not started, 0/25). One MCP server + one owning archetype per business system. |
 | 4 | [Architecture](#4-architecture) | Hexagonal Go services (`database_administrator`, `workspace_syncer`) + the layered `agent` module + Qwik frontend on Postgres 18. |
-| 5 | [Repository Layout](#5-repository-layout) | `backend/`, `frontend/`, `openspec/`, `infra/`, `scripts/`, `wiki/`, `docs/`, `spikes/`, `.worktrees/`. |
+| 5 | [Repository Layout](#5-repository-layout) | `backend/`, `frontend/`, `docs/`, `openspec/`, `infra/`, `scripts/`, `spikes/`, `.worktrees/`. |
 | 6 | [Tech Stack](#6-tech-stack) | Go 1.26.3, Echo v5.2.1, Postgres 18, OpenTelemetry → Jaeger v2, docker-compose v2, Qwik 1.20.0, pnpm 11. |
-| 7 | [SDD Pipeline Mapping](#7-sdd-pipeline-mapping) | cachicamas blocks 1–6 map to `sdd-explore`, `sdd-propose`, `sdd-design`, `sdd-tasks`, `sdd-spec`+`sdd-apply`+`sdd-verify`, `branch-pr`. |
+| 7 | [SDD: the Engineering Process](#7-sdd-the-engineering-process) | SDD is how cachicamas is built (`openspec/`, `/sdd-*` skills). It is not the product. |
 | 8 | [Conventions](#8-conventions) | Conventional commits (no Co-Authored-By), hex layout, tools to `./bin/`, `slog`+`otelslog`, triple-pinned images, ADR for new top-level deps. |
 | 9 | [Testing & TDD](#9-testing--tdd) | Strict TDD enabled (`make test` = `go test ./... -race -v`); tests next to code; coverage threshold 0 (not enforced yet). |
 | 10 | [Quick Start](#10-quick-start) | `make test`, `make lint`, `make build`, `docker compose up`; Qwik dev with `pnpm dev`. |
-| 11 | [The Agent-First Doc Pattern](#11-the-agent-first-doc-pattern) | Resumed TOC → TOC → Content. Reuse on any doc; adapt to code (file summary → symbol list → impl). |
-| 12 | [Review Checklist](#12-review-checklist) | Mandatory reviewer checklist, item by item. |
-| 13 | [Next Step](#13-next-step) | Read `openspec/project.md`, then `wiki/Incompleteness-Log.md`, then start an SDD cycle. |
+| 11 | [Where This Is Going](#11-where-this-is-going) | Finish Layer 2 → ship the coding archetype → the DBA archetype over MCP → further archetypes (tickets, finance, marketing). |
+| 12 | [The Agent-First Doc Pattern](#12-the-agent-first-doc-pattern) | Resumed TOC → TOC → Content. Reuse on any doc; adapt to code (file summary → symbol list → impl). |
+| 13 | [Review Checklist](#13-review-checklist) | Mandatory reviewer checklist, item by item. |
+| 14 | [Next Step](#14-next-step) | Read `openspec/project.md`, the v2 architecture reference, ADR 0009, then the milestone docs. |
 
 ---
 
@@ -58,25 +59,28 @@ The pattern is **portable**: section [11. The Agent-First Doc Pattern](#11-the-a
 
 1. [What is cachicamas?](#1-what-is-cachicamas)
 2. [Why does it exist?](#2-why-does-it-exist)
-3. [v0.0.1 Scope](#3-v001-scope)
+3. [The Agent Stack](#3-the-agent-stack)
 4. [Architecture](#4-architecture)
 5. [Repository Layout](#5-repository-layout)
 6. [Tech Stack](#6-tech-stack)
-7. [SDD Pipeline Mapping](#7-sdd-pipeline-mapping)
+7. [SDD: the Engineering Process](#7-sdd-the-engineering-process)
 8. [Conventions](#8-conventions)
 9. [Testing & TDD](#9-testing--tdd)
 10. [Quick Start](#10-quick-start)
-11. [The Agent-First Doc Pattern](#11-the-agent-first-doc-pattern)
-12. [Review Checklist](#12-review-checklist)
-13. [Next Step](#13-next-step)
+11. [Where This Is Going](#11-where-this-is-going)
+12. [The Agent-First Doc Pattern](#12-the-agent-first-doc-pattern)
+13. [Review Checklist](#13-review-checklist)
+14. [Next Step](#14-next-step)
 
 ---
 
 ## 1. What is cachicamas?
 
-**cachicamas** is Witsaba's Software Development Framework. It is a **PRD-driven orchestrator** that wraps the existing `/sdd-*` pipeline (Spec-Driven Development) so any team inside the Witsaba org can run a project from PRD intake to merged pull request through a single, predictable engine.
+**cachicamas** is a **multiplayer agentic system for building and running a company**. Every function a company needs to operate — database administration, finance, marketing, ticketing, software development — exists as a cooperating specialist agent that employees talk and work with. The identity is ratified in [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md).
 
-It is NOT a replacement for the SDD pipeline. The SDD pipeline (explore → propose → spec → design → tasks → apply → verify → archive) is the **execution engine** cachicamas drives. cachicamas adds the **missing upper layer**: organization → project → PRD → milestone → task → spec → phase hierarchy, intake, analysis, and decomposition.
+It is built on a three-layer agent stack (section [3](#3-the-agent-stack)): a vendor-portable model adapter, a portable agent runtime that can run *any* agent, and an **archetype layer** where each specialist agent lives. The **coding archetype** — an agent that codes, comparable to Pi or Opencode — is the first archetype; a **Database Administrator archetype** is planned next.
+
+cachicamas is usable by **any company**. [Witsaba](https://witsaba.com/) is its first user, not its boundary.
 
 | Identity | Value |
 | ---------- | ------- |
@@ -84,52 +88,44 @@ It is NOT a replacement for the SDD pipeline. The SDD pipeline (explore → prop
 | Repo | [`witsaba/cachicamas`](https://github.com/witsaba/cachicamas) |
 | Primary branch | `main` |
 | Owner | braejan (founder, Witsaba) |
-| Current version | v0.0.1 (thin slice) |
+| Status | Pre-release — Layer 1 complete, Layer 2 in progress (see [section 3](#3-the-agent-stack)) |
 | License | See `LICENSE` |
 
 ## 2. Why does it exist?
 
-Witsaba is building a **competitive engineering organization** with multiple internal companies. Each company has its own product roadmap, but they all share the same engineering process. cachicamas is the **shared process made software**: every PRD lands in the same database, gets analyzed the same way, decomposes into the same shape, and flows through the same review gates. The output is consistent quality and visible state across every project — no matter which team owns it.
+Running a company means running many systems — databases, tickets, books, campaigns, codebases — and today every one of them demands its own specialist attention. cachicamas makes each of those functions a **specialist agent** that any employee can talk to and work with, and makes the agents **cooperate**: the ticket agent can ask the DBA agent for a schema change; the coding agent can pick up the work the ticket describes.
 
-The framework exists to make the *process* the *product*. Without it, every team re-invents intake, decomposition, and review — and the org loses the leverage of shared learnings.
+The leverage comes from the stack's shape. The runtime (Layer 2) is pure mechanism and cannot tell which agent it is running, so every new specialist — an archetype — is an *additive* change: new policy, tools, resources, and frontend standing on an unchanged runtime. One company function at a time, the system grows without rewrites.
 
-## 3. v0.0.1 Scope
+Witsaba runs cachicamas first and feeds what it learns back into the system, but nothing in the design is Witsaba-specific.
 
-v0.0.1 is intentionally a **thin slice**. We want the smallest useful product that exercises every part of the engine end-to-end.
+## 3. The Agent Stack
 
-**In scope (v0.0.1):**
+The stack lives in the `backend/agent` Go module ([ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md)). The current vocabulary of record is [the v2 architecture reference](docs/architecture/0001-cachicamas-agent-stack-v2.md), as amended by [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md).
 
-- Schema for the full hierarchy (`organization`, `project`, `requirement`, `requirement_spike`, `milestone`, `task`, `spec`, `spec_phase`) — even when some tables are not yet read by the orchestrator.
-- PRD intake: capture, persist, version.
-- Metadata analysis: read the repo, extract facts (modules, package paths, linter, test command).
-- Simple milestone decomposition (Strategy D: Journey Milestones × Vertical Slice Tasks) — collapsed to 1:1 (one task per milestone) for v0.0.1; the full slice fan-out is a follow-up.
+| Layer | Package | What it is | Status |
+| --- | --- | --- | --- |
+| **Layer 1 — the model adapter** | `src/ai/` | LLM provider connector; one adapter per vendor, vendor-portable contract. | **Complete — 42/42 milestones** ([doc 0002](docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md)) |
+| **Layer 2 — the portable agent runtime** | `src/agent/` | Runs *any* agent; pure mechanism, no judgement. Loop + harness. | **In progress — 14/24 milestones** ([doc 0003](docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md)) |
+| **Layer 3 — the archetype layer** | `src/coding/` today | Where specialist agents live. An **archetype** is the implementation of one specialist agent: its policy, tools, resources, persistence, and frontend. | **Not started — 0/25 milestones** ([doc 0004](docs/architecture/milestones/0004-cachicamas-coding-layer-3-task-graph.md)) |
 
-**Out of scope (deferred to v0.0.2 → v0.1.0):**
+Three rules of the stack, all decided and cited:
 
-| Item | Why deferred |
-| ------ | -------------- |
-| R1 | Frozen interface spec — needs more usages before freezing |
-| R2 | Skip self-analysis when repo == framework — needs framework-comparison logic |
-| R3 | Golden fixtures for PRD-comparison mode — needs reference PRDs |
-| R4 | `project.setting JSONB` storage — needs concrete settings list |
-| R5 | Specific TDD retry defaults — needs empirical data |
-| R6 | Specific concurrency defaults — needs observed worktree capacity |
-| MCP-based Agent-as-a-Service packaging | Needs MCP infrastructure decisions |
-| Multi-company competitive org | Needs org modeling decisions |
-
-These live in `openspec/changes/prd-orchestrator/proposal.md` → "Out of Scope". Revisit when each iteration starts.
+- **The coding archetype is the first occupant of Layer 3, not its definition** ([ADR 0009 § D2](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). Layer 3 is a position in the stack; a DBA archetype, a ticket archetype, or a finance archetype occupies the same position with different policy, tools, and frontend on an unchanged runtime.
+- **Layer 3 is not the top of the stack** ([ADR 0009 § D3](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). Higher layers may be added — cross-archetype coordination is the obvious future occupant of a layer above 3.
+- **Each business system runs its own MCP server and has exactly one owning archetype** ([ADR 0009 § D4](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). The Database Administrator archetype will consume the existing `backend/database_administrator` service through an MCP client; a future ticket system runs its own MCP server owned by a ticket archetype. This rides on [ADR 0005 § D1](docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2): Layer 3 reaches other modules over the network only, never by import. Each business system owns its own tables; any archetype asks the DBA archetype for database work ([ADR 0009 § D6](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)).
 
 ## 4. Architecture
 
-The framework is built as **hexagonal Go services** sharing a Postgres database. Each service owns its own HTTP layer, application layer, domain layer, and adapters. Most inter-service coupling is through Postgres; `database_administrator → workspace_syncer` is the one direct HTTP call (`src/infrastructure/workspacesyncer/client.go`).
+The business systems are **hexagonal Go services** sharing a Postgres database. Each service owns its own HTTP layer, application services, domain layer, and adapters. Most inter-service coupling is through Postgres; `database_administrator → workspace_syncer` is the one direct HTTP call (`src/infrastructure/workspacesyncer/client.go`).
 
 The agent stack is the exception to "hexagonal": `backend/agent` is a **layered** module (see [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md)), not a hexagonal service, and hexagonal review rules do not apply to it.
 
 | Service | Purpose | Status |
 | --------- | --------- | -------- |
-| `database_administrator` | The backend API. Identity/OAuth callback, organizations, workspaces, sync jobs + SSE, GitHub adapter, prompts, skills. Also owns all schema migrations under `src/migration/sql/`. | Live on `main` |
+| `database_administrator` | The backend API. Identity/OAuth callback, organizations, workspaces, sync jobs + SSE, GitHub adapter, prompts, skills. Also owns all schema migrations under `src/migration/sql/`. Will be fronted by the Database Administrator archetype over MCP ([ADR 0009 § D5](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). | Live on `main` |
 | `workspace_syncer` | Git clone + validate worker. `POST /internal/clone-and-validate`, HMAC callback to `database_administrator`. | Live on `main` |
-| `agent` | The 3-layer agentic stack — model adapter (`src/ai/`), portable agent runtime (`src/agent/`), application layer (`src/coding/` — the coding agent, its first application), CLI (`src/cmd/cachicamas/`). See [ADR 0004](docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) as amended by [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md), with current vocabulary in [the v2 architecture reference](docs/architecture/0001-cachicamas-agent-stack-v2.md). | Layer 1 in progress — moves into this module in milestone AI-39 |
+| `agent` | The layered agent stack — Layer 1 model adapter (`src/ai/`), Layer 2 portable agent runtime (`src/agent/`), Layer 3 archetype layer (`src/coding/` — the coding archetype, its first occupant), CLI composition root (`src/cmd/cachicamas/`). See [ADR 0004](docs/adr/0004-adopt-tau-3-layer-agentic-architecture.md) as amended by [ADR 0005](docs/adr/0005-promote-agent-stack-to-own-module.md) and [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md), with the architecture in [the v2 reference](docs/architecture/0001-cachicamas-agent-stack-v2.md). | Layer 1 complete (42/42) · Layer 2 in progress (14/24) · Layer 3 not started |
 | `frontend` (Qwik 1.20.0) | Operator UI. Auth.js GitHub login, workspaces, Prompt Studio, Skill Studio. | Live on `main` |
 
 **Hexagonal layout** (under `backend/<service>/src/`):
@@ -143,43 +139,29 @@ otel/               → observability wiring (logging, tracing)
 migration/sql/      → goose-style .sql migrations (in database_administrator only)
 ```
 
-A service that needs another module's Go code uses `go.mod replace ../<module>` rather than an HTTP call. **Note the cost before reaching for it:** each service's Docker build context is its own directory (`docker-compose.yaml`), and each `Dockerfile` copies only that module's `go.mod`, `go.sum` and `src/`. The first cross-module import therefore also requires moving the compose build context up to `./backend` and rewriting every `COPY` path. `backend/agent` does not import, and is not imported by, any other module — see [ADR 0005 § D1](docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2).
+**Cross-module imports have a real cost.** Each service's Docker build context is its own directory (`docker-compose.yaml`), and each `Dockerfile` copies only that module's `go.mod`, `go.sum` and `src/`. The first cross-module import therefore also requires moving the compose build context up to `./backend` and rewriting every `COPY` path. `backend/agent` does not import, and is not imported by, any other module — see [ADR 0005 § D1](docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2). Archetypes reach business systems over the network (MCP), never by import.
 
-**Hierarchy:**
-
-```
-organization
-  └── project (1+ reviewers)
-        └── PRD (requirement)
-              ├── requirement_spike (0..*)
-              ├── milestone (1..*)
-              │     └── task (1..*; v0.0.1 = 1:1 with milestone)
-              ├── spec (0..*; created but unused in v0.0.1, active from v0.0.3)
-              │     └── spec_phase (1..*)
-              └── spec_phase references the task via task_id
-```
-
-**Branch strategy:** parent worktree branch per major change (e.g., `feat/prd-orchestrator`) + child branches per PR (e.g., `feat/prd-orchestrator-schema`).
+**Branch strategy:** parent worktree branch per major change (e.g., `feat/agent-layer2-wave3`) + child branches per PR.
 
 ## 5. Repository Layout
 
 | Path | Contents |
 | ------ | ---------- |
-| `backend/` | Go modules. `database_administrator/` (API + migrations), `workspace_syncer/` (git worker), `agent/` (the 3-layer agentic stack). Each is a separate Go module with its own `Makefile` and `.golangci.yml`; `make test` runs per module. |
+| `backend/` | Go modules. `database_administrator/` (API + migrations), `workspace_syncer/` (git worker), `agent/` (the layered agent stack). Each is a separate Go module with its own `Makefile` and `.golangci.yml`; `make test` runs per module. |
 | `frontend/` | Qwik 1.20.0 operator UI. |
 | `docs/adr/` | Architecture Decision Records, with the external source material they cite under `docs/adr/references/`. |
-| `docs/architecture/` | cachicamas-authored architecture documents and milestone maps. |
-| `openspec/` | OpenSpec artifacts. `project.md` (bootstrap), `AGENTS.md`, `config.yaml`, `changes/<change>/`, `specs/`. |
+| `docs/architecture/` | cachicamas-authored architecture documents and the milestone task graphs under `milestones/`. |
+| `docs/prd/` | Product requirements documents. PRD 0001 (the delivery loop) is accepted and awaits re-scope under [ADR 0009 § D7](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md). |
+| `docs/assets/` | Images (this README's logo lives here). |
+| `openspec/` | OpenSpec artifacts. `project.md` (bootstrap), `AGENTS.md`, `config.yaml`, `changes/<change>/`, `specs/` (the promoted capability register). |
 | `infra/` | Infrastructure configs. Postgres init scripts under `infra/postgres/init/`. |
 | `scripts/` | Utility shell scripts. |
-| `wiki/` | Living documentation. Currently houses `Incompleteness-Log.md`. |
-| `docs/` | Project-level docs. `assets/` for images (this README's logo lives here). |
 | `spikes/` | Exploratory / throwaway work. Not promoted to `openspec/changes/`. |
 | `.worktrees/` | Local git worktrees (untracked). Created per multi-PR change. |
 | `.atl/` | Agent Teams Lite config (skill registry). |
 | `.claude/` | Claude Code local config. |
 | `docker-compose.yaml` | Single-node local dev stack on `cachicamas_network`. |
-| `Makefile` (per service) | `make test`, `make lint`, `make build`, `make fmt`, `make vet`, `make test/cover`. |
+| `Makefile` (per module) | `make test`, `make lint`, `make build`, `make fmt`, `make vet`, `make test/cover`. |
 
 ## 6. Tech Stack
 
@@ -202,20 +184,13 @@ organization
 
 **Pinning discipline:** every base image is triple-pinned (`image:tag@digest`).
 
-## 7. SDD Pipeline Mapping
+## 7. SDD: the Engineering Process
 
-cachicamas runs **on top of** the `/sdd-*` pipeline. Each cachicamas block delegates to one or more SDD phases. The orchestrator owns the *state machine*; the SDD sub-agents own the *artifact production*.
+**SDD (Spec-Driven Development) is the engineering process cachicamas is built with. It is not the product** ([ADR 0009 § D1](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)).
 
-| cachicamas block | SDD phase(s) | Output |
-| ------------------ | -------------- | -------- |
-| 1. Intake | `sdd-explore` | Exploration report |
-| 2. Proposal | `sdd-propose` | `proposal.md` |
-| 3. Design (PRD level) | `sdd-design` | `design.md` |
-| 4. Task decomposition | `sdd-tasks` | `tasks.md` |
-| 5. Execution | `sdd-spec` + `sdd-apply` + `sdd-verify` | `spec.md`, code, `verify-report.md` |
-| 6. Delivery | `branch-pr` (or `chained-pr`) | Merged PR |
+Every change flows through the `/sdd-*` skill pipeline (explore → propose → spec → design → tasks → apply → verify → archive), leaves its artifacts under `openspec/changes/<change>/`, and promotes its requirements into `openspec/specs/` — the living capability register — on archive. Plans are milestone task graphs under `docs/architecture/milestones/`, governed by the DAG convention of [ADR 0007](docs/adr/0007-adopt-dag-convention-for-task-graphs.md); the delivery loop of [ADR 0008](docs/adr/0008-adopt-the-cachicamas-delivery-loop.md) is the machinery being built to run them.
 
-**Concurrency** is driven by **worktree capacity**, not fixed numbers. v0.0.1 reads `project.setting->>'max_concurrent_tasks'` (JSONB) — default is unlimited. The orchestrator spawns SDD sub-agents inside worktrees and respects the cap.
+Start with [`openspec/project.md`](openspec/project.md) and `openspec/AGENTS.md` for the rules the pipeline enforces.
 
 ## 8. Conventions
 
@@ -255,7 +230,7 @@ Strict TDD is **enabled**. This is non-negotiable for every change.
 2. **GREEN** — write the smallest code that makes the test pass.
 3. **REFACTOR** — clean up without breaking the test.
 
-Boundary tests (e.g., `tests/domain_imports_test.go`) ensure the hexagonal layers stay clean — domain must not import interfaces or adapters. These are the LAST file written in a separate commit so early commits don't fail the boundary check.
+Boundary tests (e.g., `src/domain/imports_test.go`, and the agent module's forward/reverse import guards) keep the layer rules mechanical — domain must not import interfaces or adapters, and no hexagonal service imports the agent module. These are the LAST file written in a separate commit so early commits don't fail the boundary check.
 
 ## 10. Quick Start
 
@@ -297,7 +272,18 @@ docker compose -f docker-compose.yaml -f docker-compose.vps.yaml up -d --build
 
 For VPS production, adjust `CORS_ALLOW_ORIGINS` in `.env` to the real public domain (`https://cachicamas.example.com`). The frontend stays accessible at `http://<host>:3015/`. The browser talks to the Go binary via the internal nginx reverse-proxy (`/api/*`); no cross-origin from the browser's perspective, so CORS is a non-issue in the normal flow.
 
-## 11. The Agent-First Doc Pattern
+## 11. Where This Is Going
+
+The roadmap, in order — each step is a milestone document, planned or to be written:
+
+1. **Finish Layer 2** — the portable agent runtime, 14/24 milestones shipped ([doc 0003](docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md)).
+2. **Ship the coding archetype** — the first occupant of Layer 3, 25 milestones planned ([doc 0004](docs/architecture/milestones/0004-cachicamas-coding-layer-3-task-graph.md)).
+3. **The Database Administrator archetype** — fronts `backend/database_administrator` through an MCP client; the first business system integrated under the one-MCP-server-per-system pattern ([ADR 0009 § D4–D5](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)). Milestone doc to be written when planning starts.
+4. **Further archetypes** — tickets, finance, marketing — each owning its business system's MCP server, each an additive change on the unchanged runtime, each with its own milestone doc when planned.
+
+In parallel: [PRD 0001](docs/prd/0001-cachicamas-delivery-loop.md) (the delivery loop) is re-scoped under the new identity before it generates milestone doc 0005 ([ADR 0009 § D7](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)).
+
+## 12. The Agent-First Doc Pattern
 
 The pattern this README follows is **portable**. Three passes, top to bottom, so an agent (or a hurried human) can find what it needs at the level of detail it needs.
 
@@ -332,28 +318,30 @@ For code, the same three passes apply — the "resumed TOC" becomes a **module/f
 
 **Rule of thumb:** if an agent can answer 80% of "what is this?" by reading pass 1 alone, the doc is well-shaped. Pass 2 exists so it doesn't have to grep. Pass 3 is the detail it reads only when pass 1 + 2 say "yes, this is what I need."
 
-## 12. Review Checklist
+## 13. Review Checklist
 
 A reviewer can confirm each item below without re-reading the whole README. This is the self-grade.
 
-- [ ] reviewer can confirm the logo renders at `docs/assets/cachicamas-logo.png`
-- [ ] reviewer can confirm cachicamas is identified as v0.0.1 thin slice, not a finished framework
-- [ ] reviewer can confirm the SDD pipeline mapping (blocks 1–6 → `sdd-*` phases) is accurate
-- [ ] reviewer can confirm the v0.0.1 out-of-scope items match `openspec/changes/prd-orchestrator/proposal.md`
+- [ ] reviewer can confirm the logo renders at `docs/assets/cachicamas-logo.png` and its alt text names the multiplayer agentic system
+- [ ] reviewer can confirm cachicamas is identified as a multiplayer agentic system for building and running a company, citing [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)
+- [ ] reviewer can confirm Layer 3 is named the archetype layer, and the coding archetype is stated as its first occupant, not its definition
+- [ ] reviewer can confirm the layer statuses match the milestone docs — Layer 1 complete 42/42 (doc 0002), Layer 2 in progress 14/24 (doc 0003), Layer 3 not started 0/25 (doc 0004)
+- [ ] reviewer can confirm the MCP pattern is stated (one MCP server + one owning archetype per business system) and does not contradict [ADR 0005 § D1](docs/adr/0005-promote-agent-stack-to-own-module.md#d1--dependency-rule-v2) (network only, never import)
+- [ ] reviewer can confirm SDD is described as the engineering process, explicitly not the product
+- [ ] reviewer can confirm no references to the removed wiki directory or to the archived prd-orchestrator change remain anywhere in this README
 - [ ] reviewer can confirm the tech stack table matches `openspec/project.md`
 - [ ] reviewer can confirm the hexagonal layout matches `backend/database_administrator/src/`
 - [ ] reviewer can confirm "no Co-Authored-By" is stated and the rule is honored
 - [ ] reviewer can confirm Strict TDD is documented as enabled
 - [ ] reviewer can confirm the Resumed TOC fits on one screen and answers "what is this repo?" in one line
-- [ ] reviewer can confirm the Agent-First pattern section (11) is reusable on docs and adaptable to code
-- [ ] reviewer can confirm there is a wiki `Incompleteness-Log.md` and this README does not contradict it
+- [ ] reviewer can confirm the Agent-First pattern section (12) is reusable on docs and adaptable to code
 - [ ] reviewer can confirm the Quick Start commands match the actual Makefile targets
 
-## 13. Next Step
+## 14. Next Step
 
 1. Read [`openspec/project.md`](openspec/project.md) for the bootstrap artifact (stack, conventions, testing discipline).
-2. Read [`wiki/Incompleteness-Log.md`](wiki/Incompleteness-Log.md) to see what the wiki is honest about not yet knowing.
-3. Pick an active change under `openspec/changes/` and run its next phase (`/sdd-continue` or `/sdd-ff`).
-4. Or start a new change with `/sdd-new <name>` — the orchestrator will route you to `sdd-explore` first.
+2. Read [the v2 architecture reference](docs/architecture/0001-cachicamas-agent-stack-v2.md) for the agent stack, then [ADR 0009](docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) for the identity and vocabulary that amend it.
+3. Read the milestone docs for the current frontier: [doc 0002](docs/architecture/milestones/0002-cachicamas-ai-layer-1-task-graph.md) (Layer 1, complete), [doc 0003](docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md) (Layer 2, active), [doc 0004](docs/architecture/milestones/0004-cachicamas-coding-layer-3-task-graph.md) (the coding archetype, next).
+4. Pick an active change under `openspec/changes/` and run its next phase (`/sdd-continue` or `/sdd-ff`), or start a new change with `/sdd-new <name>`.
 
 If you are an agent: before changing code, search engram (`mem_search` with project `cachicamas`) for prior context on the topic. Save every decision, bug fix, and convention via `mem_save` — the next session depends on it.
