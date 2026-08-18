@@ -2,7 +2,7 @@
 
 > Worktree `cachicamas-worktrees/ag16`, branch `feat/agent-layer2-wave3-ag16`, base `main@09bb30e1`. Strict TDD active (`cd backend/agent && make test`). Single PR, `size:exception` pre-accepted.
 
-## Status: Phases 0-6 complete and committed. Phases 7-9 in progress / remaining.
+## Status: ALL PHASES (0-9) COMPLETE. Change archived.
 
 ## Task 0.1 — Substrate filter tail re-grep (do not trust cited line numbers)
 
@@ -93,11 +93,37 @@ Both filters now carry an identical 46-entry set after AG-16's widening (verifie
 
 `golangci-lint cache clean && make lint` surfaced 2 issues after Phase 0-4's work: `cost_usage.go`'s doc comment didn't start with "Package agent ..." (revive `package-comments` — fixed by adopting the same "Package agent is Layer 2..." form `cancellation.go`/`tool.go`/`scheduler.go` already use), and a De Morgan's-law simplification in `cost_session_test.go`'s S-CST-009 position check (staticcheck QF1001). Both fixed; `make lint` now reports `0 issues` repo-wide.
 
-## Remaining (Phases 7-9, this batch continues)
+## Phase 7 — Documentation (commit `6f11a61d`)
 
-- [ ] Phase 7 — Documentation: doc 0003 reconciliation note, status line, counter bump; checklist row 7.3 stays deliberately unticked (AG-18.1 not shipped).
-- [ ] Phase 8 — OpenSpec promotion (6 delta merges + 1 new capability spec) + `git mv` archive.
-- [ ] Phase 9 — Final gate: full `make test -race`, `make lint`, `gofmt -l`, `make build`, `make vuln-check`, tasks.md self-check.
+- [x] 7.1 Decision 5 reconciliation note inserted on the AG-16 charter, immediately after the Out-of-scope line, following the AG-06 template's exact form. Names both reconciliations: (1) "a retried attempt's tokens are real spend" → sum-over-emitted-events, because `ai.Failure` carries no usage; (2) "usage arriving only on the final stream update" → run-scoped estimate/final axis, because Layer 1 folds every wire-chunk update into one terminal `Completion` and the charter's own out-of-scope line already assigns `Estimate` to the running incremental figure.
+- [x] 7.2 Status line (doc 0003 line 3, one continuous paragraph): "15 of 24" → "16 of 24"; "Wave 3 opens with AG-12…AG-15" → "…AG-16". A new AG-16 narrative sentence inserted following AG-13/14/15's own pattern, before "Layer 2 code now exists and carries behavior".
+- [x] 7.3 Checklist row (now at doc-0003 line `:2174`, not the tasks.md-cited `:2173` — a 1-line drift from this phase's own status-line/reconciliation-note insertions shifting subsequent lines) confirmed left UNTICKED: `- [ ] Every turn emits a cost event; cumulative figures include retries and compaction; estimates are labelled — closed by AG-16.1, AG-18.1.` Grep-confirmed the ONLY checklist row (`- [ ]`/`- [x]` line) naming `AG-16.1`; the other 9 mentions of "AG-16.1" in the doc are register/dependency/traceability rows, not checklist rows.
+- [x] 7.4 No `L2C-0N` row owed — `doc.go`/`doc_contract_guard_test.go` confirmed byte-unchanged (task 5.2). `backend/agent/README.md` grepped for "cost"/"usage"/"token": both hits are unrelated migration-cost prose; no cost-specific section exists to update.
+
+## Phase 8 — OpenSpec promotion + archive (commits `79f8cea6`, this file's own commit for the archive move + report)
+
+- [x] 8.1 All six deltas promoted. Each promoted block diff-verified byte-for-byte against its delta source using `awk` range extraction + `diff` immediately after writing it — NOT trusted on the first attempt. This caught and fixed three genuine transcription errors before they could ship: (a) `agent-protocol-events` — I had paraphrased a markdown link label (`[`agent-cost-events`]` instead of the delta's literal `[`../agent-cost-events/spec.md`]`) and slightly reworded one sentence in the "Subagent harness mechanics" row; both reverted to match verbatim. (b) `agent-run-driver` — an entire sentence ("Two exits emit no cost event at all...") was dropped from my first `R-RUN-011` transcription; caught by the same diff, re-inserted at its correct position. (c) `agent-loop-skeleton` — one single-word regression ("this change's" vs "that change's" in the AG-15 filter-widening paragraph, which the delta's own reproduction states as "this" even though it doesn't touch that specific clause) — fixed by direct comparison against the delta's fresh-read text, not from memory.
+- [x] 8.2 `openspec/specs/agent-cost-events/spec.md` created, diff-verified against the delta source: ONLY the header's "Becomes ... at archive" framing line and the "Sources" line's relative markdown links (which would dangle post-archive) differ — the Sources-line adjustment matches `agent-cancellation-tree`'s own already-promoted precedent for exactly this situation (plain-text "this change's SDD proposal and design document" instead of relative links). Every other line (Purpose through Traceability, all 7 requirements, all 14 non-bite/bite scenarios) is byte-identical.
+- [x] 8.3 `git mv` performed. Verified NOT by trusting the "R" (rename) report but by comparing `git ls-files -s`'s blob SHA-1 hash for all 12 files before and after the move — **all 12 hashes identical**, a cryptographic guarantee against the known truncation-into-placeholder risk, strictly stronger than a visual diff.
+- [x] 8.4 `archive-report.md` written at the archived path, following AG-15's shape (`2026-08-18-cachicamas-agent-retry-failover/archive-report.md`), with one deliberate framing correction: it does NOT claim an independent "Verify verdict" (AG-15's report had one from a completed `sdd-verify` pass; this apply phase has not run `sdd-verify`, so the report states plainly that this is apply-phase self-verification, not a separate verify pass).
+- [x] 8.5 `openspec/changes/archive/WAVE-3-ARCHIVE.md` read and confirmed: exclusively Layer 1's Wave 3 tracker (AI-21…AI-23, archived 2026-08-03, PR #107). No Layer 2 section, no AG-16 mention, no place a Layer 2 milestone belongs. Deliberately NOT edited, per tasks.md's own recorded correction of the orchestrator's literal (but factually incorrect) instruction.
+- [x] 8.6 This file, updated with every remaining phase's evidence.
+
+### The genuine ID collision (S-CAN-012/013 → S-CAN-013/014), found during 8.1
+
+Recorded once here in full (also noted inline at tasks 4.4/4.5 and in the promoted spec itself): the `agent-cancellation-tree` delta's own text mints "S-CAN-012" for R-CAN-002's new AG-16 scenario and "S-CAN-013" for R-CAN-005's — but `S-CAN-012` was ALREADY allocated, since AG-14, to R-CAN-006's pre-existing bite in the shipped `openspec/specs/agent-cancellation-tree/spec.md` (that spec's own header explicitly lists "the bites `S-CAN-010`, `S-CAN-011` and `S-CAN-012`" as already-allocated). This is qualitatively different from the earlier line-citation-drift findings — it is not a stale pointer but an actual ID collision that would have shipped two different scenarios both claiming `S-CAN-012` in the same archived file. Verified via `grep -rn "S-CAN-012\|S-CAN-013"` across the whole change dir AND the promoted specs dir before deciding on a fix. Resolved by renumbering AG-16's two new scenarios to the next actually-free sequential IDs (`S-CAN-013`, `S-CAN-014`), applied during promotion into the canonical spec; the delta source file inside the archived change directory is left exactly as originally authored (it is a historical planning record, not the corrected canonical text); the correction is recorded in three places for full traceability: this file, `tasks.md` (both the per-task notes and the coverage table), and the promoted spec's own header + scenario text.
+
+## Phase 9 — Final gate (evidence gathered fresh, not carried forward from earlier phase runs)
+
+- [x] 9.1 `go test -race ./...` (full module, all 12 packages, not just `src/agent`) — all `ok`, zero FAIL. `github.com/cachicamas/backend/agent/src/ai/openaicompat` took 174.8s (pre-existing conformance suite, unrelated to this change) but passed.
+- [x] 9.2 `golangci-lint cache clean && make lint` — `0 issues`, `go vet` clean.
+- [x] 9.3 `gofmt -l backend/agent` (whole module) lists 14 pre-existing dirty files, ZERO of which overlap this change's 10 touched Go files; `git diff` against `main@09bb30e1` confirms all 14 (spot-checked 6: `event_registry_test.go`, `permission_events.go`, `scheduler.go`, `tool.go`, `reconstruction_test.go`, `cost_events_test.go`) are byte-identical to main — pre-existing repo debt, several explicitly forbidden substrate files. `gofmt -l` scoped to this change's own 10 files: empty.
+- [x] 9.4 `make build` clean. `make vuln-check` (auto-installed `govulncheck`) — JSON mode showed no `"trace"` entries (no reachable vulnerability); human-readable mode confirmed explicitly: **"No vulnerabilities found."** exit code 0.
+- [x] 9.5 Self-check below.
+
+## tasks.md self-check (task 9.5)
+
+Every task 0.1 through 9.4 is `[x]` in the archived `tasks.md`. The coverage table (tasks.md, "Coverage table — every scenario has a task") maps every `S-CST-0NN` (001–014, bites 020/021/022), every touched `S-LSK-0NN`, `S-RUN-0NN`, `S-CAN-0NN` (as `S-CAN-013`/`014` post-renumbering), `S-APE-0NN`, and the doc-0003/OpenSpec rows to at least one task — re-checked against this file's own phase-by-phase evidence above; no gap found.
 
 ## TDD Cycle Evidence
 
