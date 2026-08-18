@@ -777,7 +777,7 @@ type turnAccumulator struct {
 	// ai.ToolCall parts (R-LSK-001 point 5, R-HIS-010 point 1). Never
 	// set on the nil path, so nil-path behavior stays byte-stable.
 	continuation bool
-	textBracket struct {
+	textBracket  struct {
 		msgID     ai.MessageID
 		started   bool
 		ended     bool
@@ -807,6 +807,13 @@ type turnAccumulator struct {
 	finish          ai.FinishReason
 	finishOk        bool
 	fatal           error
+	// usage is the turn's ai.Usage, captured from the Completion event
+	// (AG-16, R-CST-001). Its zero value is ai.Usage{} — every figure
+	// absent — which is exactly the correct reading for a turn whose
+	// provider closed without ever emitting a Completion (S-CST-002):
+	// finalize() still runs, and the emitted cost_turn reports all
+	// five figures absent rather than five invented zeros.
+	usage ai.Usage
 }
 
 // newTurnAccumulator constructs a fresh per-turn walker. continuation
@@ -924,6 +931,10 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 		completion, _ := ev.Completion()
 		t.finish = completion.FinishReason()
 		t.finishOk = true
+		// AG-16 (R-CST-001, R-CST-003): capture usage beside the
+		// existing finish capture. No emission here — finalize()
+		// converts and emits it (loop.go:1001).
+		t.usage = completion.Usage()
 		return true
 
 	case ai.EventKindToolCallStart:

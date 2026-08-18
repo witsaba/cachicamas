@@ -955,7 +955,23 @@ func filterOutLoopFiles(diff string) string {
 				// no wildcard/prefix/directory pattern; byte-in-sync with
 				// loop_hook_test.go's filterOutLoopHookFiles.
 				strings.HasSuffix(path, "/failover_policy.go") ||
-				strings.HasSuffix(path, "/failover_policy_test.go")
+				strings.HasSuffix(path, "/failover_policy_test.go") ||
+				// AG-16 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-16's release scope", S-LSK-025/S-LSK-026):
+				// cost_events.go is released above (the presence
+				// discriminator + accessors, bounded to exactly that);
+				// cost_usage.go is AG-16's new production file;
+				// cost_usage_test.go is its first test file. Each
+				// further AG-16 test-file suffix lands in the same
+				// commit as the file it names first appears in.
+				// cost_events_test.go is deliberately NOT added — AG-16
+				// must not edit it, and a filter entry would remove the
+				// guard that says so. Exact filenames, no
+				// wildcard/prefix/directory pattern; both filters stay
+				// byte-in-sync.
+				strings.HasSuffix(path, "/cost_events.go") ||
+				strings.HasSuffix(path, "/cost_usage.go") ||
+				strings.HasSuffix(path, "/cost_usage_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
@@ -1110,12 +1126,13 @@ func TestTurn_TwoSequentialTurnsShareNothing(t *testing.T) {
 // with a non-empty reasoning round-trip token, then text block
 // start/delta/delta/end, then completion), when the loop re-emits
 // it via Turn(...), then:
-//   (a) reasoning and text are emitted as separate bracket kinds
-//       (message_start_reasoning / message_delta_reasoning /
-//       message_end_reasoning vs message_start_text / etc.);
-//   (b) the assistant message's reasoning-content round-trip token
-//       is byte-equal to the script's token (R-ARE-010, V-REQ-11);
-//   (c) the event order matches the script's emit calls.
+//
+//	(a) reasoning and text are emitted as separate bracket kinds
+//	    (message_start_reasoning / message_delta_reasoning /
+//	    message_end_reasoning vs message_start_text / etc.);
+//	(b) the assistant message's reasoning-content round-trip token
+//	    is byte-equal to the script's token (R-ARE-010, V-REQ-11);
+//	(c) the event order matches the script's emit calls.
 //
 // RED-recorded at Task 3.2: the current loop drops reasoning events
 // on the floor and produces no reasoning Part, so the byte-exact

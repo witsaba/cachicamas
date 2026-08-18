@@ -93,13 +93,20 @@ const (
 	// _ CostLabel = iota skips zero so it is NOT a member.
 	_ CostLabel = iota
 
-	// CostLabelEstimate is the label for a figure emitted before the
-	// stream's final usage update.
+	// CostLabelEstimate is the label for a cost_session figure emitted
+	// as a running total while the run has not yet concluded — the
+	// harness decided to run another logical turn, so more tokens may
+	// follow (AG-16, R-APE-005). A cost_turn figure is never labelled
+	// Estimate: per-turn usage is complete whenever it is known at
+	// all, absence included (R-CST-001).
 	CostLabelEstimate
 
-	// CostLabelFinal is the label for the figure emitted on the
-	// stream's final usage update. Reasoning tokens only arrive on
-	// the final update (doc 0001 § 7 G10).
+	// CostLabelFinal is the label for every cost_turn figure, and for
+	// the cost_session figure emitted at a run's terminal, correcting
+	// every earlier estimate (AG-16, R-APE-005, R-CST-005). Reasoning
+	// tokens only arrive on a turn's final usage update (doc 0001 § 7
+	// G10); the run-scoped estimate/final axis is orthogonal to that
+	// per-turn completeness.
 	CostLabelFinal
 
 	// costLabelLimit is the first value outside the vocabulary.
@@ -162,6 +169,11 @@ type CostFigures struct {
 type CostTurn struct {
 	label   CostLabel
 	figures CostFigures
+	// presence records, per figure, whether Layer 1 reported it
+	// (AG-16, R-CST-002). Beside figures, never inside it — CostFigures
+	// stays byte-unchanged (S-APE-083). Read only through the paired
+	// accessors below.
+	presence costPresence
 }
 
 func (CostTurn) kind() EventKind { return EventKindCostTurn }
@@ -185,7 +197,11 @@ func NewCostTurn(run RunID, turn TurnID, label CostLabel, figures CostFigures) (
 	if turn == "" {
 		return Event{}, ai.Invalid(ai.ErrEmpty, ai.At("turn"))
 	}
-	payload := CostTurn{label: label, figures: figures}
+	// AG-16 (R-APE-004): a caller handing five plain figures through
+	// this public constructor is asserting five figures — presence is
+	// all-reported. The presence-preserving construction path is the
+	// package-private sibling newCostTurnFromUsage (cost_usage.go).
+	payload := CostTurn{label: label, figures: figures, presence: allReportedCostPresence}
 	if violation := payload.validate(nil); violation != nil {
 		return Event{}, violation
 	}
@@ -210,6 +226,33 @@ func (c CostTurn) Label() CostLabel { return c.label }
 // Figures returns the five-field token figures.
 func (c CostTurn) Figures() CostFigures { return c.figures }
 
+// InputTokens returns the input-token count together with whether
+// Layer 1 reported it (AG-16, R-CST-002). (0, false) means absent;
+// (0, true) means a reported nought — the two are never conflated.
+func (c CostTurn) InputTokens() (uint64, bool) { return c.figures.InputTokens, c.presence.input }
+
+// OutputTokens returns the output-token count together with whether
+// Layer 1 reported it (AG-16, R-CST-002).
+func (c CostTurn) OutputTokens() (uint64, bool) { return c.figures.OutputTokens, c.presence.output }
+
+// CacheReadTokens returns the cache-read-token count together with
+// whether Layer 1 reported it (AG-16, R-CST-002).
+func (c CostTurn) CacheReadTokens() (uint64, bool) {
+	return c.figures.CacheReadTokens, c.presence.cacheRead
+}
+
+// CacheWriteTokens returns the cache-write-token count together with
+// whether Layer 1 reported it (AG-16, R-CST-002).
+func (c CostTurn) CacheWriteTokens() (uint64, bool) {
+	return c.figures.CacheWriteTokens, c.presence.cacheWrite
+}
+
+// ReasoningTokens returns the reasoning-token count together with
+// whether Layer 1 reported it (AG-16, R-CST-002).
+func (c CostTurn) ReasoningTokens() (uint64, bool) {
+	return c.figures.ReasoningTokens, c.presence.reasoning
+}
+
 // String renders the payload for a diagnostic reader, naming the
 // type, the label and the input token count — never the figures
 // in full.
@@ -227,6 +270,11 @@ func (c CostTurn) GoString() string { return c.String() }
 type CostSession struct {
 	label   CostLabel
 	figures CostFigures
+	// presence records, per figure, whether Layer 1 reported it
+	// (AG-16, R-CST-002). Beside figures, never inside it — CostFigures
+	// stays byte-unchanged (S-APE-083). Read only through the paired
+	// accessors below.
+	presence costPresence
 }
 
 func (CostSession) kind() EventKind { return EventKindCostSession }
@@ -249,7 +297,11 @@ func NewCostSession(run RunID, label CostLabel, figures CostFigures) (Event, err
 	if run == "" {
 		return Event{}, ai.Invalid(ai.ErrEmpty, ai.At("run"))
 	}
-	payload := CostSession{label: label, figures: figures}
+	// AG-16 (R-APE-004): a caller handing five plain figures through
+	// this public constructor is asserting five figures — presence is
+	// all-reported. The presence-preserving construction path is the
+	// package-private sibling newCostSessionFromTotals (cost_usage.go).
+	payload := CostSession{label: label, figures: figures, presence: allReportedCostPresence}
 	if violation := payload.validate(nil); violation != nil {
 		return Event{}, violation
 	}
@@ -274,6 +326,37 @@ func (c CostSession) Label() CostLabel { return c.label }
 
 // Figures returns the five-field token figures.
 func (c CostSession) Figures() CostFigures { return c.figures }
+
+// InputTokens returns the cumulative input-token count together with
+// whether any contributing turn reported it (AG-16, R-CST-002,
+// R-CST-004). (0, false) means no contributing turn ever reported this
+// figure; (0, true) means it was reported and summed to a nought.
+func (c CostSession) InputTokens() (uint64, bool) { return c.figures.InputTokens, c.presence.input }
+
+// OutputTokens returns the cumulative output-token count together
+// with whether any contributing turn reported it (AG-16, R-CST-002).
+func (c CostSession) OutputTokens() (uint64, bool) { return c.figures.OutputTokens, c.presence.output }
+
+// CacheReadTokens returns the cumulative cache-read-token count
+// together with whether any contributing turn reported it (AG-16,
+// R-CST-002).
+func (c CostSession) CacheReadTokens() (uint64, bool) {
+	return c.figures.CacheReadTokens, c.presence.cacheRead
+}
+
+// CacheWriteTokens returns the cumulative cache-write-token count
+// together with whether any contributing turn reported it (AG-16,
+// R-CST-002).
+func (c CostSession) CacheWriteTokens() (uint64, bool) {
+	return c.figures.CacheWriteTokens, c.presence.cacheWrite
+}
+
+// ReasoningTokens returns the cumulative reasoning-token count
+// together with whether any contributing turn reported it (AG-16,
+// R-CST-002).
+func (c CostSession) ReasoningTokens() (uint64, bool) {
+	return c.figures.ReasoningTokens, c.presence.reasoning
+}
 
 // String renders the payload for a diagnostic reader, naming the
 // type, the label and the input token count — never the figures

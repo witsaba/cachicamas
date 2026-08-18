@@ -386,13 +386,13 @@ func TestTurn_PreRequestHook_NilIdentity(t *testing.T) {
 // Given a hook that returns (ai.Request{}, errHookBoom), when Turn
 // runs, then:
 //
-//   (a) provider.Requests() is empty — provider.Stream was never
-//       called (the hook aborted the turn BEFORE I/O);
-//   (b) the sink drains unblocked — the loop closed sink before
-//       returning the typed error;
-//   (c) the returned error wraps *ai.PreStreamFailure with a
-//       hook-attributing FailureReport.Category
-//       (FailureCategoryUnsupportedCapability).
+//	(a) provider.Requests() is empty — provider.Stream was never
+//	    called (the hook aborted the turn BEFORE I/O);
+//	(b) the sink drains unblocked — the loop closed sink before
+//	    returning the typed error;
+//	(c) the returned error wraps *ai.PreStreamFailure with a
+//	    hook-attributing FailureReport.Category
+//	    (FailureCategoryUnsupportedCapability).
 //
 // Mirrors the existing pre-stream-failure path (loop.go:140-147):
 // close sink, return (ai.Message{}, 0, typedErr).
@@ -515,13 +515,13 @@ func TestTurn_PreRequestHook_CannotMutateInput(t *testing.T) {
 // appended message, when both captured requests are compared via
 // ai.Request.Equal, then:
 //
-//   (a) the captured requests' system regions are byte-equal;
-//   (b) the captured requests' tools regions are byte-equal;
-//   (c) the captured requests' CacheBoundaries() return the same
-//       cascade order (R-ACB-007);
-//   (d) the second captured request has exactly one more message than
-//       the first; the first N messages are content-equal via
-//       Message.Equal (which excludes MessageID identity).
+//	(a) the captured requests' system regions are byte-equal;
+//	(b) the captured requests' tools regions are byte-equal;
+//	(c) the captured requests' CacheBoundaries() return the same
+//	    cascade order (R-ACB-007);
+//	(d) the second captured request has exactly one more message than
+//	    the first; the first N messages are content-equal via
+//	    Message.Equal (which excludes MessageID identity).
 //
 // The walking-skeleton scope emits no tools region, so (b) is
 // vacuously satisfied (both have no tools). The tools check still
@@ -1016,7 +1016,22 @@ func filterOutLoopHookFiles(diff string) string {
 				// failover_policy_test.go, byte-in-sync with loop_test.go's
 				// filterOutLoopFiles.
 				strings.HasSuffix(path, "/failover_policy.go") ||
-				strings.HasSuffix(path, "/failover_policy_test.go")
+				strings.HasSuffix(path, "/failover_policy_test.go") ||
+				// AG-16 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-16's release scope", S-LSK-025/S-LSK-026):
+				// cost_events.go is released above (the presence
+				// discriminator + accessors, bounded to exactly that);
+				// cost_usage.go is AG-16's new production file;
+				// cost_usage_test.go is its first test file. Each
+				// further AG-16 test-file suffix lands in the same
+				// commit as the file it names first appears in.
+				// cost_events_test.go is deliberately NOT added — AG-16
+				// must not edit it, and a filter entry would remove the
+				// guard that says so. Byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/cost_events.go") ||
+				strings.HasSuffix(path, "/cost_usage.go") ||
+				strings.HasSuffix(path, "/cost_usage_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
