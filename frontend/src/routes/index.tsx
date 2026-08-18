@@ -10,11 +10,11 @@ import { useSession } from "~/routes/plugin@auth";
  * decorative imagery, no icons that carry meaning, no
  * hero illustration.  The visual language is built from
  * typographic hierarchy, monospace section numbers (the
- * "agentic" / framework feel — Linear/Cursor-style), and
+ * "agentic" system feel — Linear/Cursor-style), and
  * a subtle gradient accent line at the top of the page.
  *
  * Sections:
- *   [1.0]  The framework   — hero, headline, dual CTA
+ *   [1.0]  The system      — hero, headline, dual CTA
  *   [2.0]  What you track  — 4-item bento grid
  *   [3.0]  The interface   — CLI/code block
  *   [—]    Footer          — text-only, one line
@@ -80,14 +80,14 @@ export default component$(() => {
           class="font-mono text-xs tracking-widest text-slate-500 uppercase"
           data-section="1.0"
         >
-          [1.0] The framework
+          [1.0] The system
         </p>
         <h1 class="mt-3 text-4xl leading-tight font-bold tracking-tight sm:text-5xl">
-          The agentic framework for tracking work.
+          The multiplayer agentic system for running your company.
         </h1>
         <p class="mt-4 max-w-2xl text-lg text-slate-700">
-          Track the organizations, projects, requirements, and milestones that
-          move your software forward — with agents in the loop. Text-first,
+          Work alongside specialist agents — starting with the organizations,
+          projects, requirements, and milestones they operate on. Text-first,
           built for clarity, designed for the AI era.
         </p>
         <div class="mt-8 flex flex-wrap items-center gap-3">
@@ -124,8 +124,9 @@ export default component$(() => {
           Four primitives, one connected graph.
         </h2>
         <p class="mt-3 max-w-2xl text-slate-700">
-          cachicamas models your work as four text-first records. Each one is
-          reachable from the web, the CLI, and the API.
+          cachicamas models your work as four text-first records — the graph
+          its agents operate on. Each one is reachable from the web, the CLI,
+          and the API.
         </p>
         <div class="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((f) => (
@@ -183,7 +184,7 @@ $ cachicamas requirement add \\
       {/* ===== FOOTER ===== */}
       <footer class="mx-auto max-w-5xl px-4 py-12">
         <p class="font-mono text-xs text-slate-500" data-footer>
-          cachicamas · witsaba framework · text-first · aphantasia-friendly
+          cachicamas · multiplayer agentic system · text-first · aphantasia-friendly
         </p>
       </footer>
     </main>
@@ -191,12 +192,12 @@ $ cachicamas requirement add \\
 });
 
 export const head: DocumentHead = {
-  title: "Cachicamas — the agentic framework for tracking work",
+  title: "Cachicamas — the multiplayer agentic system for running your company",
   meta: [
     {
       name: "description",
       content:
-        "Track organizations, projects, requirements, and milestones — text-first, agent-friendly, aphantasia-friendly.",
+        "Work alongside specialist agents on your organizations, projects, requirements, and milestones — text-first, aphantasia-friendly.",
     },
   ],
 };

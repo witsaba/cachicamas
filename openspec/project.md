@@ -9,6 +9,7 @@
 | Field        | Value                                                                |
 | ------------ | -------------------------------------------------------------------- |
 | Project      | `cachicamas`                                                         |
+| Vision       | multiplayer agentic system for building and running a company — agents as archetypes on the 3-layer stack; see [ADR 0009](../docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) and the root README |
 | Repo         | `https://github.com/witsaba/cachicamas`                              |
 | Primary branch | `main`                                                             |
 | Default branch strategy | feature branches → PR to `main`                          |
@@ -35,7 +36,9 @@
 - **Style**: Hexagonal (ports & adapters) under `backend/database_administrator/src/`
   and `backend/workspace_syncer/src/`. **`backend/agent` is layered, not hexagonal** —
   `src/ai` ← `src/agent` ← `src/coding` ← `src/cmd/cachicamas`, per
-  [ADR 0005](../docs/adr/0005-promote-agent-stack-to-own-module.md).
+  [ADR 0005](../docs/adr/0005-promote-agent-stack-to-own-module.md). `src/coding` is
+  the coding archetype, Layer 3's first occupant on the archetype layer
+  ([ADR 0009](../docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)).
   - `cmd/server/` — entrypoint (`main.go`)
   - `application/` — use cases (e.g., `health_service.go`)
   - `domain/` — entities and contracts (e.g., `health.go`)
@@ -90,8 +93,8 @@ the compose stack are expected to grow as services stabilize.
 
 ## Active Changes
 
-- `cachicamas-deep-healthcheck` — proposal only (no spec/design/tasks yet)
-- `cachicamas-tail-sampling` — proposal + spec + design + tasks + verify-report (in flight)
+No active changes at the moment. In-flight changes live under `openspec/changes/`;
+completed changes are archived under `openspec/changes/archive/`.
 
 ## SDD Configuration
 

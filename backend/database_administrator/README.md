@@ -4,6 +4,17 @@ The Go service that owns the `database_administrator` schema and exposes
 the first cachicamas HTTP API: `/health` (liveness) and `/organizations`
 (CRUD over the `organization` table).
 
+## Role under ADR 0009
+
+Under [ADR 0009](../../docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md),
+this service is planned to be fronted by the **Database Administrator
+archetype** through an MCP server/client seam: the service runs its own MCP
+server, and the archetype consumes it over an MCP client (ADR 0009 D4–D5).
+Other archetypes do not touch this system directly — they request database
+work (schema, queries, migrations, capacity) through the Database
+Administrator archetype (ADR 0009 D6). None of that changes what the
+service is today: the hexagonal HTTP API described below.
+
 ## Layout
 
 ```
