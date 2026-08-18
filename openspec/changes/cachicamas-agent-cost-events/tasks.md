@@ -106,8 +106,8 @@ Verified against the shipped worktree: `filterOutLoopFiles` (`loop_test.go`) sta
 - [x] 4.1 Widen `failRun` (`harness.go:335-342`) with an unexported `total costAccumulator` parameter (1 call site, `:595`); emit `cost_session(Final)` best-effort immediately before `NewRunEnd(runID, RunOutcomeFailed, failure)`.
 - [x] 4.2 Widen `windDownRun` (`harness.go:315-327`) with the same parameter (2 call sites, `:540`, `:566`); emit `cost_session(Final)` best-effort after `hist.CloseTurn()` and immediately before `NewRunEnd(runID, outcome, nil)` — preserving `R-CAN-002`'s amended enumerated order: synthesize orphans → close turn → **emit `cost_session(Final)`** → emit run-close → return.
 - [x] 4.3 RED→GREEN: `TestHarness_CostSession_FinalOnFailedRun` (S-CST-012, S-RUN-104): first turn completes with scripted usage, second fails into `R-RUN-011`'s path — assert `cost_session(Final)` immediately before run-close, figures equal cumulative over observed `cost_turn` events, failing turn contributed none, run-close still carries the failed outcome + true typed failure (`R-RTY-012`) as last event, no transcript append, `Run` returns the same error, `CheckStream` unmodified. Also: a run failing on its first turn before any usage reports all-absent, not zero.
-- [x] 4.4 RED→GREEN: `TestHarness_CostSession_FinalOnInterruptedRun` (S-CST-013 / S-CAN-012): run interrupted after ≥1 turn reported usage — order: aborted turn-close (no `cost_turn`) → `cost_session(Final)` → run-close(`Interrupted`, nil failure, last) → sink close; figures = cumulative over observed events; transcript untouched by the emission; a second `Run` on the same harness value starts its own figure from nothing (`R-CST-004` run-scope).
-- [x] 4.5 RED→GREEN: `TestHarness_CostSession_FinalOnShutdownRun` (S-CST-013 / S-CAN-013): shutdown variant of 4.4 — same shape, `RunOutcomeShutdown`; a `Run` invoked after the shutdown flag latches observes **no event whatsoever**, cost events included.
+- [x] 4.4 RED→GREEN: `TestHarness_CostSession_FinalOnInterruptedRun` (S-CST-013 / S-CAN-013): run interrupted after ≥1 turn reported usage — order: aborted turn-close (no `cost_turn`) → `cost_session(Final)` → run-close(`Interrupted`, nil failure, last) → sink close; figures = cumulative over observed events; transcript untouched by the emission; a second `Run` on the same harness value starts its own figure from nothing (`R-CST-004` run-scope). **ID correction (apply-time): the design/delta text calls this "S-CAN-012", which collides with R-CAN-006's pre-existing bite of the same ID in the shipped `agent-cancellation-tree` spec. Renumbered to S-CAN-013 during promotion (task 8.1) — see apply-progress.md.**
+- [x] 4.5 RED→GREEN: `TestHarness_CostSession_FinalOnShutdownRun` (S-CST-013 / S-CAN-014): shutdown variant of 4.4 — same shape, `RunOutcomeShutdown`; a `Run` invoked after the shutdown flag latches observes **no event whatsoever**, cost events included. **ID correction (apply-time): the design/delta text calls this "S-CAN-013", renumbered to S-CAN-014 to stay sequential after the S-CAN-012→013 correction above.**
 
 ## Phase 5 — Scope fence & substrate verification (R-CST-007, NFR-CST-004)
 
@@ -174,8 +174,8 @@ Verified against the shipped worktree: `filterOutLoopFiles` (`loop_test.go`) sta
 | S-RUN-100/101/102/103 (held) | 2.5 |
 | S-RUN-104 | 4.3 |
 | S-CAN-002/005/011 (held) | 2.5 |
-| S-CAN-012 | 4.4 |
-| S-CAN-013 | 4.5 |
+| S-CAN-013 (renumbered from the delta's "S-CAN-012" — collision fix) | 4.4 |
+| S-CAN-014 (renumbered from the delta's "S-CAN-013") | 4.5 |
 | Both substrate filters, exact-filename, byte-in-sync | 0.1, 6.1–6.2 |
 | Doc 0003 note / status / counter / checklist | 7.1–7.4 |
 | OpenSpec promotion + archive | 8.1–8.6 |
