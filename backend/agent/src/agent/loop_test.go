@@ -942,7 +942,13 @@ func filterOutLoopFiles(diff string) string {
 				// predicate's own table-driven test" sanctions the
 				// split. Byte-in-sync with loop_hook_test.go's
 				// filterOutLoopHookFiles.
-				strings.HasSuffix(path, "/retry_decision_internal_test.go")
+				strings.HasSuffix(path, "/retry_decision_internal_test.go") ||
+				// AG-15.2 widening (tasks.md task 2.6): retry_backoff_test.go
+				// is AG-15.2's own test file (S-RTY-005..009, bite
+				// S-RTY-012). Exact filename, no wildcard/prefix/directory
+				// pattern; byte-in-sync with loop_hook_test.go's
+				// filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/retry_backoff_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

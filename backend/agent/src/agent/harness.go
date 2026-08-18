@@ -77,6 +77,12 @@ type Harness struct {
 	// Scheduler.WindDownBound idiom (scheduler.go:611-613).
 	RetryAttempts int
 
+	// RetryTiming is the injected clock and wait-function seam a G4
+	// retry's backoff wait is built from (R-RTY-006, design AD-5).
+	// Zero-default: an unconfigured value resolves to production
+	// defaults via applyRetryTimingDefaults (retry_policy.go).
+	RetryTiming RetryTiming
+
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
 	queue steeringQueue
@@ -441,6 +447,14 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			bound = defaultRetryAttempts
 		}
 
+		// AG-15.2 (R-RTY-006): resolved once per logical turn, mirroring
+		// Layer 1's own Loop, which reseeds its jitter source once per
+		// pre-stream retry budget (ai/internal/retry/retry.go:78-79) —
+		// the harness's analogous unit is one logical turn's own inner
+		// attempt loop below, not the whole multi-turn run.
+		timing := applyRetryTimingDefaults(h.RetryTiming)
+		jitter := newRetryJitter(timing.JitterSeed, timing.NowFunc())
+
 		var msg ai.Message
 		var finish ai.FinishReason
 		var terr error
@@ -504,6 +518,25 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// AG-15.3's addition) — falls through to the ordinary
 			// failure path below.
 			if retryDecision(terr, attempt, bound) != verdictRetry {
+				break
+			}
+
+			// AG-15.2 (R-RTY-007, R-RTY-008, design AD-6): G4 fired —
+			// wait before re-invoking Turn. The wait selects on runCtx,
+			// never a background context, so an interrupt or shutdown
+			// fired while backing off aborts the wait promptly. On a
+			// non-nil sleep error, re-consult the run context's own
+			// cause: a match against a cancellation sentinel routes to
+			// wind-down exactly like an iteration-boundary signal; a
+			// bare cancellation of the caller's own context, matching
+			// neither sentinel, falls through to the ordinary failure
+			// surface below with the original terr still set — parity
+			// with the existing scope rule (R-CAN-001).
+			delay := retryWaitDelay(terr, attempt, timing, jitter)
+			if serr := timing.SleepFunc(runCtx, delay); serr != nil {
+				if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+					return h.windDownRun(sink, stamper, runID, hist, cause)
+				}
 				break
 			}
 		}

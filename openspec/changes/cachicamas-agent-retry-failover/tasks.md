@@ -85,13 +85,13 @@ Commit 2 (`feat(agent): retry a pre-output failure across an inner attempt loop`
 
 ## Phase 2 — AG-15.2: timing seam, backoff, retry-after, ceiling
 
-- [ ] 2.1 RED: `TestRetryTiming_BackoffJitterAndClamp`, `TestHarness_RetryAfterOverridesBackoff` (`S-RTY-007`, sc.1 first Then), `TestHarness_InterruptAbortsBackoff` (`S-RTY-008`, sc.1 second Then), `TestHarness_BoundHoldsAboveH` (`S-RTY-005`, sc.2 first Then). All in `retry_backoff_test.go`, all synchronized via injected `SleepFunc`/channels, zero `time.Sleep`. Record RED.
-- [ ] 2.2 GREEN: add `RetryTiming{NowFunc, SleepFunc, BaseDelay, MaxDelay, JitterSeed}` + `applyDefaults` + `computeBackoff` to `retry_policy.go`; add `Harness.RetryTiming` field; wire backoff wait on `runCtx` at G4, re-check `context.Cause(runCtx)` on sleep error → `windDownRun` for sentinels, fall through otherwise.
-- [ ] 2.3 RED: `TestComposedCeiling_MatchesLayer1Wording` (`S-RTY-009`, sc.2 second Then) reading `ai/internal/retry/doc.go` at a repo-relative path, asserting both the Layer 1 sentences and `retry_policy.go`'s doc wording. Record RED.
-- [ ] 2.4 GREEN: write `retry_policy.go`'s package doc stating `H` counts total attempts, `H × 4 = 12` at defaults, citing `ai/internal/retry/doc.go` verbatim.
-- [ ] 2.5 Bite `S-RTY-012` (RED-first, then revert): perturb the cited wording in a scratch copy / via test-only string substitution proving detection — **never edit the real `ai/internal/retry/doc.go`** — confirm `S-RTY-009` fails. Record RED, revert (leave `ai/internal/retry/doc.go` byte-unchanged against merge base).
-- [ ] 2.6 Widen both substrate filters, adding `/retry_backoff_test.go`.
-- [ ] 2.7 Grep new test files for `time.Sleep`; confirm zero hits (`NFR-RTY-002`).
+- [x] 2.1 RED: `TestRetryTiming_BackoffJitterAndClamp`, `TestHarness_RetryAfterOverridesBackoff` (`S-RTY-007`, sc.1 first Then), `TestHarness_InterruptAbortsBackoff` (`S-RTY-008`, sc.1 second Then), `TestHarness_BoundHoldsAboveH` (`S-RTY-005`, sc.2 first Then). All in `retry_backoff_test.go`, all synchronized via injected `SleepFunc`/channels, zero `time.Sleep`. Record RED.
+- [x] 2.2 GREEN: add `RetryTiming{NowFunc, SleepFunc, BaseDelay, MaxDelay, JitterSeed}` + `applyDefaults` + `computeBackoff` to `retry_policy.go`; add `Harness.RetryTiming` field; wire backoff wait on `runCtx` at G4, re-check `context.Cause(runCtx)` on sleep error → `windDownRun` for sentinels, fall through otherwise.
+- [x] 2.3 RED: `TestComposedCeiling_MatchesLayer1Wording` (`S-RTY-009`, sc.2 second Then) reading `ai/internal/retry/doc.go` at a repo-relative path, asserting both the Layer 1 sentences and `retry_policy.go`'s doc wording. Record RED.
+- [x] 2.4 GREEN: write `retry_policy.go`'s package doc stating `H` counts total attempts, `H × 4 = 12` at defaults, citing `ai/internal/retry/doc.go` verbatim.
+- [x] 2.5 Bite `S-RTY-012` (RED-first, then revert): perturb the cited wording in a scratch copy / via test-only string substitution proving detection — **never edit the real `ai/internal/retry/doc.go`** — confirm `S-RTY-009` fails. Record RED, revert (leave `ai/internal/retry/doc.go` byte-unchanged against merge base).
+- [x] 2.6 Widen both substrate filters, adding `/retry_backoff_test.go`.
+- [x] 2.7 Grep new test files for `time.Sleep`; confirm zero hits (`NFR-RTY-002`).
 
 Commit 3 (`feat(agent): inject retry timing, honor retry-after, state the composed ceiling`): 2.1–2.6.
 
