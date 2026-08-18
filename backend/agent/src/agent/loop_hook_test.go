@@ -993,7 +993,15 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/cancellation_interrupt_test.go") ||
 				strings.HasSuffix(path, "/cancellation_shutdown_test.go") ||
 				strings.HasSuffix(path, "/cancellation_winddown_test.go") ||
-				strings.HasSuffix(path, "/cancellation_events_test.go")
+				strings.HasSuffix(path, "/cancellation_events_test.go") ||
+				// AG-15 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-15 needs no release and widens both filters by
+				// name", S-LSK-023): retry_policy.go is AG-15's first
+				// new production file; retry_policy_test.go is its
+				// first test file. Byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/retry_policy.go") ||
+				strings.HasSuffix(path, "/retry_policy_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

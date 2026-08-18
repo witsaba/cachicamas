@@ -303,6 +303,15 @@ func Turn(
 	// Build the request from system + transcript + opts (D5a, R-LSK-001).
 	req, err := buildLoopRequest(opts, system, transcript)
 	if err != nil {
+		// AG-15 D1 (R-LSK-001 amendment, S-LSK-021): once turn_start
+		// has been emitted, every failure exit MUST close the turn
+		// bracket it opened before closing the sink — mirroring the
+		// mid-stream block below (loop.go:398-406). Best-effort: if
+		// the wrap or a constructor fails, the emission is skipped
+		// and this path's original error is still returned unchanged
+		// (the ferr == nil / terr == nil guard posture already at
+		// loop.go:388-404).
+		emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, err)
 		closeSink(sink)
 		return ai.Message{}, 0, err
 	}
@@ -320,6 +329,16 @@ func Turn(
 			Category:    ai.FailureCategoryUnsupportedCapability,
 			StatusClass: 4,
 		})
+		// AG-15 D1: the same bracket-closing obligation as the build
+		// path above. typedErr is already the *ai.Failure this path
+		// returns, so preStreamAbortFailure's errors.As arm wraps it
+		// AS ITSELF — one construction feeds both the returned error
+		// and the emitted failure. Skipped when perr != nil: no typed
+		// failure exists to emit in that (practically unreachable)
+		// case.
+		if perr == nil {
+			emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, typedErr)
+		}
 		closeSink(sink)
 		if perr != nil {
 			return ai.Message{}, 0, perr
@@ -333,7 +352,10 @@ func Turn(
 	if streamErr != nil {
 		// Pre-stream failure (V-PRV-04): no producer goroutine, no
 		// channel. The walking skeleton closes sink and surfaces the
-		// typed error to the caller.
+		// typed error to the caller. AG-15 D1: the same
+		// bracket-closing obligation as the other two pre-stream
+		// paths, before the close.
+		emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, streamErr)
 		closeSink(sink)
 		return ai.Message{}, 0, streamErr
 	}
@@ -572,6 +594,57 @@ func cancellationTurnFailure(cause error) (*Failure, error) {
 		return nil, ferr
 	}
 	return NewFailure(aiFailure)
+}
+
+// preStreamAbortFailure builds the typed *Failure a pre-stream
+// abort's turn_end carries (R-LSK-001, AG-15 D1 — agent-loop-skeleton
+// delta AD-1 sub-question 1). An err that already IS an *ai.Failure —
+// the hook path's own typed pre-stream failure (loop.go:319-322) and
+// whatever provider.Stream returned (loop.go:332-338) — is wrapped as
+// itself via errors.As, preserving its category, retryability,
+// retry-after, partial-output and delivery readings unchanged (the
+// retry.go:119-125 precedent: errors.As over a bare type assertion).
+// A plain Go error — the request-build path's own error
+// (loop.go:304-308) — is wrapped as a fresh pre-stream failure, since
+// a pre-stream abort truthfully crossed no carrier
+// (ai.DeliveryPreStream, provider_failure.go:610-612). One helper
+// serves all three call sites.
+func preStreamAbortFailure(err error) (*Failure, error) {
+	var aiFailure *ai.Failure
+	if errors.As(err, &aiFailure) {
+		return NewFailure(aiFailure)
+	}
+	built, ferr := ai.PreStreamFailure(ai.FailureReport{
+		Category: ai.FailureCategoryUnavailable,
+		Cause:    err,
+	})
+	if ferr != nil {
+		return nil, ferr
+	}
+	return NewFailure(built)
+}
+
+// emitPreStreamAbort emits the turn_end(Aborted) — and, on the
+// nil-continuation path (ownsRunBracket), the run_end(Failed) — that
+// AG-15 D1 adds ahead of each of Turn's three pre-stream failure
+// paths, before the caller closes sink (R-LSK-001 amendment,
+// S-LSK-021). Best-effort, matching the mid-stream block's own guard
+// posture (loop.go:387-406): if preStreamAbortFailure or a
+// constructor fails, the emission is skipped silently and the
+// caller's own original error is still returned unchanged.
+func emitPreStreamAbort(sink chan<- *Event, stamper *LaneStamper, runID RunID, turnID TurnID, ownsRunBracket bool, err error) {
+	failure, ferr := preStreamAbortFailure(err)
+	if ferr != nil {
+		return
+	}
+	if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
+		emitStamped(sink, stamper, turnEnd)
+	}
+	if ownsRunBracket {
+		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+			emitStamped(sink, stamper, runEnd)
+		}
+	}
 }
 
 // outcomeForFinish maps a normalized ai.FinishReason to its TurnOutcome
