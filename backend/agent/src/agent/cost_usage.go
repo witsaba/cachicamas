@@ -1,5 +1,7 @@
-// AG-16 — usage capture, the presence-preserving conversion, and the
-// run-scoped cumulative accumulator (R-CST-001..006).
+// Package agent is Layer 2 of the cachicamas agent stack. This file
+// (cost_usage.go) hosts AG-16 — usage capture, the presence-preserving
+// conversion, and the run-scoped cumulative accumulator
+// (R-CST-001..006).
 //
 // This file is package-private end to end: no Layer 3 exists yet
 // (0003:110), external tests read cost events through the paired

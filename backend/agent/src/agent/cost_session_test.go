@@ -457,7 +457,7 @@ func TestHarness_CostSession_EstimateThenFinal(t *testing.T) {
 	if turnEndIdx == -1 || turnStartTwoIdx == -1 || estimateIdx == -1 {
 		t.Fatalf("could not locate turn_end/second turn_start/estimate indices: %d/%d/%d", turnEndIdx, turnStartTwoIdx, estimateIdx)
 	}
-	if !(turnEndIdx < estimateIdx && estimateIdx < turnStartTwoIdx) {
+	if turnEndIdx >= estimateIdx || estimateIdx >= turnStartTwoIdx {
 		t.Errorf("estimate index %d is not strictly between turn_end (%d) and the second turn_start (%d)", estimateIdx, turnEndIdx, turnStartTwoIdx)
 	}
 }

@@ -9,6 +9,7 @@ package agent_test
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -547,5 +548,50 @@ func TestTurn_Standalone_NoCostSession(t *testing.T) {
 		if _, ok := ev.CostSession(); ok {
 			t.Error("recorded a cost_session event from a standalone Turn call, want none — cost_session is harness-scoped")
 		}
+	}
+}
+
+// TestCost_ScopeFence — S-CST-014, R-CST-007. This test owns only the
+// diff half of the scenario: git diff over backend/agent/src/ai/ and
+// over go.mod/go.sum must be empty. The other two clauses —
+// S-APE-083's forbidden-substring scan and reflection walk, and the
+// every-kind-constructible guard — are proven by cost_events_test.go's
+// own TestCost_PayloadShape_NoMoneyField and event_registry_test.go's
+// own kind-count test, BOTH byte-unchanged by this change and
+// therefore not duplicated here; their continuing to pass unedited
+// alongside this test in the same `make test` run is itself the
+// evidence for those two clauses.
+func TestCost_ScopeFence(t *testing.T) {
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+
+	mainRef := os.Getenv("AG16_BASE_REF")
+	if mainRef == "" {
+		// Fall back to the merge-base with origin/main (the most
+		// recent common ancestor) — mirrors S-LSK-006's
+		// TestTurn_SubstrateUntouched so the test survives merge.
+		out, mbErr := gitOutput(t, root, "merge-base", "HEAD", "origin/main")
+		if mbErr != nil {
+			t.Fatalf("scope fence: cannot determine base ref (set AG16_BASE_REF): %v", mbErr)
+		}
+		mainRef = out
+	}
+
+	aiDiff, err := gitDiff(t, root, mainRef, "backend/agent/src/ai/")
+	if err != nil {
+		t.Fatalf("git diff %s -- backend/agent/src/ai/ failed: %v", mainRef, err)
+	}
+	if len(aiDiff) != 0 {
+		t.Errorf("backend/agent/src/ai/ was edited (R-CST-007 violated — Layer 1 is consumed, never edited):\n%s", aiDiff)
+	}
+
+	goModSum, err := gitDiff(t, root, mainRef, "backend/agent/go.mod", "backend/agent/go.sum")
+	if err != nil {
+		t.Fatalf("git diff %s -- backend/agent/go.mod go.sum failed: %v", mainRef, err)
+	}
+	if len(goModSum) != 0 {
+		t.Errorf("go.mod / go.sum drifted from main (R-CST-007 violated — no new top-level Go deps):\n%s", goModSum)
 	}
 }
