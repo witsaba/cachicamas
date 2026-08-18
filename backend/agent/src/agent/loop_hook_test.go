@@ -1011,7 +1011,12 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/retry_decision_internal_test.go") ||
 				// AG-15.2 widening (tasks.md task 2.6): retry_backoff_test.go,
 				// byte-in-sync with loop_test.go's filterOutLoopFiles.
-				strings.HasSuffix(path, "/retry_backoff_test.go")
+				strings.HasSuffix(path, "/retry_backoff_test.go") ||
+				// AG-15.3 widening (tasks.md task 3.3): failover_policy.go,
+				// failover_policy_test.go, byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/failover_policy.go") ||
+				strings.HasSuffix(path, "/failover_policy_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

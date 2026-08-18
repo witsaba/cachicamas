@@ -948,7 +948,14 @@ func filterOutLoopFiles(diff string) string {
 				// S-RTY-012). Exact filename, no wildcard/prefix/directory
 				// pattern; byte-in-sync with loop_hook_test.go's
 				// filterOutLoopHookFiles.
-				strings.HasSuffix(path, "/retry_backoff_test.go")
+				strings.HasSuffix(path, "/retry_backoff_test.go") ||
+				// AG-15.3 widening (tasks.md task 3.3): failover_policy.go
+				// is AG-15.3's new production file; failover_policy_test.go
+				// is its test file (S-RTY-013, S-RTY-014). Exact filenames,
+				// no wildcard/prefix/directory pattern; byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/failover_policy.go") ||
+				strings.HasSuffix(path, "/failover_policy_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

@@ -83,6 +83,13 @@ type Harness struct {
 	// defaults via applyRetryTimingDefaults (retry_policy.go).
 	RetryTiming RetryTiming
 
+	// Failover is the failover seam consulted exactly once at G5, the
+	// attempt bound's exhaustion (R-RTY-010, design AD-7). Nil-default:
+	// a nil value is never called and behaves as a decline
+	// (R-RTY-011, the inertness pin) — NoOpFailoverPolicy{} is the one
+	// shipped, installable implementation with the identical behavior.
+	Failover FailoverPolicy
+
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
 	queue steeringQueue
@@ -458,6 +465,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		var msg ai.Message
 		var finish ai.FinishReason
 		var terr error
+		var verdict retryVerdict
 
 		// AG-15.1 (R-RTY-001, R-RTY-002, design AD-2): the inner
 		// attempt loop re-invokes Turn for this SAME logical turn on
@@ -514,10 +522,10 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 
 			// R-RTY-001 gates G1-G5, first match wins. Any verdict
 			// other than "retry" — surface (G1-G3), or the attempt
-			// bound reached (G5, consulting the failover seam is
-			// AG-15.3's addition) — falls through to the ordinary
-			// failure path below.
-			if retryDecision(terr, attempt, bound) != verdictRetry {
+			// bound reached (G5, consulting the failover seam below)
+			// — falls through to the ordinary failure path below.
+			verdict = retryDecision(terr, attempt, bound)
+			if verdict != verdictRetry {
 				break
 			}
 
@@ -542,6 +550,21 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		}
 
 		if terr != nil {
+			// AG-15.3 (R-RTY-010): G5 fired — the attempt bound was
+			// reached, not merely surfaced (G1-G3). Consult the
+			// failover seam exactly once, before the terminal report,
+			// with the true attempt count and the final attempt's own
+			// typed failure. A nil policy is never called (the
+			// inertness pin, R-RTY-011); v1's FailoverVerdict is
+			// always the declining zero value, so the exhausted-retry
+			// report always surfaces regardless of the verdict read.
+			if verdict == verdictExhausted && h.Failover != nil {
+				var failure *ai.Failure
+				if errors.As(terr, &failure) {
+					h.Failover.Resolve(runCtx, FailoverPrompt{Attempts: bound, Failure: failure})
+				}
+			}
+
 			// R-RUN-011: a failed turn ends the run typed, with no
 			// append, no CloseTurn, and no fallback. The turn's own
 			// typed closing brackets (turn_end(Aborted) on every

@@ -97,9 +97,9 @@ Commit 3 (`feat(agent): inject retry timing, honor retry-after, state the compos
 
 ## Phase 3 — AG-15.3: the failover seam (parallel with Phase 2 after Phase 1 lands)
 
-- [ ] 3.1 RED: `TestFailover_ConsultedOnceAtExhaustion` (`S-RTY-013`, sc.1) with a recording `FailoverPolicy`; `TestFailover_InertnessNilVsNoOp` (`S-RTY-014`, sc.2) running one fixture twice. Record RED.
-- [ ] 3.2 GREEN: add `FailoverPolicy` interface, `FailoverPrompt{Attempts int; Failure *ai.Failure}`, `FailoverVerdict{}` (zero-value declines), `NoOpFailoverPolicy{}` to `failover_policy.go`; add `Harness.Failover FailoverPolicy` (nil-default); consult at G5 before the terminal report.
-- [ ] 3.3 Widen both substrate filters, adding `/failover_policy.go` + `/failover_policy_test.go`.
+- [x] 3.1 RED: `TestFailover_ConsultedOnceAtExhaustion` (`S-RTY-013`, sc.1) with a recording `FailoverPolicy`; `TestFailover_InertnessNilVsNoOp` (`S-RTY-014`, sc.2) running one fixture twice. Record RED.
+- [x] 3.2 GREEN: add `FailoverPolicy` interface, `FailoverPrompt{Attempts int; Failure *ai.Failure}`, `FailoverVerdict{}` (zero-value declines), `NoOpFailoverPolicy{}` to `failover_policy.go`; add `Harness.Failover FailoverPolicy` (nil-default); consult at G5 before the terminal report.
+- [x] 3.3 Widen both substrate filters, adding `/failover_policy.go` + `/failover_policy_test.go`.
 
 Commit 4 (`feat(agent): consult the failover seam once at retry exhaustion`): 3.1–3.3.
 
