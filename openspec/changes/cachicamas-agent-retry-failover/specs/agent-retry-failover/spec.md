@@ -153,7 +153,9 @@ This closes the Layer 2 half of `R-AIS-044 / S-2` (`ai-stream-lifecycle/spec.md:
 #### Scenarios
 
 - **S-RTY-009** — **Charter AG-15.2 scenario 2, second Then.** Given the Layer 1 retry helper's package documentation read as a file at a repository-relative path and this capability's own policy documentation, when the cross-layer test runs, then the Layer 1 sentences it cites are present verbatim in the Layer 1 file, this capability's documentation states the composed formula in the same wording together with the value the shipped defaults evaluate to and the total-attempts convention, and the Layer 1 file is byte-unchanged against the merge base.
-- **S-RTY-012** — **(bite)** RED-first. Given a scratch tree in which the cited wording in the Layer 1 package documentation is perturbed, when `S-RTY-009` runs, then it FAILS reporting the divergence — proving the cross-layer contract is enforced by a test rather than asserted by a comment. RED-recorded BEFORE `S-RTY-009` is GREEN, then reverted, leaving the Layer 1 file byte-unchanged.
+- **S-RTY-012** — **(bite)** RED-first. Given a scratch tree in which one of the cited Layer 1 sentences is perturbed **in the test's own expectation set** (`wantLayer1RetryDocSentences`), when `S-RTY-009` runs, then it FAILS reporting the divergence — proving the cross-layer contract is enforced by a test rather than asserted by a comment. RED-recorded BEFORE `S-RTY-009` is GREEN, then reverted.
+
+  **Why the expectation operand and not the Layer 1 file.** `R-RUN-012` forbids editing anything under `backend/agent/src/ai/**`, transient and reverted mutations included, so this bite cannot perturb `ai/internal/retry/doc.go` even temporarily. The proving power is unchanged: the check is `strings.Contains(fileContent, want)`, symmetric in its two operands, so perturbing either side breaks the same comparison and yields the same observable failure. Note the resulting guarantee is stronger than a revert — the Layer 1 file is byte-unchanged because it is never written at all.
 
 ### R-RTY-010 — The failover seam is a named injection point consulted exactly once at exhaustion
 

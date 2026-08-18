@@ -374,6 +374,12 @@ func TestHarness_RetryVisibleAttempts(t *testing.T) {
 		System:        "system prompt for retry visible attempts",
 		History:       hist,
 		RetryAttempts: bound,
+		// S-RTY-002's Given requires a sleep that returns without
+		// waiting, and R-RTY-006/NFR-RTY-002 forbid a test reaching
+		// the wall clock. Omitting this field is not inert: it falls
+		// through to the production DefaultRetrySleep and really
+		// sleeps BaseDelay between attempts.
+		RetryTiming: agent.RetryTiming{SleepFunc: instantSleep},
 	}
 
 	sink := make(chan *agent.Event, 64)
