@@ -95,3 +95,41 @@ func newCostSessionFromTotals(run RunID, label CostLabel, f CostFigures, p costP
 	}
 	return Event{payload: payload, run: run}, nil
 }
+
+// costAccumulator is the run-scoped cumulative (R-CST-004): a local in
+// Harness.Run's own stack frame, never a Harness field (R-CAN-002) —
+// Harness is value-form, serially reused, and carries no cross-run
+// state.
+type costAccumulator struct {
+	figures  CostFigures
+	presence costPresence
+}
+
+// add folds one observed cost_turn into the running total, per figure
+// independently (R-CST-004's algebra): absence is the additive
+// identity in value, and presence is OR — a reported nought survives
+// (absent + reported 0 → reported 0), and a figure no turn ever
+// reported stays absent on the cumulative, never a fabricated 0.
+// Plain uint64 addition, no saturation: each contribution is bounded
+// by int64 max (Layer 1 non-negativity), so overflow is unreachable
+// in any real run.
+func (a *costAccumulator) add(c CostTurn) {
+	a.figures.InputTokens += c.figures.InputTokens
+	a.figures.OutputTokens += c.figures.OutputTokens
+	a.figures.CacheReadTokens += c.figures.CacheReadTokens
+	a.figures.CacheWriteTokens += c.figures.CacheWriteTokens
+	a.figures.ReasoningTokens += c.figures.ReasoningTokens
+
+	a.presence.input = a.presence.input || c.presence.input
+	a.presence.output = a.presence.output || c.presence.output
+	a.presence.cacheRead = a.presence.cacheRead || c.presence.cacheRead
+	a.presence.cacheWrite = a.presence.cacheWrite || c.presence.cacheWrite
+	a.presence.reasoning = a.presence.reasoning || c.presence.reasoning
+}
+
+// sessionEvent constructs a cost_session event carrying a's current
+// totals under label (R-CST-005, R-CST-006) — Estimate for a running
+// total between turns, Final for the run-terminal figure.
+func (a *costAccumulator) sessionEvent(run RunID, label CostLabel) (Event, error) {
+	return newCostSessionFromTotals(run, label, a.figures, a.presence)
+}

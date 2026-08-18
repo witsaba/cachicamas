@@ -1022,16 +1022,18 @@ func filterOutLoopHookFiles(diff string) string {
 				// cost_events.go is released above (the presence
 				// discriminator + accessors, bounded to exactly that);
 				// cost_usage.go is AG-16's new production file;
-				// cost_usage_test.go is its first test file. Each
-				// further AG-16 test-file suffix lands in the same
-				// commit as the file it names first appears in.
+				// cost_usage_test.go, cost_turn_emission_test.go and
+				// cost_session_test.go are its test files, each landed
+				// in the same commit as the scenarios it introduces.
 				// cost_events_test.go is deliberately NOT added — AG-16
 				// must not edit it, and a filter entry would remove the
 				// guard that says so. Byte-in-sync with loop_test.go's
 				// filterOutLoopFiles.
 				strings.HasSuffix(path, "/cost_events.go") ||
 				strings.HasSuffix(path, "/cost_usage.go") ||
-				strings.HasSuffix(path, "/cost_usage_test.go")
+				strings.HasSuffix(path, "/cost_usage_test.go") ||
+				strings.HasSuffix(path, "/cost_turn_emission_test.go") ||
+				strings.HasSuffix(path, "/cost_session_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

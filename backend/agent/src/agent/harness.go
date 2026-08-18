@@ -312,13 +312,22 @@ func typedHarnessFailureFromError(cause error) (*Failure, error) {
 // calls' own errors, exactly as failRun is best-effort on
 // wrapHarnessFailure/NewRunEnd: cause is the authoritative return
 // value regardless.
-func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, hist *History, cause error) (ai.Message, ai.FinishReason, error) {
+func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, hist *History, total costAccumulator, cause error) (ai.Message, ai.FinishReason, error) {
 	_, _ = hist.SynthesizeOrphans()
 	_ = hist.CloseTurn()
 
 	outcome := RunOutcomeInterrupted
 	if errors.Is(cause, ErrShutdown) {
 		outcome = RunOutcomeShutdown
+	}
+	// AG-16 (R-CST-006, R-CAN-002's amended enumerated order): emit
+	// the run-scoped final cost figure immediately before the
+	// run-close — tokens spent before a cancellation are real spend.
+	// Best-effort and independent of the run-close's own construction:
+	// if the payload cannot be built, the emission is skipped and the
+	// wind-down proceeds unchanged.
+	if sessionEvent, serr := total.sessionEvent(runID, CostLabelFinal); serr == nil {
+		sendStamped(sink, stamper, sessionEvent)
 	}
 	if runEnd, rerr := NewRunEnd(runID, outcome, nil); rerr == nil {
 		sendStamped(sink, stamper, runEnd)
@@ -332,7 +341,16 @@ func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID Ru
 // fallback. cause is returned unwrapped as Run's own error, so the
 // caller's errors.Is/errors.As chain reaches the turn's own typed
 // rejection; the wrapped *Failure is used only for the event payload.
-func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, cause error) (ai.Message, ai.FinishReason, error) {
+func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, total costAccumulator, cause error) (ai.Message, ai.FinishReason, error) {
+	// AG-16 (R-CST-006): tokens spent before a failure are real spend
+	// — emit the run-scoped final cost figure immediately before the
+	// run-close, best-effort and independent of the run-close's own
+	// construction. The failing turn itself contributed no cost_turn
+	// (it closed aborted), so total already carries only what really
+	// ran.
+	if sessionEvent, serr := total.sessionEvent(runID, CostLabelFinal); serr == nil {
+		sendStamped(sink, stamper, sessionEvent)
+	}
 	if failure, ferr := typedHarnessFailureFromError(cause); ferr == nil {
 		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
 			sendStamped(sink, stamper, runEnd)
@@ -435,6 +453,16 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	runID := mintHarnessRunID()
 	stamper := &LaneStamper{}
 
+	// AG-16 (R-CST-004): the run-scoped cumulative, a local in Run's
+	// own stack frame — never a Harness field (R-CAN-002). Declared
+	// before the run-open so it is in scope for every failRun/
+	// windDownRun call site below, including the ones that precede
+	// the first turn. Written only by the live forwarder goroutine
+	// further down and read only after <-forwarderDone has
+	// synchronized with it (close-of-channel happens-before), so
+	// every read below is race-free by construction.
+	var total costAccumulator
+
 	runStart, err := NewRunStart(runID)
 	if err != nil {
 		return ai.Message{}, 0, err
@@ -442,7 +470,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	sendStamped(sink, stamper, runStart)
 
 	if err := hist.Append(prompt); err != nil {
-		return h.failRun(sink, stamper, runID, err)
+		return h.failRun(sink, stamper, runID, total, err)
 	}
 
 	var lastMsg ai.Message
@@ -458,12 +486,12 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// there, since Interrupt/Shutdown can only reach a live
 		// cancelRun, set above).
 		if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
-			return h.windDownRun(sink, stamper, runID, hist, cause)
+			return h.windDownRun(sink, stamper, runID, hist, total, cause)
 		}
 
 		for _, m := range h.queue.drain() {
 			if err := hist.Append(m); err != nil {
-				return h.failRun(sink, stamper, runID, err)
+				return h.failRun(sink, stamper, runID, total, err)
 			}
 		}
 
@@ -505,6 +533,16 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			go func() {
 				defer close(forwarderDone)
 				for ev := range turnSink {
+					// AG-16 (R-CST-004, R-RUN-003): a pure read on the
+					// existing single forwarding path — the event is
+					// still forwarded exactly once, unmodified. Every
+					// attempt that reaches a Completion emits its own
+					// cost_turn inside its own bracket, so this counts
+					// retries by construction, with no retry-awareness
+					// here at all.
+					if ct, ok := ev.CostTurn(); ok {
+						total.add(ct)
+					}
 					sink <- ev
 				}
 			}()
@@ -537,7 +575,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// and falls through to the retry predicate below
 			// unchanged (the scope line, R-CAN-001).
 			if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
-				return h.windDownRun(sink, stamper, runID, hist, cause)
+				return h.windDownRun(sink, stamper, runID, hist, total, cause)
 			}
 
 			// R-RTY-001 gates G1-G5, first match wins. Any verdict
@@ -563,7 +601,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			delay := retryWaitDelay(terr, attempt, timing, jitter)
 			if serr := timing.SleepFunc(runCtx, delay); serr != nil {
 				if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
-					return h.windDownRun(sink, stamper, runID, hist, cause)
+					return h.windDownRun(sink, stamper, runID, hist, total, cause)
 				}
 				break
 			}
@@ -592,25 +630,38 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// already forwarded by the loop above, inside each
 			// attempt's own still-open turn bracket; failRun closes
 			// the run's own bracket.
-			return h.failRun(sink, stamper, runID, terr)
+			return h.failRun(sink, stamper, runID, total, terr)
 		}
 
 		if err := hist.CloseTurn(); err != nil {
-			return h.failRun(sink, stamper, runID, err)
+			return h.failRun(sink, stamper, runID, total, err)
 		}
 
 		lastMsg, lastFinish = msg, finish
 
 		switch finish {
 		case ai.FinishReasonToolCalls, ai.FinishReasonPauseTurn:
+			// AG-16 (R-CST-005): the driver decided to run another
+			// logical turn — the run has not concluded, so the running
+			// total is a running Estimate, not yet Final.
+			if sessionEvent, serr := total.sessionEvent(runID, CostLabelEstimate); serr == nil {
+				sendStamped(sink, stamper, sessionEvent)
+			}
 			continue
 		default:
 			took, queued := h.queue.takeOrClose()
 			if took {
 				for _, m := range queued {
 					if err := hist.Append(m); err != nil {
-						return h.failRun(sink, stamper, runID, err)
+						return h.failRun(sink, stamper, runID, total, err)
 					}
+				}
+				// AG-16 (R-CST-005): a steered message arrived at the
+				// terminal decision, so the driver runs another logical
+				// turn — same Estimate rule as the ToolCalls/PauseTurn
+				// arm above.
+				if sessionEvent, serr := total.sessionEvent(runID, CostLabelEstimate); serr == nil {
+					sendStamped(sink, stamper, sessionEvent)
 				}
 				continue
 			}
@@ -618,6 +669,13 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		break
 	}
 
+	// AG-16 (R-CST-005, R-CST-006): the run-terminal cost_session,
+	// immediately before the success run-close, correcting every
+	// earlier estimate. Best-effort and independent of the run-close's
+	// own construction.
+	if sessionEvent, serr := total.sessionEvent(runID, CostLabelFinal); serr == nil {
+		sendStamped(sink, stamper, sessionEvent)
+	}
 	runEnd, rerr := NewRunEnd(runID, RunOutcomeCompleted, nil)
 	if rerr == nil {
 		sendStamped(sink, stamper, runEnd)
