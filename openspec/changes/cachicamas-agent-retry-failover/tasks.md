@@ -113,12 +113,12 @@ Commit 5 (`fix(agent): preserve the true failure category on an exhausted-retry 
 
 ## Phase 5 — Documentation (part of the deliverable)
 
-- [ ] 5.1 `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md:2172` — tick `- [x] Partial-output failures are never silently retried; retry attempts are visible events — closed by AG-15.1.`
-- [ ] 5.2 Same doc, line 3 status header: extend "Wave 3 opens with AG-12…AG-14" prose to include AG-15, following AG-13/AG-14's narrative pattern (what AG-15 closes: G8's Layer 2 half, the retry predicate, backoff, the failover seam).
-- [ ] 5.3 Same doc: bump the milestone counter from **14 of 24** to **15 of 24** in the status line.
-- [ ] 5.4 R-15/G8 back-annotation: no separate checkbox exists for R-15 (line 69 is a static row); the checklist tick at 5.1 is the closing annotation — confirm no other `- [ ]` in the doc names AG-15 as its closer besides `:2172`.
-- [ ] 5.5 Composed-ceiling documentation (H × 4 = 12) lives in `retry_policy.go`'s package doc (task 2.4) — this is "where both layers' readers find it" per the charter's `0003:1455` note, which is already satisfied by the shipped `ai/internal/retry/doc.go` half; no charter text edit needed.
-- [ ] 5.6 Flag for `sdd-verify`/archive: `specs/agent-loop-skeleton/spec.md` carries an unusual `## MODIFIED Header — the allocated scenario range` section (`:10-12`, extending `S-LSK-020` → `S-LSK-023`) — confirm the archive step applies this header edit, not only the `MODIFIED Requirements` blocks.
+- [x] 5.1 `docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md:2172` — tick `- [x] Partial-output failures are never silently retried; retry attempts are visible events — closed by AG-15.1.`
+- [x] 5.2 Same doc, line 3 status header: extend "Wave 3 opens with AG-12…AG-14" prose to include AG-15, following AG-13/AG-14's narrative pattern (what AG-15 closes: G8's Layer 2 half, the retry predicate, backoff, the failover seam).
+- [x] 5.3 Same doc: bump the milestone counter from **14 of 24** to **15 of 24** in the status line.
+- [x] 5.4 R-15/G8 back-annotation: no separate checkbox exists for R-15 (line 69 is a static row); the checklist tick at 5.1 is the closing annotation — confirmed (grep) no other `- [ ]` in the doc names AG-15 as its closer besides `:2172`.
+- [x] 5.5 Composed-ceiling documentation (H × 4 = 12) lives in `retry_policy.go`'s package doc (task 2.4) — this is "where both layers' readers find it" per the charter's `0003:1455` note, which is already satisfied by the shipped `ai/internal/retry/doc.go` half; no charter text edit needed. Confirmed — no action taken.
+- [x] 5.6 Flag for `sdd-verify`/archive: `specs/agent-loop-skeleton/spec.md` carries an unusual `## MODIFIED Header — the allocated scenario range` section (`:10-12`, extending `S-LSK-020` → `S-LSK-023`) — flagged explicitly in apply-progress.md and in the batch return so the archive step applies this header edit, not only the `MODIFIED Requirements` blocks.
 
 Commit 6 (`docs(0003): tick AG-15, bump milestone counter to 15/24`): 5.1–5.3, 5.6.
 
