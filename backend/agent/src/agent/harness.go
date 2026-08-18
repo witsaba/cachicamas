@@ -280,6 +280,26 @@ func wrapHarnessFailure(cause error) (*Failure, error) {
 	return NewFailure(aiFailure)
 }
 
+// typedHarnessFailureFromError is wrapHarnessFailure's
+// conditionally-routed sibling (AG-15.4, R-RTY-012, design AD-4; the
+// AG-14 typedCancellationFailureFromError shape, scheduler.go:1088-
+// 1099): when cause already IS an *ai.Failure, it is preserved WHOLE
+// by wrapping the identical pointer through NewFailure — the same
+// precedent loop.go's own turn_end emission already uses
+// (loop.go:387-388) — rather than reconstructed from a
+// Category-only report, which is what loses every other field
+// (Retryable, RetryAfter, PartialOutput, Delivery, the cause chain).
+// When cause is NOT an *ai.Failure, this routes to the untouched
+// wrapHarnessFailure, so a plain-error cause keeps today's
+// byte-identical Unavailable behavior.
+func typedHarnessFailureFromError(cause error) (*Failure, error) {
+	var aiFailure *ai.Failure
+	if errors.As(cause, &aiFailure) {
+		return NewFailure(aiFailure)
+	}
+	return wrapHarnessFailure(cause)
+}
+
 // windDownRun is the cancellation counterpart to failRun (R-CAN-002,
 // R-CAN-005, the R-RUN-011 carve-out): synthesize orphans over the
 // transcript (R-HIS-007's first production caller — idempotent per
@@ -313,7 +333,7 @@ func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID Ru
 // caller's errors.Is/errors.As chain reaches the turn's own typed
 // rejection; the wrapped *Failure is used only for the event payload.
 func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, cause error) (ai.Message, ai.FinishReason, error) {
-	if failure, ferr := wrapHarnessFailure(cause); ferr == nil {
+	if failure, ferr := typedHarnessFailureFromError(cause); ferr == nil {
 		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
 			sendStamped(sink, stamper, runEnd)
 		}

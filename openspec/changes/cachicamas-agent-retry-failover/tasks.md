@@ -105,9 +105,9 @@ Commit 4 (`feat(agent): consult the failover seam once at retry exhaustion`): 3.
 
 ## Phase 4 — Decision 4: preserve the true category on the exhausted-retry report
 
-- [ ] 4.1 RED: `TestHarness_ExhaustedRetryPreservesTrueCategory` and `TestHarness_ExhaustedRetryPlainErrorStaysUnavailable` (`S-RTY-015`), asserting pointer-identity via `runEnd.Failure().Unwrap()`. Record RED.
-- [ ] 4.2 GREEN: add `typedHarnessFailureFromError(cause error) (*Failure, error)` sibling beside `wrapHarnessFailure` (`harness.go:250-259`, AG-14 sibling shape); route `failRun` through it; plain-error arm calls the untouched `wrapHarnessFailure` byte-identically.
-- [ ] 4.3 Grep confirms no existing test pins `Unavailable` on the harness `run_end` (per design's enumeration: `harness_test.go:1898` presence-only; cancellation tests assert absence).
+- [x] 4.1 RED: `TestHarness_ExhaustedRetryPreservesTrueCategory` and `TestHarness_ExhaustedRetryPlainErrorStaysUnavailable` (`S-RTY-015`), asserting pointer-identity via `runEnd.Failure().Unwrap()`. Record RED.
+- [x] 4.2 GREEN: add `typedHarnessFailureFromError(cause error) (*Failure, error)` sibling beside `wrapHarnessFailure` (`harness.go:250-259`, AG-14 sibling shape); route `failRun` through it; plain-error arm calls the untouched `wrapHarnessFailure` byte-identically.
+- [x] 4.3 Grep confirms no existing test pins `Unavailable` on the harness `run_end` (per design's enumeration: `harness_test.go:1898` presence-only; cancellation tests assert absence).
 
 Commit 5 (`fix(agent): preserve the true failure category on an exhausted-retry run_end`): 4.1–4.3.
 

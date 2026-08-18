@@ -28,8 +28,10 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
@@ -624,4 +626,141 @@ func TestHarness_RetryNonRetryableSurfacesImmediately(t *testing.T) {
 			t.Errorf("provider recorded %d request(s), want exactly 1 (non-retryable surfaces immediately at G2, regardless of delivery position)", n)
 		}
 	})
+}
+
+// --- Phase 4 (Decision 4, R-RTY-012) --------------------------------
+
+// findRunEnd scans got for its one RunEnd payload, failing the test if
+// none is found.
+func findRunEnd(t *testing.T, got []agent.Event) agent.RunEnd {
+	t.Helper()
+	for _, ev := range got {
+		if re, ok := ev.RunEnd(); ok {
+			return re
+		}
+	}
+	t.Fatal("no run_end event found on the stream")
+	return agent.RunEnd{}
+}
+
+// TestHarness_ExhaustedRetryPreservesTrueCategory — S-RTY-015,
+// proposal Decision 4, first Given/Then. A run exhausting its
+// attempts against a provider wrapper whose final pre-stream failure
+// reports a category other than unavailable, a true retryability
+// flag, a retry-after value, no partial output and pre-stream
+// delivery: the run-close event's *Failure MUST report that same
+// evidence, whole -- not the Unavailable category
+// wrapHarnessFailure hardcodes -- and unwrapping it MUST reach the
+// identical *ai.Failure value the final attempt failed with.
+func TestHarness_ExhaustedRetryPreservesTrueCategory(t *testing.T) {
+	t.Parallel()
+
+	const bound = 2
+	const retryAfter = 2500 * time.Millisecond
+	failure, ferr := ai.PreStreamFailure(ai.FailureReport{
+		Category:   ai.FailureCategoryRateLimit,
+		Retryable:  true,
+		RetryAfter: ai.Delay(retryAfter),
+	})
+	if ferr != nil {
+		t.Fatalf("ai.PreStreamFailure returned %v, want no failure", ferr)
+	}
+
+	inner := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	provider := newPreStreamFailingProvider(bound+5, failure, inner)
+
+	h := agent.Harness{
+		Provider:      provider,
+		System:        "system prompt for exhausted retry true category",
+		History:       agent.NewHistory(),
+		RetryAttempts: bound,
+		RetryTiming:   agent.RetryTiming{SleepFunc: instantSleep},
+	}
+
+	sink := make(chan *agent.Event, 128)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err == nil {
+		t.Fatal("Run returned err = nil, want the exhausted-retry failure")
+	}
+	got := drainSink(t, sink)
+
+	runEnd := findRunEnd(t, got)
+	if runEnd.Outcome() != agent.RunOutcomeFailed {
+		t.Fatalf("run_end outcome = %v, want %v", runEnd.Outcome(), agent.RunOutcomeFailed)
+	}
+	gotFailure, hasFailure := runEnd.Failure()
+	if !hasFailure || gotFailure == nil {
+		t.Fatal("run_end carries no *Failure, want a non-nil one")
+	}
+
+	if gotFailure.Category() != ai.FailureCategoryRateLimit {
+		t.Errorf("run_end failure Category() = %v, want %v (the true category, not the hardcoded Unavailable)", gotFailure.Category(), ai.FailureCategoryRateLimit)
+	}
+	if !gotFailure.Retryable() {
+		t.Error("run_end failure Retryable() = false, want true (preserved from the final attempt)")
+	}
+	if gotFailure.PartialOutput() {
+		t.Error("run_end failure PartialOutput() = true, want false")
+	}
+	if gotFailure.Delivery() != ai.DeliveryPreStream {
+		t.Errorf("run_end failure Delivery() = %v, want %v", gotFailure.Delivery(), ai.DeliveryPreStream)
+	}
+
+	unwrapped := gotFailure.Unwrap()
+	asAIFailure, isAIFailure := unwrapped.(*ai.Failure)
+	if !isAIFailure {
+		t.Fatalf("run_end failure Unwrap() = %T, want *ai.Failure", unwrapped)
+	}
+	if asAIFailure != failure {
+		t.Error("run_end failure does not unwrap to the identical *ai.Failure the final attempt failed with -- it was reconstructed, not wrapped")
+	}
+	if gotAfter, ok := asAIFailure.RetryAfter(); !ok || gotAfter != retryAfter {
+		t.Errorf("unwrapped failure RetryAfter() = (%v, %v), want (%v, true)", gotAfter, ok, retryAfter)
+	}
+}
+
+// TestHarness_ExhaustedRetryPlainErrorStaysUnavailable — S-RTY-015,
+// second Given/Then. A run failed by a plain Go error cause (not an
+// *ai.Failure) reports the Unavailable category exactly as it does
+// today, through the existing, byte-unchanged wrapHarnessFailure.
+// The empty-system fixture makes buildLoopRequest fail inside Turn
+// with a plain validation error (D1's own "None" fixture, loop.go's
+// buildLoopRequest error path returns err unwrapped) -- an error that
+// does not satisfy errors.As against *ai.Failure, so retryDecision's
+// G1 gate surfaces it immediately, exercising the exact same failRun
+// call site the exhausted-retry path uses.
+func TestHarness_ExhaustedRetryPlainErrorStaysUnavailable(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider() // never consulted: build fails first
+	h := agent.Harness{
+		Provider:      provider,
+		System:        "", // empty system: buildLoopRequest fails with a plain error
+		History:       agent.NewHistory(),
+		RetryAttempts: 3,
+		RetryTiming:   agent.RetryTiming{SleepFunc: instantSleep},
+	}
+
+	sink := make(chan *agent.Event, 64)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err == nil {
+		t.Fatal("Run returned err = nil, want the request-build error")
+	}
+	var asAIFailure *ai.Failure
+	if errors.As(err, &asAIFailure) {
+		t.Fatalf("Run's returned error unexpectedly reaches an *ai.Failure via errors.As (%v) -- this fixture must stay a plain error for G1 to fire", asAIFailure)
+	}
+	got := drainSink(t, sink)
+
+	runEnd := findRunEnd(t, got)
+	if runEnd.Outcome() != agent.RunOutcomeFailed {
+		t.Fatalf("run_end outcome = %v, want %v", runEnd.Outcome(), agent.RunOutcomeFailed)
+	}
+	gotFailure, hasFailure := runEnd.Failure()
+	if !hasFailure || gotFailure == nil {
+		t.Fatal("run_end carries no *Failure, want a non-nil one")
+	}
+	if gotFailure.Category() != ai.FailureCategoryUnavailable {
+		t.Errorf("run_end failure Category() = %v, want %v (today's unchanged behavior for a plain-error cause)", gotFailure.Category(), ai.FailureCategoryUnavailable)
+	}
 }
