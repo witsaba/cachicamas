@@ -637,13 +637,15 @@ The composed bound **"harness attempts × Layer 1 attempts"** is documented wher
 
 This requirement carries **no production-code obligation** beyond the documentation's wording. Its purpose is the cross-layer visibility — the contract is binding *as documentation*, not as a runtime check.
 
+**Back-annotation (AG-15, 2026-08-18) — the Layer 2 consumer now exists and is named.** `S-2`'s "Layer 2's harness-attempt test" was a forward reference when this requirement was promoted. It is discharged by `agent-retry-failover`'s `R-RTY-009` / `S-RTY-009`, whose test reads the helper's package documentation as a file, asserts the cited Layer 1 sentences verbatim, and asserts that Layer 2's own retry-policy documentation restates the formula in the same wording. Its third clause — divergence observable as a test failure — is discharged by the bite `S-RTY-012`, which perturbs one cited Layer 1 sentence in the test's own expectation set in a scratch tree and records the resulting failure before reverting. It perturbs the expectation operand rather than `ai/internal/retry/doc.go` because `R-RUN-012` forbids editing that file even transiently; the comparison is `strings.Contains` and therefore symmetric, so the proving power is identical. The Layer 2 side of the formula evaluates to **3 total harness attempts × 4 wire requests = 12**, where "3" counts total `Turn` invocations rather than retries after the first (`R-RTY-005`); the convention is stated on the Layer 2 side wherever the number appears, precisely because the two layers use different counting conventions. **Nothing in this requirement's obligations changes**, and no Layer 1 file is edited to satisfy it.
+
 #### Scenario: R-AIS-044 / S-1 — Layer 1 multiplier documented in helper's package doc comment *(pin: `R-CNF-019`, `AG-15.2` item 2)*
 
 - **GIVEN** the helper's package documentation file
 - **WHEN** a Layer 1 reader opens the file
 - **THEN** the documentation names the wire-request count per logical call (i.e. `N+1 = 4` wire requests when retries are exhausted), AND the composed-bound formula "harness attempts × Layer 1 attempts" appears in the same documentation, AND the documentation identifies Layer 2's composed-bound test as the cross-layer consumer
 
-#### Scenario: R-AIS-044 / S-2 — Layer 2 reader sees the same number with the same formula *(pin: `R-CNF-019`, `AG-15.2` item 2)*
+#### Scenario: R-AIS-044 / S-2 — Layer 2 reader sees the same number with the same formula *(pin: `R-CNF-019`, `AG-15.2` item 2; **satisfied by AG-15**, `R-RTY-009` / `S-RTY-009` + bite `S-RTY-012`)*
 
 - **GIVEN** Layer 2's harness-attempt test
 - **WHEN** a Layer 2 reader reads the test
