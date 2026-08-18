@@ -27,12 +27,67 @@
 package agent_test
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
+
+// preStreamFailingProvider is a test-local ai.ModelProvider wrapper —
+// the fixture constraint every AG-15.1 scenario needing a scripted
+// retryable pre-stream failure MUST use (agent-retry-failover
+// spec.md's "Fixture constraint" section, the errorProvider
+// precedent at loop_test.go:1408-1421): agenttest.Script cannot
+// express one on its own (fake_provider.go:74-117 fails pre-stream
+// only on a zero request, an already-cancelled context, or script
+// exhaustion). It fails its first failCount Stream calls with a
+// scripted *ai.Failure, captures its own requests independently of
+// the inner provider, then delegates every later call to inner.
+// Test-local only — agenttest itself is never widened by this
+// change.
+type preStreamFailingProvider struct {
+	mu        sync.Mutex
+	failCount int
+	failure   *ai.Failure
+	calls     int
+	requests  []ai.Request
+	inner     ai.ModelProvider
+}
+
+// newPreStreamFailingProvider constructs a wrapper that fails its
+// first failCount Stream calls with failure, then delegates to inner.
+func newPreStreamFailingProvider(failCount int, failure *ai.Failure, inner ai.ModelProvider) *preStreamFailingProvider {
+	return &preStreamFailingProvider{failCount: failCount, failure: failure, inner: inner}
+}
+
+// Stream implements ai.ModelProvider.
+func (p *preStreamFailingProvider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	p.requests = append(p.requests, req)
+	p.mu.Unlock()
+
+	if call <= p.failCount {
+		return nil, p.failure
+	}
+	return p.inner.Stream(ctx, req)
+}
+
+// Requests returns every request this wrapper itself captured, in
+// call order — independent of the inner provider's own Requests(),
+// so a test can prove the wrapper's own call count is exactly H
+// regardless of how many (if any) calls reached inner.
+func (p *preStreamFailingProvider) Requests() []ai.Request {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]ai.Request, len(p.requests))
+	copy(out, p.requests)
+	return out
+}
 
 // eventKindsOf renders events' kinds in order, for a failed
 // assertion's diagnostic message.
@@ -280,5 +335,293 @@ func TestTurn_PreStreamProviderErrorEmitsTurnEnd(t *testing.T) {
 
 		got := drainSink(t, sink)
 		assertPreStreamAbortSequence(t, got, false)
+	})
+}
+
+// TestHarness_RetryVisibleAttempts — S-RTY-002, charter AG-15.1
+// scenario 1. Given a provider wrapper scripted to fail its first
+// H-1 calls with a retryable pre-stream *ai.Failure reporting no
+// partial output, backed by an inner script that then completes the
+// turn normally, when the run is driven, then the wrapper recorded
+// exactly H requests; every recorded request compares equal to every
+// other as an ai.Request; the emitted stream carries H turn brackets
+// for that logical turn — the first H-1 closing aborted, the last
+// closing normally — with pairwise distinct turn identities on one
+// contiguous 1-based lane inside a single run bracket; the run-close
+// carries the completed run outcome; and CheckStream accepts the
+// recorded stream unmodified.
+func TestHarness_RetryVisibleAttempts(t *testing.T) {
+	t.Parallel()
+
+	const bound = 3 // H
+
+	failure, ferr := ai.PreStreamFailure(ai.FailureReport{
+		Category:  ai.FailureCategoryUnavailable,
+		Retryable: true,
+	})
+	if ferr != nil {
+		t.Fatalf("ai.PreStreamFailure returned %v, want no failure", ferr)
+	}
+
+	inner := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	provider := newPreStreamFailingProvider(bound-1, failure, inner)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{
+		Provider:      provider,
+		System:        "system prompt for retry visible attempts",
+		History:       hist,
+		RetryAttempts: bound,
+	}
+
+	sink := make(chan *agent.Event, 64)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err != nil {
+		t.Fatalf("Run returned err = %v, want nil (the retry succeeds within the bound)", err)
+	}
+
+	got := drainSink(t, sink)
+
+	// The wrapper recorded exactly H requests -- the count is the
+	// contract -- and every attempt's request is byte-identical
+	// (R-RTY-002).
+	requests := provider.Requests()
+	if len(requests) != bound {
+		t.Fatalf("wrapper recorded %d request(s), want exactly %d (H)", len(requests), bound)
+	}
+	for i := 1; i < len(requests); i++ {
+		if !requests[i].Equal(requests[0]) {
+			t.Errorf("request[%d] != request[0]; attempts of one logical turn must be byte-identical (R-RTY-002)", i)
+		}
+	}
+	if got := len(inner.Requests()); got != 1 {
+		t.Errorf("inner provider recorded %d request(s), want exactly 1 (only the final, succeeding attempt reaches it)", got)
+	}
+
+	var runStarts, runEnds, turnStarts, turnEnds int
+	var abortedCount, finishedCount int
+	turnIDs := map[agent.TurnID]bool{}
+	for i, ev := range got {
+		wantSeq := agent.Sequence(i + 1)
+		if ev.Sequence() != wantSeq {
+			t.Errorf("event[%d].Sequence() = %d, want %d (one contiguous 1-based lane)", i, ev.Sequence(), wantSeq)
+		}
+
+		switch ev.Kind() {
+		case agent.EventKindRunStart:
+			runStarts++
+		case agent.EventKindRunEnd:
+			runEnds++
+			if runEnd, ok := ev.RunEnd(); ok && runEnd.Outcome() != agent.RunOutcomeCompleted {
+				t.Errorf("run_end outcome = %v, want %v", runEnd.Outcome(), agent.RunOutcomeCompleted)
+			}
+		case agent.EventKindTurnStart:
+			turnStarts++
+			if turnID, ok := ev.Turn(); ok {
+				turnIDs[turnID] = true
+			}
+		case agent.EventKindTurnEnd:
+			turnEnds++
+			if turnEnd, ok := ev.TurnEnd(); ok {
+				switch turnEnd.Outcome() {
+				case agent.TurnOutcomeAborted:
+					abortedCount++
+					if _, hasFailure := turnEnd.Failure(); !hasFailure {
+						t.Error("turn_end(Aborted) carries no *Failure, want a non-nil one")
+					}
+				case agent.TurnOutcomeFinished:
+					finishedCount++
+				}
+			}
+		}
+	}
+
+	if runStarts != 1 || runEnds != 1 {
+		t.Errorf("run brackets: %d run_start, %d run_end, want exactly 1 each (single run bracket)", runStarts, runEnds)
+	}
+	if turnStarts != bound || turnEnds != bound {
+		t.Errorf("turn brackets: %d turn_start, %d turn_end, want exactly %d each (H -- one bracket per attempt)", turnStarts, turnEnds, bound)
+	}
+	if abortedCount != bound-1 {
+		t.Errorf("aborted turn_end count = %d, want %d (H-1)", abortedCount, bound-1)
+	}
+	if finishedCount != 1 {
+		t.Errorf("finished turn_end count = %d, want 1 (only the last attempt)", finishedCount)
+	}
+	if len(turnIDs) != bound {
+		t.Errorf("distinct turn identities observed = %d, want %d (H, pairwise distinct per attempt)", len(turnIDs), bound)
+	}
+
+	report := agent.CheckStream(got)
+	if v := report.Violation(); v != nil {
+		t.Errorf("CheckStream rejected the recorded multi-attempt stream: %v, want it accepted unmodified", v)
+	}
+}
+
+// scriptTextThenMidStreamFailure builds a script that emits a short
+// text bracket (only when outputPreceded) then a terminal mid-stream
+// *ai.Failure carrying retryable and outputPreceded exactly as given
+// — generalizing loop_test.go:1251's scriptTextThenMidStreamError
+// precedent over the two discriminators this file's S-RTY-003/004
+// scenarios need to vary independently.
+func scriptTextThenMidStreamFailure(t *testing.T, retryable, outputPreceded bool) agenttest.Script {
+	t.Helper()
+
+	steps := []agenttest.Step{}
+	if outputPreceded {
+		start, err := ai.NewTextBlockStart(1)
+		if err != nil {
+			t.Fatalf("ai.NewTextBlockStart returned %v, want no failure", err)
+		}
+		delta, err := ai.NewTextDelta(1, "partial-before-failure")
+		if err != nil {
+			t.Fatalf("ai.NewTextDelta returned %v, want no failure", err)
+		}
+		end, err := ai.NewTextBlockEnd(1)
+		if err != nil {
+			t.Fatalf("ai.NewTextBlockEnd returned %v, want no failure", err)
+		}
+		steps = append(steps, agenttest.Emit(start), agenttest.Emit(delta), agenttest.Emit(end))
+	}
+
+	failure, err := ai.MidStreamFailure(ai.FailureReport{
+		Category:  ai.FailureCategoryUnavailable,
+		Retryable: retryable,
+	}, outputPreceded)
+	if err != nil {
+		t.Fatalf("ai.MidStreamFailure returned %v, want no failure", err)
+	}
+	terminal, err := ai.ErrorEvent(failure)
+	if err != nil {
+		t.Fatalf("ai.ErrorEvent returned %v, want no failure", err)
+	}
+	steps = append(steps, agenttest.Emit(terminal))
+	return agenttest.Script{Steps: steps}
+}
+
+// TestHarness_RetryPartialOutputNotRetried — S-RTY-003, charter
+// AG-15.1 scenario 2 (the G8 sentence, now at the harness, R-RTY-003).
+// A failure reporting itself retryable but carrying already-emitted
+// output MUST NOT be retried: gate G3 fires ahead of G4. A further
+// script is queued so a retry would be observable rather than an
+// error.
+func TestHarness_RetryPartialOutputNotRetried(t *testing.T) {
+	t.Parallel()
+
+	failingScript := scriptTextThenMidStreamFailure(t, true, true)
+	neverConsumedScript := scriptTextResponse(t, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(failingScript, neverConsumedScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{
+		Provider:      provider,
+		System:        "system prompt for partial output not retried",
+		History:       hist,
+		RetryAttempts: 3,
+	}
+
+	sink := make(chan *agent.Event, 64)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err == nil {
+		t.Fatal("Run returned err = nil, want the mid-stream failure (G3 forbids retry; the run must end failed)")
+	}
+
+	got := drainSink(t, sink)
+
+	if n := len(provider.Requests()); n != 1 {
+		t.Fatalf("provider recorded %d request(s), want exactly 1 (G3 forbids retry after emitted output — a second request is the exact defect this requirement prevents)", n)
+	}
+
+	var sawAbortedWithPartial bool
+	var runOutcome agent.RunOutcome
+	for _, ev := range got {
+		if te, ok := ev.TurnEnd(); ok && te.Outcome() == agent.TurnOutcomeAborted {
+			if failure, hasFailure := te.Failure(); hasFailure && failure.PartialOutput() {
+				sawAbortedWithPartial = true
+			}
+		}
+		if re, ok := ev.RunEnd(); ok {
+			runOutcome = re.Outcome()
+		}
+	}
+	if !sawAbortedWithPartial {
+		t.Error("no turn_end(Aborted) carrying a *Failure with PartialOutput() == true observed, want the partial-content failure surfaced")
+	}
+	if runOutcome != agent.RunOutcomeFailed {
+		t.Errorf("run_end outcome = %v, want %v", runOutcome, agent.RunOutcomeFailed)
+	}
+}
+
+// TestHarness_RetryNonRetryableSurfacesImmediately — S-RTY-004,
+// charter AG-15.1 scenario 3. A non-retryable failure surfaces
+// immediately regardless of delivery position: gate G2 fires ahead of
+// G3/G4/G5 whenever Retryable() == false. Both positions from the
+// spec's Given clause — pre-stream (via the wrapper) and mid-stream
+// after emitted output (via a script) — each with a further script
+// queued so a retry would be observable.
+func TestHarness_RetryNonRetryableSurfacesImmediately(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pre-stream position", func(t *testing.T) {
+		t.Parallel()
+
+		failure, ferr := ai.PreStreamFailure(ai.FailureReport{
+			Category:  ai.FailureCategoryUnavailable,
+			Retryable: false,
+		})
+		if ferr != nil {
+			t.Fatalf("ai.PreStreamFailure returned %v, want no failure", ferr)
+		}
+		inner := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		provider := newPreStreamFailingProvider(1, failure, inner)
+
+		hist := agent.NewHistory()
+		h := agent.Harness{
+			Provider:      provider,
+			System:        "system prompt for non-retryable pre-stream",
+			History:       hist,
+			RetryAttempts: 3,
+		}
+
+		sink := make(chan *agent.Event, 64)
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		if err == nil {
+			t.Fatal("Run returned err = nil, want the non-retryable pre-stream failure")
+		}
+		_ = drainSink(t, sink)
+
+		if n := len(provider.Requests()); n != 1 {
+			t.Errorf("wrapper recorded %d request(s), want exactly 1 (non-retryable surfaces immediately at G2)", n)
+		}
+		if n := len(inner.Requests()); n != 0 {
+			t.Errorf("inner provider recorded %d request(s), want 0 (never reached — no retry)", n)
+		}
+	})
+
+	t.Run("mid-stream position after emitted output", func(t *testing.T) {
+		t.Parallel()
+
+		failingScript := scriptTextThenMidStreamFailure(t, false, true)
+		neverConsumedScript := scriptTextResponse(t, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(failingScript, neverConsumedScript)
+
+		hist := agent.NewHistory()
+		h := agent.Harness{
+			Provider:      provider,
+			System:        "system prompt for non-retryable mid-stream",
+			History:       hist,
+			RetryAttempts: 3,
+		}
+
+		sink := make(chan *agent.Event, 64)
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		if err == nil {
+			t.Fatal("Run returned err = nil, want the non-retryable mid-stream failure")
+		}
+		_ = drainSink(t, sink)
+
+		if n := len(provider.Requests()); n != 1 {
+			t.Errorf("provider recorded %d request(s), want exactly 1 (non-retryable surfaces immediately at G2, regardless of delivery position)", n)
+		}
 	})
 }

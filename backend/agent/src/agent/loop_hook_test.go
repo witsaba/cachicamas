@@ -1001,7 +1001,14 @@ func filterOutLoopHookFiles(diff string) string {
 				// first test file. Byte-in-sync with loop_test.go's
 				// filterOutLoopFiles.
 				strings.HasSuffix(path, "/retry_policy.go") ||
-				strings.HasSuffix(path, "/retry_policy_test.go")
+				strings.HasSuffix(path, "/retry_policy_test.go") ||
+				// AG-15 amendment (enumerated, not in tasks.md's
+				// original file list): retry_decision_internal_test.go,
+				// package-internal for S-RTY-001 (design AD-2's
+				// unexported retryDecision/retryVerdict; NFR-RTY-001's
+				// own carve-out). Byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/retry_decision_internal_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

@@ -931,7 +931,18 @@ func filterOutLoopFiles(diff string) string {
 				// wildcard/prefix/directory pattern; both filters stay
 				// byte-in-sync.
 				strings.HasSuffix(path, "/retry_policy.go") ||
-				strings.HasSuffix(path, "/retry_policy_test.go")
+				strings.HasSuffix(path, "/retry_policy_test.go") ||
+				// AG-15 amendment (enumerated, not in tasks.md's
+				// original file list): retry_decision_internal_test.go
+				// hosts S-RTY-001's directly-callable predicate table
+				// test, package-internal because retryDecision/
+				// retryVerdict are unexported (design AD-2) and this
+				// codebase's tests are otherwise 100% package
+				// agent_test — NFR-RTY-001's own carve-out for "the
+				// predicate's own table-driven test" sanctions the
+				// split. Byte-in-sync with loop_hook_test.go's
+				// filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/retry_decision_internal_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

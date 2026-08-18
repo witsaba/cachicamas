@@ -68,6 +68,15 @@ type Harness struct {
 	// NewHistory.
 	History *History
 
+	// RetryAttempts is H, the attempt bound for one logical turn
+	// (R-RTY-005): the harness re-invokes Turn for the same logical
+	// turn while R-RTY-001's predicate says "retry", up to H total
+	// Turn invocations (one initial attempt plus at most H-1
+	// retries). Zero-default: a non-positive value selects
+	// defaultRetryAttempts (retry_policy.go), the
+	// Scheduler.WindDownBound idiom (scheduler.go:611-613).
+	RetryAttempts int
+
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
 	queue steeringQueue
@@ -427,45 +436,86 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 
 		transcript := transcriptFromHistory(hist)
 
-		turnSink := make(chan *Event)
-		forwarderDone := make(chan struct{})
-		go func() {
-			defer close(forwarderDone)
-			for ev := range turnSink {
-				sink <- ev
-			}
-		}()
-
-		turnOpts := h.Turn
-		turnOpts.Continuation = &TurnContinuation{
-			Run:       runID,
-			Stamper:   stamper,
-			Scheduler: sched,
-			History:   hist,
+		bound := h.RetryAttempts
+		if bound <= 0 {
+			bound = defaultRetryAttempts
 		}
 
-		msg, finish, terr := Turn(runCtx, h.Provider, h.System, transcript, turnOpts, turnSink)
-		<-forwarderDone
+		var msg ai.Message
+		var finish ai.FinishReason
+		var terr error
 
-		if terr != nil {
-			// AG-14 (R-RUN-011 carve-out): a Turn error caused by a
-			// harness signal takes the wind-down path, not the
-			// failure path — re-checked against context.Cause(runCtx)
-			// directly (not by unwrapping terr) so the routing
-			// decision is independent of exactly how Turn surfaced the
-			// cause. A bare cancellation of the caller's own context,
-			// not routed through Interrupt/Shutdown, matches neither
-			// sentinel and falls through to the failure path
+		// AG-15.1 (R-RTY-001, R-RTY-002, design AD-2): the inner
+		// attempt loop re-invokes Turn for this SAME logical turn on
+		// a retry verdict, over the transcript slice built once
+		// above and reused BY REFERENCE across attempts — this, not
+		// an assumption, is what makes "identical transcript"
+		// provable: no failure path writes History (Turn's only
+		// history writer is finishContinuationTurn, reached solely on
+		// the completion arm), and the steering drain above runs only
+		// once per LOGICAL turn, outside this loop, so no steered
+		// message can interleave two attempts. This is a fresh inner
+		// loop around the Turn call, NOT a continue of the outer run
+		// loop above.
+		for attempt := 1; ; attempt++ {
+			turnSink := make(chan *Event)
+			forwarderDone := make(chan struct{})
+			go func() {
+				defer close(forwarderDone)
+				for ev := range turnSink {
+					sink <- ev
+				}
+			}()
+
+			turnOpts := h.Turn
+			turnOpts.Continuation = &TurnContinuation{
+				Run:       runID,
+				Stamper:   stamper,
+				Scheduler: sched,
+				History:   hist,
+			}
+
+			msg, finish, terr = Turn(runCtx, h.Provider, h.System, transcript, turnOpts, turnSink)
+			<-forwarderDone
+
+			if terr == nil {
+				break
+			}
+
+			// AG-14 (R-RUN-011 carve-out; R-RTY-001 gate G0, stays
+			// ahead of the retry predicate in its existing shape and
+			// site, unchanged): a Turn error caused by a harness
+			// signal takes the wind-down path, not the failure path
+			// and never the retry path — re-checked against
+			// context.Cause(runCtx) directly (not by unwrapping
+			// terr) so the routing decision is independent of
+			// exactly how Turn surfaced the cause. A bare
+			// cancellation of the caller's own context, not routed
+			// through Interrupt/Shutdown, matches neither sentinel
+			// and falls through to the retry predicate below
 			// unchanged (the scope line, R-CAN-001).
 			if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
 				return h.windDownRun(sink, stamper, runID, hist, cause)
 			}
+
+			// R-RTY-001 gates G1-G5, first match wins. Any verdict
+			// other than "retry" — surface (G1-G3), or the attempt
+			// bound reached (G5, consulting the failover seam is
+			// AG-15.3's addition) — falls through to the ordinary
+			// failure path below.
+			if retryDecision(terr, attempt, bound) != verdictRetry {
+				break
+			}
+		}
+
+		if terr != nil {
 			// R-RUN-011: a failed turn ends the run typed, with no
-			// append, no CloseTurn, and no retry or fallback. The
-			// turn's own typed closing brackets (turn_end(Aborted), or
-			// nothing at all on a pre-stream failure) were already
-			// forwarded by the loop above, inside the still-open turn
-			// bracket; failRun closes the run's own bracket.
+			// append, no CloseTurn, and no fallback. The turn's own
+			// typed closing brackets (turn_end(Aborted) on every
+			// pre-stream and mid-stream path, per AG-15 D1) were
+			// already forwarded by the loop above, inside each
+			// attempt's own still-open turn bracket; failRun closes
+			// the run's own bracket.
 			return h.failRun(sink, stamper, runID, terr)
 		}
 
