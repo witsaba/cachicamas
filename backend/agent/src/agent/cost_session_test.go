@@ -9,12 +9,47 @@
 package agent_test
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
+
+// failAfterProvider is a test-local ai.ModelProvider wrapper that
+// delegates its first succeedCount Stream calls to inner, then
+// returns a scripted failure on every call after — the fixture
+// Phase 4's non-happy-close scenarios use to fail a SECOND logical
+// turn after a first one already reported usage. The mirror image of
+// retry_policy_test.go's preStreamFailingProvider (which fails FIRST,
+// then delegates); test-local only, agenttest itself untouched.
+type failAfterProvider struct {
+	mu           sync.Mutex
+	succeedCount int
+	calls        int
+	failure      *ai.Failure
+	inner        ai.ModelProvider
+}
+
+func newFailAfterProvider(succeedCount int, failure *ai.Failure, inner ai.ModelProvider) *failAfterProvider {
+	return &failAfterProvider{succeedCount: succeedCount, failure: failure, inner: inner}
+}
+
+// Stream implements ai.ModelProvider.
+func (p *failAfterProvider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	p.mu.Unlock()
+
+	if call <= p.succeedCount {
+		return p.inner.Stream(ctx, req)
+	}
+	return nil, p.failure
+}
 
 // costSessionsIn returns every cost_session payload found in events,
 // in stream order.
@@ -460,4 +495,251 @@ func TestHarness_SingleTurnRun_FinalOnly(t *testing.T) {
 
 	final := lastEventIsRunEndPrecededByCostSessionFinal(t, events)
 	assertCostSessionEqualsUsage(t, final, sumUsageFromCostTurns(events))
+}
+
+// TestHarness_CostSession_FinalOnFailedRun — S-CST-012, S-RUN-104. A
+// run driven to R-RUN-011's failure path after at least one turn has
+// already reported usage carries a cost_session(Final) immediately
+// before the run-close; its figures equal the cumulative over the
+// cost_turn events observed on the stream; the run-close still
+// carries the failed outcome with its non-nil typed failure; nothing
+// was appended to the transcript by the cost emission; and a run
+// failing on its FIRST turn before any usage reports every figure
+// absent, never zero.
+func TestHarness_CostSession_FinalOnFailedRun(t *testing.T) {
+	t.Parallel()
+
+	failure, ferr := ai.PreStreamFailure(ai.FailureReport{
+		Category:  ai.FailureCategoryUnavailable,
+		Retryable: false,
+	})
+	if ferr != nil {
+		t.Fatalf("ai.PreStreamFailure returned %v, want no failure", ferr)
+	}
+
+	t.Run("usage reported before the failure", func(t *testing.T) {
+		t.Parallel()
+
+		usageTurnOne := ai.Usage{Input: ai.Tokens(50), Output: ai.Tokens(10), Reasoning: ai.Tokens(3)}
+		turnOneScript := scriptTextResponseWithUsage(t, ai.FinishReasonPauseTurn, usageTurnOne)
+		inner := agenttest.NewProvider(turnOneScript)
+		provider := newFailAfterProvider(1, failure, inner)
+
+		hist := agent.NewHistory()
+		h := agent.Harness{Provider: provider, System: "system prompt for cst-012 with usage", History: hist}
+		sink := make(chan *agent.Event, 64)
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		if err == nil {
+			t.Fatal("Run returned err = nil, want the second turn's non-retryable failure")
+		}
+
+		events := drainSink(t, sink)
+		if report := agent.CheckStream(events); report.Violation() != nil {
+			t.Errorf("agent.CheckStream(failed-run stream) = %v, want no violation", report.Violation())
+		}
+
+		final := lastEventIsRunEndPrecededByCostSessionFinal(t, events)
+		assertCostSessionEqualsUsage(t, final, sumUsageFromCostTurns(events))
+		if n, ok := final.InputTokens(); !ok || n != 50 {
+			t.Errorf("final InputTokens() = (%d, %v), want (50, true) — turn one's real spend, the failing turn contributed nothing", n, ok)
+		}
+
+		last := events[len(events)-1]
+		runEnd, ok := last.RunEnd()
+		if !ok {
+			t.Fatalf("last event kind = %v, want run_end", last.Kind())
+		}
+		if runEnd.Outcome() != agent.RunOutcomeFailed {
+			t.Errorf("run_end outcome = %v, want RunOutcomeFailed", runEnd.Outcome())
+		}
+		if _, hasFailure := runEnd.Failure(); !hasFailure {
+			t.Error("run_end carries no *Failure, want the non-nil typed failure R-RTY-012 requires")
+		}
+
+		// No append, no CloseTurn: the transcript holds only the
+		// prompt and turn one's own assistant message — the cost
+		// emission wrote nothing.
+		if got := len(hist.Entries()); got != 2 {
+			t.Errorf("history has %d entries, want 2 (prompt, turn-one assistant) — the cost emission must append nothing", got)
+		}
+	})
+
+	t.Run("no usage reported: fails on the first turn", func(t *testing.T) {
+		t.Parallel()
+
+		inner := agenttest.NewProvider() // never consulted
+		provider := newFailAfterProvider(0, failure, inner)
+
+		h := agent.Harness{Provider: provider, System: "system prompt for cst-012 no usage", History: agent.NewHistory()}
+		sink := make(chan *agent.Event, 32)
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		if err == nil {
+			t.Fatal("Run returned err = nil, want the first turn's non-retryable failure")
+		}
+
+		events := drainSink(t, sink)
+		final := lastEventIsRunEndPrecededByCostSessionFinal(t, events)
+		if n, ok := final.InputTokens(); ok || n != 0 {
+			t.Errorf("final InputTokens() = (%d, %v), want (0, false) — absent, never a fabricated zero", n, ok)
+		}
+		if n, ok := final.OutputTokens(); ok || n != 0 {
+			t.Errorf("final OutputTokens() = (%d, %v), want (0, false) — absent, never a fabricated zero", n, ok)
+		}
+	})
+}
+
+// TestHarness_CostSession_FinalOnInterruptedRun — S-CST-013 /
+// S-CAN-012. A run interrupted mid-flight after a turn has already
+// reported usage carries: the interrupted turn's aborted turn-close
+// with no cost_turn, then a cost_session(Final) whose figures equal
+// the cumulative over the cost_turn events observed on the stream,
+// then the run-close carrying the interrupted outcome with a nil
+// *Failure, then the sink close, in that order. A second Run on the
+// same harness value starts its own figure from nothing.
+func TestHarness_CostSession_FinalOnInterruptedRun(t *testing.T) {
+	t.Parallel()
+
+	usageTurnOne := ai.Usage{Input: ai.Tokens(40), Output: ai.Tokens(8), CacheRead: ai.Tokens(2)}
+	turnOneScript := scriptTextResponseWithUsage(t, ai.FinishReasonPauseTurn, usageTurnOne)
+	gate := agenttest.NewGate()
+	turnTwoScript := heldTurnScript(t, gate)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	hist := agent.NewHistory()
+	h := agent.Harness{Provider: provider, System: "system prompt for cst-013 interrupt", History: hist}
+
+	sink := make(chan *agent.Event, 256)
+	resultCh := make(chan error, 1)
+	go func() {
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		resultCh <- err
+	}()
+
+	<-gate.Reached()
+	h.Interrupt()
+
+	events := drainSink(t, sink)
+	err := <-resultCh
+	if !errors.Is(err, agent.ErrInterrupted) {
+		t.Fatalf("Run error = %v, want errors.Is(err, agent.ErrInterrupted)", err)
+	}
+
+	if report := agent.CheckStream(events); report.Violation() != nil {
+		t.Errorf("agent.CheckStream(interrupted stream) = %v, want no violation", report.Violation())
+	}
+
+	// Exactly one cost_turn: turn one's. The interrupted turn closed
+	// aborted and contributed none.
+	if got := len(costTurnsIn(events)); got != 1 {
+		t.Errorf("recorded %d cost_turn event(s), want 1 (turn one's only)", got)
+	}
+
+	final := lastEventIsRunEndPrecededByCostSessionFinal(t, events)
+	assertCostSessionEqualsUsage(t, final, sumUsageFromCostTurns(events))
+	if n, ok := final.InputTokens(); !ok || n != 40 {
+		t.Errorf("final InputTokens() = (%d, %v), want (40, true) — turn one's real spend", n, ok)
+	}
+
+	last := events[len(events)-1]
+	runEnd, ok := last.RunEnd()
+	if !ok {
+		t.Fatalf("last event kind = %v, want run_end", last.Kind())
+	}
+	if runEnd.Outcome() != agent.RunOutcomeInterrupted {
+		t.Errorf("run_end outcome = %v, want RunOutcomeInterrupted", runEnd.Outcome())
+	}
+	if _, hasFailure := runEnd.Failure(); hasFailure {
+		t.Error("run_end carries a *Failure, want nil (RunEnd.validate's failure-iff-Failed rule)")
+	}
+
+	// Nothing appended to the transcript by the cost emission: prompt
+	// + turn-one assistant + the synthesized closure for the
+	// interrupted turn's own open call, if any — no fourth entry from
+	// the cost emission.
+	entriesBefore := len(hist.Entries())
+
+	// A second Run on the same harness value starts its own figure
+	// from nothing: only the second run's own turn is counted.
+	usageTurnThree := ai.Usage{Input: ai.Tokens(9)}
+	secondProvider := agenttest.NewProvider(scriptTextResponseWithUsage(t, ai.FinishReasonStop, usageTurnThree))
+	h.Provider = secondProvider
+	secondSink := make(chan *agent.Event, 32)
+	_, _, secondErr := h.Run(contextBackground(), firstMessage(t), secondSink)
+	if secondErr != nil {
+		t.Fatalf("second Run returned err = %v, want nil", secondErr)
+	}
+	secondEvents := drainSink(t, secondSink)
+	secondFinal := lastEventIsRunEndPrecededByCostSessionFinal(t, secondEvents)
+	if n, ok := secondFinal.InputTokens(); !ok || n != 9 {
+		t.Errorf("second run's final InputTokens() = (%d, %v), want (9, true) — only its own turn, none of the first run's 40 carried over", n, ok)
+	}
+	if len(hist.Entries()) <= entriesBefore {
+		t.Error("second run appended nothing to the shared history — fixture defect, not a cost-emission property")
+	}
+}
+
+// TestHarness_CostSession_FinalOnShutdownRun — S-CST-013 / S-CAN-013.
+// The shutdown variant of the interrupted-run scenario: same shape,
+// RunOutcomeShutdown. A Run invoked after the shutdown flag has
+// latched observes no event whatsoever, cost events included.
+func TestHarness_CostSession_FinalOnShutdownRun(t *testing.T) {
+	t.Parallel()
+
+	usageTurnOne := ai.Usage{Input: ai.Tokens(70), CacheWrite: ai.Tokens(4)}
+	turnOneScript := scriptTextResponseWithUsage(t, ai.FinishReasonPauseTurn, usageTurnOne)
+	gate := agenttest.NewGate()
+	turnTwoScript := heldTurnScript(t, gate)
+	provider := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	h := agent.Harness{Provider: provider, System: "system prompt for cst-013 shutdown", History: agent.NewHistory()}
+
+	sink := make(chan *agent.Event, 256)
+	resultCh := make(chan error, 1)
+	go func() {
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		resultCh <- err
+	}()
+
+	<-gate.Reached()
+	h.Shutdown()
+
+	events := drainSink(t, sink)
+	err := <-resultCh
+	if !errors.Is(err, agent.ErrShutdown) {
+		t.Fatalf("Run error = %v, want errors.Is(err, agent.ErrShutdown)", err)
+	}
+
+	if report := agent.CheckStream(events); report.Violation() != nil {
+		t.Errorf("agent.CheckStream(shutdown stream) = %v, want no violation", report.Violation())
+	}
+
+	final := lastEventIsRunEndPrecededByCostSessionFinal(t, events)
+	assertCostSessionEqualsUsage(t, final, sumUsageFromCostTurns(events))
+	if n, ok := final.InputTokens(); !ok || n != 70 {
+		t.Errorf("final InputTokens() = (%d, %v), want (70, true) — turn one's real spend, same shape as the interrupted case", n, ok)
+	}
+
+	last := events[len(events)-1]
+	runEnd, ok := last.RunEnd()
+	if !ok {
+		t.Fatalf("last event kind = %v, want run_end", last.Kind())
+	}
+	if runEnd.Outcome() != agent.RunOutcomeShutdown {
+		t.Errorf("run_end outcome = %v, want RunOutcomeShutdown", runEnd.Outcome())
+	}
+	if _, hasFailure := runEnd.Failure(); hasFailure {
+		t.Error("run_end carries a *Failure, want nil")
+	}
+
+	// Post-shutdown refusal: a Run invoked after the flag has latched
+	// observes no event of any kind, cost events included.
+	secondSink := make(chan *agent.Event, 8)
+	_, _, secondErr := h.Run(contextBackground(), firstMessage(t), secondSink)
+	if !errors.Is(secondErr, agent.ErrPromptAfterShutdown) {
+		t.Errorf("second Run error = %v, want errors.Is to match agent.ErrPromptAfterShutdown", secondErr)
+	}
+	secondEvents := drainSink(t, secondSink)
+	if len(secondEvents) != 0 {
+		t.Errorf("second Run emitted %d event(s), want zero — cost events included", len(secondEvents))
+	}
 }
