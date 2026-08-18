@@ -111,11 +111,20 @@ func TestHarness_MidTurnSteer_EntersAtBoundaryBeforeNextProviderCall(t *testing.
 			break
 		}
 	}
+	// AG-16 signed-off amendment (agent-loop-skeleton delta's R-LSK-001,
+	// S-LSK-024): turn one closes non-aborted, so it carries a
+	// cost_turn immediately before turn_end. The collection loop above
+	// breaks as soon as it sees turn_end, so the window never reaches
+	// the run-scoped cost_session the harness now emits after this
+	// bracket closes (Phase 3) — determined and recorded here rather
+	// than assumed: the window does NOT cross into cost_session's
+	// window, so only cost_turn is added.
 	wantKinds := []agent.EventKind{
 		agent.EventKindTurnStart,
 		agent.EventKindMessageStartText,
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageEndText,
+		agent.EventKindCostTurn,
 		agent.EventKindTurnEnd,
 	}
 	if len(turnOneKinds) != len(wantKinds) {

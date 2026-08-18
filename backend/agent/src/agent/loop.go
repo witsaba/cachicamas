@@ -1010,6 +1010,21 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 // scope: text-only reconstruction. Phase 3 widens to reasoning parts
 // (S-LSK-005).
 func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
+	// AG-16 (R-CST-001): finalize is reached only by a turn that
+	// closes non-aborted (every aborted exit returns before this
+	// point), so its first emission is the turn's own cost_turn,
+	// inside the bracket it opened and before turn_end — the iff's
+	// emitting half. Figures and presence come from t.usage, captured
+	// beside t.finish at the Completion case; a turn that never saw
+	// one (the no-Completion fallback) still reaches finalize with
+	// t.usage at its zero value, so every figure reports absent
+	// rather than an invented zero. Best-effort: a construction
+	// failure skips the emission and changes nothing else finalize
+	// does.
+	if costTurn, cerr := newCostTurnFromUsage(t.runID, t.turnID, CostLabelFinal, t.usage); cerr == nil {
+		emitStamped(t.sink, t.stamper, costTurn)
+	}
+
 	// Emit turn_end (dispatched from t.finish via outcomeForFinish,
 	// R-ATT-002) and run_end (RunOutcomeCompleted — refusal, pause and
 	// unknown are turn-level distinctions only; D5). Failures beyond

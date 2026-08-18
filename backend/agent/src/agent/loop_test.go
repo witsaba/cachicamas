@@ -347,6 +347,11 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 
 	got := drainSink(t, sink)
 
+	// AG-16 signed-off amendment (agent-loop-skeleton delta's R-LSK-001,
+	// S-LSK-001 "Amended by AG-16"): this is a success path, so the
+	// turn closes non-aborted and AG-16's cost_turn emission rule
+	// applies — cost_turn is inserted immediately before turn_end. The
+	// sequence stays a closed list at its new length.
 	wantKinds := []agent.EventKind{
 		agent.EventKindRunStart,
 		agent.EventKindTurnStart,
@@ -355,11 +360,12 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageEndText,
+		agent.EventKindCostTurn,
 		agent.EventKindTurnEnd,
 		agent.EventKindRunEnd,
 	}
 	if len(got) != len(wantKinds) {
-		t.Fatalf("emitted %d events, want %d (full contract run → turn → text bracket → deltas → end → turn_end → run_end)", len(got), len(wantKinds))
+		t.Fatalf("emitted %d events, want %d (full contract run → turn → text bracket → deltas → end → cost_turn → turn_end → run_end)", len(got), len(wantKinds))
 	}
 	for i, ev := range got {
 		if ev.Kind() != wantKinds[i] {
@@ -369,7 +375,7 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 
 	// Sequence stamping: 1-based, contiguous.
 	for i, ev := range got {
-		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 is always in [1,9]
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 is always in [1,10] (AG-16: +cost_turn)
 			t.Errorf("event[%d] sequence = %v, want %v (1-based, contiguous)", i, ev.Sequence(), wantSeq)
 		}
 	}
@@ -1113,7 +1119,7 @@ func TestTurn_TwoSequentialTurnsShareNothing(t *testing.T) {
 		t.Errorf("second turn's first event sequence = %v, want 1 (per-stream, R-LSK-002)", secondEvents[0].Sequence())
 	}
 	for i, ev := range secondEvents {
-		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 always in [1,9]
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 always in [1,10] (AG-16: +cost_turn)
 			t.Errorf("second turn event[%d] sequence = %v, want %v (restarts at 1, not continuing first turn's count)",
 				i, ev.Sequence(), wantSeq)
 		}
@@ -1166,6 +1172,11 @@ func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
 	// events and assert both kinds appear, with the script's
 	// interleaved order (response_start dropped; reasoning bracket;
 	// text bracket; completion).
+	//
+	// AG-16 signed-off amendment: this is a success path (S-ATT stop
+	// finish), so the turn closes non-aborted and AG-16's cost_turn
+	// emission rule (R-LSK-001's amendment) applies here too — cost_turn
+	// is inserted immediately before turn_end, same as S-LSK-001.
 	wantOrder := []agent.EventKind{
 		agent.EventKindRunStart,
 		agent.EventKindTurnStart,
@@ -1176,6 +1187,7 @@ func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageEndText,
+		agent.EventKindCostTurn,
 		agent.EventKindTurnEnd,
 		agent.EventKindRunEnd,
 	}
