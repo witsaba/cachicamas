@@ -27,6 +27,14 @@ The change's own delta for `agent-cancellation-tree` minted `S-CAN-012` for R-CA
 1. `design.md` and the `agent-loop-skeleton` delta's own `S-LSK-009` scenario annotation cite `loop_test.go:1152-1165` as the "tool dispatch" wire-up test; that location is actually `TestTurn_ReasoningPassThroughByteExact` (S-LSK-005). The real tool-dispatch test lives in `loop_tool_dispatch_test.go` and uses kind-filtered counting, unaffected by AG-16 either way. The implementation fix (insert `EventKindCostTurn` before `EventKindTurnEnd` at the cited, verified-correct line range) is unaffected by the mislabel.
 2. `design.md`/`tasks.md` cite `windDownRun` as having 2 call sites; it actually has 3 (the iteration-boundary cancellation check, missed by the citation). Widened at all three — Go's compiler made an undercount impossible to ship silently.
 
+### Two promoted-spec text defects corrected after verification
+
+`sdd-verify` established that defect 1 above was **not** confined to the planning artifacts: the same mislabelled citation had been copied into promoted normative text. Both defects below were corrected in the promoted specs before the pull request opened. The archived delta sources are left as originally authored, so this report is the record of the divergence.
+
+1. **A false amendment claim in normative text.** `openspec/specs/agent-loop-skeleton/spec.md` — S-LSK-009's AG-16 note ended by claiming "the closed-order assertion at `loop_test.go:1152-1165` gains the kind at that position as an enumerated amendment". The line range is accurate but belongs to `S-LSK-005`'s reasoning test; S-LSK-009's own test, `loop_tool_dispatch_test.go`, has an empty diff against `origin/main` because it asserts kind-filtered counts rather than a closed sequence. The note's substantive ordering claim (the `cost_turn` lands after the rejoin-ordered tool events and before `turn_end`) is true and tested and was kept; the false attribution clause was replaced with the correct one.
+
+2. **`R-CST-002` contradicted a file it pins.** Its closing sentence read "A count MUST NOT be readable without its discriminator", while `CostTurn.Figures()`/`CostSession.Figures()` remain public returning five bare `uint64`s and `cost_events_test.go:60-67` reads exactly that way — a file `NFR-CST-004` pins byte-unchanged. Both obligations could not hold, and no scenario asserted the clause, so nothing failed. The concrete risk was a later milestone reading it literally, deleting `Figures()`, and breaking a pinned file. Reworded in both `agent-cost-events` and `agent-protocol-events` to state what is actually true and enforced: the paired accessors are the **required** path for judging presence, `Figures()` must not be read to infer absence, and it must not be removed to satisfy the clause.
+
 ## Commits
 
 | SHA | Subject |
