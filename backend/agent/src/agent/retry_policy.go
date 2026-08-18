@@ -31,6 +31,7 @@
 // attempts (R-RTY-005) — this is stated here, adjacent to the number,
 // because a reader who does not already know the convention cannot
 // otherwise tell whether "3" means 3 or 4.
+
 package agent
 
 import (
