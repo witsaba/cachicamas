@@ -2171,9 +2171,9 @@ Scenario: examples compile under the normal test run
 - [x] A multi-turn run completes with steering, pause resumption, and a complete event story — closed by AG-13.
 - [x] Interrupt and shutdown are distinguishable end to end; wind-down is bounded — closed by AG-14.
 - [x] Partial-output failures are never silently retried; retry attempts are visible events — closed by AG-15.1.
-- [ ] Every turn emits a cost event; cumulative figures include retries and compaction; estimates are labelled — closed by AG-16.1, AG-18.1.
+- [x] Every turn emits a cost event; cumulative figures include retries and compaction; estimates are labelled — closed by AG-16.1, AG-18.1.
 - [x] The context strategy is consulted before every call; token counting is capability-discovered with a labelled fallback — closed by AG-17.
-- [ ] Compaction protects recent turns, preserves the pairing invariant, is recorded on the stream, recovers from interruption, and is invocable on demand at a turn boundary — closed by AG-18.
+- [x] Compaction protects recent turns, preserves the pairing invariant, is recorded on the stream, recovers from interruption, and is invocable on demand at a turn boundary — closed by AG-18.
 - [ ] The harness is re-entrant: nested runs with nested cancellation, cost, and permission scope, parent-identified — closed by AG-19.
 - [ ] All four hook points fire; observers cannot stall the stream — closed by AG-20.
 - [ ] The package is race-clean and leak-free under the combined-scenario matrix — closed by AG-21.
