@@ -20,6 +20,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -89,6 +90,19 @@ type Harness struct {
 	// (R-RTY-011, the inertness pin) — NoOpFailoverPolicy{} is the one
 	// shipped, installable implementation with the identical behavior.
 	Failover FailoverPolicy
+
+	// ContextStrategy is the context seam consulted exactly once per
+	// LOGICAL turn, at the turn boundary below (R-CTX-001). Nil-default:
+	// a nil value is never consulted and no accounting is resolved — the
+	// nil path is byte-for-byte the pre-AG-17 path (R-CTX-004, the
+	// inertness pin) — NoOpContextStrategy{} is the one shipped,
+	// installable implementation with the identical behavior.
+	ContextStrategy ContextStrategy
+
+	// ContextBudget is Layer 3's stated token budget, possibly absent
+	// (R-CTX-005). Zero-default: the zero value reads as absent, never
+	// as a budget of zero tokens.
+	ContextBudget ContextBudget
 
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
@@ -496,6 +510,24 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		}
 
 		transcript := transcriptFromHistory(hist)
+
+		// AG-17 (R-CTX-001, R-CTX-002): the context seam, consulted
+		// exactly once per LOGICAL turn — at AG-13's turn boundary,
+		// outside the attempt loop below — never per attempt. A
+		// per-attempt consultation would let a future compacting
+		// verdict (AG-18) mutate the transcript between two attempts
+		// of one logical turn, making R-RTY-002's "identical
+		// transcript, reused BY REFERENCE" (harness.go:518-529)
+		// unprovable by the exact argument its comment relies on.
+		// A nil strategy is never consulted and no accounting is
+		// resolved: the nil path is byte-for-byte the pre-AG-17 path.
+		if h.ContextStrategy != nil {
+			h.ContextStrategy.Resolve(runCtx, ContextPrompt{
+				Transcript: slices.Clone(transcript),
+				Budget:     h.ContextBudget,
+				Accounting: resolveTokenAccounting(runCtx, h.Provider, h.Turn, h.System, transcript),
+			})
+		}
 
 		bound := h.RetryAttempts
 		if bound <= 0 {

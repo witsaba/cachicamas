@@ -9,9 +9,12 @@ package agent_test
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/ai"
 )
 
 // TestContextVerdict_HasNoFields — S-CTX-005, charter AG-17.1 scenario
@@ -131,5 +134,402 @@ func TestTokenAccounting_UnreadableWithoutSource(t *testing.T) {
 	}
 	if len(rendered) != 3 {
 		t.Errorf("the three TokenSource values render to %d distinct string(s), want 3", len(rendered))
+	}
+}
+
+// --- Phase 5 -- the seam consultation (R-CTX-001..004) --------------------
+
+// recordingContextStrategy is a test-local agent.ContextStrategy that
+// records every Resolve call's prompt, in order, and always returns
+// the zero ContextVerdict (v1's only constructible value). requestsFn,
+// when set, snapshots how many requests the provider has recorded at
+// the MOMENT each consultation runs -- the mechanical proof that a
+// consultation happens BEFORE that turn's own first provider call,
+// since Resolve executes synchronously ahead of Turn's own
+// provider.Stream call (S-CTX-001).
+type recordingContextStrategy struct {
+	mu         sync.Mutex
+	prompts    []agent.ContextPrompt
+	requestsFn func() int
+	countsAt   []int
+}
+
+func (s *recordingContextStrategy) Resolve(_ context.Context, prompt agent.ContextPrompt) agent.ContextVerdict {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prompts = append(s.prompts, prompt)
+	if s.requestsFn != nil {
+		s.countsAt = append(s.countsAt, s.requestsFn())
+	}
+	return agent.ContextVerdict{}
+}
+
+func (s *recordingContextStrategy) Prompts() []agent.ContextPrompt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]agent.ContextPrompt, len(s.prompts))
+	copy(out, s.prompts)
+	return out
+}
+
+func (s *recordingContextStrategy) CountsAtConsultation() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]int, len(s.countsAt))
+	copy(out, s.countsAt)
+	return out
+}
+
+var _ agent.ContextStrategy = (*recordingContextStrategy)(nil)
+
+// mutatingContextStrategy appends to and overwrites the Transcript
+// slice it receives -- proving the seam hands out a fresh CLONE, not
+// the harness's own slice (R-CTX-002): a mutation here must never
+// reach what the turn actually sends.
+type mutatingContextStrategy struct{}
+
+func (mutatingContextStrategy) Resolve(_ context.Context, prompt agent.ContextPrompt) agent.ContextVerdict {
+	for i := range prompt.Transcript {
+		prompt.Transcript[i] = ai.Message{}
+	}
+	_ = append(prompt.Transcript, ai.Message{})
+	return agent.ContextVerdict{}
+}
+
+var _ agent.ContextStrategy = mutatingContextStrategy{}
+
+// isCompactionKind reports whether k is one of the compaction-family
+// kinds AG-06 minted (compaction_events.go) — AG-17 must emit none of
+// them on any path (R-CTX-003, R-CTX-012).
+func isCompactionKind(k agent.EventKind) bool {
+	switch k {
+	case agent.EventKindCompactionStarted, agent.EventKindCompactionFinished, agent.EventKindCompactionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// assertEventStreamsStructurallyIdentical asserts a and b carry the
+// same event count, the same Kind() at every position, the same
+// turn-scoping, and — for every event kind this file's scripts
+// produce — the same payload content (R-CTX-004's byte-identity pin).
+//
+// RunID/TurnID VALUES are the one deliberate exclusion: they are
+// freshly minted per Harness.Run call by design (R-RUN-004's
+// provenance-distinctness), so two INDEPENDENT runs can never share
+// them even when identical in every other observable respect. Every
+// other field this file's scripts populate is compared.
+func assertEventStreamsStructurallyIdentical(t *testing.T, a, b []agent.Event) {
+	t.Helper()
+
+	if len(a) != len(b) {
+		t.Fatalf("event count differs: %d vs %d, want equal", len(a), len(b))
+	}
+	for i := range a {
+		ea, eb := a[i], b[i]
+		if ea.Kind() != eb.Kind() {
+			t.Errorf("event[%d].Kind() = %v, want %v", i, ea.Kind(), eb.Kind())
+			continue
+		}
+		_, aHasTurn := ea.Turn()
+		_, bHasTurn := eb.Turn()
+		if aHasTurn != bHasTurn {
+			t.Errorf("event[%d] turn-scoped: %v vs %v, want equal", i, aHasTurn, bHasTurn)
+		}
+
+		switch ea.Kind() {
+		case agent.EventKindRunEnd:
+			ra, _ := ea.RunEnd()
+			rb, _ := eb.RunEnd()
+			if ra.Outcome() != rb.Outcome() {
+				t.Errorf("event[%d] run_end outcome: %v vs %v", i, ra.Outcome(), rb.Outcome())
+			}
+			fa, hasA := ra.Failure()
+			fb, hasB := rb.Failure()
+			if hasA != hasB {
+				t.Errorf("event[%d] run_end failure presence: %v vs %v", i, hasA, hasB)
+			}
+			if hasA && hasB && fa.Category() != fb.Category() {
+				t.Errorf("event[%d] run_end failure category: %v vs %v", i, fa.Category(), fb.Category())
+			}
+		case agent.EventKindTurnEnd:
+			ta, _ := ea.TurnEnd()
+			tb, _ := eb.TurnEnd()
+			if ta.Outcome() != tb.Outcome() {
+				t.Errorf("event[%d] turn_end outcome: %v vs %v", i, ta.Outcome(), tb.Outcome())
+			}
+			fa, hasA := ta.Failure()
+			fb, hasB := tb.Failure()
+			if hasA != hasB {
+				t.Errorf("event[%d] turn_end failure presence: %v vs %v", i, hasA, hasB)
+			}
+			if hasA && hasB && (fa.Category() != fb.Category() || fa.PartialOutput() != fb.PartialOutput()) {
+				t.Errorf("event[%d] turn_end failure evidence mismatch", i)
+			}
+		case agent.EventKindToolStart:
+			ta, _ := ea.ToolStart()
+			tb, _ := eb.ToolStart()
+			if ta.Name() != tb.Name() || string(ta.Arguments()) != string(tb.Arguments()) || ta.Ordinal() != tb.Ordinal() {
+				t.Errorf("event[%d] tool_start content mismatch: %+v vs %+v", i, ta, tb)
+			}
+		case agent.EventKindToolEndSuccess:
+			ta, _ := ea.ToolEndSuccess()
+			tb, _ := eb.ToolEndSuccess()
+			if string(ta.Result()) != string(tb.Result()) || ta.Ordinal() != tb.Ordinal() {
+				t.Errorf("event[%d] tool_end_success content mismatch: %+v vs %+v", i, ta, tb)
+			}
+		case agent.EventKindMessageDeltaText:
+			da, _ := ea.MessageDeltaText()
+			db, _ := eb.MessageDeltaText()
+			if da.Fragment() != db.Fragment() || da.Index() != db.Index() {
+				t.Errorf("event[%d] message_delta_text content mismatch: %+v vs %+v", i, da, db)
+			}
+		}
+	}
+}
+
+// scriptedTwoTurnHarness builds the canonical tool-call-then-text
+// two-logical-turn harness this file's AG-17.1 tests share (mirrors
+// TestHarness_TwoTurnRun_CompletesToTerminal's shape): turn one ends
+// in a tool call, turn two completes with plain text.
+func scriptedTwoTurnHarness(t *testing.T, toolAndCallSuffix string, strategy agent.ContextStrategy, budget agent.ContextBudget) (*agent.Harness, *agenttest.Provider) {
+	t.Helper()
+
+	toolName := "read_ctx_" + toolAndCallSuffix
+	callID := "call-ctx-" + toolAndCallSuffix
+	tool := EchoScriptedTool(toolName, agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+
+	provider := agenttest.NewProvider(
+		scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)),
+		scriptTextResponse(t, ai.FinishReasonStop),
+	)
+	h := &agent.Harness{
+		Provider:        provider,
+		System:          "system prompt for context strategy seam test " + toolAndCallSuffix,
+		Turn:            agent.TurnOptions{Tools: reg},
+		ContextStrategy: strategy,
+		ContextBudget:   budget,
+	}
+	return h, provider
+}
+
+// TestHarness_ContextStrategy_ConsultedOncePerLogicalTurn — S-CTX-001,
+// charter AG-17.1 scenario 1, clean half. A run of two logical turns,
+// each completing on its first attempt, consults the recording
+// strategy EXACTLY twice, each consultation strictly before that
+// turn's own first provider call; and the run's outcome, returned
+// error and event stream match the identical script driven with no
+// strategy installed.
+func TestHarness_ContextStrategy_ConsultedOncePerLogicalTurn(t *testing.T) {
+	t.Parallel()
+
+	h, provider := scriptedTwoTurnHarness(t, "001", nil, agent.ContextBudget{})
+	strategy := &recordingContextStrategy{requestsFn: func() int { return len(provider.Requests()) }}
+	h.ContextStrategy = strategy
+
+	sink := make(chan *agent.Event, 256)
+	_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+
+	prompts := strategy.Prompts()
+	if len(prompts) != 2 {
+		t.Fatalf("recorder holds %d consultation(s), want exactly 2", len(prompts))
+	}
+	if counts := strategy.CountsAtConsultation(); len(counts) != 2 || counts[0] != 0 || counts[1] != 1 {
+		t.Errorf("provider request counts AT the moment of each consultation = %v, want [0 1] -- each consultation must precede that turn's own first provider call", counts)
+	}
+
+	baseH, _ := scriptedTwoTurnHarness(t, "001", nil, agent.ContextBudget{})
+	baseSink := make(chan *agent.Event, 256)
+	_, baseFinish, baseErr := baseH.Run(contextBackground(), firstMessage(t), baseSink)
+	baseEvents := drainSink(t, baseSink)
+
+	if (err == nil) != (baseErr == nil) {
+		t.Errorf("returned error nil-ness differs: with strategy = %v, without = %v", err, baseErr)
+	}
+	if finish != baseFinish {
+		t.Errorf("finish reason differs: with strategy = %v, without = %v", finish, baseFinish)
+	}
+	assertEventStreamsStructurallyIdentical(t, events, baseEvents)
+}
+
+// TestHarness_ContextStrategy_RetriedTurnConsultsOnce — S-CTX-002, the
+// reading this requirement exists to exclude. The first logical turn
+// fails retryably once (no partial output) then completes; the second
+// completes cleanly — three provider attempts across two logical
+// turns — and the recorder holds EXACTLY two consultations, not
+// three; the two transcripts the strategy received are the two
+// distinct per-logical-turn transcripts, never the same one twice.
+func TestHarness_ContextStrategy_RetriedTurnConsultsOnce(t *testing.T) {
+	t.Parallel()
+
+	toolName, callID := "read_ctx_002", "call-ctx-002"
+	tool := EchoScriptedTool(toolName, agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+	inner := agenttest.NewProvider(
+		scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)),
+		scriptTextResponse(t, ai.FinishReasonStop),
+	)
+	failure := mustPreStreamRetryableFailure(t, ai.RetryDelay{})
+	provider := newPreStreamFailingProvider(1, failure, inner) // fails the FIRST attempt only
+
+	strategy := &recordingContextStrategy{}
+	h := agent.Harness{
+		Provider:        provider,
+		System:          "system prompt for S-CTX-002",
+		Turn:            agent.TurnOptions{Tools: reg},
+		RetryAttempts:   3,
+		RetryTiming:     agent.RetryTiming{SleepFunc: instantSleep},
+		ContextStrategy: strategy,
+	}
+
+	sink := make(chan *agent.Event, 256)
+	_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+	if err != nil {
+		t.Fatalf("Run returned err = %v, want nil (the retry succeeds within the bound)", err)
+	}
+	drainSink(t, sink)
+
+	if got := len(provider.Requests()); got != 3 {
+		t.Fatalf("wrapper recorded %d request(s), want exactly 3 (2 logical turns, the first retried once)", got)
+	}
+
+	prompts := strategy.Prompts()
+	if len(prompts) != 2 {
+		t.Fatalf("recorder holds %d consultation(s), want exactly 2 -- NOT 3 (R-CTX-001: the unit is the LOGICAL TURN, never the attempt)", len(prompts))
+	}
+	if len(prompts[0].Transcript) >= len(prompts[1].Transcript) {
+		t.Errorf("prompt[0].Transcript has %d message(s), prompt[1].Transcript has %d -- want the second STRICTLY longer (turn one's committed entries), proving the two consultations received distinct transcripts", len(prompts[0].Transcript), len(prompts[1].Transcript))
+	}
+}
+
+// TestHarness_ContextStrategy_PromptCarriesTranscriptAndBudget —
+// S-CTX-004, the inputs half. Each recorded prompt's transcript is
+// element-equal to the messages of the request that turn's provider
+// call actually carried, and its budget echoes the stated limit
+// together with a present reading. A strategy that appends to and
+// overwrites the slice it received does not change what the provider
+// records — the clone, not a convention, is what makes that true.
+func TestHarness_ContextStrategy_PromptCarriesTranscriptAndBudget(t *testing.T) {
+	t.Parallel()
+
+	strategy := &recordingContextStrategy{}
+	h, provider := scriptedTwoTurnHarness(t, "004", strategy, agent.ContextBudgetOf(4096))
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	prompts := strategy.Prompts()
+	requests := provider.Requests()
+	if len(prompts) != 2 || len(requests) != 2 {
+		t.Fatalf("got %d prompt(s) and %d request(s), want 2 and 2", len(prompts), len(requests))
+	}
+	for i, p := range prompts {
+		want := requests[i].Messages()
+		if len(p.Transcript) != len(want) {
+			t.Fatalf("prompt[%d].Transcript has %d message(s), want %d (element-equal to the sent request's messages)", i, len(p.Transcript), len(want))
+		}
+		for j := range want {
+			if !p.Transcript[j].Equal(want[j]) {
+				t.Errorf("prompt[%d].Transcript[%d] != request[%d].Messages()[%d]", i, j, i, j)
+			}
+		}
+		limit, present := p.Budget.Limit()
+		if !present || limit != 4096 {
+			t.Errorf("prompt[%d].Budget.Limit() = (%d, %v), want (4096, true)", i, limit, present)
+		}
+	}
+
+	mutating := mutatingContextStrategy{}
+	mh, mProvider := scriptedTwoTurnHarness(t, "004", mutating, agent.ContextBudgetOf(4096))
+	mSink := make(chan *agent.Event, 256)
+	if _, _, err := mh.Run(contextBackground(), firstMessage(t), mSink); err != nil {
+		t.Fatalf("mutating-strategy Run returned err = %v, want nil", err)
+	}
+	drainSink(t, mSink)
+	mutatedRequests := mProvider.Requests()
+	if len(mutatedRequests) != len(requests) {
+		t.Fatalf("mutating-strategy run recorded %d request(s), want %d", len(mutatedRequests), len(requests))
+	}
+	for i := range requests {
+		if !mutatedRequests[i].Equal(requests[i]) {
+			t.Errorf("request[%d] differs between the non-mutating and mutating-strategy runs -- the seam must hand the strategy a fresh CLONE", i)
+		}
+	}
+}
+
+// TestHarness_ContextStrategy_NoOpInstalled_ZeroCompactionEvents —
+// S-CTX-006. Installing the shipped never-compact default: the
+// compile-time guard binds it to the seam, every consultation returns
+// the zero verdict (mechanically true, since none other exists), and
+// no compaction-family event appears anywhere on the recorded stream.
+func TestHarness_ContextStrategy_NoOpInstalled_ZeroCompactionEvents(t *testing.T) {
+	t.Parallel()
+
+	var strategy agent.ContextStrategy = agent.NoOpContextStrategy{} // compile-time guard binds
+	h, _ := scriptedTwoTurnHarness(t, "006", strategy, agent.ContextBudget{})
+
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+	if len(events) == 0 {
+		t.Fatal("zero events observed")
+	}
+	for _, ev := range events {
+		if isCompactionKind(ev.Kind()) {
+			t.Errorf("event kind %v is a compaction-family kind, want none anywhere on the stream", ev.Kind())
+		}
+	}
+}
+
+// TestHarness_ContextStrategy_NilVsNoOpByteIdentical — S-CTX-007,
+// charter AG-17.1 scenario 2 (the pin). Two runs of the identical
+// multi-turn script against the identical non-counting fake provider
+// -- run A with the seam field nil, run B with the shipped
+// never-compact default installed -- produce structurally identical
+// recorded event streams (R-CTX-004's byte-identity comparison, up to
+// the one deliberate identity exclusion documented on
+// assertEventStreamsStructurallyIdentical), neither carries any
+// compaction-family kind, and both runs' outcomes are equal.
+func TestHarness_ContextStrategy_NilVsNoOpByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T, strategy agent.ContextStrategy, budget agent.ContextBudget) (ai.FinishReason, error, []agent.Event) {
+		t.Helper()
+		h, _ := scriptedTwoTurnHarness(t, "007", strategy, budget)
+		sink := make(chan *agent.Event, 256)
+		_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+		return finish, err, drainSink(t, sink)
+	}
+
+	nilFinish, nilErr, nilEvents := run(t, nil, agent.ContextBudget{})
+	noOpFinish, noOpErr, noOpEvents := run(t, agent.NoOpContextStrategy{}, agent.ContextBudgetOf(1000))
+
+	if (nilErr == nil) != (noOpErr == nil) {
+		t.Fatalf("returned error nil-ness: nil = %v, NoOp = %v, want equal", nilErr, noOpErr)
+	}
+	if nilFinish != noOpFinish {
+		t.Errorf("finish reason: nil = %v, NoOp = %v, want equal", nilFinish, noOpFinish)
+	}
+	assertEventStreamsStructurallyIdentical(t, nilEvents, noOpEvents)
+
+	for _, ev := range nilEvents {
+		if isCompactionKind(ev.Kind()) {
+			t.Errorf("nil-field run: event kind %v is compaction-family, want none", ev.Kind())
+		}
+	}
+	for _, ev := range noOpEvents {
+		if isCompactionKind(ev.Kind()) {
+			t.Errorf("NoOp run: event kind %v is compaction-family, want none", ev.Kind())
+		}
 	}
 }
