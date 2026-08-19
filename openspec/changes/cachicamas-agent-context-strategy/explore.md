@@ -192,7 +192,7 @@ One spec covers both AG-17.1 and AG-17.2 under the single change
 | Guard | Risk to AG-17 |
 |---|---|
 | `import_boundary_test.go` | **Safe** — the `ai.TokenCounter` assertion stays inside the already-allowed `src/ai` |
-| `ambient_authority_test.go` | **Watch** — the estimate must stay pure: no clock, no env read |
+| `ambient_authority_test.go` | **Watch — narrower than first recorded.** CORRECTED during propose: the guard's forbidden set is exactly `os`, `os/exec`, `syscall`, `io/ioutil` (`ambient_authority_test.go:67-94`). It does **not** forbid `time`. So "no env read, no I/O" is guarded; "no clock" is a real obligation that this guard does **not** enforce, and the estimate's determinism therefore needs a direct assertion of its own |
 | `doc_contract_guard_test.go` | **Open question** — byte-pinned `L2C-NN` table; AG-17 adds no new `EventKind` and no new upward-visible fact, so "no new row" is likely, but propose must state this rather than assume it |
 | `event_registry_test.go` | **Safe** — no new event kind |
 | `history_surface_guard_test.go` | **Safe** — read-only via `Entries()` |
