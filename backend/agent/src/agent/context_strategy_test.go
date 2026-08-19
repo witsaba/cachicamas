@@ -726,3 +726,111 @@ func TestHarness_Accounting_PreHookDivergenceRecorded(t *testing.T) {
 		}
 	}
 }
+
+// --- Phase 7 -- closed-sequence proof & substrate verification -----------
+// (R-CTX-012, NFR-CTX-002..004)
+
+// TestHarness_ContextStrategy_ClosedSequencesUnaffected — S-CTX-020.
+// A multi-logical-turn run with the never-compact default installed
+// carries zero compaction-family events, and its kind sequence is
+// equal, position for position, to the identical run with the seam
+// nil. TestTurn_WalkingSkeleton_EmitsContractEventOrder (S-LSK-001)
+// and TestHarness_CostSession_FinalOnShutdownRun (S-CAN-013) are run
+// unmodified and byte-unchanged alongside this file -- confirmed by
+// the full-suite evidence in apply-progress.md, not re-asserted here.
+func TestHarness_ContextStrategy_ClosedSequencesUnaffected(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T, strategy agent.ContextStrategy) []agent.EventKind {
+		t.Helper()
+		h, _ := scriptedTwoTurnHarness(t, "020", strategy, agent.ContextBudget{})
+		sink := make(chan *agent.Event, 256)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+			t.Fatalf("Run returned err = %v, want nil", err)
+		}
+		events := drainSink(t, sink)
+		kinds := make([]agent.EventKind, len(events))
+		for i, ev := range events {
+			kinds[i] = ev.Kind()
+		}
+		return kinds
+	}
+
+	nilKinds := run(t, nil)
+	noOpKinds := run(t, agent.NoOpContextStrategy{})
+
+	if len(nilKinds) != len(noOpKinds) {
+		t.Fatalf("kind sequence length: nil = %d, NoOp = %d, want equal", len(nilKinds), len(noOpKinds))
+	}
+	for i := range nilKinds {
+		if nilKinds[i] != noOpKinds[i] {
+			t.Errorf("kind[%d]: nil = %v, NoOp = %v, want equal", i, nilKinds[i], noOpKinds[i])
+		}
+		if isCompactionKind(nilKinds[i]) || isCompactionKind(noOpKinds[i]) {
+			t.Errorf("kind[%d] is compaction-family, want none anywhere on either stream", i)
+		}
+	}
+}
+
+// TestNoRelease_SubstrateByteUnchanged — S-CTX-021, R-CTX-012, part of
+// NFR-CTX-004. Diffing the merge base against the working tree: the
+// named substrate files are byte-unchanged, the diff under
+// backend/agent/src/ai/ is empty, go.mod/go.sum are byte-unchanged,
+// and expectedLayer2ContractRows still carries exactly eight rows.
+func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+
+	mainRef := os.Getenv("AG07_BASE_REF")
+	if mainRef == "" {
+		out, err := gitOutput(t, root, "merge-base", "HEAD", "origin/main")
+		if err != nil {
+			t.Fatalf("cannot determine base ref (set AG07_BASE_REF): %v", err)
+		}
+		mainRef = out
+	}
+
+	untouched := []string{
+		"backend/agent/src/agent/doc.go",
+		"backend/agent/src/agent/doc_contract_guard_test.go",
+		"backend/agent/src/agent/stream_check.go",
+		"backend/agent/src/agent/event.go",
+		"backend/agent/src/agent/event_descriptor.go",
+		"backend/agent/src/agent/event_registry_test.go",
+		"backend/agent/src/agent/compaction_events.go",
+		"backend/agent/src/agent/cost_events.go",
+		"backend/agent/src/agent/cost_usage.go",
+		"backend/agent/src/agent/history.go",
+	}
+	for _, path := range untouched {
+		diff, err := gitDiff(t, root, mainRef, path)
+		if err != nil {
+			t.Fatalf("git diff %s -- %s failed: %v", mainRef, path, err)
+		}
+		if len(diff) != 0 {
+			t.Errorf("%s is NOT byte-unchanged against %s (R-CTX-012, NFR-CTX-004):\n%s", path, mainRef, diff)
+		}
+	}
+
+	aiDiff, err := gitDiff(t, root, mainRef, "backend/agent/src/ai/")
+	if err != nil {
+		t.Fatalf("git diff %s -- backend/agent/src/ai/ failed: %v", mainRef, err)
+	}
+	if len(aiDiff) != 0 {
+		t.Errorf("backend/agent/src/ai/ is NOT byte-unchanged against %s -- AG-17 must never edit Layer 1:\n%s", mainRef, aiDiff)
+	}
+
+	goModSum, err := gitDiff(t, root, mainRef, "backend/agent/go.mod", "backend/agent/go.sum")
+	if err != nil {
+		t.Fatalf("git diff %s -- go.mod go.sum failed: %v", mainRef, err)
+	}
+	if len(goModSum) != 0 {
+		t.Errorf("go.mod / go.sum drifted from %s:\n%s", mainRef, goModSum)
+	}
+
+	if len(expectedLayer2ContractRows) != 8 {
+		t.Errorf("expectedLayer2ContractRows carries %d row(s), want exactly 8 (L2C-01..L2C-08) -- AG-17 declares no new package-wide contract row", len(expectedLayer2ContractRows))
+	}
+}
