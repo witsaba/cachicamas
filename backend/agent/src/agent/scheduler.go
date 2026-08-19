@@ -489,7 +489,13 @@ func (s *Scheduler) executeCall(
 	if modifiedArgs != nil {
 		runArgs = modifiedArgs
 	}
-	reply, detached := s.runToolWithWindDown(ctx, tool, runArgs, PolicySlot(call.ID()))
+	// AG-19 (R-DEL-001, R-DEL-003, design AD-1): install the delegation
+	// seam for exactly this tool.Run frame and revoke it on every exit
+	// path. Registered after `defer recoverCall` above, so LIFO runs
+	// revocation first on the normal, detach and re-panic exits alike.
+	seam := newDelegationSeam(runID, turnID, emissions)
+	defer seam.revoke()
+	reply, detached := s.runToolWithWindDown(withDelegationSeam(ctx, seam), tool, runArgs, PolicySlot(call.ID()))
 	if reply.panicVal != nil {
 		panic(reply.panicVal)
 	}
