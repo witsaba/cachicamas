@@ -11,11 +11,14 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -282,5 +285,101 @@ func TestEstimateTokens_NoClockNoIO_SourceScan(t *testing.T) {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("token_accounting.go imports %s -- the estimate MUST be a pure function: no clock, no environment, no randomness, no I/O", forbidden)
 		}
+	}
+}
+
+// --- Phase 3 -- the accounting resolver (R-CTX-006, R-CTX-007) -----------
+
+// TestResolveTokenAccounting_ThreeStates — S-CTX-012, the three-state
+// table. Four fixtures: (a) a counting fixture reporting a present
+// figure, (b) the non-counting fake, (c) an ADVERTISED counter
+// returning a non-nil error, (d) an ADVERTISED counter returning a
+// NIL error with an ABSENT count. (a) yields Reported with that
+// figure; (b) yields Estimated with the estimate's own figure; (c)
+// and (d) BOTH yield Unavailable with no figure -- specifically NOT
+// Estimated -- and their value equals the zero TokenAccounting.
+func TestResolveTokenAccounting_ThreeStates(t *testing.T) {
+	t.Parallel()
+
+	opts := TurnOptions{}
+	system := "system prompt for the resolver's three-state table"
+	transcript := []ai.Message{mustEstimateText(t, ai.RoleUser, "resolve my accounting please")}
+
+	t.Run("(a) reporting counter -> Reported with its own figure", func(t *testing.T) {
+		t.Parallel()
+		provider := agenttest.NewCountingProvider(ai.Tokens(555))
+
+		got := resolveTokenAccounting(context.Background(), provider, opts, system, transcript)
+		tokens, source := got.Tokens()
+		if source != TokenSourceReported || tokens != 555 {
+			t.Errorf("resolveTokenAccounting(reporting counter) = (%d, %v), want (555, TokenSourceReported)", tokens, source)
+		}
+	})
+
+	t.Run("(b) non-counting fake -> Estimated with the estimate's figure", func(t *testing.T) {
+		t.Parallel()
+		provider := agenttest.NewProvider()
+
+		req, err := buildLoopRequest(opts, system, transcript)
+		if err != nil {
+			t.Fatalf("buildLoopRequest returned %v, want no failure", err)
+		}
+		want := estimateTokens(req)
+
+		got := resolveTokenAccounting(context.Background(), provider, opts, system, transcript)
+		tokens, source := got.Tokens()
+		if source != TokenSourceEstimated || tokens != want {
+			t.Errorf("resolveTokenAccounting(non-counting) = (%d, %v), want (%d, TokenSourceEstimated)", tokens, source, want)
+		}
+	})
+
+	t.Run("(c) advertised counter errors -> Unavailable, NEVER Estimated", func(t *testing.T) {
+		t.Parallel()
+		provider := agenttest.NewFailingCountingProvider(errors.New("advertised counter declines"))
+
+		got := resolveTokenAccounting(context.Background(), provider, opts, system, transcript)
+		var zero TokenAccounting
+		tokens, source := got.Tokens()
+		if source != TokenSourceUnavailable || tokens != 0 {
+			t.Errorf("resolveTokenAccounting(erroring advertised counter) = (%d, %v), want (0, TokenSourceUnavailable)", tokens, source)
+		}
+		if got != zero {
+			t.Errorf("resolveTokenAccounting(erroring advertised counter) = %#v, want the zero TokenAccounting (R-AMP-019: non-conformant, not absent, NEVER estimated)", got)
+		}
+	})
+
+	t.Run("(d) advertised counter answers nil-error absent-count -> Unavailable, NEVER Estimated", func(t *testing.T) {
+		t.Parallel()
+		provider := agenttest.NewCountingProvider(ai.TokenCount{})
+
+		got := resolveTokenAccounting(context.Background(), provider, opts, system, transcript)
+		var zero TokenAccounting
+		tokens, source := got.Tokens()
+		if source != TokenSourceUnavailable || tokens != 0 {
+			t.Errorf("resolveTokenAccounting(nil-error absent-count) = (%d, %v), want (0, TokenSourceUnavailable)", tokens, source)
+		}
+		if got != zero {
+			t.Errorf("resolveTokenAccounting(nil-error absent-count) = %#v, want the zero TokenAccounting -- \"answered no figure\" is not a report", got)
+		}
+	})
+}
+
+// TestResolveTokenAccounting_BuildFailureYieldsUnavailable — R-CTX-006:
+// a buildLoopRequest failure at the accounting point yields Unavailable
+// rather than aborting; the turn's own build (loop.go:304) stays the
+// single abort authority. An empty transcript makes buildLoopRequest's
+// underlying ai.NewRequest fail its "at least one message" rule.
+func TestResolveTokenAccounting_BuildFailureYieldsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewCountingProvider(ai.Tokens(999))
+	got := resolveTokenAccounting(context.Background(), provider, TurnOptions{}, "system prompt", nil)
+
+	var zero TokenAccounting
+	if got != zero {
+		t.Errorf("resolveTokenAccounting(empty transcript, build failure) = %#v, want the zero TokenAccounting (Unavailable)", got)
+	}
+	if got := len(provider.CountRequests()); got != 0 {
+		t.Errorf("CountRequests() = %d, want 0 -- a build failure must never reach the counter", got)
 	}
 }

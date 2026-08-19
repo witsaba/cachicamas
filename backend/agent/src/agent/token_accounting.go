@@ -11,7 +11,11 @@
 
 package agent
 
-import "github.com/cachicamas/backend/agent/src/ai"
+import (
+	"context"
+
+	"github.com/cachicamas/backend/agent/src/ai"
+)
 
 // TokenSource is the provenance of a token figure (R-CTX-008).
 // The zero value is Unavailable, so a zero TokenAccounting{} reads as
@@ -67,6 +71,44 @@ type TokenAccounting struct {
 // cannot obtain the number without also obtaining the source — the
 // mechanical enforcement of "an estimate never masquerades as exact".
 func (a TokenAccounting) Tokens() (int64, TokenSource) { return a.tokens, a.source }
+
+// resolveTokenAccounting resolves the coming logical turn's measured
+// size (R-CTX-006, R-CTX-007). Package-private — no Layer 3 exists yet
+// (0003:110); external tests read ContextPrompt.Accounting through a
+// recording strategy (the AG-16 cost_usage surface argument).
+//
+// The three states, in the order this resolver decides them:
+//  1. buildLoopRequest fails -> Unavailable. The turn's own build
+//     (loop.go:304) stays the single abort authority; duplicating
+//     that decision would create a second failure site for one
+//     condition.
+//  2. provider does not satisfy ai.TokenCounter (a clean absence,
+//     R-AMP-018) -> Estimated, via estimateTokens.
+//  3. provider satisfies ai.TokenCounter:
+//     - CountTokens errors, or answers with a nil error and an
+//     absent count -> Unavailable, NEVER Estimated. An advertised
+//     counter that declines is non-conformant, not absent
+//     (R-AMP-019) — falling back to the estimate would launder it
+//     into a working one.
+//     - CountTokens answers with a present count -> Reported.
+func resolveTokenAccounting(ctx context.Context, provider ai.ModelProvider, opts TurnOptions, system string, transcript []ai.Message) TokenAccounting {
+	req, err := buildLoopRequest(opts, system, transcript) // loop.go:713-726 — the SAME builder the turn uses
+	if err != nil {
+		return TokenAccounting{}
+	}
+
+	counter, ok := provider.(ai.TokenCounter) // the ONLY discovery mechanism (ai/provider.go:112-113)
+	if !ok {
+		return TokenAccounting{tokens: estimateTokens(req), source: TokenSourceEstimated}
+	}
+
+	tc, cerr := counter.CountTokens(ctx, req)
+	n, present := tc.Count()
+	if cerr != nil || !present {
+		return TokenAccounting{}
+	}
+	return TokenAccounting{tokens: n, source: TokenSourceReported}
+}
 
 // estimateBytesPerToken (D) = 4: byte-level BPE averages ~4 UTF-8
 // bytes per token on mixed prose; bytes, not runes, because a 3-byte
