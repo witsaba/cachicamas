@@ -8,7 +8,12 @@ package agent_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -530,6 +535,194 @@ func TestHarness_ContextStrategy_NilVsNoOpByteIdentical(t *testing.T) {
 	for _, ev := range noOpEvents {
 		if isCompactionKind(ev.Kind()) {
 			t.Errorf("NoOp run: event kind %v is compaction-family, want none", ev.Kind())
+		}
+	}
+}
+
+// --- Phase 6 -- externally-observed AG-17.2 scenarios ---------------------
+
+// assertNoTokenCountingInterfaceDeclared parses every non-test source
+// file in this package's own directory and fails if any declares an
+// interface carrying a CountTokens method — Layer 2 MUST declare NO
+// counting contract of its own; ai.TokenCounter is the only one
+// (R-CTX-006, R-AMP-017).
+func assertNoTokenCountingInterfaceDeclared(t *testing.T) {
+	t.Helper()
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q) returned %v, want nil", ".", err)
+	}
+
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, name, nil, 0)
+		if perr != nil {
+			t.Fatalf("parser.ParseFile(%q) returned %v, want nil", name, perr)
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				iface, ok := ts.Type.(*ast.InterfaceType)
+				if !ok || iface.Methods == nil {
+					continue
+				}
+				for _, method := range iface.Methods.List {
+					for _, methodName := range method.Names {
+						if methodName.Name == "CountTokens" {
+							t.Errorf("%s declares interface %s with a CountTokens method -- Layer 2 must declare NO token-counting interface of its own (R-CTX-006, R-AMP-017)", name, ts.Name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestHarness_ContextStrategy_Accounting_DiscoveryAndFallback —
+// S-CTX-011, charter AG-17.2 scenario 1, the discovery half. A
+// counting-capable exported fake reports its own figure with the
+// Reported provenance, and the fixture recorded a counting call built
+// from the turn's own transcript; the existing non-counting exported
+// fake, driven with the identical script, makes no counting call at
+// all and reports Estimated. Layer 2 declares no token-counting
+// interface of its own.
+func TestHarness_ContextStrategy_Accounting_DiscoveryAndFallback(t *testing.T) {
+	t.Parallel()
+
+	toolName, callID := "read_ctx_011", "call-ctx-011"
+	tool := EchoScriptedTool(toolName, agent.EffectClassRead)
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+
+	countingProvider := agenttest.NewCountingProvider(ai.Tokens(4321),
+		scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)),
+		scriptTextResponse(t, ai.FinishReasonStop),
+	)
+	countingStrategy := &recordingContextStrategy{}
+	countingH := agent.Harness{Provider: countingProvider, System: "system prompt for S-CTX-011", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: countingStrategy}
+	countingSink := make(chan *agent.Event, 256)
+	if _, _, err := countingH.Run(contextBackground(), firstMessage(t), countingSink); err != nil {
+		t.Fatalf("Run (counting) returned err = %v, want nil", err)
+	}
+	drainSink(t, countingSink)
+
+	countingPrompts := countingStrategy.Prompts()
+	countingCalls := countingProvider.CountRequests()
+	if len(countingPrompts) != 2 || len(countingCalls) != 2 {
+		t.Fatalf("counting run: got %d prompt(s) and %d counting call(s), want 2 and 2", len(countingPrompts), len(countingCalls))
+	}
+	for i, p := range countingPrompts {
+		tokens, source := p.Accounting.Tokens()
+		if source != agent.TokenSourceReported || tokens != 4321 {
+			t.Errorf("counting run: prompt[%d].Accounting = (%d, %v), want (4321, Reported)", i, tokens, source)
+		}
+		if len(countingCalls[i].Messages()) != len(p.Transcript) {
+			t.Errorf("counting run: counting call[%d] carries %d message(s), prompt[%d].Transcript carries %d -- want the counting call built from the turn's own transcript", i, len(countingCalls[i].Messages()), i, len(p.Transcript))
+		}
+	}
+
+	nonCountingProvider := agenttest.NewProvider(
+		scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)),
+		scriptTextResponse(t, ai.FinishReasonStop),
+	)
+	nonCountingStrategy := &recordingContextStrategy{}
+	nonCountingH := agent.Harness{Provider: nonCountingProvider, System: "system prompt for S-CTX-011", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: nonCountingStrategy}
+	nonCountingSink := make(chan *agent.Event, 256)
+	if _, _, err := nonCountingH.Run(contextBackground(), firstMessage(t), nonCountingSink); err != nil {
+		t.Fatalf("Run (non-counting) returned err = %v, want nil", err)
+	}
+	drainSink(t, nonCountingSink)
+
+	nonCountingPrompts := nonCountingStrategy.Prompts()
+	if len(nonCountingPrompts) != 2 {
+		t.Fatalf("non-counting run: recorder holds %d consultation(s), want 2", len(nonCountingPrompts))
+	}
+	for i, p := range nonCountingPrompts {
+		_, source := p.Accounting.Tokens()
+		if source != agent.TokenSourceEstimated {
+			t.Errorf("non-counting run: prompt[%d].Accounting source = %v, want Estimated (no counting call is possible against this fake)", i, source)
+		}
+	}
+
+	assertNoTokenCountingInterfaceDeclared(t)
+}
+
+// TestHarness_Accounting_PreHookDivergenceRecorded — S-CTX-019, DD6.
+// A counting-capable fixture plus a request-mutating PreRequestHook:
+// the accounting the strategy received corresponds to the pre-hook
+// request the turn's own builder produced, and the fixture's captured
+// counting request DIFFERS from the provider's recorded sent request
+// -- the divergence is recorded, never asserted away. The shipped
+// documentation of the reported provenance and the prompt's
+// accounting field both state the pre-hook semantic.
+func TestHarness_Accounting_PreHookDivergenceRecorded(t *testing.T) {
+	t.Parallel()
+
+	extraPart, err := ai.NewText("appended by the pre-request hook, downstream of the turn boundary")
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want nil", err)
+	}
+	extra, err := ai.NewMessage(ai.RoleUser, extraPart)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v, want nil", err)
+	}
+	hook := func(_ context.Context, req ai.Request) (ai.Request, error) {
+		return req.With(ai.WithMessages(append(req.Messages(), extra)...))
+	}
+
+	provider := agenttest.NewCountingProvider(ai.Tokens(999), scriptTextResponse(t, ai.FinishReasonStop))
+	strategy := &recordingContextStrategy{}
+	h := agent.Harness{
+		Provider:        provider,
+		System:          "system prompt for S-CTX-019",
+		Turn:            agent.TurnOptions{PreRequestHook: hook},
+		ContextStrategy: strategy,
+	}
+	sink := make(chan *agent.Event, 64)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	prompts := strategy.Prompts()
+	if len(prompts) != 1 {
+		t.Fatalf("recorder holds %d consultation(s), want exactly 1 (one logical turn)", len(prompts))
+	}
+	tokens, source := prompts[0].Accounting.Tokens()
+	if source != agent.TokenSourceReported || tokens != 999 {
+		t.Fatalf("Accounting = (%d, %v), want (999, Reported)", tokens, source)
+	}
+
+	countedRequests := provider.CountRequests()
+	sentRequests := provider.Requests()
+	if len(countedRequests) != 1 || len(sentRequests) != 1 {
+		t.Fatalf("got %d counted request(s) and %d sent request(s), want 1 and 1", len(countedRequests), len(sentRequests))
+	}
+	if countedRequests[0].Equal(sentRequests[0]) {
+		t.Error("the counted (pre-hook) request equals the sent (post-hook) request -- want them to DIVERGE, since the hook appends a message downstream of the accounting point")
+	}
+	if len(sentRequests[0].Messages()) != len(countedRequests[0].Messages())+1 {
+		t.Errorf("sent request has %d message(s), counted request has %d -- want the sent one to carry exactly one MORE (the hook's own appended message)", len(sentRequests[0].Messages()), len(countedRequests[0].Messages()))
+	}
+
+	for _, file := range []string{"token_accounting.go", "context_strategy.go"} {
+		data, rerr := os.ReadFile(file)
+		if rerr != nil {
+			t.Fatalf("os.ReadFile(%q) returned %v, want nil", file, rerr)
+		}
+		if !strings.Contains(strings.ToLower(string(data)), "pre-hook request") {
+			t.Errorf("%s's documentation does not state \"pre-hook request\" (R-CTX-011: the reported provenance and the prompt's accounting field must both state this semantic, never claim exactness)", file)
 		}
 	}
 }
