@@ -517,7 +517,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// per-attempt consultation would let a future compacting
 		// verdict (AG-18) mutate the transcript between two attempts
 		// of one logical turn, making R-RTY-002's "identical
-		// transcript, reused BY REFERENCE" (harness.go:518-529)
+		// transcript, reused BY REFERENCE" (harness.go:550-561)
 		// unprovable by the exact argument its comment relies on.
 		// A nil strategy is never consulted and no accounting is
 		// resolved: the nil path is byte-for-byte the pre-AG-17 path.

@@ -20,7 +20,7 @@ import (
 type ContextStrategy interface {
 	// Resolve is consulted exactly once per LOGICAL turn, at AG-13's
 	// turn boundary in Harness.Run's outer loop — never per retry
-	// attempt (see the R-RTY-002 argument at harness.go:518-529).
+	// attempt (see the R-RTY-002 argument at harness.go:550-561).
 	Resolve(ctx context.Context, prompt ContextPrompt) ContextVerdict
 }
 
