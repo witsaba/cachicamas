@@ -979,7 +979,22 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/cost_usage.go") ||
 				strings.HasSuffix(path, "/cost_usage_test.go") ||
 				strings.HasSuffix(path, "/cost_turn_emission_test.go") ||
-				strings.HasSuffix(path, "/cost_session_test.go")
+				strings.HasSuffix(path, "/cost_session_test.go") ||
+				// AG-17 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-17 requests NO release", S-LSK-028): AG-17 takes NO
+				// release -- every entry below names a file this change
+				// CREATES, none names a pre-existing file.
+				// context_strategy.go and token_accounting.go are AG-17's
+				// two new src/agent production files; the two suffixes
+				// after them are their own test files. cost_events_test.go
+				// and stream_check_test.go stay deliberately absent, as
+				// does every file under src/agenttest/ -- these filters do
+				// not govern that directory. Byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/context_strategy.go") ||
+				strings.HasSuffix(path, "/token_accounting.go") ||
+				strings.HasSuffix(path, "/context_strategy_test.go") ||
+				strings.HasSuffix(path, "/token_accounting_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
