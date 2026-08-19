@@ -59,6 +59,13 @@ type contractRow struct {
 // L2C-07 (added by AG-12, agent-history) follows the same pattern: history
 // is a second upward surface no existing row covers, so its own row and
 // this table entry land in the same pull request (R-HIS-009).
+// AG-18 amends the L2C-07 row's two independently falsifiable clauses —
+// the route enumeration (append, seeded construction, orphan synthesis,
+// prefix replacement) and the identity-stability clause (stable within a
+// transcript generation, not unqualified) — confined to those two
+// clauses, byte-in-sync with doc.go, landed in the same pull request
+// (R-HIS-009's closed-amendment rule; S-HIS-104 proves both moved
+// together).
 var expectedLayer2ContractRows = []contractRow{
 	{id: "L2C-01", text: "Imports: the Go standard library, github.com/cachicamas/backend/agent/src/ai and its measured transitive closure — nothing else, deny-by-default (ADR 0005 § D1 row 2; import_boundary_test.go)."},
 	{id: "L2C-02", text: "No I/O of its own: no environment read, no filesystem access, no network call, no process spawn (ADR 0005 § D1 row 2; ambient_authority_test.go and import_boundary_test.go)."},
@@ -66,7 +73,7 @@ var expectedLayer2ContractRows = []contractRow{
 	{id: "L2C-04", text: "Stream membership: a fact belongs on the event stream or it does not exist upward — if it is not on the stream, no frontend can render it and no log can reconstruct it. This is the criterion every later event family is judged by (doc 0003 AG-04 acceptance; agent-event-envelope)."},
 	{id: "L2C-05", text: "Message and tool families are reconstructable: a session log carrying a message-text bracket, a reasoning bracket, or a tool-call bracket reconstructs each message and each tool outcome independently and completely, so a frontend can render \"what the model said\" and \"what the tools did\" without losing interleaving order (doc 0003 AG-05 acceptance; agent-message-tool-events). Reconstruction helpers are test-only code; the property is the test."},
 	{id: "L2C-06", text: "Permission, cost, delegation, and compaction families are constructible on the event stream: a session log receives each family's events with their typed payloads and identity fields, and a frontend renders \"may this call proceed?\", the model's token usage, the delegation tree, and the compaction lifecycle without losing interleaving order (doc 0003 AG-06 acceptance; agent-protocol-events). Per-family semantics — the closed PermissionOutcome enum (R-APE-002), the token-only CostFigures shape (R-APE-004), the parent identifier envelope field (R-APE-006), the turn-bracket CompactionSpan (R-APE-007) — belong in this package's prose and per-family files, not in the guarded row."},
-	{id: "L2C-07", text: "History is the second upward surface and has exactly one commit path: the transcript a run accumulates is read back as unmodified Layer 1 values with stable ordinal entry identity, and every route that can extend it — append, seeded construction, orphan synthesis — funnels through one validating commit primitive enforcing the pairing invariant (every tool call has a matching result) at the boundary, with no privileged bypass for internal callers; a synthesized interruption result is distinguishable from a real one by envelope origin alone (doc 0003 AG-12 acceptance; agent-history)."},
+	{id: "L2C-07", text: "History is the second upward surface and has exactly one commit path: the transcript a run accumulates is read back as unmodified Layer 1 values with ordinal entry identity stable within a transcript generation, and every route that can extend it — append, seeded construction, orphan synthesis, prefix replacement — funnels through one validating commit primitive enforcing the pairing invariant (every tool call has a matching result) at the boundary, with no privileged bypass for internal callers; a synthesized interruption result is distinguishable from a real one by envelope origin alone (doc 0003 AG-12 acceptance; agent-history)."},
 	{id: "L2C-08", text: "Cancellation is a bounded, typed, two-signal tree: interrupt aborts the run and keeps the harness; shutdown aborts the run and terminally refuses new prompts; both propagate down through loop, provider and tools as one context cancellation cause, stay errors.Is-distinguishable in the error chain and distinct in the run-end outcome; after the documented wind-down bound only third-party tool code may remain running — reported typed by tool and call identity — and every goroutine the package itself owns has exited (doc 0003 AG-14 acceptance; agent-cancellation-tree)."},
 }
 
@@ -136,5 +143,93 @@ func TestLayer2DocContract_MatchesTheCommittedTable(t *testing.T) {
 			t.Errorf("doc-contract guard: row %d = id %q text %q, want id %q text %q — doc.go has drifted from the committed table",
 				i+1, got.id, got.text, want.id, want.text)
 		}
+	}
+}
+
+// TestDocContract_L2C07BothClausesTogether — S-HIS-104, AG-18. The
+// amended L2C-07 row's text in doc.go and in
+// expectedLayer2ContractRows is byte-identical between the two; the
+// route clause names all FOUR routes including the prefix replacement;
+// the identity clause states stability within a transcript generation
+// rather than unqualified stability; and the pairing-invariant,
+// no-privileged-bypass and origin-distinguishability clauses are
+// preserved verbatim. The row cannot be half-amended: this scenario
+// checks the route clause and the identity clause as two INDEPENDENT
+// assertions, so a scratch edit touching only one of them would fail
+// the other — by construction, not by a separate mutation drill (this
+// row's amendment is not one of the four mandated bites).
+func TestDocContract_L2C07BothClausesTogether(t *testing.T) {
+	t.Parallel()
+
+	path := docGoPath(t)
+	rows := parseLayer2ContractRows(t, path)
+
+	var docRow, wantRow contractRow
+	foundDoc, foundWant := false, false
+	for _, r := range rows {
+		if r.id == "L2C-07" {
+			docRow, foundDoc = r, true
+		}
+	}
+	for _, r := range expectedLayer2ContractRows {
+		if r.id == "L2C-07" {
+			wantRow, foundWant = r, true
+		}
+	}
+	if !foundDoc || !foundWant {
+		t.Fatalf("L2C-07 row missing: found in doc.go=%v, found in expectedLayer2ContractRows=%v", foundDoc, foundWant)
+	}
+	if docRow.text != wantRow.text {
+		t.Fatalf("L2C-07 text differs between doc.go and expectedLayer2ContractRows:\n  doc.go:    %q\n  committed: %q", docRow.text, wantRow.text)
+	}
+
+	if !strings.Contains(docRow.text, "append, seeded construction, orphan synthesis, prefix replacement") {
+		t.Error("L2C-07 route clause does not name all four routes including prefix replacement")
+	}
+	if !strings.Contains(docRow.text, "ordinal entry identity stable within a transcript generation") {
+		t.Error("L2C-07 identity clause does not state generation-scoped stability")
+	}
+	for _, mustContain := range []string{
+		"enforcing the pairing invariant (every tool call has a matching result) at the boundary",
+		"no privileged bypass for internal callers",
+		"a synthesized interruption result is distinguishable from a real one by envelope origin alone",
+	} {
+		if !strings.Contains(docRow.text, mustContain) {
+			t.Errorf("L2C-07 no longer preserves the clause %q verbatim", mustContain)
+		}
+	}
+}
+
+// TestDocContract_RowCountReScoped — S-HIS-080. The
+// expectedLayer2ContractRows table contains the L2C-07 row, present
+// and in its committed position, with row text referencing history's
+// single validated commit path as a package-wide guarantee — scoped
+// OFF the literal row count, the repeated count-assertion drift class
+// this repository has hit before (AG-14 appended L2C-08 without any
+// test ever asserting "7 rows", and this scenario itself asserts no
+// literal row count either). S-HIS-081's bite (a scratch row appended
+// to doc.go with no matching expectedLayer2ContractRows entry, FAILS
+// naming the unexpected row) is unchanged by this change: it is
+// TestLayer2DocContract_MatchesTheCommittedTable's own pre-existing
+// count-mismatch detection, untouched here.
+func TestDocContract_RowCountReScoped(t *testing.T) {
+	t.Parallel()
+
+	const wantIndex = 6 // 0-based: L2C-01..L2C-06 precede it, L2C-08 follows.
+	if wantIndex >= len(expectedLayer2ContractRows) {
+		t.Fatalf("expectedLayer2ContractRows has only %d row(s), want at least %d", len(expectedLayer2ContractRows), wantIndex+1)
+	}
+	row := expectedLayer2ContractRows[wantIndex]
+	if row.id != "L2C-07" {
+		t.Fatalf("expectedLayer2ContractRows[%d].id = %q, want %q", wantIndex, row.id, "L2C-07")
+	}
+	if !strings.Contains(row.text, "History is the second upward surface and has exactly one commit path") {
+		t.Error("L2C-07's row text no longer references history's single validated commit path as a package-wide guarantee")
+	}
+
+	path := docGoPath(t)
+	rows := parseLayer2ContractRows(t, path)
+	if len(rows) <= wantIndex || rows[wantIndex].id != "L2C-07" {
+		t.Errorf("doc.go's own row at index %d is not L2C-07", wantIndex)
 	}
 }
