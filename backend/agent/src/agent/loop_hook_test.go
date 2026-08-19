@@ -1067,7 +1067,32 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/compaction_stream_test.go") ||
 				strings.HasSuffix(path, "/compaction_reconstruction_test.go") ||
 				strings.HasSuffix(path, "/compaction_recovery_test.go") ||
-				strings.HasSuffix(path, "/compaction_demand_test.go")
+				strings.HasSuffix(path, "/compaction_demand_test.go") ||
+				// AG-19 widening (agent-loop-skeleton delta's R-LSK-007
+				// "AG-19 requests NO release", S-LSK-031): AG-19 takes NO
+				// release -- every entry below names a file this change
+				// CREATES, none names a pre-existing filename.
+				// delegation_seam.go is AG-19's one new production file;
+				// the twelve suffixes after it are its own new test
+				// files. cost_events.go, cost_events_test.go,
+				// stream_check_test.go and reconstruction_test.go stay
+				// deliberately absent, as does every file under
+				// src/agenttest/ -- these filters do not govern that
+				// directory. Byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/delegation_seam.go") ||
+				strings.HasSuffix(path, "/delegation_seam_test.go") ||
+				strings.HasSuffix(path, "/revocation_test.go") ||
+				strings.HasSuffix(path, "/delegating_tool_test.go") ||
+				strings.HasSuffix(path, "/nested_run_test.go") ||
+				strings.HasSuffix(path, "/walkable_tree_test.go") ||
+				strings.HasSuffix(path, "/siblings_test.go") ||
+				strings.HasSuffix(path, "/cancellation_test.go") ||
+				strings.HasSuffix(path, "/cost_test.go") ||
+				strings.HasSuffix(path, "/permission_scope_test.go") ||
+				strings.HasSuffix(path, "/scope_fence_test.go") ||
+				strings.HasSuffix(path, "/inert_path_test.go") ||
+				strings.HasSuffix(path, "/v1_scope_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
