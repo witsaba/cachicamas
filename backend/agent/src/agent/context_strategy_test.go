@@ -508,16 +508,16 @@ func TestHarness_ContextStrategy_NoOpInstalled_ZeroCompactionEvents(t *testing.T
 func TestHarness_ContextStrategy_NilVsNoOpByteIdentical(t *testing.T) {
 	t.Parallel()
 
-	run := func(t *testing.T, strategy agent.ContextStrategy, budget agent.ContextBudget) (ai.FinishReason, error, []agent.Event) {
+	run := func(t *testing.T, strategy agent.ContextStrategy, budget agent.ContextBudget) (ai.FinishReason, []agent.Event, error) {
 		t.Helper()
 		h, _ := scriptedTwoTurnHarness(t, "007", strategy, budget)
 		sink := make(chan *agent.Event, 256)
 		_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
-		return finish, err, drainSink(t, sink)
+		return finish, drainSink(t, sink), err
 	}
 
-	nilFinish, nilErr, nilEvents := run(t, nil, agent.ContextBudget{})
-	noOpFinish, noOpErr, noOpEvents := run(t, agent.NoOpContextStrategy{}, agent.ContextBudgetOf(1000))
+	nilFinish, nilEvents, nilErr := run(t, nil, agent.ContextBudget{})
+	noOpFinish, noOpEvents, noOpErr := run(t, agent.NoOpContextStrategy{}, agent.ContextBudgetOf(1000))
 
 	if (nilErr == nil) != (noOpErr == nil) {
 		t.Fatalf("returned error nil-ness: nil = %v, NoOp = %v, want equal", nilErr, noOpErr)
