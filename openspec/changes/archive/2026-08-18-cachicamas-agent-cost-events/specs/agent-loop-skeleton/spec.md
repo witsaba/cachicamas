@@ -1,24 +1,26 @@
-# Spec — The one-turn walking skeleton (`agent-loop-skeleton`)
+# Delta for `agent-loop-skeleton` — AG-16 AMENDS the nil-path turn sequence and takes a recorded `cost_events.go` release
 
-> **Change**: `cachicamas-agent-loop-skeleton` · **AG-07** (Layer 2, Wave 2 opening) of [doc 0003](../../../docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md#ag-07--build-the-one-turn-walking-skeleton), `0003:771-832`
-> **Nodes**: AG-07.1 `[leaf]` (one text turn) · AG-07.2 `[leaf]` (statelessness + reasoning pass-through)
-> **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario independently verifiable.
-> **IDs**: `R-LSK-0NN` / `S-LSK-0NN`. Append-only. Distinct from `R-AEV-`/`S-AEV-`, `R-AMT-`/`S-AMT-`, `R-APE-`/`S-APE-`, `R-AGE-`/`S-AGE-`.
-> **Scenario IDs**: `S-LSK-0NN`, **append-only** — allocated `S-LSK-001` through `S-LSK-026`, plus the lettered bites `S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`. Each milestone that appends records its own additions in its delta; this header states the allocated range and never a total, because a total is defended by no test and goes silently false on the next append. Coverage per requirement is stated at each requirement, which is where a reader can check it against the requirement's own scenarios.
+> **Change**: `cachicamas-agent-cost-events` · **AG-16** (Layer 2, Wave 3), `0003:1527-1560`
+> **Modifies**: `agent-loop-skeleton` ([`../../../../specs/agent-loop-skeleton/spec.md`](../../../../specs/agent-loop-skeleton/spec.md)) — the header's allocated range (`spec.md:7`), `R-LSK-001` (`spec.md:23-66`) and `R-LSK-004` (`spec.md:91-119`).
+> **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. The archive step REPLACES each block in the main spec with the MODIFIED block below; **full-block preservation is mandatory** and every scenario of every touched requirement is reproduced here verbatim unless explicitly amended.
+>
+> ## ⚠ THIS DELTA CONTAINS AN AMENDMENT TO A MECHANICALLY-PINNED SEQUENCE — READ THIS BEFORE THE BLOCKS BELOW
+>
+> **`S-LSK-001` enumerates the nil-path turn sequence as a CLOSED list** ending `turn_end`, `run_end` (`spec.md:56`), and its implementing test enforces closure with a length-equality assertion — `if len(got) != len(wantKinds)` (`loop_test.go:361`, the sequence at `:350-361`). AG-16 emits a `cost_turn` inside **every** non-aborted turn bracket, on the nil path as much as on the continuation path. That **changes the closed sequence**, and the change is therefore an **amendment, signed off here**, not a test fix discovered at apply time.
+>
+> **AG-15 set the precedent on this exact requirement** — it amended `R-LSK-001`'s "byte-stable pre-AG-13 behavior" clause for the pre-stream turn-close, and recorded the carve-out in the requirement text rather than letting the new event ride in silently (`spec.md:42`, `:52`). AG-16 follows it verbatim in shape: the requirement states the new emission obligation, the compatibility clause gains an enumerated AG-16 carve-out, and `S-LSK-001`'s sequence carries an explicit **"Amended by AG-16"** annotation naming the inserted position.
+>
+> Any test whose assertion changes because of this — `loop_test.go:350-361` (implements `S-LSK-001`), `loop_test.go:1152-1165`, `harness_steering_test.go:103-126` — is an **enumerated, signed-off amendment recorded in `apply-progress.md`** (`NFR-CST-005`), never a quiet fix.
+>
+> **A second, independent obligation this delta discharges: `cost_events.go` is a FORBIDDEN FILE under `R-LSK-004`.** It is named in that requirement's list (`spec.md:93`), and AG-16 modifies it (design DD1: the presence field and its accessors). **`NFR-APE-004` does not cover this** — that requirement's byte-unchanged list names `event_descriptor.go`, `stream_check.go`, `failure.go`, `sequence.go` and the build files, not `cost_events.go`. Without the release recorded below, AG-16 would merge with a modified forbidden file and no requirement saying so — the un-back-annotated-merge staleness shape. The release is bounded, structural, and AG-16-only.
+>
+> **Ownership**: what a cost event *asserts* is owned by [`../agent-cost-events/spec.md`](../agent-cost-events/spec.md) (`R-CST-001`…`R-CST-007`); the payload vocabulary by [`../agent-protocol-events/spec.md`](../agent-protocol-events/spec.md). This delta owns only what `Turn`'s own per-path emission contract and the substrate rule must now say.
 
-## Coverage
+## MODIFIED Header — the allocated scenario range
 
-| Charter | Requirements | Spec | Bites |
-|---|---|---|---|
-| **5 of 5** | 5 (`R-LSK-001`–`005`) + 1 added (`R-LSK-006` by AG-09) | see each requirement | see each requirement |
+The promoted spec's header (`spec.md:7`) states the allocated scenario range, which AG-16 extends. At archive it MUST read **"allocated `S-LSK-001` through `S-LSK-026`"** in place of "through `S-LSK-023`". Every other clause of that line is unchanged, including its refusal to state a total and its naming of the three lettered bites. Recorded here because `S-LSK-020` makes the range — not a count — the header's own falsifiable claim, and a delta that appends scenarios without extending it leaves that claim false.
 
-Charter → spec: AG-07.1#1 → `R-LSK-001`/`S-LSK-001`; AG-07.1#2 → `R-LSK-001`/`S-LSK-002`; AG-07.1#3 → `R-LSK-001`/`S-LSK-003` + bites; AG-07.2#4 → `R-LSK-002`/`S-LSK-004`; AG-07.2#5 → `R-LSK-003`/`S-LSK-005`. AG-09 adds: `R-LSK-006` (one cycle per turn, S-LSK-008 + S-LSK-008a). Cross-cuts → `R-LSK-004` (substrate, AG-07), `R-LSK-005` (coverage, AG-07), `R-LSK-006` (one cycle per turn, AG-09).
-
-## Purpose
-
-The first Layer 2 milestone where a live loop produces events. Per doc 0003:773: "the single most important node in this document: the first time Layer 1 and Layer 2 meet." AG-07 owns the producer side of AG-01's carrier decision (D2a) and gives AG-08/AG-09/AG-11 the surface they wrap. Bites defend the AG-05.1 reconstruction property against the AG-05 W1 vacuous-helper failure mode. AG-09 adds the wording-trap boundary with AG-13: the loop schedules, it does not iterate.
-
-## Requirements
+## MODIFIED Requirements
 
 ### R-LSK-001 — Loop surface: single-turn function form (D1)
 
@@ -67,36 +69,13 @@ Four consequences, stated rather than left to be inferred:
 - **S-LSK-003** — AG-07.1 one source of truth for the assistant message. Given a completed turn, when the caller reads the loop's returned `msg` AND a consumer reconstructs an `ai.Message` from the emitted deltas via the AG-05.3 helper (`reconstruction_test.go:54-114`), then the two `ai.Message` values are equal as Layer 1 message values (fragment-for-fragment byte-equal). *(AG-16 note: a `cost_turn` carries no message fragment, so the reconstruction is unaffected and `reconstruction_test.go` stays byte-unchanged.)*
 - **S-LSK-003a** — **(bite)** Given a complete turn with three text deltas, when the loop's emitted event sequence is REWRITTEN to drop the middle delta, then the reconstructed message differs from the loop's returned `msg` — proving the property is non-vacuous. RED-recorded BEFORE `S-LSK-003` is GREEN.
 - **S-LSK-003b** — **(bite)** Given a complete turn with three text deltas, when the loop's emitted event sequence is REWRITTEN to double the middle delta, then the reconstructed message differs from the loop's returned `msg`. RED-recorded BEFORE `S-LSK-003` is GREEN.
-- **S-LSK-009** — AG-09 wire-up: `Turn` consumes AI-18 tool-call events and calls `Schedule`. Given a `TurnOptions{Tools: map[string]Tool{...}}` with one registered read-class tool and a provider that streams one `ToolCallStart` / `ToolCallDelta` / `ToolCallEnd` triplet followed by a `Completion{FinishReason: FinishReasonToolCalls}`, when `Turn` runs, then the loop converts the AI-18 events into a `[]ScheduledCall`, invokes `Schedule` exactly once between `provider.Stream` close and `finalize`, and emits the AG-05.2 tool events (`ToolStart`, `ToolEnd*`) on `sink` in rejoin order — proving the AG-09 wire-up. *(AG-13 note: this scenario passes no continuation, so the finalize-first ordering it pins is the nil path's and is byte-stable; the continuation path's inverted ordering is `S-LSK-013`'s. AG-16 note: the `cost_turn` is emitted from within finalize and therefore lands **after** the rejoin-ordered tool events and before `turn_end`, leaving the tool events' relative order untouched. This scenario's own test, `loop_tool_dispatch_test.go`, is **byte-unchanged** by AG-16: it asserts kind-filtered counts rather than a closed sequence, so the added kind never reaches it. The closed-order assertion amended at `loop_test.go:1152-1165` belongs to `S-LSK-005`'s reasoning test, not to this scenario.)*
+- **S-LSK-009** — AG-09 wire-up: `Turn` consumes AI-18 tool-call events and calls `Schedule`. Given a `TurnOptions{Tools: map[string]Tool{...}}` with one registered read-class tool and a provider that streams one `ToolCallStart` / `ToolCallDelta` / `ToolCallEnd` triplet followed by a `Completion{FinishReason: FinishReasonToolCalls}`, when `Turn` runs, then the loop converts the AI-18 events into a `[]ScheduledCall`, invokes `Schedule` exactly once between `provider.Stream` close and `finalize`, and emits the AG-05.2 tool events (`ToolStart`, `ToolEnd*`) on `sink` in rejoin order — proving the AG-09 wire-up. *(AG-13 note: this scenario passes no continuation, so the finalize-first ordering it pins is the nil path's and is byte-stable; the continuation path's inverted ordering is `S-LSK-013`'s. AG-16 note: the `cost_turn` is emitted from within finalize and therefore lands **after** the rejoin-ordered tool events and before `turn_end`, leaving the tool events' relative order untouched; the closed-order assertion at `loop_test.go:1152-1165` gains the kind at that position as an enumerated amendment.)*
 - **S-LSK-010** — AG-10 wire-up: `TurnOptions.PermissionPolicy` reaches the gate, and nil stays a bypass. Given a `TurnOptions{Tools: ..., PermissionPolicy: p}` where `p` defers one call, denies a second, and modifies the arguments of a third, when `Turn` runs against a provider streaming those three tool calls, then the deferred call resolves into a typed abort once the run context is cancelled, the denied call's ordinal slot carries `ExecutionFailure` with a typed `*Failure`, the modified call's `tool_start.Arguments()` byte-equals `decision_made.ModifiedArguments()` and the tool records those same bytes, and `Turn` returns without a Go error; and given the identical setup with `PermissionPolicy: nil`, when `Turn` runs, then no permission event appears on `sink` and every call executes as it did before AG-10. Verified by `TestTurn_PermissionPolicy_E2E_DeferDenyModify` and `TestNoOpPermissionPolicy_AllowsEverySynchronously`.
 - **S-LSK-011** — AG-11 return contract on the fatal path. Given a provider stream scripted to deliver text content and then a terminal mid-stream error, when `Turn` returns, then the returned `msg` carries that content byte-for-byte rather than the zero `ai.Message{}`, the returned `err` is non-nil, and `Turn`'s exported signature is unchanged (asserted by the package's documented-contract guard). Cross-referenced to `R-ATT-007` / `S-ATT-009`. *(AG-13 note: `Turn`'s exported signature is still unchanged — the continuation arrives as a `TurnOptions` field, not as a new parameter. AG-15 note: still unchanged — the pre-stream emission adds an event, not a parameter and not a returned value. AG-16 note: still unchanged — the usage reaches the emission site through the turn's own accumulator, not through a returned value.)*
 - **S-LSK-013** — **AG-13 continuation seam, nil-default and non-nil behavior.** Given a `TurnOptions` whose continuation is nil, when `Turn` runs any of the scripted shapes above, then its emitted event sequence is the pre-AG-13 sequence for that shape extended by exactly the deviations the compatibility clause above enumerates — run brackets present, lane restarting at 1, schedule after finalize; and given a `TurnOptions` carrying a fully configured continuation, when `Turn` runs a tool-calling turn, then no run-open and no run-close appears on `sink`, the emitted events are stamped from the supplied stamper continuing its existing lane, the turn's tool and permission events appear **inside** the turn bracket and **before** the turn-close, and the rejoin results are returned to the caller's transcript store rather than discarded. *(Amended by AG-16: the Given previously said "byte-identical to the pre-AG-13 sequence". That phrasing was already made false by AG-15's pre-stream close and is made false again by AG-16's `cost_turn`; it is corrected to reference the compatibility clause's own enumeration, which is the claim that is actually defensible and actually tested. The observable it pins — that the nil path deviates from pre-AG-13 behavior **only** in enumerated ways — is strengthened, not relaxed.)*
 - **S-LSK-014** — **AG-13 continuation is all-or-nothing.** Given a `TurnOptions` carrying a continuation with any one member absent, when `Turn` runs, then it returns a typed rejection naming the absent member's position, **no event whatsoever is emitted on `sink`**, and the sink is left in the state the caller gave it — a half-configured continuation never produces a partial stream. *(AG-15 note: this path returns **before** `turn_start`, so it is outside the pre-stream emission rule, which is scoped to failures occurring after the turn bracket is open. AG-16 note: likewise outside the cost emission rule, which is scoped to a turn that **closes**; a turn that never opened emits no `cost_turn`.)*
 - **S-LSK-021** — **AG-15 pre-stream failures close their bracket, on both paths.** Given a zero-value `TurnOptions` (nil continuation) and, in turn, each of the three pre-stream failure conditions — a request that fails to build, a pre-request hook returning an error, and a provider whose `Stream` returns an error before producing a channel — when `Turn` runs and the consumer drains `sink` to close, then for each condition the consumer observes `run_start`, `turn_start`, a `turn_end` carrying `TurnOutcomeAborted` with a **non-nil** `*Failure`, a `run_end` carrying `RunOutcomeFailed` with a `*Failure`, and then the channel close, in that order; `CheckStream` accepts each recorded stream **unmodified**; the returned error is the same value the path returned before this change — the hook path's typed pre-stream failure with its unsupported-capability category, and the provider path's own returned error, reachable by `errors.As` to an `*ai.Failure` where one was returned; and given the identical three conditions under a fully configured continuation, when `Turn` runs, then each stream carries the `turn_end(TurnOutcomeAborted)` and **no** `run_end` at all, because the caller owns the run bracket on every path. Cross-referenced to `R-ATT-005` and to `R-RTY-002` / `S-RTY-011`. *(AG-16 note: these are aborted closes, so **no `cost_turn` appears in any of the three sequences** — the enumerated order above is unchanged by AG-16 and its implementing assertions stay byte-unchanged. That is the aborted half of AG-16's iff, cross-referenced to `S-CST-003`.)*
 - **S-LSK-024** — **AG-16 the cost emission lands inside the bracket, on both paths, and only on a non-aborted close.** Given a zero-value `TurnOptions` and a completing script, when `Turn` runs, then the consumer observes exactly one `cost_turn` for that turn, positioned after the turn's content events and **before** its `turn_end`, and the enumerated nil-path sequence of `S-LSK-001` holds at its amended length; and given a fully configured continuation and the same script, when `Turn` runs, then the `cost_turn` appears inside the turn bracket, after the rejoin-ordered tool events where any exist, and before the turn-close, with **no** run bracket emitted; and given each aborted close — mid-stream fatal, the three pre-stream conditions, and a cancellation observed mid-turn — when each stream is recorded, then **no** `cost_turn` appears in the aborted turn's bracket; and `CheckStream` accepts every one of these streams **unmodified** with `stream_check.go` byte-unchanged. Cross-referenced to `R-CST-001` / `S-CST-001` / `S-CST-003`.
-
-### R-LSK-002 — Statelessness: two sequential turns share nothing
-
-The system SHALL treat `Turn` as stateless across calls **on the nil-continuation path**; the second call's event sequence SHALL be independent of the first's, with fresh per-stream ordering starting at 1 (per D1, U3 path-a).
-
-The scope of this requirement is stated explicitly, because AG-13 introduces an invocation shape that it deliberately does not cover. `S-LSK-004`'s Given is "fresh slices, fresh `opts`, fresh `sink`, fresh `provider` script" — the invariant is about two **independent** invocations with **fresh options**. An invocation carrying a non-nil `TurnOptions.Continuation` is a **different scenario**, not a violation of this one: it shares run identity and lane deliberately, on the caller's instruction, and its behavior is governed by `R-LSK-001` and by `R-RUN-003`. This reading is binding.
-
-The compatibility claim is discharged by enumeration, not by assertion. Exactly three existing tests assert unconditional run brackets or a per-call sequence restart — `TestTurn_WalkingSkeleton_EmitsContractEventOrder` (`loop_test.go:326`), `TestTurn_TwoSequentialTurnsShareNothing` (`loop_test.go:960`), and `TestTurn_ReasoningPassThroughByteExact` (`loop_test.go:1058`). All three construct a zero-value `TurnOptions`, therefore all three take the nil-continuation path, and therefore all three MUST stay green with their **source file unchanged**. If any of them requires an edit, that is a conscious amendment needing sign-off, not a quiet fix.
-
-(Previously: the requirement stated statelessness unconditionally, with no path qualifier, and no enumeration recorded which tests pin it.)
-
-#### Scenarios
-
-- **S-LSK-004** — AG-07.2 two sequential turns share nothing. Given one `Turn` function value that has already run a turn, when a second turn runs via a second `Turn(...)` invocation (fresh slices, fresh `opts`, fresh `sink`, fresh `provider` script), then the second turn's emitted events carry fresh per-stream ordering starting at 1, and the second turn's events do not depend on any state from the first turn (no closure captures over first-turn results, no shared `LaneStamper`).
-- **S-LSK-015** — **AG-13 compatibility, by enumeration.** Given the three enumerated tests above and the full loop, hook, dispatch, termination and permission suites, when the suite runs against the AG-13 change, then every one of them passes and `git diff` shows the three enumerated tests' source **byte-unchanged** — the nil-continuation path preserved statelessness rather than the tests being re-scoped.
-
-### R-LSK-003 — Reasoning pass-through: byte-exact round-trip token
-
-The system SHALL distinguish reasoning from text events by kind (`message_start_reasoning`/`message_delta_reasoning`/`message_end_reasoning` vs `message_start_text`/`message_delta_text`/`message_end_text` per AG-05.1), and SHALL preserve the reasoning round-trip token byte-exact into the assistant message.
-
-#### Scenarios
-
-- **S-LSK-005** — AG-07.2 reasoning flows through distinguished, byte-exact. Given a scripted response interleaving reasoning and text deltas (reasoning → text → reasoning → text per D4), with a non-empty `[]byte` reasoning round-trip token on each reasoning end, when the loop re-emits it via `Turn(...)`, then reasoning and text are emitted as separate bracket kinds, and the assistant message's reasoning-content round-trip token is byte-equal to the script's token, and the event order matches the script's emit calls.
 
 ### R-LSK-004 — Substrate untouched, with AG-11's, AG-14's and AG-16's recorded exact-filename releases
 
@@ -142,89 +121,3 @@ The same discipline binds AG-13. `loop.go`, `scheduler.go` and `tool.go` are **a
 - **S-LSK-023** — **AG-15 widens both filters by name and in sync.** Given the two filter functions after this change, when their entry sets are compared, then they are identical to each other; each file AG-15 introduces is present in both as an exact filename suffix; every entry contains no wildcard, prefix or directory pattern; `stream_check_test.go` is absent from both; and when an unnamed new file is placed in the package, then both substrate guards fail on it. Cross-referenced to `R-RTY-001`'s change-wide substrate obligation (`NFR-RTY-004`).
 - **S-LSK-025** — **AG-16's release is bounded and exact.** Given the merge base of the AG-16 branch with `origin/main`, when `git diff` is taken over `backend/agent/src/agent/` and over `go.mod`/`go.sum`, then the set of pre-existing non-test files that differ is exactly `{cost_events.go, harness.go, loop.go}`; `cost_events.go`'s diff adds only the presence discriminator on `CostTurn`/`CostSession`, its paired accessors, and the label-axis doc comments, leaving **`CostFigures` byte-unchanged** and `NewCostTurn`/`NewCostSession`'s signatures unchanged; `cost_events_test.go`, `event.go`, `event_descriptor.go`, `stream_check.go`, `stream_check_test.go`, `sequence.go`, `run_events.go`, `turn_events.go`, `failure.go`, `event_registry_test.go`, `reconstruction_test.go`, `doc.go`, `doc_contract_guard_test.go`, `history.go` and every file under `backend/agent/src/ai/` are byte-unchanged; the `go.mod`/`go.sum` diff is empty; and the every-kind-constructible guard still passes at its committed kind count, AG-16 registering none. Cross-referenced to `R-CST-007` / `S-CST-014`.
 - **S-LSK-026** — **AG-16 widens both filters by name and in sync.** Given the two filter functions after this change, when their entry sets are compared, then they are identical to each other; `/cost_events.go` and each file AG-16 introduces is present in both as an exact filename suffix; every entry contains no wildcard, prefix or directory pattern; **`cost_events_test.go` is absent from both**; `stream_check_test.go` is absent from both; and when an unnamed new file is placed in the package, then both substrate guards fail on it.
-
-### R-LSK-005 — Test coverage on `loop.go`
-
-The system SHALL achieve ≥ 80% line coverage on `backend/agent/src/agent/loop.go` per `make test` race-gated run, satisfying AG-04 W8. The coverage SHALL include the AG-09 wire-up: the path from `provider.Stream` close through `Schedule` invocation through tool-event emission SHALL be covered; the "loop schedules; does not iterate" invariant (`S-LSK-008`) SHALL be covered by a test that asserts `Schedule` is invoked exactly once per `Turn` even when tool results would warrant a follow-up model call.
-
-#### Scenarios
-
-- **S-LSK-007** — Given `make test` green in `backend/agent/`, when the coverage report is read for `backend/agent/src/agent/loop.go`, then the line coverage is ≥ 80%, and `loop_tool_dispatch_test.go` is part of the covered surface.
-
-### R-LSK-006 — One cycle per turn (AG-09 wording-trap boundary with AG-13)
-
-The loop SHALL schedule at most one cycle of `model → tools → finalize` per `Turn` invocation. Iteration across cycles (`model → tools → model`) is **AG-13's `Harness` contract**; AG-09 MUST NOT loop the cycle within `Turn`. This is the wording trap from `0003:107-112` — the loop schedules, it does not iterate.
-
-**The seam sentence, as AG-13 reconciles it:** `Schedule` is invoked **only** by `Turn`; the AG-13 `Harness` owns the `Scheduler` **value** and its wake surface (`WakeParked`) but does **not** call `Schedule`. The AG-09-era phrase "callable … from `Harness` (AG-13)" was a forecast about who *might* call the seam, written before AG-13.1's third charter scenario was weighed; it is **re-scoped here, not deleted silently**. The charter wins for three recorded reasons: doc 0003 is the task-graph authority; `doc.go:31`'s `L2C-03` — "callers observe the stream, they never reach into the loop" — already encodes the charter's reading package-wide; and a harness-side `Schedule` call would force the harness to re-accumulate tool calls and re-emit tool events outside a turn bracket, destroying exactly the provenance that disqualified driver-side event rewriting.
-
-**What stays true, explicitly:** the operative clause — "`Turn` MUST call `Schedule` at most once per invocation" — remains **TRUE** under AG-13 and is not weakened, qualified, or made conditional on the continuation. The harness iterates by calling `Turn` repeatedly; each `Turn` invocation still calls `Schedule` at most once, on the nil path and on the continuation path alike. `S-LSK-008` and `S-LSK-008a` stay green with their source **unchanged**.
-
-`WakeParked` is not this seam. It is the upward-path wake surface that `agent-permission-protocol/spec.md:144` reserves for AG-13, and the harness reaching it does not constitute reaching into the loop.
-
-(Previously: the seam sentence read "the scheduler's `Schedule` function is the seam: callable from `Turn` (AG-09) or from `Harness` (AG-13), but `Turn` MUST call it at most once per invocation" — permitting a harness-side `Schedule` call that AG-13.1's third charter scenario forbids.)
-
-#### Scenarios
-
-- **S-LSK-008** — One cycle per turn. Given a provider that streams one round of tool-call events (`ToolCallStart` / `Delta` / `End`) followed by a `Completion` with `FinishReasonToolCalls`, when `Turn` runs, then `Schedule` is invoked exactly once per `Turn` (asserted via a per-tool invocation counter) and `Turn` returns without re-entering `provider.Stream` — even if the tool results would warrant a follow-up model call.
-- **S-LSK-008a** — **(bite)** RED-first. Given a `Turn` whose post-`Schedule` path erroneously re-invokes `Schedule`, when the cycle-count scenario runs, then the per-tool invocation counter reports > 1 — proves the one-cycle invariant is non-vacuous. RED-recorded BEFORE `S-LSK-008` is GREEN.
-- **S-LSK-017** — **AG-13 honours the reconciled seam.** Given the run driver's production source read as raw bytes, when it is scanned by the source guard of `R-RUN-006`, then it contains **no `Schedule` call site**; and given a harness-driven multi-turn run with a tool-calling turn, when the per-tool schedule-invocation counter is read, then it reports exactly one invocation per turn and no invocation attributable to the harness itself.
-
-## Non-functional requirements
-
-| ID | Requirement |
-|---|---|
-| **NFR-LSK-001** | External-package verifiability: every scenario verifiable by `cd backend/agent && make test`. Every behavioral test in `package agent_test` or another external package. |
-| **NFR-LSK-002** | Determinism and race cleanliness: every test MUST be deterministic, hermetic, and pass under `-race`. |
-| **NFR-LSK-003** | Substrate byte-unchanged: the 21 files in `R-LSK-004` are byte-unchanged. 6th consecutive extensibility demonstration. |
-| **NFR-LSK-004** | Boundary guards stay green untouched: AG-03's `import_boundary_test.go` and `ambient_authority_test.go` pass with zero changes. |
-| **NFR-LSK-005** | Review budget: single PR under pre-authorised `size:exception` against 1000-line budget, forecast 400–700 lines. |
-
-## MODIFIED Explicit non-requirements
-
-The list is reproduced in full; two lines are back-annotated as closed and none is removed.
-
-- **No edit** to any substrate file in `R-LSK-004`. AG-04/05/06 rule engine, registry, descriptor vocabulary, tests stay untouched.
-- **No new top-level Go deps.** No `go.mod`/`go.sum` edit. No AG-03 guard edit.
-- **Tools, hooks, errors beyond typed pass-through, permission, retry, context-check, cost events** — AG-08…AG-18.
-- **Value-form `Harness`** — AG-13. AG-07 ships the function form only (D1). **CLOSED by AG-13**: the value-form `Harness` ships in this change and is owned by `R-RUN-001` in [`../agent-run-driver/spec.md`](../agent-run-driver/spec.md). AG-07's function form is unchanged and remains the only public one-turn surface.
-- **Multi-turn state** — AG-21. AG-07 is stateless across calls (per `R-LSK-002`). *(Still open. AG-13 owns one run's iteration; state that outlives a run remains AG-21's.)*
-- **Iteration of the model ↔ tools ↔ model cycle** — AG-13. AG-09 ships ONE cycle; AG-13 iterates. **CLOSED by AG-13**: iteration ships here, in the harness, by repeated `Turn` invocation — owned by `R-RUN-002`. `Turn` itself still schedules exactly one cycle per invocation (`R-LSK-006`, unweakened).
-- **Test-convenience wrappers** in `backend/agent/src/agenttest` — AG-23. AG-07 uses `agenttest.Script` directly (per D4).
-- **CI** — every gate runs when a human runs `make test` in `backend/agent/`.
-
-## Evidence discipline
-
-`openspec/config.yaml` `apply.tdd: true`; strict TDD active (`openspec/AGENTS.md`).
-
-- Both leaves are behavior, so RED-first.
-- **`R-LSK-001` closes only on its recorded bites** (`S-LSK-003a`, `S-LSK-003b`): the reconstruction helper bites RED twice BEFORE `S-LSK-003` is GREEN. Mirrors AG-05 `S-AMT-071`/`S-AMT-072` (`reconstruction_test.go:180-277`).
-- **AG-09 adds `R-LSK-006`** with bite `S-LSK-008a`: the one-cycle-per-turn invariant bites RED with an invocation-counter scenario BEFORE `S-LSK-008` is GREEN.
-- **No new event kinds** registered by AG-07 — the every-kind-constructible guard stays at 25.
-- **AG-09 adds zero event kinds** — the every-kind-constructible guard stays at 25.
-- **Scope-fence remains at 25.** AG-07 + AG-08 + AG-09 extend via `R-LSK-004`'s 6th consecutive extensibility demonstration, not by editing the registry.
-- **Strict TDD skill gap** — `openspec/AGENTS.md` `## Strict TDD is on` is the inline fallback.
-
-## Acceptance criteria
-
-1. Every `S-LSK-001`…`S-LSK-009` has recorded evidence.
-2. `cd backend/agent && make test`, `make lint` (after `cache clean`), `make build`, and `make vuln-check` are all green.
-3. `backend/agent/go.mod` and `go.sum` byte-unchanged.
-4. The 21 substrate files in `R-LSK-004` are byte-unchanged.
-5. `loop.go` line coverage ≥ 80% (AG-04 W8).
-6. The every-kind-constructible guard still passes at 25 kinds; AG-03's two boundary guards pass with zero changes.
-7. The 5 charter `AG-07.1`/`AG-07.2` Gherkin scenarios are covered; none reduced.
-8. All 3 bites (`S-LSK-003a`, `S-LSK-003b`, `S-LSK-008a`) RED-recorded with failing output in `apply-progress.md`.
-9. `5 charter → 7 spec + 2 bites = 9 total` (AG-07) + 1 cross-cut `S-LSK-008` + 1 bite `S-LSK-008a` (AG-09) = **11 total** scenario count stated identically with the proposal, tasks, apply-progress, and verify-report.
-10. The `Turn` does not iterate (one cycle per turn, `S-LSK-008`) — the wording trap from `0003:107-112` is asserted mechanically in `loop_tool_dispatch_test.go`.
-
-## Traceability
-
-| Requirement | Charter node | Decisions cited | Charter scenario (`0003`) |
-|---|---|---|---|
-| `R-LSK-001` | AG-07.1 | D1, D2, D3, D5 | `:794-805` |
-| `R-LSK-002` | AG-07.2 | D1, U3 path-a | `:821-825` |
-| `R-LSK-003` | AG-07.2 | D4 | `:827-829` |
-| `R-LSK-004` | AG-07 cross-cut | — | substrate preservation |
-| `R-LSK-005` | AG-07 cross-cut | — | AG-04 W8 carry |
-| `R-LSK-006` | AG-09 (one-cycle) | D8 (AG-09) | wording trap `0003:107-112` |
-| `S-LSK-009` | AG-09 (wire-up) | D8, D9a (AG-09) | new end-to-end dispatch |

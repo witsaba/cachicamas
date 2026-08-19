@@ -777,7 +777,7 @@ type turnAccumulator struct {
 	// ai.ToolCall parts (R-LSK-001 point 5, R-HIS-010 point 1). Never
 	// set on the nil path, so nil-path behavior stays byte-stable.
 	continuation bool
-	textBracket struct {
+	textBracket  struct {
 		msgID     ai.MessageID
 		started   bool
 		ended     bool
@@ -807,6 +807,13 @@ type turnAccumulator struct {
 	finish          ai.FinishReason
 	finishOk        bool
 	fatal           error
+	// usage is the turn's ai.Usage, captured from the Completion event
+	// (AG-16, R-CST-001). Its zero value is ai.Usage{} — every figure
+	// absent — which is exactly the correct reading for a turn whose
+	// provider closed without ever emitting a Completion (S-CST-002):
+	// finalize() still runs, and the emitted cost_turn reports all
+	// five figures absent rather than five invented zeros.
+	usage ai.Usage
 }
 
 // newTurnAccumulator constructs a fresh per-turn walker. continuation
@@ -924,6 +931,10 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 		completion, _ := ev.Completion()
 		t.finish = completion.FinishReason()
 		t.finishOk = true
+		// AG-16 (R-CST-001, R-CST-003): capture usage beside the
+		// existing finish capture. No emission here — finalize()
+		// converts and emits it (loop.go:1001).
+		t.usage = completion.Usage()
 		return true
 
 	case ai.EventKindToolCallStart:
@@ -999,6 +1010,21 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 // scope: text-only reconstruction. Phase 3 widens to reasoning parts
 // (S-LSK-005).
 func (t *turnAccumulator) finalize() (ai.Message, ai.FinishReason) {
+	// AG-16 (R-CST-001): finalize is reached only by a turn that
+	// closes non-aborted (every aborted exit returns before this
+	// point), so its first emission is the turn's own cost_turn,
+	// inside the bracket it opened and before turn_end — the iff's
+	// emitting half. Figures and presence come from t.usage, captured
+	// beside t.finish at the Completion case; a turn that never saw
+	// one (the no-Completion fallback) still reaches finalize with
+	// t.usage at its zero value, so every figure reports absent
+	// rather than an invented zero. Best-effort: a construction
+	// failure skips the emission and changes nothing else finalize
+	// does.
+	if costTurn, cerr := newCostTurnFromUsage(t.runID, t.turnID, CostLabelFinal, t.usage); cerr == nil {
+		emitStamped(t.sink, t.stamper, costTurn)
+	}
+
 	// Emit turn_end (dispatched from t.finish via outcomeForFinish,
 	// R-ATT-002) and run_end (RunOutcomeCompleted — refusal, pause and
 	// unknown are turn-level distinctions only; D5). Failures beyond

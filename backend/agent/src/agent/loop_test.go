@@ -347,6 +347,11 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 
 	got := drainSink(t, sink)
 
+	// AG-16 signed-off amendment (agent-loop-skeleton delta's R-LSK-001,
+	// S-LSK-001 "Amended by AG-16"): this is a success path, so the
+	// turn closes non-aborted and AG-16's cost_turn emission rule
+	// applies — cost_turn is inserted immediately before turn_end. The
+	// sequence stays a closed list at its new length.
 	wantKinds := []agent.EventKind{
 		agent.EventKindRunStart,
 		agent.EventKindTurnStart,
@@ -355,11 +360,12 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageEndText,
+		agent.EventKindCostTurn,
 		agent.EventKindTurnEnd,
 		agent.EventKindRunEnd,
 	}
 	if len(got) != len(wantKinds) {
-		t.Fatalf("emitted %d events, want %d (full contract run → turn → text bracket → deltas → end → turn_end → run_end)", len(got), len(wantKinds))
+		t.Fatalf("emitted %d events, want %d (full contract run → turn → text bracket → deltas → end → cost_turn → turn_end → run_end)", len(got), len(wantKinds))
 	}
 	for i, ev := range got {
 		if ev.Kind() != wantKinds[i] {
@@ -369,7 +375,7 @@ func TestTurn_WalkingSkeleton_EmitsContractEventOrder(t *testing.T) {
 
 	// Sequence stamping: 1-based, contiguous.
 	for i, ev := range got {
-		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 is always in [1,9]
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 is always in [1,10] (AG-16: +cost_turn)
 			t.Errorf("event[%d] sequence = %v, want %v (1-based, contiguous)", i, ev.Sequence(), wantSeq)
 		}
 	}
@@ -955,7 +961,25 @@ func filterOutLoopFiles(diff string) string {
 				// no wildcard/prefix/directory pattern; byte-in-sync with
 				// loop_hook_test.go's filterOutLoopHookFiles.
 				strings.HasSuffix(path, "/failover_policy.go") ||
-				strings.HasSuffix(path, "/failover_policy_test.go")
+				strings.HasSuffix(path, "/failover_policy_test.go") ||
+				// AG-16 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-16's release scope", S-LSK-025/S-LSK-026):
+				// cost_events.go is released above (the presence
+				// discriminator + accessors, bounded to exactly that);
+				// cost_usage.go is AG-16's new production file;
+				// cost_usage_test.go, cost_turn_emission_test.go and
+				// cost_session_test.go are its test files, each landed
+				// in the same commit as the scenarios it introduces.
+				// cost_events_test.go is deliberately NOT added — AG-16
+				// must not edit it, and a filter entry would remove the
+				// guard that says so. Exact filenames, no
+				// wildcard/prefix/directory pattern; both filters stay
+				// byte-in-sync.
+				strings.HasSuffix(path, "/cost_events.go") ||
+				strings.HasSuffix(path, "/cost_usage.go") ||
+				strings.HasSuffix(path, "/cost_usage_test.go") ||
+				strings.HasSuffix(path, "/cost_turn_emission_test.go") ||
+				strings.HasSuffix(path, "/cost_session_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
@@ -1097,7 +1121,7 @@ func TestTurn_TwoSequentialTurnsShareNothing(t *testing.T) {
 		t.Errorf("second turn's first event sequence = %v, want 1 (per-stream, R-LSK-002)", secondEvents[0].Sequence())
 	}
 	for i, ev := range secondEvents {
-		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 always in [1,9]
+		if wantSeq := agent.Sequence(i + 1); ev.Sequence() != wantSeq { //nolint:gosec // i+1 always in [1,10] (AG-16: +cost_turn)
 			t.Errorf("second turn event[%d] sequence = %v, want %v (restarts at 1, not continuing first turn's count)",
 				i, ev.Sequence(), wantSeq)
 		}
@@ -1110,12 +1134,13 @@ func TestTurn_TwoSequentialTurnsShareNothing(t *testing.T) {
 // with a non-empty reasoning round-trip token, then text block
 // start/delta/delta/end, then completion), when the loop re-emits
 // it via Turn(...), then:
-//   (a) reasoning and text are emitted as separate bracket kinds
-//       (message_start_reasoning / message_delta_reasoning /
-//       message_end_reasoning vs message_start_text / etc.);
-//   (b) the assistant message's reasoning-content round-trip token
-//       is byte-equal to the script's token (R-ARE-010, V-REQ-11);
-//   (c) the event order matches the script's emit calls.
+//
+//	(a) reasoning and text are emitted as separate bracket kinds
+//	    (message_start_reasoning / message_delta_reasoning /
+//	    message_end_reasoning vs message_start_text / etc.);
+//	(b) the assistant message's reasoning-content round-trip token
+//	    is byte-equal to the script's token (R-ARE-010, V-REQ-11);
+//	(c) the event order matches the script's emit calls.
 //
 // RED-recorded at Task 3.2: the current loop drops reasoning events
 // on the floor and produces no reasoning Part, so the byte-exact
@@ -1149,6 +1174,11 @@ func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
 	// events and assert both kinds appear, with the script's
 	// interleaved order (response_start dropped; reasoning bracket;
 	// text bracket; completion).
+	//
+	// AG-16 signed-off amendment: this is a success path (S-ATT stop
+	// finish), so the turn closes non-aborted and AG-16's cost_turn
+	// emission rule (R-LSK-001's amendment) applies here too — cost_turn
+	// is inserted immediately before turn_end, same as S-LSK-001.
 	wantOrder := []agent.EventKind{
 		agent.EventKindRunStart,
 		agent.EventKindTurnStart,
@@ -1159,6 +1189,7 @@ func TestTurn_ReasoningPassThroughByteExact(t *testing.T) {
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageDeltaText,
 		agent.EventKindMessageEndText,
+		agent.EventKindCostTurn,
 		agent.EventKindTurnEnd,
 		agent.EventKindRunEnd,
 	}
