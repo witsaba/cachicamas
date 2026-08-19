@@ -994,7 +994,26 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/context_strategy.go") ||
 				strings.HasSuffix(path, "/token_accounting.go") ||
 				strings.HasSuffix(path, "/context_strategy_test.go") ||
-				strings.HasSuffix(path, "/token_accounting_test.go")
+				strings.HasSuffix(path, "/token_accounting_test.go") ||
+				// AG-18 widening (agent-loop-skeleton delta's R-LSK-004
+				// "AG-18's release scope", S-LSK-029/S-LSK-030): AG-18
+				// releases doc.go and doc_contract_guard_test.go, both
+				// already present above since AG-14 -- no pre-existing
+				// filename is added. compaction.go is AG-18's new
+				// production file; the six suffixes after it are its
+				// own new test files. cost_events.go, cost_events_test.go,
+				// stream_check_test.go and reconstruction_test.go stay
+				// deliberately absent, as does every file under
+				// src/agenttest/ -- these filters do not govern that
+				// directory. Byte-in-sync with loop_hook_test.go's
+				// filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/compaction.go") ||
+				strings.HasSuffix(path, "/compaction_call_test.go") ||
+				strings.HasSuffix(path, "/compaction_surgery_test.go") ||
+				strings.HasSuffix(path, "/compaction_stream_test.go") ||
+				strings.HasSuffix(path, "/compaction_reconstruction_test.go") ||
+				strings.HasSuffix(path, "/compaction_recovery_test.go") ||
+				strings.HasSuffix(path, "/compaction_demand_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

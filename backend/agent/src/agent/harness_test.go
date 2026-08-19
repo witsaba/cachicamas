@@ -1022,7 +1022,13 @@ func TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged(t *testing.T) {
 	// "A consequence stated so sdd-apply is not read as a silent test
 	// rewrite"); the subtest no longer claims a count, only the exact
 	// named set.
-	t.Run("exported methods are exactly Interrupt, Run, Shutdown, Steer", func(t *testing.T) {
+	//
+	// AG-18 (R-CMP-001, R-CMP-011, design AD-10) widens it again, from
+	// four methods to five: Compact sits beside them as the on-demand
+	// compaction door, on the same non-privileged upward path. Named
+	// explicitly, not counted, for the same reason AG-14's comment
+	// above states.
+	t.Run("exported methods are exactly Compact, Interrupt, Run, Shutdown, Steer", func(t *testing.T) {
 		t.Parallel()
 
 		typ := reflect.TypeOf(&agent.Harness{})
@@ -1031,7 +1037,7 @@ func TestHarness_StructLiteralRun_NoConstructorFieldsUnchanged(t *testing.T) {
 			names = append(names, typ.Method(i).Name)
 		}
 		sort.Strings(names)
-		want := []string{"Interrupt", "Run", "Shutdown", "Steer"}
+		want := []string{"Compact", "Interrupt", "Run", "Shutdown", "Steer"}
 		if !reflect.DeepEqual(names, want) {
 			t.Errorf("*Harness exported methods = %v, want exactly %v", names, want)
 		}

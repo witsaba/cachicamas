@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"reflect"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -549,6 +550,192 @@ func TestHistory_EntryIdentity_StableAcrossReadsAndSeed(t *testing.T) {
 	for i := range firstRead {
 		if seededEntries[i].ID() != firstRead[i].ID() {
 			t.Errorf("seeded entries[%d].ID() = %v, want %v (the appended original's identity — a function of ordinal position alone)", i, seededEntries[i].ID(), firstRead[i].ID())
+		}
+	}
+}
+
+// --- AG-18 — R-HIS-001 as amended: the one removal route ------------------
+//
+// ReplacePrefix is exported (S-HIS-030's sixth route), so — unlike
+// compaction_surgery_test.go's internal TestResolveCut_* tests — these
+// scenarios belong in package agent_test (NFR-HIS-001). A recorded turn
+// mark is required for any non-trivial count to validate
+// (checkReplacePrefixCount), and this package has no door onto one
+// directly: closeTurnMarked is package-private, reachable only from the
+// harness (S-CMP-035). So these tests drive a real, minimal
+// agent.Harness.Run — reusing context_strategy_test.go's own
+// scriptedTwoTurnHarness fixture builder, same package, same directory
+// — to obtain a genuinely turn-marked history before exercising
+// ReplacePrefix through its public signature.
+
+// markedTwoTurnHistory drives scriptedTwoTurnHarness's two-logical-turn
+// script to completion over a caller-visible *agent.History, and
+// returns it once Run has returned successfully. The resulting
+// transcript is [prompt, assistant-with-call, tool-result,
+// assistant-text] — 4 entries — with turn marks after entry 3 (the
+// tool-calling turn) and after entry 4 (the text-only turn).
+func markedTwoTurnHistory(t *testing.T, suffix string) *agent.History {
+	t.Helper()
+	h, _ := scriptedTwoTurnHarness(t, suffix, nil, agent.ContextBudget{})
+	hist := agent.NewHistory()
+	h.History = hist
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned %v, want nil", err)
+	}
+	drainSink(t, sink)
+	if got := hist.Len(); got != 4 {
+		t.Fatalf("fixture history carries %d entries, want 4 (prompt, assistant-with-call, tool-result, assistant-text)", got)
+	}
+	return hist
+}
+
+// TestHistory_ReplacePrefix_SucceedsAndRenumbers — S-HIS-100, S-CMP-007.
+// A prefix replacement over a mark-aligned, pairing-closed boundary
+// commits: the read-back is [summary, tail...], the count is
+// 1+(len(pre)-r), and a fresh seeded history over the read-back
+// succeeds. Attempting the same replacement with a boundary that splits
+// a pair is rejected typed, leaving the transcript byte-identical to
+// its pre-attempt state.
+func TestHistory_ReplacePrefix_SucceedsAndRenumbers(t *testing.T) {
+	t.Parallel()
+
+	hist := markedTwoTurnHistory(t, "his100")
+	pre := hist.Entries()
+	const r = 3 // the tool-calling turn's own mark boundary.
+
+	summaryPart, err := ai.NewText("summary of the tool-calling turn")
+	if err != nil {
+		t.Fatalf("ai.NewText returned %v, want nil", err)
+	}
+	summary, err := ai.NewMessage(ai.RoleAssistant, summaryPart)
+	if err != nil {
+		t.Fatalf("ai.NewMessage returned %v, want nil", err)
+	}
+
+	if err := hist.ReplacePrefix(r, summary); err != nil {
+		t.Fatalf("ReplacePrefix(%d, summary) returned %v, want nil", r, err)
+	}
+
+	post := hist.Entries()
+	wantLen := 1 + (len(pre) - r)
+	if len(post) != wantLen {
+		t.Fatalf("post-compaction entry count = %d, want %d (1 + (len(pre)-r))", len(post), wantLen)
+	}
+	if !post[0].Message().Equal(summary) {
+		t.Error("post[0] is not the summary message")
+	}
+	if post[0].Origin() != agent.EntryOriginSummarized {
+		t.Errorf("post[0].Origin() = %v, want EntryOriginSummarized", post[0].Origin())
+	}
+	for i := r; i < len(pre); i++ {
+		postIdx := 1 + (i - r)
+		if !pre[i].Message().Equal(post[postIdx].Message()) {
+			t.Errorf("post[%d] does not equal pre[%d]'s message (the formerly-tail entries must survive in original relative order)", postIdx, i)
+		}
+	}
+
+	readBack := post
+	messages := make([]ai.Message, len(readBack))
+	for i, e := range readBack {
+		messages[i] = e.Message()
+	}
+	if _, serr := agent.NewSeededHistory(messages); serr != nil {
+		t.Errorf("NewSeededHistory(post-compaction read-back) returned %v, want nil", serr)
+	}
+
+	// A boundary that splits a pair is rejected typed, and the
+	// transcript is left byte-identical to its pre-attempt state.
+	splitHist := markedTwoTurnHistory(t, "his100b")
+	preSplit := splitHist.Entries()
+	if err := splitHist.ReplacePrefix(2, summary); err == nil {
+		t.Fatal("ReplacePrefix(2, summary) over a boundary splitting the call/result pair returned nil, want a typed rejection")
+	}
+	postSplit := splitHist.Entries()
+	if len(postSplit) != len(preSplit) {
+		t.Fatalf("entry count after a rejected ReplacePrefix = %d, want unchanged %d", len(postSplit), len(preSplit))
+	}
+	for i := range preSplit {
+		if !preSplit[i].Message().Equal(postSplit[i].Message()) || preSplit[i].ID() != postSplit[i].ID() || preSplit[i].Origin() != postSplit[i].Origin() {
+			t.Errorf("entry %d changed after a rejected ReplacePrefix, want byte-identical", i)
+		}
+	}
+}
+
+// TestHistory_ReplacePrefix_NothingElseRemovable — S-HIS-101. The
+// exported transcript-store surface removes a committed entry in
+// exactly one shape: [agent.History.ReplacePrefix]. Its own signature
+// structurally excludes a mid-transcript span (it names a PREFIX
+// length, never a [start, end) pair), so "no mid-span route exists" is
+// a fact about the public API's shape, not a runtime behavior to probe;
+// and no route on the surface reorders or rewrites a surviving entry —
+// every method that reads an entry (Entries, Len, and Entry's own
+// accessors) is read-only, mirrored by history_surface_guard_test.go's
+// closed enumeration (S-HIS-030/031), reused here as the closed set
+// this scenario reasons over.
+func TestHistory_ReplacePrefix_NothingElseRemovable(t *testing.T) {
+	t.Parallel()
+
+	typ := reflect.TypeOf(&agent.History{})
+	names := make(map[string]bool, typ.NumMethod())
+	for i := range typ.NumMethod() {
+		names[typ.Method(i).Name] = true
+	}
+	wantMutating := []string{"Append", "CloseTurn", "SynthesizeOrphans", "ReplacePrefix"}
+	for _, name := range wantMutating {
+		if !names[name] {
+			t.Errorf("*agent.History has no exported method %q", name)
+		}
+	}
+	// A hypothetical "ReplaceSpan(start, end int, ...)" or "Reorder(...)"
+	// method is simply absent from the surface — enumerated by name so a
+	// silent future addition of either shape fails this exact assertion.
+	for _, forbidden := range []string{"ReplaceSpan", "Reorder", "Remove", "Rewrite", "Delete", "Truncate"} {
+		if names[forbidden] {
+			t.Errorf("*agent.History exports %q, want no mid-span, reorder or in-place-rewrite route", forbidden)
+		}
+	}
+
+	// ReplacePrefix's own signature: a prefix length and a summary
+	// message, nothing that could name an arbitrary [start, end) span.
+	method, ok := typ.MethodByName("ReplacePrefix")
+	if !ok {
+		t.Fatal("*agent.History has no ReplacePrefix method")
+	}
+	// Method.Type includes the receiver as argument 0.
+	if got := method.Type.NumIn(); got != 3 {
+		t.Fatalf("ReplacePrefix takes %d argument(s) (receiver included), want 3 (receiver, count, summary) — a span-shaped signature would take 4", got)
+	}
+}
+
+// TestHistory_ReplacePrefix_RejectsToolBearingSummary — S-CMP-027. A
+// summary carrying a tool-call part is rejected typed, the transcript
+// is left byte-identical to its pre-attempt state, and no entry is
+// committed.
+func TestHistory_ReplacePrefix_RejectsToolBearingSummary(t *testing.T) {
+	t.Parallel()
+
+	hist := markedTwoTurnHistory(t, "his_cmp027")
+	pre := hist.Entries()
+
+	callPart := mustToolCall(t, "call-in-summary", "a-tool")
+	toolBearingSummary := mustMessage(t, ai.RoleAssistant, callPart)
+
+	err := hist.ReplacePrefix(3, toolBearingSummary)
+	if err == nil {
+		t.Fatal("ReplacePrefix with a tool-bearing summary returned nil, want a typed rejection")
+	}
+	if !errors.Is(err, ai.ErrMisplaced) {
+		t.Errorf("errors.Is(err, ai.ErrMisplaced) = false, want true (err = %v)", err)
+	}
+
+	post := hist.Entries()
+	if len(post) != len(pre) {
+		t.Fatalf("entry count after a rejected ReplacePrefix = %d, want unchanged %d", len(post), len(pre))
+	}
+	for i := range pre {
+		if !pre[i].Message().Equal(post[i].Message()) || pre[i].ID() != post[i].ID() || pre[i].Origin() != post[i].Origin() {
+			t.Errorf("entry %d changed after a rejected ReplacePrefix, want byte-identical", i)
 		}
 	}
 }

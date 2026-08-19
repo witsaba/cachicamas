@@ -22,32 +22,54 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
-// TestContextVerdict_HasNoFields — S-CTX-005, charter AG-17.1 scenario
-// 2, the type half. The shipped verdict type reports zero fields when
-// inspected reflectively, and carries no exported method and no
-// constructor function that could produce a value distinguishable
-// from its zero value: the only value NoOpContextStrategy.Resolve can
-// ever return IS the zero value, because no other value exists to
-// return (R-CTX-003).
-func TestContextVerdict_HasNoFields(t *testing.T) {
+// TestContextVerdict_ZeroRequestsNothing — S-CTX-005, charter AG-17.1
+// scenario 2, the type half — DELIBERATELY AMENDED BY AG-18, exactly as
+// this scenario's own closing sentence at AG-17 instructed. Through
+// AG-17 this scenario asserted the verdict type reports zero fields and
+// carries no constructor producing a value distinguishable from its
+// zero value; AG-18 adds the field that sentence forecast, so the
+// field-count assertion is retired. The falsifiable claim is re-homed
+// from the type's SHAPE onto the ZERO VALUE's BEHAVIOR — the property
+// AG-17 actually wanted, and the one no later field addition can
+// silently outgrow: a zero verdict's Compaction is nil, and a strategy
+// returning the zero verdict on every consultation of a multi-turn run
+// emits no compaction-family event and reads back byte-identical to the
+// same run with the seam field nil — asserted by scanning recorded
+// kinds and comparing streams, never by trusting that no request was
+// constructed.
+func TestContextVerdict_ZeroRequestsNothing(t *testing.T) {
 	t.Parallel()
 
-	typ := reflect.TypeOf(agent.ContextVerdict{})
-	if typ.NumField() != 0 {
-		t.Fatalf("agent.ContextVerdict has %d field(s), want 0 (R-CTX-003: no field can request compaction)", typ.NumField())
+	var zero agent.ContextVerdict
+	if zero.Compaction != nil {
+		t.Fatalf("zero ContextVerdict.Compaction = %#v, want nil", zero.Compaction)
 	}
-	if typ.NumMethod() != 0 {
-		t.Errorf("agent.ContextVerdict (value type) declares %d exported method(s), want 0 -- a method could still manufacture a distinguishable value", typ.NumMethod())
-	}
-	ptrTyp := reflect.TypeOf(&agent.ContextVerdict{})
-	if ptrTyp.NumMethod() != 0 {
-		t.Errorf("*agent.ContextVerdict declares %d exported method(s), want 0", ptrTyp.NumMethod())
+	verdict := agent.NoOpContextStrategy{}.Resolve(context.Background(), agent.ContextPrompt{})
+	if verdict.Compaction != nil {
+		t.Errorf("NoOpContextStrategy.Resolve().Compaction = %#v, want nil", verdict.Compaction)
 	}
 
-	var zero agent.ContextVerdict
-	verdict := agent.NoOpContextStrategy{}.Resolve(context.Background(), agent.ContextPrompt{})
-	if verdict != zero {
-		t.Errorf("NoOpContextStrategy.Resolve() = %#v, want the zero ContextVerdict", verdict)
+	run := func(t *testing.T, strategy agent.ContextStrategy) ([]agent.Event, error) {
+		t.Helper()
+		h, _ := scriptedTwoTurnHarness(t, "ctx005", strategy, agent.ContextBudget{})
+		sink := make(chan *agent.Event, 256)
+		_, _, err := h.Run(contextBackground(), firstMessage(t), sink)
+		return drainSink(t, sink), err
+	}
+
+	nilEvents, nilErr := run(t, nil)
+	zeroEvents, zeroErr := run(t, agent.NoOpContextStrategy{})
+
+	if (nilErr == nil) != (zeroErr == nil) {
+		t.Fatalf("returned error nil-ness: nil-field run = %v, zero-verdict-strategy run = %v, want equal", nilErr, zeroErr)
+	}
+	assertEventStreamsStructurallyIdentical(t, nilEvents, zeroEvents)
+	for _, events := range [][]agent.Event{nilEvents, zeroEvents} {
+		for _, ev := range events {
+			if isCompactionKind(ev.Kind()) {
+				t.Errorf("event kind %v is compaction-family, want none anywhere on either stream", ev.Kind())
+			}
+		}
 	}
 }
 
@@ -319,6 +341,296 @@ func scriptedTwoTurnHarness(t *testing.T, toolAndCallSuffix string, strategy age
 	}
 	return h, provider
 }
+
+// TestContextStrategy_RequestConstructibleOnlyWithAllThree — S-CTX-022,
+// AG-18. A strategy supplying provider+options+instruction compacts
+// when driven through a run; a request whose instruction is empty
+// fails typed, issues no provider request, and injects no Layer
+// 2-authored text into any captured request.
+func TestContextStrategy_RequestConstructibleOnlyWithAllThree(t *testing.T) {
+	t.Parallel()
+
+	// Both sub-tests need a run that reaches a SECOND consultation
+	// (skip:1 fires there) -- a turn finishing FinishReasonStop with no
+	// steering queued terminates the run immediately with no second
+	// consultation at all, so turn 1 here is a tool-calling turn
+	// (FinishReasonToolCalls continues the loop). Only ONE script is
+	// queued for turn 1: turn 2's own attempt then exhausts the queue
+	// and Run returns a (tolerated, expected) non-nil error -- fixture
+	// design, not a compaction failure, matching
+	// TestCompaction_OneDemandSharedMechanics's own established shape.
+	t.Run("all three supplied compacts", func(t *testing.T) {
+		t.Parallel()
+		const toolName, callID = "read_ctx022a", "call-ctx022a"
+		reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+		ownProvider := agenttest.NewProvider(scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)))
+		compactionProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		strategy := &compactAfterNStrategy{skip: 1, request: func(prompt agent.ContextPrompt) agent.CompactionRequest {
+			return agent.CompactionRequest{Provider: compactionProvider, Options: agent.TurnOptions{Model: "ctx-022-model"}, Instruction: "summarize for S-CTX-022", Cut: len(prompt.Transcript)}
+		}}
+		hist := agent.NewHistory()
+		h := &agent.Harness{Provider: ownProvider, System: "system prompt for S-CTX-022a", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: strategy, History: hist}
+		sink := make(chan *agent.Event, 64)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err == nil {
+			t.Fatal("Run returned nil, want the deliberately-scripted turn-2 exhaustion error (fixture design, not a compaction failure)")
+		}
+		events := drainSink(t, sink)
+		sawFinished := false
+		for _, ev := range events {
+			if ev.Kind() == agent.EventKindCompactionFinished {
+				sawFinished = true
+			}
+		}
+		if !sawFinished {
+			t.Error("no compaction_finished event on the stream, want one -- the compaction must execute")
+		}
+		if got := len(compactionProvider.Requests()); got != 1 {
+			t.Errorf("compaction provider recorded %d request(s), want exactly 1", got)
+		}
+	})
+
+	t.Run("empty instruction fails typed with no provider request", func(t *testing.T) {
+		t.Parallel()
+		const toolName, callID = "read_ctx022b", "call-ctx022b"
+		reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+		ownProvider := agenttest.NewProvider(scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)))
+		compactionProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		strategy := &compactAfterNStrategy{skip: 1, request: func(prompt agent.ContextPrompt) agent.CompactionRequest {
+			return agent.CompactionRequest{Provider: compactionProvider, Instruction: "", Cut: len(prompt.Transcript)}
+		}}
+		hist := agent.NewHistory()
+		h := &agent.Harness{Provider: ownProvider, System: "system prompt for S-CTX-022b", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: strategy, History: hist}
+		sink := make(chan *agent.Event, 64)
+		// Turn 2's own attempt also exhausts the (single-script) queue
+		// regardless of the compaction's own outcome -- a failed
+		// compaction never fails the run, but turn 2 still needs a
+		// script this fixture deliberately does not supply.
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err == nil {
+			t.Fatal("Run returned nil, want the deliberately-scripted turn-2 exhaustion error (fixture design)")
+		}
+		events := drainSink(t, sink)
+		sawFailed := false
+		for _, ev := range events {
+			if ev.Kind() == agent.EventKindCompactionFailed {
+				sawFailed = true
+			}
+		}
+		if !sawFailed {
+			t.Error("no compaction_failed event on the stream, want one")
+		}
+		if got := len(compactionProvider.Requests()); got != 0 {
+			t.Errorf("compaction provider recorded %d request(s), want 0 -- no provider request may be issued for an empty instruction", got)
+		}
+	})
+}
+
+// TestContextStrategy_BoundaryInPromptCoordinates — S-CTX-023, AG-18.
+// The request's Cut is an index into the transcript the prompt
+// carried; the entries actually replaced are a prefix of that same
+// transcript ending at or before it.
+func TestContextStrategy_BoundaryInPromptCoordinates(t *testing.T) {
+	t.Parallel()
+
+	const toolName, callID = "read_ctx023", "call-ctx023"
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+	ownProvider := agenttest.NewProvider(scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)))
+	var recordedTranscript []ai.Message
+	compactionProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	strategy := &compactAfterNStrategy{skip: 1, request: func(prompt agent.ContextPrompt) agent.CompactionRequest {
+		recordedTranscript = prompt.Transcript
+		return agent.CompactionRequest{Provider: compactionProvider, Instruction: "summarize for S-CTX-023", Cut: len(prompt.Transcript)}
+	}}
+	hist := agent.NewHistory()
+	h := &agent.Harness{Provider: ownProvider, System: "system prompt for S-CTX-023", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: strategy, History: hist}
+
+	sink := make(chan *agent.Event, 64)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err == nil {
+		t.Fatal("Run returned nil, want the deliberately-scripted turn-2 exhaustion error (fixture design)")
+	}
+	drainSink(t, sink)
+
+	if recordedTranscript == nil {
+		t.Fatal("strategy was never consulted")
+	}
+	if len(recordedTranscript) != 3 {
+		t.Fatalf("prompt.Transcript carried %d message(s), want 3 (prompt, the tool call, its result -- turn 1's own committed entries)", len(recordedTranscript))
+	}
+	// The replaced entries (everything except the new summary at
+	// position 0) are a prefix of that SAME transcript ending at or
+	// before the named Cut -- here Cut == len(recordedTranscript), so
+	// the WHOLE prompt transcript was compacted, and nothing beyond it
+	// (which the strategy never saw) could have been touched.
+	post := hist.Entries()
+	if len(post) != 1 {
+		t.Fatalf("post-compaction entry count = %d, want 1 (the summary alone, since Cut covered the whole transcript the prompt carried)", len(post))
+	}
+}
+
+// TestContextStrategy_PinSurvivesCapableButInert — S-CTX-025, AG-18. A
+// strategy fully capable of requesting compaction but returning the
+// zero verdict on every consultation produces byte-identical streams
+// and read-backs versus the nil-field run -- inertness is a property
+// of the value returned, not of the strategy's incapacity.
+func TestContextStrategy_PinSurvivesCapableButInert(t *testing.T) {
+	t.Parallel()
+
+	// capableButInertStrategy is fully able to construct a compaction
+	// request (its own Resolve method could, in principle, do so) but
+	// always returns the zero verdict -- distinguishing "never asked"
+	// from "asked and declined every time" is the whole point.
+	capableButInert := &compactAfterNStrategy{skip: 1 << 30} // never fires: every consultation is within skip.
+
+	nilFinish, nilEvents, nilErr := runContextStrategyPinScenario(t, nil)
+	inertFinish, inertEvents, inertErr := runContextStrategyPinScenario(t, capableButInert)
+
+	if (nilErr == nil) != (inertErr == nil) {
+		t.Fatalf("returned error nil-ness: nil-field = %v, capable-but-inert = %v, want equal", nilErr, inertErr)
+	}
+	if nilFinish != inertFinish {
+		t.Errorf("finish reason: nil-field = %v, capable-but-inert = %v, want equal", nilFinish, inertFinish)
+	}
+	assertEventStreamsStructurallyIdentical(t, nilEvents, inertEvents)
+	for _, events := range [][]agent.Event{nilEvents, inertEvents} {
+		for _, ev := range events {
+			if isCompactionKind(ev.Kind()) {
+				t.Errorf("event kind %v is compaction-family, want none anywhere on either stream", ev.Kind())
+			}
+		}
+	}
+}
+
+// runContextStrategyPinScenario is TestContextStrategy_PinSurvivesCapableButInert's own
+// small run helper.
+func runContextStrategyPinScenario(t *testing.T, strategy agent.ContextStrategy) (ai.FinishReason, []agent.Event, error) {
+	t.Helper()
+	h, _ := scriptedTwoTurnHarness(t, "ctx025", strategy, agent.ContextBudget{})
+	sink := make(chan *agent.Event, 256)
+	_, finish, err := h.Run(contextBackground(), firstMessage(t), sink)
+	return finish, drainSink(t, sink), err
+}
+
+// TestContextStrategy_NextTurnUsesRebuiltTranscript — S-CTX-024, AG-18.
+// The turn following a compaction sends the POST-compaction transcript
+// (summary first, tail after), never the stale pre-compaction slice;
+// and every attempt of a retried following turn carries that same
+// rebuilt slice.
+func TestContextStrategy_NextTurnUsesRebuiltTranscript(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clean turn 2 sends the rebuilt transcript", func(t *testing.T) {
+		t.Parallel()
+		const toolName, callID = "read_ctx_024", "call-ctx-024"
+		reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+		ownProvider := agenttest.NewProvider(
+			scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)),
+			scriptTextResponse(t, ai.FinishReasonStop),
+		)
+		compactionProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		strategy := &compactAfterNStrategy{
+			skip: 1,
+			request: func(prompt agent.ContextPrompt) agent.CompactionRequest {
+				return agent.CompactionRequest{Provider: compactionProvider, Instruction: "summarize for S-CTX-024", Cut: len(prompt.Transcript)}
+			},
+		}
+		hist := agent.NewHistory()
+		h := &agent.Harness{Provider: ownProvider, System: "system prompt for S-CTX-024", Turn: agent.TurnOptions{Tools: reg}, ContextStrategy: strategy, History: hist}
+		sink := make(chan *agent.Event, 256)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+			t.Fatalf("Run returned %v, want nil", err)
+		}
+		drainSink(t, sink)
+
+		requests := ownProvider.Requests()
+		if len(requests) != 2 {
+			t.Fatalf("own provider recorded %d request(s), want 2 (turn 1, then turn 2 over the rebuilt transcript)", len(requests))
+		}
+		turn2Messages := requests[1].Messages()
+		if len(turn2Messages) != 1 {
+			t.Fatalf("turn 2's request carries %d message(s), want 1 (the summary alone -- Cut covered the whole pre-compaction transcript)", len(turn2Messages))
+		}
+		readBack := hist.Entries()
+		if len(readBack) < 1 {
+			t.Fatal("post-run history is empty")
+		}
+		if !turn2Messages[0].Equal(readBack[0].Message()) {
+			t.Error("turn 2's request message[0] does not equal the post-compaction summary entry -- want the run to send the REBUILT transcript, not the stale pre-compaction one")
+		}
+	})
+
+	t.Run("every attempt of a retried turn 2 carries the same rebuilt slice", func(t *testing.T) {
+		t.Parallel()
+
+		// Turn 1 MUST be a tool-calling turn: a FinishReasonStop turn
+		// with nothing steered terminates the run immediately, with no
+		// second consultation at all -- the same lesson this file's
+		// other AG-18 fixtures already record.
+		const toolName, callID = "read_ctx024b", "call-ctx024b"
+		reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+		turn1Provider := agenttest.NewProvider(scriptToolCallResponse(t, callID, toolName, []byte(`{"x":1}`)))
+		turn2Inner := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		failure := mustPreStreamRetryableFailure(t, ai.RetryDelay{})
+		turn2Wrapper := newPreStreamFailingProvider(1, failure, turn2Inner) // fails turn 2's own first attempt once, then delegates.
+		ownProvider := &firstCallPassthroughThenWrapped{first: turn1Provider, rest: turn2Wrapper}
+
+		compactionProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		strategy := &compactAfterNStrategy{
+			skip: 1,
+			request: func(prompt agent.ContextPrompt) agent.CompactionRequest {
+				return agent.CompactionRequest{Provider: compactionProvider, Instruction: "summarize for S-CTX-024b", Cut: len(prompt.Transcript)}
+			},
+		}
+		hist := agent.NewHistory()
+		h := &agent.Harness{
+			Provider: ownProvider, System: "system prompt for S-CTX-024b",
+			Turn:            agent.TurnOptions{Tools: reg},
+			ContextStrategy: strategy, History: hist,
+			RetryAttempts: 3, RetryTiming: agent.RetryTiming{SleepFunc: instantSleep},
+		}
+		sink := make(chan *agent.Event, 256)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+			t.Fatalf("Run returned %v, want nil (the retry succeeds within the bound)", err)
+		}
+		drainSink(t, sink)
+
+		turn2Attempts := turn2Wrapper.Requests()
+		if len(turn2Attempts) != 2 {
+			t.Fatalf("turn 2's own wrapper recorded %d request(s), want exactly 2 (the failing first attempt, then the successful retry)", len(turn2Attempts))
+		}
+		attempt1, attempt2 := turn2Attempts[0], turn2Attempts[1]
+		if len(attempt1.Messages()) != 1 || len(attempt2.Messages()) != 1 {
+			t.Fatalf("turn 2 attempts carry %d and %d message(s), want 1 each (the rebuilt summary-only transcript)", len(attempt1.Messages()), len(attempt2.Messages()))
+		}
+		if !attempt1.Messages()[0].Equal(attempt2.Messages()[0]) {
+			t.Error("turn 2's two attempts sent different transcripts, want the identical rebuilt slice on every attempt")
+		}
+	})
+}
+
+// firstCallPassthroughThenWrapped routes its FIRST Stream call directly
+// to `first` (bypassing any wrapping), and every subsequent call to
+// `rest` — the shape the retry sub-test above needs: turn 1 must
+// succeed cleanly (so a mark is recorded before compaction is
+// requested) before the wrapper's own retry-inducing call-counting
+// begins on turn 2.
+type firstCallPassthroughThenWrapped struct {
+	mu    sync.Mutex
+	calls int
+	first ai.ModelProvider
+	rest  ai.ModelProvider
+}
+
+func (p *firstCallPassthroughThenWrapped) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	p.mu.Unlock()
+	if call == 1 {
+		return p.first.Stream(ctx, req)
+	}
+	return p.rest.Stream(ctx, req)
+}
+
+var _ ai.ModelProvider = (*firstCallPassthroughThenWrapped)(nil)
 
 // TestHarness_ContextStrategy_ConsultedOncePerLogicalTurn — S-CTX-001,
 // charter AG-17.1 scenario 1, clean half. A run of two logical turns,
@@ -835,6 +1147,28 @@ func TestHarness_ContextStrategy_ClosedSequencesUnaffected(t *testing.T) {
 // named substrate files are byte-unchanged, the diff under
 // backend/agent/src/ai/ is empty, go.mod/go.sum are byte-unchanged,
 // and expectedLayer2ContractRows still carries exactly eight rows.
+//
+// AG-18 amendment (apply-progress.md's own recorded deviation, added at
+// apply time, not in the original tasks.md plan): this test's
+// `untouched` list is AG-17's own -- and AG-17 correctly recorded that
+// its OWN change touched none of doc.go, doc_contract_guard_test.go or
+// history.go. AG-18 legitimately releases the first two (design AD-12,
+// the L2C-07 amendment below) and modifies the third (Phase 1, the
+// prefix-replacement route and its turn marks). Asserting those three
+// unchanged here would therefore assert something AG-18's own recorded
+// design deliberately falsifies -- the house pattern (AG-11..AG-17) is
+// that each milestone retires the PREVIOUS milestone's version of this
+// test in favour of its own, narrower-scoped replacement, which is
+// exactly what removing those three entries does. AG-18's OWN, fuller
+// and exactly-scoped version of this same underlying property lives in
+// compaction_stream_test.go's TestCompaction_SubstrateByteUnchanged
+// (S-CMP-036), mirroring agent-loop-skeleton's S-LSK-029/S-LSK-030
+// shape: it independently confirms doc.go's and
+// doc_contract_guard_test.go's diffs are confined to the L2C-07 row,
+// and that the exact set of changed non-test files is {doc.go,
+// history.go, harness.go, context_strategy.go}. This test keeps
+// asserting AG-17's OWN remaining, still-true claims: every other
+// named substrate file, Layer 1, and go.mod/go.sum stay byte-unchanged.
 func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
 	root, err := gitTopLevel(t)
 	if err != nil {
@@ -851,8 +1185,9 @@ func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
 	}
 
 	untouched := []string{
-		"backend/agent/src/agent/doc.go",
-		"backend/agent/src/agent/doc_contract_guard_test.go",
+		// doc.go, doc_contract_guard_test.go and history.go are removed
+		// here -- AG-18 legitimately modifies all three (see the AG-18
+		// amendment note on this test's own doc comment above).
 		"backend/agent/src/agent/stream_check.go",
 		"backend/agent/src/agent/event.go",
 		"backend/agent/src/agent/event_descriptor.go",
@@ -860,7 +1195,6 @@ func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
 		"backend/agent/src/agent/compaction_events.go",
 		"backend/agent/src/agent/cost_events.go",
 		"backend/agent/src/agent/cost_usage.go",
-		"backend/agent/src/agent/history.go",
 	}
 	for _, path := range untouched {
 		diff, err := gitDiff(t, root, mainRef, path)

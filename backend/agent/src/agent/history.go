@@ -10,12 +10,13 @@
 //
 // [History] is an opaque struct with unexported storage. Every public
 // route that can extend or mutate the transcript — [History.Append],
-// [NewSeededHistory], [History.CloseTurn], [History.SynthesizeOrphans] —
-// funnels through the single unexported [History.commit] primitive
-// (R-HIS-004, the C1 lesson (doc 0001:376) reapplied to history). Bypass is
-// impossible by construction, not convention: entries and open are
-// unexported, so no external caller can reach them; commit is the only
-// function whose body assigns them, auditable by reading this one file;
+// [NewSeededHistory], [History.CloseTurn], [History.SynthesizeOrphans],
+// and AG-18's [History.ReplacePrefix] — funnels through the single
+// unexported [History.commit] primitive (R-HIS-004, the C1 lesson (doc
+// 0001:376) reapplied to history). Bypass is impossible by construction,
+// not convention: entries, open and marks are unexported, so no external
+// caller can reach them; commit is the only function whose body assigns
+// them, auditable by reading this one file;
 // [EntryOrigin] is a commit parameter no public signature accepts, so only
 // [History.SynthesizeOrphans] can mint [EntryOriginSynthesized]; and the
 // zero-value door defect C1 exploited is closed at the same single point —
@@ -89,6 +90,14 @@ const (
 	// [History.SynthesizeOrphans] — an interruption artifact, not a real
 	// tool answer. It is the only route that can mint this origin.
 	EntryOriginSynthesized
+
+	// EntryOriginSummarized is the origin of the one summary entry a
+	// prefix replacement commits (AG-18, R-CMP-007). It is mintable
+	// ONLY by [History.ReplacePrefix]'s own commit op. Distinguishability
+	// from an ordinarily-appended assistant message rides this
+	// discriminator alone — never content, never a failure flag
+	// (R-HIS-007's content-sentinel prohibition, carried forward).
+	EntryOriginSummarized
 )
 
 // String renders the origin, or "entryorigin(N)" for a non-member,
@@ -100,6 +109,8 @@ func (o EntryOrigin) String() string {
 		return "appended"
 	case EntryOriginSynthesized:
 		return "synthesized"
+	case EntryOriginSummarized:
+		return "summarized"
 	default:
 		return "entryorigin(" + strconv.Itoa(int(o)) + ")"
 	}
@@ -158,6 +169,22 @@ type openCall struct {
 	partIndex  int // the call's part position within that message's content
 }
 
+// turnMark is a turn identifier together with the entry count at that
+// turn's close (AG-18, R-CMP-012, design AD-9): {TurnID, count}, where
+// count is the number of entries committed at the moment the turn
+// closed — the same "prefix length" coordinate a compaction cut is
+// denominated in. Written only through [History.commit]'s marked-close
+// op, never any other way. A recorded mark is a structural guarantee: it
+// can only be committed when the open-call set was empty at that
+// instant (commitCloseTurnMarkedOp delegates to commitCloseTurnOp's own
+// rule 4), so every prefix ending at a mark's count is pairing-closed by
+// construction — a fact [resolveCut] and [History.commitReplacePrefixOp]
+// both rely on to avoid a second, redundant correlation scan.
+type turnMark struct {
+	turnID TurnID
+	count  int
+}
+
 // History is the ordered, append-only transcript store for one run
 // (R-HIS-001). Its storage is unexported; every route that can extend or
 // mutate it funnels through [History.commit] (R-HIS-004). The zero value
@@ -167,6 +194,7 @@ type History struct {
 	constructed bool // set only by the two constructors; commit's first gate
 	entries     []Entry
 	open        []openCall // unanswered calls, issuance order
+	marks       []turnMark // recorded turn-close boundaries, count order (AG-18)
 }
 
 // commitOp discriminates which validated mutation [History.commit]
@@ -180,7 +208,31 @@ const (
 
 	// commitCloseTurn validates that no call is left unanswered (rule 4).
 	commitCloseTurn
+
+	// commitCloseTurnMarked runs commitCloseTurn's identical rule 4, then
+	// additionally records a turn mark (AG-18, R-CMP-012). Reachable
+	// only through the package-private [History.closeTurnMarked] door —
+	// the exported [History.CloseTurn] keeps its pre-AG-18 signature and
+	// semantics, an unmarked close.
+	commitCloseTurnMarked
+
+	// commitReplacePrefix validates and commits AG-18's one new removal
+	// shape: a prefix replacement (R-HIS-001 as amended, R-CMP-005),
+	// reachable only through the exported [History.ReplacePrefix].
+	commitReplacePrefix
 )
+
+// commitParams carries every op's own parameters through the single
+// [History.commit] dispatch point. Not every field is meaningful for
+// every op — each commitXxxOp method reads only the fields its own op
+// uses — mirroring the pre-AG-18 shape where commitCloseTurnOp already
+// ignored the message/origin parameters it was handed.
+type commitParams struct {
+	message ai.Message
+	origin  EntryOrigin
+	turnID  TurnID // commitCloseTurnMarked
+	count   int    // commitReplacePrefix
+}
 
 // NewHistory constructs an empty, usable history. An empty transcript is
 // trivially valid, so this constructor commits nothing and cannot fail.
@@ -216,7 +268,7 @@ func NewHistory() *History {
 func NewSeededHistory(messages []ai.Message) (*History, error) {
 	h := NewHistory()
 	for _, m := range messages {
-		if err := h.commit(commitAppend, m, EntryOriginAppended); err != nil {
+		if err := h.commit(commitAppend, commitParams{message: m, origin: EntryOriginAppended}); err != nil {
 			return nil, err
 		}
 	}
@@ -228,7 +280,7 @@ func NewSeededHistory(messages []ai.Message) (*History, error) {
 // transcript is left byte-unchanged — a failed commit is not a partial
 // commit.
 func (h *History) Append(message ai.Message) error {
-	return h.commit(commitAppend, message, EntryOriginAppended)
+	return h.commit(commitAppend, commitParams{message: message, origin: EntryOriginAppended})
 }
 
 // CloseTurn validates that every tool call in the transcript has a
@@ -239,8 +291,57 @@ func (h *History) Append(message ai.Message) error {
 // ends; in AG-12 only tests exercise it. An empty open set is a no-op:
 // closing an already-closed turn succeeds and changes nothing
 // (idempotent).
+//
+// This is the UNMARKED close: it keeps its exact pre-AG-18 signature and
+// semantics, and it does not record a turn mark. [History.closeTurnMarked]
+// is the package-private, marked sibling AG-18 added beside it
+// (R-CMP-012) — every existing caller of this exported method is
+// unaffected.
 func (h *History) CloseTurn() error {
-	return h.commit(commitCloseTurn, ai.Message{}, 0)
+	return h.commit(commitCloseTurn, commitParams{})
+}
+
+// closeTurnMarked runs CloseTurn's identical rule 4, then additionally
+// records a turn mark {turnID, entry count} through the same commit
+// primitive (AG-18, R-CMP-012, design AD-9). Package-private: reachable
+// only from inside this package — the harness supplies turnID from the
+// successful attempt's own forwarded turn bracket (S-CMP-035 asserts it
+// is unreachable from package agent_test). A recorded mark is what lets
+// a later compaction attribute a resolved cut to the turn identifiers
+// that produced it, and what lets [resolveCut] and
+// [History.commitReplacePrefixOp] both skip a redundant pairing re-scan:
+// a mark can only be committed when the open-call set was empty at that
+// instant, so every prefix ending at a mark's count is pairing-closed by
+// construction.
+func (h *History) closeTurnMarked(turnID TurnID) error {
+	return h.commit(commitCloseTurnMarked, commitParams{turnID: turnID})
+}
+
+// ReplacePrefix replaces the prefix [0, count) with one summary entry
+// (AG-18, R-HIS-001 as amended, R-CMP-005), through [History.commit]
+// (R-HIS-004) — the sixth exported route, dispatched from the same
+// single validating primitive so "commit is the ONLY function that
+// writes h.entries, h.open or h.marks" stays literally true.
+//
+// count MUST name a recorded turn-mark boundary (R-HIS-001 item 3); a
+// count that does not is rejected typed, and — because every mark
+// guarantees pairing-closure of everything before it by construction —
+// this one check subsumes the pairing-closure obligation without a
+// second, redundant correlation re-scan. summary MUST carry a non-zero
+// identity and no tool-call or tool-result part (R-CMP-005: a prefix
+// replacement must not reopen the open set); its content and origin are
+// otherwise taken verbatim — Layer 2 wraps, annotates or re-serialises
+// nothing. On any validation failure h.entries, h.open and h.marks are
+// left byte-unchanged (R-HIS-002, carried forward to this route).
+//
+// On success the new entry sequence is [summary, tail...], with entry
+// identities renumbered ordinally from 1 (R-HIS-005) and every tail
+// entry's own Layer 1 value and origin discriminator preserved
+// positionally (R-CMP-006); marks fully inside the replaced prefix are
+// dropped and every surviving mark's count is shifted to the new
+// coordinate space.
+func (h *History) ReplacePrefix(count int, summary ai.Message) error {
+	return h.commit(commitReplacePrefix, commitParams{count: count, message: summary})
 }
 
 // synthesizedInterruptionContent is the fixed content every synthesized
@@ -292,7 +393,7 @@ func (h *History) SynthesizeOrphans() (int, error) {
 	}
 
 	for _, message := range messages {
-		if err := h.commit(commitAppend, message, EntryOriginSynthesized); err != nil {
+		if err := h.commit(commitAppend, commitParams{message: message, origin: EntryOriginSynthesized}); err != nil {
 			return 0, err
 		}
 	}
@@ -324,20 +425,25 @@ func (h *History) checkConstructed() error {
 	return nil
 }
 
-// commit is the ONLY function that writes h.entries or h.open (R-HIS-004).
-// Every public mutating route funnels through it. Rule 1 (constructed) is
-// checked here, ahead of the op-specific rules, because it gates every
-// route uniformly; op-specific rules are dispatched from here so a new
-// rule always has exactly one place to be added.
-func (h *History) commit(op commitOp, message ai.Message, origin EntryOrigin) error {
+// commit is the ONLY function that writes h.entries, h.open or h.marks
+// (R-HIS-004, AD-9: "commit writes everything"). Every public mutating
+// route funnels through it. Rule 1 (constructed) is checked here, ahead
+// of the op-specific rules, because it gates every route uniformly;
+// op-specific rules are dispatched from here so a new rule always has
+// exactly one place to be added.
+func (h *History) commit(op commitOp, p commitParams) error {
 	if err := h.checkConstructed(); err != nil {
 		return err
 	}
 	switch op {
 	case commitAppend:
-		return h.commitAppendOp(message, origin)
+		return h.commitAppendOp(p.message, p.origin)
 	case commitCloseTurn:
 		return h.commitCloseTurnOp()
+	case commitCloseTurnMarked:
+		return h.commitCloseTurnMarkedOp(p.turnID)
+	case commitReplacePrefix:
+		return h.commitReplacePrefixOp(p.count, p.message)
 	default:
 		return nil
 	}
@@ -353,6 +459,159 @@ func (h *History) commitCloseTurnOp() error {
 	}
 	first := h.open[0]
 	return ai.Invalid(ai.ErrEmpty, ai.AtIndex("messages", first.entryIndex), ai.AtIndex("content", first.partIndex), ai.At("result"))
+}
+
+// commitCloseTurnMarkedOp runs commitCloseTurnOp's identical rule 4 by
+// delegation, then — on success only — records a turn mark {turnID,
+// len(h.entries)} (AG-18, R-CMP-012). turnID is required: an empty
+// identity is rejected before the close rule even runs, since a mark
+// with no identity could never be named by a later CompactionSpan.
+func (h *History) commitCloseTurnMarkedOp(turnID TurnID) error {
+	if turnID == "" {
+		return ai.Invalid(ai.ErrEmpty, ai.At("turn"))
+	}
+	if err := h.commitCloseTurnOp(); err != nil {
+		return err
+	}
+	h.marks = append(h.marks, turnMark{turnID: turnID, count: len(h.entries)})
+	return nil
+}
+
+// markBoundaryAtOrBefore returns the greatest recorded turn-mark
+// boundary <= cut, or 0 if none exists (R-CMP-004 step 1, design AD-1).
+// Marks are always positive, so 0 unambiguously means "no mark at or
+// before cut" — which [resolveCut] reads as "nothing to compact" at the
+// end of its retraction. Read-only; never mutates h.
+func (h *History) markBoundaryAtOrBefore(cut int) int {
+	best := 0
+	for _, m := range h.marks {
+		if m.count <= cut && m.count > best {
+			best = m.count
+		}
+	}
+	return best
+}
+
+// markSpan returns the first and last recorded turn identifiers whose
+// mark boundary falls within [0, cut], in mark order, and whether at
+// least one such mark exists (R-CMP-012, design AD-9 span derivation).
+// Every mark with count <= cut names a turn whose entries are entirely
+// inside the replaced prefix — "the marks fully contained in [0, cut)".
+// Read-only; never mutates h.
+func (h *History) markSpan(cut int) (start, end TurnID, ok bool) {
+	for _, m := range h.marks {
+		if m.count > cut {
+			continue
+		}
+		if !ok {
+			start = m.turnID
+			ok = true
+		}
+		end = m.turnID
+	}
+	return start, end, ok
+}
+
+// checkReplacePrefixCount reports count's own broken rule, or nil: count
+// must be positive, must not exceed the current entry count, and MUST
+// coincide with a recorded turn-mark boundary (R-HIS-001 item 3). The
+// mark-membership check subsumes pairing-closure of [0, count) by the
+// structural guarantee documented on [turnMark] — no separate
+// correlation re-scan of the discarded prefix is needed here.
+func checkReplacePrefixCount(marks []turnMark, count, entryCount int) *ai.Violation {
+	if count <= 0 || count > entryCount {
+		return ai.Invalid(ai.ErrOutOfRange, ai.At("count"))
+	}
+	for _, m := range marks {
+		if m.count == count {
+			return nil
+		}
+	}
+	return ai.Invalid(ai.ErrOutOfRange, ai.At("count"))
+}
+
+// checkSummaryCarriesNoToolParts reports summary's own broken rule, or
+// nil: a prefix-replacement summary must carry no ToolCall and no
+// ToolResult part, so the replacement can never reopen the open set
+// (R-CMP-005).
+func checkSummaryCarriesNoToolParts(summary ai.Message) *ai.Violation {
+	for partIndex, part := range summary.Content() {
+		if _, ok := part.ToolCall(); ok {
+			return ai.Invalid(ai.ErrMisplaced, ai.At("summary"), ai.AtIndex("content", partIndex))
+		}
+		if _, ok := part.ToolResult(); ok {
+			return ai.Invalid(ai.ErrMisplaced, ai.At("summary"), ai.AtIndex("content", partIndex))
+		}
+	}
+	return nil
+}
+
+// replacementOpenSet computes the open-call set the new [summary,
+// tail...] sequence would carry, validating along the way that the
+// sequence is pairing-closed by the SAME correlation [resolveOpenSet]
+// runs for an ordinary append or a fresh seed (R-HIS-001 item 4,
+// R-CMP-010 gate 3: "the same pairing rules seeded construction
+// enforces"). It is read-only over its arguments — a scratch
+// computation, never a partial mutation of h.
+func replacementOpenSet(summary ai.Message, tail []Entry) ([]openCall, *ai.Violation) {
+	var open []openCall
+	var violation *ai.Violation
+	open, violation = resolveOpenSet(open, summary, 0)
+	if violation != nil {
+		return nil, violation
+	}
+	for i, e := range tail {
+		open, violation = resolveOpenSet(open, e.Message(), i+1)
+		if violation != nil {
+			return nil, violation
+		}
+	}
+	return open, nil
+}
+
+// commitReplacePrefixOp validates and performs AG-18's one new removal
+// shape (R-HIS-001 as amended, R-CMP-005, design AD-6): every check runs
+// before any field is written, so a rejected replacement leaves
+// h.entries, h.open and h.marks byte-unchanged (R-HIS-002, R-CMP-010).
+func (h *History) commitReplacePrefixOp(count int, summary ai.Message) error {
+	if err := ai.FirstFailure(
+		func() *ai.Violation { return checkReplacePrefixCount(h.marks, count, len(h.entries)) },
+		func() *ai.Violation {
+			if summary.ID().IsZero() {
+				return ai.Invalid(ai.ErrEmpty, ai.At("summary"))
+			}
+			return nil
+		},
+		func() *ai.Violation { return checkSummaryCarriesNoToolParts(summary) },
+	); err != nil {
+		return err
+	}
+
+	tail := h.entries[count:]
+	newOpen, violation := replacementOpenSet(summary, tail)
+	if violation != nil {
+		return violation
+	}
+
+	newEntries := make([]Entry, 0, 1+len(tail))
+	newEntries = append(newEntries, Entry{id: EntryID(1), message: summary, origin: EntryOriginSummarized})
+	for i, e := range tail {
+		newEntries = append(newEntries, Entry{id: EntryID(i + 2), message: e.Message(), origin: e.Origin()})
+	}
+
+	shift := count - 1
+	newMarks := make([]turnMark, 0, len(h.marks))
+	for _, m := range h.marks {
+		if m.count <= count {
+			continue
+		}
+		newMarks = append(newMarks, turnMark{turnID: m.turnID, count: m.count - shift})
+	}
+
+	h.entries = newEntries
+	h.open = newOpen
+	h.marks = newMarks
+	return nil
 }
 
 // commitAppendOp runs rule 2 (the message was built through

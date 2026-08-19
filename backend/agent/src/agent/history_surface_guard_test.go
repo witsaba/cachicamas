@@ -64,6 +64,7 @@ var expectedHistoryRoutes = []historyRoute{
 	{"Append", "method:*History", routeMutating},
 	{"CloseTurn", "method:*History", routeMutating},
 	{"SynthesizeOrphans", "method:*History", routeMutating},
+	{"ReplacePrefix", "method:*History", routeMutating},
 	{"Entries", "method:*History", routeReadOnly},
 	{"Len", "method:*History", routeReadOnly},
 	{"ID", "method:Entry", routeReadOnly},
@@ -260,6 +261,7 @@ func TestHistory_NoBypass_EveryMutatingRouteRejectsOrphaningSequence(t *testing.
 		"NewSeededHistory":  driveNewSeededHistoryOrphaningSequence,
 		"CloseTurn":         driveCloseTurnOrphaningSequence,
 		"SynthesizeOrphans": driveSynthesizeOrphansOrphaningSequence,
+		"ReplacePrefix":     driveReplacePrefixOrphaningSequence,
 	}
 
 	for _, route := range expectedHistoryRoutes {
@@ -327,5 +329,62 @@ func driveSynthesizeOrphansOrphaningSequence(t *testing.T) {
 	requireEmptyAtHistory(t, err)
 	if n != 0 {
 		t.Errorf("new(History).SynthesizeOrphans() returned n = %d, want 0", n)
+	}
+}
+
+// driveReplacePrefixOrphaningSequence (AG-18) proves ReplacePrefix
+// rejects an attempted removal typed, leaves state byte-unchanged, and
+// rejects through the zero value — this route's own analog of an
+// orphaning sequence. package agent_test has no door onto a real turn
+// mark: [History.closeTurnMarked] is package-private, reachable only
+// from the harness (S-CMP-035 asserts exactly this). So a count with no
+// recorded mark behind it — which is every count reachable from an
+// appended-only history built in this package — is the shape this
+// route's own validation must reject, mirroring how the other three
+// drivers each exercise their own route's rejection rule.
+func driveReplacePrefixOrphaningSequence(t *testing.T) {
+	h := agent.NewHistory()
+	if err := h.Append(mustMessage(t, ai.RoleAssistant, mustText(t, "hi"))); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+	summary := mustMessage(t, ai.RoleAssistant, mustText(t, "a summary"))
+
+	err := h.ReplacePrefix(1, summary)
+	if err == nil {
+		t.Fatal("ReplacePrefix(1, summary) on an unmarked history returned nil, want a typed rejection — count names no recorded turn-mark boundary")
+	}
+	if !errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("errors.Is(err, ai.ErrOutOfRange) = false, want true (err = %v)", err)
+	}
+	if h.Len() != 1 {
+		t.Errorf("ReplacePrefix changed entry count to %d after rejection, want 1 unchanged (state must stay byte-unchanged)", h.Len())
+	}
+
+	zero := new(agent.History)
+	requireEmptyAtHistory(t, zero.ReplacePrefix(1, summary))
+}
+
+// TestHistory_MarkedCloseNotExported (S-CMP-035) — the exported
+// CloseTurn keeps its exact pre-AG-18 signature and semantics: an
+// unmarked close still succeeds (and is still idempotent) on a fresh,
+// pairing-closed history. The package-private marked-close door AG-18
+// added beside it is not reachable from this package: the closed
+// method set expectedHistoryRoutes enumerates above (S-HIS-030/031)
+// names CloseTurn and ReplacePrefix, never a "closeTurnMarked" — a
+// third, marked-close member would be a compile error in this file,
+// not a runtime one, which is the strongest form of "not reachable"
+// this test can assert.
+func TestHistory_MarkedCloseNotExported(t *testing.T) {
+	t.Parallel()
+
+	h := agent.NewHistory()
+	if err := h.Append(mustMessage(t, ai.RoleAssistant, mustText(t, "hi"))); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+	if err := h.CloseTurn(); err != nil {
+		t.Fatalf("CloseTurn() returned %v, want nil (an unmarked close over a pairing-closed history)", err)
+	}
+	if err := h.CloseTurn(); err != nil {
+		t.Fatalf("second CloseTurn() returned %v, want nil — closing an already-closed turn stays idempotent, unchanged by AG-18", err)
 	}
 }
