@@ -517,16 +517,55 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// per-attempt consultation would let a future compacting
 		// verdict (AG-18) mutate the transcript between two attempts
 		// of one logical turn, making R-RTY-002's "identical
-		// transcript, reused BY REFERENCE" (harness.go:550-561)
-		// unprovable by the exact argument its comment relies on.
-		// A nil strategy is never consulted and no accounting is
+		// transcript, reused BY REFERENCE" (this file's own comment
+		// on the attempt loop below, re-resolved at AG-18 apply time
+		// per the AG-16/17 line-shift lesson — grep "reused BY
+		// REFERENCE across attempts" rather than trust a pinned line
+		// number) unprovable by the exact argument its comment relies
+		// on. A nil strategy is never consulted and no accounting is
 		// resolved: the nil path is byte-for-byte the pre-AG-17 path.
+		// AG-18 (R-CMP-001, design AD-7): a non-zero verdict IS acted
+		// on in this same gap, exactly once, and the transcript is
+		// rebuilt from the mutated history before the attempt loop
+		// below — see the compaction wiring immediately after this
+		// consultation — so this comment's own "unprovable" warning
+		// stays true only for a HYPOTHETICAL per-attempt consultation,
+		// never for what AG-18 actually ships (a single, boundary-scoped
+		// act-then-rebuild, still outside the attempt loop).
 		if h.ContextStrategy != nil {
-			h.ContextStrategy.Resolve(runCtx, ContextPrompt{
+			verdict := h.ContextStrategy.Resolve(runCtx, ContextPrompt{
 				Transcript: slices.Clone(transcript),
 				Budget:     h.ContextBudget,
 				Accounting: resolveTokenAccounting(runCtx, h.Provider, h.Turn, h.System, transcript),
 			})
+			// AG-18 (R-CMP-001, R-CMP-011, design AD-7): act on a
+			// non-zero verdict in the SAME gap it was captured in, at
+			// most once per boundary — the verdict is the only request
+			// carrier on this door, and Resolve is consulted exactly
+			// once per logical turn (R-CTX-001), so a second compaction
+			// at this boundary is unrequestable rather than merely
+			// unimplemented. The compaction's own outcome is discarded
+			// here: a failure is visible on the stream and nowhere else
+			// (R-CMP-010, R-CMP-013) and never interrupts the run.
+			if verdict.Compaction != nil {
+				_ = runCompaction(runCtx, hist, *verdict.Compaction, runID, stamper, sink, &total)
+				// R-CTX-003 (as amended)/R-RTY-002: the slice built
+				// above is stale after a successful compaction —
+				// rebuild it from the mutated history BEFORE the
+				// attempt loop, so every attempt of the following
+				// logical turn receives the same rebuilt slice by
+				// reference (S-CTX-024).
+				transcript = transcriptFromHistory(hist)
+				// A run-level Interrupt/Shutdown arriving during
+				// compaction closes the compaction bracket aborted
+				// (runCompaction's own failure arm) and leaves the run
+				// to wind down here, at the same cause check every
+				// other boundary uses — windDownRun is never entered
+				// from inside compaction itself (R-CMP-010, AD-11).
+				if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+					return h.windDownRun(sink, stamper, runID, hist, total, cause)
+				}
+			}
 		}
 
 		bound := h.RetryAttempts
@@ -547,6 +586,18 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		var terr error
 		var verdict retryVerdict
 
+		// AG-18 (R-CMP-012, design AD-9): the successful attempt's own
+		// TurnID, captured from its forwarded events below and read
+		// only after <-forwarderDone has synchronized with the
+		// goroutine that writes it (close-of-channel happens-before —
+		// the same pattern `total`'s own doc comment above states).
+		// Every event Turn forwards on the continuation path carries
+		// this same TurnID, so capturing it from any one of them is
+		// sufficient; a failed final attempt never reaches the
+		// hist.closeTurnMarked call below, so this is always non-empty
+		// by the time it is read.
+		var capturedTurnID TurnID
+
 		// AG-15.1 (R-RTY-001, R-RTY-002, design AD-2): the inner
 		// attempt loop re-invokes Turn for this SAME logical turn on
 		// a retry verdict, over the transcript slice built once
@@ -565,6 +616,13 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			go func() {
 				defer close(forwarderDone)
 				for ev := range turnSink {
+					// AG-18 (R-CMP-012): capture this attempt's TurnID
+					// from its own forwarded events — every event a
+					// continuation-path Turn call emits carries it, so
+					// overwriting on each is harmless (same value).
+					if tid, ok := ev.Turn(); ok {
+						capturedTurnID = tid
+					}
 					// AG-16 (R-CST-004, R-RUN-003): a pure read on the
 					// existing single forwarding path — the event is
 					// still forwarded exactly once, unmodified. Every
@@ -665,7 +723,14 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			return h.failRun(sink, stamper, runID, total, terr)
 		}
 
-		if err := hist.CloseTurn(); err != nil {
+		// AG-18 (R-CMP-012, design AD-9): the run-driven path closes
+		// MARKED, not through the bare exported CloseTurn — recording
+		// {capturedTurnID, entry count} through the same commit
+		// primitive so a later compaction can attribute a resolved cut
+		// to the turn identifiers that produced it. CloseTurn() itself
+		// stays reachable and semantically unchanged for every other
+		// caller (S-CMP-035).
+		if err := hist.closeTurnMarked(capturedTurnID); err != nil {
 			return h.failRun(sink, stamper, runID, total, err)
 		}
 
