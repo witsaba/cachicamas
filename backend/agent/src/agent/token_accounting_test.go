@@ -13,7 +13,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -285,6 +289,81 @@ func TestEstimateTokens_NoClockNoIO_SourceScan(t *testing.T) {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("token_accounting.go imports %s -- the estimate MUST be a pure function: no clock, no environment, no randomness, no I/O", forbidden)
 		}
+	}
+}
+
+// TestEstimateTokens_NeverConvertedToTokenCount — S-CTX-017, the
+// mechanical half. An estimate is a Layer 2 approximation; an
+// ai.TokenCount's presence bit means "Layer 1 REPORTED it". Nothing
+// may launder the former into the latter.
+//
+// Two independent locks, because either alone is defeatable:
+//
+//  1. estimateTokens' own result type is a bare int64 -- never
+//     ai.TokenCount -- so the conversion cannot happen implicitly at
+//     the source.
+//  2. NO non-test file in this package calls ai.Tokens, the ONLY
+//     exported constructor of an ai.TokenCount (ai/usage.go:53-55;
+//     the struct's fields are unexported, so a composite literal is
+//     impossible from outside package ai). Layer 2 therefore cannot
+//     mint a TokenCount at all, from an estimate or from anything
+//     else.
+//
+// Lock 2 is an AST walk over every production file in this directory,
+// not a grep: it ignores comments (cost_usage.go names ai.Tokens(0)
+// in prose) and it covers files that do not exist yet, which is the
+// gap a byte-unchanged diff check over a fixed file list cannot close.
+func TestEstimateTokens_NeverConvertedToTokenCount(t *testing.T) {
+	t.Parallel()
+
+	// Lock 1 -- the estimate's own result type.
+	got := reflect.TypeOf(estimateTokens).Out(0)
+	if want := reflect.TypeOf(int64(0)); got != want {
+		t.Errorf("estimateTokens returns %v, want %v -- an estimate MUST NOT be typed as a counted quantity", got, want)
+	}
+	if got == reflect.TypeOf(ai.TokenCount{}) {
+		t.Errorf("estimateTokens returns ai.TokenCount -- an estimate is not a reported count (R-CTX-008)")
+	}
+
+	// Lock 2 -- no production file mints an ai.TokenCount.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q) returned %v, want nil", ".", err)
+	}
+
+	fset := token.NewFileSet()
+	scanned := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, name, nil, 0)
+		if perr != nil {
+			t.Fatalf("parser.ParseFile(%q) returned %v, want nil", name, perr)
+		}
+		scanned++
+
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel == nil || sel.Sel.Name != "Tokens" {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "ai" {
+				return true
+			}
+			t.Errorf("%s:%d calls ai.Tokens -- Layer 2 MUST NOT construct an ai.TokenCount; the presence bit means Layer 1 reported the figure, and an estimate never did (S-CTX-017)", name, fset.Position(call.Pos()).Line)
+			return true
+		})
+	}
+
+	if scanned == 0 {
+		t.Fatal("scanned 0 production files -- the guard asserted nothing")
 	}
 }
 

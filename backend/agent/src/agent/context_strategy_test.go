@@ -470,6 +470,64 @@ func TestHarness_ContextStrategy_PromptCarriesTranscriptAndBudget(t *testing.T) 
 	}
 }
 
+// TestHarness_ContextStrategy_UnsetBudgetReachesStrategyAbsent —
+// S-CTX-010, the SECOND half: "given a harness with no budget field
+// set, when a recording strategy is consulted, then the prompt's
+// budget reports absence rather than a limit of zero".
+//
+// This is NOT a corollary of
+// TestHarness_ContextStrategy_PromptCarriesTranscriptAndBudget: that
+// test installs ContextBudgetOf(4096) and asserts (4096, true) -- the
+// opposite input -- so it cannot distinguish an absent budget from a
+// stated limit of zero. The harness literal below OMITS the
+// ContextBudget field entirely rather than assigning it a hand-built
+// zero, which is exactly the caller posture the scenario names.
+// Asserted at EVERY consultation of a two-turn run, so a seam that
+// forwarded absence only on the first turn cannot pass.
+func TestHarness_ContextStrategy_UnsetBudgetReachesStrategyAbsent(t *testing.T) {
+	t.Parallel()
+
+	const toolName = "read_ctx_010"
+	reg := agent.NewMapRegistry(map[string]agent.Tool{
+		toolName: EchoScriptedTool(toolName, agent.EffectClassRead),
+	})
+	provider := agenttest.NewProvider(
+		scriptToolCallResponse(t, "call-ctx-010", toolName, []byte(`{"x":1}`)),
+		scriptTextResponse(t, ai.FinishReasonStop),
+	)
+
+	strategy := &recordingContextStrategy{}
+	h := &agent.Harness{
+		Provider:        provider,
+		System:          "system prompt for context strategy seam test 010",
+		Turn:            agent.TurnOptions{Tools: reg},
+		ContextStrategy: strategy,
+		// ContextBudget is deliberately NOT set.
+	}
+
+	sink := make(chan *agent.Event, 256)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+
+	prompts := strategy.Prompts()
+	if len(prompts) != 2 {
+		t.Fatalf("recorder holds %d consultation(s), want exactly 2 (two logical turns)", len(prompts))
+	}
+
+	var absent agent.ContextBudget
+	for i, p := range prompts {
+		limit, present := p.Budget.Limit()
+		if present || limit != 0 {
+			t.Errorf("prompt[%d].Budget.Limit() = (%d, %v), want (0, false) -- an unset Harness.ContextBudget MUST reach the strategy as ABSENT, never as a stated limit of zero", i, limit, present)
+		}
+		if p.Budget != absent {
+			t.Errorf("prompt[%d].Budget = %#v, want the zero ContextBudget (%#v)", i, p.Budget, absent)
+		}
+	}
+}
+
 // TestHarness_ContextStrategy_NoOpInstalled_ZeroCompactionEvents —
 // S-CTX-006. Installing the shipped never-compact default: the
 // compile-time guard binds it to the seam, every consultation returns
