@@ -11,6 +11,8 @@
 
 package agent
 
+import "github.com/cachicamas/backend/agent/src/ai"
+
 // TokenSource is the provenance of a token figure (R-CTX-008).
 // The zero value is Unavailable, so a zero TokenAccounting{} reads as
 // "no figure", never as "0 tokens".
@@ -65,3 +67,74 @@ type TokenAccounting struct {
 // cannot obtain the number without also obtaining the source — the
 // mechanical enforcement of "an estimate never masquerades as exact".
 func (a TokenAccounting) Tokens() (int64, TokenSource) { return a.tokens, a.source }
+
+// estimateBytesPerToken (D) = 4: byte-level BPE averages ~4 UTF-8
+// bytes per token on mixed prose; bytes, not runes, because a 3-byte
+// CJK ideograph is roughly one token (runes under-count it ~4x, bytes
+// under 2x). Errs toward over-counting dense ASCII — the safe
+// direction for a budget check (compaction asked earlier, never later).
+const estimateBytesPerToken = 4
+
+// estimateTokensPerMessage (M) = 4: chat encodings add role and
+// delimiter tokens per message that no byte count sees (~3-4 per
+// message); 4 keeps the same conservative direction. Dominant on
+// short-message transcripts, where byte counting alone is worst.
+const estimateTokensPerMessage = 4
+
+// estimateTokens = ceil(B/D) + M*K over req (R-CTX-009). PURE: no
+// clock, no env, no randomness, no I/O — TestEstimateTokens_
+// NoClockNoIO_SourceScan asserts this directly, because the
+// ambient-authority guard forbids only os, os/exec, syscall,
+// io/ioutil (ambient_authority_test.go:73-94) — NOT time.
+//
+// Approximate BY CONSTRUCTION, unbounded in both directions: it
+// over-counts dense ASCII, under-counts non-Latin scripts, base64-like
+// content, and unusual tool schemas. Its result is only ever labelled
+// TokenSourceEstimated — R-CTX-008 makes it mechanically unreadable
+// without that label, so no path can treat it as exact.
+//
+// B is the exact accessor walk (R-CTX-009), pinned so a later Layer 1
+// field cannot be missed silently:
+//   - the system instruction's segment text;
+//   - every message's content parts: text, tool-call name+arguments,
+//     tool-result content, and reasoning text;
+//   - every declared tool's name, description and schema.
+func estimateTokens(req ai.Request) int64 {
+	var b int64
+
+	if system, ok := req.SystemInstruction(); ok {
+		for _, seg := range system.Segments() {
+			b += int64(len(seg.Text()))
+		}
+	}
+
+	messages := req.Messages()
+	for _, msg := range messages {
+		for _, part := range msg.Content() {
+			if text, ok := part.Text(); ok {
+				b += int64(len(text))
+			}
+			if call, ok := part.ToolCall(); ok {
+				b += int64(len(call.Name()))
+				b += int64(len(call.Arguments()))
+			}
+			if result, ok := part.ToolResult(); ok {
+				b += int64(len(result.Content()))
+			}
+			if reasoning, ok := part.Reasoning(); ok {
+				b += int64(len(reasoning.Text()))
+			}
+		}
+	}
+
+	if tools, ok := req.Tools(); ok {
+		for _, tool := range tools.Tools() {
+			b += int64(len(tool.Name()))
+			b += int64(len(tool.Description()))
+			b += int64(len(tool.Schema()))
+		}
+	}
+
+	k := int64(len(messages))
+	return (b+estimateBytesPerToken-1)/estimateBytesPerToken + estimateTokensPerMessage*k
+}
