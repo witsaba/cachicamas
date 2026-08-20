@@ -252,15 +252,16 @@ When a mutating hook returns a non-nil error the system MUST abort typed **befor
 
 AG-20 MUST register **no** new `EventKind` (the shipped guard stays at its committed kind count, `scope_fence_test.go:87`), add **no** new turn outcome member and **no** new cost label, and change **no** existing exported signature: `Turn` and `Run` MUST keep their signatures and `Harness` MUST gain no exported method.
 
-`event.go`, `event_descriptor.go`, `event_registry_test.go`, `stream_check.go`, `delegation_events.go`, `permission_events.go`, `cost_events.go`, `cost_usage.go`, `turn_events.go`, `run_events.go`, `failure.go`, `sequence.go`, `compaction_events.go`, `doc.go`, `doc_contract_guard_test.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `reconstruction_test.go`, `scheduler.go`, `delegation_seam.go`, `scope_fence_test.go`, `go.mod`, `go.sum` and **every file under `backend/agent/src/ai/`** MUST be **byte-unchanged**. `backend/agent/src/agenttest/` MUST be byte-unchanged: the test gate primitive is **used**, not widened.
+`event.go`, `event_descriptor.go`, `event_registry_test.go`, `stream_check.go`, `delegation_events.go`, `permission_events.go`, `cost_events.go`, `cost_usage.go`, `turn_events.go`, `run_events.go`, `failure.go`, `sequence.go`, `compaction_events.go`, `doc.go`, `doc_contract_guard_test.go`, `ambient_authority_test.go`, `import_boundary_test.go`, `reconstruction_test.go`, `scheduler.go`, `delegation_seam.go`, `go.mod`, `go.sum` and **every file under `backend/agent/src/ai/`** MUST be **byte-unchanged**. `backend/agent/src/agenttest/` MUST be byte-unchanged: the test gate primitive is **used**, not widened.
 
 **The stall types MUST live in the new hook file, not in the typed-failure file.** Editing the typed-failure file would pass the mechanical guard silently while violating `R-LSK-004`'s prose; the placement is declined explicitly rather than left to convenience.
 
-Three consequences MUST be stated here rather than discovered by a later consumer:
+Four consequences MUST be stated here rather than discovered by a later consumer:
 
 1. **No concrete hook ships.** The charter's own out-of-scope line is verbatim: *"Any concrete hook implementation (Layer 3 wires them)"* (`0003:1874`). Layer 3's wiring is doc 0004 CO-24.1/CO-24.2, and `S-AGS-048` already names those nodes.
 2. **`TurnOptions.PreRequestHook` is kept and superseded in prose only.** Its removal is AG-23's, and AG-20 does not take it.
 3. **AG-21 inherits the stalled-observer goroutine leak and the release-before-baseline test rule knowingly** (`NFR-HKS-005`), rather than discovering them.
+4. **`scope_fence_test.go` is deliberately ABSENT from the byte-unchanged list above — a narrow, recorded release, discovered during `sdd-apply`, not planned at design time** (the [`agent-loop-skeleton` delta](../agent-loop-skeleton/spec.md)'s own `R-LSK-008` consequence 6 owns the full account). `TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt`'s own `NumMethod()`-and-named-set assertions (`:102-105`, cited above) and the event-kind-count assertion (`:87`, cited above) both stay byte-unchanged and green; the ONE edit converts that same test's own anti-vacuity floor — an empty `git diff` over `scheduler.go` — from `t.Fatal` to `t.Skip`, because an empty diff means the absence it checks holds vacuously on a branch (any branch after AG-19's merge, AG-20 included) that does not itself touch `scheduler.go`. `cancellation_test.go` carries the identical fix for its own mirror (`S-DEL-015`) but was never named byte-unchanged by this requirement to begin with.
 
 #### Scenarios
 

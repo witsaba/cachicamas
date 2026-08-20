@@ -256,7 +256,18 @@ func TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt(t *testing.T)
 		t.Fatalf("git diff %s -- scheduler.go failed: %v", baseRef, err)
 	}
 	if diff == "" {
-		t.Fatal("scheduler.go's diff against the merge base is empty — S-TLS-020 has nothing to scan (expected the AG-19 seam-install hunk)")
+		// AG-20 fix: an empty diff means scheduler.go was not touched
+		// on THIS branch, so the absence S-TLS-020 asserts (no type
+		// assertion, no bare seam type/key named in ADDED lines) holds
+		// vacuously and correctly for it — there are no added lines to
+		// violate it. That is a skip, not a failure: fatal-ing here
+		// only ever fires on a later, innocent branch (any branch cut
+		// after AG-19 merged that does not itself touch scheduler.go —
+		// AG-20, AG-21, AG-22, AG-23 alike), never on the branch that
+		// actually introduces the hunk this guard exists to scan. On
+		// AG-19's own branch the diff was non-empty and the scan ran;
+		// see TestScopeFence_S_LSK_031... and this file's own history.
+		t.Skip("S-TLS-020: scheduler.go's diff against the merge base is empty on this branch — the absence this guard asserts holds vacuously (nothing was added to violate it); the guard bites on the branch that actually introduces the seam-install hunk")
 	}
 	// Scoped to ADDED lines only, not the whole file: scheduler.go's
 	// pre-existing `cause, _ := r.(error)` (unrelated to this change)

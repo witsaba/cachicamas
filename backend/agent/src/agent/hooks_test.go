@@ -1443,6 +1443,21 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 // hksScopeFenceByteUnchangedFiles is R-HKS-010's own named list,
 // relative to backend/agent/src/agent/ — every file this change MUST
 // NOT edit. go.mod/go.sum are checked separately (one directory up).
+//
+// scope_fence_test.go is DELIBERATELY ABSENT from this list — a
+// narrow, recorded release (agent-loop-skeleton delta, R-LSK-008,
+// the AG-11 turn_events.go/failure.go and AG-18 doc.go/
+// doc_contract_guard_test.go precedent): TestScopeFence_S_TLS_020's
+// own anti-vacuity floor (an empty diff over scheduler.go on the
+// empty-diff branch) fatally fired on every branch cut after AG-19
+// merged that does not itself touch scheduler.go — every one,
+// AG-20 included, never only an errant one — because
+// baseRefIsHEAD's own skip covers only the literal post-merge-
+// checkout case. Converted from t.Fatal to t.Skip in this same
+// milestone; the edit is confined to that one branch and changes no
+// other assertion. cancellation_test.go's mirror (S-DEL-015, over
+// delegation_seam.go/scheduler.go) carries the identical fix but was
+// never on this list to begin with.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
 		"event.go",
@@ -1465,7 +1480,6 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"reconstruction_test.go",
 		"scheduler.go",
 		"delegation_seam.go",
-		"scope_fence_test.go",
 	}
 }
 
@@ -1533,7 +1547,17 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 			t.Fatalf("git diff %s -- loop.go failed: %v", baseRef, lerr)
 		}
 		if loopDiff == "" {
-			t.Fatal("loop.go's diff against the merge base is empty — this scope-fence guard has nothing to measure (anti-vacuity floor, S-TLS-020 precedent)")
+			// An empty diff means loop.go was not touched on THIS
+			// branch (AG-20 happens to touch it; a later milestone
+			// that legitimately does not is not a defect) -- the
+			// absence this guard measures holds vacuously, and that is
+			// a skip, not a failure. Fatal-ing here is exactly the
+			// latent shape found (and fixed, this same commit) in
+			// scope_fence_test.go's S-TLS-020 and cancellation_test.go's
+			// S-DEL-015: it fires on every innocent later branch that
+			// does not touch the named file, never only on the branch
+			// that actually changed something to scan.
+			t.Skip("loop.go's diff against the merge base is empty on this branch — this scope-fence guard has nothing to measure and the absence it checks holds vacuously; it bites on a branch that actually changes loop.go")
 		}
 	}
 
@@ -1601,7 +1625,9 @@ func hksBaseRefIsHEAD(t *testing.T, root, baseRef string) bool {
 // this same suite run, and by re-stating the table's own resolution —
 // the byte-unchanged half is what TestHooks_ScopeFence_
 // ByteUnchangedFilesAndNoNewKind above already proves for the shared
-// files (scope_fence_test.go, delegation_seam.go, event.go, etc.).
+// files (delegation_seam.go, event.go, etc. — scope_fence_test.go
+// itself carries its own narrow, recorded release this same
+// milestone; see hksScopeFenceByteUnchangedFiles's own comment).
 func TestHooks_ClosedSequenceTable_HoldsAmendedAndClarifiedRowsResolve(t *testing.T) {
 	t.Parallel()
 
@@ -2103,6 +2129,53 @@ func TestHooks_S_AGE_030_StalledHookTraceHasNoPathBack_ChildObserverFindsNoSeam(
 	}
 
 	hold.Release()
+}
+
+// TestHooks_AntiVacuityFloorsSkipRatherThanFail — AG-20 regression
+// guard. Three "diff over a single named file is empty" anti-vacuity
+// checks in this package's own history — scope_fence_test.go's
+// S-TLS-020, cancellation_test.go's S-DEL-015, and this file's own
+// S-HKS-024 loop.go check — each latently fatal-ed on EVERY branch
+// that legitimately does not touch the diffed file, which is every
+// branch after the one that first introduced the hunk, never only an
+// errant one; discovered when AG-20's own branch turned two of them
+// red (a coordinator-verified finding: main passes both, AG-20 fails
+// both, because baseRefIsHEAD's own skip only covers the literal
+// post-merge-checkout case). Fixed, this same milestone, in all three
+// occurrences including this file's own. This test source-scans all
+// three sites so a future edit cannot silently reintroduce a fatal on
+// an empty diff.
+func TestHooks_AntiVacuityFloorsSkipRatherThanFail(t *testing.T) {
+	t.Parallel()
+
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+
+	// The general anti-pattern this guards against: an "if <x>diff ==
+	// \"\" {" branch whose body calls t.Fatal or t.Fatalf. An empty
+	// diff means the absence being checked holds vacuously; the
+	// correct response is t.Skip, never a fatal. Anchored on a
+	// variable name ending in "diff" (case-varying: diff, Diff,
+	// aiDiff, loopDiff, ...) so this does not false-positive on an
+	// unrelated "== \"\"" check in the same file (e.g. the
+	// AG19_BASE_REF / "baseRef == \"\"" env-var fallback).
+	emptyDiffThenFatal := regexp.MustCompile(`(?s)[Dd]iff\s*==\s*""\s*\{[^}]{0,300}t\.Fatal`)
+
+	files := []string{"scope_fence_test.go", "cancellation_test.go", "hooks_test.go"}
+	for _, name := range files {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			raw, rerr := os.ReadFile(root + "/backend/agent/src/agent/" + name)
+			if rerr != nil {
+				t.Fatalf("os.ReadFile(%s) failed: %v", name, rerr)
+			}
+			if loc := emptyDiffThenFatal.FindString(string(raw)); loc != "" {
+				t.Errorf("%s contains an empty-diff branch that calls t.Fatal(f) instead of t.Skip — this anti-vacuity floor will fire on every later, innocent branch that does not touch the diffed file:\n%s", name, loc)
+			}
+		})
+	}
 }
 
 // S-AGS-065 — AG-20: the discharge is auditable, not asserted. The

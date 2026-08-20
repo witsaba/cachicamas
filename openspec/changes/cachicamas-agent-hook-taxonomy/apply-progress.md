@@ -4,14 +4,18 @@
 `sdd-archive`/`sdd-verify` obligations per their own task text, not apply's.
 
 **Mode**: Strict TDD. Runner: `cd backend/agent && go test -race -count=1 ./...`.
-Final evidence run: **174.14s real** (`2:54.14`), `-count=1`, uncached — matches
-the ~170s baseline this project's memory records for a genuine (non-cached) run.
+Final evidence run (post-correction, see below): **172.57s real** (`2:52.57`),
+`-count=1`, uncached — matches the ~170s baseline this project's memory
+records for a genuine (non-cached) run; exit 0, zero `FAIL`.
 
 **Commits** (`feat/agent-layer2-wave5-ag20`):
 1. `83362a26` `feat(agent): AG-20 -- complete the hook taxonomy production surface`
 2. `dac4fc3f` `test(agent): AG-20 -- hook taxonomy scenario suite, all 49 scenarios`
 3. `779a4c4b` `docs(0003): AG-20 -- tick hook taxonomy milestone, Wave 5 complete`
 4. `591ce82d` `fix(agent): AG-20 -- S-LSK-032's own guard must allow hooks.go's diff`
+5. *(this correction round)* `fix(agent): AG-20 -- convert AG-19's two anti-vacuity
+   floors to skip, close the shape in AG-20's own new test` — see
+   "Correction round" below.
 
 ## Deviation from the suggested U1/U2/U3 commit split
 
@@ -116,43 +120,142 @@ claimed as complete. Scenario ID `S-HKS-011` is still mapped to task 2.5 per
 the coverage table, since the join of (2 behavioral rows) + (structural count
 proof for the remaining 6) is what task 2.5 actually produced.
 
-## Final full-suite evidence
+## Correction round: the two failures are a merge blocker, not pre-existing
+
+**This section corrects an earlier, wrong claim in this same file.** The
+first pass of this apply reported `TestScopeFence_S_TLS_020_...` and
+`TestCancellation_NestedRunCancelsLeafFirst` as "pre-existing and unrelated
+to AG-20," on the theory that they were structurally unable to pass on any
+branch cut after AG-19 merged. **That claim was checked and is false.** Both
+tests pass today on `main` (`2a138b59`):
+
+```
+$ git rev-parse origin/main && git merge-base HEAD origin/main
+2a138b5997c5e6a3f5e13fcfdc873833ed8975fa
+2a138b5997c5e6a3f5e13fcfdc873833ed8975fa
+$ go test -race -count=1 -run 'TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt|TestCancellation_NestedRunCancelsLeafFirst' ./src/agent/...
+ok  	github.com/cachicamas/backend/agent/src/agent  (on main)
+```
+
+They fail only on AG-20's own branch. This is a genuine **merge blocker**,
+not a pre-existing condition, and treating it as pre-existing would have
+shipped a red suite on `main` the moment AG-20 merged.
+
+**Root cause.** `scope_fence_test.go:236-259` (S-TLS-020) does: (1) resolve
+`baseRef = merge-base(HEAD, origin/main)`; (2) `if baseRefIsHEAD(...) {
+t.Skip(...) }` — this is the *only* case AG-19's own fix (`c4e4455f`)
+covers, and it is why the test is green when run **on** `main` itself, where
+`HEAD == baseRef`; (3) `diff := gitDiff(baseRef, ".../scheduler.go")`; then
+**`if diff == "" { t.Fatal(...) }`** — an anti-vacuity floor. On a branch cut
+*after* AG-19 merged, step 2 does not fire (`HEAD != baseRef` — the branch is
+ahead of its own merge-base by definition), and `scheduler.go`'s diff against
+that merge-base is legitimately empty because AG-20 correctly does not touch
+`scheduler.go`. Step 3 then fatals. `baseRefIsHEAD`'s skip only ever covered
+the literal post-merge-checkout case, never the general "this branch simply
+doesn't touch the guarded file" case — so the floor fires on every descendant
+branch that (correctly) leaves the guarded file alone, not only on AG-20's.
+
+**The defective shape appears in three places — all three are fixed, not
+only the two that were red:**
+
+1. `scope_fence_test.go:259` (S-TLS-020, AG-19's, over `scheduler.go`) — was RED.
+2. `cancellation_test.go:222` (S-DEL-015, AG-19's mirror, over
+   `delegation_seam.go`/`scheduler.go`) — was RED.
+3. `hooks_test.go:1536` (AG-20's own, new this milestone, over `loop.go`) —
+   was GREEN only because AG-20 happens to modify `loop.go`; on a future
+   branch that doesn't, it would fatal for the identical reason. This
+   happened because task 4.3's own text (`tasks.md:108`) instructed reusing
+   `scope_fence_test.go`'s pattern *including* "fail loudly on an empty diff
+   (`S-TLS-020` precedent)" — the defective shape was in the plan, not just
+   copied by accident, and this apply propagated it into new code
+   unmodified. Left as-authored in `tasks.md` (task 4.3 was in fact
+   completed as specified); the correction is recorded here instead.
+
+**The fix.** For a guard asserting an absence in a file's *added* lines, an
+empty diff means there are no added lines, so the asserted absence holds
+trivially and correctly — that is a **skip**, not a failure. All three sites
+now do `t.Skip(...)` on an empty diff, each with a message stating that the
+subject file is unchanged on this branch (so the absence holds vacuously)
+and that the guard bites on the branch that actually introduces the hunk
+(where the diff is non-empty — verified true for S-TLS-020 on AG-19's own
+branch history). `cancellation_test.go`'s two-path loop now skips only if
+**neither** of its two paths had anything to scan, preserving a real scan on
+either one alone. A new regression test,
+`TestHooks_AntiVacuityFloorsSkipRatherThanFail`, source-scans all three files
+for the `diff == "" { ... t.Fatal }` anti-pattern and fails if it reappears
+anywhere, so this cannot silently regress on AG-21/22/23.
+
+**Spec documentation.** `scope_fence_test.go` was previously listed as
+byte-unchanged in three delta files; it now carries one narrow, explicit
+release (bounded to exactly this fatal-to-skip conversion, nothing else),
+recorded following the AG-11 (`turn_events.go`/`failure.go`) and AG-18
+(`doc.go`/`doc_contract_guard_test.go`) precedents:
+- `specs/agent-loop-skeleton/spec.md` — `R-LSK-008` gains a new consequence
+  (6) describing the release in full, plus a new scenario `S-LSK-033`
+  asserting the fixed property (skip, not fail, on an empty diff; the
+  anti-pattern is absent from all three files).
+- `specs/agent-hook-taxonomy/spec.md` — `R-HKS-010`'s byte-unchanged list no
+  longer names `scope_fence_test.go`; a fourth consequence cross-references
+  the release.
+- `specs/agent-delegation-readiness/spec.md` — the header note, the
+  `R-DEL-009` "not modified" table row, and `S-DEL-026`'s scenario text are
+  all updated to the same accurate framing.
+`agent-run-driver/spec.md`'s two mentions (`:13`, `:44`) were reviewed and
+left unchanged: both are narrowly scoped to the `NumMethod()`/named-method
+assertion specifically, which remains byte-unchanged and accurate.
+`design.md`/`proposal.md` (planning artifacts, not deltas) were left
+unchanged, consistent with SDD practice of recording apply-time deviations
+in this file rather than retroactively editing frozen planning docs.
+
+**Verification after the fix** (focused, `-race -count=1 -v`):
+
+```
+--- PASS: TestHooks_AntiVacuityFloorsSkipRatherThanFail (0.02s)
+    --- PASS: TestHooks_AntiVacuityFloorsSkipRatherThanFail/cancellation_test.go (0.00s)
+    --- PASS: TestHooks_AntiVacuityFloorsSkipRatherThanFail/scope_fence_test.go (0.01s)
+    --- PASS: TestHooks_AntiVacuityFloorsSkipRatherThanFail/hooks_test.go (0.03s)
+--- SKIP: TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt (0.06s)
+    scope_fence_test.go:270: S-TLS-020: scheduler.go's diff against the merge base is empty on this branch — the absence this guard asserts holds vacuously (nothing was added to violate it); the guard bites on the branch that actually introduces the seam-install hunk
+--- SKIP: TestCancellation_NestedRunCancelsLeafFirst (0.07s)
+    cancellation_test.go:240: S-DEL-015: neither delegation_seam.go nor scheduler.go changed against the merge base on this branch — the absence this guard asserts holds vacuously; it bites on the branch that actually introduces the seam-install hunk, mirroring S-TLS-020's identical fix at scope_fence_test.go
+--- PASS: TestHooks_SubstrateFilters_NoReleaseExactWideningInBothFilters (0.07s)
+--- PASS: TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind (0.22s)
+PASS
+ok  	github.com/cachicamas/backend/agent/src/agent	1.753s
+```
+
+The earlier Engram memory entry titled
+`bug/ag-19-anti-vacuity-floor-breaks-for-every-later-milestone`, which
+repeated the "pre-existing, not fixed here" framing, is superseded by this
+section and by a corrected Engram save made in this same correction round.
+
+## Final full-suite evidence (corrected re-run, uncached)
 
 ```
 $ cd backend/agent && go test -race -count=1 ./...
---- FAIL: TestCancellation_NestedRunCancelsLeafFirst (0.09s)
-    cancellation_test.go:222: ...S-DEL-015 has nothing to scan (expected the AG-19 seam-install hunk)...
---- FAIL: TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt (0.07s)
-    scope_fence_test.go:259: scheduler.go's diff against the merge base is empty...
-FAIL	github.com/cachicamas/backend/agent/src/agent	8.204s
-ok  	github.com/cachicamas/backend/agent/src/agenttest	2.501s
-ok  	github.com/cachicamas/backend/agent/src/agenttest/sweep	1.885s
-ok  	github.com/cachicamas/backend/agent/src/agenttest/tracetest	2.015s
-ok  	github.com/cachicamas/backend/agent/src/ai	4.490s
-ok  	github.com/cachicamas/backend/agent/src/ai/internal/retry	2.565s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	173.513s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest	3.152s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter	3.433s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance	6.618s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke	2.604s
-ok  	github.com/cachicamas/backend/agent/src/handoff	2.272s
-FAIL
-real: 2:54.14 (174.14s), -count=1, uncached
+ok  	github.com/cachicamas/backend/agent/src/agent	9.197s
+ok  	github.com/cachicamas/backend/agent/src/agenttest	2.679s
+ok  	github.com/cachicamas/backend/agent/src/agenttest/sweep	2.125s
+ok  	github.com/cachicamas/backend/agent/src/agenttest/tracetest	2.150s
+ok  	github.com/cachicamas/backend/agent/src/ai	4.631s
+ok  	github.com/cachicamas/backend/agent/src/ai/internal/retry	2.662s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	171.912s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest	3.219s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter	2.951s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance	6.722s
+?   	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance/fixtures	[no test files]
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke	2.528s
+ok  	github.com/cachicamas/backend/agent/src/handoff	2.222s
+$ echo $?
+0
 ```
 
-The two failures are **pre-existing and unrelated to AG-20**: both are
-anti-vacuity floors (`S-TLS-020`, `S-DEL-015`) that require a non-empty
-`git diff <merge-base> -- scheduler.go|delegation_seam.go`. Since AG-19 is
-already merged into `origin/main` (`2a138b59`) and AG-20 never touches either
-file (design requires both byte-unchanged; confirmed via
-`git diff --stat -- scheduler.go delegation_seam.go` on the AG-20 branch
-showing zero lines), the diff is genuinely empty for AG-20 and for any future
-milestone that also correctly leaves those two files alone. `baseRefIsHEAD`'s
-own escape hatch only covers the literal post-merge-checkout case (`HEAD ==
-baseRef`), not a later branch several commits ahead of that same merge-base.
-Recorded separately: `bug/ag-19-anti-vacuity-floor-breaks-for-every-later-milestone`
-(Engram). Not fixed here — both files are on AG-20's explicit do-not-touch
-list, and `scope_fence_test.go` is on the byte-unchanged list too.
+Wall-clock, measured with `time`: **`( go test -race -count=1 ./... )  63.84s
+user 7.59s system 41% cpu 2:52.57 total`** — **172.57s real**, `-count=1`,
+uncached. Zero `FAIL` anywhere in the module. This is the evidence that
+supersedes the mischaracterized run at the top of this section's previous
+version; both `S-TLS-020` and `S-DEL-015` now SKIP (confirmed above via the
+targeted `-v` run) rather than FAIL, and no other package regressed.
 
 ## Gates (Phase 6)
 
