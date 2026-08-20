@@ -1458,6 +1458,22 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 // other assertion. cancellation_test.go's mirror (S-DEL-015, over
 // delegation_seam.go/scheduler.go) carries the identical fix but was
 // never on this list to begin with.
+//
+// doc.go and doc_contract_guard_test.go are ALSO deliberately absent
+// — a second, unrelated narrow release, taken during sdd-verify
+// (CRITICAL-2, not planned at design time and not the same release as
+// AG-18's own): L2C-08's package-wide contract row falsely claimed
+// "every goroutine the package itself owns has exited" past the
+// wind-down bound, when AG-20's own observer lane goroutine may
+// legitimately still be running, by design, while blocked inside a
+// stalled observer. Both files gained a scoped amendment — the
+// agent-cancellation-tree delta's R-CAN-006/R-CAN-008 own the full
+// account — widening the existing third-party-tool carve-out to also
+// name a permanently stalled observing-hook invocation, reported
+// typed by hook point and registration index. Both files are
+// pre-existing entries in both substrate filters since AG-18, so this
+// release needs no new filter entry, exactly as the scope_fence_test.go
+// release above needed none either.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
 		"event.go",
@@ -1473,8 +1489,6 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"failure.go",
 		"sequence.go",
 		"compaction_events.go",
-		"doc.go",
-		"doc_contract_guard_test.go",
 		"ambient_authority_test.go",
 		"import_boundary_test.go",
 		"reconstruction_test.go",
@@ -1636,8 +1650,11 @@ func hksBaseRefIsHEAD(t *testing.T, root, baseRef string) bool {
 // S-HKS-025 — The closed-sequence table is checked, not asserted.
 // Given the merged change, when each of R-HKS-011's rows is evaluated
 // against the shipped code and suites, then every "holds" row's owning
-// test passes byte-unchanged; the AMENDED rows (R-PRH-002, R-PRH-005)
-// each resolve to this change's agent-pre-request-hook delta; and the
+// test passes byte-unchanged; the THREE AMENDED rows — (R-PRH-002,
+// R-PRH-005) resolving to this change's agent-pre-request-hook delta,
+// and (R-CAN-006, R-CAN-008/L2C-08) resolving to the agent-
+// cancellation-tree delta added during sdd-verify (CRITICAL-2) — each
+// resolve to a delta in this change carrying the amendment; and the
 // CLARIFIED row (R-CMP-004) resolves to the agent-compaction delta.
 // Checked here by asserting the OWNING tests exist and pass as part of
 // this same suite run, and by re-stating the table's own resolution —
@@ -1645,7 +1662,15 @@ func hksBaseRefIsHEAD(t *testing.T, root, baseRef string) bool {
 // ByteUnchangedFilesAndNoNewKind above already proves for the shared
 // files (delegation_seam.go, event.go, etc. — scope_fence_test.go
 // itself carries its own narrow, recorded release this same
-// milestone; see hksScopeFenceByteUnchangedFiles's own comment).
+// milestone; see hksScopeFenceByteUnchangedFiles's own comment). The
+// R-CAN-006/R-CAN-008 AMENDED row's own proof is TestDocContract_
+// L2C08CarveOutClause (doc_contract_guard_test.go) plus
+// TestHooks_Asynchrony_DeliveryUnimpeded_RunReturnsWithHoldHeld and
+// TestHooks_Asynchrony_EventuallyReported_OutstandingAndQueued above,
+// all three already part of this same suite run — no new assertion is
+// added to this function's own body for it, mirroring how this
+// function already resolves R-PRH-002/005 by citation to fixtures
+// exercised elsewhere rather than by re-implementing them here.
 func TestHooks_ClosedSequenceTable_HoldsAmendedAndClarifiedRowsResolve(t *testing.T) {
 	t.Parallel()
 
@@ -1925,11 +1950,23 @@ func TestHooks_SubstrateFilters_NoReleaseExactWideningInBothFilters(t *testing.T
 		// so it legitimately appears in this diff too, once committed.
 		// It is allowed here for that reason; the pre-existing set
 		// S-LSK-032 actually cares about is the other three.
+		//
+		// doc.go is allowed here too, added during the sdd-verify
+		// CRITICAL-2 correction round: L2C-08's package-wide contract
+		// row needed a narrow, recorded amendment (agent-cancellation-
+		// tree delta, R-CAN-006/R-CAN-008) to carve out the observer
+		// lane goroutine, mirroring the identical release AG-18 already
+		// took for L2C-07 (doc.go and doc_contract_guard_test.go are
+		// both pre-existing entries in both substrate filters since
+		// AG-18 — no new filter entry needed here either). Like
+		// hooks.go, this is a conditional allowance, not a required
+		// one: it is not in wantPreExisting because AG-20's core splice
+		// work never required touching doc.go on its own.
 		wantPreExisting := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true}
-		allowed := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true, "hooks.go": true}
+		allowed := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true, "hooks.go": true, "doc.go": true}
 		for _, name := range nonTestChanged {
 			if !allowed[name] {
-				t.Errorf("non-test file %q changed, want only loop.go/harness.go/compaction.go (pre-existing) plus hooks.go (new)", name)
+				t.Errorf("non-test file %q changed, want only loop.go/harness.go/compaction.go (pre-existing) plus hooks.go (new) plus doc.go (CRITICAL-2 correction round)", name)
 			}
 		}
 		for name := range wantPreExisting {

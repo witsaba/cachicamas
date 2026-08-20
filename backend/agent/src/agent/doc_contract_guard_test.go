@@ -66,6 +66,19 @@ type contractRow struct {
 // clauses, byte-in-sync with doc.go, landed in the same pull request
 // (R-HIS-009's closed-amendment rule; S-HIS-104 proves both moved
 // together).
+// AG-20 amends the L2C-08 row's goroutine-exit clause — discovered
+// during sdd-verify (CRITICAL-2), not planned at design time — on the
+// identical AG-18/L2C-07 precedent: AG-20 introduces the observer lane
+// (agent-hook-taxonomy delta, R-HKS-008), a package-owned goroutine
+// that MAY legitimately outlive the wind-down bound while blocked
+// inside a caller-registered observing hook, exactly as third-party
+// tool code already may. The row is widened to name that second,
+// disjoint carve-out — reported typed by hook point and registration
+// index, mirroring the tool carve-out's "reported typed by tool and
+// call identity" — rather than left silently false of the shipped
+// code. Every other clause is unchanged. Full account: the
+// agent-cancellation-tree delta of cachicamas-agent-hook-taxonomy
+// (R-CAN-006, R-CAN-008, S-CAN-016, S-CAN-017).
 var expectedLayer2ContractRows = []contractRow{
 	{id: "L2C-01", text: "Imports: the Go standard library, github.com/cachicamas/backend/agent/src/ai and its measured transitive closure — nothing else, deny-by-default (ADR 0005 § D1 row 2; import_boundary_test.go)."},
 	{id: "L2C-02", text: "No I/O of its own: no environment read, no filesystem access, no network call, no process spawn (ADR 0005 § D1 row 2; ambient_authority_test.go and import_boundary_test.go)."},
@@ -74,7 +87,7 @@ var expectedLayer2ContractRows = []contractRow{
 	{id: "L2C-05", text: "Message and tool families are reconstructable: a session log carrying a message-text bracket, a reasoning bracket, or a tool-call bracket reconstructs each message and each tool outcome independently and completely, so a frontend can render \"what the model said\" and \"what the tools did\" without losing interleaving order (doc 0003 AG-05 acceptance; agent-message-tool-events). Reconstruction helpers are test-only code; the property is the test."},
 	{id: "L2C-06", text: "Permission, cost, delegation, and compaction families are constructible on the event stream: a session log receives each family's events with their typed payloads and identity fields, and a frontend renders \"may this call proceed?\", the model's token usage, the delegation tree, and the compaction lifecycle without losing interleaving order (doc 0003 AG-06 acceptance; agent-protocol-events). Per-family semantics — the closed PermissionOutcome enum (R-APE-002), the token-only CostFigures shape (R-APE-004), the parent identifier envelope field (R-APE-006), the turn-bracket CompactionSpan (R-APE-007) — belong in this package's prose and per-family files, not in the guarded row."},
 	{id: "L2C-07", text: "History is the second upward surface and has exactly one commit path: the transcript a run accumulates is read back as unmodified Layer 1 values with ordinal entry identity stable within a transcript generation, and every route that can extend it — append, seeded construction, orphan synthesis, prefix replacement — funnels through one validating commit primitive enforcing the pairing invariant (every tool call has a matching result) at the boundary, with no privileged bypass for internal callers; a synthesized interruption result is distinguishable from a real one by envelope origin alone (doc 0003 AG-12 acceptance; agent-history)."},
-	{id: "L2C-08", text: "Cancellation is a bounded, typed, two-signal tree: interrupt aborts the run and keeps the harness; shutdown aborts the run and terminally refuses new prompts; both propagate down through loop, provider and tools as one context cancellation cause, stay errors.Is-distinguishable in the error chain and distinct in the run-end outcome; after the documented wind-down bound only third-party tool code may remain running — reported typed by tool and call identity — and every goroutine the package itself owns has exited (doc 0003 AG-14 acceptance; agent-cancellation-tree)."},
+	{id: "L2C-08", text: "Cancellation is a bounded, typed, two-signal tree: interrupt aborts the run and keeps the harness; shutdown aborts the run and terminally refuses new prompts; both propagate down through loop, provider and tools as one context cancellation cause, stay errors.Is-distinguishable in the error chain and distinct in the run-end outcome; after the documented wind-down bound only third-party tool code — reported typed by tool and call identity — or a permanently stalled third-party observing-hook invocation — reported typed by hook point and registration index — may remain running, and every other goroutine the package itself owns has exited (doc 0003 AG-14 acceptance; agent-cancellation-tree)."},
 }
 
 // docGoPath resolves src/agent/doc.go relative to THIS test file's own
@@ -197,6 +210,67 @@ func TestDocContract_L2C07BothClausesTogether(t *testing.T) {
 		if !strings.Contains(docRow.text, mustContain) {
 			t.Errorf("L2C-07 no longer preserves the clause %q verbatim", mustContain)
 		}
+	}
+}
+
+// TestDocContract_L2C08CarveOutClause — S-CAN-017, AG-20 (sdd-verify
+// CRITICAL-2). The amended L2C-08 row's text in doc.go and in
+// expectedLayer2ContractRows is byte-identical between the two; the
+// pre-existing clauses — the two-signal tree, the propagation-as-one-
+// cancellation-cause clause, the errors.Is-distinguishability clause,
+// and the original third-party-tool carve-out ("reported typed by
+// tool and call identity") — are all preserved verbatim; and the row
+// additionally states a SECOND, disjoint carve-out naming the class
+// R-CAN-006's widened table admits at AG-20: a permanently stalled
+// third-party observing-hook invocation, reported typed by hook point
+// and registration index. Mirrors TestDocContract_L2C07BothClausesTogether's
+// shape exactly (the AG-18/L2C-07 precedent this amendment follows):
+// both the preserved half and the new half are checked as independent
+// assertions, so a scratch edit touching only one would fail the
+// other.
+func TestDocContract_L2C08CarveOutClause(t *testing.T) {
+	t.Parallel()
+
+	path := docGoPath(t)
+	rows := parseLayer2ContractRows(t, path)
+
+	var docRow, wantRow contractRow
+	foundDoc, foundWant := false, false
+	for _, r := range rows {
+		if r.id == "L2C-08" {
+			docRow, foundDoc = r, true
+		}
+	}
+	for _, r := range expectedLayer2ContractRows {
+		if r.id == "L2C-08" {
+			wantRow, foundWant = r, true
+		}
+	}
+	if !foundDoc || !foundWant {
+		t.Fatalf("L2C-08 row missing: found in doc.go=%v, found in expectedLayer2ContractRows=%v", foundDoc, foundWant)
+	}
+	if docRow.text != wantRow.text {
+		t.Fatalf("L2C-08 text differs between doc.go and expectedLayer2ContractRows:\n  doc.go:    %q\n  committed: %q", docRow.text, wantRow.text)
+	}
+
+	for _, mustContain := range []string{
+		"Cancellation is a bounded, typed, two-signal tree",
+		"interrupt aborts the run and keeps the harness",
+		"shutdown aborts the run and terminally refuses new prompts",
+		"both propagate down through loop, provider and tools as one context cancellation cause",
+		"stay errors.Is-distinguishable in the error chain and distinct in the run-end outcome",
+		"only third-party tool code — reported typed by tool and call identity —",
+	} {
+		if !strings.Contains(docRow.text, mustContain) {
+			t.Errorf("L2C-08 no longer preserves the pre-existing clause %q verbatim", mustContain)
+		}
+	}
+
+	if !strings.Contains(docRow.text, "a permanently stalled third-party observing-hook invocation — reported typed by hook point and registration index") {
+		t.Error("L2C-08 does not state the AG-20 observing-hook carve-out by hook point and registration index")
+	}
+	if !strings.Contains(docRow.text, "every other goroutine the package itself owns has exited") {
+		t.Error("L2C-08's blanket clause no longer scopes to \"every OTHER goroutine\" now that a second carve-out exists")
 	}
 }
 
