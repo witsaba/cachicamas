@@ -1875,13 +1875,20 @@ func TestHooks_SubstrateFilters_NoReleaseExactWideningInBothFilters(t *testing.T
 			t.Fatalf("git diff %s -- backend/agent/src/agent/ failed: %v", baseRef, derr)
 		}
 		nonTestChanged := hksNonTestFilesChanged(raw)
-		wantNonTest := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true}
+		// hooks.go is a NEW file (git diff --git a/X b/X headers look
+		// identical for "modified" and "newly added" — only the diff
+		// BODY distinguishes them via "new file mode"/"--- /dev/null"),
+		// so it legitimately appears in this diff too, once committed.
+		// It is allowed here for that reason; the pre-existing set
+		// S-LSK-032 actually cares about is the other three.
+		wantPreExisting := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true}
+		allowed := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true, "hooks.go": true}
 		for _, name := range nonTestChanged {
-			if !wantNonTest[name] {
-				t.Errorf("pre-existing non-test file %q changed, want only loop.go/harness.go/compaction.go (plus hooks.go, which is NEW, not pre-existing)", name)
+			if !allowed[name] {
+				t.Errorf("non-test file %q changed, want only loop.go/harness.go/compaction.go (pre-existing) plus hooks.go (new)", name)
 			}
 		}
-		for name := range wantNonTest {
+		for name := range wantPreExisting {
 			found := false
 			for _, c := range nonTestChanged {
 				if c == name {
