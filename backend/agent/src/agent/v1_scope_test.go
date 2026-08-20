@@ -99,11 +99,13 @@ func TestV1Scope_S_AGS_063_Seam12MechanismsAuditable(t *testing.T) {
 		}
 	})
 
-	t.Run("admissibility_rule_refuses_and_admits_by_errors_Is", func(t *testing.T) {
+	t.Run("admissibility_rule_distinguishes_inadmissible_from_revoked_by_errors_Is", func(t *testing.T) {
 		t.Parallel()
-		if !errors.Is(agent.ErrDelegationInadmissible, agent.ErrDelegationInadmissible) {
-			t.Error("ErrDelegationInadmissible does not match itself by errors.Is")
-		}
+		// The self-match half (errors.Is(x, x)) was deleted: it is a
+		// tautology, true for any non-nil error regardless of how
+		// ErrDelegationInadmissible is defined, so it could never
+		// fail (verify-report CRITICAL-2). This distinctness check
+		// is the meaningful half and is kept unchanged.
 		if errors.Is(agent.ErrDelegationInadmissible, agent.ErrDelegationRevoked) {
 			t.Error("ErrDelegationInadmissible unexpectedly matches ErrDelegationRevoked")
 		}
@@ -111,11 +113,13 @@ func TestV1Scope_S_AGS_063_Seam12MechanismsAuditable(t *testing.T) {
 
 	t.Run("revocation_latch_has_its_own_dedicated_named_scenarios", func(t *testing.T) {
 		t.Parallel()
-		// Full proof: revocation_test.go (S-DEL-006/007/008/009). This
-		// audit confirms the sentinel exists and is distinct, the
-		// minimum a reviewer needs before opening that file.
-		if !errors.Is(agent.ErrDelegationRevoked, agent.ErrDelegationRevoked) {
-			t.Error("ErrDelegationRevoked does not match itself by errors.Is")
+		// Full proof: revocation_test.go (S-DEL-006/007/008/009).
+		// This audit confirms the sentinel is distinct from a
+		// DIFFERENT termination sentinel the package defines
+		// (errors.Is(x, x) was a tautology — verify-report
+		// CRITICAL-2 — and is not reused here).
+		if errors.Is(agent.ErrDelegationRevoked, agent.ErrInterrupted) {
+			t.Error("ErrDelegationRevoked unexpectedly matches agent.ErrInterrupted")
 		}
 	})
 
@@ -130,17 +134,24 @@ func TestV1Scope_S_AGS_063_Seam12MechanismsAuditable(t *testing.T) {
 		}
 	})
 
-	t.Run("sibling_isolation_has_its_own_dedicated_race_proven_scenario", func(t *testing.T) {
-		t.Parallel()
-		// Full proof: siblings_test.go (S-DEL-013), run under -race.
-		// This audit does not re-run the concurrent fixture.
-	})
+	// sibling_isolation_has_its_own_dedicated_race_proven_scenario was
+	// deleted (verify-report CRITICAL-3): its body was comments only,
+	// so it reported PASS unconditionally and proved nothing. No
+	// non-redundant reachability check exists for this mechanism
+	// beyond what assertDelegationSeamSurfaceDeclaresNoSubagentConcept
+	// already covers below — the mechanism's own real,
+	// independently-verifiable, -race-proven scenario lives in
+	// siblings_test.go (S-DEL-013).
 
 	t.Run("nested_cancellation_inherited_through_the_existing_tree", func(t *testing.T) {
 		t.Parallel()
 		// Full proof: cancellation_test.go (S-DEL-014/015, S-CAN-015).
-		if !errors.Is(agent.ErrInterrupted, agent.ErrInterrupted) {
-			t.Error("agent.ErrInterrupted does not match itself by errors.Is")
+		// errors.Is(x, x) was a tautology (verify-report CRITICAL-2);
+		// replaced with the one remaining unchecked sentinel pair
+		// this file's audit exercises (Inadmissible/Revoked at the
+		// first subtest above, Revoked/Interrupted at the second).
+		if errors.Is(agent.ErrInterrupted, agent.ErrDelegationInadmissible) {
+			t.Error("agent.ErrInterrupted unexpectedly matches agent.ErrDelegationInadmissible")
 		}
 	})
 

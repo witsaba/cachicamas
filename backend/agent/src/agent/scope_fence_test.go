@@ -221,6 +221,87 @@ func TestScopeFence_S_LSK_031_SubstrateFiltersByteInSyncExactWidening(t *testing
 	}
 }
 
+// S-TLS-020 / S-DEL-003 — AG-19: the seam rides beside PolicySlot,
+// not inside it, and the guard proves it by raw bytes. Given the
+// merged AG-19 change, when scheduler.go's own diff against the
+// merge base is scanned, then the ADDED lines contain no type
+// assertion of any kind and no occurrence of the seam's context key
+// or interface type; and when a tool records both the policy value
+// it received and the seam it obtained from its context, then the
+// policy value is byte-identical to the injected one and the seam
+// is a distinct value reached through its own accessor, never
+// through the policy parameter. Asserted directly (verify-report
+// CRITICAL-6 — previously unasserted, only claimed by the narrower
+// pre-existing PolicySlot-type-assertion guard).
+func TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt(t *testing.T) {
+	t.Parallel()
+
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+	baseRef := os.Getenv("AG19_BASE_REF")
+	if baseRef == "" {
+		out, err := gitOutput(t, root, "merge-base", "HEAD", "origin/main")
+		if err != nil {
+			t.Fatalf("S-TLS-020: cannot determine base ref (set AG19_BASE_REF): %v", err)
+		}
+		baseRef = out
+	}
+	diff, err := gitDiff(t, root, baseRef, "backend/agent/src/agent/scheduler.go")
+	if err != nil {
+		t.Fatalf("git diff %s -- scheduler.go failed: %v", baseRef, err)
+	}
+	if diff == "" {
+		t.Fatal("scheduler.go's diff against the merge base is empty — S-TLS-020 has nothing to scan (expected the AG-19 seam-install hunk)")
+	}
+	// Scoped to ADDED lines only, not the whole file: scheduler.go's
+	// pre-existing `cause, _ := r.(error)` (unrelated to this change)
+	// would otherwise false-positive a whole-file scan.
+	typeAssertionPattern := regexp.MustCompile(`\.\s*\(\s*\*?\s*[A-Za-z_]`)
+	// Word-boundary matched: scheduler.go legitimately CALLS the
+	// constructor/installer (newDelegationSeam, withDelegationSeam)
+	// as part of this change's own wiring — those identifiers merely
+	// CONTAIN "DelegationSeam" as a naming convention. What S-TLS-020
+	// forbids is scheduler.go naming the BARE interface type
+	// (DelegationSeam) or the unexported context-key type
+	// (delegationSeamKey) directly, e.g. by declaring its own
+	// DelegationSeam-typed variable or reading the key type itself.
+	bareSeamTypeOrKey := regexp.MustCompile(`\b(DelegationSeam|delegationSeamKey)\b`)
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		if typeAssertionPattern.MatchString(line) {
+			t.Errorf("scheduler.go's diff against %s adds a type assertion: %q", baseRef, line)
+		}
+		if bareSeamTypeOrKey.MatchString(line) {
+			t.Errorf("scheduler.go's diff against %s names the seam's bare context-key or interface type directly (S-TLS-020 requires zero occurrence): %q", baseRef, line)
+		}
+	}
+
+	const callID = "call-tls-020"
+	toolName := "tls020_tool"
+	tool := &seamCapturingTool{toolName: toolName}
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+	calls := callsToAICalls([]scheduledCall{{id: callID, name: toolName, args: []byte(`{}`), effect: agent.EffectClassRead}})
+
+	sink := make(chan *agent.Event, 16)
+	sched := &agent.Scheduler{}
+	_ = sched.Schedule(contextBackground(), calls, reg, "run-tls-020", "turn-tls-020", nil, &agent.LaneStamper{}, sink)
+	drainSink(t, sink)
+
+	if _, hadSeam := tool.Seam(); !hadSeam {
+		t.Fatal("tool.Run's context carried no DelegationSeam")
+	}
+	if got, want := tool.Policy(), agent.PolicySlot(callID); got != want {
+		t.Errorf("tool.Run received PolicySlot %v, want byte-identical to the injected %v", got, want)
+	}
+	if seamFromPolicy, ok := tool.Policy().(agent.DelegationSeam); ok {
+		t.Errorf("the injected PolicySlot type-asserts to a DelegationSeam (%v) — the seam must be reachable only through DelegationSeamFrom(ctx), never by unwrapping the policy parameter", seamFromPolicy)
+	}
+}
+
 func containsString(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {

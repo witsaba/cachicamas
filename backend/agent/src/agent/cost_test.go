@@ -88,13 +88,23 @@ func buildCostFixture(t *testing.T) costFixtureResult {
 }
 
 // sumCostTurnInputTokens sums InputTokens over every cost_turn event
-// in events. Used as the "reconstruction a consumer performs"
-// (R-DEL-007): a single figure is enough to prove the strict
-// inequality and the fold-guard non-vacuously; the paired accessors
-// on CostTurn/CostSession cover every other figure identically.
-func sumCostTurnInputTokens(events []agent.Event) uint64 {
+// in events whose Event.Run() equals run. Used as the
+// "reconstruction a consumer performs" (R-DEL-007): a single figure
+// is enough to prove the strict inequality and the fold-guard
+// non-vacuously; the paired accessors on CostTurn/CostSession cover
+// every other figure identically. Filtered by run identity
+// (verify-report WARNING-1): S-DEL-016 says "the sum over the
+// cost_turn events observed on the parent's OWN stream" — an
+// unfiltered sum moves in lockstep with a leaked foreign cost_turn
+// (both the test's own reconstruction and harness.go's unfiltered
+// fold inflate together), making the equality assertion below
+// fold-blind.
+func sumCostTurnInputTokens(events []agent.Event, run agent.RunID) uint64 {
 	var total uint64
 	for _, ev := range events {
+		if ev.Run() != run {
+			continue
+		}
 		ct, ok := ev.CostTurn()
 		if !ok {
 			continue
@@ -120,8 +130,8 @@ func TestCost_ParentAloneStrictlyLessThanCombined(t *testing.T) {
 
 	got := buildCostFixture(t)
 
-	parentOwnInput := sumCostTurnInputTokens(got.parentEvents)
-	childInput := sumCostTurnInputTokens(got.childEvents)
+	parentOwnInput := sumCostTurnInputTokens(got.parentEvents, got.parentRun)
+	childInput := sumCostTurnInputTokens(got.childEvents, got.childRun)
 	combined := parentOwnInput + childInput
 
 	if childInput == 0 {
@@ -286,8 +296,8 @@ func TestCost_S_CST_023_MirroredFigureDoesNotDisturbOwnProtocol(t *testing.T) {
 		}
 	}
 
-	parentOwnInput := sumCostTurnInputTokens(got.parentEvents)
-	childInput := sumCostTurnInputTokens(got.childEvents)
+	parentOwnInput := sumCostTurnInputTokens(got.parentEvents, got.parentRun)
+	childInput := sumCostTurnInputTokens(got.childEvents, got.childRun)
 	if in, present := lastCS.InputTokens(); !present || in != parentOwnInput {
 		t.Errorf("parent's own final cost_session input tokens = (%d, present=%v), want (%d, true)", in, present, parentOwnInput)
 	}

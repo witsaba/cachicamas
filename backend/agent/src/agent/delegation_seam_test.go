@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -260,17 +261,18 @@ type seamCapturingTool struct {
 	beforeReturn func(seam agent.DelegationSeam)
 	panicMsg     string
 
-	mu       sync.Mutex
-	captured agent.DelegationSeam
-	hadSeam  bool
+	mu             sync.Mutex
+	captured       agent.DelegationSeam
+	hadSeam        bool
+	capturedPolicy agent.PolicySlot
 }
 
 func (s *seamCapturingTool) Name() string                   { return s.toolName }
 func (s *seamCapturingTool) EffectClass() agent.EffectClass { return agent.EffectClassRead }
-func (s *seamCapturingTool) Run(ctx context.Context, _ []byte, _ agent.PolicySlot) (agent.Result, error) {
+func (s *seamCapturingTool) Run(ctx context.Context, _ []byte, policy agent.PolicySlot) (agent.Result, error) {
 	seam, ok := agent.DelegationSeamFrom(ctx)
 	s.mu.Lock()
-	s.captured, s.hadSeam = seam, ok
+	s.captured, s.hadSeam, s.capturedPolicy = seam, ok, policy
 	s.mu.Unlock()
 	if s.beforeReturn != nil && ok {
 		s.beforeReturn(seam)
@@ -289,7 +291,103 @@ func (s *seamCapturingTool) Seam() (agent.DelegationSeam, bool) {
 	return s.captured, s.hadSeam
 }
 
+// Policy returns the PolicySlot value this tool's Run received —
+// S-TLS-020's own comparison point ("the policy value is
+// byte-identical to the injected one"). Safe to call only after the
+// scheduled call has returned.
+func (s *seamCapturingTool) Policy() agent.PolicySlot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.capturedPolicy
+}
+
 var _ agent.Tool = (*seamCapturingTool)(nil)
+
+// S-DEL-001 — Charter AG-19.1 scenario 1, the door half. Given a
+// tool scheduled by the ordinary path, when its Run frame asks the
+// context for a seam, then one is present; the identities it
+// reports equal the hosting run's and the hosting turn's, compared
+// against the run_start and turn_start events observed on that same
+// recorded stream; and an event published through it is observed by
+// the consumer on the parent's stream. Asserted directly
+// (verify-report CRITICAL-6 — previously unasserted): seam.Parent()
+// is compared against the actual run_start/turn_start events on the
+// same drained stream, not merely consumed by a fixture.
+func TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStream(t *testing.T) {
+	t.Parallel()
+
+	var capturedRun agent.RunID
+	var capturedTurn agent.TurnID
+	var publishErr error
+
+	toolName := "del001_tool"
+	tool := &seamCapturingTool{
+		toolName: toolName,
+		beforeReturn: func(seam agent.DelegationSeam) {
+			capturedRun, capturedTurn = seam.Parent()
+			ev, err := agent.NewMessageStartText(capturedRun, capturedTurn, mustFreshMessageID(t))
+			if err != nil {
+				t.Fatalf("agent.NewMessageStartText: %v", err)
+			}
+			publishErr = seam.Publish(ev)
+		},
+	}
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+
+	turnOneScript := scriptToolCallResponse(t, "call-del-001", toolName, []byte(`{}`))
+	provider := agenttest.NewProvider(turnOneScript, scriptTextResponse(t, ai.FinishReasonStop))
+	h := agent.Harness{Provider: provider, System: "system prompt for del-001", Turn: agent.TurnOptions{Tools: reg}}
+
+	sink := make(chan *agent.Event, 64)
+	if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+		t.Fatalf("Run returned err = %v, want nil", err)
+	}
+	events := drainSink(t, sink)
+
+	if _, ok := tool.Seam(); !ok {
+		t.Fatal("seamCapturingTool captured no seam — Tool.Run's context carries no DelegationSeam")
+	}
+	if publishErr != nil {
+		t.Errorf("seam.Publish(message_start_text) = %v, want nil (an admissible kind)", publishErr)
+	}
+
+	runStartIdx := indexOfFirst(events, agent.EventKindRunStart)
+	turnStartIdx := indexOfFirst(events, agent.EventKindTurnStart)
+	if runStartIdx < 0 {
+		t.Fatal("recorded stream carries no run_start")
+	}
+	if turnStartIdx < 0 {
+		t.Fatal("recorded stream carries no turn_start")
+	}
+	if got := events[runStartIdx].Run(); got != capturedRun {
+		t.Errorf("seam.Parent() run = %q, run_start event's Run() = %q, want equal", capturedRun, got)
+	}
+	gotTurn, hasTurn := events[turnStartIdx].Turn()
+	if !hasTurn {
+		t.Fatal("turn_start event reports no turn — Event.Turn()'s second return is false")
+	}
+	if gotTurn != capturedTurn {
+		t.Errorf("seam.Parent() turn = %q, turn_start event's Turn() = %q, want equal", capturedTurn, gotTurn)
+	}
+	if got := events[turnStartIdx].Run(); got != capturedRun {
+		t.Errorf("turn_start event's Run() = %q, want %q (seam.Parent()'s run)", got, capturedRun)
+	}
+
+	// "an event published through it is observed by the consumer on
+	// the parent's stream": the message_start_text this tool
+	// published through the seam appears on the same recorded
+	// stream, carrying the captured run identity.
+	found := false
+	for _, ev := range events {
+		if ev.Kind() == agent.EventKindMessageStartText && ev.Run() == capturedRun {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("the message_start_text published through the seam does not appear on the parent's recorded stream")
+	}
+}
 
 // S-DEL-004 — the rule is total, kind by kind. Given a table naming
 // every registered kind together with the verdict R-DEL-002's table

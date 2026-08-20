@@ -7,6 +7,8 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,13 +188,36 @@ func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 	}
 
 	// S-DEL-015: the production diff introduces no context
-	// derivation of its own — delegation_seam.go imports neither
-	// "context" for a cancel constructor beyond ctx.Value/WithValue,
-	// which this positive statement records rather than re-derives
-	// per run (grep-verified at apply time: delegation_seam.go
-	// declares no WithCancel/WithCancelCause/WithTimeout/WithDeadline
-	// call; the child's own context derivation lives entirely in
-	// delegatingTool.Run, package agent_test).
+	// derivation of its own. Asserted directly against the diff
+	// (verify-report CRITICAL-1 — a comment is not evidence): the
+	// merged change's own additions to delegation_seam.go and
+	// scheduler.go contain no WithCancel/WithCancelCause/WithTimeout/
+	// WithDeadline call; the child's own context derivation lives
+	// entirely in delegatingTool.Run, package agent_test.
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+	baseRef := os.Getenv("AG19_BASE_REF")
+	if baseRef == "" {
+		out, err := gitOutput(t, root, "merge-base", "HEAD", "origin/main")
+		if err != nil {
+			t.Fatalf("S-DEL-015: cannot determine base ref (set AG19_BASE_REF): %v", err)
+		}
+		baseRef = out
+	}
+	forbiddenContextDerivation := []string{"context.WithCancel", "context.WithCancelCause", "context.WithTimeout", "context.WithDeadline"}
+	for _, path := range []string{"backend/agent/src/agent/delegation_seam.go", "backend/agent/src/agent/scheduler.go"} {
+		diff, err := gitDiff(t, root, baseRef, path)
+		if err != nil {
+			t.Fatalf("git diff %s -- %s failed: %v", baseRef, path, err)
+		}
+		for _, sym := range forbiddenContextDerivation {
+			if strings.Contains(diff, sym) {
+				t.Errorf("the production diff for %s introduces %q — S-DEL-015 requires the child's context derivation to live entirely in package agent_test, not in production sources", path, sym)
+			}
+		}
+	}
 }
 
 // S-CAN-015 — AG-19: the tail is closed against an in-frame
