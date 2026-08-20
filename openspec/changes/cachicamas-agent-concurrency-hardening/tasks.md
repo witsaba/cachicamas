@@ -102,9 +102,9 @@ Counted against the **1000-line budget excluding `openspec/**`**, extension pre-
 
 ## Phase 8 — doc 0003 update (same PR)
 
-- [ ] 8.1 Read the Wave 0–6 table of contents (doc's own ToC, `:43-45`) to derive the shipped count — never increment the printed figure blindly; confirm it yields **22 of 24** after AG-21.
-- [ ] 8.2 Append AG-21's outcome to the running status paragraph (`0003:3`), following the AG-19/AG-20 append pattern; update **"21 of 24"** → **"22 of 24"**.
-- [ ] 8.3 Flip the checklist row at `0003:2179`: `- [ ]` → `- [x] The package is race-clean and leak-free under the combined-scenario matrix — closed by AG-21.`
+- [x] 8.1 Read the Wave 0–6 table of contents (doc's own ToC, `:43-45`) to derive the shipped count — never increment the printed figure blindly; confirm it yields **22 of 24** after AG-21. **Derived**: Wave 0 (AG-00,01,02)=3 + Wave 1 (AG-03..06)=4 + Wave 2 (AG-07..11)=5 + Wave 3 (AG-12..16)=5 + Wave 4 (AG-17,18)=2 + Wave 5 (AG-19,20)=2 = 21 already shipped; +AG-21 (Wave 6's first) = **22**. Total 24 confirmed against the ToC's own 7-wave listing (3+4+5+5+2+2+3=24).
+- [x] 8.2 Append AG-21's outcome to the running status paragraph (`0003:3`), following the AG-19/AG-20 append pattern; update **"21 of 24"** → **"22 of 24"**. Opening clause updated to `Wave 5 complete (AG-19…AG-20), Wave 6 opened (AG-21) — **22 of 24** milestones shipped.`; one new sentence appended after "...and Wave 5 is complete." and before the closing "Layer 2 code now exists..." sentence, naming the 12-cell matrix (with the two adjusted-Then cells), the stalled-consumer pressure scenarios, the cross-run absence/carry inventory with its defeat test, and the leak sweep's accounted third-party goroutine — closing with "No production code changed."
+- [x] 8.3 Flip the checklist row at `0003:2179`: `- [ ]` → `- [x] The package is race-clean and leak-free under the combined-scenario matrix — closed by AG-21.` Done exactly at that line; no other checklist row touched (several pre-existing rows for already-merged milestones AG-03/04/06/07/08/09/10 remain `[ ]` — a pre-existing inconsistency in this doc, out of scope for this change).
 
 ## Phase 9 — `sdd-archive` promotion obligations (rows it discharges)
 
