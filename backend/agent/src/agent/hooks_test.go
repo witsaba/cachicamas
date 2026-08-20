@@ -1954,40 +1954,79 @@ func TestHooks_SubstrateFilters_NoReleaseExactWideningInBothFilters(t *testing.T
 			t.Fatalf("git diff %s -- backend/agent/src/agent/ failed: %v", baseRef, derr)
 		}
 		nonTestChanged := hksNonTestFilesChanged(raw)
-		// hooks.go is a NEW file (git diff --git a/X b/X headers look
-		// identical for "modified" and "newly added" — only the diff
-		// BODY distinguishes them via "new file mode"/"--- /dev/null"),
-		// so it legitimately appears in this diff too, once committed.
-		// It is allowed here for that reason; the pre-existing set
-		// S-LSK-032 actually cares about is the other three.
+
+		// AG-21 amendment (R-LSK-008 / S-LSK-032 branch-scoping release,
+		// agent-loop-skeleton delta) — everything below in this
+		// diff-dependent block asserts a claim that was only ever true
+		// of AG-20's OWN AUTHORING BRANCH. On any branch cut from main
+		// after AG-20 merged, the merge base is main and the
+		// src/agent/ diff carries none of {loop.go, harness.go,
+		// compaction.go}, so both loops below fire unconditionally —
+		// verified in this worktree: a detached worktree at AG-20's
+		// merge commit passes, the same worktree plus one empty commit
+		// fails with the identical three t.Errorf below at :1990.
 		//
-		// doc.go is allowed here too, added during the sdd-verify
-		// CRITICAL-2 correction round: L2C-08's package-wide contract
-		// row needed a narrow, recorded amendment (agent-cancellation-
-		// tree delta, R-CAN-006/R-CAN-008) to carve out the observer
-		// lane goroutine, mirroring the identical release AG-18 already
-		// took for L2C-07 (doc.go and doc_contract_guard_test.go are
-		// both pre-existing entries in both substrate filters since
-		// AG-18 — no new filter entry needed here either). Like
-		// hooks.go, this is a conditional allowance, not a required
-		// one: it is not in wantPreExisting because AG-20's core splice
-		// work never required touching doc.go on its own.
-		wantPreExisting := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true}
-		allowed := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true, "hooks.go": true, "doc.go": true}
-		for _, name := range nonTestChanged {
-			if !allowed[name] {
-				t.Errorf("non-test file %q changed, want only loop.go/harness.go/compaction.go (pre-existing) plus hooks.go (new) plus doc.go (CRITICAL-2 correction round)", name)
-			}
-		}
-		for name := range wantPreExisting {
-			found := false
-			for _, c := range nonTestChanged {
-				if c == name {
-					found = true
+		// Two guards gate the block and BOTH are required — the second
+		// is not optional, because the first alone re-trips the
+		// instant a later branch's own legitimate, delta-backed
+		// production edit (this change's own pre-authorized D1
+		// contingency included) makes nonTestChanged non-empty again:
+		//   (i)  nonTestChanged is empty — the innocent-branch fast
+		//        path, and the default for a test-only milestone such
+		//        as AG-21;
+		//   (ii) nonTestChanged is non-empty but does not contain
+		//        hooks.go — AG-20's own new file and therefore that
+		//        branch's authorship signature (the same file the
+		//        comment below already reasons about).
+		//
+		// t.Logf + fall-through, NEVER t.Skip: this block sits FIRST in
+		// the function, and the diff-independent filter-entry half
+		// below (loopEntries/hookEntries onward) is real, completed,
+		// branch-independent coverage that a whole-test Skip would
+		// hide from anyone scanning for it — sdd-verify's MINOR-3
+		// ruling, the identical reasoning cancellation_test.go's own
+		// t.Logf-then-return branch already carries.
+		switch {
+		case len(nonTestChanged) == 0:
+			t.Logf("AG-21: nonTestChanged is empty on this branch — S-LSK-032's diff-dependent block asserts a claim true only of AG-20's own authoring branch; skipping it here and falling through to the diff-independent filter-entry assertions below")
+		case !containsString(nonTestChanged, "hooks.go"):
+			t.Logf("AG-21: nonTestChanged is non-empty (%v) but does not contain hooks.go, AG-20's own authorship signature — this is not AG-20's authoring branch, so S-LSK-032's diff-dependent block does not apply here; skipping it and falling through to the diff-independent filter-entry assertions below", nonTestChanged)
+		default:
+			// hooks.go is a NEW file (git diff --git a/X b/X headers look
+			// identical for "modified" and "newly added" — only the diff
+			// BODY distinguishes them via "new file mode"/"--- /dev/null"),
+			// so it legitimately appears in this diff too, once committed.
+			// It is allowed here for that reason; the pre-existing set
+			// S-LSK-032 actually cares about is the other three.
+			//
+			// doc.go is allowed here too, added during the sdd-verify
+			// CRITICAL-2 correction round: L2C-08's package-wide contract
+			// row needed a narrow, recorded amendment (agent-cancellation-
+			// tree delta, R-CAN-006/R-CAN-008) to carve out the observer
+			// lane goroutine, mirroring the identical release AG-18 already
+			// took for L2C-07 (doc.go and doc_contract_guard_test.go are
+			// both pre-existing entries in both substrate filters since
+			// AG-18 — no new filter entry needed here either). Like
+			// hooks.go, this is a conditional allowance, not a required
+			// one: it is not in wantPreExisting because AG-20's core splice
+			// work never required touching doc.go on its own.
+			wantPreExisting := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true}
+			allowed := map[string]bool{"loop.go": true, "harness.go": true, "compaction.go": true, "hooks.go": true, "doc.go": true}
+			for _, name := range nonTestChanged {
+				if !allowed[name] {
+					t.Errorf("non-test file %q changed, want only loop.go/harness.go/compaction.go (pre-existing) plus hooks.go (new) plus doc.go (CRITICAL-2 correction round)", name)
 				}
 			}
-			if !found {
-				t.Errorf("expected pre-existing non-test file %q to have changed, it did not", name)
+			for name := range wantPreExisting {
+				found := false
+				for _, c := range nonTestChanged {
+					if c == name {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("expected pre-existing non-test file %q to have changed, it did not", name)
+				}
 			}
 		}
 	}
