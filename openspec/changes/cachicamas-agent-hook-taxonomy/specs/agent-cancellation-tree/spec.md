@@ -17,7 +17,7 @@
 | `R-CAN-007` — the shutdown run-outcome discriminator | **Byte-unchanged.** AG-20 adds no run-outcome member |
 | Every NFR (`NFR-CAN-001`…`NFR-CAN-005`) | **Byte-unchanged.** AG-20 adds no new test package, no new timer use beyond the pre-existing wind-down bound, no new ambient-authority import, and ships inside the same single pull request this change already declares |
 | Every "Explicit non-requirement" row | **Byte-unchanged.** AG-20 ships no subagent tool, no frontend signal, no retry change, no cost-accounting change and no third cancellation signal; none of those rows is about goroutine lifetime |
-| `S-CAN-001`…`S-CAN-015` (every pre-existing scenario, including `S-CAN-006`, `S-CAN-012`) | **Byte-unchanged.** Reproduced verbatim below only because they sit inside the `R-CAN-006` requirement block being reproduced in full; no scenario's own text changed |
+| `S-CAN-001`…`S-CAN-015` (every pre-existing scenario, including `S-CAN-006`, `S-CAN-012`) | **Byte-unchanged, with `S-CAN-008` the one stated exception.** Reproduced verbatim below only because they sit inside the `R-CAN-006` requirement block being reproduced in full. `S-CAN-008` alone gains one parenthetical scope note — recording that its "every pre-existing row" clause refers to the rows that predated AG-14's addition of `L2C-08`, so it does not claim `L2C-08` itself can never be amended — and its assertion is otherwise untouched. *(Narrowed by `sdd-verify` round 2, W-2a: this row previously read "no scenario's own text changed", a blanket claim `S-CAN-008` falsified. The clause is correct and necessary; only the blanket row was wrong.)* |
 
 ## MODIFIED Requirements
 

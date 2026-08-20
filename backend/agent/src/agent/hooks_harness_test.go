@@ -866,8 +866,19 @@ func TestHooksHarness_S_RUN_113_AdditionsExactlyFiveAbsencesAsserted(t *testing.
 		t.Fatalf("hooked Run returned err = %v, want nil (Run must return with the gate still held)", runErr)
 	}
 	hookedEvents := drainSink(t, hookedSink)
-	if len(hookedEvents) != len(baselineEvents) {
-		t.Fatalf("hooked stream has %d event(s), baseline has %d, want equal", len(hookedEvents), len(baselineEvents))
+	// sdd-verify round 2 (W-1): S-RUN-113's own text claims
+	// kind-sequence equality via kindsEqualHKS — "the identical
+	// mechanism S-HKS-017 uses for this same fixture". A bare length
+	// comparison did not deliver that: two streams of equal length
+	// carrying different kinds in different order would have passed.
+	// The test is strengthened to the claim rather than the claim
+	// weakened to the test, because kind-sequence equality is the
+	// stronger and more meaningful property and kindsOfHKS/
+	// kindsEqualHKS were already available.
+	hookedKinds := kindsOfHKS(hookedEvents)
+	baselineKinds := kindsOfHKS(baselineEvents)
+	if !kindsEqualHKS(hookedKinds, baselineKinds) {
+		t.Fatalf("hooked stream kind sequence = %v, baseline = %v, want equal", hookedKinds, baselineKinds)
 	}
 	if report := agent.CheckStream(hookedEvents); report.Violation() != nil {
 		t.Errorf("CheckStream rejected the hooked stream: %v, want accepted", report.Violation())

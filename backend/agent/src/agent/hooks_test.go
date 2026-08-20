@@ -2256,7 +2256,14 @@ func TestHooks_AntiVacuityFloorsSkipRatherThanFail(t *testing.T) {
 	// "[^}]*" cannot cross the guarded branch's own closing brace.
 	emptyDiffThenFatal := regexp.MustCompile(`(?s)[Dd]iff\s*==\s*""\s*\{[^}]*t\.Fatal`)
 
-	files := []string{"scope_fence_test.go", "cancellation_test.go", "hooks_test.go"}
+	// sdd-verify round 2 (W-2b): S-LSK-033 claims the scan covers
+	// "every file AG-20 adds". The list carried only one of the four,
+	// so the scenario over-claimed. Widened to make the claim true
+	// rather than narrowing the claim to the list.
+	files := []string{
+		"scope_fence_test.go", "cancellation_test.go",
+		"hooks.go", "hooks_test.go", "hooks_harness_test.go", "hooks_compaction_test.go",
+	}
 	for _, name := range files {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

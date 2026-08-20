@@ -1,18 +1,40 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:005107c1145d18fabb1f7ad6ccfc58e79c428d2a18da78570c52b62cd6191515
-verdict: fail
-blockers: 2
-critical_findings: 2
-requirements: 17/25
-scenarios: 52/61
+evidence_revision: sha256:d5d37ed9fadbcd7103f1c58e36fe5781bc28e12ba715bf0024efcb550327adc1
+verdict: pass_with_warnings
+blockers: 0
+critical_findings: 0
+requirements: 27/27
+scenarios: 63/63
 test_command: "cd backend/agent && go test -race -count=1 ./..."
 test_exit_code: 0
-test_output_hash: sha256:c39afd4b42bd7bd94d0a345745873c83ef70afcfd45e4ac43ab8a4f1c3374d36
+test_output_hash: sha256:4c15b730386e987cf8b5846e5273ba3047fb9b700cf988a3d518d579a8abca98
 build_command: "cd backend/agent && go build ./..."
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
+
+> **Round 2 (this file's current, authoritative verdict): PASS WITH WARNINGS.**
+> The envelope above is round 2's. Round 1's own envelope, verdict and findings
+> are preserved verbatim below as the record; §§ 1–10 are round 1's text and are
+> superseded by "## 11. Round 2 re-verification" at the end of this file.
+
+**Round 1 envelope, preserved as the record.** Indented rather than fenced so this
+file carries exactly one machine-readable envelope (round 2's, above):
+
+    schema: gentle-ai.verify-result/v1
+    evidence_revision: sha256:005107c1145d18fabb1f7ad6ccfc58e79c428d2a18da78570c52b62cd6191515
+    verdict: fail
+    blockers: 2
+    critical_findings: 2
+    requirements: 17/25
+    scenarios: 52/61
+    test_command: "cd backend/agent && go test -race -count=1 ./..."
+    test_exit_code: 0
+    test_output_hash: sha256:c39afd4b42bd7bd94d0a345745873c83ef70afcfd45e4ac43ab8a4f1c3374d36
+    build_command: "cd backend/agent && go build ./..."
+    build_exit_code: 0
+    build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
 # Verification Report — AG-20 `cachicamas-agent-hook-taxonomy`
 
@@ -501,3 +523,197 @@ scenario count and coverage table. Each will otherwise archive as a false claim.
 explicit, justified narrowing.
 
 **Next phase:** `sdd-apply`.
+
+---
+
+## 11. Round 2 re-verification — `sdd-apply`'s correction round, finding by finding
+
+**Branch** `feat/agent-layer2-wave5-ag20` · **HEAD** `2f5c03689a1655c972b1ea8e3fe617c5a846cbaf` · **merge-base** `2a138b5997c5e6a3f5e13fcfdc873833ed8975fa`
+
+**Verdict: PASS WITH WARNINGS** — 0 CRITICAL, 2 WARNING, 3 SUGGESTION.
+
+Both round-1 blockers are closed and each was re-proved by execution, not by
+reading apply's claim. All 8 MAJOR findings are closed. 4 of 5 MINOR findings
+are closed; MINOR-5 is partially closed. Two new WARNING-level residues were
+found in the remediation itself. None blocks archive.
+
+Size is not a finding (`exception-ok`, pre-authorised).
+
+### 11.1 Evidence run — re-executed, uncached, on a clean tree
+
+```
+$ cd backend/agent && go test -race -count=1 ./...
+ok   .../src/agent                                    8.818s
+ok   .../src/agenttest                                2.487s
+ok   .../src/agenttest/sweep                          1.466s
+ok   .../src/agenttest/tracetest                      1.887s
+ok   .../src/ai                                       4.259s
+ok   .../src/ai/internal/retry                        2.298s
+ok   .../src/ai/openaicompat                        172.907s
+ok   .../src/ai/openaicompat/conformancetest          2.746s
+ok   .../src/ai/openaicompat/openrouter               2.923s
+ok   .../src/ai/openaicompat/openrouter/conformance   6.184s
+?    .../conformance/fixtures                         [no test files]
+ok   .../openrouter/internal/smoke                    2.307s
+ok   .../src/handoff                                  1.784s
+real 173.49   user 62.90   sys 7.14
+EXIT=0
+```
+
+**173.49s real, exit 0, `-count=1`, zero `FAIL`, no `(cached)` marker.** Taken on
+a `git status`-clean tree with no plant active, after every plant of this round
+had been reverted. This corroborates apply's 175.09s claim. `go build ./...`
+exits 0 with empty output; `go vet ./...` is clean.
+
+`gofmt -l ./src/` reports 15 files including `scheduler_test.go`. Verified
+pre-existing: `origin/main`'s own copy of `scheduler_test.go` is equally
+unformatted, and `gofmt -d` places its three hunks at lines 35, 77 and 1028 —
+all outside this round's edit region (~699–751). Apply's claim is accurate. The
+mutating `make all` fmt target was deliberately not used.
+
+### 11.2 Disposition table
+
+| # | Round-1 finding | Disposition | Evidence I produced this round |
+|---|---|---|---|
+| **CRITICAL-1** | Anti-vacuity regression guard is dead (300-char regex window) | **CLOSED** | Planted `continue`→`t.Fatalf` in `cancellation_test.go:222` and `t.Skip`→`t.Fatal` in `hooks_test.go:1602`, ran `TestHooks_AntiVacuityFloorsSkipRatherThanFail`: **both subtests FAILED**, each printing the comment-stripped offending branch. Reverted via `git checkout --`; tree clean. Combined with the coordinator's own `scope_fence_test.go` plant, **all three protected sites now bite.** Root cause fixed twice over: `[^}]{0,300}` → `[^}]*`, and the source is comment-stripped before the match |
+| **CRITICAL-1 (dependency)** | Apply's own discovery: `stripGoComments` had no backtick raw-string tracking | **CLOSED, and independently re-proved** | Extracted the shipped function into a standalone program and ran **10 adversarial cases**: raw string carrying 3 bare `"`; raw string containing `//` and `/*`; backslash-before-backtick (no escape in raw strings); backtick inside a line comment / block comment / interpreted string; escaped rune quote; apostrophe in a comment; string and raw-string contents preserved. **10/10 pass.** The bug was real — the old code toggles `inString` on the odd third `"` and stops stripping comments for the rest of the file |
+| **CRITICAL-1 (regression check)** | Does the shared-helper fix break its two pre-existing callers? | **NO REGRESSION** | `TestScheduler_SourceGuard_NoErrgroupImport`, `TestScheduler_SourceGuard_PolicySlotNoTypeAssertion`, `TestHarness_LoopAccess_PublicOneTurnSurfaceOnly_SourceScanGuard`: all PASS. And they still **bite**: appended `var _ = "errgroup"` to `scheduler.go` → `--- FAIL: TestScheduler_SourceGuard_NoErrgroupImport`. Reverted. Structural argument for why no caller can lose coverage: string and raw-string bodies are always written to the output; only comment classification changed |
+| **CRITICAL-2** | `L2C-08` falsified by the observer lane, recorded in no delta | **CLOSED** | `doc.go:36` now carries the amended row. `expectedLayer2ContractRows`' `L2C-08` entry is **byte-identical** — proved by mutation, not by eye: dropping the single word "other" from `doc.go` failed **both** `TestLayer2DocContract_MatchesTheCommittedTable` and `TestDocContract_L2C08CarveOutClause`. The general guard compares `contractRow` structs with `got != want` (full `id`+`text` equality), plus a row-count check and positional ordering — **not** a prefix or substring match. Reverted; tree clean |
+| **CRITICAL-2 (delta completeness)** | Is the new `agent-cancellation-tree` delta complete? | **CLOSED** | Machine-diffed the delta's `R-CAN-006` and `R-CAN-008` blocks against the promoted `openspec/specs/agent-cancellation-tree/spec.md`. **Every diff line is an addition; nothing is dropped** — all three prose paragraphs, the panic-containment paragraph, both original table rows verbatim, and scenarios `S-CAN-006`/`S-CAN-012`/`S-CAN-008` are reproduced in full. It amends the requirements that actually carry the claim: `R-CAN-006`'s disjoint-sets table (third row) and `R-CAN-008`'s `L2C-08` row text. `S-CAN-016` and `S-CAN-017` are falsifiable and `S-CAN-017` is proved by the new `TestDocContract_L2C08CarveOutClause` |
+| **CRITICAL-2 (`R-HKS-011`)** | Closed-sequence table missed its own case | **CLOSED** | The table gained the `R-CAN-006` / `R-CAN-008` (`L2C-08`) row, marked **AMENDED**. `S-HKS-025`'s dependent count was updated in step — it now reads "the three AMENDED rows", and the table carries exactly three (`R-PRH-002`, `R-PRH-005`, `R-CAN-006`/`R-CAN-008`) |
+| **MAJOR-1** | `S-HKS-026` compares the branch against itself | **CLOSED** — apply chose the narrowing option | Read the test body, not the scenario. `TestHooks_Inertness_ByteIdenticalOnEveryArm` has **seven** `t.Run` arms; each runs the same hookless config twice on this branch, compares kind sequences via `kindsEqualHKS`, and calls `waitForGoroutineBaseline`. The scenario now claims **exactly that**: "each pair run **TWICE ON THIS BRANCH**", "**This is deliberately NOT** 'one of each pair on the merge base…'", "History read-backs and captured provider requests are **not** compared". The stale "six paired runs" is now "SEVEN". Text and test agree |
+| **MAJOR-2** | `S-HKS-011` demands eight runs; two shipped | **CLOSED** | Scenario now states "**two** behavioral runs … the remaining six rows … proven **structurally**". The test asserts `strings.Count(raw, "lane.enqueuePostTurn(") == 4` and `… "lane.enqueueSessionStart(") == 1`; measured against `harness.go`: **4 and 1**. The structural claim is real and the scenario no longer overstates it |
+| **MAJOR-3** | `S-HKS-023` / `S-PRH-009` assert an insertion property the code lacks | **CLOSED** | Both scenarios rewritten to the true claim (stability under the **singular field's** own presence/absence) and both now carry an explicit "**This is deliberately NOT**" / "**This does NOT claim**" disclaimer for in-chain insertion. Read `hooks_test.go:741-786`: the test genuinely runs the pair — index-1 failing chain with no singular, then with `noopPreRequestHook` — and asserts `noSingularAttribution == withSingularAttribution` plus `[0 1]` invocation order in both |
+| **MAJOR-4** | `S-HKS-001` claims the whole `scope_fence_test.go` is byte-unchanged | **CLOSED** | Now scoped to "the assertions, not the whole file", citing `R-HKS-010` consequence 4 / `R-LSK-008` consequence 6 and the 13-line bound. Swept the change directory: every remaining "byte-unchanged" mention of that file is assertion-scoped |
+| **MAJOR-5** | `S-HKS-012`'s two cost clauses are unachievable | **CLOSED** | Scenario now names the achievable claim and explicitly records why the original two were structurally impossible (`retryDecision` G1–G5 vs `finalize()`). The test asserts `Attempts() == 3`, `costTurnCount == 1`, `report.Cost() == streamCost` — exactly what the corrected text claims |
+| **MAJOR-6** | bite `S-HKS-053`'s stated observable is unreachable | **CLOSED — re-reproduced** | Re-applied the sabotage (`cut = resolveCut(hist, plan.Cut())` → `cut = plan.Cut()`) and ran `TestHooksCompaction_ForwardAdjustment_StaysInvariantSafe`: `hooks_compaction_test.go:287: compaction_finished count = 0, want exactly 1`. That is **verbatim** the corrected scenario's stated observable ("`compaction_finished` count is **zero** … the compaction bracket takes its typed failure arm"). Reverted; tree clean. The "committed prefix splits a call/result pair" claim is gone and its unreachability is recorded |
+| **MAJOR-7** | `S-RUN-113` asserts a four-method set | **CLOSED** | Scenario now names the five methods directly and records `R-RUN-001`'s pre-existing staleness as pre-existing. The covering test is renamed `…AdditionsExactlyFiveAbsencesAsserted` and asserts `reflect.DeepEqual(sorted(names), []string{"Compact","Interrupt","Run","Shutdown","Steer"})` — the exact named set, not a count |
+| **MAJOR-8** | `tasks.md`'s scenario count is stale | **CLOSED** (one cosmetic residue, S-3) | The coverage table now states **no total** and enumerates allocated ranges per delta — the `S-LSK-020` treatment. `S-LSK-033`, `S-CAN-016` and `S-CAN-017` all have rows. This structurally removes the drift class rather than re-fixing one instance |
+| **MINOR-1** | Skip precedes four diff-independent assertions | **CLOSED** | The kind-count, `NumMethod()`, `Turn` and `Run` signature assertions now run **before** the `loop.go` anti-vacuity skip at `hooks_test.go:1602`. On a branch that does not touch `loop.go` all four still execute |
+| **MINOR-2** | `S-LSK-033`'s bounding clause is wrong for `cancellation_test.go` | **CLOSED** (one residue, W-2) | The scenario now describes each file's actual, different shape — `t.Skip` for one, `continue` + `scannedAny` + a separate terminal `t.Logf`/`return` for the other |
+| **MINOR-3** | `TestCancellation_NestedRunCancelsLeafFirst` reports SKIP | **CLOSED** | The terminal branch is now `t.Logf(...)` + `return`, matching the same function's own `baseRefIsHEAD` idiom 12 lines above. The test reports PASS |
+| **MINOR-4** | Doc 0003 counters | **CLOSED** | Status line now reads "**21 of 24**" (AG-00…AG-20 = 21; the Wave 0–6 table of contents totals 24) and "Wave 2 complete … **five milestones**", both derived from the document's own table rather than restated. AG-20's two checklist rows are now ticked. The AG-03…AG-09 unticked rows remain — pre-existing, already recorded in round 1 |
+| **MINOR-5** | "Byte-identical" implemented as kind-sequence equality | **PARTIALLY CLOSED — see W-1** | `S-HKS-007` ✅ accurate (`kindsEqualHKS` for the stream, entry-by-entry `.Equal()` for the history read-back). `S-HKS-017` ✅ substantively accurate (its test does compare kinds element by element, inline at `hooks_test.go:1038-1042`). `S-RUN-113` ❌ — see W-1 |
+
+### 11.3 New findings introduced by the remediation
+
+#### WARNING W-1 — `S-RUN-113`'s MINOR-5 correction replaced one over-claim with a smaller one
+
+`S-RUN-113` now reads: *"its recorded stream's **event-KIND sequence** is equal to
+the same script's with no hooks installed (precision added by `sdd-verify`
+MINOR-5: kind-sequence equality, `kindsEqualHKS` … the identical mechanism
+`S-HKS-017` uses for this same fixture)"*.
+
+Its covering test, `TestHooksHarness_S_RUN_113_AdditionsExactlyFiveAbsencesAsserted`
+(`hooks_harness_test.go:792-877`), performs **no kind comparison at all**. Its only
+stream comparison is:
+
+```go
+if len(hookedEvents) != len(baselineEvents) {
+    t.Fatalf("hooked stream has %d event(s), baseline has %d, want equal", ...)
+}
+```
+
+`S-HKS-017`'s test does compare kinds (an inline elementwise loop); `S-RUN-113`'s
+does not, so "the identical mechanism `S-HKS-017` uses" is false, and
+`kindsEqualHKS` is named by a scenario whose test never calls it. Either add the
+elementwise kind loop to that test (three lines, copying `S-HKS-017`'s own), or
+narrow the clause to "event **count** equality". Not archive-blocking: the
+substantive property is proved by `S-HKS-017` and `S-HKS-026`, and the weaker
+comparison still passes.
+
+#### WARNING W-2 — two absolute claims in the round-2 artifacts are falsified by their own diffs
+
+Both are the repository's recorded "absolute quantifier" drift class. Neither
+falsifies a test; both would archive as false prose.
+
+1. **`agent-cancellation-tree`'s "Not modified, and why" table** claims
+   `S-CAN-001`…`S-CAN-015` are *"**Byte-unchanged.** … no scenario's own text
+   changed"*. `S-CAN-008`'s text **did** change in the same delta: it gained the
+   clause *"Unchanged by this delta: this scenario's own 'every pre-existing row'
+   scope is AG-14's act of adding L2C-08 as a NEW row among L2C-01…L2C-07…"*.
+   The added clause is **correct and necessary** — without it `S-CAN-008`'s "every
+   pre-existing row byte-unchanged" would itself be falsified by AG-20 amending
+   `L2C-08`. Only the blanket "not modified" row is wrong; exclude `S-CAN-008`
+   from it.
+2. **`S-LSK-033`** says the source scan runs *"across `scope_fence_test.go`,
+   `cancellation_test.go` and **every file AG-20 adds**"*. The guard's own file
+   list is `{"scope_fence_test.go", "cancellation_test.go", "hooks_test.go"}` —
+   one of the four files AG-20 adds. Harmless today (`hooks.go`,
+   `hooks_harness_test.go` and `hooks_compaction_test.go` contain zero
+   `diff == ""` branches, measured), but the scan-coverage claim is false and a
+   future anti-vacuity floor added to either of the other two test files would
+   not be caught.
+
+### 11.4 Suggestions
+
+1. **S-1 — the `scheduler_test.go` release is recorded only in `apply-progress.md`.**
+   Round 2 released a third pre-existing package file (29 changed lines, the
+   `stripGoComments` fix), but no delta's release prose names it, while this same
+   change records exactly this class twice (`R-LSK-008` consequences 6 and 7, for
+   `scope_fence_test.go`/`cancellation_test.go` and `doc.go`/`doc_contract_guard_test.go`).
+   Nothing is falsified — `scheduler_test.go` is on no byte-unchanged list and is a
+   pre-existing entry in both substrate filters — but the promoted spec will not
+   carry the release. A one-sentence extension of consequence 7 would close it.
+2. **S-2 — no anti-vacuity floor on the kind-sequence and cost comparisons.**
+   `kindsEqualHKS(nil, nil)` returns `true`, and `report.Cost() == streamCost`
+   holds when both are zero values. `S-HKS-026`'s seven arms and `S-HKS-012`
+   would pass on empty input. In practice every arm asserts `err == nil` and a
+   run always emits a bracket, so this is theoretical — but a `len(first) > 0`
+   floor is one line and matches this repository's own established discipline.
+3. **S-3 — `tasks.md:16` still says "49 scenarios + 5 bites".** MAJOR-8's fix
+   removed the total from the coverage table but not from the Review Workload
+   Forecast table above it. It is a frozen pre-apply estimate rather than a live
+   count assertion, so it is cosmetic.
+
+### 11.5 Re-checks the orchestrator asked for explicitly
+
+| Check | Method | Result |
+|---|---|---|
+| Substrate filters byte-in-sync | extracted both `HasSuffix` entry lists, `diff`'d them | **74 entries each, identical, same order** ✅ |
+| No filter change in round 2 | `git diff origin/main` on both files | only the round-1 four-entry AG-20 widening; **no round-2 edit** ✅ |
+| `doc.go` / `doc_contract_guard_test.go` already in both filters | grepped the extracted lists | both present (since AG-18); `scheduler_test.go` and `cancellation_test.go` also present — **no new entry was needed and none was made** ✅ |
+| Release of `doc.go` / `doc_contract_guard_test.go` recorded in prose | read `R-LSK-008` consequences 4 and 7, `R-HKS-010` consequence 5, `S-LSK-032` | recorded in **four** places, each naming it as a second, unrelated release distinct from the design-time one that never fired ✅ |
+| `len(agent.EventKinds()) == 25` | asserted at `hooks_test.go:1573` in the green suite, now running **before** the skip | **25** ✅ |
+| `*agent.Harness` exactly 5 methods | `hooks_test.go:1578` (count) and `hooks_harness_test.go:800` (exact named set), both green | **5** ✅ |
+| No wall clock in production | `TestHooksHarness_S_RUN_113_…` scans `hooks.go` and `harness.go` for `"time"`, `time.After/Sleep/NewTimer/NewTicker`, `context.WithTimeout/WithDeadline` — green | none ✅ |
+| Observers get a `context.Background()`-rooted context | grepped `hooks.go` | `obs(context.Background(), report)` at `:338` and `:357`; **no `WithoutCancel` anywhere** ✅ |
+| Observer cannot reach `DelegationSeamFrom` | structural (a `Background()` context carries no values) + `S-DEL-026` / `S-AGE-030` green | ✅ |
+| Production unchanged since round 1 | `git diff d6dae074 -- hooks.go loop.go harness.go compaction.go` | **empty** — round 2's only production edit is `doc.go`'s single contract row ✅ |
+| Count-assertion sweep over the change directory | grepped every numeric/spelled quantifier over deltas, scenarios, requirements, rows | `tasks.md` 7.2's "**Now 11 deltas**" is **correct** (12 spec dirs = 1 new capability + 11 deltas; all 11 targets exist in `openspec/specs/`); `S-HKS-025`'s "three AMENDED rows" is **correct**; only S-3 above is stale ✅ |
+| Task completion | `tasks.md` | 52 checked; 7.2 and 7.3 remain unchecked and are explicitly `[ARCHIVE OBLIGATION]` / `[ARCHIVE NOTE]` for `sdd-archive`; 7.4 was discharged in round 1 ✅ |
+
+### 11.6 Authoritative counts (round 2)
+
+Measured across the **12** spec files (1 new capability + 11 deltas):
+**27 requirements, 63 scenario declarations** (round 1: 25 / 61; `R-CAN-006`,
+`R-CAN-008`, `S-CAN-016`, `S-CAN-017` are the additions).
+
+**Coverage: 27 / 27 requirements, 63 / 63 scenarios.** Every requirement and
+every scenario has a covering test that passed at runtime in the 173.49s
+uncached `-race` run above — there is no `UNTESTED` and no `FAILING` scenario.
+
+The envelope's completion counts state exactly that, and deliberately do **not**
+deduct W-1 and W-2. Both are **prose over-claims above passing tests**, not
+coverage gaps: `S-RUN-113`'s test does compare the hooked and baseline streams
+(by event count) and runs `CheckStream` over them, and `S-LSK-033`'s guard does
+run and does bite at all three sites it lists. What is wrong in each case is one
+clause of the scenario's own wording, which is a WARNING under this phase's
+decision gates ("design deviation exists → WARNING unless it breaks a spec"),
+not a missing or failing covering test. Recording them as coverage deductions
+would misreport working, executed coverage as absent.
+
+### 11.7 Verdict
+
+**PASS WITH WARNINGS.** Both CRITICAL blockers are closed and each closure was
+re-proved by execution — a planted anti-pattern at the two sites the coordinator
+had not tested, a mutated contract row, a re-applied compaction sabotage, and an
+adversarial re-test of the shared `stripGoComments` helper plus a bite check on
+each of its pre-existing callers. All 8 MAJOR findings are closed, and in each
+case the rewritten scenario matches what the test actually does — checked against
+test bodies, not against apply's summary. Nothing found this round blocks
+promotion into `openspec/specs/`.
+
+**Next phase:** `sdd-archive`. W-1 and W-2 are one-sentence prose corrections that
+`sdd-archive` may fold into the promotion commit; they do not warrant a third
+`sdd-apply` round.
