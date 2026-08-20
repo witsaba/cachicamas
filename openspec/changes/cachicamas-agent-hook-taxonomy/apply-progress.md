@@ -13,9 +13,8 @@ records for a genuine (non-cached) run; exit 0, zero `FAIL`.
 2. `dac4fc3f` `test(agent): AG-20 -- hook taxonomy scenario suite, all 49 scenarios`
 3. `779a4c4b` `docs(0003): AG-20 -- tick hook taxonomy milestone, Wave 5 complete`
 4. `591ce82d` `fix(agent): AG-20 -- S-LSK-032's own guard must allow hooks.go's diff`
-5. *(this correction round)* `fix(agent): AG-20 -- convert AG-19's two anti-vacuity
-   floors to skip, close the shape in AG-20's own new test` — see
-   "Correction round" below.
+5. `50e02b8f` `fix(agent): AG-20 -- close anti-vacuity floor merge blocker in scope guards`
+   — see "Correction round" below.
 
 ## Deviation from the suggested U1/U2/U3 commit split
 
