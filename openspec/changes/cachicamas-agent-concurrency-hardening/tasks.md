@@ -114,7 +114,7 @@ Counted against the **1000-line budget excluding `openspec/**`**, extension pre-
 - [ ] 9.4 `agent-cancellation-tree`: **NO header change** — no new `S-CAN-`/`R-CAN-` identifier minted.
 - [ ] 9.5 `agent-turn-termination`: **NO header/ID change.**
 - [ ] 9.6 `agent-v1-scope`: add `S-AGS-067` to the scenario range (range, never a total). No other header line changes.
-- [ ] 9.7 `agent-loop-skeleton`: extend the scenario range to `S-LSK-034`; append the AG-21 amendment line (`R-LSK-009` ADDED, `R-LSK-008` MODIFIED, no substrate release requested, both filters widened by exact suffix for the 5 new files, one narrow normative release on `hooks_test.go`'s `S-LSK-032` block).
+- [ ] 9.7 `agent-loop-skeleton`: extend the scenario range to `S-LSK-034`; append the AG-21 amendment line (`R-LSK-009` ADDED, `R-LSK-008` MODIFIED, no substrate release requested, both filters widened by exact suffix for the 5 new files, one narrow normative release on `hooks_test.go`'s `S-LSK-032` block). **Round-2 addition (MAJOR-3)**: ALSO apply the body correction to `S-LSK-032`'s own scenario clause — replace "neither names `failure.go`, `cost_events.go`, `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" with "neither names `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" (dropping `failure.go`/`cost_events.go`, present in both filters since AG-11/AG-16) and attach the `(Previously: ...)` note specified in this delta's `S-LSK-032` AG-21-amendment section. This is a body edit, separate from the two header edits above.
 
 ## Phase 10 — Post-archive verification (AG-20's truncation defect MUST NOT repeat)
 
