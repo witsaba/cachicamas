@@ -1,12 +1,16 @@
 # Apply progress: AG-20 — Complete the hook taxonomy
 
-**Status**: 51/54 tasks complete. The remaining 3 (7.2, 7.3, 7.4) are explicitly
-`sdd-archive`/`sdd-verify` obligations per their own task text, not apply's.
+**Status**: 52/54 tasks complete (7.4 discharged by `sdd-verify` itself, see
+below). The remaining 2 (7.2, 7.3) are explicitly `sdd-archive` obligations
+per their own task text, not apply's or verify's. `sdd-verify` round 1
+returned **FAIL — 2 CRITICAL, 8 MAJOR, 5 MINOR**; all 15 findings are closed —
+see "Correction round 2" below, which is this file's current, authoritative
+evidence.
 
 **Mode**: Strict TDD. Runner: `cd backend/agent && go test -race -count=1 ./...`.
-Final evidence run (post-correction, see below): **172.57s real** (`2:52.57`),
-`-count=1`, uncached — matches the ~170s baseline this project's memory
-records for a genuine (non-cached) run; exit 0, zero `FAIL`.
+Final evidence run (post round-2 correction, see below): **175.09s real**
+(`2:55.09`), `-count=1`, uncached — matches the ~170s baseline this project's
+memory records for a genuine (non-cached) run; exit 0, zero `FAIL`.
 
 **Commits** (`feat/agent-layer2-wave5-ag20`):
 1. `83362a26` `feat(agent): AG-20 -- complete the hook taxonomy production surface`
@@ -14,7 +18,15 @@ records for a genuine (non-cached) run; exit 0, zero `FAIL`.
 3. `779a4c4b` `docs(0003): AG-20 -- tick hook taxonomy milestone, Wave 5 complete`
 4. `591ce82d` `fix(agent): AG-20 -- S-LSK-032's own guard must allow hooks.go's diff`
 5. `50e02b8f` `fix(agent): AG-20 -- close anti-vacuity floor merge blocker in scope guards`
-   — see "Correction round" below.
+   — see "Correction round 1" below.
+6. `7d64d219` `docs(openspec): AG-20 -- record the correction commit hash in apply-progress`
+7. `d6dae074` `docs(openspec): AG-20 -- annotate task 6.4 with the correction round`
+8. `f5232f3a` `fix(agent): AG-20 -- repair the dead anti-vacuity regression guard (CRITICAL-1)`
+9. `190d4426` `fix(agent): AG-20 -- track backtick raw strings in the shared stripGoComments`
+10. `9268d007` `fix(agent): AG-20 -- scope L2C-08's goroutine-exit claim to admit the observer lane (CRITICAL-2)`
+11. `f05cdccb` `docs(openspec): AG-20 -- correct four overreaching scenarios (MAJOR-1..4)`
+12. `f3bc556e` `docs(openspec): AG-20 -- correct remaining MAJOR/MINOR findings (5..8, MINOR-4/5)`
+    — commits 6-12 are "Correction round 2", see below.
 
 ## Deviation from the suggested U1/U2/U3 commit split
 
@@ -119,7 +131,7 @@ claimed as complete. Scenario ID `S-HKS-011` is still mapped to task 2.5 per
 the coverage table, since the join of (2 behavioral rows) + (structural count
 proof for the remaining 6) is what task 2.5 actually produced.
 
-## Correction round: the two failures are a merge blocker, not pre-existing
+## Correction round 1 (`sdd-apply` coordinator review): the two failures are a merge blocker, not pre-existing
 
 **This section corrects an earlier, wrong claim in this same file.** The
 first pass of this apply reported `TestScopeFence_S_TLS_020_...` and
@@ -228,43 +240,122 @@ The earlier Engram memory entry titled
 repeated the "pre-existing, not fixed here" framing, is superseded by this
 section and by a corrected Engram save made in this same correction round.
 
-## Final full-suite evidence (corrected re-run, uncached)
+## Correction round 2 (`sdd-verify`): FAIL — 2 CRITICAL, 8 MAJOR, 5 MINOR, all closed
+
+`sdd-verify` independently re-ran the suite (**171.00s real**, exit 0),
+re-derived the coverage matrix from the test bodies rather than trusting this
+file's own claims, planted the anti-vacuity anti-pattern back into the guard
+round 1 shipped, and opened every cited requirement. Verdict: the production
+code is correct, every non-negotiable invariant holds by measurement, and task
+7.4's ADDED-not-MODIFIED judgment was discharged in this change's favour — but
+9 scenarios would have archived asserting something the shipped tests do not
+prove, and the correction-round-1 regression guard did not fire. Every finding
+below is a spec-versus-code contradiction or an untested claim, never a code
+defect; **no test was weakened and no coverage was deleted** to close any of
+them.
+
+| # | Finding | What changed | Test or scenario? |
+|---|---|---|---|
+| CRITICAL-1 | `TestHooks_AntiVacuityFloorsSkipRatherThanFail`'s regex bounded the scan to 300 chars between `{` and `t.Fatal`; every protected site's own explanatory comment (717 chars at the reproduced site) exceeded it, so planting the anti-pattern back in at any of the three sites passed silently | Widened `[^}]{0,300}` to unbounded `[^}]*` (safe: `[^}]` cannot cross the guarded branch's own `}`) and ran the match against comment-stripped source, reusing this package's own `stripGoComments` (`scheduler_test.go`) rather than adding a competing implementation. Discovered `stripGoComments` itself had a latent bug — no backtick-raw-string tracking, desynced by `hasSuffixLiteralPattern`'s own 3-quote regex literal — and fixed that at its root, benefiting its two pre-existing callers too. **Proved the repair bites**: planted the historical anti-pattern back at all three sites in turn, captured the real `--- FAIL` output for each, reverted via `git checkout --` | **Test** (the regression guard itself, plus its shared dependency) |
+| CRITICAL-2 | `L2C-08`'s package contract row claimed "every goroutine the package itself owns has exited" past the wind-down bound; AG-20's own observer lane goroutine may legitimately still be running, by design, while blocked inside a permanently stalled observer — falsifying the row, with no delta recording it | Widened `doc.go`'s `L2C-08` row and `doc_contract_guard_test.go`'s mirrored `expectedLayer2ContractRows` entry to name a second carve-out (a permanently stalled observing-hook invocation, reported typed by hook point and index), following the AG-18/`L2C-07` precedent exactly; added `TestDocContract_L2C08CarveOutClause` mirroring `TestDocContract_L2C07BothClausesTogether`; added a new `agent-cancellation-tree` delta amending `R-CAN-006` (a third disjoint-set table row) and `R-CAN-008` in full, with two new scenarios (`S-CAN-016`, proven by existing `S-HKS-017`/`S-HKS-019` fixtures without a new Go test; `S-CAN-017`, proven by the new doc-contract test); added the missing row to `R-HKS-011`'s own closed-sequence table; recorded the narrow release of `doc.go`/`doc_contract_guard_test.go` (no new filter entry needed — both pre-existing in both substrate filters since AG-18) | **Production doc + spec + one new test** |
+| MAJOR-1 | `S-HKS-026` claimed a merge-base comparison and history-read-back/provider-request byte-identity the test never performs — it runs the same hookless config twice on this branch and compares only event-kind sequences. AG-19's identical shortcut earned its justification (its own diff is never read on the hookless path); AG-20 does not re-earn it, since `loop.go`'s chain composition, `harness.go`'s capture locals and `compaction.go`'s `len(chain) > 0` guard all execute unconditionally on that path too | Corrected the scenario (and the test's own Go doc comment) to claim only what two-runs-on-this-branch proves: determinism under repetition and goroutine-count return-to-baseline, with equivalence to pre-AG-20 behavior stated as a structural (code-inspection) claim, not a behavioral one this test measures. Also fixed a stale "six paired runs" to the actual seven arms | **Scenario** (chose narrowing, the option `sdd-verify` explicitly offered, over building an impractical merge-base-checkout comparison this codebase has no precedent for) |
+| MAJOR-2 | `S-HKS-011` demanded eight behavioral runs; two shipped (rows 13, 7) plus a structural call-site-count proof for the remaining six, exactly as this file's "Known limitation" section above and the Go test's own comment already disclosed honestly | Corrected the scenario text to state the actual, achieved method (2 behavioral + structural count proof) instead of the unshipped 8-run claim | **Scenario** (the Go test and this file's own prior prose were already honest; only the spec scenario overreached) |
+| MAJOR-3 | `S-HKS-023` / `S-PRH-009` both claimed attribution is unchanged when elements are inserted INTO the chain ahead of the failing one — false and must be false: attribution is that element's own slice index, so insertion ahead of it correctly renumbers it. The test proves a different, true claim: the SINGULAR field's own presence/absence does not renumber the chain | Corrected both scenarios to state the true claim (stability under the singular field's own insertion/removal, explicitly NOT under insertion into the chain) | **Scenario** (×2 — `agent-hook-taxonomy` and `agent-pre-request-hook` deltas) |
+| MAJOR-4 | `S-HKS-001` still claimed `scope_fence_test.go` (the whole file) is byte-unchanged; `R-HKS-010` consequence 4 had already retracted that claim for the file but `S-HKS-001` was never updated to match | Corrected `S-HKS-001` to name the specific assertions that stay byte-unchanged (not the whole file); swept the entire change directory for the same stale pattern and confirmed every remaining mention is narrowly scoped to a still-accurate, genuinely-unedited assertion (e.g. `:102-105`'s `NumMethod()` check) | **Scenario** |
+| MAJOR-5 | `S-HKS-012` claimed each retried attempt carries a distinct nonzero usage figure and the sum strictly exceeds the last attempt's own — both structurally unachievable: `retryDecision`'s G1-G5 gates only retry attempts that never reach `finalize()`, the sole `cost_turn` emission site, so a retried attempt always contributes zero | Corrected the scenario to the achievable claim the fixture proves: the sum equals the one completing attempt's own figure; attempt count is genuinely 3 | **Scenario** |
+| MAJOR-6 | Bite `S-HKS-053` claimed its RED shows "the committed prefix splitting a call/result pair"; the actual, reproduced RED is "compaction fails typed" (`hist.markSpan` rejects the cut, zero `compaction_finished`) — `sdd-verify` additionally neutralised the `markSpan` guard too and it STILL could not reach a split, since `buildLoopRequest` independently refuses a pairing-broken prefix | Corrected the scenario and the bite table row to the actual, reproduced observable, while keeping the verdict the property IS proven (removing re-resolution turns success into typed failure) | **Scenario** (the actual RED shape was already recorded accurately in this file's own "TDD Cycle Evidence" table above, `S-HKS-053` row — only the spec's own scenario text and bite table had drifted from it; `sdd-verify` independently reproduced the same RED, including the further probe that shows the split is unreachable even with a second guard also removed) |
+| MAJOR-7 | `S-RUN-113` claimed a four-method set; the shipped set is five (`Compact, Interrupt, Run, Shutdown, Steer`) — `R-RUN-001`'s own pre-existing (AG-18) staleness, which AG-20 did not create but which `S-RUN-113` restated as a fresh claim | Corrected the scenario to state the true, current five names directly rather than delegating to `R-RUN-001`'s stale count; renamed the covering test from `...AdditionsExactlyFourAbsencesAsserted` to `...AdditionsExactlyFiveAbsencesAsserted` (identifier only — the test's own assertion logic was already correct and unchanged) | **Scenario**, plus a test **identifier** rename (no logic change) |
+| MAJOR-8 | `tasks.md`'s coverage table stated a total of "49 scenarios," now stale (52 new scenarios after `S-LSK-033`, `S-CAN-016`, `S-CAN-017`); `S-LSK-033` was additionally absent from the coverage table entirely | Replaced the stated total with the `S-LSK-020` no-total treatment (allocated ranges per delta instead of a count that goes silently stale on the next append); added the three missing scenario rows | **Task artifact** (`tasks.md`, not a Go test or an OpenSpec scenario) |
+| MINOR-1 | `hooks_test.go`'s S-HKS-024 test ran its loop.go anti-vacuity `t.Skip` BEFORE four diff-independent reflection assertions (event-kind count, method count, `Turn`/`Run` signatures); on a future branch not touching `loop.go`, all four would silently stop running with this suite | Moved the skip to the end of the function, after all four diff-independent assertions | **Test** |
+| MINOR-2 | `S-LSK-033`'s bounding clause said the release "converts one branch to a call to `t.Skip`" — true for `scope_fence_test.go`, inaccurate for `cancellation_test.go`, which converts to `continue` plus a `scannedAny` flag plus a separate terminal branch | Corrected the scenario to describe each file's actual, different shape precisely | **Scenario** |
+| MINOR-3 | `TestCancellation_NestedRunCancelsLeafFirst` reported `SKIP` even though its entire behavioral core had already run and passed — misleading to anyone scanning for skipped coverage, and inconsistent with this same file's own pre-existing `baseRefIsHEAD` branch, which uses `t.Logf` + `return` a few lines above | Converted the terminal "nothing to scan" branch from `t.Skip` to `t.Logf` + `return`, matching the file's own established idiom; the test now reports `PASS` | **Test** |
+| MINOR-4 | Doc 0003's status line said "20 of 24" (the document's own Wave 0-6 table of contents sums to 21 shipped) and "5 of 7 wave-2 milestones shipped" (the same table lists exactly 5 Wave-2 milestones, all shipped — the "7" was never correct) — both pre-existing, carried forward rather than introduced by AG-20 (prior counter value was 19); AG-20's own two ticks and narrative sentence were independently confirmed accurate | Corrected both counts using the document's own authoritative table of contents as evidence | **Architecture doc** (not a Go test or OpenSpec scenario) |
+| MINOR-5 | "Byte-identical" in `S-HKS-007`, `S-HKS-017` and `S-RUN-113` is implemented as `kindsEqualHKS` (event-KIND sequence equality) — payload fields, full events and (except `S-HKS-007`'s own history-read-back half, which genuinely is compared entry-by-entry) provider requests are not compared | Added a precision parenthetical to each scenario naming the actual mechanism, without touching `S-HKS-007`'s accurate history-read-back claim | **Scenario** (×3) |
+
+No finding required deleting or weakening a test, and no finding required
+adding new behavioral coverage beyond CRITICAL-1's own regression guard and
+CRITICAL-2's one new doc-contract test — every other fix corrected prose to
+match code that was already correct.
+
+## Final full-suite evidence (round 2, post-`sdd-verify`-correction, uncached)
+
+Round 1's own evidence (172.57s, immediately above) is superseded by this
+run, taken after every CRITICAL/MAJOR/MINOR fix above landed:
 
 ```
 $ cd backend/agent && go test -race -count=1 ./...
-ok  	github.com/cachicamas/backend/agent/src/agent	9.197s
-ok  	github.com/cachicamas/backend/agent/src/agenttest	2.679s
-ok  	github.com/cachicamas/backend/agent/src/agenttest/sweep	2.125s
-ok  	github.com/cachicamas/backend/agent/src/agenttest/tracetest	2.150s
-ok  	github.com/cachicamas/backend/agent/src/ai	4.631s
-ok  	github.com/cachicamas/backend/agent/src/ai/internal/retry	2.662s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	171.912s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest	3.219s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter	2.951s
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance	6.722s
+ok  	github.com/cachicamas/backend/agent/src/agent	9.462s
+ok  	github.com/cachicamas/backend/agent/src/agenttest	2.209s
+ok  	github.com/cachicamas/backend/agent/src/agenttest/sweep	1.792s
+ok  	github.com/cachicamas/backend/agent/src/agenttest/tracetest	1.900s
+ok  	github.com/cachicamas/backend/agent/src/ai	4.441s
+ok  	github.com/cachicamas/backend/agent/src/ai/internal/retry	2.385s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat	174.486s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest	2.618s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter	3.151s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance	6.203s
 ?   	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance/fixtures	[no test files]
-ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke	2.528s
-ok  	github.com/cachicamas/backend/agent/src/handoff	2.222s
+ok  	github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke	2.360s
+ok  	github.com/cachicamas/backend/agent/src/handoff	2.073s
 $ echo $?
 0
 ```
 
-Wall-clock, measured with `time`: **`( go test -race -count=1 ./... )  63.84s
-user 7.59s system 41% cpu 2:52.57 total`** — **172.57s real**, `-count=1`,
-uncached. Zero `FAIL` anywhere in the module. This is the evidence that
-supersedes the mischaracterized run at the top of this section's previous
-version; both `S-TLS-020` and `S-DEL-015` now SKIP (confirmed above via the
-targeted `-v` run) rather than FAIL, and no other package regressed.
+Wall-clock, measured with `time`: **`( go test -race -count=1 ./... )  65.18s
+user 7.86s system 41% cpu 2:55.09 total`** — **175.09s real**, `-count=1`,
+uncached (started `13:02:39`, finished `13:05:34`). Zero `FAIL` anywhere in
+the module, zero `(cached)` marker. `go vet ./...`: clean, no output.
+`gofmt -l` on every AG-20-owned and correction-round file (`hooks.go`,
+`hooks_test.go`, `hooks_harness_test.go`, `hooks_compaction_test.go`,
+`loop.go`, `harness.go`, `compaction.go`, `loop_test.go`, `loop_hook_test.go`,
+`compaction_surgery_test.go`, `scope_fence_test.go`, `cancellation_test.go`,
+`scheduler_test.go`, `doc.go`, `doc_contract_guard_test.go`): clean —
+`scheduler_test.go` alone shows 3 gofmt hunks (lines 35, 77, 1028), all
+confirmed pre-existing and outside this correction round's own edit (which
+sits at ~lines 677-745) via `gofmt -d`; none touches this round's own lines.
+
+**Anti-vacuity guard proof (CRITICAL-1), captured transcripts:**
+
+```
+$ # site 1: scope_fence_test.go, t.Skip -> t.Fatal planted
+$ go test -count=1 -v -run 'TestHooks_AntiVacuityFloorsSkipRatherThanFail' ./src/agent/...
+    hooks_test.go:2222: scope_fence_test.go contains an empty-diff branch that
+    calls t.Fatal(f) instead of t.Skip ...:
+        diff == "" {
+        		t.Fatal
+--- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail (0.02s)
+    --- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail/scope_fence_test.go (0.01s)
+FAIL   (reverted via git checkout --; re-confirmed PASS afterward)
+
+$ # site 2: cancellation_test.go, continue -> t.Fatal planted
+$ go test -count=1 -v -run 'TestHooks_AntiVacuityFloorsSkipRatherThanFail' ./src/agent/...
+    hooks_test.go:2222: cancellation_test.go contains an empty-diff branch
+    that calls t.Fatal(f) instead of t.Skip ...
+--- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail (0.02s)
+    --- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail/cancellation_test.go (0.00s)
+FAIL   (reverted via git checkout --; re-confirmed PASS afterward)
+
+$ # site 3: hooks_test.go's own S-HKS-024 site, t.Skip -> t.Fatal planted
+$ go test -count=1 -v -run 'TestHooks_AntiVacuityFloorsSkipRatherThanFail' ./src/agent/...
+--- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail (0.02s)
+    --- FAIL: TestHooks_AntiVacuityFloorsSkipRatherThanFail/hooks_test.go (0.02s)
+FAIL   (reverted via git checkout --; re-confirmed PASS afterward)
+```
+
+All three plants caught, all three reverted cleanly (`git status` clean after
+each), `go build`/`go vet` confirmed clean after the final revert.
 
 ## Gates (Phase 6)
 
-- `gofmt -l` on all 10 AG-20 files: clean (two files needed one `gofmt -w`
-  pass for pure whitespace after initial authoring; verified clean after).
-- `go vet ./...`: clean.
+- `gofmt -l` on all 10 AG-20 files plus the round-2 correction files (see
+  above): clean.
+- `go vet ./...`: clean (re-confirmed round 2).
 - `golangci-lint run --config=.golangci.yml ./...` (after `make lint`
   auto-installed golangci-lint v2.9.0): found 4 issues (3 comment-form
   findings on `StallOutstanding`/`StallQueued`/`StallPanicked`, 1 De Morgan's
-  law suggestion) — fixed; re-run: **0 issues**.
+  law suggestion) — fixed; re-run: **0 issues**. Not independently re-run in
+  round 2 (`sdd-verify` noted this and did not re-run it either; no round-2
+  edit touched a linted construct these findings were about).
 - `make build`: clean.
 - `make vuln-check`: exit 0, **zero reachable findings** — `govulncheck -json`
   reports several OSV database entries for dependencies in the build list
