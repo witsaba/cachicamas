@@ -1,0 +1,30 @@
+# Delta for `agent-run-driver` — nested runs are PROVEN, no production subagent tool ships, and the run's closed sequences do not move
+
+> **Change**: `cachicamas-agent-delegation-readiness` · **AG-19** (Layer 2, Wave 5), `0003:1793-1862`
+> **Modifies**: `agent-run-driver` ([`../../../../specs/agent-run-driver/spec.md`](../../../../specs/agent-run-driver/spec.md)) — the non-requirement row at `spec.md:345` only.
+> **BACK-ANNOTATION ONLY, and scenario-free.** No requirement is amended, no scenario is added or removed, no bracket count moves, and no sequence rule changes.
+> **This delta was NOT in the proposal's list of nine, and it is here on evidence.** `R-RUN-003` states *"exactly one run-open/run-close pair, N turn-open/turn-close brackets nested inside it (one per `Turn` invocation), and one contiguous 1-based sequence across the entire run"*, and the non-requirement row at `spec.md:345` reads *"A production subagent tool, nested or child runs | **AG-19.**"*. AG-19 is the milestone that makes nested runs real and that puts a **new event producer** onto a live run's lane from inside a tool frame. Both statements come due here; leaving either unannotated is this repository's known staleness shape, and **no Go test defends a back-annotation**.
+> **The verdict on the closed sequences is: they hold, and they hold by MECHANISM rather than by fixture luck.** That reasoning is recorded in the table below rather than left to be rediscovered, because "a new event producer landing inside a requirement that never mentions it" is exactly how this repository has broken specs before.
+> **Ownership**: the seam and its admissibility rule are owned by [`../agent-delegation-readiness/spec.md`](../agent-delegation-readiness/spec.md) (`R-DEL-002`, `R-DEL-005`, `R-DEL-010`). This delta owns only the run driver's audit statement.
+
+## Not modified, and why — the closed-sequence analysis, stated rather than assumed
+
+| Rule | Verdict | The mechanism that keeps it true |
+|---|---|---|
+| `R-RUN-003` — **exactly one** run-open/run-close pair per run | **holds** | the seam refuses every kind carrying a bracket role and every terminal kind (`R-DEL-002` gates 2 and 4), so a child's `run_start` and `run_end` can never reach the parent's lane. AG-19's bite `S-DEL-021` admits one deliberately and watches the parent's `CheckStream` fail with a duplicate run-open — the gate is asserted, not assumed |
+| `R-RUN-003` — **N** turn brackets, one per `Turn` invocation | **holds** | the same gate 2 refuses `turn_start` and `turn_end`. A hosted child run performs its own turns on its **own** lane; the parent's bracket count is unchanged. AG-19 opens no bracket and closes none |
+| `R-RUN-003` — one **contiguous** 1-based sequence owned by a single shared `LaneStamper` | **holds** | a mirrored event is stamped by the parent's **one** dispatcher goroutine, the same single stamping writer every concurrent sibling tool call already uses; re-stamping discards the prior sequence and returns a copy (`sequence.go:50-58`), so the parent's lane stays contiguous and the child's own lane — stamped only by the child's own stamper — stays independently contiguous. Two lanes, never merged |
+| `S-RUN-020`'s walk — exactly one run-open, exactly one run-close, exactly N brackets, sequence increasing by exactly 1 | **holds unchanged** | all three of the above; its fixture drives no tool that publishes, and its assertions would still pass on a fixture that did |
+| `R-RUN-011`'s failure path and its AG-16 cost insertion | **holds** | the seam is revoked when the hosting tool call completes, on every exit path (`R-DEL-003`), so no mirrored event can land in the run's closing tail. The final cost figure still sits immediately before the run-close |
+| `R-RUN-012`'s sink-ownership flag and its one-mutation exception | **holds** | AG-19 mutates no caller field; the seam is a per-call context value, not a scheduler or harness field |
+| `R-RUN-001`'s one-run-at-a-time clause | **holds, and AG-19 stays inside it deliberately** | AG-19's sibling scenario uses **two distinct `Harness` values**, never two concurrent `Run` calls on one value. This is noted so a reviewer does not read the sibling scenario as a collision with this clause |
+
+Any milestone that later admits a kind AG-19's rule refuses, or that lets a publish survive its hosting tool call, MUST re-check every row above before doing so.
+
+## MODIFIED Explicit non-requirements
+
+The list is reproduced only where AG-19 touches it; every other row is unchanged and none is removed.
+
+- **A production subagent tool, nested or child runs** — was: *"**AG-19.** No subagent tool ships in v1 (`0003:1794`)."* **SPLIT by AG-19, because the row bundles two things with different fates, and closing it whole would be a false claim.**
+  - **Nested and child runs: PROVEN by AG-19.** A child `Harness` value runs to completion inside a parent's tool call, on a context derived from the tool's own `ctx`, with its events mirrored onto the parent's stream through a publishing seam and its own stream captured and validated separately. Four structural properties are proven under it: attribution by a one-hop parent walk, sibling children interleaving with no cross-talk under `-race`, cancellation inherited leaf-first through the **existing** tree, and cost and permission crossing correctly. **The run driver itself is unchanged**: it gained no requirement, no scenario, no field and no bracket — a hosted child run drives its **own** `Harness.Run`, and the parent's run driver never learns a child exists.
+  - **A production subagent tool: STILL NOT SHIPPED, and still post-v1** (`0003:1803`). AG-19's every subagent concept lives in `package agent_test`, which production code cannot import, and the seam's concrete type and installer are unexported so no code outside the package can mint one. *(A reader must not take "nested runs proven" as "a subagent tool shipped". The row's first half closes; its second half does not, and its second half is the one AG-02's verdict governs.)*

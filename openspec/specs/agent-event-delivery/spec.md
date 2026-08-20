@@ -150,6 +150,13 @@ The decision MUST settle the single-hand-off versus multi-observer fork explicit
 
 The decision MUST state, for each of the per-turn, per-run and per-delegated-run scopes, its sole owner and sole closer: the loop for the turn scope, the harness for the run scope, and the child harness for a delegated run with the parent separately owning the subagent bracket on its own stream. It MUST state that ownership is never shared, that nesting is strict and sequential, and that nothing else closes — not a consumer, not a test helper, not a party above the layer.
 
+**Back-annotation (AG-19) — the per-delegated-run scope now exists in fact, and the rule it was written for held without amendment.** AG-04 wrote this scope before any delegated run could exist. AG-19 creates one, and every clause survives literally:
+
+- **The child harness is the sole closer of the child's stream.** The child's sink closes only after the child's run-close was sent (`harness.go:446`), and the parent's tool never closes it.
+- **The parent separately owns the subagent bracket on its own stream.** `subagent_started` and `subagent_ended` are parent-lane events, stamped by the parent's dispatcher, and the child never emits them.
+- **Nesting is strict and sequential, and the ordering is structural rather than asserted.** The tool publishes `subagent_ended` only after the child's sink closed, so on the parent's lane `index(subagent_ended) < index(parent run-close)` — which is exactly `S-AGE-014`'s "the child's stream fully closes before the parent's representation of it closes", now checkable by a test instead of by a reviewer.
+- **Ownership is never shared even with N children.** Sibling tool calls each host a **distinct** `Harness` value with its own context, transcript, stamper and sink; concurrent `Run` calls on one `Harness` value remain out of scope.
+
 #### Scenario: S-AGE-013 — Every scope has exactly one closer
 
 - **GIVEN** the merged decision
@@ -161,6 +168,17 @@ The decision MUST state, for each of the per-turn, per-run and per-delegated-run
 - **GIVEN** a delegated run cancelled leaf-first
 - **WHEN** a reviewer traces the close order under the decision's rules
 - **THEN** the child's stream fully closes before the parent's representation of it closes, AND the parent never closes the child's stream, AND the child never closes the parent's
+
+*(AG-19 update: this scenario's claim is unchanged, and it is now discharged by execution rather than by review — `S-DEL-014` runs exactly this shape and asserts the close order by observed event index on the parent's lane, never by elapsed time.)*
+
+#### Scenario: S-AGE-028 — AG-19: the delegated scope is exercised, and the closers are counted in a running system
+
+- **GIVEN** a parent run whose tool hosts a child harness, and separately two sibling tools each hosting their own child
+- **WHEN** the runs complete and every stream is captured
+- **THEN** each child's sink is closed exactly once, by that child's own harness, and neither the parent nor a sibling closes it
+- **AND** `subagent_started` and `subagent_ended` appear only on the parent's lane, and no child emits either
+- **AND** on the parent's lane the index of each `subagent_ended` is strictly less than the index of the parent's run-close
+- **AND** the parent's stream and each child's stream are `CheckStream`-valid **validated separately**, never concatenated
 
 ### R-AGE-011 — Exactly-one-terminal discipline at the agent level
 
@@ -230,15 +248,31 @@ The decision MUST require a **typed rejection** — never a silent drop and neve
 
 The decision MUST state that a child harness has its own inbound surface, that what a child's policy scope would ask about is asked on the **parent's** stream, and that the frontend therefore answers through the parent's surface while the parent's routing must reach the nested child's own suspension lookup.
 
+**Back-annotation (AG-19) — `S-AGE-022`'s routing obligation is DISCHARGED, and it is discharged with ZERO new production routing surface.** The obligation this requirement stated was that the routing be *stated rather than left to the delegation milestone to invent*. AG-19 is that milestone, and it invented nothing:
+
+- **Ask up.** The child's `permission_decision_required` is emitted on the child's own stream by the child's own scheduler and is **mirrored** onto the parent's stream through the publishing seam. Its answering `permission_decision_made` crosses **with it**: a mirrored ask with no mirrored answer is unreadable to the human watching, so the pair crosses together or not at all (`R-DEL-002`, `R-DEL-008`).
+- **Decision down.** The human's verdict, given on the parent's surface, reaches the child's suspension through the **existing** wake surface (`scheduler.go:264-272`), on the child `Scheduler` value the delegating tool already owns. The gate re-enters resolution on wake (`scheduler.go:772-783`) and the child's derived scope answers with that verdict. **No new routing type, method, channel or registry ships.**
+- **What "the parent's policy allowed flows down" operationally means, since the phrase admits a weaker reading.** The child's scope is an ordinary composition of the parent's policy; it may only **narrow** and MUST NOT **widen**, and AG-19 asserts **both** directions rather than only the convenient one (`S-DEL-018`). No scope type, rule set or mode flag enters Layer 2.
+- **What is not carried up.** `permission_resolution_remembered` is `CardinalityAtMostOne`, so it is refused at the seam and stays on the child's own stream. A remembered rule remains scoped to one `Schedule` call, exactly as `R-APP-010`'s deferral already says.
+
 #### Scenario: S-AGE-022 — A decision for a nested call reaches the child
 
 - **GIVEN** a call suspended inside a delegated run
 - **WHEN** a reviewer traces where the frontend sends the decision and where it must arrive
 - **THEN** it is sent to the parent's surface and arrives at the child's suspension, AND the routing obligation is stated rather than left to the delegation milestone to invent
 
+*(AG-19 update: the obligation is now discharged by execution — `S-DEL-019` suspends a child call, observes the ask and its answer on the parent's stream, answers through the existing wake surface and asserts the child's call resumes with that verdict. This scenario's own claim is unchanged; the annotation adds discharge evidence.)*
+
 ### R-AGE-017 — Downstream milestones consume this surface rather than inventing their own
 
 The decision MUST close with an inheritance table stating, in each milestone's own terms, what AG-04, AG-10, AG-13, AG-14, AG-19 and AG-20 take from it. It MUST state that none of them may invent its own channel, its own loss rule, or its own way back into a live run; a downstream milestone that finds itself deciding one of these properties is proposing an amendment to this decision, not exercising a judgement call.
+
+**Back-annotation (AG-19) — AG-19's row is EXERCISED UNAMENDED, and the borderline case is adjudicated in the open rather than assumed away.** AG-19 is the first milestone whose whole subject matter is "a way back into a live run", so the row deserves an explicit verdict rather than a reassurance:
+
+- **No channel is invented.** AG-19 reuses the scheduler's existing emission funnel verbatim — the same funnel, the same single stamping dispatcher goroutine, the same sink — that concurrent sibling tool calls already use. It creates no channel, declares no buffer capacity and names no numeric value, so `R-AGE-018` is untouched too.
+- **No loss rule is invented.** A mirrored event either reaches the funnel or is refused **typed**, by one of exactly two sentinels: inadmissible (the kind can never cross) or revoked (the hosting call has completed or detached). There is no third outcome, no silent drop and no panic (`R-DEL-002`, `R-DEL-003`).
+- **No second stamping writer is introduced.** Each lane keeps exactly one stamping writer: the parent's stamper is touched only by the parent's dispatcher, the child's only by the child's own. Re-stamping discards the prior sequence and returns a copy, so both lanes stay contiguous and are **never merged**.
+- **The borderline judgement, stated because this requirement demands it be stated.** What AG-19 adds is a **named exported accessor** onto the channel this decision already owns, reachable only for the duration of one tool call and revoked on every exit path. Read as "a new door", it is new; read as "a new way", it is the existing way given a name and a lifetime. **This delta records the reading as a judgement made in the open, not as an amendment made by silence.** A later milestone that wants a *second* funnel, a buffer, an unrevoked handle, or a publish path that survives its hosting call is proposing an amendment to this decision — and this paragraph is what it will be measured against.
 
 #### Scenario: S-AGE-023 — Every blocked milestone has a row
 
@@ -246,6 +280,16 @@ The decision MUST close with an inheritance table stating, in each milestone's o
 - **WHEN** a reviewer checks the inheritance table against AG-04, AG-10, AG-13, AG-14, AG-19 and AG-20
 - **THEN** each has a row stating what it inherits, AND the no-invented-channel rule is stated once for all of them
 - **AND** the acceptance criterion is checkable by reading that one table
+
+*(AG-19 update: the table's row count and its milestone list are unchanged — AG-19 was always in it. What changed is that AG-19's row is now discharged. AG-20 remains outstanding.)*
+
+#### Scenario: S-AGE-029 — AG-19: the no-invented-channel rule is checked against code, not against a claim
+
+- **GIVEN** the merged AG-19 change
+- **WHEN** its production diff is read
+- **THEN** it declares no channel type, no channel creation, no buffer capacity and no numeric capacity anywhere
+- **AND** the seam's every refusal path returns one of exactly two sentinels distinguishable by `errors.Is`, with no path that drops an event silently and no path that panics
+- **AND** each lane's stamper has exactly one writing goroutine, proven under `-race` with two sibling children running concurrently
 
 ### R-AGE-018 — Every deferred number names its owner and its closing evidence
 
