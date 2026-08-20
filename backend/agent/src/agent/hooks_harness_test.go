@@ -782,9 +782,14 @@ func TestHooksHarness_PostTurn_CostIsSumOverAttempts(t *testing.T) {
 	}
 }
 
-// S-RUN-113 — AG-20: the additions are exactly four, and the absences
-// are asserted rather than claimed.
-func TestHooksHarness_S_RUN_113_AdditionsExactlyFourAbsencesAsserted(t *testing.T) {
+// S-RUN-113 — AG-20: the method set is exactly five (Compact,
+// Interrupt, Run, Shutdown, Steer) — measured directly, not delegated
+// to R-RUN-001's own stale four-name count (a pre-existing staleness
+// from AG-18 adding Compact without back-annotating it; corrected in
+// this scenario's own text by sdd-verify MAJOR-7, not in R-RUN-001
+// itself, which this change does not modify) — and the absences are
+// asserted rather than claimed.
+func TestHooksHarness_S_RUN_113_AdditionsExactlyFiveAbsencesAsserted(t *testing.T) {
 	t.Parallel()
 
 	typ := reflect.TypeOf(&agent.Harness{})

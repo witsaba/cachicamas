@@ -56,8 +56,9 @@ Chain strategy: size-exception
 | S-HKS-017 | 3.9 | S-PRH-011 | 1.7 | | |
 | S-HKS-018 | 3.11 | S-AEV-126 | 5.1 | | |
 | | | S-CMP-038 | 3.3 | | |
+| S-LSK-033 | correction round 1 (`sdd-apply`, CRITICAL-1 fix) | S-CAN-016 | correction round 2 (`sdd-verify`, CRITICAL-2 fix) | S-CAN-017 | correction round 2 (`sdd-verify`, CRITICAL-2 fix) |
 
-49 scenarios (31 `S-HKS-*` incl. 5 bites, 18 across the 9 amendment deltas), each discharged once, none doubled.
+**Scenario count corrected by `sdd-verify` (MAJOR-8): a stated total is a count-assertion that goes silently false on the next append — the `S-LSK-020` precedent this table now follows instead of restating.** This table states no total. The allocated **ranges** are: `S-HKS-001`…`S-HKS-026` plus bites `S-HKS-050`…`S-HKS-054` (`agent-hook-taxonomy`); `S-PRH-008`…`S-PRH-011` (`agent-pre-request-hook`); `S-CMP-038`…`S-CMP-042` (`agent-compaction`); `S-LSK-032`…`S-LSK-033` (`agent-loop-skeleton`); `S-CAN-016`…`S-CAN-017` (`agent-cancellation-tree`, added during `sdd-verify`, not present at this table's original authoring); `S-AEV-126`; `S-AGE-030`; `S-RUN-113`; `S-ATT-015`; `S-DEL-026`; `S-AGS-065`…`S-AGS-066`; `S-AIV-032`. Every scenario in every range above is discharged exactly once, by exactly the task or correction round this table's own rows name.
 
 ## Phase 1 — U1: hooks.go core types, transport, pre-request chain
 
