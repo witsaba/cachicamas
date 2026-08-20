@@ -117,3 +117,46 @@ Before editing, grepped the whole change directory for `strict inequality broken
 ### Disposition summary
 
 All 6 CRITICAL blockers closed (2 by real new assertions replacing dead code, 2 by real assertions replacing tautologies, 1 by honest deletion, 2 by spec re-scoping to the actually-observed mechanism, 2 by new dedicated tests). WARNING-1 closed. No blocker was a false positive — the orchestrator's independent confirmation of blockers 1-3 held, and this phase's own re-derivation confirmed 4-6 and W1 by real command, not by re-reading the report.
+
+## Correction Round 2 — `sdd-verify` Round 2 FAIL closure
+
+**Trigger**: `sdd-verify` Round 2 (against commit `d5a9c364`) returned **FAIL** — 5 of 6 round-1 blockers held, but a new CRITICAL-7 surfaced inside the very fix that closed round-1's CRITICAL-6, plus 3 new WARNINGs (WARNING-7/8/9). This round closes CRITICAL-7 and all 3 WARNINGs — the complete set Round 2 required. Full disposition table with exact commands is in `tasks.md`'s own "Correction Round 2" section; this section is the TDD-evidence-table view of the same work, per the same non-duplication convention round 1 established.
+
+### TDD Cycle Evidence (Correction Round 2)
+
+| Fix | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| CRITICAL-7 — `S-DEL-001` publish clause | `go test -overlay` with `delegation_seam.go`'s `Publish` remapped to a scratch copy whose send is replaced by `_ = emission{ev: ev}` (silently discarded, never touches the funnel) → `--- FAIL: TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStream`: "the message_start_text published through the seam (matched by its minted message ID) does not appear on the parent's recorded stream", exit 1 | Overlay removed (never touched the real file — `git diff --stat` on `delegation_seam.go` empty throughout); `go test -race -count=1 -run TestDelegationSeam_S_DEL_001_...` — PASS, exit 0 | n/a — the fix replaces a kind+run search with a minted-message-ID match; no structural change beyond that |
+| WARNING-9 — `S-DEL-015` anti-vacuity floor | `AG19_BASE_REF=HEAD go test -race -count=1 -run TestCancellation_NestedRunCancelsLeafFirst` (diffing HEAD against itself forces an empty diff on both scanned paths) → `--- FAIL`: "delegation_seam.go's diff against the merge base is empty — S-DEL-015 has nothing to scan...", exit 1 — proves the new floor is wired and reachable, not dead code | Normal run (no env override) unaffected: `go test -race -count=1 -run TestCancellation_NestedRunCancelsLeafFirst` — PASS, exit 0 | n/a — one line, mirrors `S-TLS-020`'s existing floor exactly |
+| WARNING-7 (spec text) / WARNING-8 (comment) | n/a — text corrections, not bitable | Verified by command before writing: `git diff 558641f3 --stat -- scheduler.go` = `7 insertions(+), 1 deletion(-)` (WARNING-8's number); grep sweep of the whole change dir for "move together" / "15 vs 92" found no other restatement needing correction (WARNING-7) | n/a |
+| Full evidence | — | `go test -race -v -count=1 ./...` from `backend/agent/`: exit 0, wall-clock **175s** (19:49:19→19:52:14), zero `--- FAIL`/`FAIL` anywhere in 12 packages, zero `(cached)` markers, 1392 top-level `--- PASS` across the module | `go vet ./...` clean throughout; `gofmt -l` clean on both touched files (`cancellation_test.go`, `delegation_seam_test.go`); `delegation_seam.go`/`scheduler.go` confirmed byte-identical to `d5a9c364` (`git diff --stat` empty) before the final run |
+
+### Falsifiability proof for CRITICAL-7 (before/after)
+
+| State | Mechanism defeated? | `found` search result | Test result |
+|---|---|---|---|
+| Unfixed (round-2 verify's own measurement, `d5a9c364`) | Yes — `Publish` overlaid to discard | still `true` (harness's own turn-2 `message_start_text` satisfies `Kind()==message_start_text && Run()==capturedRun`) | **PASS** — ghost assertion |
+| Fixed (this round), mechanism intact | No | `true` (matches the minted `capturedMsgID`) | **PASS**, exit 0 |
+| Fixed (this round), `Publish` overlaid to discard | Yes | `false` — no event on the drained stream carries `capturedMsgID` | **FAIL**, exit 1 |
+
+The assertion now moves with the mechanism it names, in both directions.
+
+### Files changed this round
+
+| File | Action | Lines | What |
+|---|---|---|---|
+| `backend/agent/src/agent/delegation_seam_test.go` | Modified | +13/-4 | CRITICAL-7: capture minted `ai.MessageID`; match publish search on `MessageStartText().MessageID()` + run, not kind+run |
+| `backend/agent/src/agent/cancellation_test.go` | Modified | +9/-4 | WARNING-8: corrected stale doc comment (diff stat, "positive statement" → real git-diff derivation); WARNING-9: added `if diff == ""` anti-vacuity floor per scanned path |
+| `openspec/changes/.../specs/agent-delegation-readiness/spec.md` | Modified | +1/-1 | WARNING-7: corrected `S-DEL-020`'s inaccurate "move together" clause |
+| `openspec/changes/.../tasks.md` | Modified | — | Appended Correction Round 2 disposition table |
+| `openspec/changes/.../apply-progress.md` | Modified | — | This section |
+
+**Changed-line total this round**: 30 lines in `backend/agent/` (authored risk, counted against the review budget: `cancellation_test.go` +9/-4, `delegation_seam_test.go` +13/-4); 1 line in `openspec/specs/` (excluded, reported only). Well within the PR's already-accepted `size:exception` — no new workload decision needed; this closes defects in already-in-scope work, not new scope. No production file (`delegation_seam.go`, `scheduler.go`) touched.
+
+### Grep sweep for restated phrases (WARNING-7)
+
+Before editing, grepped the whole change directory for `move together` and `15 vs 92`. Hits outside `spec.md:213` (the corrected line): `verify-report.md` (the historical record of the round-2 finding itself — not this phase's artifact to edit, same precedent round 1 established) and `tasks.md:115` (already accurate — states the inequality "still strictly less" without claiming the two figures move together; no correction needed).
+
+### Disposition summary (Round 2)
+
+CRITICAL-7 and WARNING-7/8/9 all closed. CRITICAL-7 is the only finding this round required a falsifiability proof for beyond a source read, and it is proven in both directions (mechanism intact → PASS; mechanism defeated → FAIL) using the same overlay technique round-2 verify itself used, confirming the fix — not merely re-reading the report. WARNING-9's new guard was independently proven reachable (not dead code) via the same `AG19_BASE_REF` override mechanism `S-TLS-020`'s existing floor already exercises.

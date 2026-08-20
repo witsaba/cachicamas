@@ -318,6 +318,7 @@ func TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStrea
 
 	var capturedRun agent.RunID
 	var capturedTurn agent.TurnID
+	var capturedMsgID ai.MessageID
 	var publishErr error
 
 	toolName := "del001_tool"
@@ -325,7 +326,8 @@ func TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStrea
 		toolName: toolName,
 		beforeReturn: func(seam agent.DelegationSeam) {
 			capturedRun, capturedTurn = seam.Parent()
-			ev, err := agent.NewMessageStartText(capturedRun, capturedTurn, mustFreshMessageID(t))
+			capturedMsgID = mustFreshMessageID(t)
+			ev, err := agent.NewMessageStartText(capturedRun, capturedTurn, capturedMsgID)
 			if err != nil {
 				t.Fatalf("agent.NewMessageStartText: %v", err)
 			}
@@ -376,16 +378,23 @@ func TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStrea
 	// "an event published through it is observed by the consumer on
 	// the parent's stream": the message_start_text this tool
 	// published through the seam appears on the same recorded
-	// stream, carrying the captured run identity.
+	// stream, matched by its own minted message identity — not
+	// merely by kind and run, which the harness's own turn-2 text
+	// response also satisfies and would make this a ghost assertion
+	// (verify-report round-2 CRITICAL-7).
 	found := false
 	for _, ev := range events {
-		if ev.Kind() == agent.EventKindMessageStartText && ev.Run() == capturedRun {
+		payload, ok := ev.MessageStartText()
+		if !ok {
+			continue
+		}
+		if ev.Run() == capturedRun && payload.MessageID() == capturedMsgID {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("the message_start_text published through the seam does not appear on the parent's recorded stream")
+		t.Error("the message_start_text published through the seam (matched by its minted message ID) does not appear on the parent's recorded stream")
 	}
 }
 

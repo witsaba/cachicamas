@@ -138,10 +138,12 @@ func buildCancellationFixture(t *testing.T, childCtxOverride func(context.Contex
 // context derivation of their own; the child's context derivation
 // happens entirely in package agent_test; and S-DEL-014 still
 // passes. (The production-source half is a static claim, proven
-// directly against delegation_seam.go and the 3-line scheduler.go
-// diff — neither declares a context.WithCancel/WithCancelCause/
-// WithTimeout/WithDeadline call anywhere; asserted below via a
-// direct positive statement rather than re-derived per run.)
+// directly against delegation_seam.go and the scheduler.go diff (7
+// insertions, 1 deletion against the merge base) — neither declares
+// a context.WithCancel/WithCancelCause/WithTimeout/WithDeadline call
+// anywhere; asserted below via a real git-diff derivation against
+// the merge base, re-run every time rather than a static positive
+// statement — verify-report round-2 WARNING-8.)
 func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 	t.Parallel()
 
@@ -211,6 +213,9 @@ func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 		diff, err := gitDiff(t, root, baseRef, path)
 		if err != nil {
 			t.Fatalf("git diff %s -- %s failed: %v", baseRef, path, err)
+		}
+		if diff == "" {
+			t.Fatalf("%s's diff against the merge base is empty — S-DEL-015 has nothing to scan (expected the AG-19 seam-install hunk); mirrors S-TLS-020's identical anti-vacuity floor at scope_fence_test.go", path)
 		}
 		for _, sym := range forbiddenContextDerivation {
 			if strings.Contains(diff, sym) {
