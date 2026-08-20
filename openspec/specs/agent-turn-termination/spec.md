@@ -4,8 +4,10 @@
 > **Nodes**: AG-11.1 `[leaf]` (finish-reason dispatch, `0003:1132-1151`) · AG-11.2 `[leaf]` (typed failure upward, `0003:1153-1170`)
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. Every scenario independently verifiable by `cd backend/agent && make test`.
 > **IDs**: `R-ATT-0NN` / `S-ATT-0NN`, bites `S-TTB-0NN`. Append-only. Distinct from `R-AEV-`/`R-AMT-`/`R-APE-`/`R-AGE-`/`R-LSK-`/`R-TLS-`/`R-APP-`.
-> **Scenario count**: **4 charter → 12 spec + 5 bites = 17 total** across 9 requirements.
+> **Scenario count**: allocated `S-ATT-001` through `S-ATT-015`, plus the five bites `S-TTB-001`…`S-TTB-005`, across requirements allocated `R-ATT-001` through `R-ATT-010`. Each milestone that appends records its own additions in its delta; this header states the allocated range and never a total, because a total is defended by no test and goes silently false on the next append (`S-LSK-020`).
 > **Inherited decision (CLOSED, not re-openable here)**: the extended vocabulary is **1:1** — each of the seven `ai.FinishReason` members maps to its own distinct `TurnOutcome` member (`proposal.md` "Resolved design fork"). A collapsed subset is not specified.
+>
+> **Amended 2026-08-20 (AG-20)**: `R-ATT-010` ADDED, alongside `R-ATT-001` and `R-ATT-009`, both of which are byte-unchanged. BACK-ANNOTATION ONLY: no outcome member is added, removed or renumbered; no `String()` form changes; no constructor signature changes; the failure-iff-aborted rule is untouched. `turn_events.go` and `failure.go` — released for AG-11 only — are forbidden again at AG-20 and stay byte-unchanged. AG-20 is the outcome vocabulary's first non-stream consumer, reading the outcome from the forwarded turn-close payload. See delta spec at `openspec/changes/cachicamas-agent-hook-taxonomy/specs/agent-turn-termination/spec.md`.
 
 ## Coverage
 
@@ -136,6 +138,20 @@ Widening the filters alone would leave merged code contradicting two canonical s
 #### Scenarios
 
 - **S-ATT-011** — Only the released files differ, and the specs say so. Given the merge base of the AG-11 branch with `origin/main`, when `git diff` is taken over `backend/agent/src/agent/` and over `go.mod`/`go.sum`, then the only pre-existing non-test files that differ are `turn_events.go`, `failure.go` and `loop.go`; every other substrate file named by `R-LSK-004` and `R-APP-012` is byte-unchanged; the `go.mod`/`go.sum` diff is empty; the every-kind-constructible guard still passes at 25 kinds; both substrate guards pass; both filters carry the identical set of exact-filename entries; and this change's spec deltas for `R-LSK-004`, `R-APP-012` and `R-AEV-008` exist.
+
+### R-ATT-010 — AG-20 CONSUMES the turn-outcome vocabulary and adds no member, and the consumption is on FOURTEEN enumerated exits
+
+**AG-20 is the outcome vocabulary's first non-stream consumer**, and that is the whole of its interaction with this capability. The per-logical-turn observation report carries the turn's outcome as a payload field, read from the turn-close event the per-attempt forwarder already handles. Three consequences MUST be stated rather than inferred:
+
+1. **No member is added, and the reason is that none is needed.** Every exit AG-20 reports on maps onto an outcome the vocabulary already carries: a completed logical turn reports the finished outcome, and a failed, interrupted or wound-down one reports the aborted outcome, in each case the value the turn's own close event carried. An outcome member meaning "observed by a hook" would be a category error — the report is *about* a turn, it is not a turn state.
+2. **The read is a PURE READ downstream of the forwarder, so the outcome the report carries is by construction the outcome the STREAM carries.** They cannot diverge: there is one source. A reviewer checking a report against a recorded stream is checking an identity, not a correspondence, and `S-ATT-015` asserts it that way.
+3. **The consumption is total over the logical-turn loop's exits, and the enumeration is normative in `R-HKS-004`.** Fourteen exits are enumerated there with an explicit fires/does-not-fire verdict each, collapsing to four enqueue sites so that no exit can fire twice and no firing exit can be skipped by an early return above it. This capability's contribution is the guarantee the report leans on: **a logical turn that ran has exactly one turn-close event carrying exactly one outcome**, so "the turn's outcome" is well defined for every yes-row and undefined — and therefore not reported — for every no-row.
+
+**This requirement adds no obligation to any producer.** It records what AG-20 reads, so that a later milestone contemplating a new outcome member knows a second consumer exists.
+
+#### Scenarios
+
+- **S-ATT-015** — **AG-20: the reported outcome IS the streamed outcome, and no member was added.** Given six runs driving the finished, failed, interrupted and wound-down logical-turn exits, with a post-turn observer recording every report, when each run completes and its lane has drained, then each report's outcome is **identical** to the outcome carried by that turn's own close event on the recorded stream, compared value-to-value rather than through a rendered string; and when the outcome vocabulary is enumerated through the public surface, then its member set and each member's rendered form are exactly what they were at the merge base, `turn_events.go` and `failure.go` are byte-unchanged, and the turn-close constructor's signature and the failure-iff-aborted rule are unchanged. Cross-referenced to `R-HKS-004` / `S-HKS-010` and `R-HKS-010` / `S-HKS-024`.
 
 ## The no-`Completion` path (a REQUIRED observable, with the fix left to design)
 

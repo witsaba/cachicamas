@@ -213,19 +213,43 @@ func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 		return
 	}
 	forbiddenContextDerivation := []string{"context.WithCancel", "context.WithCancelCause", "context.WithTimeout", "context.WithDeadline"}
+	scannedAny := false
 	for _, path := range []string{"backend/agent/src/agent/delegation_seam.go", "backend/agent/src/agent/scheduler.go"} {
 		diff, err := gitDiff(t, root, baseRef, path)
 		if err != nil {
 			t.Fatalf("git diff %s -- %s failed: %v", baseRef, path, err)
 		}
 		if diff == "" {
-			t.Fatalf("%s's diff against the merge base is empty — S-DEL-015 has nothing to scan (expected the AG-19 seam-install hunk); mirrors S-TLS-020's identical anti-vacuity floor at scope_fence_test.go", path)
+			// AG-20 fix: an empty diff for THIS path means it was not
+			// touched on this branch, so the absence S-DEL-015 asserts
+			// holds vacuously for it — nothing was added to violate
+			// it. Move on to the other path rather than failing (or
+			// skipping) the whole test on the first empty one; only if
+			// NEITHER path had anything to scan is there truly nothing
+			// for this guard to measure.
+			continue
 		}
+		scannedAny = true
 		for _, sym := range forbiddenContextDerivation {
 			if strings.Contains(diff, sym) {
 				t.Errorf("the production diff for %s introduces %q — S-DEL-015 requires the child's context derivation to live entirely in package agent_test, not in production sources", path, sym)
 			}
 		}
+	}
+	if !scannedAny {
+		// sdd-verify MINOR-3: t.Logf + return, not t.Skip, matching
+		// this same function's own baseRefIsHEAD branch above rather
+		// than diverging from it. Both branches assert the identical
+		// thing — an absence that holds vacuously because there is
+		// nothing to scan — and reporting one as SKIP while the other
+		// is an ordinary PASS was an inconsistency; SKIP is the
+		// misleading one here, because this test's entire behavioral
+		// core (the nested-cancellation-tree assertions above) has
+		// already run and passed by the time this branch is reached,
+		// and marking the whole test "skipped" would hide real,
+		// completed coverage from anyone scanning for it.
+		t.Logf("S-DEL-015: neither delegation_seam.go nor scheduler.go changed against the merge base on this branch — the absence this guard asserts holds vacuously; it bites on the branch that actually introduces the seam-install hunk, mirroring S-TLS-020's identical fix at scope_fence_test.go")
+		return
 	}
 }
 

@@ -58,6 +58,18 @@ type Harness struct {
 	// caller's own struct is never mutated by that derivation.
 	Turn TurnOptions
 
+	// Hooks is AG-20's ONE registration surface (R-HKS-001): the four
+	// hook families plus one nil-defaultable stall reporter. Run fills
+	// turnOpts.Hooks from this value on its per-turn copy of Turn,
+	// beside Continuation. A caller-set, non-zero Turn.Hooks is a
+	// silent-overwrite hazard the transport MUST refuse rather than
+	// clobber — Run refuses it typed at entry, before any identity is
+	// minted and before any event is emitted (S-HKS-002).
+	//
+	// Zero-value Hooks is inert: no lane, no goroutine, no queue, and
+	// every arm is byte-identical to today's (R-HKS-012).
+	Hooks Hooks
+
 	// Scheduler is the caller-owned wake handle: injecting it (rather
 	// than handing one back) is what makes WakeParked reachable while a
 	// turn is blocked (design "Decision 2"). Nil constructs one. Run
@@ -129,6 +141,17 @@ type Harness struct {
 	// (agent-run-driver/spec.md:72). Not yet consulted at Run entry;
 	// that wiring is Phase 7.
 	shutdown bool
+
+	// sessionStarted is AG-20's one-way session-start latch
+	// (R-HKS-005, design AD-6): the shutdown flag's own class — per-
+	// value bookkeeping only, no transcript, never resumed, and does
+	// not pre-empt AG-21's cross-run state. Guarded by the same
+	// signalMu. Set at Run entry, after the shutdown check: a shut-
+	// down value fires nothing and leaves this latch untouched. A
+	// serially reused Harness value fires session-start once, on its
+	// first non-refused Run; a delegated child is a distinct Harness
+	// value with its own latch and fires its own.
+	sessionStarted bool
 }
 
 // Interrupt fires the interrupt signal (R-CAN-001, R-CAN-002): under
@@ -409,6 +432,20 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	// clear, so a signal racing the very end of Run never dereferences
 	// a stale func.
 	h.signalMu.Lock()
+	// AG-20 (R-HKS-001, S-HKS-002, design AD-1): a non-zero h.Turn.Hooks
+	// is caller misconfiguration — Hooks is transported into Turn's own
+	// per-turn copy below (turnOpts.Hooks = h.Hooks), never accepted as
+	// a second registration surface. Refused typed, in this same
+	// pre-identity block as the shutdown check below, before any
+	// identity is minted and before any event is emitted — the
+	// validateContinuation / S-LSK-014 posture. Because Hooks holds
+	// function fields it is not comparable, so isZero is the explicit
+	// predicate this check MUST use.
+	if !h.Turn.Hooks.isZero() {
+		h.signalMu.Unlock()
+		close(sink)
+		return ai.Message{}, 0, ai.Invalid(ai.ErrMisplaced, ai.At("turn"), ai.At("hooks"))
+	}
 	// AG-14 (R-CAN-005): a value already shut down refuses every
 	// subsequent Run typed, before any identity is minted and before
 	// any event is emitted — the terminal, one-way flag Shutdown
@@ -430,6 +467,19 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	// needs.
 	if !h.shutdown {
 		h.queue.reopen()
+	}
+	// AG-20 (R-HKS-005, design AD-6): test-and-set the session-start
+	// latch here, after the shutdown check (a shut-down value fires
+	// nothing and leaves the latch untouched) and before the cancel
+	// derivation. fireSessionStart is read once, below, to decide
+	// whether THIS run enqueues session-start invocations — the
+	// enqueue itself is placed after the lane is created and before
+	// NewRunStart's own construction, never merely before its send,
+	// so a run that fails to construct its run-open event still
+	// consumes the latch having fired, never silently.
+	fireSessionStart := !h.sessionStarted
+	if fireSessionStart {
+		h.sessionStarted = true
 	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	h.cancelRun = cancel
@@ -466,6 +516,25 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 
 	runID := mintHarnessRunID()
 	stamper := &LaneStamper{}
+
+	// AG-20 (R-HKS-005, R-HKS-007, design AD-3/AD-6): the observer lane
+	// serves SessionStart and PostTurn — created only when at least one
+	// observing hook is registered (R-HKS-012 inertness), immediately
+	// after runID is minted (attribution needs it) and before any
+	// event is emitted. The defer is registered immediately after
+	// creation, so LIFO places its terminal-boundary snapshot FIRST
+	// among Run's defers — after every returning arm's own run_end has
+	// already been sent (success :776-779, windDownRun, failRun, all
+	// below) and before the queue close / cancel-clear / close(sink)
+	// deferred above (design AD-4). The session-start enqueue is
+	// placed here, before NewRunStart's own construction below — not
+	// merely before its send — so a run whose run-open event fails to
+	// construct still consumes the latch having fired (S-HKS-015).
+	lane := newObserverLane(h.Hooks)
+	defer lane.reportOutstanding()
+	if fireSessionStart {
+		lane.enqueueSessionStart(h.Hooks.SessionStart, runID)
+	}
 
 	// AG-16 (R-CST-004): the run-scoped cumulative, a local in Run's
 	// own stack frame — never a Harness field (R-CAN-002). Declared
@@ -548,7 +617,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// here: a failure is visible on the stream and nowhere else
 			// (R-CMP-010, R-CMP-013) and never interrupts the run.
 			if verdict.Compaction != nil {
-				_ = runCompaction(runCtx, hist, *verdict.Compaction, runID, stamper, sink, &total)
+				_ = runCompaction(runCtx, hist, *verdict.Compaction, runID, stamper, sink, &total, h.Hooks.PreCompact)
 				// R-CTX-003 (as amended)/R-RTY-002: the slice built
 				// above is stale after a successful compaction —
 				// rebuild it from the mutated history BEFORE the
@@ -598,6 +667,33 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// by the time it is read.
 		var capturedTurnID TurnID
 
+		// AG-20 (R-HKS-004, design AD-7): two pure reads join the
+		// forwarder beside capturedTurnID and total.add — a
+		// per-LOGICAL-turn costAccumulator (turnCost, a local of this
+		// same outer-loop iteration, reset every logical turn, never
+		// a Harness field — R-CST-004) and capturedOutcome, read from
+		// the forwarded turn_end payload (no new TurnOutcome). Every
+		// attempt of this logical turn — retried or not — forwards
+		// its own turn_end, so both variables always hold the LAST
+		// attempt's own values by the time any of the four post-turn
+		// enqueue sites below reads them: the successful final
+		// attempt's on the success site, the last failed attempt's on
+		// the failure/wind-down sites.
+		var capturedOutcome TurnOutcome
+		var turnCost costAccumulator
+
+		// AG-20 (R-HKS-004): the attempt loop's own induction variable
+		// (attempt, below) is scoped to the for statement and goes out
+		// of scope once the loop exits — attemptsMade survives past it
+		// (declared here, in the same outer scope as capturedTurnID),
+		// so the two post-turn sites AFTER the attempt loop (success,
+		// and turn-failed) can still report an attempt count. Set on
+		// every iteration's first statement, so it always holds the
+		// LAST attempt's own number by the time either site reads it —
+		// the same "last attempt wins" rule capturedTurnID/
+		// capturedOutcome/turnCost already follow.
+		var attemptsMade int
+
 		// AG-15.1 (R-RTY-001, R-RTY-002, design AD-2): the inner
 		// attempt loop re-invokes Turn for this SAME logical turn on
 		// a retry verdict, over the transcript slice built once
@@ -611,6 +707,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// loop around the Turn call, NOT a continue of the outer run
 		// loop above.
 		for attempt := 1; ; attempt++ {
+			attemptsMade = attempt
 			turnSink := make(chan *Event)
 			forwarderDone := make(chan struct{})
 			go func() {
@@ -632,6 +729,20 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 					// here at all.
 					if ct, ok := ev.CostTurn(); ok {
 						total.add(ct)
+						// AG-20 (R-HKS-004): folded into the SAME
+						// per-logical-turn accumulator turnCost,
+						// beside total's own run-scoped cumulative —
+						// two independent readers of one forwarded
+						// event, never a second writer on the event
+						// path (R-RUN-003 holds unamended).
+						turnCost.add(ct)
+					}
+					// AG-20 (R-HKS-004, R-ATT-010): a pure read of the
+					// forwarded turn-close outcome — the report's
+					// outcome IS the streamed outcome, by
+					// construction, because this is the read.
+					if te, ok := ev.TurnEnd(); ok {
+						capturedOutcome = te.Outcome()
 					}
 					sink <- ev
 				}
@@ -644,6 +755,12 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 				Scheduler: sched,
 				History:   hist,
 			}
+			// AG-20 (R-HKS-001, design AD-1): the transport assignment,
+			// beside Continuation. h.Turn.Hooks is guaranteed zero here
+			// (Run's own entry refusal above), so this never silently
+			// overwrites a caller value — it fills the one legitimate
+			// carrier from the one registration surface.
+			turnOpts.Hooks = h.Hooks
 
 			msg, finish, terr = Turn(runCtx, h.Provider, h.System, transcript, turnOpts, turnSink)
 			<-forwarderDone
@@ -665,6 +782,11 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// and falls through to the retry predicate below
 			// unchanged (the scope line, R-CAN-001).
 			if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+				// AG-20 (R-HKS-004 row 4, site iii): a mid-turn signal
+				// winds the run down — fires, outcome aborted (already
+				// captured above from this attempt's own forwarded
+				// turn_end).
+				lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attempt})
 				return h.windDownRun(sink, stamper, runID, hist, total, cause)
 			}
 
@@ -691,6 +813,11 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			delay := retryWaitDelay(terr, attempt, timing, jitter)
 			if serr := timing.SleepFunc(runCtx, delay); serr != nil {
 				if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+					// AG-20 (R-HKS-004 row 5, site iv): a signal during
+					// the retry backoff winds the run down — fires,
+					// outcome aborted (the preceding failed attempt's
+					// own forwarded turn_end already captured it).
+					lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attempt})
 					return h.windDownRun(sink, stamper, runID, hist, total, cause)
 				}
 				break
@@ -713,6 +840,14 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 				}
 			}
 
+			// AG-20 (R-HKS-004 rows 3/6, site ii): the turn failed —
+			// surfaced directly (G1-G3), attempt-bound exhausted (G5),
+			// or a bare cancellation during backoff fell through to
+			// this same failing exit — fires, outcome aborted (the
+			// last attempt's own forwarded turn_end already captured
+			// it).
+			lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attemptsMade})
+
 			// R-RUN-011: a failed turn ends the run typed, with no
 			// append, no CloseTurn, and no fallback. The turn's own
 			// typed closing brackets (turn_end(Aborted) on every
@@ -722,6 +857,18 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// the run's own bracket.
 			return h.failRun(sink, stamper, runID, total, terr)
 		}
+
+		// AG-20 (R-HKS-004 rows 1/2/11, site i): every successful
+		// attempt-loop exit fires here, before the history commit
+		// below — including a turn that will go on to fail THAT
+		// commit (row 2: the fire precedes the close, so a
+		// closeTurnMarked failure below does not un-fire it) and a
+		// turn whose finish reason continues the outer loop (rows 1
+		// and 11 share this one site: ToolCalls/PauseTurn and a
+		// steered terminal decision are both "success, before
+		// closeTurnMarked" from this site's point of view — no
+		// separate call site is needed for either).
+		lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attemptsMade})
 
 		// AG-18 (R-CMP-012, design AD-9): the run-driven path closes
 		// MARKED, not through the bare exported CloseTurn — recording

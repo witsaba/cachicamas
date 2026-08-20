@@ -499,6 +499,32 @@ The register MUST restate both wording traps from doc 0002's *Layer boundary* se
 - **S-AIV-030** — Given the first trap, when a reviewer reads the accompanying text, then it states that Layer 1 owns the provider-neutral transport representation of tool declarations and tool calls AND that Layer 1 must not execute tools, resolve tool names, or own application behavior AND the register's tool-related rows are consistent with both halves.
 - **S-AIV-031** — Given the second trap, when a reviewer reads the accompanying text, then it states that the claim applies only after adapters exist AND that adding a new vendor still requires a new adapter unless it is genuinely compatible with an existing transport.
 
+### R-AIV-014 — `V-OUT-13`'s exclusion is HONOURED: Layer 2 built all four hook points and the asynchrony clause, and Layer 1 was not touched (AG-20 addition, 2026-08-20)
+
+**`V-OUT-13` excluded *hook* from Layer 1 and assigned it to Layer 2 and Layer 3, naming four points and one discipline.** That row was written before any of them existed. AG-20 realises the Layer 2 half in full, and the realisation MUST be recorded here rather than left for a reader to infer from a milestone document, because the register's own value is that a reader can resolve a term without leaving it.
+
+**Each of the row's four named points now exists in Layer 2:**
+
+| `V-OUT-13`'s point | Realised by | Family |
+|---|---|---|
+| pre-request | AG-08's shipped callable, **composed into a chain** by AG-20 | mutating |
+| pre-compact | AG-20, spliced inside the one compaction operation before the provider call | mutating |
+| post-turn | AG-20, once per logical turn over an enumerated set of exits | observing |
+| session-start | AG-20, once per harness **value** | observing |
+
+**The row's discipline clause — *"observers never synchronous on the streaming path"* — is realised MECHANICALLY, and the distinction matters to this register.** The clause is a vocabulary statement, and a vocabulary statement is satisfied by a mechanism or it is satisfied by nothing. AG-20 satisfies it by type and by structure rather than by convention: the two observing families' function types have **no result parameters**, so an observer cannot signal a mutation or a failure back to the runtime; dispatch happens on a per-run lane whose enqueue never blocks and whose goroutine is neither the run's nor any event-delivery goroutine; and the observers' invocation context is value-stripped, so the one context-carried route back onto a run's event lane is unreachable from an observer. `R-AGE-008`'s standard — *"A statement of the obligation, a convention, a review rule, or documentation alone MUST NOT satisfy this requirement"* — is the bar, and it is met.
+
+**Two boundary facts MUST be stated so the row is not later misread:**
+
+1. **Layer 1 was not touched, and the row's note explains why it did not need to be.** Layer 1's obligation is `V-REQ-29`, the request rebuild, *"which is the mechanism the pre-request hook stands on"*. AG-20 composes over that rebuild and adds nothing to it: each chain element receives a request value and returns a request value. The diff under `backend/agent/src/ai/` is **empty**, so `R-RUN-012` holds and the row's Layer 1 exclusion is honoured in the strongest available sense.
+2. **The row's *Layer 3* half is NOT discharged, and it is the half most at risk of being wrongly closed.** `V-OUT-13` names *"Layer 2 **and Layer 3**"* as owners. Layer 2 owns the **taxonomy**; Layer 3 owns the **concrete hooks** — cache-breakpoint placement, compaction policy, telemetry — at doc 0004 CO-24.1 / CO-24.2, which `S-AGS-048` already maps. AG-20 ships **zero** concrete hooks, verbatim from its charter: *"Any concrete hook implementation (Layer 3 wires them)"* (`0003:1874`). **A taxonomy is not a wiring**, and the row's two owners MUST NOT be collapsed into one.
+
+**This requirement adds no obligation to Layer 1 and no term to the register.** It records a discharge, so that a later reader asking "who built the hook, and did Layer 1 have to change?" gets both answers from the register itself.
+
+#### Scenarios
+
+- **S-AIV-032** — **AG-20: `V-OUT-13`'s exclusion is checked against the shipped code, not against this register's prose.** Given the merged AG-20 change, when a reviewer opens each of the row's four named hook points, then each exists in Layer 2 with at least one independently verifiable scenario in `agent-hook-taxonomy`, and each is classified mutating or observing by its **function type** rather than by a doc comment — an observing type's function signature declares **no result parameters**, asserted by a compile-time refusal rather than by a runtime check. When the reviewer looks for a synchronous observer dispatch on the streaming path, then there is none: a run carrying a deliberately stalled observing hook produces an event stream byte-identical to the same script with no hooks installed, `CheckStream` accepts it unmodified, and the observing hook's recorded stack contains neither the run driver's frame nor the event forwarder's. When the reviewer takes `git diff` over `backend/agent/src/ai/` against the merge base, then it is **empty**, and `go.mod`/`go.sum` are byte-unchanged. And when the reviewer reads the row's Layer 3 half, then the concrete hooks are still assigned to doc 0004 CO-24.1 / CO-24.2 and AG-20 ships none — a discharge that also closed those would be over-claiming. Cross-referenced to `R-HKS-001` / `S-HKS-003`, `R-HKS-007` / `S-HKS-017` / `S-HKS-018`, `R-HKS-010` / `S-HKS-024` and `R-AGS-016` / `S-AGS-066`.
+
 ---
 
 ## Non-functional requirements
@@ -524,7 +550,7 @@ The register MUST restate both wording traps from doc 0002's *Layer boundary* se
 
 The contract holds when:
 
-1. `R-AIV-001` through `R-AIV-013` hold, each verified by its scenarios.
+1. `R-AIV-001` through `R-AIV-014` hold, each verified by its scenarios.
 2. All six items of AI-01.1's closing checklist are answered in § 1 … § 10.
 3. No Go identifier appears anywhere in this file.
 4. Every amendment leaves the register with a correct term count in § 10, no renumbered identifier, and no reworded existing row.

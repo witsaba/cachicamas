@@ -368,3 +368,60 @@ func TestCompaction_SummaryTypedByOriginOnly(t *testing.T) {
 		t.Error("summary and control origins are equal, want distinguishable")
 	}
 }
+
+// TestResolveCut_FixedPointOnItsOwnOutput — AG-20, S-CMP-040 (design
+// AD-8's idempotence proof, exercised under NFR-CMP-001's pure-helper
+// carve-out: resolveCut already has an external caller in this
+// package's own scope by the time AG-20 lands, and this table asserts
+// its fixed-point property directly rather than assuming it). The
+// carve-out's own condition — every claim about what a CALLER observes
+// is also asserted externally — is satisfied by
+// hooks_compaction_test.go's TestHooksCompaction_Idempotence_
+// IdenticalPlanByteIdenticalToNoHook (S-HKS-007 / S-CMP-038), which
+// asserts the OBSERVABLE consequence (a hook returning its input plan
+// unchanged produces a byte-identical stream and history read-back to
+// the hookless run) from package agent_test.
+//
+// Over the same class of naive cuts this file's own suite already
+// drives — zero, on a mark, mid-mark (straddling a pair), straddling a
+// nested open pair, and beyond the transcript length — resolving a
+// cut's own output a second time MUST return that output unchanged:
+// resolveCut(hist, resolveCut(hist, n)) == resolveCut(hist, n).
+func TestResolveCut_FixedPointOnItsOwnOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(t *testing.T) (*History, int)
+	}{
+		{"zero", func(t *testing.T) (*History, int) {
+			hist, _, _ := twoTurnStraddleFixture(t)
+			return hist, 0
+		}},
+		{"on a mark", func(t *testing.T) (*History, int) {
+			hist, _, _ := twoTurnStraddleFixture(t)
+			return hist, 1
+		}},
+		{"mid-mark, straddling a pair", func(t *testing.T) (*History, int) {
+			hist, _, resultIndex := twoTurnStraddleFixture(t)
+			return hist, resultIndex
+		}},
+		{"straddling a nested open pair", func(t *testing.T) (*History, int) {
+			hist := nestedStraddleFixture(t)
+			return hist, 4
+		}},
+		{"beyond the transcript length", func(t *testing.T) (*History, int) {
+			hist, _, _ := twoTurnStraddleFixture(t)
+			return hist, 99
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hist, naive := tt.build(t)
+			first := resolveCut(hist, naive)
+			second := resolveCut(hist, first)
+			if second != first {
+				t.Errorf("resolveCut(hist, resolveCut(hist, %d)) = %d, want %d (resolution is a fixed point on its own output; naive cut was %d)", naive, second, first, naive)
+			}
+		})
+	}
+}

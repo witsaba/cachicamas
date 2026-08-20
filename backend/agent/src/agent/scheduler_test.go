@@ -674,14 +674,31 @@ func TestScheduler_SourceGuard_NoErrgroupImport(t *testing.T) {
 	}
 }
 
-// stripGoComments removes `//` line comments and `/* ... */` block
+// stripGoComments removes `//` line comments and /* ... */ block
 // comments from a Go source. Used by the source-guard tests so
 // doc-comment mentions of forbidden symbols don't trigger false
 // positives. Best-effort — fine for the guard's regex scope; not
 // a full Go parser.
+//
+// FIX (sdd-verify CRITICAL-1, this package's
+// TestHooks_AntiVacuityFloorsSkipRatherThanFail, AG-20): raw-string
+// literals (backtick-delimited) were not tracked as a string context
+// at all. Any raw string containing an ODD number of bare '"'
+// characters — this file's own hasSuffixLiteralPattern regex,
+// `strings\.HasSuffix\(path,\s*"([^"]*)"\)`, contains exactly three —
+// left the double-quote tracker permanently toggled "inString" for
+// the remainder of the source, silently disabling comment stripping
+// for everything after it (found while proving the repaired anti-
+// vacuity guard actually bites: scope_fence_test.go's own copy of
+// this same literal desynced the tracker before it ever reached the
+// S-TLS-020 site this guard scans). A backtick is now tracked as a
+// third string delimiter, closed only by another backtick and never
+// by a backslash escape (Go raw strings have none), so an embedded
+// '"' or "'" inside one no longer desyncs the tracker for what
+// follows.
 func stripGoComments(src string) string {
 	var out strings.Builder
-	inString := byte(0)
+	inString := byte(0) // '"', '\'', or '`' while inside that literal kind; 0 otherwise.
 	inBlock := false
 	i := 0
 	for i < len(src) {
@@ -697,7 +714,11 @@ func stripGoComments(src string) string {
 		}
 		if inString != 0 {
 			out.WriteByte(c)
-			if c == '\\' && i+1 < len(src) {
+			// Raw strings (`...`) have no escape sequences: a
+			// backslash inside one is a literal backslash, so only
+			// the interpreted string ('"') and rune ('\'') kinds
+			// consume the following byte as an escape.
+			if inString != '`' && c == '\\' && i+1 < len(src) {
 				out.WriteByte(src[i+1])
 				i += 2
 				continue
@@ -720,7 +741,7 @@ func stripGoComments(src string) string {
 			i += 2
 			continue
 		}
-		if c == '"' || c == '\'' {
+		if c == '"' || c == '\'' || c == '`' {
 			inString = c
 		}
 		out.WriteByte(c)

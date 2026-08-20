@@ -5,6 +5,7 @@
 > **Introduced by**: `openspec/changes/archive/2026-08-12-cachicamas-agent-event-envelope/`, opened as a PR against `main` on 2026-08-12 (PR number and merge commit to be back-filled once merged, per this repo's convention on already-merged specs).
 > **Amended 2026-08-12 (AG-05)**: `R-AEV-007` and `R-AEV-010` MODIFIED (invariant 1 co-closure now joint with AG-05.1; scope-fence retightened from 4 to 15); `R-AEV-012` ADDED (documents the AG-04.4 extensibility experiment path AG-05 took). See delta spec at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/specs/agent-event-envelope/spec.md` and the AG-05 archive report at `openspec/changes/archive/2026-08-12-cachicamas-agent-message-tool-events/archive-report.md`.
 > **Amended 2026-08-13 (AG-06)**: `R-AEV-010` MODIFIED (scope-fence retightened from 15 to 25; forbidden-names list retires); `R-AEV-012` MODIFIED (extensibility pattern restated to record AG-06 as the third kind-set following AG-04.4); `R-AEV-013`, `R-AEV-014`, `R-AEV-015` ADDED (registry stands at 25; L2C-06 doc-contract row; AG-06 envelope invariants compliance). See delta spec at `openspec/changes/archive/2026-08-13-cachicamas-agent-protocol-events/specs/agent-event-envelope/spec.md` and the AG-06 archive report at `openspec/changes/archive/2026-08-13-cachicamas-agent-protocol-events/archive-report.md`.
+> **Amended 2026-08-20 (AG-20)**: the "Explicit non-requirements" invariant table's **invariant-3 row** MODIFIED — closure now reads `AG-01.1 + AG-20.2 — CLOSED`, with AG-20.2's mechanical contribution spelled out in the third column and the "AG-04 closes no envelope invariant by itself" sentence gaining a parenthetical update; `S-AEV-126` ADDED. No requirement in this capability is amended. See delta spec at `openspec/changes/cachicamas-agent-hook-taxonomy/specs/agent-event-envelope/spec.md`.
 > **Status**: **live** — the invariants below hold for the lifetime of Layer 2, not only at the moment AG-04 merged
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario is independently verifiable.
 > **Identifier convention**: requirements `R-AEV-0NN`, scenarios `S-AEV-0NN`. Append-only. (`R-AGE-`/`S-AGE-` belong to `agent-event-delivery` and are not reused here.)
@@ -265,10 +266,16 @@ Stated so that no test, guard or acceptance line is written as if AG-04 closes m
 | --- | --- | --- |
 | 1 — indexed deltas | AG-04.3 **+ AG-05.1** | the construction-surface pin only (`R-AEV-007`) |
 | 2 — explicit nesting | AG-04.1 **+ AG-19.1 — CLOSED** | the parent identifier exists; **AG-19.1 delivered the delegation semantics** as a walkable tree in one hop (`R-DEL-004`), with the first production emission of `subagent_started`/`subagent_ended`, and **no** per-event parent stamp (`R-AEV-003` as amended) |
-| 3 — non-blocking observers | **AG-01.1 + AG-20.2 — AG-04 absent** | **none.** No requirement here closes any part of invariant 3 |
+| 3 — non-blocking observers | **AG-01.1 + AG-20.2 — CLOSED** | **none.** No requirement here closes any part of invariant 3. **AG-01.1 decided the decoupling mechanism** (`R-AGE-008`: one canonical internal stream, and per attached consumer an independently owned carrier fed by its own forwarding activity), and **AG-20.2 delivered the mechanical half** the decision demanded of it: three observing hook points exist, a per-run observer lane whose **enqueue is a lock-append that never blocks** dispatches them on the lane's own goroutine, the observers' context is **value-stripped** so the publishing seam is unreachable from an observer, and a deliberately stalled observer is proven — by a goroutine-placement assertion and by stream byte-identity, with **no wall clock anywhere** — to delay no event delivery, and is then reported typed at the run's terminal boundary (`R-HKS-007`, `R-HKS-008`) |
 | 4 — typed errors | AG-04.3 **+ AG-11.2** | the typed-failure surface exists; loop-level emission is AG-11's (`R-AEV-008`) |
 
-**AG-04 closes no envelope invariant by itself.** No requirement, scenario, test name or acceptance line may claim otherwise. *(AG-19 update: invariant 2 is now closed **jointly**, exactly as this table always said — AG-04.1 built the field, AG-19.1 gave it meaning. The row must not be re-read as "AG-04 closed it".)*
+**AG-04 closes no envelope invariant by itself.** No requirement, scenario, test name or acceptance line may claim otherwise. *(AG-19 update: invariant 2 is now closed **jointly**, exactly as this table always said — AG-04.1 built the field, AG-19.1 gave it meaning. The row must not be re-read as "AG-04 closed it".)* *(AG-20 update: invariant 3 is now closed **jointly** in the same shape — AG-01.1 decided the mechanism and AG-20.2 made it mechanical. The row must not be re-read as "AG-01.1 closed it", and it must not be re-read as AG-04 closing anything: AG-04's cell for this row was, and remains, **none**.)*
+
+(Previously: the invariant-3 row read `**AG-01.1 + AG-20.2 — AG-04 absent**`, recording that the second closer had not yet shipped. AG-20.2 has now shipped it, and leaving the row unchanged would leave the table understating a delivered closure — the same silent staleness the invariant-2 row carried until AG-19.)
+
+#### Scenarios
+
+- **S-AEV-126** — **AG-20: invariant 3's closure is checked against the shipped mechanism, not against this table's prose.** Given the merged AG-20 change, when a reviewer traces every path from a stalled observing hook back toward the canonical producer, then every path terminates inside the observer lane's own drain activity and **none** reaches the producer, the sink, the stamper or any other consumer; when the reviewer looks for how the stall is announced, then it is a Go-side typed value delivered to a nil-defaultable reporter and **no** `EventKind` was registered, with the event registry byte-unchanged at its committed kind count; when the reviewer looks for a wall clock, a timeout, a deadline, a sleep or a join on a stalled observer, then there is **none** in production or in test; and when a run carrying a gated observer is recorded, then its event stream is byte-identical to the same script with no hooks installed and `CheckStream` accepts it unmodified — so a reviewer can confirm the closure without reading this artifact. Cross-referenced to `R-AGE-008` / `S-AGE-010` and to `R-HKS-007` / `R-HKS-008` / `S-HKS-017` / `S-HKS-019`.
 
 Also out of scope, each with a named owner:
 
@@ -294,7 +301,7 @@ Also out of scope, each with a named owner:
 
 The contract holds when:
 
-1. Every scenario `S-AEV-001` through `S-AEV-102` and `S-AEV-110` through `S-AEV-112` and `S-AEV-120` through `S-AEV-125` has recorded evidence.
+1. Every scenario `S-AEV-001` through `S-AEV-102` and `S-AEV-110` through `S-AEV-112` and `S-AEV-120` through `S-AEV-126` has recorded evidence.
 2. `cd backend/agent && make test` and `make lint` are green, recorded pre- and post-change.
 3. `backend/agent/go.mod` and `go.sum` are byte-unchanged.
 4. An external-package test constructs, validates and inspects **every** kind this milestone registers.

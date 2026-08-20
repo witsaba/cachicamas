@@ -138,6 +138,19 @@ type TurnOptions struct {
 	// half-configured continuation is rejected typed, before any
 	// event is emitted (validateContinuation, S-LSK-014).
 	Continuation *TurnContinuation
+
+	// Hooks is AG-20's transport: Harness.Run fills this on its
+	// per-turn copy of Turn, beside Continuation — it is NEVER a
+	// second registration surface (R-HKS-001, hooks.go). Turn itself
+	// consumes only Hooks.PreRequest (through applyPreRequestHook,
+	// composed after the singular field above); the observing
+	// families and the reporter are INERT on a directly-constructed
+	// TurnOptions — Turn owns no observer lane and no run identity
+	// (R-HKS-001, S-HKS-003).
+	//
+	// Zero-value Hooks is the identity default: byte-identical to
+	// today's path on every arm (R-HKS-012).
+	Hooks Hooks
 }
 
 // TurnContinuation is AG-13's run-continuation seam: the four things a
@@ -323,11 +336,18 @@ func Turn(
 	// pre-stream-failure path (R-PRH-003, D2): close sink, return
 	// (ai.Message{}, 0, *ai.PreStreamFailure) carrying a
 	// hook-attributing FailureReport.Category (UnsupportedCapability).
-	req, err = applyPreRequestHook(ctx, req, opts.PreRequestHook)
+	req, err = applyPreRequestHook(ctx, req, opts.PreRequestHook, opts.Hooks.PreRequest)
 	if err != nil {
 		typedErr, perr := ai.PreStreamFailure(ai.FailureReport{
 			Category:    ai.FailureCategoryUnsupportedCapability,
 			StatusClass: 4,
+			// AG-20 (R-HKS-009): Cause carries the source-attributed
+			// error applyPreRequestHook wrapped — err's own
+			// errors.Unwrap chain, not a fresh construction. The
+			// caller reaches the source name through
+			// errors.Unwrap(returnedErr).Error() (S-HKS-022/023,
+			// S-PRH-009).
+			Cause: err,
 		})
 		// AG-15 D1: the same bracket-closing obligation as the build
 		// path above. typedErr is already the *ai.Failure this path
@@ -725,26 +745,74 @@ func buildLoopRequest(opts TurnOptions, system string, transcript []ai.Message) 
 	return ai.NewRequest(modelForOpts(opts), transcript, reqOpts...)
 }
 
-// applyPreRequestHook invokes hook if non-nil; returns (req, nil)
-// unchanged when hook is nil. AG-08.1's helper, extracted to keep the
-// Turn branch small and to make the identity-default no-op reachable
-// for direct testing if needed.
+// preRequestSingularSourceName and preRequestChainSourceName are
+// R-HKS-009's two source-name vocabularies: the shipped singular
+// field's own fixed name, and a chain element's own registration
+// index — never a bare ordinal over the composed sequence, which a
+// later insertion would renumber (a renumbered attribution is a lie a
+// green suite never catches).
+const preRequestSingularSourceName = "TurnOptions.PreRequestHook"
+
+// preRequestChainSourceName renders a chain element's own registration-
+// indexed name. strconv.Itoa, not "fmt" — cancellation.go's own
+// package comment records why: "fmt" transitively imports "os" and
+// "io/fs", which the production-closure import-boundary guard
+// (import_boundary_test.go) forbids by exact path.
+func preRequestChainSourceName(i int) string {
+	return "Hooks.PreRequest[" + strconv.Itoa(i) + "]"
+}
+
+// attributedPreRequestError wraps a hook's own error with its SOURCE's
+// own name (R-HKS-009), reachable through the standard single-error
+// errors.Unwrap route — the "fmt.Errorf(%w, ...)" shape built by hand,
+// mirroring cancellation.go's promptAfterShutdownError precedent, so
+// this file adds no "fmt" import.
+type attributedPreRequestError struct {
+	source string
+	err    error
+}
+
+func (e *attributedPreRequestError) Error() string { return e.source + ": " + e.err.Error() }
+
+func (e *attributedPreRequestError) Unwrap() error { return e.err }
+
+// applyPreRequestHook composes the pre-request chain (R-HKS-002, AG-20
+// widening of AG-08's shipped shape): the singular field, when
+// non-nil, is invoked FIRST, on the request buildLoopRequest produced;
+// its returned request is the input to chain[0]; element i's returned
+// request is the input to element i+1; and the chain's FINAL element's
+// returned request — and only that value — is what this returns. Nil
+// singular AND an empty chain is the identity default (R-PRH-005 as
+// amended): req returns unchanged, preserving AG-07's R-LSK-002
+// byte-stability.
 //
-// Nil is the identity default (R-PRH-005, D4a): a zero-value
-// TurnOptions produces byte-identical output to AG-07's skeleton for
-// identical inputs (AG-07 R-LSK-002 carry). When hook is non-nil, the
-// helper delegates to it; the loop's caller owns the typed-error
-// handling path that wraps a non-nil hook error in *ai.PreStreamFailure
-// (R-PRH-003, S-PRH-003).
+// A non-nil error from any source aborts the sequence — no later
+// element is invoked — and is wrapped with its SOURCE's own name
+// (R-HKS-009) via %w, reachable by the caller's errors.Unwrap chain:
+// TurnOptions.PreRequestHook for the singular field, or
+// Hooks.PreRequest[i] for a chain element at index i.
 func applyPreRequestHook(
 	ctx context.Context,
 	req ai.Request,
 	hook func(ctx context.Context, req ai.Request) (ai.Request, error),
+	chain []PreRequestHook,
 ) (ai.Request, error) {
-	if hook == nil {
-		return req, nil
+	next := req
+	if hook != nil {
+		out, err := hook(ctx, next)
+		if err != nil {
+			return ai.Request{}, &attributedPreRequestError{source: preRequestSingularSourceName, err: err}
+		}
+		next = out
 	}
-	return hook(ctx, req)
+	for i, elem := range chain {
+		out, err := elem(ctx, next)
+		if err != nil {
+			return ai.Request{}, &attributedPreRequestError{source: preRequestChainSourceName(i), err: err}
+		}
+		next = out
+	}
+	return next, nil
 }
 
 // modelForOpts returns the request's model identity. Walking-skeleton
