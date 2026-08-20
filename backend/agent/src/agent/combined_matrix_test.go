@@ -72,7 +72,7 @@ func TestCombinedMatrix(t *testing.T) {
 // continues and reaches its own terminal -- and a run-close carrying
 // the interrupted or shutdown outcome anywhere on this cell's stream
 // FAILS the scenario.
-func adjustedThenCompactionFailure(t *testing.T, arr *cnhArrangement, got cnhRunOutcome, events []agent.Event) {
+func adjustedThenCompactionFailure(t *testing.T, _ *cnhArrangement, got cnhRunOutcome, events []agent.Event) {
 	t.Helper()
 
 	if got := countKind(events, agent.EventKindCompactionFinished); got != 0 {
@@ -130,7 +130,7 @@ func adjustedThenSuspensionFailure(t *testing.T, arr *cnhArrangement, got cnhRun
 // never RunOutcomeFailed, and never interrupted/shutdown -- the
 // containment closure (containmentChildFailure) carries the scenario's
 // remaining, more specific assertions.
-func adjustedThenChildFailure(t *testing.T, arr *cnhArrangement, got cnhRunOutcome, events []agent.Event) {
+func adjustedThenChildFailure(t *testing.T, _ *cnhArrangement, got cnhRunOutcome, events []agent.Event) {
 	t.Helper()
 
 	if len(events) == 0 {

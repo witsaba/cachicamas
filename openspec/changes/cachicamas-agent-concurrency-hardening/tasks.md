@@ -95,10 +95,10 @@ Counted against the **1000-line budget excluding `openspec/**`**, extension pre-
 
 ## Phase 7 — Full-suite green + quality gates
 
-- [ ] 7.1 `cd backend/agent && go test -race -count=1 ./...` — full green, wall-clock duration recorded (sub-170s is suspect).
-- [ ] 7.2 `golangci-lint cache clean` then `make lint` — clean.
-- [ ] 7.3 `make build` — clean.
-- [ ] 7.4 `make vuln-check` — clean. **NOT** part of `make all`; do **NOT** run `make all` (its fmt step rewrites committed files).
+- [x] 7.1 `cd backend/agent && go test -race -count=1 ./...` — full green, wall-clock duration recorded (sub-170s is suspect). **Evidence**: every package `ok` (`src/agent 12.148s`, `src/agenttest 3.097s`, `src/agenttest/sweep 1.766s`, `src/agenttest/tracetest 2.525s`, `src/ai 4.802s`, `src/ai/internal/retry 2.823s`, `src/ai/openaicompat 175.170s`, `src/ai/openaicompat/conformancetest 3.398s`, `src/ai/openaicompat/openrouter 3.684s`, `src/ai/openaicompat/openrouter/conformance 6.770s`, `src/ai/openaicompat/openrouter/internal/smoke 3.042s`, `src/handoff 2.184s`); real wall-clock via `time`: **2:55.80 (175.80s)** — matches the documented ~170s uncached baseline, not a cache artifact.
+- [x] 7.2 `golangci-lint cache clean` then `make lint` — clean. **Finding and fix**: `golangci-lint` was not yet installed (`cache clean` itself reported "command not found"; `make lint` auto-installed a fresh v2.9.0 binary, so there was no stale cache to begin with); the fresh run found 2 real issues — unused `arr *cnhArrangement` parameter in `adjustedThenCompactionFailure` and `adjustedThenChildFailure` (`combined_matrix_test.go`) — fixed by renaming both to `_` (function type unchanged, both callers unaffected). Re-run: `bin/golangci-lint run --config=.golangci.yml ./...` → `0 issues.`. Re-verified `go test -race -count=1 ./src/agent/...` still green after the rename (`ok ... 9.698s`).
+- [x] 7.3 `make build` — clean. **Evidence**: `go build -trimpath ./...`, no output, exit clean.
+- [x] 7.4 `make vuln-check` — clean. **NOT** part of `make all`; do **NOT** run `make all` (its fmt step rewrites committed files). **Evidence**: `govulncheck` (auto-installed) ran to completion, exit code 0; the JSON stream lists database `osv` entries scanned against dependencies (pre-existing, no new dependency added by this change — `go.mod`/`go.sum` byte-unchanged) but zero `"finding"` objects (no vulnerability reachable from this module's actual call graph).
 
 ## Phase 8 — doc 0003 update (same PR)
 
