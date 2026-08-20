@@ -1,22 +1,26 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:455ee7aa7b4e64c0c19039852fb82adfe7bd2241eda73cf5d5423cf969ffd2c0
+evidence_revision: sha256:68029c9562e7e250c003625317d01ad141faae18c6c4c37e6db725f4a37aceda
 verdict: fail
-blockers: 1
-critical_findings: 1
-requirements: 17/22
-scenarios: 30/36
+blockers: 0
+critical_findings: 0
+requirements: 18/22
+scenarios: 31/36
 test_command: cd backend/agent && go test -race -count=1 ./...
 test_exit_code: 0
-test_output_hash: sha256:3f15cc740b033b706841f05f08ff0c8dce9b9d88bd77c5ca3ef898806c8db94d
+test_output_hash: sha256:8eb3edae48996522370866c6ed915a7b97dc3b2f8d48428e97e27a22af17b107
 build_command: cd backend/agent && go vet ./...
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
-> **This file holds two rounds.** Round 1 (below, verbatim) is the record that
-> produced the correction commit `d5a9c364`. Round 2 (at the end) adjudicates
-> that correction and is the **current** verdict; the envelope above is Round 2's.
+> **This file holds three rounds.** Round 1 (below, verbatim) is the record
+> that produced the correction commit `d5a9c364`. Round 2 (verbatim) adjudicates
+> that correction and produced `10d64ea0`. Round 3 (at the end) adjudicates
+> `10d64ea0` and is the **current** verdict; the envelope above is Round 3's.
+> The envelope reads `fail` with `blockers: 0` — that token is the validator's
+> evidence-completeness rule firing on five accepted carry-forward PARTIALs,
+> **not** an unresolved blocker. Round 3's adjudication is PASS WITH WARNINGS.
 
 ---
 
@@ -596,3 +600,299 @@ sentence and two comments — all four belong in a single scoped correction.
 **Next**: `sdd-apply` for one scoped correction, then a third focused verify
 limited to `S-DEL-001` and the three new warnings. Archive must not proceed
 until CRITICAL-7 is closed.
+
+---
+
+# Round 3 — 0 blockers, 0 CRITICAL; envelope `fail` on evidence completeness only
+
+**Change**: `cachicamas-agent-delegation-readiness` (AG-19, Layer 2 Wave 5)
+**Branch**: `feat/agent-layer2-wave5-ag19` @ `10d64ea0`, base `558641f3`
+**Mode**: Strict TDD — third and final focused pass
+
+**Adjudication verdict**: **PASS WITH WARNINGS** — **0 blockers, 0 CRITICAL**.
+All four round-2 findings are closed, each re-derived here by command rather
+than read. Every remaining warning was carried forward by explicit agreement
+before this round began, and none of them blocks archive.
+
+**Machine envelope verdict**: **`fail`**, with `blockers: 0` and
+`critical_findings: 0`. This is *not* a new blocker. `gentle-ai
+sdd-verify-validate` refuses any passing verdict while `requirements` or
+`scenarios` are short of their totals — probed directly, `pass_with_warnings`
+is admitted at `22/22` + `36/36` and denied at `18/22` or `31/36` regardless
+of blocker count. Five scenarios remain PARTIAL by explicit agreement, so the
+honest counts are `18/22` and `31/36`, and the only admissible envelope that
+carries those true counts is `fail`. Inflating either count to buy a passing
+token would have been fabricating evidence; the counts stand and the token
+gives way. See **The envelope, and why it says `fail`** below.
+
+**Scope**: this round adjudicates only the closure of `CRITICAL-7` and
+`WARNING-7/8/9`, regression from the correction, the final requirement and
+scenario tally, and archive readiness. Rounds 1 and 2's verification of the
+production seam (revocation ordering, admissibility totality, the `S-DEL-022`
+grandchild-goroutine hazard, the one-hop walk, the narrowing table) was not
+redone and still stands.
+
+## The correction under adjudication
+
+`10d64ea0`, measured by `git show --numstat`:
+
+| Path | +/- | Class |
+|---|---|---|
+| `backend/agent/src/agent/cancellation_test.go` | +9/-4 | test |
+| `backend/agent/src/agent/delegation_seam_test.go` | +13/-4 | test |
+| `openspec/.../specs/agent-delegation-readiness/spec.md` | +1/-1 | spec text |
+| `openspec/.../apply-progress.md` | +43/-0 | SDD bookkeeping |
+| `openspec/.../tasks.md` | +19/-0 | SDD bookkeeping |
+| `openspec/.../verify-report.md` | +391/-6 | round-2 report itself |
+
+**Zero production files.** `git show --name-only` filtered to `backend/` minus
+`_test.go` returns nothing, and `git diff d5a9c364 10d64ea0 -- delegation_seam.go
+scheduler.go` is empty — both production files are byte-identical to the
+previous round. Authored risk in `backend/agent/` is **30 lines** (9+4+13+4),
+matching apply's claim exactly.
+
+## CRITICAL-7 — CLOSED
+
+Settled by the orchestrator's own overlay reproduction, independent of the
+correction agent: a scratch `delegation_seam.go` keeping every admissibility
+gate but replacing the funnel send with `_ = emission{ev: ev}` makes
+`TestDelegationSeam_S_DEL_001_IdentitiesMatchRunStartAndTurnStartOnSameStream`
+**FAIL** at `delegation_seam_test.go:397` with "the message_start_text
+published through the seam (matched by its minted message ID) does not appear
+on the parent's recorded stream"; the undefeated control passes
+(`ok ... src/agent 1.337s`). The real `delegation_seam.go` was never edited.
+
+Source confirms the mechanism: `delegation_seam_test.go:329` now captures the
+minted `ai.MessageID` into `capturedMsgID`, and the search loop at `:386-395`
+type-asserts `ev.MessageStartText()` and requires
+`ev.Run() == capturedRun && payload.MessageID() == capturedMsgID` — the unique
+minted identity, not the kind-plus-run shape the harness's own turn-2 text
+response already satisfies. The kind check is now implicit in the successful
+type assertion. **Not re-litigated here.**
+
+## WARNING-7 — CLOSED, re-measured independently
+
+The corrected clause is a claim about numbers, so it was verified by
+measurement, not by reading. An instrumented probe was added to
+`package agent_test` **via `go test -overlay` only** (never written into the
+worktree), together with a gate-5-removed copy of `delegation_seam.go`. Overlay
+is sound on this path: the cost fixture is pure Go with no `os/exec`
+subprocess, unlike `S-DEL-015`'s git-diff guard.
+
+| Tree | `parentOwn` (filtered) | `childInput` | `combined` | parent terminal `cost_session` | leaked child `cost_turn` |
+|---|---|---|---|---|---|
+| Shipped | **15** | 77 | **92** | 15 | 0 |
+| Gate 5 removed (the bite) | **15** | 77 | **92** | 92 | 1 |
+
+`spec.md:213`'s new sentence, clause by clause:
+
+| Clause | Measured | Verdict |
+|---|---|---|
+| "the filtered parent-own figure stays pinned at **15**" | 15 in both trees | ✅ true |
+| "the parent-plus-child combined figure stays at **92**" | 92 in both trees | ✅ true |
+| "neither one moving between the shipped tree and this bite" | both constant | ✅ true |
+| "parent-own remains strictly less than combined regardless" | 15 < 92 | ✅ true |
+
+The surrounding S-DEL-020 clauses re-confirmed in the same run: the bite makes
+`TestCost_ParentAloneStrictlyLessThanCombined` FAIL at exactly `cost_test.go:168`
+("terminal cost_session input tokens = 92, want 15") **and** `cost_test.go:179`
+("parent event[7] is a cost_turn carrying the CHILD's run identity"), while the
+strict-inequality line `:140` never fires — precisely what the sentence claims.
+The inflation is `92 - 15 = 77 = childInput`, "exactly the child's spend". The
+cited `harness.go:633-635` resolves to the unfiltered
+`if ct, ok := ev.CostTurn(); ok { total.add(ct) }` fold — citation accurate.
+
+This round's figures reproduce round 2's table exactly from an independently
+written probe.
+
+**Restatement sweep.** `grep -rn "move together|moves together|lockstep|15 vs 92"`
+over `openspec/` and `backend/agent/src/` returns no surviving false
+restatement. Live hits are: `verify-report.md:346,428` (this file's own record
+of the round-2 finding, correctly preserved as history), `tasks.md:115`
+("15 vs 92, still strictly less" — accurate, never claimed they move together),
+`tasks.md:133` and `apply-progress.md:131,150,158` (descriptions of the
+correction, accurate), and `cost_test.go:98` (a statement about the *unfiltered*
+sum, which genuinely does move in lockstep — that is why the filter exists).
+Unrelated hits in `agent-permission-protocol/spec.md:82`, `scheduler.go:679`
+and archived changes concern permission transparency, not cost. **No fourth
+false claim shipped.**
+
+## WARNING-8 — CLOSED, every factual claim re-derived by command
+
+The rewritten comment at `cancellation_test.go:140-146` asserts three facts.
+A comment asserting a measured number is a claim like any other, so all three
+were checked:
+
+| Claim | Command | Result |
+|---|---|---|
+| the merge base is what the guard resolves | `git merge-base HEAD origin/main` | `558641f3560ce1…` — matches the base apply diffed against |
+| scheduler.go's diff is "7 insertions, 1 deletion against the merge base" | `git diff 558641f3 --numstat -- scheduler.go` | `7  1` — **exact** |
+| "neither declares a `context.WithCancel/WithCancelCause/WithTimeout/WithDeadline` call anywhere" | `grep -n` over both production files | zero hits in either |
+
+The comment's process claim — "asserted below via a real git-diff derivation
+against the merge base, re-run every time rather than a static positive
+statement" — matches the code at `:199-225`: `gitTopLevel`, then
+`merge-base HEAD origin/main` (overridable by `AG19_BASE_REF`), then `gitDiff`
+per path, then the forbidden-symbol scan. The stale "3-line" figure and the
+inverted "direct positive statement" wording are both gone.
+
+*Nit (not a warning):* the comment uses "static" in two senses one line apart —
+"a **static** claim" (a claim about source text) and "a **static** positive
+statement" (a hardcoded assertion). Both readings are true; the collision is a
+readability wart only.
+
+## WARNING-9 — CLOSED, and the floor was watched firing
+
+A floor nobody has watched fire is dead code, so the reachability proof was
+re-run here rather than accepted:
+
+```
+$ AG19_BASE_REF=HEAD go test -race -count=1 -run TestCancellation_NestedRunCancelsLeafFirst -v ./src/agent/
+    cancellation_test.go:218: backend/agent/src/agent/delegation_seam.go's diff against the
+    merge base is empty — S-DEL-015 has nothing to scan (expected the AG-19 seam-install
+    hunk); mirrors S-TLS-020's identical anti-vacuity floor at scope_fence_test.go
+--- FAIL: TestCancellation_NestedRunCancelsLeafFirst (0.02s)
+FAIL
+
+$ go test -race -count=1 -run TestCancellation_NestedRunCancelsLeafFirst -v ./src/agent/   # control
+--- PASS: TestCancellation_NestedRunCancelsLeafFirst (0.05s)
+ok
+```
+
+The floor fires with the exact intended diagnostic when the diff is forced
+empty, and is inert on the real tree. It now mirrors `S-TLS-020`'s floor at
+`scope_fence_test.go:255-257` exactly, with the added correctness that
+`S-DEL-015`'s version sits **inside** the per-path loop and is parameterized by
+`path`, so it covers both `delegation_seam.go` and `scheduler.go`. The
+round-2 asymmetry is gone.
+
+*Forward-looking, not a blocker:* once AG-19 lands on `main`, `git merge-base
+HEAD origin/main` resolves past the change and **both** guards will fail loudly
+rather than pass vacuously. That is the deliberate resolution round 2 asked
+for — failing loudly beats certifying nothing — and the merge-base pattern
+itself is repo-wide and pre-existing. It is recorded here so archive knows the
+two guards are branch-scoped by construction.
+
+## Regression check
+
+- **No assertion weakened.** `delegation_seam_test.go`'s publish search went
+  from `kind == MessageStartText && run == capturedRun` to a successful
+  `MessageStartText()` type assertion **plus** `run == capturedRun` **plus**
+  `payload.MessageID() == capturedMsgID` — strictly stronger, nothing dropped.
+  `cancellation_test.go`'s change is a comment rewrite plus three added lines
+  that can only *cause* a failure. Both are net-strengthening.
+- **No scenario lost coverage.** `S-DEL-001`'s three clauses all remain
+  asserted: seam presence (`:349`), identity equality against `run_start` and
+  `turn_start` on the same drained stream (`:364-376`), and the publish clause
+  (`:385-398`), plus `publishErr == nil` (`:352`).
+- **Assertion quality audit** on the two changed files: no tautology, no
+  orphan-empty check, no type-only assertion, no ghost loop. The publish loop
+  is no longer a ghost loop — that was CRITICAL-7.
+- `gofmt -l` clean on both touched files; `go vet ./...` exit 0.
+
+## Final compliance
+
+**Scenarios: 31 COMPLIANT / 5 PARTIAL / 0 UNTESTED, of 36.**
+`S-DEL-001` moves PARTIAL → COMPLIANT; every other row is unchanged from
+round 2.
+
+**Requirements: 18/22.** `R-DEL-001` closes with `S-DEL-001`. The four still
+open are `R-DEL-006` (WARNING-2), `R-DEL-010` (WARNING-4) and the two
+`agent-v1-scope` requirements (WARNING-5) — all carried forward by explicit
+agreement.
+
+**No scenario lacks a test asserting its actual claim.** UNTESTED is 0. The
+five PARTIALs each have a passing covering test that proves a *weaker*
+proposition than the scenario states:
+
+| Scenario | Covering test asserts | Scenario also claims | Origin |
+|---|---|---|---|
+| `S-DEL-014` | the **child's** run error is not a `*DetachedCallError` | the **parent's tool result** is not one; `parentToolErr` is set and never read | WARNING-2 |
+| `S-AGE-029` | bracket contiguity | the source-level "no channel type / no buffer capacity" half (the exported-names scan cannot see unexported declarations) | WARNING-3 |
+| `S-DEL-025` | the fixture runs twice **on this change** | one run on the merge base and one on this change | WARNING-4 |
+| `S-AGS-063` | a `cost_turn` is constructed then discarded with `_ = ev` | the refusal makes the fold unreachable | WARNING-5 |
+| `S-AGS-064` | the **absence** of a seam on a background context | the three leaves' exported entry points exist and are reachable | WARNING-5 |
+
+## Tasks
+
+30/32 checked. The two unchecked rows are **5.2** (allocated-ID header
+maintenance) and **5.4** (OpenSpec archive), both explicitly scoped to
+`sdd-archive` in their own text. Nothing in the code state contradicts a
+checked row.
+
+## Carried forward by explicit agreement — not blockers
+
+Round-1 `WARNING-2/3/4/5/6` and `SUGGESTION-1..4`; round-2's three
+non-blocking suggestions; the two `errors.Is(x, x)` tautologies at
+`cancellation_events_test.go:119,122` (traced to `045f8095`/AG-14,
+pre-existing, outside AG-19's range); 15 pre-existing `gofmt -l` failures
+elsewhere in the module; stale citations in the promoted
+`agent-loop-skeleton` / `agent-turn-termination` specs; tasks 5.2 and 5.4;
+and the ~3667-line total under the accepted `size:exception`.
+
+## Runtime evidence
+
+```
+$ cd backend/agent && go test -race -count=1 ./...      # uncached, -race
+ok  github.com/cachicamas/backend/agent/src/agent                                  8.829s
+ok  github.com/cachicamas/backend/agent/src/agenttest                              2.416s
+ok  github.com/cachicamas/backend/agent/src/agenttest/sweep                        1.839s
+ok  github.com/cachicamas/backend/agent/src/agenttest/tracetest                    2.056s
+ok  github.com/cachicamas/backend/agent/src/ai                                     4.505s
+ok  github.com/cachicamas/backend/agent/src/ai/internal/retry                      2.484s
+ok  github.com/cachicamas/backend/agent/src/ai/openaicompat                      171.975s
+ok  github.com/cachicamas/backend/agent/src/ai/openaicompat/conformancetest        2.937s
+ok  github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter             3.163s
+ok  github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/conformance 6.443s
+ok  github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter/internal/smoke 2.216s
+ok  github.com/cachicamas/backend/agent/src/handoff                                1.916s
+exit 0
+```
+
+12 packages, **zero `(cached)` markers** (`grep -c` = 0), zero `--- FAIL`
+lines. `go vet ./...` exit 0, empty output.
+
+## The envelope, and why it says `fail`
+
+The envelope at the top of this file records `verdict: fail` alongside
+`blockers: 0` and `critical_findings: 0`. Those three fields are not in
+tension — they are describing two different questions.
+
+`gentle-ai sdd-verify-validate` was probed directly with this exact report
+body, varying one field at a time:
+
+| verdict | requirements | scenarios | blockers | admitted? |
+|---|---|---|---|---|
+| `pass_with_warnings` | 22/22 | 36/36 | 0 | ✅ |
+| `pass` | 22/22 | 36/36 | 0 | ✅ |
+| `pass_with_warnings` | **18/22** | 36/36 | 0 | ❌ denied |
+| `pass_with_warnings` | 22/22 | **31/36** | 0 | ❌ denied |
+| `pass_with_warnings` | 18/22 | 31/36 | 1 | ❌ denied |
+| `fail` | 18/22 | 31/36 | 0 | ✅ |
+
+The rule is completeness, not blockers: a passing token requires every
+requirement and every scenario to be complete. Five scenarios are genuinely
+not complete — each has a passing covering test that proves a **weaker**
+proposition than the scenario states (table above). That is real incomplete
+evidence, and the validator is right to refuse a passing token for it. It is
+also exactly the incompleteness the orchestrator and user accepted as
+non-blocking before this round started.
+
+So: the counts are true, the `fail` token is the completeness rule firing on
+five accepted carry-forwards, and **no new blocker exists**. A consumer that
+gates purely on the envelope token will stop; a consumer asking "is anything
+unresolved that should block archive?" gets **no**.
+
+## Verdict
+
+**Adjudication: PASS WITH WARNINGS — 0 blockers, 0 CRITICAL, 18/22
+requirements, 31/36 scenarios COMPLIANT (5 PARTIAL, 0 UNTESTED).**
+**Envelope: `fail`** on evidence completeness only, per the table above.
+
+**`sdd-archive` can proceed.** No unresolved CRITICAL issue remains. Every
+finding that ever blocked archive across three rounds is closed and
+independently re-derived by command; everything still open was accepted as
+non-blocking before this round began. If `sdd-archive` gates on the envelope
+token rather than on `blockers`/`critical_findings`, it will need the
+orchestrator's explicit carry-forward acknowledgement to proceed — that is a
+process decision, not a defect in the change.

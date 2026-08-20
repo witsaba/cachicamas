@@ -248,6 +248,9 @@ func TestScopeFence_S_TLS_020_SeamRidesBesidePolicySlotNotInsideIt(t *testing.T)
 		}
 		baseRef = out
 	}
+	if baseRefIsHEAD(t, root, baseRef) {
+		t.Skip("S-TLS-020: base ref resolves to HEAD — this change is merged, so scheduler.go's added lines no longer appear in a diff against the base and the absence this guard asserts holds trivially; branch-scoped by construction, mirroring AG-07's substrate guard")
+	}
 	diff, err := gitDiff(t, root, baseRef, "backend/agent/src/agent/scheduler.go")
 	if err != nil {
 		t.Fatalf("git diff %s -- scheduler.go failed: %v", baseRef, err)
@@ -319,4 +322,29 @@ func countString(haystack []string, needle string) int {
 		}
 	}
 	return n
+}
+
+// baseRefIsHEAD reports whether baseRef resolves to the same commit as
+// HEAD. That is the post-merge condition: once this change is on main,
+// `git merge-base HEAD origin/main` resolves to HEAD itself, so the
+// change's own additions no longer appear in any diff against the base.
+//
+// The AG-19 diff guards assert an ABSENCE — that no forbidden symbol was
+// introduced by this change's own added lines. An empty diff satisfies
+// that trivially, so the guards are branch-scoped by construction and
+// must degrade the way AG-07's substrate guard already does
+// (loop_test.go's substrate check passes on an empty diff) rather than
+// redden main's suite. The anti-vacuity floors below stay in force for
+// the on-branch case they were written for (verify-report WARNING-9).
+func baseRefIsHEAD(t *testing.T, root, baseRef string) bool {
+	t.Helper()
+	headSHA, err := gitOutput(t, root, "rev-parse", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD failed: %v", err)
+	}
+	baseSHA, err := gitOutput(t, root, "rev-parse", baseRef+"^{commit}")
+	if err != nil {
+		t.Fatalf("git rev-parse %s failed: %v", baseRef, err)
+	}
+	return headSHA == baseSHA
 }

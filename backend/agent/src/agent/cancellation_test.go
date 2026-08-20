@@ -208,6 +208,10 @@ func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 		}
 		baseRef = out
 	}
+	if baseRefIsHEAD(t, root, baseRef) {
+		t.Logf("S-DEL-015: base ref resolves to HEAD — this change is merged, so its own additions no longer appear in a diff against the base and the absence this guard asserts holds trivially; branch-scoped by construction, mirroring AG-07's substrate guard")
+		return
+	}
 	forbiddenContextDerivation := []string{"context.WithCancel", "context.WithCancelCause", "context.WithTimeout", "context.WithDeadline"}
 	for _, path := range []string{"backend/agent/src/agent/delegation_seam.go", "backend/agent/src/agent/scheduler.go"} {
 		diff, err := gitDiff(t, root, baseRef, path)
