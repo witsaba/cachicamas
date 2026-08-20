@@ -1062,7 +1062,8 @@ func filterOutLoopFiles(diff string) string {
 				// loop_hook_test.go's filterOutLoopHookFiles.
 				strings.HasSuffix(path, "/combined_state_fixtures_test.go") ||
 				strings.HasSuffix(path, "/combined_matrix_test.go") ||
-				strings.HasSuffix(path, "/slow_consumer_pressure_test.go")
+				strings.HasSuffix(path, "/slow_consumer_pressure_test.go") ||
+				strings.HasSuffix(path, "/cross_run_state_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
