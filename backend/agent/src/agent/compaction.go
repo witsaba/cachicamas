@@ -249,7 +249,13 @@ func drainCompactionCall(pCh <-chan ai.Event) compactionCallOutcome {
 // strategy-triggered door (harness.go) discards this return value: a
 // compaction failure is visible on the stream and nowhere else
 // (R-CMP-010, R-CMP-013) and never interrupts the run.
-func runCompaction(ctx context.Context, hist *History, req CompactionRequest, runID RunID, stamper *LaneStamper, sink chan<- *Event, total *costAccumulator) error {
+//
+// chain is AG-20's pre-compact chain (R-HKS-003, design AD-8): an
+// unexported parameter the harness supplies from Harness.Hooks —
+// never smuggled through req.Options, which the misplaced-options
+// rejection below refuses. A nil/empty chain is inert: no invocation,
+// no CompactionPlan value, byte-for-byte today's path.
+func runCompaction(ctx context.Context, hist *History, req CompactionRequest, runID RunID, stamper *LaneStamper, sink chan<- *Event, total *costAccumulator, chain []PreCompactHook) error {
 	compactionTurnID := mintCompactionTurnID()
 	compactionID := string(compactionTurnID)
 
@@ -266,7 +272,11 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrEmpty, ai.At("instruction")))
 	}
-	if req.Options.Tools != nil || req.Options.Continuation != nil {
+	// AG-20 (R-HKS-001, R-CMP-015, S-CMP-042): Hooks joins the
+	// misplaced-options rejection — the pre-compact chain reaches this
+	// operation ONLY as the explicit chain parameter above, never
+	// smuggled through the request's own options.
+	if req.Options.Tools != nil || req.Options.Continuation != nil || !req.Options.Hooks.isZero() {
 		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrMisplaced, ai.At("options")))
 	}
@@ -286,6 +296,42 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	if !spanOK {
 		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrEmpty, ai.At("span")))
+	}
+
+	// AG-20 (R-HKS-003, design AD-8): the pre-compact chain, spliced
+	// here — after the naive cut is resolved and the span derived,
+	// strictly before the provider call below — reaches BOTH doors
+	// (R-CMP-001) through this one operation; no second splice is
+	// added. len(chain) > 0 guards inertness (R-HKS-012): a nil/empty
+	// chain constructs no CompactionPlan value and this path stays
+	// byte-for-byte today's.
+	if len(chain) > 0 {
+		plan := CompactionPlan{cut: cut, span: CompactionSpan{StartTurnID: startTurnID, EndTurnID: endTurnID}}
+		var herr error
+		for _, hook := range chain {
+			plan, herr = hook(ctx, plan)
+			if herr != nil {
+				return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted, herr)
+			}
+		}
+		// The chain's returned cut is re-resolved UNCONDITIONALLY
+		// (R-CMP-004 as amended) — an implementation MUST NOT skip
+		// this on the grounds the plan "looks unchanged": skipping is
+		// exactly what splits a call/result pair (bite S-HKS-053 /
+		// S-CMP-041). The span is then re-derived from the
+		// (possibly moved) resolved cut, pre-commit, so
+		// NewCompactionFinished below reports the span that was
+		// actually used.
+		cut = resolveCut(hist, plan.Cut())
+		if cut == 0 {
+			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+				ai.Invalid(ai.ErrEmpty, ai.At("cut")))
+		}
+		startTurnID, endTurnID, spanOK = hist.markSpan(cut)
+		if !spanOK {
+			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+				ai.Invalid(ai.ErrEmpty, ai.At("span")))
+		}
 	}
 
 	prefix := transcriptFromHistory(hist)[:cut]
@@ -392,7 +438,7 @@ func (h *Harness) Compact(ctx context.Context, req CompactionRequest, sink chan<
 	sendStamped(sink, stamper, runStart)
 
 	var total costAccumulator
-	compactErr := runCompaction(ctx, hist, req, runID, stamper, sink, &total)
+	compactErr := runCompaction(ctx, hist, req, runID, stamper, sink, &total, h.Hooks.PreCompact)
 
 	if sessionEvent, serr := total.sessionEvent(runID, CostLabelFinal); serr == nil {
 		sendStamped(sink, stamper, sessionEvent)

@@ -1038,7 +1038,19 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/permission_scope_test.go") ||
 				strings.HasSuffix(path, "/scope_fence_test.go") ||
 				strings.HasSuffix(path, "/inert_path_test.go") ||
-				strings.HasSuffix(path, "/v1_scope_test.go")
+				strings.HasSuffix(path, "/v1_scope_test.go") ||
+				// AG-20 widening (agent-loop-skeleton delta's R-LSK-008
+				// "AG-20 requests NO release", S-LSK-032): AG-20 takes NO
+				// release -- every entry below names a file this change
+				// CREATES, none names a pre-existing filename. hooks.go
+				// is AG-20's one new production file; the three suffixes
+				// after it are its own new test files. Exact filenames,
+				// no wildcard/prefix/directory pattern; byte-in-sync
+				// with loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/hooks.go") ||
+				strings.HasSuffix(path, "/hooks_test.go") ||
+				strings.HasSuffix(path, "/hooks_harness_test.go") ||
+				strings.HasSuffix(path, "/hooks_compaction_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
