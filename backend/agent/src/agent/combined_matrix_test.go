@@ -14,9 +14,12 @@ import (
 
 // cnhCells is the twelve-row table (design AD-1): one row per state x
 // signal pair. Ten cells carry the uniform Then; the compaction x
-// provider-failure and suspension x provider-failure cells carry
-// R-CNH-001's recorded, evidence-cited adjusted Then; the three child-
-// harness cells additionally carry S-CNH-002's containment check.
+// provider-failure and child-harness-active x provider-failure cells
+// carry R-CNH-001's recorded, evidence-cited adjusted Then (sdd-verify
+// round-2, MAJOR-2: suspension x provider-failure is uniform in
+// outcome, adjusted only in the timing S-CNH-005 checks — it is NOT
+// one of these two); the three child-harness cells additionally carry
+// S-CNH-002's containment check.
 var cnhCells = []cellCase{
 	// State 1 — a suspension pending (a permission-deferred call parked
 	// on the gate).
@@ -90,8 +93,12 @@ func adjustedThenCompactionFailure(t *testing.T, _ *cnhArrangement, got cnhRunOu
 	if !ok {
 		t.Fatalf("compaction_mid_run/provider_failure: last event kind = %v, want run_end", last.Kind())
 	}
-	if runEnd.Outcome() == agent.RunOutcomeInterrupted || runEnd.Outcome() == agent.RunOutcomeShutdown {
-		t.Errorf("compaction_mid_run/provider_failure: run_end outcome = %v, want the run to continue past the compaction failure to its OWN terminal, never interrupted/shutdown (R-CMP-010's own heading: a failed compaction never winds the run down)", runEnd.Outcome())
+	// sdd-verify round-2, SUGGESTION-1 (adopted): assert the positive
+	// outcome directly rather than only excluding the two wrong ones --
+	// strictly stronger, and this exact strengthening is what would
+	// have surfaced MAJOR-2 at authoring time.
+	if runEnd.Outcome() != agent.RunOutcomeCompleted {
+		t.Errorf("compaction_mid_run/provider_failure: run_end outcome = %v, want RunOutcomeCompleted -- the run continues past the compaction failure to its OWN terminal, never interrupted/shutdown/failed (R-CMP-010's own heading: a failed compaction never winds the run down)", runEnd.Outcome())
 	}
 	if got.err != nil {
 		t.Errorf("compaction_mid_run/provider_failure: Run returned err = %v, want nil -- the compaction failure is stream-visible only and never fails the run itself (R-CMP-013)", got.err)
@@ -120,16 +127,26 @@ func adjustedThenSuspensionFailure(t *testing.T, arr *cnhArrangement, got cnhRun
 // compaction: the requirement's uniform prose describes the state
 // whose OWN driving provider fails (suspension, steering); here it is
 // the CHILD's provider that fails, and the failure is CONTAINED
-// (S-CNH-002, R-DEL-002) rather than propagated -- Schedule's own
-// return value is discarded by the loop (the documented R-LSK-...
-// gap), so a tool-execution-level failure never surfaces as the
-// PARENT's own Turn-level error, and the parent falls through to its
-// own next turn exactly as the compaction cell does. Verified directly
-// against the shipped scheduler/loop behavior in this worktree (not
-// assumed): the parent reaches its own terminal with a nil error,
-// never RunOutcomeFailed, and never interrupted/shutdown -- the
-// containment closure (containmentChildFailure) carries the scenario's
-// remaining, more specific assertions.
+// (S-CNH-002, R-DEL-002) rather than propagated -- the true mechanism,
+// corrected here (sdd-verify round-2, MINOR-1; the prior wording --
+// "Schedule's own return value is discarded by the loop" -- was false
+// on this path and carried a dangling R-LSK-... placeholder): Schedule
+// (tool.go) has NO error return at all, only []Result. On the
+// continuation path Harness.Run always takes, finishContinuationTurn
+// (loop.go:525-566) captures that slice at :542 and converts each
+// Result via toolResultMessage (:578-598) into a tool-result or
+// tool-failure message appended to history -- never a Turn-level
+// error. The one place Schedule's return IS discarded (`_ =
+// sched.Schedule(...)`, loop.go:411) is the nil-continuation path,
+// which Harness.Run never takes. So a tool-execution-level failure
+// never surfaces as the PARENT's own Turn-level error, and the parent
+// falls through to its own next turn exactly as the compaction cell
+// does. Verified directly against the shipped scheduler/loop behavior
+// in this worktree (not assumed): the parent reaches its own terminal
+// with a nil error, never RunOutcomeFailed, and never
+// interrupted/shutdown -- the containment closure
+// (containmentChildFailure) carries the scenario's remaining, more
+// specific assertions.
 func adjustedThenChildFailure(t *testing.T, _ *cnhArrangement, got cnhRunOutcome, events []agent.Event) {
 	t.Helper()
 
@@ -141,8 +158,10 @@ func adjustedThenChildFailure(t *testing.T, _ *cnhArrangement, got cnhRunOutcome
 	if !ok {
 		t.Fatalf("child_harness_active/provider_failure: last event kind = %v, want run_end", last.Kind())
 	}
-	if runEnd.Outcome() == agent.RunOutcomeInterrupted || runEnd.Outcome() == agent.RunOutcomeShutdown {
-		t.Errorf("child_harness_active/provider_failure: run_end outcome = %v, want the parent to reach its own terminal, never interrupted/shutdown -- the parent itself was never signalled", runEnd.Outcome())
+	// sdd-verify round-2, SUGGESTION-1 (adopted): assert the positive
+	// outcome directly rather than only excluding the two wrong ones.
+	if runEnd.Outcome() != agent.RunOutcomeCompleted {
+		t.Errorf("child_harness_active/provider_failure: run_end outcome = %v, want RunOutcomeCompleted -- the parent reaches its own terminal, never interrupted/shutdown/failed -- the parent itself was never signalled", runEnd.Outcome())
 	}
 	if got.err != nil {
 		t.Errorf("child_harness_active/provider_failure: Run returned err = %v, want nil -- the child's failure is contained on its own subagent bracket and never fails the parent run (R-DEL-002, S-CNH-002)", got.err)

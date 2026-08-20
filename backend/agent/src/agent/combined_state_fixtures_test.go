@@ -529,14 +529,17 @@ func arrangeChildHarnessActive(t *testing.T, signal cnhSignal, label string) *cn
 // optional per-row overrides for the two cells whose Then this
 // requirement's own text records as adjusted rather than uniform.
 type cellCase struct {
-	state  string
-	signal string
-	sig    cnhSignal
+	state   string
+	signal  string
+	sig     cnhSignal
 	arrange func(t *testing.T, signal cnhSignal, label string) *cnhArrangement
 
 	// adjustedThen, when non-nil, REPLACES assertion 4's uniform check
 	// for this cell (R-CNH-001's recorded charter deviation:
-	// compaction x provider-failure, suspension x provider-failure).
+	// compaction x provider-failure, child-harness-active x
+	// provider-failure — sdd-verify round-2, MAJOR-2: suspension x
+	// provider-failure is uniform in outcome, adjusted only in the
+	// timing S-CNH-005 checks, and is NOT one of these two).
 	adjustedThen func(t *testing.T, arr *cnhArrangement, got cnhRunOutcome, events []agent.Event)
 
 	// containment, when non-nil, is S-CNH-002's extra child-cell check,
