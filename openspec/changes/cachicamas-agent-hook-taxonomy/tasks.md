@@ -123,7 +123,7 @@ Chain strategy: size-exception
 - [x] 6.1 `gofmt -l` on every file authored/modified (`hooks*.go`, `loop.go`, `harness.go`, `compaction.go`, `loop_test.go`, `loop_hook_test.go`) — clean. **NEVER `make fmt`** (rewrites committed files, fails substrate guards).
 - [x] 6.2 `go vet ./...` from `backend/agent` — clean.
 - [x] 6.3 `golangci-lint cache clean && golangci-lint run ./...` (or `make lint`) — 0 issues.
-- [x] 6.4 `cd backend/agent && go test -race -count=1 ./...` — record wall-clock (~170s), zero `--- FAIL`, no `(cached)` markers.
+- [x] 6.4 `cd backend/agent && go test -race -count=1 ./...` — record wall-clock (~170s), zero `--- FAIL`, no `(cached)` markers. **Correction round** (commit `50e02b8f`): the first pass under-satisfied this item — task 4.3's own text below instructed "fail loudly on an empty diff (`S-TLS-020` precedent)," which reproduced a merge-blocking anti-vacuity floor already latent in AG-19's `scope_fence_test.go`/`cancellation_test.go`. Fixed to `t.Skip` in all three occurrences; final evidence is 172.57s real, zero `FAIL`. Full account in `apply-progress.md`'s "Correction round" section. Task 4.3's text below is left as originally authored (an honest record of the plan that carried the flaw).
 - [x] 6.5 `make build` clean; `make vuln-check` clean (not part of `make all` — do not run `make all`).
 - [x] 6.6 Confirm isolated-process evidence for 3.15's panic bite (and any other process-crashing bite) is recorded outside the full-suite run.
 
