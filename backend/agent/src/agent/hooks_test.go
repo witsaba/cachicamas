@@ -1706,22 +1706,32 @@ func TestHooks_ClosedSequenceTable_HoldsAmendedAndClarifiedRowsResolve(t *testin
 	}
 }
 
-// S-HKS-026 — The inert path is byte-identical on every arm. Given
-// six paired runs of identical scripts — success, turn failure, retry
-// exhaustion, interrupt, shutdown, and a compacting run through each
-// door — one of each pair with a zero-value Hooks, run TWICE on this
-// change, then event streams (kind sequence), history read-backs and
-// captured provider requests are equal, and runtime.NumGoroutine()
-// returns to baseline after every one.
+// S-HKS-026 — The nil-Hooks path is deterministic on repetition, and
+// no lane goroutine exists on it. Given SEVEN paired runs of identical
+// scripts — success, turn failure, retry exhaustion, interrupt,
+// shutdown, a compacting run through the strategy-verdict door, and a
+// compacting run through the on-demand door — each pair run TWICE ON
+// THIS BRANCH with a zero-value Hooks, then the two runs' event-KIND
+// sequences are equal and runtime.NumGoroutine() returns to baseline
+// after every one.
 //
-// AG-19's inert_path_test.go established the argument this reuses:
-// every new code path this milestone adds is reachable ONLY through
-// Hooks being non-zero (isZero()/len(...)==0 guards gate all of it —
-// newObserverLane returns nil, the transport refusal never fires, the
-// pre-request/pre-compact composition takes its empty-chain branch) —
-// so "once on the merge base, once on this change" and "twice on this
-// change with zero-value Hooks" are the same experiment for a caller
-// who never sets Hooks.
+// CORRECTED (sdd-verify MAJOR-1): this scenario previously claimed
+// "one of each pair on the merge base and one on this change" and
+// claimed history-read-back and captured-provider-request equality —
+// neither is what this test does or could honestly claim. AG-19's
+// inert_path_test.go earned "twice on this branch" == "once on the
+// merge base, once here" explicitly, by showing its OWN new code is
+// never read on the hookless path at all (a caller-invisible seam
+// behind an opt-in accessor). AG-20 does NOT re-earn that argument:
+// applyPreRequestHook's chain composition (loop.go), the
+// turnCost/capturedOutcome capture locals (harness.go), and the
+// len(chain) > 0 guard (compaction.go) all execute UNCONDITIONALLY on
+// the hookless path too, so two runs on this branch is a narrower,
+// honest claim — determinism under repetition, not equivalence to
+// pre-AG-20 behavior. That equivalence is a STRUCTURAL claim instead,
+// verifiable by reading the isZero()/len(...)==0 guard at each of the
+// three call sites above, not something this test measures
+// behaviorally.
 func TestHooks_Inertness_ByteIdenticalOnEveryArm(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
