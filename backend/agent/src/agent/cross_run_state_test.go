@@ -91,6 +91,18 @@ func cnhDriveCrossRunNilHistory(t *testing.T) {
 	callID := "call-" + nonce
 	toolName := "cnh_crossrun_tool_nil"
 
+	// release carries NO t.Cleanup fallback, unlike this file's own
+	// gates elsewhere -- recorded here rather than left implicit
+	// (sdd-verify round-2, MINOR-4). The tradeoff is deliberate and
+	// correct for the sweep (Phase 5): a t.Cleanup registered per
+	// iteration would not fire until the whole 50-repeat sweep test
+	// ends, misreporting every iteration's own detached goroutine as
+	// leaked at snapshot time -- the same reasoning already documented
+	// for the pressure-2 driver (slow_consumer_pressure_test.go). The
+	// accepted risk is narrow: only a t.Fatal inside readUntilToolStart
+	// below, BEFORE close(release) at run 1's own return, would leave
+	// this one goroutine parked -- a test-authoring bug, not a
+	// production leak, and never reached on the shipped path.
 	release := make(chan struct{})
 	tool := BlockingScriptedTool(toolName, agent.EffectClassRead, release)
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
