@@ -237,7 +237,19 @@ func TestCancellation_NestedRunCancelsLeafFirst(t *testing.T) {
 		}
 	}
 	if !scannedAny {
-		t.Skip("S-DEL-015: neither delegation_seam.go nor scheduler.go changed against the merge base on this branch — the absence this guard asserts holds vacuously; it bites on the branch that actually introduces the seam-install hunk, mirroring S-TLS-020's identical fix at scope_fence_test.go")
+		// sdd-verify MINOR-3: t.Logf + return, not t.Skip, matching
+		// this same function's own baseRefIsHEAD branch above rather
+		// than diverging from it. Both branches assert the identical
+		// thing — an absence that holds vacuously because there is
+		// nothing to scan — and reporting one as SKIP while the other
+		// is an ordinary PASS was an inconsistency; SKIP is the
+		// misleading one here, because this test's entire behavioral
+		// core (the nested-cancellation-tree assertions above) has
+		// already run and passed by the time this branch is reached,
+		// and marking the whole test "skipped" would hide real,
+		// completed coverage from anyone scanning for it.
+		t.Logf("S-DEL-015: neither delegation_seam.go nor scheduler.go changed against the merge base on this branch — the absence this guard asserts holds vacuously; it bites on the branch that actually introduces the seam-install hunk, mirroring S-TLS-020's identical fix at scope_fence_test.go")
+		return
 	}
 }
 

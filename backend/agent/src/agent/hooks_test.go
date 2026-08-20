@@ -1541,26 +1541,21 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 		t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
 	}
 
-	if !hksBaseRefIsHEAD(t, root, baseRef) {
-		loopDiff, lerr := gitDiff(t, root, baseRef, "backend/agent/src/agent/loop.go")
-		if lerr != nil {
-			t.Fatalf("git diff %s -- loop.go failed: %v", baseRef, lerr)
-		}
-		if loopDiff == "" {
-			// An empty diff means loop.go was not touched on THIS
-			// branch (AG-20 happens to touch it; a later milestone
-			// that legitimately does not is not a defect) -- the
-			// absence this guard measures holds vacuously, and that is
-			// a skip, not a failure. Fatal-ing here is exactly the
-			// latent shape found (and fixed, this same commit) in
-			// scope_fence_test.go's S-TLS-020 and cancellation_test.go's
-			// S-DEL-015: it fires on every innocent later branch that
-			// does not touch the named file, never only on the branch
-			// that actually changed something to scan.
-			t.Skip("loop.go's diff against the merge base is empty on this branch — this scope-fence guard has nothing to measure and the absence it checks holds vacuously; it bites on a branch that actually changes loop.go")
-		}
-	}
-
+	// Diff-independent assertions FIRST, deliberately (sdd-verify
+	// MINOR-1): these four checks — event-kind count, Harness's
+	// exported method count, and Turn's/Run's signatures — read
+	// runtime reflection over the built package, never a git diff, so
+	// nothing about them can hold "vacuously" on a branch that leaves
+	// loop.go untouched. Running them before the loop.go anti-vacuity
+	// floor below means a future branch that legitimately does not
+	// touch loop.go still exercises all four every time, rather than
+	// having the branch below skip them along with itself. (Previously
+	// these four ran after the skip, so on such a branch none of them
+	// would run at all — silently, since nothing failed. Mitigated in
+	// practice because scope_fence_test.go's own
+	// TestScopeFence_S_DEL_024_... — a test that cannot skip — asserts
+	// the same invariants unconditionally; this reordering removes the
+	// dependency on that mitigation for this suite's own coverage.)
 	if got := len(agent.EventKinds()); got != 25 {
 		t.Errorf("len(agent.EventKinds()) = %d, want 25 (AG-20 registers no new EventKind)", got)
 	}
@@ -1583,6 +1578,29 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 	// MethodByName's Type includes the receiver as parameter 0.
 	if got := runMethod.Type.NumIn(); got != 4 {
 		t.Errorf("Harness.Run takes %d parameter(s) (receiver included), want 4 (receiver, ctx, prompt, sink) — signature unchanged", got)
+	}
+
+	if !hksBaseRefIsHEAD(t, root, baseRef) {
+		loopDiff, lerr := gitDiff(t, root, baseRef, "backend/agent/src/agent/loop.go")
+		if lerr != nil {
+			t.Fatalf("git diff %s -- loop.go failed: %v", baseRef, lerr)
+		}
+		if loopDiff == "" {
+			// An empty diff means loop.go was not touched on THIS
+			// branch (AG-20 happens to touch it; a later milestone
+			// that legitimately does not is not a defect) -- the
+			// absence this guard measures holds vacuously, and that is
+			// a skip, not a failure. Fatal-ing here is exactly the
+			// latent shape found (and fixed, this same commit) in
+			// scope_fence_test.go's S-TLS-020 and cancellation_test.go's
+			// S-DEL-015: it fires on every innocent later branch that
+			// does not touch the named file, never only on the branch
+			// that actually changed something to scan. Placed LAST in
+			// this function (sdd-verify MINOR-1) so this skip, when it
+			// fires, skips only itself — every diff-independent
+			// assertion above has already run.
+			t.Skip("loop.go's diff against the merge base is empty on this branch — this scope-fence guard has nothing to measure and the absence it checks holds vacuously; it bites on a branch that actually changes loop.go")
+		}
 	}
 }
 
@@ -2145,6 +2163,31 @@ func TestHooks_S_AGE_030_StalledHookTraceHasNoPathBack_ChildObserverFindsNoSeam(
 // occurrences including this file's own. This test source-scans all
 // three sites so a future edit cannot silently reintroduce a fatal on
 // an empty diff.
+//
+// CORRECTION (sdd-verify CRITICAL-1, coordinator-reproduced): the first
+// version of this guard bounded the scan to "[^}]{0,300}" characters
+// between the opening brace and t.Fatal. Every one of the three fixed
+// sites carries a long explanatory comment inside that same branch —
+// the coordinator measured 717 characters at the planted site — so the
+// 300-character budget could not span it, and the guard PASSED with the
+// anti-pattern planted back in at all three sites (verified: it caught
+// none of the three in-place t.Skip-to-t.Fatal reversions the
+// coordinator tried). Two independent fixes, not one: (1) comments are
+// now stripped before the regex ever runs, so a long comment cannot
+// widen the gap it has to cross — reusing this package's own
+// stripGoComments (scheduler_test.go), the established convention for
+// exactly this "don't let a doc comment fool a source-guard regex"
+// problem, rather than adding a second, competing implementation; (2)
+// the character budget itself is removed ("[^}]{0,300}" to "[^}]*") —
+// unbounded is correct here, not merely permissive, because "[^}]"
+// cannot itself match "}", so the scan still stops at the guarded
+// branch's own closing brace no matter how long the (now comment-free)
+// body between them is. Proof that the repaired guard actually bites —
+// an in-place t.Skip/continue reversion planted at each of the three
+// sites in turn, run, reverted — is recorded in apply-progress.md's
+// "Correction round 2" section; a guard whose own RED was never
+// observed is exactly what this repeated finding (this project's own
+// "a ghost assertion matches shape, not identity") warns against.
 func TestHooks_AntiVacuityFloorsSkipRatherThanFail(t *testing.T) {
 	t.Parallel()
 
@@ -2156,12 +2199,15 @@ func TestHooks_AntiVacuityFloorsSkipRatherThanFail(t *testing.T) {
 	// The general anti-pattern this guards against: an "if <x>diff ==
 	// \"\" {" branch whose body calls t.Fatal or t.Fatalf. An empty
 	// diff means the absence being checked holds vacuously; the
-	// correct response is t.Skip, never a fatal. Anchored on a
-	// variable name ending in "diff" (case-varying: diff, Diff,
-	// aiDiff, loopDiff, ...) so this does not false-positive on an
-	// unrelated "== \"\"" check in the same file (e.g. the
-	// AG19_BASE_REF / "baseRef == \"\"" env-var fallback).
-	emptyDiffThenFatal := regexp.MustCompile(`(?s)[Dd]iff\s*==\s*""\s*\{[^}]{0,300}t\.Fatal`)
+	// correct response is t.Skip (or, where the file's own
+	// established idiom is log-and-return rather than Skip, that),
+	// never a fatal. Anchored on a variable name ending in "diff"
+	// (case-varying: diff, Diff, aiDiff, loopDiff, ...) so this does
+	// not false-positive on an unrelated "== \"\"" check in the same
+	// file (e.g. the AG19_BASE_REF / "baseRef == \"\"" env-var
+	// fallback). Unbounded on purpose (see the function doc above):
+	// "[^}]*" cannot cross the guarded branch's own closing brace.
+	emptyDiffThenFatal := regexp.MustCompile(`(?s)[Dd]iff\s*==\s*""\s*\{[^}]*t\.Fatal`)
 
 	files := []string{"scope_fence_test.go", "cancellation_test.go", "hooks_test.go"}
 	for _, name := range files {
@@ -2171,8 +2217,9 @@ func TestHooks_AntiVacuityFloorsSkipRatherThanFail(t *testing.T) {
 			if rerr != nil {
 				t.Fatalf("os.ReadFile(%s) failed: %v", name, rerr)
 			}
-			if loc := emptyDiffThenFatal.FindString(string(raw)); loc != "" {
-				t.Errorf("%s contains an empty-diff branch that calls t.Fatal(f) instead of t.Skip — this anti-vacuity floor will fire on every later, innocent branch that does not touch the diffed file:\n%s", name, loc)
+			scanned := stripGoComments(string(raw))
+			if loc := emptyDiffThenFatal.FindString(scanned); loc != "" {
+				t.Errorf("%s contains an empty-diff branch that calls t.Fatal(f) instead of t.Skip — this anti-vacuity floor will fire on every later, innocent branch that does not touch the diffed file (comments stripped before this match; shown with comments blanked to spaces):\n%s", name, loc)
 			}
 		})
 	}
