@@ -89,4 +89,4 @@ Cross-referenced to `R-HKS-007` / `S-HKS-017` / `S-HKS-018` and `R-HKS-008` / `S
 - **AND** this scenario asserts nothing about a stalled **hook** — that is `S-AGE-030`'s — and nothing about closing envelope invariant 3, which `AG-01.1 + AG-20.2` already closed
 - **AND** a defence resting on the back-annotation paragraph above, on a doc comment, or on a convention fails this scenario exactly as it fails `S-AGE-010`
 
-Cross-referenced to `R-CNH-003` / `S-CNH-007` / `S-CNH-008` and `R-CNH-001`.
+Discharged directly by `TestCombinedPressure_StalledSteering_NeverCancelled_LosesNothing` and `TestCombinedPressure_StalledSteering_Interrupted` (`slow_consumer_pressure_test.go`), which drive R-CNH-001's steering-queued state and R-CNH-003's structural stall on the SAME run — the literal conjunction this scenario's GIVEN clauses require (sdd-verify round-2, MAJOR-1: the standalone `S-CNH-007`/`S-CNH-008` evidence alone does not exercise it). Cross-referenced to `R-CNH-003` / `S-CNH-007` / `S-CNH-008` and `R-CNH-001` for the single-feature halves.
