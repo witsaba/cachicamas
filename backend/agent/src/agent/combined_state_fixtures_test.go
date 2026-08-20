@@ -420,9 +420,14 @@ func arrangeCompactionMidRun(t *testing.T, signal cnhSignal, label string) *cnhA
 	arr := &cnhArrangement{h: h, sink: sink, resultCh: resultCh}
 	switch signal {
 	case cnhInterrupt:
-		arr.fire = fireInterrupt(h)
+		// h.Interrupt() cancels runCtx, which the Hold's own select
+		// already races against ctx.Done(); compGate.Release() is an
+		// explicit, inline safety-net release (NFR-CNH-003) rather
+		// than left to the t.Cleanup above — harmless once ctx is
+		// already cancelled, idempotent either way.
+		arr.fire = func() { h.Interrupt(); compGate.Release() }
 	case cnhShutdown:
-		arr.fire = fireShutdown(h)
+		arr.fire = func() { h.Shutdown(); compGate.Release() }
 	case cnhProviderFailure:
 		arr.fire = func() { compGate.Release() }
 	}
@@ -502,9 +507,13 @@ func arrangeChildHarnessActive(t *testing.T, signal cnhSignal, label string) *cn
 	arr := &cnhArrangement{h: h, sink: sink, resultCh: resultCh, childTool: tool}
 	switch signal {
 	case cnhInterrupt:
-		arr.fire = fireInterrupt(h)
+		// h.Interrupt() propagates the cause transitively into the
+		// child's own runCtx; childGate.Release() is an explicit,
+		// inline safety-net release (NFR-CNH-003) rather than left to
+		// the t.Cleanup above.
+		arr.fire = func() { h.Interrupt(); childGate.Release() }
 	case cnhShutdown:
-		arr.fire = fireShutdown(h)
+		arr.fire = func() { h.Shutdown(); childGate.Release() }
 	case cnhProviderFailure:
 		arr.fire = func() { childGate.Release() }
 	}

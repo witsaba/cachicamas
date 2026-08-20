@@ -75,13 +75,23 @@ func cnhCountCallIDInRequests(requests []ai.Request, callID string) int {
 // — proving this test is not vacuously green regardless of sharing.
 func TestCrossRunState_NilHistory_AbsenceWithAntiGhostFloor(t *testing.T) {
 	t.Parallel()
+	cnhDriveCrossRunNilHistory(t)
+}
+
+// cnhDriveCrossRunNilHistory is TestCrossRunState_NilHistory_
+// AbsenceWithAntiGhostFloor's own callable body — reused as one of the
+// leak sweep's own serial drivers (Phase 5, R-CNH-005). The deaf
+// tool's own release channel is closed explicitly, inline, once run 1
+// has returned — never left to t.Cleanup, which would pile up unfired
+// across the sweep's 50 repeats.
+func cnhDriveCrossRunNilHistory(t *testing.T) {
+	t.Helper()
 
 	nonce := cnhMintNonce()
 	callID := "call-" + nonce
 	toolName := "cnh_crossrun_tool_nil"
 
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	tool := BlockingScriptedTool(toolName, agent.EffectClassRead, release)
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
 
@@ -105,6 +115,9 @@ func TestCrossRunState_NilHistory_AbsenceWithAntiGhostFloor(t *testing.T) {
 	h.Interrupt()
 	events1 = append(events1, drainSink(t, sink1)...)
 	got1 := <-resultCh1
+	// AFTER run 1 returns: the detached goroutine is accounted for,
+	// not merely excluded from the leak count (R-CNH-006).
+	close(release)
 
 	if !errors.Is(got1.err, agent.ErrInterrupted) {
 		t.Fatalf("run 1 error = %v, want errors.Is(_, agent.ErrInterrupted)", got1.err)
@@ -167,6 +180,14 @@ func TestCrossRunState_NilHistory_AbsenceWithAntiGhostFloor(t *testing.T) {
 // latched flag would refuse it typed and emit nothing.
 func TestCrossRunState_SharedHistory_LegitimateCarryAndInventory(t *testing.T) {
 	t.Parallel()
+	cnhDriveCrossRunSharedHistory(t)
+}
+
+// cnhDriveCrossRunSharedHistory is TestCrossRunState_SharedHistory_
+// LegitimateCarryAndInventory's own callable body — reused as one of
+// the leak sweep's own serial drivers (Phase 5, R-CNH-005).
+func cnhDriveCrossRunSharedHistory(t *testing.T) {
+	t.Helper()
 
 	nonce := cnhMintNonce()
 	callID := "call-" + nonce
@@ -217,6 +238,7 @@ func TestCrossRunState_SharedHistory_LegitimateCarryAndInventory(t *testing.T) {
 
 	<-gate1.Reached()
 	h.Interrupt()
+	gate1.Release() // explicit, inline safety-net release (NFR-CNH-003); ctx.Done() already unblocks the Hold, this is idempotent.
 	events1 := drainSink(t, sink1)
 	got1 := <-resultCh1
 

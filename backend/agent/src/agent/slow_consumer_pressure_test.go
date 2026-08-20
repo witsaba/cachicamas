@@ -135,8 +135,16 @@ func cnhAssertCommittedFactsPresent(t *testing.T, label string, events []agent.E
 // scenario, since that path is unreachable here.
 func TestSlowConsumerPressure_NeverCancelled_LosesNothing(t *testing.T) {
 	t.Parallel()
+	cnhDrivePressureNeverCancelled(t)
+}
 
-	callID := "call-cnh-pressure-001"
+// cnhDrivePressureNeverCancelled is TestSlowConsumerPressure_
+// NeverCancelled_LosesNothing's own callable body — reused, unchanged,
+// as one of the leak sweep's own serial drivers (Phase 5, R-CNH-005).
+func cnhDrivePressureNeverCancelled(t *testing.T) {
+	t.Helper()
+
+	callID := "call-" + cnhMintNonce()
 	toolName := "cnh_pressure_tool_001"
 	tool := EchoScriptedTool(toolName, agent.EffectClassRead)
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
@@ -204,11 +212,23 @@ func TestSlowConsumerPressure_NeverCancelled_LosesNothing(t *testing.T) {
 // unmodified; and no assertion in this scenario reads elapsed time.
 func TestSlowConsumerPressure_CancelledUnblocksWithinBound(t *testing.T) {
 	t.Parallel()
+	cnhDrivePressureCancelledUnblocks(t)
+}
 
-	callID := "call-cnh-pressure-002"
+// cnhDrivePressureCancelledUnblocks is TestSlowConsumerPressure_
+// CancelledUnblocksWithinBound's own callable body — reused as one of
+// the leak sweep's own serial drivers (Phase 5, R-CNH-005/R-CNH-006).
+// The deaf tool's own release channel is closed explicitly, INLINE,
+// after the run has returned — never left to t.Cleanup, which would
+// pile up unfired across the sweep's 50 repeats and make every
+// iteration's own detached goroutine look leaked at snapshot time
+// (S-CNH-013's own "accounted, not leaked" distinction).
+func cnhDrivePressureCancelledUnblocks(t *testing.T) {
+	t.Helper()
+
+	callID := "call-" + cnhMintNonce()
 	toolName := "cnh_pressure_tool_002"
-	release := make(chan struct{}) // never closed during the run: the deaf tool ignores ctx entirely.
-	t.Cleanup(func() { close(release) })
+	release := make(chan struct{}) // never closed until AFTER the run returns, below.
 
 	tool := BlockingScriptedTool(toolName, agent.EffectClassRead, release)
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
@@ -239,6 +259,13 @@ func TestSlowConsumerPressure_CancelledUnblocksWithinBound(t *testing.T) {
 
 	events := <-consumerOut
 	got := <-resultCh // the run RETURNS — observed here, never by a wall-clock assertion.
+
+	// AFTER the run returns: the detached goroutine is accounted for
+	// (proven alive past the bound by the typed report below, now
+	// proven to exit), not merely excluded from the leak count
+	// (R-CNH-006, mirroring cancellation_winddown_test.go's own
+	// TestHarness_WindDown_NoHarnessGoroutineRemains discipline).
+	close(release)
 
 	if got.err == nil {
 		t.Fatal("Run returned err = nil, want a non-nil error satisfying errors.Is against the interrupt sentinel")
