@@ -10,7 +10,7 @@
 | **Artifact store** | hybrid (`openspec/changes/…` + Engram `sdd/cachicamas-agent-layer3-handoff/*`) |
 | **Delivery** | single-pr |
 | **Review budget** | 1000 counted lines (`openspec/**` excluded; production + tests + `docs/**` counted) — forecast **≈ 917**, see § Budget |
-| **TDD runner** | `cd backend/agent && make test` (`go test -race -count=1 ./...`). **A `(cached)` result is not evidence** — `-count=1` is mandatory |
+| **TDD runner** | `cd backend/agent && go clean -testcache && make test` (`make test` is `go test -race -v ./...` — the shipped Makefile carries no `-count=1` of its own; a testcache clean is what proves an uncached run). Focused/single-package runs use `go test -race -count=1 ./...` directly. **A `(cached)` result is not evidence** either way |
 | **Prefix** | **`L3H`** — verified free this phase: `rg 'L3H\|R-L3H\|S-L3H' openspec/` → **0 occurrences across 0 files** (whole tree, including `changes/` and `changes/archive/`) |
 | **Exploration** | Engram `sdd/cachicamas-agent-layer3-handoff/explore` (#3562) |
 

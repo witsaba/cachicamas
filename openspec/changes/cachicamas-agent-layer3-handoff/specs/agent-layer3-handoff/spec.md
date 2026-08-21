@@ -62,7 +62,7 @@ a reader can map the charter's acceptance sentence onto the shipped stages witho
 #### Scenarios
 
 - **S-L3H-001** — Given the consumer proof's source, when its package clause and directory are read, then it is an external test package living in a directory that is neither Layer 2's package directory nor the Layer 1 substrate's, and it is not nested inside either.
-- **S-L3H-002** — Given the consumer proof, when it runs under `cd backend/agent && make test` with `-race -count=1`, then it passes, and its stage names enumerate the seven capabilities above, one stage per capability.
+- **S-L3H-002** — Given the consumer proof, when it runs uncached under `cd backend/agent && go clean -testcache && make test` (`make test` itself is `go test -race -v ./...` — the shipped Makefile carries no `-count=1`, and the module proves an uncached run by clearing the test cache first, not by a flag the Makefile does not have), then it passes, and its stage names enumerate the seven capabilities above, one stage per capability.
 - **S-L3H-003** — Given stage 2, when its drained stream is read, then it carries more than one turn bracket and at least one tool execution with its result, and the drain's report is clean.
 - **S-L3H-004** — Given stage 3, when the scripted policy queues a deferring verdict followed by its resolution, then the drained stream carries the suspension and its resolution in that order, and the queue is fully consumed at the stage's end.
 - **S-L3H-005** — Given stage 4, when the run is interrupted while a turn is held at a test gate, then the stream drains to close and the run's terminal outcome attributes closure to the interrupt rather than to completion.
@@ -340,10 +340,14 @@ delta owns.
 ### NFR-L3H-B — Gates and evidence
 
 Every behavioural item MUST be taken **red → green → refactor** in order under strict TDD, with both outputs
-recorded. Evidence MUST be recorded with **`-count=1`** and the wall-clock duration recorded beside it: the
-real uncached suite for this module is on the order of minutes, so a sub-second pass is a **cache artifact,
-not evidence**. The milestone closes on a recorded green `cd backend/agent && make test`
-(`go test -race -count=1 ./...`), `make lint` reporting zero issues, and `make build` exiting zero.
+recorded. Focused, single-package or single-test evidence MUST be recorded with **`-count=1`** and the
+wall-clock duration recorded beside it. Whole-module evidence MUST instead be recorded **uncached** by
+running `go clean -testcache` immediately before `make test`: the shipped `make test` target
+(`go test -race -v ./...`) carries no `-count=1` of its own, and adding one would contradict
+`agent-run-driver`'s own shipped pin of that exact command string. Either way, the real uncached suite for
+this module is on the order of minutes, so a sub-second pass — cached or not — is a **cache artifact, not
+evidence**. The milestone closes on a recorded green, uncached `cd backend/agent && go clean -testcache && make test`,
+`make lint` reporting zero issues over this change's own packages, and `make build` exiting zero.
 
 Every planted bite named in this spec (`S-L3H-010`, `S-L3H-011`, `S-L3H-012`, `S-L3H-021`, `S-L3H-025`,
 `S-L3H-045`) MUST be recorded **watched failing**, with the failure text, before being reverted. A bite
@@ -352,8 +356,8 @@ recorded as "would fail" is not recorded.
 #### Scenarios
 
 - **S-L3H-054** — Given the change's task record, when each behavioural item is walked, then it carries recorded red output, recorded green output, and a refactor note.
-- **S-L3H-055** — Given the recorded evidence, when each test run is read, then it names `-count=1` and carries its wall-clock duration, and no `(cached)` result is offered as evidence.
-- **S-L3H-056** — Given the merged change, when the test, lint and build commands run from `backend/agent`, then the test run is green under `-race -count=1`, lint reports zero issues, and build exits zero.
+- **S-L3H-055** — Given the recorded evidence, when each **focused** test run is read, then it names `-count=1` and carries its wall-clock duration; when each **whole-module** `make test` run is read, then it is preceded by `go clean -testcache` and carries its wall-clock duration instead, because `make test` itself carries no `-count=1`; and no `(cached)` result is offered as evidence for either kind.
+- **S-L3H-056** — Given the merged change, when the test, lint and build commands run from `backend/agent`, then the whole-module test run is green under `-race`, uncached (`go clean -testcache` immediately before), lint reports zero issues **over this change's own packages** (`./src/agent/... ./src/apptest/... ./src/layer3handoff/...` — module-wide lint carries one pre-existing finding, byte-identical to `main`, inside `src/ai/`, which this change's own byte-freeze forbids touching), and build exits zero.
 
 ---
 

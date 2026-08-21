@@ -180,7 +180,7 @@ Discharges: the archive obligation for all five spec sets plus the three back-an
 
 ## Verification gates (run before PR, and again before merge)
 
-- [x] G.1 `cd backend/agent && make test` — forces `go test -race -count=1 ./...`. A `(cached)` result is **not evidence**; confirm uncached wall-clock duration is reported (`src/ai/openaicompat` alone runs ~170s when uncached).
+- [x] G.1 `cd backend/agent && go clean -testcache && make test` — `make test` itself runs `go test -race -v ./...` and carries no `-count=1` of its own (correcting this task's own earlier text); the testcache clean, not a `-count=1` flag, is what proves the run uncached. A `(cached)` result is **not evidence**; confirm uncached wall-clock duration is reported (`src/ai/openaicompat` alone runs ~170s when uncached).
 - [x] G.2 `bin/golangci-lint cache clean && cd backend/agent && make lint` — clean cache first; a stale cache artifact has previously masqueraded as a finding in this repo.
 - [x] G.3 `cd backend/agent && make vuln-check` — run as its own gate; it is **not** part of `make all`.
 - [x] G.4 `gofmt -l .` (backend/agent module root) — **never `make all`**, whose fmt stage rewrites committed files and manufactures failures. Confirm no newly-dirty file among this change's own additions.
