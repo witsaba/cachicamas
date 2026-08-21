@@ -128,9 +128,20 @@ type l3hGuardViolation struct {
 // against a scratch location without duplicating the mechanism.
 func l3hGuardScan(t *testing.T, dir string) []l3hGuardViolation {
 	t.Helper()
+	units := l3hGuardSourceUnits(t, dir)
+	if len(units) == 0 {
+		// AG-23 (sdd-verify round 1, W-10): the vacuity floor is PER
+		// TREE, mirroring agent-package-scaffold's own check 5
+		// (S-AGP-044) and this same guard's own tree-resolution floor
+		// one source unit over — a renamed, emptied or relocated tree
+		// MUST fail by naming ITS OWN location, not pass because the
+		// loop's non-empty tree map (checked once, above the loop) says
+		// nothing about any ONE tree's own source-unit count.
+		t.Fatalf("no .go source unit found directly inside %q; the vocabulary scan would pass vacuously for this tree", dir)
+	}
 	patterns := l3hGuardWordBoundaryPatterns()
 	var violations []l3hGuardViolation
-	for _, path := range l3hGuardSourceUnits(t, dir) {
+	for _, path := range units {
 		raw, rerr := os.ReadFile(path)
 		if rerr != nil {
 			t.Fatalf("os.ReadFile(%q) error = %v, want nil", path, rerr)

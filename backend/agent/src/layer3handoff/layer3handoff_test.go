@@ -184,10 +184,16 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 		}
 	})
 
-	// Stage 2 + Stage 3 (one Run, two capabilities) — a multi-turn
-	// conversation whose first turn's tool call is deferred by the
-	// scripted policy and resolved by its own second queued verdict,
-	// mirroring src/agent's own harness_suspension_test.go driveSuspendedRun
+	// Stage 2 — a multi-turn conversation with tool execution. Stage 2
+	// and stage 3 below are driven by the SAME Run #1 — sdd-verify round
+	// 1's W-4: the tool call under test is exactly the one whose
+	// permission decision stage 3 resolves, so one Run necessarily
+	// produces the events both stages assert against, and folding two
+	// capabilities into one t.Run is no longer acceptable once
+	// `S-L3H-002` requires one stage PER capability. This stage owns the
+	// drive (goroutine, the sink read loop, and the Scheduler.WakeParked
+	// call needed to unblock the suspended call), mirroring
+	// src/agent's own harness_suspension_test.go driveSuspendedRun
 	// mechanism one layer up: read the consumer sink event by event
 	// (synchronization by channel reads only, R-L3H-004's no-wall-clock
 	// rule), and on permission_decision_required call Scheduler.WakeParked
@@ -195,8 +201,11 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 	// what apptest.DrainAndCheck does internally — accumulate to close,
 	// then delegate to agent.CheckStream — but inlined, because it must
 	// also intercept mid-stream to call WakeParked; every later stage's
-	// drain calls apptest.DrainAndCheck directly.
-	t.Run("02_multiturn_and_scripted_permission_suspension", func(t *testing.T) {
+	// drain calls apptest.DrainAndCheck directly. run1Events, run1Msg and
+	// run1Finish are shared vars stage 3 below reads without re-driving
+	// anything, exactly the pattern stage 7's closing validation uses
+	// against every earlier stage's own results.
+	t.Run("02_multiturn_and_tool_execution", func(t *testing.T) {
 		sink := make(chan *agent.Event)
 		resultCh := make(chan struct {
 			msg    ai.Message
@@ -255,15 +264,6 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 		if len(run1Msg.Content()) == 0 {
 			t.Error("Run #1 returned a message with zero content parts, want turn two's text")
 		}
-		if policy.Exhausted() {
-			t.Error("policy.Exhausted() = true after exactly 2 Resolve calls against a 2-entry queue, want false (exhaustion latches only on a call BEYOND the queued count)")
-		}
-		if got := len(policy.Resolved()); got != 2 {
-			t.Errorf("policy.Resolved() returned %d call(s), want 2 (the deferred call, then its own re-entry)", got)
-		}
-		if got := tool.Invocations(); got != 1 {
-			t.Errorf("tool.Invocations() = %d, want 1", got)
-		}
 
 		turnBrackets := 0
 		for _, ev := range run1Events {
@@ -275,8 +275,67 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 			t.Errorf("Run #1 carried %d turn_start event(s), want at least 2 (multi-turn)", turnBrackets)
 		}
 
+		// sdd-verify round 1's W-5: the tool's execution and its result
+		// MUST be visible ON THE DRAINED STREAM, not only through the
+		// fake tool's own invocation counter below — a regression that
+		// stopped emitting either event would not fail this proof
+		// without this pair of checks (S-L3H-003).
+		var sawToolStart, sawToolEndSuccess bool
+		for _, ev := range run1Events {
+			if start, ok := ev.ToolStart(); ok && start.CallID() == toolCallID {
+				sawToolStart = true
+			}
+			if end, ok := ev.ToolEndSuccess(); ok && end.CallID() == toolCallID {
+				sawToolEndSuccess = true
+			}
+		}
+		if !sawToolStart {
+			t.Errorf("run1Events carries no tool_start for call %q, want one — the tool's execution MUST be visible on the drained stream (S-L3H-003)", toolCallID)
+		}
+		if !sawToolEndSuccess {
+			t.Errorf("run1Events carries no tool_end_success (the tool's result) for call %q, want one — the tool's result MUST be visible on the drained stream (S-L3H-003)", toolCallID)
+		}
+		if got := tool.Invocations(); got != 1 {
+			t.Errorf("tool.Invocations() = %d, want 1", got)
+		}
+
 		if report := agent.CheckStream(run1Events); report.Violation() != nil {
 			t.Fatalf("agent.CheckStream rejected Run #1's stream: %v", report.Violation())
+		}
+	})
+
+	// Stage 3 — a permission suspension resolved by script. Reads the
+	// SAME Run #1 stream stage 2 above already collected into run1Events
+	// — no re-drive.
+	t.Run("03_scripted_permission_suspension", func(t *testing.T) {
+		// sdd-verify round 1's W-5: the suspension AND its resolution
+		// MUST be visible, in order, ON THE DRAINED STREAM — not only
+		// through the scripted policy's own Resolved()/Exhausted()
+		// counters below (S-L3H-004).
+		requiredIdx, madeIdx := -1, -1
+		for i, ev := range run1Events {
+			if req, ok := ev.PermissionDecisionRequired(); ok && req.CallID() == toolCallID && requiredIdx == -1 {
+				requiredIdx = i
+			}
+			if made, ok := ev.PermissionDecisionMade(); ok && made.CallID() == toolCallID && madeIdx == -1 {
+				madeIdx = i
+			}
+		}
+		if requiredIdx == -1 {
+			t.Fatalf("run1Events carries no permission_decision_required for call %q, want one", toolCallID)
+		}
+		if madeIdx == -1 {
+			t.Fatalf("run1Events carries no permission_decision_made for call %q, want one", toolCallID)
+		}
+		if madeIdx <= requiredIdx {
+			t.Errorf("permission_decision_made (stream index %d) does not follow permission_decision_required (stream index %d) for call %q, want required strictly before made (S-L3H-004)", madeIdx, requiredIdx, toolCallID)
+		}
+
+		if policy.Exhausted() {
+			t.Error("policy.Exhausted() = true after exactly 2 Resolve calls against a 2-entry queue, want false (exhaustion latches only on a call BEYOND the queued count)")
+		}
+		if got := len(policy.Resolved()); got != 2 {
+			t.Errorf("policy.Resolved() returned %d call(s), want 2 (the deferred call, then its own re-entry)", got)
 		}
 	})
 
@@ -288,7 +347,7 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 	// nothing here needs to intercept mid-stream, because the
 	// synchronization point is gate.Reached(), a channel entirely
 	// separate from the event sink.
-	t.Run("03_interrupt", func(t *testing.T) {
+	t.Run("04_interrupt", func(t *testing.T) {
 		sink := make(chan *agent.Event)
 		drainDone := make(chan struct{})
 		go func() {
@@ -331,7 +390,7 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 	// Stage 5 — a resumed prompt. Run #3 drives a further prompt on the
 	// SAME harness value after the interrupt: R-RUN-001's own contract
 	// that an interrupted-then-reused Harness accepts a new run.
-	t.Run("04_resumed_prompt", func(t *testing.T) {
+	t.Run("05_resumed_prompt", func(t *testing.T) {
 		sink := make(chan *agent.Event)
 		drainDone := make(chan struct{})
 		go func() {
@@ -366,7 +425,7 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 	// Entry.Message() -> agent.NewSeededHistory(msgs) -> a fresh
 	// Harness{History: seeded}. No Layer 2 internal was touched to move
 	// the transcript.
-	t.Run("05_second_harness_over_seeded_transcript", func(t *testing.T) {
+	t.Run("06_second_harness_over_seeded_transcript", func(t *testing.T) {
 		entries := hist.Entries()
 		if len(entries) == 0 {
 			t.Fatal("first harness's History.Entries() returned zero entries after three runs, want at least one")
@@ -420,7 +479,7 @@ func TestLayer3Handoff_ConsumerProof(t *testing.T) {
 	// 2 test-only compilation unit: doing so would not compile, which is
 	// what makes this sufficiency claim falsifiable rather than merely
 	// asserted (S-L3H-008).
-	t.Run("06_closing_validation_every_drain_clean", func(t *testing.T) {
+	t.Run("07_closing_validation_every_drain_clean", func(t *testing.T) {
 		if report := agent.CheckStream(run1Events); report.Violation() != nil {
 			t.Errorf("Run #1's stream: %v", report.Violation())
 		}
