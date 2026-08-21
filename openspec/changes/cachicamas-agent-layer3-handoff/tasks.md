@@ -153,10 +153,10 @@ Discharges: doc-contract completion obligation (not tied to a `R-L3H-`/`S-L3H-` 
 
 ## WU-9 — Three back-annotation deltas (falsified-requirement closure)
 
-- [ ] 9.1 Add a MODIFIED-requirement delta to `openspec/changes/cachicamas-agent-layer3-handoff/specs/agent-loop-skeleton/spec.md` amending the requirement/scenario at `openspec/specs/agent-loop-skeleton/spec.md:294` that defers test-convenience wrappers to AG-23: record **DELIVERED, RELOCATED to `src/apptest`** (not `src/agenttest`, which stays byte-frozen), with the reason (a genuinely third-party consumer package cannot live inside `agenttest`, which Layer 1's own import guard sweeps under Layer 1's rules).
-- [ ] 9.2 Add the matching delta to `.../specs/agent-protocol-events/spec.md` amending `openspec/specs/agent-protocol-events/spec.md:163`, same DELIVERED/RELOCATED text.
-- [ ] 9.3 Add the matching delta to `.../specs/agent-message-tool-events/spec.md` amending `openspec/specs/agent-message-tool-events/spec.md:109`, same DELIVERED/RELOCATED text.
-- [ ] 9.4 Confirm each delta names `src/apptest` explicitly (never a vague "a new package") and cites this change (`cachicamas-agent-layer3-handoff`) as the resolving milestone, so no shipped spec references a closed milestone that left it un-amended.
+- [x] 9.1 Add a MODIFIED-requirement delta to `openspec/changes/cachicamas-agent-layer3-handoff/specs/agent-loop-skeleton/spec.md` amending the requirement/scenario at `openspec/specs/agent-loop-skeleton/spec.md:294` that defers test-convenience wrappers to AG-23: record **DELIVERED, RELOCATED to `src/apptest`** (not `src/agenttest`, which stays byte-frozen), with the reason (a genuinely third-party consumer package cannot live inside `agenttest`, which Layer 1's own import guard sweeps under Layer 1's rules).
+- [x] 9.2 Add the matching delta to `.../specs/agent-protocol-events/spec.md` amending `openspec/specs/agent-protocol-events/spec.md:163`, same DELIVERED/RELOCATED text.
+- [x] 9.3 Add the matching delta to `.../specs/agent-message-tool-events/spec.md` amending `openspec/specs/agent-message-tool-events/spec.md:109`, same DELIVERED/RELOCATED text.
+- [x] 9.4 Confirm each delta names `src/apptest` explicitly (never a vague "a new package") and cites this change (`cachicamas-agent-layer3-handoff`) as the resolving milestone, so no shipped spec references a closed milestone that left it un-amended.
 
 **Focused test**: N/A — OpenSpec delta files, no code.
 **Runtime harness**: N/A.
