@@ -61,6 +61,20 @@
 // adds its § D3 paths here, in its own PR, under its own justification —
 // exactly the precedent AI-37 set for Layer 1's own empty-at-birth
 // third-party group.
+//
+// # AG-22 amendment — the predicted first real-usage milestone has landed
+//
+// The paragraph above predicted "the first Layer 2 milestone with real
+// OpenTelemetry usage adds its § D3 paths here, in its own PR, under its
+// own justification." That milestone is AG-22 (the observability
+// boundary, ADR 0005 § D3 extension): allowedProductionPrefixes below
+// now carries five OTel/xxhash entries, each citing either a § D3 table
+// row or, for the two entries with no row of their own, the forced-
+// closure clause and a fresh go list -deps measurement (apply-progress
+// for AG-22). The reasoning above (AG-03's own zero-grant decision) is
+// left unstruck, not deleted: it explains why the allowlist started
+// empty, and remains true as a description of that milestone's own
+// evidence — it does not describe today's allowlist.
 package agent_test
 
 import (
@@ -122,11 +136,37 @@ var forbiddenPrefixes = []struct {
 
 // allowedProductionPrefixes is check 1's deny-by-default allowlist, minus
 // the standard library (filtered by the toolchain itself — see
-// listNonStdlibDeps). See the package comment for why no OpenTelemetry or
-// xxhash entry appears here, unlike ai_test's own allowlist.
+// listNonStdlibDeps). AG-22 (the observability boundary) adds the five
+// OTel/xxhash entries below it, each citing either an ADR 0005 § D3
+// table row or, for the two entries with no row of their own
+// (otel/semconv, cespare/xxhash/v2), the forced-closure clause — see the
+// package comment's "AG-22 amendment" for why this allowlist no longer
+// stays OTel-free the way ai_test's own allowlist does not either.
 var allowedProductionPrefixes = []string{
 	modulePath + "/src/agent",
 	modulePath + "/src/ai", // the Layer 1 contract package; openaicompat carved back out by the forbidden row above
+
+	// AG-22 (design D-A/C4, ADR 0005 § D3 Layer 2 extension). Every
+	// entry below is the tracing API only — never the SDK or an
+	// exporter, both already denied by name in forbiddenPrefixes above.
+	"go.opentelemetry.io/otel/trace",     // § D3 table row (0005:240); prefix covers the forced subpackages trace/noop, trace/embedded, trace/internal/telemetry
+	"go.opentelemetry.io/otel/attribute", // § D3 table row (0005:241)
+	"go.opentelemetry.io/otel/codes",     // § D3 table row (0005:241)
+	// go.opentelemetry.io/otel/semconv is NOT a § D3 table row: it is the
+	// forced transitive closure of otel/trace at the version otel/trace
+	// pins (R-AGP-003's forced-closure clause), confirmed by
+	// `go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}'
+	// go.opentelemetry.io/otel/trace/noop` (apply-progress for AG-22).
+	// This MUST stay a prefix, never an exact path: the measured path is
+	// version-suffixed (go.opentelemetry.io/otel/semconv/v1.41.0),
+	// pinned by otel/trace's own go.mod requirement, and an exact entry
+	// would break on an unrelated otel/trace version bump (S-AGP-032).
+	"go.opentelemetry.io/otel/semconv",
+	// github.com/cespare/xxhash/v2 is likewise NOT a § D3 table row: it
+	// is forced by otel/attribute's own internal hashing
+	// (attribute/internal/xxhash), same forced-closure clause and same
+	// fresh measurement.
+	"github.com/cespare/xxhash/v2",
 }
 
 // allowedTestPrefixes is check 2's allowlist: the production set plus the
@@ -217,6 +257,83 @@ func TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction(t *testin
 	}
 }
 
+// forcedStandardLibraryImporters is check 3's own narrow, evidence-cited
+// exception (AG-22, discovered during apply — see apply-progress). "net"
+// and "net/http" carry NO entry here and stay denied unconditionally the
+// instant either appears in the closure, exactly as before.
+//
+// "os" gained one legitimate non-standard importer the moment
+// go.opentelemetry.io/otel/trace entered allowedProductionPrefixes
+// (design D-A/C4): trace@v1.44.0's own auto.go file makes exactly one
+// os.Getenv call (auto.go:665), gated behind OpenTelemetry's SEPARATE
+// auto-instrumentation bridge module (go.opentelemetry.io/auto/sdk) —
+// a module design D-A rejects by name (S-AGP-024) and this closure never
+// admits. Layer 2's own code never calls it; nothing else in the
+// closure imports "os" directly (confirmed by
+// `go list -deps -f '{{.ImportPath}}|{{join .Imports ","}}' ./src/agent/...`,
+// apply-progress for AG-22).
+//
+// This is a per-PATH allowlist of the ONLY non-standard-library import
+// paths permitted to import the key directly — never a blanket skip: the
+// check below still fails loudly the moment ANY OTHER non-standard
+// package (including a future Layer 2 source file of this package's
+// own) imports "os" or "net"/"net/http" directly. "io/fs" needs no entry
+// of its own: every one of its direct importers in this closure (os,
+// fmt, internal/filepathlite) is itself part of the Go standard library
+// — the check below treats any standard-library importer as
+// structurally inert (the Go runtime's own internal plumbing, not a
+// Layer 2 or third-party choice), for every denied path, not only "os".
+var forcedStandardLibraryImporters = map[string][]string{
+	"os": {"go.opentelemetry.io/otel/trace"},
+}
+
+// productionImportGraph runs `go list -deps` once over pattern's
+// PRODUCTION closure (no -test, matching listAllProductionDeps' own
+// invocation) and returns, for every package the closure contains,
+// whether it is standard library and the exact set of packages that
+// import it DIRECTLY — not merely transitively. Check 3's own exception
+// (forcedStandardLibraryImporters, above) uses this to prove exactly
+// which package forces a denied standard-library path into the closure,
+// rather than trusting an unproven allowlist.
+func productionImportGraph(pattern string) (standard map[string]bool, importedBy map[string][]string, err error) {
+	cmd := exec.Command("go", "list", "-deps", "-f", `{{.ImportPath}}|{{.Standard}}|{{join .Imports ","}}`, pattern)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if runErr := cmd.Run(); runErr != nil {
+		return nil, nil, &goListError{err: runErr, stderr: stderr.String()}
+	}
+
+	standard = make(map[string]bool)
+	importedBy = make(map[string][]string)
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "|", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		importer, ok := normalizeListedPackage(fields[0])
+		if !ok {
+			continue
+		}
+		standard[importer] = fields[1] == "true"
+		if fields[2] == "" {
+			continue
+		}
+		for _, imported := range strings.Split(fields[2], ",") {
+			imported = strings.TrimSpace(imported)
+			if imported == "" {
+				continue
+			}
+			importedBy[imported] = append(importedBy[imported], importer)
+		}
+	}
+	return standard, importedBy, nil
+}
+
 // TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage is
 // check 3 (AD-3, AI-10.4's pattern, ai_test's
 // TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage):
@@ -224,10 +341,11 @@ func TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction(t *testin
 // and 2 never see them — [listNonStdlibDeps] filters the standard library
 // out before either allowlist ever runs. This is the narrower,
 // complementary claim: not "nothing foreign", but "nothing that reaches a
-// socket or a filesystem", checked against the standard library too.
-// Production-only, for AI-10.4's own recorded reason: -test pulls in
-// "testing", which imports "os" itself, so a test-inclusive scan could
-// never pass.
+// socket or a filesystem" THAT LAYER 2 OR AN ADMITTED DEPENDENCY REACHES
+// ITSELF (AG-22's own refinement, below) — checked against the standard
+// library too. Production-only, for AI-10.4's own recorded reason: -test
+// pulls in "testing", which imports "os" itself, so a test-inclusive scan
+// could never pass.
 func TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage(t *testing.T) {
 	t.Parallel()
 
@@ -240,9 +358,40 @@ func TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage(t *testin
 			"Check that the package pattern still resolves: " + layer2Pattern)
 	}
 
+	var (
+		standard   map[string]bool
+		importedBy map[string][]string
+		graphErr   error
+	)
 	for _, forbidden := range networkOrFilesystemPackages {
-		if slices.Contains(deps, forbidden.path) {
-			t.Errorf("Layer 2's production closure imports %q\n  rule: %s", forbidden.path, forbidden.rule)
+		if !slices.Contains(deps, forbidden.path) {
+			continue
+		}
+		if standard == nil {
+			standard, importedBy, graphErr = productionImportGraph(layer2Pattern)
+			if graphErr != nil {
+				t.Fatalf("go list (import graph) failed: %v", graphErr)
+			}
+		}
+
+		vetted := forcedStandardLibraryImporters[forbidden.path]
+		var unexpected []string
+		for _, importer := range importedBy[forbidden.path] {
+			if standard[importer] {
+				// Standard-library-on-standard-library plumbing (e.g.
+				// "os" importing "io/fs") is not a Layer 2 or
+				// third-party choice — structurally inert for this
+				// check, for every denied path.
+				continue
+			}
+			if slices.Contains(vetted, importer) {
+				continue
+			}
+			unexpected = append(unexpected, importer)
+		}
+		if len(unexpected) > 0 {
+			t.Errorf("Layer 2's production closure imports %q via unexpected non-standard importer(s) %v (vetted: %v)\n  rule: %s",
+				forbidden.path, unexpected, vetted, forbidden.rule)
 		}
 	}
 }
