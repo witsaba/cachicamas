@@ -205,7 +205,7 @@ Discharges: the archive obligation for all five spec sets plus the three back-an
 | `R-L3H-010` | S-L3H-053…054 (generic-client boundary, mechanical + vocabulary, non-self-tripping) | WU-4 |
 | `R-L3H-011` | S-L3H-055…056 (no new event kind/outcome/cost label, go.mod/go.sum byte-identical) | WU-1, WU-7 |
 | `NFR-L3H-A`, `NFR-L3H-B` | — (structural/behavioral, proven by the above) | WU-1–WU-5 |
-| `R-AGP-003` (MODIFIED) | S-AGP-039…044 | WU-2 |
+| `R-AGP-003` (MODIFIED) | S-AGP-067…072 | WU-2 |
 | `R-RUN-014` (ADDED) | S-RUN-114…117 | WU-1 |
 | `R-HKS-010` (MODIFIED) | S-HKS-027, S-HKS-028 | WU-6 |
 | `R-AGS-016` (MODIFIED) | S-AGS-069 | WU-6 |

@@ -12,6 +12,8 @@
 > **Amended 2026-08-20 (AG-20)**: `R-RUN-013` ADDED, alongside `R-RUN-001`, `R-RUN-003`, `R-RUN-004` and `R-RUN-010`, all four of which are byte-unchanged. AG-20 adds one exported configuration field (`Hooks`) and no exported method, one unexported one-way session-start latch of the shipped shutdown flag's class, two pure reads beside the per-attempt forwarder plus a run-frame-local cost accumulator, and one per-run observer lane created only when at least one observing hook is registered — with **NO** third path, **NO** timeout and **NO** harness method. See delta spec at `openspec/changes/cachicamas-agent-hook-taxonomy/specs/agent-run-driver/spec.md`.
 >
 > **Amended 2026-08-20 (AG-21 archive)**: `R-RUN-001` MODIFIED (back-annotation only, no new identifier minted). The clause "Cross-run transcript state remains AG-21's" is discharged by an enumerated inventory with an absence assertion, and "Concurrent runs on one value stay out of scope" is restated as still true. See delta spec at `openspec/changes/cachicamas-agent-concurrency-hardening/specs/agent-run-driver/spec.md`.
+>
+> **Amended 2026-08-21 (AG-23 archive)**: `R-RUN-014` ADDED — the per-attempt forwarder's exit contract on the **panic-unwind** path, where the harness previously carried no guarantee at all: the forwarder MUST have terminated before the consumer sink is closed, by a dedicated cancellation signal that makes both its receive and its send abandonable **and** an ordering edge from its exit to the close. `R-RUN-002`'s forwarding and no-rewrite clauses, `R-RUN-003`'s bracket and lane rules, `R-RUN-010`'s no-timeout prohibition, `NFR-RUN-002`'s no-wall-clock rule and `R-RUN-013`'s two pure reads are all **byte-unchanged**: on every non-panicking path the forwarder's observable behaviour is unchanged by construction. The panic still propagates **uncontained**. Four scenarios, `S-RUN-114` through `S-RUN-117`, are appended; no existing identifier is renumbered. See the archived change folder at `openspec/changes/archive/2026-08-21-cachicamas-agent-layer3-handoff/`.
 
 ## Coverage
 
@@ -23,7 +25,7 @@
 | Fourth acceptance clause (`0003:1302`) | `R-RUN-010` | 1 | 1 |
 | Cross-cut (failure path, seams) | `R-RUN-011`…`012` | 5 | 0 |
 
-**This capability: requirements allocated `R-RUN-001` through `R-RUN-013`; scenarios allocated `S-RUN-001` through `S-RUN-113`, of which the bites are `S-RUN-061` and `S-RUN-091`.** Each milestone that appends records its own additions in its delta; this line states the allocated range and never a total, because a total is defended by no test and goes silently false on the next append (`S-LSK-020`).
+**This capability: requirements allocated `R-RUN-001` through `R-RUN-014`; scenarios allocated `S-RUN-001` through `S-RUN-117`, of which the bites are `S-RUN-061` and `S-RUN-091`.** Each milestone that appends records its own additions in its delta; this line states the allocated range and never a total, because a total is defended by no test and goes silently false on the next append (`S-LSK-020`).
 
 > **Verify remediation (MAJOR-1)**: `S-RUN-101` was added under `R-RUN-011` after `sdd-verify` found the harness's `Run` left the steering queue open on every failure exit, so `Steer` returned nil forever after an `R-RUN-011` failure instead of `R-RUN-001`'s typed rejection. See `R-RUN-011`'s own text below.
 
@@ -352,6 +354,45 @@ Both substrate filters — `filterOutLoopFiles` (`loop_test.go:831`) and `filter
 #### Scenarios
 
 - **S-RUN-113** — **AG-20: the method set is exactly FIVE, matching what is actually shipped — corrected by `sdd-verify` (MAJOR-7) from a stale four-name count — and the absences are asserted rather than claimed.** Given the merged AG-20 change, when `Harness`'s exported surface is enumerated from `package agent_test`, then its method set is exactly the **five** names `Compact, Interrupt, Run, Shutdown, Steer` — measured, not `R-RUN-001`'s own **four**-name enumeration, which is a pre-existing staleness AG-18 left when it added `Compact` and never back-annotated; AG-20 did not create that staleness, but restating the OLD count here would have made it a fresh, current claim, so this scenario asserts the true, current count instead. `harness_test.go`'s named-method assertion and `scope_fence_test.go`'s method assertion are **byte-unchanged** and green, and the only exported addition AG-20 itself makes is one configuration field. When the run driver's production source is read as raw bytes, then it declares **no** per-logical-turn cost accumulator as a `Harness` field — the accumulator is a local of the run's frame — and it contains **no** timer, deadline, sleep, poll or join on an observing hook. When `git diff` is taken against the merge base, then the module's no-deadline permission pin is **file-unchanged** and passes. When a run whose observer is held indefinitely by the test gate executes, then `Run` **returns** with the gate still held, its recorded stream's **event-KIND sequence** is equal to the same script's with no hooks installed *(precision added by `sdd-verify` MINOR-5 and MADE TRUE in round 2, W-1: kind-sequence equality via `kindsOfHKS`/`kindsEqualHKS`, not a payload-field or full-event comparison — the identical mechanism `S-HKS-017` uses for this same fixture. Round 2 found the test performed only a length comparison, which this sentence over-claimed; the TEST was strengthened to the claim rather than the claim weakened to the test, because kind-sequence equality is the stronger property and both helpers already existed.)*, and `CheckStream` accepts it unmodified. When a run with a **zero-value** `Hooks` executes on each of the success, turn-failure, retry-exhaustion, interrupt, shutdown and compaction arms, then `runtime.NumGoroutine()` returns to its baseline after every one — no lane goroutine exists on the inert path. And no assertion in this scenario reads elapsed time. Cross-referenced to `R-HKS-004`, `R-HKS-005`, `R-HKS-008`, `R-HKS-012` and `S-HKS-026`.
+
+### R-RUN-014 — The per-attempt forwarder exits on **every** path, and the consumer sink never closes under a live sender
+
+The harness MUST guarantee, on **every** exit path of a run including the **panic unwind**, that the
+per-attempt forwarder goroutine has **terminated** before the consumer sink is closed. Two properties MUST
+hold jointly, and neither alone is sufficient:
+
+1. **Termination.** The forwarder MUST have a cancellation path that makes both its receive from the turn's
+   sink and its send to the consumer sink abandonable. On the panic path the turn's sink is never closed, so
+   a forwarder without an abandonable **receive** would block forever.
+2. **Happens-before.** The run MUST establish an ordering edge from the forwarder's exit to the consumer
+   sink's close, so that the close provably runs after the last possible send.
+
+**Termination without the ordering edge is a race, and the ordering edge without termination is a
+deadlock.** A run whose consumer has abandoned the sink MUST still unwind: an unbuffered send with no
+receiver is not ready, so an abandoned forwarder MUST deterministically take its cancellation path rather
+than park. **Trading a crash for a hang is not a fix**, and both directions MUST be proven separately.
+
+The cancellation signal MUST be **dedicated to this purpose** and MUST NOT be the run's own cancellation
+context. On the interrupt path the run context is **already cancelled** while legitimate wind-down events
+are still flowing through the forwarder; a select with two ready cases chooses pseudo-randomly, so keying
+the send on the run context would **drop events on a non-panicking path**. The dedicated signal is raised
+only inside the run's own unwind, after the last normal join has already completed, so on every
+non-panicking path the forwarder's behaviour degenerates to today's and the event stream is unchanged **by
+construction**, not by tolerance.
+
+The panic MUST still propagate **uncontained**: this requirement changes what the *harness* leaves behind
+during the unwind, and MUST NOT recover, swallow, wrap, or re-type the panic, and MUST NOT convert it into
+an error return or an event.
+
+On the panic path the stream MAY end without a run-close bracket. That path never carried a stream
+guarantee, and this requirement does not create one.
+
+#### Scenarios
+
+- **S-RUN-114** — **(the RED, watched failing before the fix exists)** Given a harness whose turn panics from the unrecovered pre-request seam with a **uniquely minted runtime sentinel**, and a consumer that drains exactly the run-open event and then **abandons** the sink, when the run is driven repeatedly in one test, then the recovered value is that **exact sentinel by identity** (not by shape) and **no** send on a closed channel occurs on any iteration. Before the production fix exists this test FAILS by **process crash** naming the send on a closed channel — that failure text is recorded, and it is what proves the test fails for the intended reason rather than for any reason.
+- **S-RUN-115** — **(defeat A — termination removed)** Given the fix with the forwarder's **send** reverted to an unabandonable send while the deferred join is kept, when `S-RUN-114` runs, then it **deadlocks**: the deferred join blocks forever on the forwarder's own completion signal because the forwarder itself is now permanently parked in its unabandonable send, so `close(sink)` is never reached and a send on a closed channel is structurally **unreachable** on this defeat. The failure surfaces as a test timeout naming exactly two blocked goroutines — the deferred join blocked on a channel receive, and the forwarder blocked on its own channel send. Recorded, then reverted.
+- **S-RUN-116** — **(defeat B — the ordering edge removed)** Given the fix with the cancellation path kept but the deferred join **deleted**, when `S-RUN-114` runs, then it fails: with the signal raised and the sink closed back to back, a forwarder at its select has both cases ready and the runtime chooses uniformly, so the miss probability across the test's iteration count is negligible. Recorded, then reverted. **Both defeat directions are load-bearing, and each closes a different hazard, not the same one twice**: defeat A proves the **termination** half — remove it and the join has nothing left to wait for except a forwarder that can never abandon its send, so the run **hangs**; defeat B proves the **happens-before** half — remove it and the abort and the close race each other, so the run **crashes**. One direction proves termination (hang); the other proves the happens-before edge (crash). A single-direction proof would leave a guard that passes with half its mechanism defeated.
+- **S-RUN-117** — **(no hang, and no stream change)** Given a run whose consumer abandons the sink and whose turn panics, when the unwind runs, then it **completes** — it does not deadlock on the join — and the sink is closed. And given every non-panicking arm (success, turn failure, retry exhaustion, interrupt, shutdown, compaction), when each is driven, then its recorded event sequence is **identical** to the same script's at the merge base, the exported stream validator accepts each unmodified, and the module's ordered-kind and wind-down suites pass byte-unchanged under `-race -count=1`.
 
 ## Non-functional requirements
 

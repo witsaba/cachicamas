@@ -1,7 +1,7 @@
 # Delta — `agent-package-scaffold` (AG-23)
 
 > **Change**: `cachicamas-agent-layer3-handoff` · **AG-23** · Target: `openspec/specs/agent-package-scaffold/spec.md`
-> **Ops**: MODIFIED `R-AGP-003` — AG-23 adds two package trees to the module, so the guard's single scan pattern becomes a **per-check pattern set**, its **test** allowlist gains the two new prefixes, and a **fifth** check lands. Six scenarios (`S-AGP-039`…`S-AGP-044`) are appended. Every existing scenario is reproduced verbatim and unchanged in claim.
+> **Ops**: MODIFIED `R-AGP-003` — AG-23 adds two package trees to the module, so the guard's single scan pattern becomes a **per-check pattern set**, its **test** allowlist gains the two new prefixes, and a **fifth** check lands. Six scenarios (`S-AGP-067`…`S-AGP-072`) are appended. Every existing scenario is reproduced verbatim and unchanged in claim.
 > **Decision**: design **AD-2** (which binds proposal `D-3`), binding.
 
 ## Why the guard is extended and not cloned
@@ -23,7 +23,7 @@ is path-boundary aware. A kit or a proof **nested** under Layer 2's own tree wou
 admitted into Layer 2's **production** closure, destroying the separate-closure property `S-AGP-025` and
 `S-AGP-026` were built to prove. The kit and the proof are consequently **siblings**, not subpackages, and
 this delta widens only the **test** allowlist. `S-AGP-025` and `S-AGP-026` are reproduced unchanged and
-`S-AGP-040` re-proves the production half against the new trees specifically.
+`S-AGP-068` re-proves the production half against the new trees specifically.
 
 ## Not modified, and why
 
@@ -38,7 +38,7 @@ this delta widens only the **test** allowlist. `S-AGP-025` and `S-AGP-026` are r
 
 ## Header maintenance obligation at promotion
 
-`sdd-archive` MUST add **`S-AGP-039`** … **`S-AGP-044`** wherever this spec's scenario identifiers are
+`sdd-archive` MUST add **`S-AGP-067`** … **`S-AGP-072`** wherever this spec's scenario identifiers are
 enumerated, as a **range and never a total**. The Acceptance-criteria line already states a range and needs
 no edit; no existing `S-AGP-` identifier is renumbered.
 
@@ -128,9 +128,9 @@ This guard closes on **bite proof**, not on green. An amendment to its allowlist
 - **S-AGP-036** — **(AG-22 correction)** Given the exact-path table's matching mechanism, when a Layer 2 production source directly imports a standard-library package that is not on that forbidden path's own vetted-importer list (for example `os/exec`, reaching `os`), then the guard FAILS naming the unvetted importer and the vetted set, exactly as an unvetted third-party importer would; and given `go.opentelemetry.io/otel/trace`'s own vetted, evidence-cited reach into `os`, then the guard PASSES unchanged.
 - **S-AGP-037** — **(bite 5, AG-22 correction)** Given a scratch production file in `backend/agent/src/agent/` importing, one at a time, `os/exec`, `net/http` or `crypto/tls`, when the forward guard runs, then it FAILS naming the offending path for each. Recorded, then removed; the merged diff contains no scratch file.
 - **S-AGP-038** — **(AG-22 correction)** Given the guard's source, when its direct-import family scan over Layer 2's own production files is read, then it denies any import exactly matching, or prefixed by, `os`, `net`, `syscall` or `io/fs`, independent of the exact-path table's own transitive mechanism; and given a scratch production file directly importing `syscall`, when the guard runs, then it FAILS naming the file and the family. Recorded, then removed.
-- **S-AGP-039** — **(AG-23)** Given the guard's source after AG-23, when each check's scanned pattern set is read, then checks 1, 3 and 4 scan Layer 2's own tree alone, check 2 scans Layer 2's tree **and** each new sibling tree, and check 5 scans only the new sibling trees — and a comment in place states that checks 1, 3 and 4 are deliberately unwidened so Layer 2 production provably cannot import the kit or the proof.
-- **S-AGP-040** — **(AG-23)** Given the merged change, when the **production** closure is asserted, then it passes **without** admitting either new sibling tree; and given a scratch **production** file in `backend/agent/src/agent/` importing either one, when the guard runs, then it FAILS naming the unadmitted path and the deny-by-default rule. Recorded, then removed.
-- **S-AGP-041** — **(AG-23)** Given the single commit that introduces each new sibling tree, when its diff is inspected, then the test-allowlist entry admitting that tree is in the **same commit** as the tree; and given that commit with the entry withheld, when the guard runs, then check 2 FAILS naming the unadmitted path. That red output is recorded.
-- **S-AGP-042** — **(bite, AG-23)** Given check 2's pattern set with one new pattern replaced by a **mistyped** path that resolves zero packages, when the guard runs, then it FAILS naming **that pattern** — proving the vacuity floor is per pattern rather than per set, and that a mistyped pattern cannot silently drop a tree from the sweep. Recorded, then reverted.
-- **S-AGP-043** — **(bite, AG-23)** Given a scratch file planted in each new sibling tree importing, one at a time, a wall-clock package and a process or filesystem package — including once as a **test file**, to prove test files are scanned — when check 5 runs, then it FAILS naming the file and the family for each. Recorded, then removed; the merged diff contains no scratch file.
-- **S-AGP-044** — **(AG-23)** Given check 5's source, when its vacuity floor is read, then finding zero files in a tree fails naming that directory; and when its comment is read, then it states that check 5 lists no dependencies and is therefore a zero-hop scan that a standard-library-excluding filter cannot blind, that transitive reach is closed by check 2 plus each admitted member's own guard, and that the test framework's own unavoidable reach is the residual floor.
+- **S-AGP-067** — **(AG-23)** Given the guard's source after AG-23, when each check's scanned pattern set is read, then checks 1, 3 and 4 scan Layer 2's own tree alone, check 2 scans Layer 2's tree **and** each new sibling tree, and check 5 scans only the new sibling trees — and a comment in place states that checks 1, 3 and 4 are deliberately unwidened so Layer 2 production provably cannot import the kit or the proof.
+- **S-AGP-068** — **(AG-23)** Given the merged change, when the **production** closure is asserted, then it passes **without** admitting either new sibling tree; and given a scratch **production** file in `backend/agent/src/agent/` importing either one, when the guard runs, then it FAILS naming the unadmitted path and the deny-by-default rule. Recorded, then removed.
+- **S-AGP-069** — **(AG-23)** Given the single commit that introduces each new sibling tree, when its diff is inspected, then the test-allowlist entry admitting that tree is in the **same commit** as the tree; and given that commit with the entry withheld, when the guard runs, then check 2 FAILS naming the unadmitted path. That red output is recorded.
+- **S-AGP-070** — **(bite, AG-23)** Given check 2's pattern set with one new pattern replaced by a **mistyped** path that resolves zero packages, when the guard runs, then it FAILS naming **that pattern** — proving the vacuity floor is per pattern rather than per set, and that a mistyped pattern cannot silently drop a tree from the sweep. Recorded, then reverted.
+- **S-AGP-071** — **(bite, AG-23)** Given a scratch file planted in each new sibling tree importing, one at a time, a wall-clock package and a process or filesystem package — including once as a **test file**, to prove test files are scanned — when check 5 runs, then it FAILS naming the file and the family for each. Recorded, then removed; the merged diff contains no scratch file.
+- **S-AGP-072** — **(AG-23)** Given check 5's source, when its vacuity floor is read, then finding zero files in a tree fails naming that directory; and when its comment is read, then it states that check 5 lists no dependencies and is therefore a zero-hop scan that a standard-library-excluding filter cannot blind, that transitive reach is closed by check 2 plus each admitted member's own guard, and that the test framework's own unavoidable reach is the residual floor.

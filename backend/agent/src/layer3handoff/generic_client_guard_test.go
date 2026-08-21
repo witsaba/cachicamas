@@ -180,7 +180,7 @@ func l3hGuardScan(t *testing.T, dir string) []l3hGuardViolation {
 	if len(units) == 0 {
 		// AG-23 (sdd-verify round 1, W-10): the vacuity floor is PER
 		// TREE, mirroring agent-package-scaffold's own check 5
-		// (S-AGP-044) and this same guard's own tree-resolution floor
+		// (S-AGP-072) and this same guard's own tree-resolution floor
 		// one source unit over — a renamed, emptied or relocated tree
 		// MUST fail by naming ITS OWN location, not pass because the
 		// loop's non-empty tree map (checked once, above the loop) says

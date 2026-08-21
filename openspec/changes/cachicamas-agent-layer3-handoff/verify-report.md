@@ -307,7 +307,7 @@ The doc-0003 diff is **9 insertions / 9 deletions**: 8 checkbox flips and 1 stat
 | Delta | Requirements | Scenarios (AG-23's own) | Reproduced as context |
 |---|---|---|---|
 | `agent-layer3-handoff` | 13 (`R-L3H-001…011`, `NFR-L3H-A`, `NFR-L3H-B`) | 56 (`S-L3H-001…056`) | — |
-| `agent-package-scaffold` | 1 (`R-AGP-003`) | 6 (`S-AGP-039…044`) | 19 (`S-AGP-020…038`) |
+| `agent-package-scaffold` | 1 (`R-AGP-003`) | 6 (`S-AGP-067…072`) | 19 (`S-AGP-020…038`) |
 | `agent-run-driver` | 1 (`R-RUN-014`) | 4 (`S-RUN-114…117`) | — |
 | `agent-hook-taxonomy` | 1 (`R-HKS-010`) | 2 (`S-HKS-027, 028`) | 1 (`S-HKS-024`) |
 | `agent-v1-scope` | 1 (`R-AGS-016`) | 1 (`S-AGS-069`) | 4 (`S-AGS-065…068`) |

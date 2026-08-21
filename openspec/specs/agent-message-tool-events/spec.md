@@ -6,6 +6,8 @@
 > **Identifier convention**: requirements `R-AMT-0NN`, scenarios `S-AMT-0NN`. Append-only. Distinct from `R-AEV-`/`S-AEV-` (AG-04 envelope) and `R-AGE-`/`S-AGE-` (AG-01 delivery).
 > **Co-closure map** (`0003:2203`): envelope invariant 1 (indexed deltas) closed by AG-04.3 **+ AG-05.1**; invariants 2, 3, 4 untouched.
 > **Evidence gate**: `cd backend/agent && make test` (`go test -race -v ./...`), plus `make lint`. No CI exists. `make vuln-check` is NOT in `make all`; it MUST be run explicitly (Engram `obs #2944`).
+>
+> **Amended 2026-08-21 (AG-23)**: Explicit non-requirements list MODIFIED (back-annotation only — no requirement or scenario identifier is added, removed or renumbered, and `R-AMT-001`…`R-AMT-009` are byte-unchanged). This spec's **first** amendment of the **"Test-convenience wrappers"** row, carried unamended since this spec shipped: it closes on the merits as **DELIVERED, RELOCATED** to `backend/agent/src/apptest`, a new sibling package one layer up, never inside `backend/agent/src/agenttest`, which stays byte-unchanged as both Layer 1's own import guard (`src/ai/import_boundary_test.go`'s `layer1Patterns`, which sweeps `agenttest` under Layer 1's rules and denies `src/agent` by name) and the shipped scope fence (`hooks_test.go`'s `hksScopeFenceByteUnchangedFiles()`) require. AG-23 is Layer 2's **last** milestone, so a row still open after it has nowhere left to be forwarded to. The substrate and Go-dependency rows are additionally back-annotated as still true at AG-23, whose one production edit — `harness.go` — touches none of `event_descriptor.go`, `stream_check.go`, `failure.go` or `sequence.go`. See delta spec at `openspec/changes/archive/2026-08-21-cachicamas-agent-layer3-handoff/specs/agent-message-tool-events/spec.md`.
 
 ## Coverage
 
@@ -101,12 +103,12 @@ All 11 new kinds MUST register with `Placement: PlacementTurn` — AG-05's first
 
 ## Explicit non-requirements
 
-- **No edit** to `event_descriptor.go`, `stream_check.go`, `failure.go`, or `sequence.go` — AG-04's rule engine stays untouched; AD-1, AD-2, AD-5 hold.
-- **No new top-level Go deps.** No `go.mod`/`go.sum` edit. No AG-03 guard edit.
+- **No edit** to `event_descriptor.go`, `stream_check.go`, `failure.go`, or `sequence.go` — AG-04's rule engine stays untouched; AD-1, AD-2, AD-5 hold. *(Still true at AG-23, whose one production edit is confined to `harness.go`.)*
+- **No new top-level Go deps.** No `go.mod`/`go.sum` edit. No AG-03 guard edit. *(Still true at AG-23 — `agent-layer3-handoff`'s `R-L3H-011` — which adds zero module dependencies.)*
 - **Permission, cost, delegation, compaction families** (`VL2-EVT-06`…`09`) — **AG-06**.
 - **Live-loop emission** — **AG-07, AG-09**. AG-05 ships no producer.
 - **Tool execution contract** (scheduling, rejoin) — **AG-09.1**. **Permission events around tools** — **AG-06, AG-10**.
-- **Test-convenience wrappers** in `backend/agent/src/agenttest` — **AG-23**.
+- **Test-convenience wrappers** in `backend/agent/src/agenttest` — **AG-23**. **CLOSED by AG-23 (`cachicamas-agent-layer3-handoff`): DELIVERED, RELOCATED.** The wrappers ship as `backend/agent/src/apptest` — a new sibling package one layer up, never inside `backend/agent/src/agenttest`, which stays byte-unchanged as both the import guard and the shipped scope fence require.
 - **CI** — every gate runs when a human runs `make test` in `backend/agent/`.
 
 ## Evidence discipline

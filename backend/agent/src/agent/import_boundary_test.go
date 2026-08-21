@@ -28,7 +28,7 @@
 //     listNonStdlibDeps call PER pattern, with the zero-packages vacuity
 //     floor moved INSIDE that loop so a mistyped new pattern fails BY
 //     NAME rather than passing vacuously because the union as a whole is
-//     still non-empty (S-AGP-042). Checks 1, 3 and 4 stay scoped to
+//     still non-empty (S-AGP-070). Checks 1, 3 and 4 stay scoped to
 //     layer2Pattern alone, deliberately unwidened, so Layer 2's
 //     PRODUCTION closure provably never admits either new sibling tree.
 //
@@ -314,7 +314,7 @@ func TestLayer2_ProductionClosure_ImportsOnlyLayer1AndStdlib_DenyByDefault(t *te
 // layer2TestOnlyTreePatterns, one listNonStdlibDeps call PER PATTERN —
 // never one call over a merged/union pattern string — because the
 // zero-packages vacuity floor below MUST be per-pattern, not per-set
-// (S-AGP-042). A mistyped new pattern resolves zero packages on its own;
+// (S-AGP-070). A mistyped new pattern resolves zero packages on its own;
 // with a per-SET floor the union as a whole would still be non-empty
 // (layer2Pattern alone already resolves plenty), so the mistyped pattern
 // would pass vacuously, silently dropping a tree from the sweep while the
@@ -732,7 +732,7 @@ func TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport(t *testing.T) {
 	for importPath, dir := range dirs {
 		files := layer2SiblingTreeAllSourceFiles(t, importPath, dir)
 		if len(files) == 0 {
-			// AG-23 (S-AGP-044): the vacuity floor is PER TREE — a
+			// AG-23 (S-AGP-072): the vacuity floor is PER TREE — a
 			// renamed or moved tree must fail by naming ITS OWN
 			// directory, not pass because some OTHER tree in this map
 			// is non-empty.
