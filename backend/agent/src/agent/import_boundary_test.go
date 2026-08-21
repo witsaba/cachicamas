@@ -5,20 +5,32 @@
 // ai_test's import_boundary_test.go mechanism (AI-00.3) from Layer 1 to
 // Layer 2. Structural differences from that mechanism, all AD-3:
 //
-//  1. FOUR checks, not one merged scan: the production closure
+//  1. FIVE checks, not one merged scan: the production closure
 //     ([TestLayer2_ProductionClosure_ImportsOnlyLayer1AndStdlib_DenyByDefault]),
 //     the test closure
 //     ([TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction]),
 //     a network/filesystem closure scan that includes the standard
 //     library
 //     ([TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage],
-//     AI-10.4's pattern), and a direct-import family scan over Layer 2's
-//     own production source files
+//     AI-10.4's pattern), a direct-import family scan over Layer 2's own
+//     production source files
 //     ([TestLayer2_ProductionSources_NoDirectForbiddenFamilyImport],
-//     AG-22 correction, below). Production and test are asserted
-//     SEPARATELY — not L1's single `-deps -test` merge — because
-//     S-AGP-026 requires proving the production closure never admits the
-//     test substrate (src/agenttest) while the test closure does.
+//     AG-22 correction, below), and a fifth source-level scan over AG-23's
+//     two new sibling trees, test files included
+//     ([TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport], AG-23,
+//     design AD-2). Production and test are asserted SEPARATELY — not
+//     L1's single `-deps -test` merge — because S-AGP-026 requires
+//     proving the production closure never admits the test substrate
+//     (src/agenttest) while the test closure does.
+//
+//     AG-23 also turns check 2's single scan pattern into a pattern SET:
+//     it now sweeps {layer2Pattern} ∪ layer2TestOnlyTreePatterns, one
+//     listNonStdlibDeps call PER pattern, with the zero-packages vacuity
+//     floor moved INSIDE that loop so a mistyped new pattern fails BY
+//     NAME rather than passing vacuously because the union as a whole is
+//     still non-empty (S-AGP-042). Checks 1, 3 and 4 stay scoped to
+//     layer2Pattern alone, deliberately unwidened, so Layer 2's
+//     PRODUCTION closure provably never admits either new sibling tree.
 //  2. Why check 3 exists at all: "net/http" is standard library, so
 //     [listNonStdlibDeps] filters it out before checks 1 and 2 ever see
 //     it — a bare-prefix "denied by name" row for it in forbiddenPrefixes
@@ -135,6 +147,24 @@ const modulePath = "github.com/cachicamas/backend/agent"
 // relative ./... pattern is unsafe.
 const layer2Pattern = modulePath + "/src/agent/..."
 
+// layer2TestOnlyTreePatterns are AG-23's two new sibling package trees —
+// the packaged test kit (src/apptest) and the consumer proof
+// (src/layer3handoff) — that are neither Layer 2 nor its Layer 1
+// substrate (design AD-2, agent-package-scaffold's amended R-AGP-003).
+// Check 2 (the test closure) sweeps {layer2Pattern} ∪
+// layer2TestOnlyTreePatterns; checks 1, 3 and 4 stay scoped to
+// layer2Pattern alone, deliberately unwidened, so Layer 2's PRODUCTION
+// closure provably never admits either sibling tree. Both trees are
+// siblings of src/agent, never nested beneath it: allowedProductionPrefixes
+// admits modulePath+"/src/agent" as a PREFIX, so nesting either tree
+// under it would silently admit it into the production closure,
+// destroying the separate-closure property S-AGP-025/S-AGP-026 exist to
+// prove.
+var layer2TestOnlyTreePatterns = []string{
+	modulePath + "/src/apptest/...",
+	modulePath + "/src/layer3handoff/...",
+}
+
 // forbiddenPrefixes are checked BEFORE the allowlist, mirroring
 // ai_test's import_boundary_test.go — and, as there, the order is
 // load-bearing for one of the two reasons the guard needs a forbidden
@@ -216,7 +246,13 @@ var allowedProductionPrefixes = []string{
 // so the production closure can be proven, independently, to never admit
 // it (S-AGP-025, S-AGP-026). The prefix match below covers agenttest's own
 // subpackages (for example agenttest/sweep) without a separate entry.
-var allowedTestPrefixes = append(slices.Clone(allowedProductionPrefixes), modulePath+"/src/agenttest")
+//
+// AG-23: the two new sibling test-only trees (layer2TestOnlyTreePatterns)
+// join this same allowlist, in the SAME commit as the trees themselves
+// (R-AGP-003's own "amendment lands in the same commit as the import it
+// authorises" rule) — never the production allowlist above, which stays
+// unwidened.
+var allowedTestPrefixes = append(slices.Clone(allowedProductionPrefixes), modulePath+"/src/agenttest", modulePath+"/src/apptest", modulePath+"/src/layer3handoff")
 
 // networkOrFilesystemPackages is check 3's own list — mirroring
 // ai_test's TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage
@@ -271,30 +307,43 @@ func TestLayer2_ProductionClosure_ImportsOnlyLayer1AndStdlib_DenyByDefault(t *te
 // production closure admits, plus src/agenttest — scanned separately from
 // check 1 so the production closure can be proven never to see it
 // (S-AGP-025, S-AGP-026).
+//
+// AG-23 (design AD-2): the scanned pattern SET is now {layer2Pattern} ∪
+// layer2TestOnlyTreePatterns, one listNonStdlibDeps call PER PATTERN —
+// never one call over a merged/union pattern string — because the
+// zero-packages vacuity floor below MUST be per-pattern, not per-set
+// (S-AGP-042). A mistyped new pattern resolves zero packages on its own;
+// with a per-SET floor the union as a whole would still be non-empty
+// (layer2Pattern alone already resolves plenty), so the mistyped pattern
+// would pass vacuously, silently dropping a tree from the sweep while the
+// guard reports green.
 func TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction(t *testing.T) {
 	t.Parallel()
 
-	deps, err := listNonStdlibDeps(layer2Pattern, true)
-	if err != nil {
-		t.Fatalf("go list failed: %v", err)
-	}
-	if len(deps) == 0 {
-		t.Fatal("go list -test returned no packages; the guard would pass vacuously. " +
-			"Check that the package pattern still resolves: " + layer2Pattern)
-	}
-
-	for _, dep := range deps {
-		if rule, forbidden := matchForbidden(dep); forbidden {
-			t.Errorf("Layer 2's test closure must not import %q\n  rule: %s", dep, rule)
-			continue
+	patterns := append([]string{layer2Pattern}, layer2TestOnlyTreePatterns...)
+	for _, pattern := range patterns {
+		deps, err := listNonStdlibDeps(pattern, true)
+		if err != nil {
+			t.Fatalf("go list failed for pattern %q: %v", pattern, err)
 		}
-		if !isAllowed(dep, allowedTestPrefixes) {
-			t.Errorf("Layer 2's test closure must not import %q\n"+
-				"  rule: deny-by-default allowlist (ADR 0005 § D1 row 2) — this path is neither "+
-				"the Go standard library, a production-allowed package, nor the test substrate "+
-				"(src/agenttest).\n"+
-				"  No forbidden prefix names it, and that is not a licence to add it.",
-				dep)
+		if len(deps) == 0 {
+			t.Fatalf("go list -test returned no packages for pattern %q; the guard would pass vacuously for this pattern. "+
+				"Check that the package pattern still resolves.", pattern)
+		}
+
+		for _, dep := range deps {
+			if rule, forbidden := matchForbidden(dep); forbidden {
+				t.Errorf("pattern %q: Layer 2's test closure must not import %q\n  rule: %s", pattern, dep, rule)
+				continue
+			}
+			if !isAllowed(dep, allowedTestPrefixes) {
+				t.Errorf("pattern %q: Layer 2's test closure must not import %q\n"+
+					"  rule: deny-by-default allowlist (ADR 0005 § D1 row 2) — this path is neither "+
+					"the Go standard library, a production-allowed package, nor the test substrate "+
+					"(src/agenttest, src/apptest, src/layer3handoff).\n"+
+					"  No forbidden prefix names it, and that is not a licence to add it.",
+					pattern, dep)
+			}
 		}
 	}
 }
@@ -468,13 +517,17 @@ func TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage(t *testin
 var layer2ForbiddenImportFamilies = []string{"os", "net", "syscall", "io/fs"}
 
 // isForbiddenImportFamily reports whether importPath is exactly one of
-// layer2ForbiddenImportFamilies or has one of them as a "/"-bounded
-// prefix — so "os/exec" matches family "os" and "net/http" matches
-// family "net", but "crypto/tls" and "fmt" match neither by name (check
-// 3's direct-import-edge mechanism is what catches "crypto/tls" instead;
-// "fmt" is vetted there, per forcedStandardLibraryImporters).
-func isForbiddenImportFamily(importPath string) (family string, matched bool) {
-	for _, f := range layer2ForbiddenImportFamilies {
+// families or has one of them as a "/"-bounded prefix — so "os/exec"
+// matches family "os" and "net/http" matches family "net", but
+// "crypto/tls" and "fmt" match neither by name (check 3's
+// direct-import-edge mechanism is what catches "crypto/tls" instead;
+// "fmt" is vetted there, per forcedStandardLibraryImporters). Shared by
+// check 4 (families: layer2ForbiddenImportFamilies) and AG-23's check 5
+// (families: layer2SiblingTreeForbiddenImportFamilies, the same four
+// families plus "time") — the same mechanism, applied to two different
+// family lists over two different scanned trees.
+func isForbiddenImportFamily(importPath string, families []string) (family string, matched bool) {
+	for _, f := range families {
 		if importPath == f || strings.HasPrefix(importPath, f+"/") {
 			return f, true
 		}
@@ -540,9 +593,108 @@ func TestLayer2_ProductionSources_NoDirectForbiddenFamilyImport(t *testing.T) {
 		}
 		for _, imp := range file.Imports {
 			importPath := strings.Trim(imp.Path.Value, `"`)
-			if family, matched := isForbiddenImportFamily(importPath); matched {
+			if family, matched := isForbiddenImportFamily(importPath, layer2ForbiddenImportFamilies); matched {
 				t.Errorf("%s directly imports %q, which is in the forbidden %q family\n  rule: ADR 0005 § D1 row 2: Layer 2 performs no I/O of its own — no network, filesystem or process package, reached directly or through any intermediary",
 					filepath.Base(path), importPath, family)
+			}
+		}
+	}
+}
+
+// layer2SiblingTreeForbiddenImportFamilies is check 5's own family list
+// (AG-23, design AD-2, agent-package-scaffold's amended R-AGP-003): the
+// two new sibling trees may import none of Layer 2's own forbidden
+// families PLUS "time" — the zero-I/O AND no-wall-clock property
+// (R-L3H-002, R-L3H-004) denied by name, at the source level, in one
+// scan. "time" carries no entry in layer2ForbiddenImportFamilies because
+// check 4's own scope (Layer 2 production) has no no-wall-clock rule of
+// its own; check 5 is a distinct list over a distinct pair of trees.
+var layer2SiblingTreeForbiddenImportFamilies = append(slices.Clone(layer2ForbiddenImportFamilies), "time")
+
+// layer2SiblingTreeDirs resolves AG-23's two new sibling trees' own
+// directories relative to THIS test file's own source location — the
+// same runtime.Caller(0) resolution layer2AgentPackageDir performs for
+// Layer 2's own tree, extended one level up to reach src/apptest and
+// src/layer3handoff as SIBLINGS of src/agent, never nested beneath it
+// (design AD-2, the separate-closure property S-AGP-025/S-AGP-026 exist
+// to keep). Keyed by the same import path layer2TestOnlyTreePatterns
+// names, so a failure message below can cite one alongside the other.
+func layer2SiblingTreeDirs(t *testing.T) map[string]string {
+	t.Helper()
+	srcDir := filepath.Dir(layer2AgentPackageDir(t))
+	return map[string]string{
+		modulePath + "/src/apptest":       filepath.Join(srcDir, "apptest"),
+		modulePath + "/src/layer3handoff": filepath.Join(srcDir, "layer3handoff"),
+	}
+}
+
+// layer2SiblingTreeAllSourceFiles returns the absolute path of every .go
+// file — test files INCLUDED — directly inside dir (no subpackages).
+// Check 5's own listing helper: unlike check 4's own
+// layer2ProductionSourceFiles, which deliberately EXCLUDES _test.go
+// (Layer 2 production-only scope), check 5 must see test files too — the
+// zero-I/O and no-wall-clock property this change proves covers a
+// sibling tree's own test files exactly as much as its production files
+// (R-L3H-002).
+func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q) error = %v, want nil", dir, err)
+	}
+	var files []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, name))
+	}
+	return files
+}
+
+// TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport is check 5 (AG-23,
+// design AD-2, agent-package-scaffold's amended R-AGP-003): a direct,
+// source-level scan of the two new sibling trees' OWN .go files —
+// production AND test files — for an import matching
+// layer2SiblingTreeForbiddenImportFamilies. Verbatim reuse of check 4's
+// AST mechanism (parser.ParseFile with parser.ImportsOnly), applied to a
+// different pair of trees and a different family list.
+//
+// This is a ZERO-HOP scan: it lists no dependencies at all, so a closure
+// listing filtered to exclude the standard library (as checks 1/2 filter
+// it) cannot blind it — that blind spot simply does not exist here.
+// Transitive, standard-library-mediated reach is closed elsewhere and by
+// a different mechanism: check 2 pins these two trees' own non-stdlib
+// closure to exactly the allowlist, and every admitted member carries its
+// own I/O guard. The residual floor is the test framework's own
+// unavoidable "testing" -> "os" reach, the same floor check 3's own
+// comment already records — restated here, not hidden.
+func TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport(t *testing.T) {
+	t.Parallel()
+
+	dirs := layer2SiblingTreeDirs(t)
+	fset := token.NewFileSet()
+	for importPath, dir := range dirs {
+		files := layer2SiblingTreeAllSourceFiles(t, dir)
+		if len(files) == 0 {
+			// AG-23 (S-AGP-044): the vacuity floor is PER TREE — a
+			// renamed or moved tree must fail by naming ITS OWN
+			// directory, not pass because some OTHER tree in this map
+			// is non-empty.
+			t.Fatalf("no .go file found directly inside %q (%s); the scan would pass vacuously for this tree", dir, importPath)
+		}
+		for _, path := range files {
+			file, ferr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+			if ferr != nil {
+				t.Fatalf("parser.ParseFile(%q) error = %v, want nil", path, ferr)
+			}
+			for _, imp := range file.Imports {
+				imported := strings.Trim(imp.Path.Value, `"`)
+				if family, matched := isForbiddenImportFamily(imported, layer2SiblingTreeForbiddenImportFamilies); matched {
+					t.Errorf("%s directly imports %q, which is in the forbidden %q family\n  rule: R-L3H-002/R-L3H-004: the kit and the consumer proof perform no I/O and use no wall clock — no network, filesystem, process or time package, in production or test source",
+						filepath.Base(path), imported, family)
+				}
 			}
 		}
 	}
