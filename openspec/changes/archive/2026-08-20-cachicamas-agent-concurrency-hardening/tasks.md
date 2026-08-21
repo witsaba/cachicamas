@@ -108,18 +108,27 @@ Counted against the **1000-line budget excluding `openspec/**`**, extension pre-
 
 ## Phase 9 — `sdd-archive` promotion obligations (rows it discharges)
 
-- [ ] 9.1 Promote the NEW capability `agent-concurrency-hardening` into `openspec/specs/agent-concurrency-hardening/spec.md` verbatim (AG-14/19/20 precedent).
-- [ ] 9.2 `agent-event-delivery`: extend the scenario-ID header line to cover `S-AGE-031` (range, never a total). No other header line changes.
-- [ ] 9.3 `agent-run-driver`: **NO header change** — Allocated-IDs line stays `R-RUN-001..013` / `S-RUN-001..113` verbatim.
-- [ ] 9.4 `agent-cancellation-tree`: **NO header change** — no new `S-CAN-`/`R-CAN-` identifier minted.
-- [ ] 9.5 `agent-turn-termination`: **NO header/ID change.**
-- [ ] 9.6 `agent-v1-scope`: add `S-AGS-067` to the scenario range (range, never a total). No other header line changes.
-- [ ] 9.7 `agent-loop-skeleton`: extend the scenario range to `S-LSK-034`; append the AG-21 amendment line (`R-LSK-009` ADDED, `R-LSK-008` MODIFIED, no substrate release requested, both filters widened by exact suffix for the 5 new files, one narrow normative release on `hooks_test.go`'s `S-LSK-032` block). **Round-2 addition (MAJOR-3)**: ALSO apply the body correction to `S-LSK-032`'s own scenario clause — replace "neither names `failure.go`, `cost_events.go`, `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" with "neither names `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" (dropping `failure.go`/`cost_events.go`, present in both filters since AG-11/AG-16) and attach the `(Previously: ...)` note specified in this delta's `S-LSK-032` AG-21-amendment section. This is a body edit, separate from the two header edits above.
+- [x] 9.1 Promote the NEW capability `agent-concurrency-hardening` into `openspec/specs/agent-concurrency-hardening/spec.md` verbatim (AG-14/19/20 precedent).  
+  **Evidence**: DONE — `openspec/specs/agent-concurrency-hardening/spec.md` created, 182 lines (delta source 180 + archive amendment line).
+- [x] 9.2 `agent-event-delivery`: extend the scenario-ID header line to cover `S-AGE-031` (range, never a total). No other header line changes.  
+  **Evidence**: DONE — scenario-ID line extended to cover `S-AGE-031` as a range; file 353 → 379 lines (+27/−1).
+- [x] 9.3 `agent-run-driver`: **NO header change** — Allocated-IDs line stays `R-RUN-001..013` / `S-RUN-001..113` verbatim.  
+  **Evidence**: DONE — header verified byte-unchanged; body 412 → 434 (+24/−2), `R-RUN-001` discharge only.
+- [x] 9.4 `agent-cancellation-tree`: **NO header change** — no new `S-CAN-`/`R-CAN-` identifier minted.  
+  **Evidence**: DONE — header verified byte-unchanged; body 207 → 235 (+33/−5), five naming sites discharged.
+- [x] 9.5 `agent-turn-termination`: **NO header/ID change.**  
+  **Evidence**: DONE — header/ID lines verified byte-unchanged; body 214 → 218 (+5/−1).
+- [x] 9.6 `agent-v1-scope`: add `S-AGS-067` to the scenario range (range, never a total). No other header line changes.  
+  **Evidence**: DONE — `S-AGS-067` added as a range; file 328 → 351 (+23/−1).
+- [x] 9.7 `agent-loop-skeleton`: extend the scenario range to `S-LSK-034`; append the AG-21 amendment line (`R-LSK-009` ADDED, `R-LSK-008` MODIFIED, no substrate release requested, both filters widened by exact suffix for the 5 new files, one narrow normative release on `hooks_test.go`'s `S-LSK-032` block). **Round-2 addition (MAJOR-3)**: ALSO apply the body correction to `S-LSK-032`'s own scenario clause — replace "neither names `failure.go`, `cost_events.go`, `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" with "neither names `cost_events_test.go`, `stream_check_test.go` or `reconstruction_test.go`" (dropping `failure.go`/`cost_events.go`, present in both filters since AG-11/AG-16) and attach the `(Previously: ...)` note specified in this delta's `S-LSK-032` AG-21-amendment section. This is a body edit, separate from the two header edits above.  
+  **Evidence**: DONE — range extended to `S-LSK-034`; `S-LSK-032` carries AD-9 branch-scoping AND the inherited-false-clause correction; file 303 → 314 (+37/−8).
 
 ## Phase 10 — Post-archive verification (AG-20's truncation defect MUST NOT repeat)
 
-- [ ] 10.1 `wc -l` each promoted spec target against its delta source (all 7: the new capability + 6 deltas) — confirm line counts consistent with a real body, not a truncated stub.
-- [ ] 10.2 `grep -rln "Content continues|^## Key Learnings|skill_resolution|next_recommended|executive_summary" openspec/specs/` — MUST return empty (or only pre-existing matches unrelated to this change). This is the exact defect that shipped into `openspec/specs/agent-hook-taxonomy/spec.md` at AG-20 and was repaired in `c46b696b`; this row exists so AG-21 cannot repeat it.
+- [x] 10.1 `wc -l` each promoted spec target against its delta source (all 7: the new capability + 6 deltas) — confirm line counts consistent with a real body, not a truncated stub.  
+  **Evidence**: DONE — every target grew, none shrank: net +26/+22/+28/+4/+29/+22 across the six MODIFIED, new capability 182 lines. Verified by `git diff --numstat -- openspec/specs/`.
+- [x] 10.2 `grep -rln "Content continues|^## Key Learnings|skill_resolution|next_recommended|executive_summary" openspec/specs/` — MUST return empty (or only pre-existing matches unrelated to this change). This is the exact defect that shipped into `openspec/specs/agent-hook-taxonomy/spec.md` at AG-20 and was repaired in `c46b696b`; this row exists so AG-21 cannot repeat it.  
+  **Evidence**: DONE — `grep -rln "Content continues|^## Key Learnings|skill_resolution|next_recommended|executive_summary" openspec/specs/` returns EMPTY across the whole promoted tree. (Pre-AG-21 this grep returned `agent-hook-taxonomy/spec.md`, the AG-20 truncation, repaired in `c46b696b`.)
 
 ---
 
