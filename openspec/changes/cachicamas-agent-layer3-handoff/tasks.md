@@ -128,10 +128,10 @@ Discharges: `R-L3H-006`, `R-L3H-007`, `R-L3H-008`, `R-L3H-009`.
 
 ## WU-7 — W-6 closure (guard restoration)
 
-- [ ] 7.1 In `hooks_test.go`, add `"scheduler.go"` back to `hksScopeFenceByteUnchangedFiles()`'s list (17th entry; AG-23 does not touch it). Bite: confirm the fence still bites by planting a one-line scratch comment in `scheduler.go`, watch the fence FAIL naming it, revert, confirm clean.
-- [ ] 7.2 Rewrite the comment at the freeze-list site recording `import_boundary_test.go`'s release from the fence as **PERMANENT** (not a dropped follow-up): state the category-error reasoning — freezing a designed extension point (the guard itself, which must grow with every new sibling tree) is a category error, not an oversight. Record this reasoning in **both** the guard source comment and `decision.md` §4's known-limitations register (cross-reference WU-6).
-- [ ] 7.3 Confirm `harness.go` was never on either freeze list to begin with (`hksScopeFenceByteUnchangedFiles()`'s 16 pre-AG-23 entries, `del024ByteUnchangedFiles()`'s 7) — WU-1's edit needs no widening.
-- [ ] 7.4 Re-run `hksScopeFenceByteUnchangedFiles()`'s test and `del024ByteUnchangedFiles()`'s test (`scope_fence_test.go`) `-count=1`, confirm both green with `scheduler.go` restored and `import_boundary_test.go` still released.
+- [x] 7.1 In `hooks_test.go`, add `"scheduler.go"` back to `hksScopeFenceByteUnchangedFiles()`'s list (17th entry; AG-23 does not touch it). Bite: confirm the fence still bites by planting a one-line scratch comment in `scheduler.go`, watch the fence FAIL naming it, revert, confirm clean.
+- [x] 7.2 Rewrite the comment at the freeze-list site recording `import_boundary_test.go`'s release from the fence as **PERMANENT** (not a dropped follow-up): state the category-error reasoning — freezing a designed extension point (the guard itself, which must grow with every new sibling tree) is a category error, not an oversight. Record this reasoning in **both** the guard source comment and `decision.md` §4's known-limitations register (cross-reference WU-6).
+- [x] 7.3 Confirm `harness.go` was never on either freeze list to begin with (`hksScopeFenceByteUnchangedFiles()`'s 16 pre-AG-23 entries, `del024ByteUnchangedFiles()`'s 7) — WU-1's edit needs no widening.
+- [x] 7.4 Re-run `hksScopeFenceByteUnchangedFiles()`'s test and `del024ByteUnchangedFiles()`'s test (`scope_fence_test.go`) `-count=1`, confirm both green with `scheduler.go` restored and `import_boundary_test.go` still released.
 
 **Focused test**: `go test -race -count=1 ./src/agent/... -run TestHooks_ScopeFence` and the `scope_fence_test.go` suite.
 **Runtime harness**: N/A — guard-list edit, structural check only.

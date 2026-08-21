@@ -1492,6 +1492,40 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 // assertion, no bare seam type/key, no errgroup import) — all three
 // re-verified green against this phase's own diff. Every other entry
 // below is untouched by AG-22 and stays frozen.
+//
+// AG-23 disposition (agent-hook-taxonomy's amended R-HKS-010; W-6,
+// AG-22's own carry-forward): the fence is a per-branch scope fence
+// against a moving merge base, not a recorded hash — an entry asserts
+// only that THIS branch does not touch that file, and a release expires
+// with the branch that took it unless renewed on the merits. AG-22
+// released two files above; AG-23 is Layer 2's LAST milestone, so both
+// are disposed of here rather than carried again, and disposed of
+// SEPARATELY, because the two decide independently:
+//
+//   - "scheduler.go" is RESTORED (17th entry, below). AG-23 ships no
+//     scheduler change of any kind — the kit and the proof are new
+//     sibling packages, the examples are a new test unit, and the one
+//     production fix (R-RUN-014) is confined to harness.go, which was
+//     never on this list to begin with. Restoration costs nothing and
+//     re-arms a guard whose release expired with the milestone that took
+//     it.
+//   - "import_boundary_test.go" is NOT restored, and its release is made
+//     PERMANENT: this list continues to omit it, on the merits, not by
+//     oversight. That file's allowlists and scan-pattern set are the
+//     layer's own DESIGNED EXTENSION POINT for its import boundary —
+//     every milestone that admits a new dependency or a new sibling
+//     package must edit it, by construction (agent-package-scaffold's
+//     R-AGP-003 itself requires the amendment and the import it
+//     authorises to land in the same commit, which makes editing it
+//     mandatory, not optional). Two independent milestones (AG-22, for
+//     the observability allowlist; AG-23, for the sibling-tree pattern
+//     set and the fifth check) needing the same file is evidence the
+//     freeze ENTRY was wrong, not that either milestone was — freezing a
+//     designed extension point is a category error, and restoring it
+//     would make the restoring branch fail its own restored guard. This
+//     reasoning is recorded a second time in this change's own
+//     decision.md (§ 4.4), so a later reader cannot mistake either
+//     disposition for a dropped follow-up.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
 		"event.go",
@@ -1510,6 +1544,7 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"ambient_authority_test.go",
 		"reconstruction_test.go",
 		"delegation_seam.go",
+		"scheduler.go",
 	}
 }
 
