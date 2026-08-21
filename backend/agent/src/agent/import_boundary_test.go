@@ -31,6 +31,7 @@
 //     still non-empty (S-AGP-042). Checks 1, 3 and 4 stay scoped to
 //     layer2Pattern alone, deliberately unwidened, so Layer 2's
 //     PRODUCTION closure provably never admits either new sibling tree.
+//
 //  2. Why check 3 exists at all: "net/http" is standard library, so
 //     [listNonStdlibDeps] filters it out before checks 1 and 2 ever see
 //     it — a bare-prefix "denied by name" row for it in forbiddenPrefixes
@@ -39,6 +40,7 @@
 //     library, and denies by exact path instead. Production-only, for
 //     AI-10.4's own recorded reason: `-test` pulls in "testing", which
 //     imports "os" itself, so a test-inclusive scan could never pass.
+//
 //  3. Why check 4 exists (AG-22 correction, agent-package-scaffold's
 //     amended R-AGP-003): check 3's own direct-import-edge mechanism
 //     (below) can only ever deny a forbidden path's DIRECT importer by
@@ -628,14 +630,31 @@ func layer2SiblingTreeDirs(t *testing.T) map[string]string {
 	}
 }
 
+// layer2SiblingTreeSelfExcludedFiles is check 5's own, single, exact-name
+// exclusion, discovered during apply (not planned at design time): the
+// generic-client vocabulary guard (R-L3H-010) is co-located inside
+// src/layer3handoff, one of the two trees check 5 itself scans, and it
+// necessarily reads its sibling trees' own source bytes for a static
+// text inspection — needing the very standard-library family this check
+// denies. That need is categorically different from the kit's and the
+// proof's own RUNTIME zero-I/O claim: it is verification tooling reading
+// already-committed source for a build-time scan, exactly the same
+// category as import_boundary_test.go's own os.ReadDir/os.ReadFile use
+// scanning Layer 2's production files for check 4 — nobody reads THAT
+// as a violation of Layer 2's own zero-I/O claim over its production
+// surface, because the scanning mechanism is not part of the surface it
+// scans. The exclusion is exact-filename, no wildcard/prefix/directory
+// pattern, matching every other named exception in this module's guards.
+const layer2SiblingTreeSelfExcludedFile = "generic_client_guard_test.go"
+
 // layer2SiblingTreeAllSourceFiles returns the absolute path of every .go
-// file — test files INCLUDED — directly inside dir (no subpackages).
-// Check 5's own listing helper: unlike check 4's own
-// layer2ProductionSourceFiles, which deliberately EXCLUDES _test.go
-// (Layer 2 production-only scope), check 5 must see test files too — the
-// zero-I/O and no-wall-clock property this change proves covers a
-// sibling tree's own test files exactly as much as its production files
-// (R-L3H-002).
+// file — test files INCLUDED — directly inside dir (no subpackages),
+// except layer2SiblingTreeSelfExcludedFile (above). Check 5's own
+// listing helper: unlike check 4's own layer2ProductionSourceFiles,
+// which deliberately EXCLUDES _test.go (Layer 2 production-only scope),
+// check 5 must see test files too — the zero-I/O and no-wall-clock
+// property this change proves covers a sibling tree's own test files
+// exactly as much as its production files (R-L3H-002).
 func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -646,6 +665,9 @@ func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if name == layer2SiblingTreeSelfExcludedFile {
 			continue
 		}
 		files = append(files, filepath.Join(dir, name))

@@ -84,8 +84,8 @@ Discharges: `R-L3H-003`, `R-L3H-004` (kit half).
 
 ## WU-4 — AD-4 `src/layer3handoff` consumer proof
 
-- [ ] 4.1 Create `layer3handoff/doc.go` — package `layer3handoff`, intentionally empty (AI-40 shape, mirrors `backend/agent/src/handoff/doc.go`'s precedent), pointing at `decision.md` for the frozen v1 surface.
-- [ ] 4.2 Create `layer3handoff_test.go`, package `layer3handoff_test`. One driver `TestLayer3Handoff_ConsumerProof` with **sequential** (never parallel) `t.Run` stages covering all seven acceptance capabilities in order:
+- [x] 4.1 Create `layer3handoff/doc.go` — package `layer3handoff`, intentionally empty (AI-40 shape, mirrors `backend/agent/src/handoff/doc.go`'s precedent), pointing at `decision.md` for the frozen v1 surface.
+- [x] 4.2 Create `layer3handoff_test.go`, package `layer3handoff_test`. One driver `TestLayer3Handoff_ConsumerProof` with **sequential** (never parallel) `t.Run` stages covering all seven acceptance capabilities in order:
   1. Build a harness from fakes (`agenttest` provider, `NewMapRegistry` over an `apptest` tool, `apptest` policy, public `Harness` fields).
   2. Drive Run #1: multi-turn + tool call.
   3. Scripted `PermissionDefer` suspension + resolution via drained permission events.
@@ -93,10 +93,10 @@ Discharges: `R-L3H-003`, `R-L3H-004` (kit half).
   5. Drive Run #3: resumed prompt.
   6. Take Run #1's `History.Entries()` → `Entry.Message()` → `NewSeededHistory` → build Harness #2 → run it.
   7. Every drain routed through `apptest.DrainAndCheck`; every report clean.
-- [ ] 4.3 End the sequence with `agent.CheckStream` over the fully drained stream (`R-L3H-001`'s explicit closing assertion).
-- [ ] 4.4 Create `generic_client_guard_test.go`: scan both trees' `.go` bytes (comments **included**) for runtime-**concatenated** word-boundary needles (`file`, `shell`, `terminal`, `editor`, `git`, `repository`, `filesystem`, `directory` — never the bare substring `path`).
-- [ ] 4.5 **Non-self-tripping pin**: run the guard against the tree's own prose and confirm it does not flag its own needle-construction code (needles must be built by runtime concatenation, never a literal contiguous match of the denied word inside the guard file itself). Bite: plant a fixture tool named `read_file` in either tree, run the guard, **watch it FAIL naming the literal**, revert, confirm clean.
-- [ ] 4.6 Confirm capability-leak coverage is mechanical, not prose-only: file/shell/process reach requires `os`/`io/fs`/`net`/`syscall`, already denied by name in WU-2's check 5 — cross-reference, do not re-implement.
+- [x] 4.3 End the sequence with `agent.CheckStream` over the fully drained stream (`R-L3H-001`'s explicit closing assertion).
+- [x] 4.4 Create `generic_client_guard_test.go`: scan both trees' `.go` bytes (comments **included**) for runtime-**concatenated** word-boundary needles (`file`, `shell`, `terminal`, `editor`, `git`, `repository`, `filesystem`, `directory` — never the bare substring `path`).
+- [x] 4.5 **Non-self-tripping pin**: run the guard against the tree's own prose and confirm it does not flag its own needle-construction code (needles must be built by runtime concatenation, never a literal contiguous match of the denied word inside the guard file itself). Bite: plant a fixture tool named `read_file` in either tree, run the guard, **watch it FAIL naming the literal**, revert, confirm clean.
+- [x] 4.6 Confirm capability-leak coverage is mechanical, not prose-only: file/shell/process reach requires `os`/`io/fs`/`net`/`syscall`, already denied by name in WU-2's check 5 — cross-reference, do not re-implement.
 
 **Focused test**: `go test -race -count=1 ./src/layer3handoff/...`.
 **Runtime harness**: real, full 7-stage `agent.Harness` run sequence — this test IS the runtime harness.
