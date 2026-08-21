@@ -60,6 +60,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -436,8 +439,41 @@ func (s *Scheduler) executeCall(
 		// / Deny / ModifyInput-constructor-failure / cancellation-
 		// abort — every proceed=false path). The call does not reach
 		// ToolStart or Run; nothing further to do here.
+		//
+		// AG-22 (design D-D, R-AGO-005 item 3, R-AGO-007): no span
+		// opens for a gated-out call either — the permission gate runs
+		// entirely before this point and emits no span of its own.
 		return
 	}
+
+	// AG-22 (design D-A, D-D, R-AGO-002, R-AGO-007): the tool span
+	// opens here — after the gate proceeds, ambiently acquired from
+	// whatever's already on ctx (the turn span, once Phase 6 wires it
+	// in) — with its finalizer's closing values tracked in the four
+	// locals below and applied uniformly by the single deferred call,
+	// registered at open, that covers every post-gate exit: the
+	// start-constructor failure, the panic re-raise, the detached arm,
+	// runErr, and each of the four outcome-switch arms (R-AGO-007's own
+	// "registered at open, never at individual return sites" rule).
+	// call.Name()/call.ID()/ordinal are set now because they are
+	// identical to what NewToolStart below is given — never re-read
+	// from the ToolStart event, since that construction can (in
+	// practice unreachably) fail.
+	tracer := tracerFromContext(ctx)
+	ctx, toolSpan := tracer.Start(ctx, toolSpanName(call.Name()), trace.WithAttributes(
+		attribute.String(toolNameKey, call.Name()),
+		attribute.String(toolCallIDKey, call.ID()),
+		attribute.Int64(toolOrdinalKey, int64(ordinal)),
+	))
+	var (
+		toolFinalOutcome  string
+		toolFinalDetached bool
+		toolFinalFailed   bool
+		toolFinalCategory string
+	)
+	defer func() {
+		finalizeToolSpan(toolSpan, toolFinalOutcome, toolFinalDetached, toolFinalFailed, toolFinalCategory)
+	}()
 
 	// Emit `ToolStart` BEFORE calling `Run` (R-TLS-006: start
 	// events at execution start, not at rejoin). The emission
@@ -459,6 +495,9 @@ func (s *Scheduler) executeCall(
 		// not a tool defect. Typed `*Failure` is required.
 		results[ordinal] = typedExecutionFailureFromError(call.ID(), startErr)
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalFailed = true
+		toolFinalCategory = results[ordinal].Failure.Category().String()
 		return
 	}
 	emissions <- emission{ev: startEv}
@@ -497,11 +536,35 @@ func (s *Scheduler) executeCall(
 	defer seam.revoke()
 	reply, detached := s.runToolWithWindDown(withDelegationSeam(ctx, seam), tool, runArgs, PolicySlot(call.ID()))
 	if reply.panicVal != nil {
+		// AG-22 (design D-D, R-AGO-007, S-AGO-058): the panic re-raise
+		// unwinds through this frame — the deferred finalizer above
+		// still runs during that unwind, ending the span exactly once
+		// before recoverCall's own (earlier-registered, so LIFO-later)
+		// defer converts the panic to a typed ExecutionFailure. No
+		// *Failure exists yet at this point to read a category from;
+		// recoverCall's own conversion (typedFailureFromRecover ->
+		// typedFailureFromError) always hardcodes
+		// ai.FailureCategoryUnavailable, so this is the exact value the
+		// eventual (nonexistent, per the fixture's own doc comment —
+		// no tool_end_execution_failure is ever emitted here) failure
+		// would have carried, not a guess.
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalFailed = true
+		toolFinalCategory = ai.FailureCategoryUnavailable.String()
 		panic(reply.panicVal)
 	}
 	if detached {
 		results[ordinal] = typedDetachedCallFailure(call.ID(), call.Name())
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		// AG-22 (design D-D, R-AGO-007, S-AGO-055/056): the tool span
+		// ends HERE, at the scheduler's own wind-down bound — the still-
+		// running goroutine inside runToolWithWindDown holds no span
+		// handle (it received only ctx, tool, args, policy) and never
+		// ends, mutates or annotates this span.
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalDetached = true
+		toolFinalFailed = true
+		toolFinalCategory = results[ordinal].Failure.Category().String()
 		return
 	}
 	runRes, runErr := reply.res, reply.err
@@ -514,6 +577,9 @@ func (s *Scheduler) executeCall(
 	if runErr != nil {
 		results[ordinal] = typedExecutionFailureFromError(call.ID(), runErr)
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalFailed = true
+		toolFinalCategory = results[ordinal].Failure.Category().String()
 		return
 	}
 
@@ -527,17 +593,25 @@ func (s *Scheduler) executeCall(
 		if endErr != nil {
 			results[ordinal] = typedExecutionFailureFromError(call.ID(), endErr)
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+			toolFinalFailed = true
+			toolFinalCategory = results[ordinal].Failure.Category().String()
 			return
 		}
 		emissions <- emission{ev: endEv}
+		toolFinalOutcome = ToolOutcomeSuccess.String()
 	case ToolOutcomeResultFailure:
 		endEv, endErr := NewToolEndResultFailure(runID, turnID, call.ID(), uint32(ordinal), runRes.Content)
 		if endErr != nil {
 			results[ordinal] = typedExecutionFailureFromError(call.ID(), endErr)
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+			toolFinalFailed = true
+			toolFinalCategory = results[ordinal].Failure.Category().String()
 			return
 		}
 		emissions <- emission{ev: endEv}
+		toolFinalOutcome = ToolOutcomeResultFailure.String()
 	case ToolOutcomeExecutionFailure:
 		// A tool that returns a typed `Result{Outcome: ExecutionFailure}`
 		// MUST also carry a typed `*Failure` (R-AMT-006 carry).
@@ -545,15 +619,24 @@ func (s *Scheduler) executeCall(
 			results[ordinal] = typedExecutionFailureFromError(call.ID(),
 				errBiteToolMissingFailure)
 			emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+			toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+			toolFinalFailed = true
+			toolFinalCategory = results[ordinal].Failure.Category().String()
 			return
 		}
 		emitExecutionFailureWith(ordinal, call, runID, turnID, runRes.Failure, emissions)
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalFailed = true
+		toolFinalCategory = runRes.Failure.Category().String()
 	default:
 		// Zero value: the tool returned no outcome. Treat as
 		// an execution failure with a typed `*Failure`.
 		results[ordinal] = typedExecutionFailureFromError(call.ID(),
 			errBiteToolZeroOutcome)
 		emitExecutionFailure(ordinal, call, runID, turnID, results, emissions)
+		toolFinalOutcome = ToolOutcomeExecutionFailure.String()
+		toolFinalFailed = true
+		toolFinalCategory = results[ordinal].Failure.Category().String()
 	}
 }
 

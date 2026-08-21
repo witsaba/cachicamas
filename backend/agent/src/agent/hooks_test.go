@@ -1479,8 +1479,19 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 // It is AG-22's own Phase 3 deliverable — the five OTel/xxhash
 // allowlist entries and the check-3 direct-importer exception are its
 // whole point — so requiring it byte-unchanged here would contradict
-// this change's own approved design. Every other entry is untouched by
-// AG-22 and stays frozen.
+// this change's own approved design.
+//
+// AG-22 widening (Phase 7, design D-D, R-AGO-002/006/007, discovered
+// during apply): "scheduler.go" is ALSO removed from this list, for the
+// identical reason — Phase 7 instruments `executeCall`'s tool span,
+// including the detached arm's own scheduler-owned wind-down bound
+// (R-AGO-007's own decided case), which is exactly this milestone's own
+// approved design, not an incidental touch. `TestScopeFence_S_TLS_020`
+// and the two `TestScheduler_SourceGuard_*` tests are the guards that
+// remain scoped to scheduler.go's own content (no PolicySlot type
+// assertion, no bare seam type/key, no errgroup import) — all three
+// re-verified green against this phase's own diff. Every other entry
+// below is untouched by AG-22 and stays frozen.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
 		"event.go",
@@ -1498,7 +1509,6 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"compaction_events.go",
 		"ambient_authority_test.go",
 		"reconstruction_test.go",
-		"scheduler.go",
 		"delegation_seam.go",
 	}
 }
