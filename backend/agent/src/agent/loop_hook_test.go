@@ -1140,7 +1140,13 @@ func filterOutLoopHookFiles(diff string) string {
 				// anticipate Phase 11's new file). Exact filename, no
 				// wildcard/prefix/directory pattern. Byte-in-sync with
 				// loop_test.go's filterOutLoopFiles.
-				strings.HasSuffix(path, "/observability_scope_test.go")
+				strings.HasSuffix(path, "/observability_scope_test.go") ||
+				// AG-22 widening (sdd-verify correction round, MAJOR-1/
+				// MAJOR-2): observability_attributes_test.go is this
+				// round's own new R-AGO-002 full-table attribute-vocabulary
+				// proof file. Exact filename, no wildcard/prefix/directory
+				// pattern. Byte-in-sync with loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/observability_attributes_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

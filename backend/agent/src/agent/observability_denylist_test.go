@@ -319,6 +319,13 @@ func TestObservability_DenylistAbsence(t *testing.T) {
 		agent.EventKindToolStart, agent.EventKindToolEndSuccess,
 		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade,
 		agent.EventKindCompactionStarted, agent.EventKindCompactionFinished,
+		// AG-22 correction (MAJOR-3, sdd-verify round 1): R-AGO-008 item
+		// 4 names "reasoning" explicitly among the event kinds this
+		// non-vacuity guard must cover, and Run A's own script
+		// (agoDenylistReasoningToolCallScript) already drives a full
+		// reasoning bracket — the coverage gap was in this list, not in
+		// what Run A produces.
+		agent.EventKindMessageStartReasoning, agent.EventKindMessageDeltaReasoning, agent.EventKindMessageEndReasoning,
 	}
 	for _, want := range wantKinds {
 		if !gotKinds[want] {
