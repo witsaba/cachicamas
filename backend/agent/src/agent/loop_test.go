@@ -1096,7 +1096,24 @@ func filterOutLoopFiles(diff string) string {
 				// this before it ships unnoticed). Exact filename, no
 				// wildcard/prefix/directory pattern. Byte-in-sync with
 				// loop_hook_test.go's filterOutLoopHookFiles.
-				strings.HasSuffix(path, "/observability_attributes_test.go")
+				strings.HasSuffix(path, "/observability_attributes_test.go") ||
+				// AG-23 widening (agent-run-driver's ADDED R-RUN-014,
+				// design AD-1): AG-23 requests NO release -- every entry
+				// below names a file this change CREATES, none names a
+				// pre-existing filename. harness_forwarder_panic_test.go
+				// is AG-23's own new RED-test file for the forwarder
+				// panic-unwind fix, discovered during apply (this
+				// guard's own list did not anticipate it, exactly the
+				// AG-22/Phase-11 discovery shape). Exact filename, no
+				// wildcard/prefix/directory pattern; byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/harness_forwarder_panic_test.go") ||
+				// AG-23 widening (design AD-5, R-L3H-005): example_test.go
+				// is AG-23's own new runnable-examples file. Exact
+				// filename, no wildcard/prefix/directory pattern;
+				// byte-in-sync with loop_hook_test.go's
+				// filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/example_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

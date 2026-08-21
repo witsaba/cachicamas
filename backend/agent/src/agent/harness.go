@@ -532,6 +532,35 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	// this run's own still-pending clear.
 	defer close(sink)
 
+	// AG-23 (D-5, R-RUN-014, design AD-1): the per-attempt forwarder's
+	// bounded exit on every unwind path, including a panic through the
+	// deliberately-unrecovered PreRequestHook seam (R-AGS-016).
+	// Registered immediately AFTER close(sink)'s own defer above, so
+	// LIFO runs THIS defer immediately BEFORE close(sink) executes — the
+	// forwarder is therefore always terminated and joined before the
+	// consumer sink closes, on every exit path including a panic.
+	// forwarderAbort is dedicated to this purpose and is deliberately
+	// NOT runCtx.Done(): on the interrupt path runCtx is already
+	// cancelled while legitimate wind-down events still flow through the
+	// forwarder, and keying the send on the run context would drop
+	// events on that non-panicking path (a select with two ready cases
+	// chooses pseudo-randomly). forwarderDone is hoisted to Run's own
+	// scope (rather than declared fresh inside the attempt loop below)
+	// so this deferred closure always joins whichever attempt's
+	// forwarder is live when the unwind runs; every pre-identity refusal
+	// above returns before this defer is even registered, and any exit
+	// before the first attempt starts (e.g. hist.Append's own failRun
+	// call) leaves forwarderDone nil, which the guard below skips rather
+	// than joins.
+	forwarderAbort := make(chan struct{})
+	var forwarderDone chan struct{}
+	defer func() {
+		close(forwarderAbort)
+		if forwarderDone != nil {
+			<-forwarderDone
+		}
+	}()
+
 	defer func() {
 		h.signalMu.Lock()
 		h.cancelRun = nil
@@ -777,42 +806,68 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		for attempt := 1; ; attempt++ {
 			attemptsMade = attempt
 			turnSink := make(chan *Event)
-			forwarderDone := make(chan struct{})
+			forwarderDone = make(chan struct{})
 			go func() {
 				defer close(forwarderDone)
-				for ev := range turnSink {
-					// AG-18 (R-CMP-012): capture this attempt's TurnID
-					// from its own forwarded events — every event a
-					// continuation-path Turn call emits carries it, so
-					// overwriting on each is harmless (same value).
-					if tid, ok := ev.Turn(); ok {
-						capturedTurnID = tid
+				// AG-23 (D-5, R-RUN-014, design AD-1): both the receive
+				// from turnSink and the send to sink now select on
+				// forwarderAbort, so an abandoned consumer or a
+				// panicked Turn unwind can never leave this goroutine
+				// parked forever — an unbuffered send with no receiver
+				// is never "ready" on its own, so an aborted forwarder
+				// deterministically takes the abort case rather than
+				// blocking. On every non-panicking path forwarderAbort
+				// is only closed AFTER this goroutine has already
+				// exited via turnSink's own close and Run's
+				// <-forwarderDone join above has already synchronized
+				// with that exit — both selects therefore degenerate to
+				// today's bare receive/send and the event stream is
+				// unchanged by construction (S-RUN-117).
+				for {
+					select {
+					case ev, ok := <-turnSink:
+						if !ok {
+							return
+						}
+						// AG-18 (R-CMP-012): capture this attempt's TurnID
+						// from its own forwarded events — every event a
+						// continuation-path Turn call emits carries it, so
+						// overwriting on each is harmless (same value).
+						if tid, ok := ev.Turn(); ok {
+							capturedTurnID = tid
+						}
+						// AG-16 (R-CST-004, R-RUN-003): a pure read on the
+						// existing single forwarding path — the event is
+						// still forwarded exactly once, unmodified. Every
+						// attempt that reaches a Completion emits its own
+						// cost_turn inside its own bracket, so this counts
+						// retries by construction, with no retry-awareness
+						// here at all.
+						if ct, ok := ev.CostTurn(); ok {
+							total.add(ct)
+							// AG-20 (R-HKS-004): folded into the SAME
+							// per-logical-turn accumulator turnCost,
+							// beside total's own run-scoped cumulative —
+							// two independent readers of one forwarded
+							// event, never a second writer on the event
+							// path (R-RUN-003 holds unamended).
+							turnCost.add(ct)
+						}
+						// AG-20 (R-HKS-004, R-ATT-010): a pure read of the
+						// forwarded turn-close outcome — the report's
+						// outcome IS the streamed outcome, by
+						// construction, because this is the read.
+						if te, ok := ev.TurnEnd(); ok {
+							capturedOutcome = te.Outcome()
+						}
+						select {
+						case sink <- ev:
+						case <-forwarderAbort:
+							return
+						}
+					case <-forwarderAbort:
+						return
 					}
-					// AG-16 (R-CST-004, R-RUN-003): a pure read on the
-					// existing single forwarding path — the event is
-					// still forwarded exactly once, unmodified. Every
-					// attempt that reaches a Completion emits its own
-					// cost_turn inside its own bracket, so this counts
-					// retries by construction, with no retry-awareness
-					// here at all.
-					if ct, ok := ev.CostTurn(); ok {
-						total.add(ct)
-						// AG-20 (R-HKS-004): folded into the SAME
-						// per-logical-turn accumulator turnCost,
-						// beside total's own run-scoped cumulative —
-						// two independent readers of one forwarded
-						// event, never a second writer on the event
-						// path (R-RUN-003 holds unamended).
-						turnCost.add(ct)
-					}
-					// AG-20 (R-HKS-004, R-ATT-010): a pure read of the
-					// forwarded turn-close outcome — the report's
-					// outcome IS the streamed outcome, by
-					// construction, because this is the read.
-					if te, ok := ev.TurnEnd(); ok {
-						capturedOutcome = te.Outcome()
-					}
-					sink <- ev
 				}
 			}()
 

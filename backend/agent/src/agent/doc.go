@@ -61,4 +61,14 @@
 // co-closure is asserted mechanically by
 // TestConstructionSurface_NoRouteFromDeltaKindToAccumulatedPayload
 // (invariant_pin_test.go, S-AEV-060 + S-AMT-021).
+//
+// # The v1 surface freeze (AG-23)
+//
+// The v1 surface this package exposes is enumerated and declared frozen as
+// of the cachicamas-agent-layer3-handoff change (doc 0003 § AG-23); see
+// that change's decision.md for the full by-capability enumeration, the
+// twenty-one-row completion-checklist walk, and the known-limitations
+// register. This is a pointer paragraph, not a package-wide contract
+// clause: it carries no L2C row of its own and is invisible to the row
+// parser above by construction.
 package agent
