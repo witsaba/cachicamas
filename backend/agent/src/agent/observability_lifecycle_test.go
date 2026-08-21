@@ -11,6 +11,10 @@ package agent_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -280,6 +284,12 @@ func TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce(t *
 	}
 }
 
+// agoLifecycleDetachedCallID is the detached fixture's own fixed call
+// identity — named so TestObservability_Lifecycle_DetachedArm_
+// DecidedAttributes (S-AGO-055) can correlate the recorded tool span
+// back to this exact call without duplicating the literal.
+const agoLifecycleDetachedCallID = "call-lifecycle-detached-001"
+
 // agoLifecycleDetachedWindDown mirrors
 // TestHarness_WindDown_DeafToolCannotHoldRunHostage exactly (a
 // cancellation-deaf BlockingScriptedTool, a small injected
@@ -307,7 +317,7 @@ func agoLifecycleDetachedWindDown(t *testing.T) *tracetest.Provider {
 	}
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
 
-	callID := "call-lifecycle-detached-001"
+	callID := agoLifecycleDetachedCallID
 	modelProvider := agenttest.NewProvider(scriptToolCallResponse(t, callID, toolName, []byte(`{}`)))
 	sched := &agent.Scheduler{WindDownBound: smallWindDownBound}
 	h := agent.Harness{
@@ -333,4 +343,85 @@ func agoLifecycleDetachedWindDown(t *testing.T) *tracetest.Provider {
 	close(release)
 	<-finished // join the detached goroutine BEFORE this driver returns.
 	return provider
+}
+
+// TestObservability_Lifecycle_DetachedArm_DecidedAttributes is S-AGO-055
+// (AG-22 correction, MAJOR-5, sdd-verify round 1): the detached tool
+// span's own DECIDED attributes — the one thing this milestone chose to
+// decide explicitly (D-D) — were previously left unguarded; the
+// `detached_wind_down` table row above asserted only
+// AssertAllEndedOnce()/Started()/Started()==Ended(), never
+// cachicamas.tool.detached, error.type or the status those decided
+// values sit beside.
+func TestObservability_Lifecycle_DetachedArm_DecidedAttributes(t *testing.T) {
+	provider := agoLifecycleDetachedWindDown(t)
+
+	var toolSpan *tracetest.Span
+	for _, span := range provider.Spans() {
+		if callID, ok := attrString(span.Attributes(), "gen_ai.tool.call.id"); ok && callID == agoLifecycleDetachedCallID {
+			toolSpan = span
+			break
+		}
+	}
+	if toolSpan == nil {
+		t.Fatalf("no recorded span carries gen_ai.tool.call.id = %q", agoLifecycleDetachedCallID)
+	}
+
+	if got, ok := attrBool(toolSpan.Attributes(), "cachicamas.tool.detached"); !ok || !got {
+		t.Errorf("detached tool span cachicamas.tool.detached = (%v, present=%v), want (true, true) (S-AGO-055)", got, ok)
+	}
+	wantCategory := ai.FailureCategoryCancellation.String()
+	if got, ok := attrString(toolSpan.Attributes(), "error.type"); !ok || got != wantCategory {
+		t.Errorf("detached tool span error.type = (%q, present=%v), want (%q, true) — the detached arm's own typed cancellation category (S-AGO-055)", got, ok, wantCategory)
+	}
+	agoAssertStatus(t, "tool", agoLifecycleDetachedCallID, toolSpan, true, wantCategory)
+}
+
+// TestObservability_Lifecycle_DetachedArm_GoroutineHoldsNoSpanHandle is
+// S-AGO-056 (AG-22 correction, MAJOR-5): "the detached goroutine's own
+// code is read, then it holds no span handle and calls no span method."
+// scheduler.go's own comment already argues this (runToolWithWindDown's
+// inner goroutine receives only ctx, tool, args and policy — no span
+// parameter — so it is LEXICALLY unable to reference the tool span at
+// all, being a separate function call, not a closure over executeCall's
+// locals) but the claim was never checked against the shipped source,
+// only asserted in prose. This scans runToolWithWindDown's own function
+// SIGNATURE (go/parser, mirroring observability_scope_test.go's
+// agoDeclMentionsOtel/agoOtelImportAliases convention) for any
+// OpenTelemetry-imported identifier — if a future change ever added a
+// span parameter to this function, the inner goroutine WOULD gain the
+// ability to reference one, and this guard would catch that at the
+// exact point it becomes possible, not by inspecting the goroutine body
+// for evidence it happens not to use it.
+func TestObservability_Lifecycle_DetachedArm_GoroutineHoldsNoSpanHandle(t *testing.T) {
+	root, err := gitTopLevel(t)
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel failed: %v", err)
+	}
+	path := root + "/backend/agent/src/agent/scheduler.go"
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("os.Stat(%q) failed: %v", path, statErr)
+	}
+
+	fset := token.NewFileSet()
+	file, ferr := parser.ParseFile(fset, path, nil, 0)
+	if ferr != nil {
+		t.Fatalf("parser.ParseFile(%q) error = %v, want nil", path, ferr)
+	}
+	aliases := agoOtelImportAliases(file)
+
+	found := false
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name.Name != "runToolWithWindDown" {
+			continue
+		}
+		found = true
+		if agoDeclMentionsOtel(fn.Type, aliases) {
+			t.Errorf("runToolWithWindDown's own signature mentions an OpenTelemetry-imported identifier — S-AGO-056 requires the detached goroutine hold no span handle; this function's signature is the only channel through which its own inner goroutine could ever receive one (it is a separate function call, not a closure over executeCall's locals)")
+		}
+	}
+	if !found {
+		t.Fatal("runToolWithWindDown method not found in scheduler.go — the S-AGO-056 structural claim has nothing to check")
+	}
 }
