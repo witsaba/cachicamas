@@ -59,7 +59,7 @@ Chain strategy: size-exception
 - [x] 2.4 **RED-first bite for the per-pattern floor**: plant a bogus/mistyped pattern in `layer2TestOnlyTreePatterns`, run the check-2 test, **watch it FAIL naming the bogus pattern**, revert, confirm clean.
 - [x] 2.5 Add check 5: verbatim reuse of check 4's AST mechanism over every `.go` file (including `_test.go`) in both new trees, denying families `{os, net, syscall, io/fs}` **plus `time`**, with a per-tree zero-files floor. State explicitly in the task's evidence: this is a **zero-hop AST source scan**, so it is NOT blinded by a `go list -deps` closure filtered with `{{if not .Standard}}` — that filtered form must never be offered as evidence for the zero-I/O claim (a stdlib-mediated import reaches `os`/`net` invisibly to a `.Standard`-filtered listing but is still caught here because the scan reads import declarations directly, not the resolved dependency graph).
 - [x] 2.6 **RED-first bite for check 5**: plant a direct `time` import and a direct `os` import (separately, one at a time) inside `src/apptest` or `src/layer3handoff`, run check 5, **watch each FAIL naming the family and the file**, revert, confirm clean after each.
-- [ ] 2.7 Confirm behavioral half of the `time` denial: `apptest.ScriptedTool` records tool-call ordering via gate channels, never `time.After`/wall-clock timestamps (AD-2's stated consequence — no `startAt` wall-clock field).
+- [x] 2.7 Confirm behavioral half of the `time` denial: `apptest.ScriptedTool` records tool-call ordering via gate channels, never `time.After`/wall-clock timestamps (AD-2's stated consequence — no `startAt` wall-clock field).
 
 **Focused test**: `go test -race -count=1 ./src/agent/... -run TestLayer2` (confirm exact check function names by reading `import_boundary_test.go` at edit time).
 **Runtime harness**: N/A — AST-only guard, no runtime scenario beyond the Go test itself.
@@ -68,14 +68,14 @@ Discharges: `R-L3H-002` (guard mechanism half).
 
 ## WU-3 — AD-3 `src/apptest` kit
 
-- [ ] 3.1 Create `src/apptest/doc.go` (package doc — importable production source, per `R-L3H-003`).
-- [ ] 3.2 Create `permission.go`: `NewScriptedPermissionPolicy(verdicts ...agent.PermissionVerdict)` — FIFO under mutex; `Resolve`/`Remember` satisfying `permission_protocol.go`'s interface; `RememberReturns` field; `Resolved() []ai.ToolCall`; `Exhausted() bool`. Exhausted-queue default returns `AllowOnce` and **latches** `Exhausted()` — never wedges.
-- [ ] 3.3 Create `tool.go`: `NewScriptedTool(name, effect, script func(ctx, args []byte, policy agent.PolicySlot) (agent.Result, error))` implementing `Name`/`EffectClass`/`Run`; `Invocations()`/`RecordedArgs()` mutex-guarded; no wall clock.
-- [ ] 3.4 Create `drain.go`: `DrainAndCheck(sink <-chan *agent.Event) ([]agent.Event, agent.StreamReport)` — drains to close, derefs preserving order, delegates to `agent.CheckStream` **wholesale** (never re-implemented).
-- [ ] 3.5 Compile pins: `var _ agent.PermissionPolicy = (*ScriptedPermissionPolicy)(nil)`, `var _ agent.Tool = (*ScriptedTool)(nil)`.
-- [ ] 3.6 Write `permission_test.go`, `tool_test.go`, `drain_test.go` covering FIFO order, exhaustion latch, invocation recording, and `DrainAndCheck` delegation.
-- [ ] 3.7 **Determinism proof, scoped to structural equality modulo minted identities**: two repeat runs of the same scripted scenario cannot be byte-equal (RunID/TurnID mint from `harness.go`'s/`loop.go`'s process-global atomic counters). Write a repeat-run test asserting: (a) identical event-kind sequences, (b) identity-independent payload projections are equal, AND (c) **the identity values themselves are asserted to differ** between the two runs — this is the anti-vacuity check; a projection that never looks at the identity field would pass even if both runs shared one Harness and the counters never advanced.
-- [ ] 3.8 Both drains in 3.7 must be `apptest.CheckStream`-clean.
+- [x] 3.1 Create `src/apptest/doc.go` (package doc — importable production source, per `R-L3H-003`).
+- [x] 3.2 Create `permission.go`: `NewScriptedPermissionPolicy(verdicts ...agent.PermissionVerdict)` — FIFO under mutex; `Resolve`/`Remember` satisfying `permission_protocol.go`'s interface; `RememberReturns` field; `Resolved() []ai.ToolCall`; `Exhausted() bool`. Exhausted-queue default returns `AllowOnce` and **latches** `Exhausted()` — never wedges.
+- [x] 3.3 Create `tool.go`: `NewScriptedTool(name, effect, script func(ctx, args []byte, policy agent.PolicySlot) (agent.Result, error))` implementing `Name`/`EffectClass`/`Run`; `Invocations()`/`RecordedArgs()` mutex-guarded; no wall clock.
+- [x] 3.4 Create `drain.go`: `DrainAndCheck(sink <-chan *agent.Event) ([]agent.Event, agent.StreamReport)` — drains to close, derefs preserving order, delegates to `agent.CheckStream` **wholesale** (never re-implemented).
+- [x] 3.5 Compile pins: `var _ agent.PermissionPolicy = (*ScriptedPermissionPolicy)(nil)`, `var _ agent.Tool = (*ScriptedTool)(nil)`.
+- [x] 3.6 Write `permission_test.go`, `tool_test.go`, `drain_test.go` covering FIFO order, exhaustion latch, invocation recording, and `DrainAndCheck` delegation.
+- [x] 3.7 **Determinism proof, scoped to structural equality modulo minted identities**: two repeat runs of the same scripted scenario cannot be byte-equal (RunID/TurnID mint from `harness.go`'s/`loop.go`'s process-global atomic counters). Write a repeat-run test asserting: (a) identical event-kind sequences, (b) identity-independent payload projections are equal, AND (c) **the identity values themselves are asserted to differ** between the two runs — this is the anti-vacuity check; a projection that never looks at the identity field would pass even if both runs shared one Harness and the counters never advanced.
+- [x] 3.8 Both drains in 3.7 must be `apptest.CheckStream`-clean.
 
 **Focused test**: `go test -race -count=1 ./src/apptest/...`.
 **Runtime harness**: real scripted permission/tool scenario against a live `agent.Harness` (not a mock) — this IS the kit's own proof surface.
