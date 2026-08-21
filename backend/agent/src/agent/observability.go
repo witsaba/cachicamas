@@ -1,9 +1,10 @@
-// AG-22 — the observability boundary: Layer 2's OpenTelemetry tracing
-// API seam (design D-A) and the ADR 0005 § D3 attribute vocabulary
-// (design D-B), mirroring AI-37's own shape (src/ai/openaicompat/trace.go)
-// at four span families — invoke_agent (run), turn, execute_tool {name}
-// (tool call) and compact (compaction) — instead of Layer 1's single
-// request span.
+// Package agent is Layer 2 of the cachicamas agent stack. This file
+// (observability.go) hosts AG-22 — the observability boundary: Layer
+// 2's OpenTelemetry tracing API seam (design D-A) and the ADR 0005 §
+// D3 attribute vocabulary (design D-B), mirroring AI-37's own shape
+// (src/ai/openaicompat/trace.go) at four span families — invoke_agent
+// (run), turn, execute_tool {name} (tool call) and compact
+// (compaction) — instead of Layer 1's single request span.
 //
 // A tracer arrives only by injection (Harness.TracerProvider) or by
 // ambient acquisition from an already-recording span already occupying
