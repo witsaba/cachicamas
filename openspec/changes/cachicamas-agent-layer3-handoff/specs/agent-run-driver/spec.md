@@ -22,7 +22,7 @@ milestone, so it cannot be carried forward either.
 | Element | Verdict |
 |---|---|
 | `R-RUN-002`'s *"forwarding MUST NOT depend on the turn returning"* clause | **Byte-unchanged.** The forwarder still relays each event while the turn is in flight; nothing about mid-turn observability moves |
-| `R-RUN-002`'s *"MUST NOT rewrite, synthesize, suppress or reorder"* clause | **Byte-unchanged and re-proven.** `S-RUN-115` asserts stream identity on every non-panicking path rather than assuming it |
+| `R-RUN-002`'s *"MUST NOT rewrite, synthesize, suppress or reorder"* clause | **Byte-unchanged and re-proven.** `S-RUN-117` asserts stream identity on every non-panicking path rather than assuming it |
 | `R-RUN-003`'s bracket and lane rules | **Byte-unchanged.** No event is added, removed or re-placed |
 | `R-RUN-013` item 3 — *"every read is downstream of the forwarder's completion"* | **Byte-unchanged and strengthened in fact.** Those reads sit on the normal path, where the existing join still runs first; the new deferred join adds a second, later happens-before edge and removes none |
 | `R-RUN-010`'s no-timeout prohibition, `NFR-RUN-002`'s no-wall-clock rule | **Byte-unchanged and honoured.** The fix adds no timeout, deadline, sleep or poll; termination is by channel close, and the join is unbounded because it is now provably finite |

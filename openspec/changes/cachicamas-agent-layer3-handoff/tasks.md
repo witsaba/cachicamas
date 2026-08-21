@@ -35,7 +35,7 @@ Chain strategy: size-exception
 
 | Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
 |---|---|---|---|---|---|
-| 1–10 (whole change) | Forwarder race fix, guard extension, apptest kit, consumer proof, examples, compat statement, W-6 closure, docs, back-annotations, archive | PR 1 (single, `size:exception`) | `cd backend/agent && make test` | Real: full suite `-race -count=1 ./...` incl. `src/apptest`, `src/layer3handoff`, `example_test.go` execution | Revert the merge commit — restores 2-entry `layer2TestOnlyTreePatterns` absence, removes `src/apptest`/`src/layer3handoff`, restores `hksScopeFenceByteUnchangedFiles()` to its pre-AG-23 16 entries, reverts doc 0003 to "23 of 24" |
+| 1–10 (whole change) | Forwarder race fix, guard extension, apptest kit, consumer proof, examples, compat statement, W-6 closure, docs, back-annotations, archive | PR 1 (single, `size:exception`) | `cd backend/agent && go clean -testcache && make test` | Real: full suite `go clean -testcache && make test` (`go test -race -v ./...` — carries no `-count=1` of its own; the testcache clean is what proves the run uncached) incl. `src/apptest`, `src/layer3handoff`, `example_test.go` execution | Revert the merge commit — restores 2-entry `layer2TestOnlyTreePatterns` absence, removes `src/apptest`/`src/layer3handoff`, restores `hksScopeFenceByteUnchangedFiles()` to its pre-AG-23 16 entries, reverts doc 0003 to "23 of 24" |
 
 ---
 

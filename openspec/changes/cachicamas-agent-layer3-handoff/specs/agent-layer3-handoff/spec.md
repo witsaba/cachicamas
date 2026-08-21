@@ -347,7 +347,7 @@ running `go clean -testcache` immediately before `make test`: the shipped `make 
 `agent-run-driver`'s own shipped pin of that exact command string. Either way, the real uncached suite for
 this module is on the order of minutes, so a sub-second pass — cached or not — is a **cache artifact, not
 evidence**. The milestone closes on a recorded green, uncached `cd backend/agent && go clean -testcache && make test`,
-`make lint` reporting zero issues over this change's own packages, and `make build` exiting zero.
+`make lint` reporting zero issues **module-wide**, and `make build` exiting zero.
 
 Every planted bite named in this spec (`S-L3H-010`, `S-L3H-011`, `S-L3H-012`, `S-L3H-021`, `S-L3H-025`,
 `S-L3H-045`) MUST be recorded **watched failing**, with the failure text, before being reverted. A bite
@@ -357,7 +357,7 @@ recorded as "would fail" is not recorded.
 
 - **S-L3H-054** — Given the change's task record, when each behavioural item is walked, then it carries recorded red output, recorded green output, and a refactor note.
 - **S-L3H-055** — Given the recorded evidence, when each **focused** test run is read, then it names `-count=1` and carries its wall-clock duration; when each **whole-module** `make test` run is read, then it is preceded by `go clean -testcache` and carries its wall-clock duration instead, because `make test` itself carries no `-count=1`; and no `(cached)` result is offered as evidence for either kind.
-- **S-L3H-056** — Given the merged change, when the test, lint and build commands run from `backend/agent`, then the whole-module test run is green under `-race`, uncached (`go clean -testcache` immediately before), lint reports zero issues **over this change's own packages** (`./src/agent/... ./src/apptest/... ./src/layer3handoff/...` — module-wide lint carries one pre-existing finding, byte-identical to `main`, inside `src/ai/`, which this change's own byte-freeze forbids touching), and build exits zero.
+- **S-L3H-056** — Given the merged change, when the test, lint and build commands run from `backend/agent`, then the whole-module test run is green under `-race`, uncached (`go clean -testcache` immediately before), `make lint` reports zero issues **module-wide** (measured after `golangci-lint cache clean`, since a stale cache has previously masqueraded as a finding in this repo), and build exits zero.
 
 ---
 
