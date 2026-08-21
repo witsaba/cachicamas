@@ -126,8 +126,23 @@ func mintCompactionTurnID() TurnID {
 // construction failure the affected emission is skipped, and cause is
 // always returned as the operation's own error regardless, so a caller
 // never loses the underlying reason to a secondary construction defect.
-func emitCompactionFailedArm(sink chan<- *Event, stamper *LaneStamper, runID RunID, turnID TurnID, compactionID string, outcome TurnOutcome, cause error) error {
+//
+// AG-22 (design D-B, D-D, R-AGO-002, R-AGO-007): span is runCompaction's
+// own compaction span (nil iff compaction_started itself never
+// constructed — D-D's practically-unreachable iff-rule edge). It is
+// finalized here, uniformly, at this ONE shared closing function every
+// non-success exit of runCompaction already routes through — the same
+// span.End() discipline failRun/windDownRun/emitPreStreamAbort use. The
+// span's status is ALWAYS the error status here (this function's whole
+// purpose is the fail arm), even though outcome is not always
+// TurnOutcomeAborted — the ReplacePrefix-commit-failure caller passes
+// TurnOutcomeFinished because the underlying model turn itself finished
+// normally even though the compaction's own commit failed. error.type
+// reflects "the fail arm ran", not the turn outcome (R-AGO-002's
+// compaction row).
+func emitCompactionFailedArm(sink chan<- *Event, stamper *LaneStamper, runID RunID, turnID TurnID, compactionID string, span trace.Span, outcome TurnOutcome, cause error) error {
 	failure, ferr := typedHarnessFailureFromError(cause)
+	category := ""
 	if ferr == nil {
 		if fev, cerr := NewCompactionFailed(runID, turnID, compactionID, failure); cerr == nil {
 			sendStamped(sink, stamper, fev)
@@ -139,6 +154,10 @@ func emitCompactionFailedArm(sink chan<- *Event, stamper *LaneStamper, runID Run
 		if tend, terr := NewTurnEnd(runID, turnID, outcome, endFailure); terr == nil {
 			sendStamped(sink, stamper, tend)
 		}
+		category = failure.Category().String()
+	}
+	if span != nil {
+		finalizeCompactionSpan(span, outcome.String(), "", true, category)
 	}
 	return cause
 }
@@ -265,14 +284,30 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	if turnStart, terr := NewTurnStart(runID, compactionTurnID); terr == nil {
 		sendStamped(sink, stamper, turnStart)
 	}
+	// AG-22 (design D-A, D-D, R-AGO-002, R-AGO-007): the compaction span
+	// opens co-located with compaction_started's own emission, ambiently
+	// acquired from whatever's already on ctx (the run span, from
+	// either door — Harness.Run's turn boundary or Harness.Compact).
+	// compactionSpan stays nil iff NewCompactionStarted itself never
+	// constructed (compactionID is always non-empty in practice, so
+	// this is D-D's iff-rule edge, not a reachable path) — every use
+	// below is nil-guarded, matching that no compaction_started event
+	// was ever emitted on that arm either.
+	var compactionSpan trace.Span
 	if started, serr := NewCompactionStarted(runID, compactionTurnID, compactionID); serr == nil {
 		sendStamped(sink, stamper, started)
+		tracer := tracerFromContext(ctx)
+		ctx, compactionSpan = tracer.Start(ctx, compactionSpanName, trace.WithAttributes(
+			attribute.String(runIDKey, string(runID)),
+			attribute.String(turnIDKey, string(compactionTurnID)),
+			attribute.String(compactionIDKey, compactionID),
+		))
 	}
 
 	// Every failure from here through the provider call inclusive is
 	// the iff's "no completion" arm: aborted, no cost_turn (R-CMP-003).
 	if req.Instruction == "" {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrEmpty, ai.At("instruction")))
 	}
 	// AG-20 (R-HKS-001, R-CMP-015, S-CMP-042): Hooks joins the
@@ -280,13 +315,13 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	// operation ONLY as the explicit chain parameter above, never
 	// smuggled through the request's own options.
 	if req.Options.Tools != nil || req.Options.Continuation != nil || !req.Options.Hooks.isZero() {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrMisplaced, ai.At("options")))
 	}
 
 	cut := resolveCut(hist, req.Cut)
 	if cut == 0 {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrEmpty, ai.At("cut")))
 	}
 	// Span derivation (R-CMP-012, design AD-9) is captured BEFORE the
@@ -297,7 +332,7 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	// fabricate a turn identifier" rule.
 	startTurnID, endTurnID, spanOK := hist.markSpan(cut)
 	if !spanOK {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 			ai.Invalid(ai.ErrEmpty, ai.At("span")))
 	}
 
@@ -314,7 +349,7 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 		for _, hook := range chain {
 			plan, herr = hook(ctx, plan)
 			if herr != nil {
-				return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted, herr)
+				return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted, herr)
 			}
 		}
 		// The chain's returned cut is re-resolved UNCONDITIONALLY
@@ -327,12 +362,12 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 		// actually used.
 		cut = resolveCut(hist, plan.Cut())
 		if cut == 0 {
-			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 				ai.Invalid(ai.ErrEmpty, ai.At("cut")))
 		}
 		startTurnID, endTurnID, spanOK = hist.markSpan(cut)
 		if !spanOK {
-			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted,
+			return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted,
 				ai.Invalid(ai.ErrEmpty, ai.At("span")))
 		}
 	}
@@ -340,12 +375,12 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	prefix := transcriptFromHistory(hist)[:cut]
 	pReq, berr := buildLoopRequest(req.Options, req.Instruction, prefix)
 	if berr != nil {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted, berr)
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted, berr)
 	}
 
 	pCh, serr := req.Provider.Stream(ctx, pReq)
 	if serr != nil {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted, serr)
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted, serr)
 	}
 
 	outcome := drainCompactionCall(pCh)
@@ -354,7 +389,7 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 		if cancelCause := context.Cause(ctx); errors.Is(cancelCause, ErrInterrupted) || errors.Is(cancelCause, ErrShutdown) {
 			cause = cancelCause
 		}
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeAborted, cause)
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeAborted, cause)
 	}
 
 	// A completion was obtained: cost_turn is emitted from here on, on
@@ -369,7 +404,7 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	}
 
 	if outcome.completion.FinishReason() != ai.FinishReasonStop {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, outcomeForFinish(outcome.completion.FinishReason()),
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, outcomeForFinish(outcome.completion.FinishReason()),
 			ai.Invalid(ai.ErrOutOfRange, ai.At("finish_reason")))
 	}
 
@@ -378,7 +413,7 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	// Stop completion. Nothing above this line has touched hist's own
 	// pointee.
 	if rerr := hist.ReplacePrefix(cut, outcome.summary); rerr != nil {
-		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, TurnOutcomeFinished, rerr)
+		return emitCompactionFailedArm(sink, stamper, runID, compactionTurnID, compactionID, compactionSpan, TurnOutcomeFinished, rerr)
 	}
 
 	if fev, ferr := NewCompactionFinished(runID, compactionTurnID, compactionID, CompactionSpan{StartTurnID: startTurnID, EndTurnID: endTurnID}, outcome.summary.ID().String()); ferr == nil {
@@ -386,6 +421,15 @@ func runCompaction(ctx context.Context, hist *History, req CompactionRequest, ru
 	}
 	if tend, terr := NewTurnEnd(runID, compactionTurnID, TurnOutcomeFinished, nil); terr == nil {
 		sendStamped(sink, stamper, tend)
+	}
+	// AG-22 (design D-B, D-D, R-AGO-002, R-AGO-007): the success tail —
+	// exactly ONE span covers the whole compaction bracket (R-AGO-002's
+	// "one bracket, one span" clause; no separate turn span was ever
+	// opened alongside it). cachicamas.compaction.summary_id is set from
+	// the SAME expression NewCompactionFinished above was given, never
+	// re-read from its own (best-effort, possibly-failed) construction.
+	if compactionSpan != nil {
+		finalizeCompactionSpan(compactionSpan, TurnOutcomeFinished.String(), outcome.summary.ID().String(), false, "")
 	}
 	return nil
 }

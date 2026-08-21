@@ -147,9 +147,10 @@ func finalizeRunSpan(span trace.Span, outcome string, failed bool, category stri
 }
 
 // finalizeTurnSpan renders the turn bracket's terminal attributes onto
-// span and ends it exactly once (design D-B, D-D). Registered as Turn's
-// deferred finalizer at Phase 6 — not yet called from any production
-// site in this commit.
+// span and ends it exactly once (design D-B, D-D). Called at every one
+// of Turn's own closing sites (emitPreStreamAbort, finishContinuation-
+// Turn, the mid-stream fatal block, the cancellation branch, both
+// normal-completion tails — Phase 6).
 func finalizeTurnSpan(span trace.Span, outcome string, failed bool, category string) {
 	span.SetAttributes(attribute.String(turnOutcomeKey, outcome))
 	spanOutcome(span, failed, category)
@@ -159,8 +160,8 @@ func finalizeTurnSpan(span trace.Span, outcome string, failed bool, category str
 // finalizeToolSpan renders the tool-call bracket's terminal attributes
 // onto span and ends it exactly once (design D-B, D-D) — including the
 // detached-arm marker (D-D), set only when detached is true (D-B: "iff
-// true"). Registered as executeCall's deferred finalizer at Phase 7 —
-// not yet called from any production site in this commit.
+// true"). Called from executeCall's single deferred finalizer,
+// registered at open, covering every post-gate exit (Phase 7).
 func finalizeToolSpan(span trace.Span, outcome string, detached bool, failed bool, category string) {
 	span.SetAttributes(attribute.String(toolOutcomeKey, outcome))
 	if detached {
@@ -173,9 +174,10 @@ func finalizeToolSpan(span trace.Span, outcome string, detached bool, failed boo
 // finalizeCompactionSpan renders the compaction bracket's terminal
 // attributes onto span and ends it exactly once (design D-B, D-D) —
 // including the summary identity, set only when the compaction finished
-// (D-B: "iff finished"). Registered as runCompaction's deferred
-// finalizer at Phase 8 — not yet called from any production site in
-// this commit.
+// (D-B: "iff finished"). Called from emitCompactionFailedArm (every
+// fail arm) and runCompaction's own success tail — the two closing
+// sites the compaction bracket's exactly-one-span rule funnels through
+// (Phase 8).
 func finalizeCompactionSpan(span trace.Span, outcome string, summaryID string, failed bool, category string) {
 	span.SetAttributes(attribute.String(turnOutcomeKey, outcome))
 	if summaryID != "" {
