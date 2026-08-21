@@ -1,0 +1,304 @@
+// AG-22 — Phase 4 (RED, design D-E / D-G scenario 2): the absence proof
+// (R-AGO-004, R-AGO-005, R-AGO-008), mirroring AI-37's own
+// ai37_denylist_test.go precedent (src/ai/openaicompat), adapted to
+// Layer 2's own event vocabulary and driven against not-yet-instrumented
+// code.
+//
+// Nine runtime-CONCATENATED sentinels are planted (design D-E): prompt,
+// reasoning, tool-call arguments, tool-result, permission-decision
+// arguments, compaction instruction, compaction summary, credential-
+// shaped and header-shaped. Tool-call arguments and permission-decision
+// arguments share ONE planted value — at Layer 2 they are literally the
+// same call's argument bytes, read through two different accessors
+// (ToolStart.Arguments(), PermissionDecisionRequired.Arguments()) — so
+// eight distinct byte values cover the nine named vectors.
+//
+// Credential-shaped and header-shaped content have no delivery mechanism
+// of their own at Layer 2 (no HTTP call, no header, no credential is
+// ever constructed here — that is Layer 1's own surface, AI-37's
+// denylist test already covers it there); they are included in
+// denyEntries so sweep.SelfTest's positive control still proves the SCAN
+// mechanism itself would catch them, and their absence from the corpus
+// holds by construction (no code path in this package could ever
+// produce them), the strongest form the other seven vectors are proven
+// empirically instead.
+package agent_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agenttest/sweep"
+	"github.com/cachicamas/backend/agent/src/agenttest/tracetest"
+	"github.com/cachicamas/backend/agent/src/ai"
+)
+
+// agoDenylistCanaries names the eight runtime-assembled markers this
+// test plants. Every value is built by concatenation, never as one
+// contiguous literal, so this file's own source bytes never contain a
+// needle the scan below searches other bytes for.
+type agoDenylistCanaries struct {
+	prompt                string
+	reasoning             string
+	toolArgs              string // covers ToolStart.Arguments() AND PermissionDecisionRequired.Arguments()
+	toolResult            string
+	compactionInstruction string
+	summary               string
+	credential            string
+	header                string
+}
+
+func newAGODenylistCanaries() agoDenylistCanaries {
+	return agoDenylistCanaries{
+		prompt:                "AGO" + "-PROMPT-" + "CANARY-9f2a",
+		reasoning:             "AGO" + "-REASONING-" + "CANARY-3c7e",
+		toolArgs:              "AGO" + "-TOOLARGS-" + "CANARY-5b1d",
+		toolResult:            "AGO" + "-TOOLRESULT-" + "CANARY-8e4f",
+		compactionInstruction: "AGO" + "-COMPACTINSTR-" + "CANARY-4a1c",
+		summary:               "AGO" + "-SUMMARY-" + "CANARY-6d2e",
+		credential:            "AGO" + "-CREDENTIAL-" + "CANARY-2d6a",
+		header:                "AGO" + "-HEADER-" + "CANARY-7a3b",
+	}
+}
+
+// denyEntries builds the sweep deny-list, one entry per named vector
+// (D-E), tool-args/permission-args sharing one needle as documented
+// above.
+func (c agoDenylistCanaries) denyEntries() []sweep.Entry {
+	return []sweep.Entry{
+		{Vector: "prompt", Needle: []byte(c.prompt)},
+		{Vector: "reasoning", Needle: []byte(c.reasoning)},
+		{Vector: "tool-call arguments (and permission-decision arguments)", Needle: []byte(c.toolArgs)},
+		{Vector: "tool-result", Needle: []byte(c.toolResult)},
+		{Vector: "compaction instruction", Needle: []byte(c.compactionInstruction)},
+		{Vector: "compaction summary", Needle: []byte(c.summary)},
+		{Vector: "credential", Needle: []byte(c.credential)},
+		{Vector: "credential (bearer form)", Needle: []byte("Bearer " + c.credential)},
+		{Vector: "header-shaped value", Needle: []byte(c.header)},
+	}
+}
+
+// agoDenylistPromptMessage builds the user message carrying the prompt
+// canary.
+func agoDenylistPromptMessage(t *testing.T, promptCanary string) ai.Message {
+	t.Helper()
+	part, err := ai.NewText("hello " + promptCanary)
+	if err != nil {
+		t.Fatalf("ai.NewText(prompt) error = %v, want nil", err)
+	}
+	msg, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		t.Fatalf("ai.NewMessage(user) error = %v, want nil", err)
+	}
+	return msg
+}
+
+// agoDenylistReasoningToolCallScript builds turn one: a reasoning block
+// carrying the reasoning canary, then a tool call whose arguments carry
+// the tool-args canary, finishing with FinishReasonToolCalls.
+func agoDenylistReasoningToolCallScript(t *testing.T, c agoDenylistCanaries, toolName, callID string) agenttest.Script {
+	t.Helper()
+
+	reasonStartEvent, err := ai.NewReasoningBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockStart returned %v, want nil", err)
+	}
+	reasonStartPayload, ok := reasonStartEvent.ReasoningBlockStart()
+	if !ok {
+		t.Fatal("reasoning block start event carries no ReasoningBlockStart payload")
+	}
+	reasonDelta, err := ai.NewReasoningDelta(reasonStartPayload, []byte(c.reasoning))
+	if err != nil {
+		t.Fatalf("ai.NewReasoningDelta returned %v, want nil", err)
+	}
+	reasonEnd, err := ai.NewReasoningBlockEnd(reasonStartPayload, []byte{0x01, 0x02, 0x03})
+	if err != nil {
+		t.Fatalf("ai.NewReasoningBlockEnd returned %v, want nil", err)
+	}
+
+	toolArgs := []byte(`{"q":"` + c.toolArgs + `"}`)
+	tcStart, err := ai.NewToolCallStart(2, callID, toolName)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallStart returned %v, want nil", err)
+	}
+	tcDelta, err := ai.NewToolCallDelta(2, toolArgs)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallDelta returned %v, want nil", err)
+	}
+	tcEnd, err := ai.NewToolCallEnd(2, toolArgs)
+	if err != nil {
+		t.Fatalf("ai.NewToolCallEnd returned %v, want nil", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonToolCalls, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion returned %v, want nil", err)
+	}
+	return agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(reasonStartEvent),
+		agenttest.Emit(reasonDelta),
+		agenttest.Emit(reasonEnd),
+		agenttest.Emit(tcStart),
+		agenttest.Emit(tcDelta),
+		agenttest.Emit(tcEnd),
+		agenttest.Emit(completion),
+	}}
+}
+
+// agoDenylistTextScript builds a plain text-only scripted stream whose
+// content is text, finishing with FinishReasonStop — used for both the
+// second turn of the tool-calling run and the compaction call's own
+// completion (whose text is the "summary" the compaction commits).
+func agoDenylistTextScript(t *testing.T, text string) agenttest.Script {
+	t.Helper()
+	start, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart returned %v, want nil", err)
+	}
+	delta, err := ai.NewTextDelta(1, text)
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta returned %v, want nil", err)
+	}
+	end, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockEnd returned %v, want nil", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion returned %v, want nil", err)
+	}
+	return agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(start),
+		agenttest.Emit(delta),
+		agenttest.Emit(end),
+		agenttest.Emit(completion),
+	}}
+}
+
+// TestObservability_DenylistAbsence is R-AGO-007's absence proof and
+// R-AGO-008's five-guard non-vacuity harness, in the design D-E order:
+// (1) SelfTest positive control, (2) AssertAllEndedOnce, (3) corpus
+// non-empty + attribute-count floor, (4) event/outcome coverage, (5)
+// every needle non-empty — THEN the scan itself.
+func TestObservability_DenylistAbsence(t *testing.T) {
+	c := newAGODenylistCanaries()
+	provider := tracetest.NewProvider()
+
+	// --- Guard 1: the positive control runs before any clean scan ---
+	deny := c.denyEntries()
+	if err := sweep.SelfTest(deny); err != nil {
+		t.Fatalf("sweep.SelfTest(deny) = %v, want nil — every needle must bite its own synthetic corpus (R-AGO-008 item 1)", err)
+	}
+
+	var allEvents []agent.Event
+
+	// --- Run A: reasoning + a permission-gated tool call, sharing provider ---
+	toolName := "denylist_tool"
+	tool := NewScriptedTool(toolName, agent.EffectClassRead, agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte(c.toolResult)})
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+	policy := &wiringTestPolicy{resolve: func(context.Context, ai.ToolCall) agent.PermissionVerdict {
+		return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
+	}}
+
+	turnOneScript := agoDenylistReasoningToolCallScript(t, c, toolName, "call-ago-denylist-001")
+	turnTwoScript := agoDenylistTextScript(t, "final answer, no canaries here")
+	modelProviderA := agenttest.NewProvider(turnOneScript, turnTwoScript)
+
+	hA := agent.Harness{
+		Provider:       modelProviderA,
+		System:         "system prompt for denylist absence proof",
+		Turn:           agent.TurnOptions{Tools: reg, PermissionPolicy: policy},
+		TracerProvider: provider,
+	}
+	sinkA := make(chan *agent.Event, 512)
+	if _, _, err := hA.Run(contextBackground(), agoDenylistPromptMessage(t, c.prompt), sinkA); err != nil {
+		t.Fatalf("Run A returned err = %v, want nil", err)
+	}
+	allEvents = append(allEvents, drainSink(t, sinkA)...)
+
+	// --- Run B: a compaction call, sharing the same provider ---
+	hB, hist, _ := markedHarnessForCompaction(t, "denylist-001")
+	hB.TracerProvider = provider
+	compactionModelProvider := agenttest.NewProvider(agoDenylistTextScript(t, c.summary))
+	reqB := agent.CompactionRequest{Provider: compactionModelProvider, Instruction: c.compactionInstruction, Cut: hist.Len()}
+	sinkB := make(chan *agent.Event, 64)
+	if err := hB.Compact(contextBackground(), reqB, sinkB); err != nil {
+		t.Fatalf("Compact returned err = %v, want nil", err)
+	}
+	allEvents = append(allEvents, drainSink(t, sinkB)...)
+
+	// --- Run C: a failure arm, sharing the same provider (R-AGO-008
+	// item 3's "failure" coverage — Layer 2 registers no separate error
+	// EventKind; failures ride RunOutcomeFailed/TurnOutcomeAborted). ---
+	modelProviderC := agenttest.NewProvider(scriptTextThenTerminalFailure(t, ai.FailureCategoryUnavailable, true))
+	hC := agent.Harness{Provider: modelProviderC, System: "system prompt for denylist failure arm", TracerProvider: provider}
+	sinkC := make(chan *agent.Event, 64)
+	if _, _, err := hC.Run(contextBackground(), firstMessage(t), sinkC); err == nil {
+		t.Fatal("Run C returned err = nil, want a non-nil error (mid-stream terminal failure)")
+	}
+	allEvents = append(allEvents, drainSink(t, sinkC)...)
+
+	// --- Guard 2: exactly-once precondition (reuses R-AGO-007's own
+	// assertion on the same runs, per D-E's guard 2) ---
+	if err := provider.AssertAllEndedOnce(); err != nil {
+		t.Fatalf("AssertAllEndedOnce() = %v, want nil (R-AGO-008 item 2's exactly-once precondition)", err)
+	}
+
+	// --- Guard 3: corpus non-empty + attribute-count floor ---
+	corpus := provider.Corpus()
+	if len(corpus) == 0 {
+		t.Fatal("Corpus() is empty — no span has been recorded yet (the run/turn/tool/compaction seams are not instrumented until Phases 5-8); the absence claim would pass vacuously (R-AGO-008 item 2)")
+	}
+	const wantMinAttributeCount = 14 // ADR 0005 § D3 Layer 2 extension's own unique-key cardinality
+	gotAttributeCount := 0
+	for _, span := range provider.Spans() {
+		gotAttributeCount += len(span.Attributes())
+	}
+	if gotAttributeCount < wantMinAttributeCount {
+		t.Errorf("recorded attribute count = %d across %d span(s), want at least %d (the § D3 Layer 2 vocabulary's own cardinality, R-AGO-008 item 2)", gotAttributeCount, provider.Started(), wantMinAttributeCount)
+	}
+
+	// --- Guard 4: event/outcome coverage — every drained kind this
+	// scenario is scripted to produce must actually appear, so the
+	// absence claim is proven over a run that genuinely used it. ---
+	gotKinds := make(map[agent.EventKind]bool, len(allEvents))
+	for _, ev := range allEvents {
+		gotKinds[ev.Kind()] = true
+	}
+	wantKinds := []agent.EventKind{
+		agent.EventKindRunStart, agent.EventKindRunEnd,
+		agent.EventKindTurnStart, agent.EventKindTurnEnd,
+		agent.EventKindToolStart, agent.EventKindToolEndSuccess,
+		agent.EventKindPermissionDecisionRequired, agent.EventKindPermissionDecisionMade,
+		agent.EventKindCompactionStarted, agent.EventKindCompactionFinished,
+	}
+	for _, want := range wantKinds {
+		if !gotKinds[want] {
+			t.Errorf("drained recording never contained an event of kind %v — the absence claim must be proven over a run that used it (R-AGO-008 item 3)", want)
+		}
+	}
+	sawFailedRun := false
+	for _, ev := range allEvents {
+		if end, ok := ev.RunEnd(); ok && end.Outcome() == agent.RunOutcomeFailed {
+			sawFailedRun = true
+		}
+	}
+	if !sawFailedRun {
+		t.Error("drained recording never contained a run_end(Failed) — the failure arm's own coverage is unproven (R-AGO-008 item 3)")
+	}
+
+	// --- Guard 5: every needle non-empty ---
+	for _, entry := range deny {
+		if len(entry.Needle) == 0 {
+			t.Fatalf("deny entry %q has an empty needle — the scan below would never have been able to find it", entry.Vector)
+		}
+	}
+
+	// --- The absence scan itself (R-AGO-007) ---
+	for _, entry := range deny {
+		if _, found := sweep.Scan(corpus, []sweep.Entry{entry}); found {
+			t.Errorf("denylist leak: vector %q found in the corpus (R-AGO-007) — failure names the vector only, never the matched bytes (S-AGO-029)", entry.Vector)
+		}
+	}
+}

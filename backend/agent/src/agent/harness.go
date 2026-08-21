@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -115,6 +117,17 @@ type Harness struct {
 	// (R-CTX-005). Zero-default: the zero value reads as absent, never
 	// as a budget of zero tokens.
 	ContextBudget ContextBudget
+
+	// TracerProvider is the injected OTel API tracer provider AG-22's
+	// observability boundary records the run span onto (design D-A).
+	// Nil-default: Run/Compact resolve it to the tracing API's own
+	// no-op provider (Phase 5 wiring — this field is declared now,
+	// pulled forward from task 5.1, ONLY so Phase 4's proof-type tests
+	// compile against it and RED for a genuine runtime reason; nothing
+	// reads this field yet in this commit, so it is entirely inert —
+	// Harness stays byte-identically behaved for every existing caller,
+	// zero-value Harness included).
+	TracerProvider trace.TracerProvider
 
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
