@@ -1698,7 +1698,18 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 			// this function (sdd-verify MINOR-1) so this skip, when it
 			// fires, skips only itself — every diff-independent
 			// assertion above has already run.
-			t.Skip("loop.go's diff against the merge base is empty on this branch — this scope-fence guard has nothing to measure and the absence it checks holds vacuously; it bites on a branch that actually changes loop.go")
+			//
+			// sdd-verify round 1, W-12: a reader scanning suite output
+			// for PASS/FAIL alone would see only the terse "--- SKIP"
+			// line Go prints for the whole function and could mistake
+			// it for "this fence was never enforced". It was: every
+			// byte-unchanged-file check, the src/ai and src/agenttest
+			// freeze diffs, the event-kind count, and the exported
+			// method/signature pins above already ran and already
+			// passed in THIS invocation before this point was ever
+			// reached. The skip message below says so explicitly,
+			// rather than leaving that only in this comment.
+			t.Skip("loop.go's diff against the merge base is empty on this branch — only THIS anti-vacuity floor is skipped; every byte-unchanged-file check, the src/ai and src/agenttest freeze diffs, the event-kind count and the exported method/signature pins above already ran and passed in this invocation. The absence this floor checks holds vacuously here; it bites on a branch that actually changes loop.go")
 		}
 	}
 }
