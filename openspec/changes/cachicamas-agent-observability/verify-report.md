@@ -1,25 +1,28 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:df50cd7c9ee5f32b69aab1ba262641719fe58ec884d8d11337b1345df248e673
-verdict: fail
-blockers: 2
-critical_findings: 2
-requirements: 8/16
-scenarios: 55/75
+evidence_revision: sha256:fc91e8034479c57ae0924ce671595a9483573df9507976f507d4c7539859f277
+verdict: pass_with_warnings
+blockers: 0
+critical_findings: 0
+requirements: 16/16
+scenarios: 78/78
 test_command: cd backend/agent && go test -race -count=1 -v ./...
 test_exit_code: 0
-test_output_hash: sha256:c214d59077fba71b8f5f934a73486558ba0292c7021e80865ea2e717e9b1c8f7
+test_output_hash: sha256:57bdb6bb103529f4d62a085a450148571c5d23276d072e558d3eaf7faef3bff1
 build_command: cd backend/agent && make build
 build_exit_code: 0
 build_output_hash: sha256:617ff8b581dc1493b2d85d998e6171f774f2328ec65dc7264829b71cc7238495
 ```
 
-## Verification Report
+## Verification Report — ROUND 2 (supersedes round 1)
 
 **Change**: `cachicamas-agent-observability` (AG-22 — Add the observability boundary)
-**Worktree**: `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/ag22-observability`, branch `feat/agent-layer2-wave6-ag22`, HEAD `fbd8acb6`, base `main@7dac9ec9`
+**Worktree**: `/Users/braejan/workspace/witsaba/repositories/cachicamas-worktrees/ag22-observability`, branch `feat/agent-layer2-wave6-ag22`, HEAD `09f6ae95`, base `main@7dac9ec9`
 **Mode**: Strict TDD
-**Verdict**: **FAIL** — 2 CRITICAL. The suite is green, but green is not the claim: one shipped guard was rewritten so that it no longer catches what it caught on `main`, and one normative MUST is violated on a reachable path that no test drives.
+
+**Round-1 verdict (history, HEAD `fbd8acb6`)**: **FAIL** — 2 CRITICAL, 6 MAJOR, 3 MINOR, 2 SUGGESTION. CRITICAL-1: `TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage`'s blanket standard-library exemption let `os/exec` and `crypto/tls`, planted directly in Layer 2 production, reach `os`/`net` invisibly — a case `main` correctly failed. CRITICAL-2: `R-AGO-007`'s exactly-once span lifetime was violated on a reachable panic path, leaking both the run and turn spans. Each blocked archive on its own.
+
+**Round-2 verdict**: **PASS WITH WARNINGS** — 0 CRITICAL, 6 WARNING, 3 SUGGESTION. Both CRITICALs and all 6 MAJORs are closed and independently re-proved by defeat test. No correction re-encoded the defect it removed, and no requirement or scenario was weakened to fit the implementation.
 
 ---
 
@@ -27,11 +30,11 @@ build_output_hash: sha256:617ff8b581dc1493b2d85d998e6171f774f2328ec65dc7264829b7
 
 | Metric | Value |
 |--------|-------|
-| Tasks total | 49 |
-| Tasks complete | 45 |
-| Tasks incomplete | 4 (12.1–12.4, Phase 12 — orchestrator scope, out of this run by design) |
+| Tasks total | 49 phase tasks + 10 correction-round rows |
+| Tasks complete | 45 in-scope phase tasks + 8 of 10 correction rows |
+| Tasks incomplete | 4 (12.1–12.4, orchestrator scope, out of this run by design) + 2 consciously-open correction rows (MINOR-1; both SUGGESTIONs) |
 
-Phase 12 is deliberately unstarted and is **not** reported as an omission.
+Phase 12 remains deliberately unstarted and is not reported as an omission. The two open correction rows are disclosed in `tasks.md` with reasons; both are assessed below and neither blocks archive.
 
 ---
 
@@ -39,237 +42,166 @@ Phase 12 is deliberately unstarted and is **not** reported as an omission.
 
 | Gate | Command | Result |
 |---|---|---|
-| Tests | `go test -race -count=1 -v ./...` | **exit 0** — 1451 top-level PASS / 0 FAIL / 2 SKIP (uncached; never `(cached)`) |
-| Build | `go build ./...`, `make build` | exit 0, clean |
+| Tests | `go test -race -count=1 -v ./...` | **exit 0** — **1458 PASS / 0 FAIL / 2 SKIP**, matching the correction's claim exactly |
+| Uncached proof | `grep -c '(cached)'` over the log | **0**; `src/ai/openaicompat` alone **170.163s**, `src/agent` 12.382s |
+| Build | `make build` (`go build -trimpath ./...`) | exit 0, clean |
 | Vet | `go vet ./...` | exit 0, clean |
 | Lint | `golangci-lint cache clean && make lint` | exit 0, **0 issues** |
 | Vulnerabilities | `make vuln-check` | exit 0, **0 `finding` entries** |
-| gofmt | `gofmt -l .` | 15 files — **all 15 independently confirmed dirty on `main` too** (`git show main:<path> \| gofmt -d`); I agree with the orchestrator |
-| Freeze | `git diff --stat main...HEAD -- go.mod go.sum src/ai/` | empty — byte-unchanged |
-| Diff size | `git diff --numstat main...HEAD` excl. `openspec/` | 17 files, **+2362/−51** — exactly as claimed |
+| gofmt | `gofmt -l .` | the same **15** pre-existing dirty files; none of this change's own files appear |
+| Freeze | `git diff --stat main...HEAD -- go.mod go.sum src/ai/` | **empty** — byte-unchanged |
+| Diff size | `git diff --numstat main...HEAD` excl. `openspec/` | **18 files, +3870/−59** — exactly as claimed (incl. `openspec/`: 25 files, +5206/−59) |
 
-The 2 skips are `TestTurn_CoverageGate` and `TestOpenRouterAdapter_LiveSmoke`, both pre-existing and unrelated.
-
-**Apply's self-report was accurate on every number I re-ran.** The findings below are things apply's report did not surface, not things it misstated.
+The 2 skips are `TestTurn_CoverageGate` and `TestOpenRouterAdapter_LiveSmoke`, both pre-existing and unrelated. **Every numeric claim the correction round made was accurate on re-run.** `make all` was never invoked — it is mutating.
 
 ---
 
-## CRITICAL
+## Round-1 → Round-2 disposition
 
-### CRITICAL-1 — The check-3 rewrite weakened enforcement; `os/exec` in Layer 2 production now passes the entire suite
+| # | Round-1 finding | Round-2 disposition | Proof |
+|---|---|---|---|
+| **CRITICAL-1** | check-3 blanket std-lib exemption passes `os/exec`, `crypto/tls` | **CLOSED — VERIFIED** | C-1 below: `crypto/tls` and `syscall` plants |
+| **CRITICAL-2** | run/turn/compaction spans leak on panic (`R-AGO-007`) | **CLOSED — VERIFIED, both directions** | C-2 below: double-end and leak plants |
+| **MAJOR-1** | attribute vocabulary unasserted (3/14 keys) | **CLOSED — VERIFIED** | `observability_attributes_test.go:547-573`, real `t.Errorf` per family, anti-vacuity floor at `:545` |
+| **MAJOR-2** | `S-AGO-014` value equality 3/21 rows | **CLOSED — VERIFIED** | four `agoAssert*SpanRow` correlators over six fixtures. The table is **21** rows / 14 unique keys — apply's count was right, round 1's "20 rows" was wrong |
+| **MAJOR-3** | denylist coverage guard omits the reasoning kind | **CLOSED — VERIFIED** | `observability_denylist_test.go:338-351` now lists the three `EventKindMessage*Reasoning` kinds |
+| **MAJOR-4** | parity compares kinds, not values | **CLOSED — VERIFIED by defeat** | M-4 below |
+| **MAJOR-5** | detached arm's decided attributes unasserted | **CLOSED — VERIFIED** | `observability_lifecycle_test.go:658-665` asserts `cachicamas.tool.detached == true` and `error.type == cancellation`; `:684+` scans `runToolWithWindDown`'s signature via `go/parser` |
+| **MAJOR-6** | compaction parent / cardinality / exit table / refusals untested | **CLOSED — VERIFIED** | `observability_nesting_test.go:266-293` asserts `Parent() == requesterSpan` and exact 1/0 span counts; new 6-row exit table and 4-subtest refusal test |
+| **MINOR-1** | `hksScopeFenceByteUnchangedFiles()` releases rather than filters | **STILL OPEN — defensible, but not for the stated reason** | W-6 below |
+| **MINOR-2** | `wantMinAttributeCount = 14` is a loose floor | **CLOSED — VERIFIED** | `observability_denylist_test.go:320-329` — a unique-**key-set** floor of 12, computed against this run's achievable ceiling |
+| **MINOR-3** | stale RED-phase failure messages | **CLOSED-PARTIALLY** | the 7 failure *messages* are reworded; 8 stale RED *doc comments* still ship — W-2 |
+| **SUGGESTION-1/2** | `S-AGO-025` / `S-AGO-026` lack dedicated guards | **STILL OPEN — carried, not blocking** | unchanged from round 1 |
+| — | — | **NEWLY FOUND** | W-3, W-4, W-5 |
 
-**Where**: `backend/agent/src/agent/import_boundary_test.go:380-386` (the `if standard[importer] { continue }` branch), introduced in commit `07341886`.
+---
 
-`TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage` was rewritten from
-`if slices.Contains(deps, forbidden.path) → fail` to a **direct-importer** check that exempts (a) a
-per-path vetted allowlist and (b) **any standard-library importer**. Clause (b) is the hole: a denied
-path reached through *any* standard-library intermediary is now invisible.
+### C-1 — CRITICAL-1 closed, re-proved on the plants nobody had re-run
 
-Planted, observed, reverted (worktree clean after each):
+The orchestrator independently re-planted `os/exec` and `net/http`; I agree with those results. I ran the two remaining cases from the correction's own bite list, against the shipped tree, plus a clean baseline. All plants created, observed, deleted; `git status --short` empty after each.
 
-| Plant in a Layer 2 production file | On `main` | On `HEAD` |
+```
+########## PLANT crypto/tls ##########
+--- FAIL: TestLayer2_ProductionClosure_ContainsNoNetworkOrFilesystemPackage (0.09s)
+    import_boundary_test.go:453: Layer 2's production closure imports "net" via unexpected direct importer(s) [crypto/x509 crypto/tls] (vetted: [])
+    import_boundary_test.go:453: Layer 2's production closure imports "os" via unexpected direct importer(s) [crypto/internal/sysrand net crypto/tls] (vetted: [go.opentelemetry.io/otel/trace fmt])
+    import_boundary_test.go:453: Layer 2's production closure imports "io/fs" via unexpected direct importer(s) [net] (vetted: [os internal/filepathlite])
+########## PLANT syscall ##########
+--- FAIL: TestLayer2_ProductionSources_NoDirectForbiddenFamilyImport (0.00s)
+    import_boundary_test.go:544: zzplant.go directly imports "syscall", which is in the forbidden "syscall" family
+########## BASELINE ##########
+ok  	github.com/cachicamas/backend/agent/src/agent	0.400s
+```
+
+`crypto/tls` — the case round 1 proved *passed* — now fails on check 3, and `syscall` fails on the new check 4. This discharges **`S-AGP-036`**, **`S-AGP-037`** and **`S-AGP-038`** by command rather than by citation. Plants used real scratch files, never `-overlay`, which is unsound for an `os/exec`-based guard.
+
+**Governance half — verified, and it strengthened rather than weakened.** I diffed both delta specs against their pre-correction state (`git diff fbd8acb6..HEAD -- .../specs/`). That diff is the entire spec delta of this round: **2 files, +12/−5 lines**.
+
+- `R-AGP-003` gained two normative paragraphs describing **the shipped mechanism exactly**: direct-import-edge matching against a per-path closed, evidence-cited vetted list, and the zero-hop family scan. The text explicitly forbids the removed defect — *"The vetted-importer list MUST NOT exempt an importer merely because it is standard library."*
+- `NFR-AGO-003` was **narrowed, not widened**. It now names the two authorised amendments and adds a new prohibition: *"no amendment MAY widen a check's tolerance (for example, exempting an importer class the check previously caught) without the corresponding spec text naming that exemption and the evidence that bounds it."* That is a rule against the exact failure round 1 found.
+- Three scenarios were **appended** (`S-AGP-036`…`038`). No existing requirement or scenario was edited, re-scoped, softened or deleted anywhere in either spec.
+
+**No MAJOR was closed by editing the scenario to match the test.** The only requirement text touched this round is the two paragraphs above. In particular **MAJOR-4 — the one finding whose cheapest fix was to re-scope `R-AGO-009`/`S-AGO-080` down to the kind comparison the old test could actually prove — was closed on the test side, with the requirement left at its original, stronger "element for element and value for value" wording.** That is the direction round 1 said was correct, and the correction took it.
+
+### C-2 — CRITICAL-2 closed; the leak audit finds no re-encoded double-end
+
+Mechanism: `finalizeRunSpan`, `finalizeTurnSpan`, `finalizeCompactionSpan` and `finalizeToolSpan` each now have **exactly one call site in the whole module**, and every one is inside a `defer` registered immediately at span open — `harness.go:614`, `loop.go:333`, `loop.go:375`, `compaction.go:317`, `compaction.go:522`, `scheduler.go:474`. I read all six defer bodies: each contains **only** the finalize call. **No `recover()`, so a panic is not swallowed** — it propagates exactly as `R-AGS-016`'s unrecovered-hook posture requires. The package's two `recover()` calls (`hooks.go:474`, `loop.go:891`) are pre-existing and unrelated. In `loop.go` and `compaction.go` the defer is registered inside the same `if` that opens the span, so no nil-span finalizer can be registered.
+
+**The double-end risk is real, and it is caught.** `tracetest.Span.End()` increments `endCount` unconditionally (`tracetest.go:240-244`) — it is *not* idempotent — and `AssertAllEndedOnce` fails on `EndCount() != 1`, i.e. on **two** ends as well as on zero (`tracetest.go:130-145`). I did not trust that reading; I planted a second `span.End()` in `finalizeTurnSpan`:
+
+```
+########## PLANT: turn span ended TWICE ##########
+--- FAIL: TestObservability_DenylistAbsence
+    observability_denylist_test.go:292: AssertAllEndedOnce() = tracetest: 3 span(s) not ended exactly once: span 1 (name "turn") ended 2 time(s), want exactly 1; span 3 ...; span 7 ...
+--- FAIL: TestObservability_Lifecycle_ExactlyOnceAcrossEveryExitFamily   (all 7 rows)
+--- FAIL: TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce
+    observability_lifecycle_test.go:571: ... span 2 (name "turn") ended 2 time(s), want exactly 1
+```
+
+Nine separate assertions bite on a double end, across every family. Then the leak direction, simulating the pre-fix behaviour by skipping the finalizer on panic:
+
+```
+########## PLANT: turn finalizer skipped on panic ##########
+--- FAIL: TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce (0.00s)
+    observability_lifecycle_test.go:569: Started=3 Ended=2
+    observability_lifecycle_test.go:571: AssertAllEndedOnce() = tracetest: 1 span(s) not ended exactly once: span 2 (name "turn") ended 0 time(s), want exactly 1
+########## BASELINE after revert ##########
+ok  	github.com/cachicamas/backend/agent/src/agent   0.304s
+```
+
+`R-AGO-007`'s exactly-once MUST is enforced in both directions on a real, reachable panic path. Worktree clean after every plant.
+
+### M-4 — the parity value comparison genuinely bites
+
+`agoParityRedactedEvent` (`observability_parity_test.go:66-127`) projects out only RunID/TurnID/MessageID and renders tool call IDs, ordinals, names, arguments, results, outcomes, failure categories, text/reasoning fragments and cost figures. Defeated it by giving the traced arm a different tool name:
+
+```
+--- FAIL: TestObservability_NoTracerParity_DrainedSequencesEqual (0.00s)
+    observability_parity_test.go:201: drained event sequences differ once minted identifiers are projected out (R-AGO-009, S-AGO-080)
+```
+
+The failure lands at line **201** — the *value* comparison — while the pre-existing kind pre-check at `:193` stayed green on the same input. That is exactly the divergence class the old test could not catch.
+
+### Substrate guards — still biting after this round's own second widening
+
+The correction widened `filterOutLoopFiles`/`filterOutLoopHookFiles` again for `observability_attributes_test.go`. Re-proved with a **staged** plant (an untracked file proves nothing — `git diff <ref>` ignores it):
+
+```
+--- FAIL: TestTurn_PreRequestHook_SubstrateUntouched (0.06s)
+        diff --git a/backend/agent/src/agent/zzsubstrate_test.go ...
+--- FAIL: TestTurn_SubstrateUntouched (0.04s)
+        diff --git a/backend/agent/src/agent/zzsubstrate_test.go ...
+```
+
+The widened exact-filename filters do **not** over-match.
+
+---
+
+## Spec Compliance
+
+**Authoritative counts from the retrieved delta specs**: **16 requirements** (14 `AGO` + `R-AGP-003` + `R-AGS-016`) and **78 scenarios** (55 `S-AGO`, 19 `S-AGP`, 4 `S-AGS`) — up from round 1's 75 by the three appended `S-AGP-036`…`038`.
+
+**Two different metrics, stated separately so they cannot be read as one.** The envelope's `scenarios: 78/78` means *every scenario has recorded evidence of a kind this repo accepts* (shipped test, recorded bite, or documented inspection). The stricter metric is: **72 of 78 scenarios have a dedicated, shipped, passing covering test.** The 6 that do not are itemized here rather than absorbed into a count:
+
+| Scenario | Status | Assessment |
 |---|---|---|
-| `import "os"` | FAIL | **FAIL** ✅ (control still bites) |
-| `import "net/http"` | FAIL | **FAIL** ✅ (control still bites) |
-| `import "os/exec"` | FAIL | **PASSES** ❌ |
-| `import "crypto/tls"` | FAIL | **PASSES** ❌ |
+| `S-AGO-020` (Layer 2 keys ∩ Layer 1's eleven = ∅) | ✅ COMPLIANT **by corollary** | `S-AGO-013`'s shipped assertion (`observability_attributes_test.go:550-554`) fails on any key outside `agoAttributeVocabulary`. I read that map (`:46-61`) against `R-AGO-002`'s table and against Layer 1's keys in `src/ai/openaicompat/trace.go:37-48`: it holds exactly the table's 14 keys and none of Layer 1's eleven. `error.type` is the spec's own named shared key, correctly excluded from the eleven. Sound — but see **W-4**. |
+| `S-AGO-023` (Layer 1 request span recorded alongside; key sets compared) | ⚠️ PARTIAL — every *then* clause covered, the *given* clause unexercised | No fixture records both spans in one trace. But each of the scenario's three assertions is proven by a shipped, passing test: Layer 1 carries its own keys (`TestAI37_Attributes_PerKeyTable`), Layer 2 carries none of them (`S-AGO-013`'s closed-vocabulary assertion, the same corollary as `S-AGO-020`), and neither table has been widened (both are closed sets). Only the *given* — the joint recording — is unexercised, and a *given* is a fixture condition, not a claim. See **W-1**. |
+| `S-AGO-025` (values rendered through the API's own value accessor) | ⚠️ PARTIAL | satisfied by `tracetest`'s corpus builder, never asserted as its own claim. Unchanged SUGGESTION-1. |
+| `S-AGO-026` (accessor-flow half) | ⚠️ PARTIAL | the `RecordError` half is genuinely guarded; the accessor-flow half is discharged by inspection. Unchanged SUGGESTION-2. |
+| `S-AGO-027` (no configuration switch enables a denied category) | ⚠️ static | enumeration argument resting on the ambient-authority guard; accepted in round 1. |
+| `S-AGO-053` (compaction exit table) | ⚠️ PARTIAL | 6 of 8 arms driven; the span-derivation-failure and ReplacePrefix-commit-failure arms are disclosed-unreached, matching this package's existing precedent for two other defensive branches. |
 
-Proof the original check would have caught them — with the plant in place,
-`go list -deps ./...` shows `os` in the closure (via `os/exec`) and `net` in the closure (via
-`crypto/tls`), so `slices.Contains(deps, …)` was true in both cases.
+The 13 `(bite)` scenarios are evidenced by recorded manual bites per this repo's convention. Five I re-proved by command this round (`S-AGP-035`, `S-AGP-037`, `S-AGP-038`, and both directions of `S-AGO-057`'s exactly-once claim); the rest were audited in round 1 and are unchanged by the correction.
 
-Worse, **no other guard covers it**: with `os/exec` planted, the *full* package suite reports
-`ok github.com/cachicamas/backend/agent/src/agent 5.310s`. Check 1's deny-by-default allowlist never
-sees stdlib (the toolchain filters it first), and the ambient-authority guard does not catch it either.
-`os/exec` is process execution — precisely the ambient authority `NFR-AGO-003` and `R-AGP-005` exist
-to deny.
+### Milestone acceptance — `0003:2075-2091`, the three AG-22.2 Gherkin scenarios
 
-Reproduce:
-```
-cd backend/agent/src/agent
-printf 'package agent\n\nimport "os/exec"\n\nvar _ = exec.Command\n' > zz.go
-go test -count=1 ./... ; rm zz.go     # → ok  (expected: FAIL)
-```
-
-**Why this is a spec violation, not a judgement call:**
-
-- `NFR-AGO-003` (`agent-observability-boundary/spec.md:298`) — "The ten substrate files named in
-  `openspec/AGENTS.md` MUST remain byte-unchanged, **including `import_boundary_test.go`'s behaviour**
-  — its **data tables** are what this change amends." The change amended ~90 lines of *behaviour*
-  (`productionImportGraph`, `forcedStandardLibraryImporters`, a rewritten matching loop), not data tables.
-- `R-AGP-003` / `S-AGP-023` — the exact-path table MUST be "matched over a dependency listing **that
-  includes the standard library**". It is now matched over a direct-importer graph with a
-  standard-library exemption.
-- The `agent-package-scaffold` delta's own "Not modified" table (`spec.md:32`) asserts this table is
-  "**Byte-unchanged.** AG-22 adds no network or filesystem reach" — the data is byte-unchanged, but the
-  semantics around it are not, and the delta claims no such amendment.
-- **No spec or design text authorizes it.** `grep -rn -i 'direct-importer|import graph|forcedStandard|productionImportGraph' specs/ design.md` → **no matches**.
-
-The underlying problem is real (`otel/trace@v1.44.0`'s `auto.go` calls `os.Getenv`) and the *vetted-importer*
-half (`forcedStandardLibraryImporters`) is a sound, narrow fix. Only the blanket standard-library
-exemption needs removing — `io/fs` is the sole path that relied on it, and it can take its own vetted
-entry. This is the failure shape the phase brief named: a guard widened until it stops catching the class
-that includes the widener's own change.
-
-### CRITICAL-2 — `R-AGO-007`'s exactly-once span lifetime is violated on a reachable path; run and turn spans leak
-
-**Where**: `harness.go:592` (open) vs `:393`, `:425`, `:974` (close); `loop.go:351` (open) vs 8 separate close sites; `compaction.go:300`/`:493` vs `:160`, `:432`, `:518`, `:526`.
-
-`R-AGO-007` (`spec.md:211`): *"the closing obligation MUST be discharged **uniformly for all exits** by a
-finalizer **registered at open, never at individual return sites**. Every span MUST end **exactly once**
-on every terminal path without exception: normal completion, every typed failure arm, every cancellation
-shape, **a panic unwinding through the frame**, and the detached arm."*
-
-Only the **tool** family satisfies this — `scheduler.go:470` registers a real `defer`. The run span closes
-at 3 individual return-site funnels, the turn span at **8** call sites, the compaction span at 2. There is
-no `defer` for any of them (`grep -n 'defer func' loop.go compaction.go harness.go` finds only an unrelated
-`recover()` and a channel close).
-
-The consequence is not theoretical. A panic unwinding through `Turn`/`Harness.Run` is reachable through the
-deliberately-**unrecovered** mutating `PreRequest` hook (a posture `agent-v1-scope` `R-AGS-016` records by name).
-Driven with a scratch test (created, run, deleted; worktree clean):
-
-```
-ZZRESULT panic recovered by caller: zz deliberate hook panic
-ZZRESULT Started=2 Ended=0
-ZZRESULT LEAK: tracetest: 2 span(s) not ended exactly once:
-  span 0 (name "invoke_agent") ended 0 time(s), want exactly 1;
-  span 1 (name "turn")         ended 0 time(s), want exactly 1
-```
-
-Both spans leak. `R-AGO-007` says such a case "MUST fail the suite" — it does not, because
-`S-AGO-051`'s run table is only "normal terminal, each typed failure arm, and cancellation"; panic appears
-only in `S-AGO-052`'s **tool** table, which is the one family that happens to be correct. This is a defect
-sitting exactly between two satisfied scenarios, and it is the same unbounded-lifetime shape AG-21 was
-chartered to remove.
-
----
-
-## MAJOR
-
-### MAJOR-1 — The attribute vocabulary is essentially unasserted: 3 keys of 14 appear anywhere in the tests
-
-`grep -oh 'gen_ai\.[a-z_.]*|cachicamas\.[a-z_.]*|error\.type' observability_*_test.go` yields exactly
-three distinct keys: `cachicamas.run.id`, `gen_ai.tool.call.id`, `cachicamas.compaction.id`.
-Consequently these scenarios have **no covering assertion at all**:
-
-| Scenario | Claim | Status |
-|---|---|---|
-| `S-AGO-013` | recorded key set is a **subset** of the vocabulary; no other key appears | ❌ UNTESTED |
-| `S-AGO-017` | presence-typed attrs **absent**, never `""`/`0`/`false` | ❌ UNTESTED |
-| `S-AGO-018` | span status error/ok; description is the category name **only** | ❌ UNTESTED (no `SetStatus`/`codes.` assertion exists in any observability test) |
-| `S-AGO-021` | `error.type` appears only on brackets with a typed failure, value = category name | ❌ UNTESTED |
-| `S-AGO-023` | Layer 1 request span recorded alongside; key sets compared | ❌ UNTESTED |
-
-`R-AGO-002`'s "no key outside this set MAY appear, under any name, on any path" is currently defended by
-nothing. (I confirmed by grep that Layer 1's eleven keys are absent from Layer 2 production source — but
-that is my inspection, not a shipped guard, so `S-AGO-020` is evidenced only statically.)
-
-### MAJOR-2 — `S-AGO-014` value-equality is 3/20 rows, and it is the charter's headline acceptance
-
-`R-AGO-002`'s table has 20 rows with a "MUST equal — exact event accessor" column; `S-AGO-014` requires the
-comparison "row by row, per the table above". Three rows are asserted
-(`observability_nesting_test.go:97`, `:173`, `:256`). The charter clause this discharges is
-`0003:2080` — *"attributes from the decided vocabulary with values equal to the corresponding events'"* —
-so the milestone's own headline acceptance is 15% covered. Status: **PARTIAL**, not compliant.
-
-### MAJOR-3 — The denylist non-vacuity guard omits the reasoning kind the spec names explicitly
-
-`observability_denylist_test.go:316-322` — `wantKinds` lists run/turn/tool/permission/compaction kinds and
-**no reasoning kind**. `R-AGO-008` item 4 requires "every event kind the driven run structurally produces —
-tool, **reasoning**, permission, compaction and failure kinds among them"; `S-AGO-072` repeats it.
-
-The omission is load-bearing, not cosmetic: `reasoning` is one of the nine denied vectors, and the run
-demonstrably produces the events. Measured with a scratch probe (deleted; tree clean):
-`ZZRESULT reasoning: start=1 delta=1 end=1`. Today the reasoning-vector absence claim rests on a
-precondition nothing asserts — if the reasoning deltas ever stopped flowing, that vector would pass
-vacuously and no test would say so. That is exactly the vacuity `R-AGO-008` exists to prevent.
-
-### MAJOR-4 — The parity proof compares event **kinds**, not values, contradicting `R-AGO-009`/`S-AGO-080`
-
-`R-AGO-009` (`spec.md:253`): the two drained sequences "MUST equal, **element for element and value for
-value**". `S-AGO-080` repeats "with the same values". `observability_parity_test.go:24-30,79-83` compares
-only `Kind()` sequences, and its own comment (`:19-23`) concedes per-field equality "can never hold" because
-the two runs mint distinct RunID/TurnID values.
-
-The test is *right* and the requirement is unachievable as written. But the artifact ships with the
-requirement claiming value equality and the scenario claiming value equality, so `S-AGO-080` archives as
-false. Either `R-AGO-009`/`S-AGO-080` should be re-scoped to the kind sequence (plus the ID-independent
-fields), or the comparison must project out the minted identifiers and compare the remainder.
-
-### MAJOR-5 — The detached arm's own decided attributes are never asserted
-
-`S-AGO-055` requires the detached tool span to end "with the error status, `cachicamas.tool.detached`
-present and `true`, and `error.type` equal to that arm's typed cancellation category". The
-`detached_wind_down` row (`observability_lifecycle_test.go:43`, `:222-266`) asserts only
-`AssertAllEndedOnce()`, `Started() > 0`, and `Started() == Ended()`. Neither `cachicamas.tool.detached`
-nor `error.type` is read anywhere in the suite. `S-AGO-056`'s "the goroutine holds no span handle" is
-likewise argued in a comment (`scheduler.go:556-561`), not asserted.
-
-The production code does set them (`scheduler.go:558-566` → `finalizeToolSpan(..., detached=true, ...)`),
-so this is missing coverage rather than a defect — but D-D's decided behaviour is the one thing this
-milestone chose to decide explicitly, and it is unguarded.
-
-### MAJOR-6 — Compaction nesting, cardinality, and exit-table scenarios are untested
-
-- `S-AGO-041` (compaction span's parent is the requesting bracket's span) — the covering subtest is named
-  `compaction_span_recorded_standalone_root` (`observability_nesting_test.go:230`) and **never reads the
-  parent**. ❌ UNTESTED.
-- `S-AGO-019` (exactly one span covers the bracket; no turn span opened for it) — no count assertion, no
-  turn-span-absence assertion. ❌ UNTESTED.
-- `S-AGO-053` (a table of compaction exits — success tail and each failure arm) — the lifecycle table has
-  **no compaction row** at all. ❌ UNTESTED.
-- `S-AGO-054` (no span started for pre-Start-event refusals: run, turn, gated-out tool, compaction) — no
-  covering test found. ❌ UNTESTED.
-
----
-
-## MINOR
-
-1. **`hksScopeFenceByteUnchangedFiles()` fully releases two files rather than filtering them.**
-   `hooks_test.go:1511`/`:1512` — `import_boundary_test.go` and `scheduler.go` were **deleted** from the
-   frozen list. Both releases are necessary and disclosed, but the same change demonstrates a narrower
-   technique three times over (`hksFilterOutAG22TracetestFiles`, `filterOutLoopFiles`,
-   `filterOutLoopHookFiles` — exact-filename suffix filters). Residual protection for `scheduler.go` is
-   three narrow content guards (`TestScopeFence_S_TLS_020`, `TestScheduler_SourceGuard_PolicySlotNoTypeAssertion`,
-   `TestScheduler_SourceGuard_NoErrgroupImport`), not byte identity. Note this is *how CRITICAL-1 went
-   unnoticed*: `import_boundary_test.go` left the freeze in the same commit that rewrote its behaviour.
-2. **`wantMinAttributeCount = 14` is a very loose floor.** `observability_denylist_test.go:300-307` sums
-   **total** attributes across **all** spans of three runs and compares against the *unique-key
-   cardinality* (14). The real total is far higher, so the floor cannot detect a family that stopped
-   recording. A per-family or unique-key floor would bite.
-3. **Stale RED-phase failure messages ship in green tests** — e.g. `observability_denylist_test.go:298`
-   ("the run/turn/tool/compaction seams are not instrumented until Phases 5-8"),
-   `observability_lifecycle_test.go:54`, `observability_parity_test.go:100`,
-   `observability_nesting_test.go:247`. Harmless today; actively misleading when one of them next fires.
-
----
-
-## SUGGESTION
-
-1. `S-AGO-025` (values rendered through the tracing API's own value accessor, not a structure dump) is
-   satisfied by `tracetest`'s corpus builder but is never asserted as its own claim; a one-line guard on
-   the corpus renderer would close the AI-41 lesson explicitly.
-2. `S-AGO-026`'s accessor-flow half is discharged by inspection. The `RecordError` half is genuinely
-   guarded — `grep -rn RecordError src/agent/*.go` (non-test) matches only `observability.go:23`'s comment.
-
----
-
-### Verified sound — audited and found no finding
-
-| Target | Evidence |
+| Charter scenario | Verdict |
 |---|---|
-| **Guard widenings are exact-filename, no wildcards** | All entries in `filterOutLoopFiles`, `filterOutLoopHookFiles`, `hksFilterOutAG22TracetestFiles` are `strings.HasSuffix(path, "/<exact>.go")`. |
-| **All three git-diff substrate guards still bite** | Proved with **staged** plants (an untracked file proves nothing — `git diff <ref>` ignores it): modifying a still-frozen entry (`event.go`) → `TestHooks_ScopeFence…` FAILS at `hooks_test.go:1579`; a **non**-tracetest file under `src/agenttest/` → FAILS at `:1597` (filter does **not** over-match); a new file in `src/agent/` → both `TestTurn_SubstrateUntouched` and `TestTurn_PreRequestHook_SubstrateUntouched` FAIL. |
-| **The widened allowlist did not go over-broad** | Planted and observed FAIL: `otel/sdk/trace` → forbidden-prefix rule, `import_boundary_test.go:213` (exactly what `S-AGP-035` claims); `database_administrator/src/application` → `:213`; `src/ai/openaicompat` → `:213`; `go.opentelemetry.io/otel` root getter → denied. |
-| **`S-AGP-031`/`032`/`033` citations** | `import_boundary_test.go:147-169`: the three § D3 rows cite their rows; `otel/semconv` and `cespare/xxhash/v2` cite the **forced-closure clause plus the measurement** and cite **no** § D3 row; `semconv` is admitted as a **prefix**, with the version-bump rationale in place. Correct on every count. |
-| **Closure measured independently** | `go list -deps -f '{{if not .Standard}}…' ./src/agent/...` → exactly the 10 claimed packages, no more. `S-AGO-091`/`S-AGO-092` hold. |
-| **`S-AGO-090`** | Actual `import` statements (not comments) in Layer 2 production: only `otel/trace`, `otel/trace/noop`, `otel/attribute`, `otel/codes`. No root getter, no metric, no SDK, no exporter, no `otelslog`. |
-| **ADR § D3 extension** | Landed at `docs/adr/0005…md:252-343`, immediately after the Layer 1 allowlist, with all four span families, the per-key accessor mapping, the eleven deferred Layer 1 keys naming AI-37, and the seven not-recorded items each with a reason. `S-AGO-010`, `S-AGO-022`, `S-AGO-030` hold. |
-| **`S-AGO-011`** | The denylist paragraph appears twice and is **byte-identical** after whitespace normalization (verified programmatically). Unweakened, no carve-out. |
-| **`S-AGS-068` guard is real** | `observability_scope_test.go:192-330` enumerates the shipped surface via `go/parser` **and** `reflect`, pins `Harness.TracerProvider`'s type to the OTel **API** interface and its kind to `Interface`, scans production sources for global telemetry symbols, and re-checks the `go.mod`/`go.sum`/`src/ai` freeze. It checks the shipped surface, not prose — priority target 4 is satisfied. I re-read every phrase changed by the `S-AGS-066` amendment and found **no** scenario still restating the old "no telemetry sink" claim. |
-| **Denylist proof mechanics** | Needles are runtime-concatenated (`observability_denylist_test.go:55-63`), `sweep.SelfTest` runs as a positive control **before** the clean scan (`:190`), `AssertAllEndedOnce()` precedes the corpus read (`:291`), corpus-non-empty and every-needle-non-empty floors both present. Only the event-kind coverage floor is incomplete (MAJOR-3). Run A's Defer→Wake→Allow restructuring genuinely strengthened the run — `permission_decision_required` now fires and is asserted. |
-| **Two "unreachable" defensive branches** | `Turn`'s `NewTurnStart`-failure gap and `emitPreStreamAbort`'s `perr != nil` fallback remain unreached, as disclosed. I did not defeat them; they are unproven-but-disclosed, not a finding. |
+| *spans nest correctly with vocabulary attributes only* (`0003:2076-2080`) | ✅ **now genuinely discharged.** Round 1 rated the headline clause at 15% (3 of 21 rows). `observability_attributes_test.go`'s six fixtures (A–F, including delegation and both compaction arms) correlate every recorded span against the drained event stream row by row, and `S-AGO-019`/`S-AGO-041` now assert compaction cardinality and parentage. |
+| *the denylist is proven by absence* (`0003:2082-2085`) | ✅ discharged; the reasoning vector's coverage floor is non-vacuous (MAJOR-3) and the unique-key floor of 12 bites (MINOR-2). |
+| *no tracer, no difference* (`0003:2087-2090`) | ✅ discharged **at value level**, verified by defeat (M-4). |
+
+---
+
+## Issues Found
+
+**CRITICAL**: None. Both round-1 blockers are closed and independently re-proved.
+
+**WARNING**
+
+1. **W-1 — `S-AGO-023`'s joint recording is never driven.** No fixture records Layer 1's request span alongside a Layer 2 run: `agenttest.Provider` is a scripted `ai.ModelProvider` fake that never reaches `src/ai/openaicompat`'s instrumented adapter. Disclosed in `observability_attributes_test.go:17-25` rather than silently skipped. **I weighed escalating this to CRITICAL** under the "spec scenario has no passing covering test" gate and concluded it does not meet that gate: each of the scenario's three *then* clauses is proven by a shipped, passing test (table above), so what is absent is the fixture condition, not the evidence. That is PARTIAL, not UNTESTED — the standing this repo already grants `S-AGO-020`, `S-AGO-022`, `S-AGO-027` and `S-AGO-030`. **Not archive-blocking, with one condition**: `S-AGO-023` is claimed by this change's own acceptance table (`spec.md:28`, `:31`), so archiving it silently would promote a scenario whose framing nothing exercises. Carry it as a named AI-37-owned follow-up, or re-scope its text to the two-sided claim that *is* proven.
+2. **W-2 — MINOR-3 is only half closed.** The 7 stale RED-phase *failure messages* were reworded, but **8 stale RED-phase doc comments still ship**, and one states the opposite of the assertion it documents: `observability_parity_test.go:209-211` — *"This is the genuine RED right now … the run/turn/tool seams are not instrumented until Phases 5-7, so provider.Started() == 0"* — sits on `TestObservability_NoTracerParity_TracedArmRecordsAtLeastOneSpan`, which is green and asserts `Started() > 0`. Same present-tense staleness at `observability_nesting_test.go:6,9,68` and `observability_lifecycle_test.go:6,8,30`. The correction's rationale (package-level narrative is legitimate history) holds for the file headers, but not for a function doc comment written in the present tense about the test directly beneath it.
+3. **W-3 — the CRITICAL-2 test's own doc comment misdescribes it.** `observability_lifecycle_test.go:552-563` says the test is *"driven through … `Harness.Run`"* and that *"Before the fix this fails naming Started=2 Ended=0"*. The fixture actually drives **bare `agent.Turn`** with a test-seeded root span (`agoLifecyclePreRequestHookPanic`, `:399-423`), and apply-progress records its real RED as `Started=3 Ended=1`; my own defeat run produced `Started=3 Ended=2`. The numbers quoted belong to the abandoned `Harness.Run` attempt. The test is correct; its comment is not. Its `t.Fatal` message ("did not propagate through `Harness.Run`") carries the same error.
+4. **W-4 — `agoAttributeVocabulary` is an unguarded hand-maintained duplicate.** `S-AGO-013` and, by corollary, `S-AGO-020` and two thirds of `S-AGO-023` all rest entirely on that 14-entry map matching `R-AGO-002`'s table and the ADR § D3 extension. Nothing ties the three artifacts together: adding `gen_ai.system` to the map would silently keep every one of those scenarios green while the Layer 1 / Layer 2 separation they exist to prove was broken. I verified the map is correct **today** by reading all three; there is no guard that keeps it correct tomorrow. This is the count-assertion drift class in a different shape.
+5. **W-5 — a real pre-existing race is disclosed only inside an Engram observation.** The correction reports that when `Turn` panics inside `Harness.Run`'s attempt loop, `<-forwarderDone` is never reached, abandoning the per-attempt forwarder goroutine, which then races `Run`'s own `defer close(sink)`. **I verified this is genuinely pre-existing and was not made reachable by AG-22**: the forwarder, `<-forwarderDone` and `defer close(sink)` are structurally identical on `main` (`harness.go:712-766`) and on HEAD (`:780-834`), and AG-22's `harness.go` diff touches no forwarder or `close(sink)` line — the only match in that diff is an unrelated comment. The `PreRequestHook` panic seam is pre-existing too (`R-AGS-016`). Routing around it via bare `Turn` was the right call and is correctly outside AG-22's scope. But the disclosure lives only in apply-progress; it needs a tracked follow-up before it is lost.
+6. **W-6 — MINOR-1 stays open, and leaving it open is defensible — though not for the reason given.** I checked the mechanism the finding proposed as the narrower alternative, and it is **not** narrower. `hksFilterOutAG22TracetestFiles` strips the whole `diff --git` block for a named file (`hooks_test.go:1520-1547`), which is exactly as permissive as deleting that file's name from `hksScopeFenceByteUnchangedFiles()` — both fully release the file, neither filters hunks. The filter exists only because the `src/agenttest/` guard's unit is a directory, where removing a list entry is not an option. So the correction's judgement (leave it) is right, but the finding's premise — that the same change demonstrated a narrower technique three times over — does not survive inspection. **This is not the same class as CRITICAL-1**: CRITICAL-1 was a shipped enforcement hole with a demonstrated escape; MINOR-1 is a guard-design observation with none. What *is* real and durable is different from what the finding says: `import_boundary_test.go` and `scheduler.go` are released from the byte-unchanged freeze **permanently, for every future branch**, and no restoration is planned in `tasks.md` or either spec. The mitigation shipped is adequate for AG-22 — `NFR-AGO-003` now forbids un-named behavioural widening, and check 4 is a new independent automated guard — but the accumulating release list deserves its own change.
+
+**SUGGESTION**
+
+1. `S-AGO-025` — a one-line guard on `tracetest`'s corpus renderer would close the AI-41 lesson explicitly (carried from round 1).
+2. `S-AGO-026`'s accessor-flow half remains discharged by inspection (carried from round 1).
+3. The compaction nesting subtest is still named `compaction_span_recorded_standalone_root` (`observability_nesting_test.go:230`) although MAJOR-6's fix made it assert the span is **not** a root — it now asserts `Parent() == requesterSpan`. Rename it.
 
 ---
 
@@ -277,27 +209,27 @@ milestone chose to decide explicitly, and it is unguarded.
 
 | Check | Result | Details |
 |-------|--------|---------|
-| TDD Evidence reported | ✅ | Full RED/GREEN table in apply-progress for every phase |
-| All tasks have tests | ✅ | 45/45 in-scope tasks |
-| RED confirmed (test files exist) | ✅ | All 5 observability test files present |
-| GREEN confirmed (tests pass) | ✅ | 1451/1451 pass on an uncached `-count=1` run |
-| Triangulation adequate | ⚠️ | Lifecycle table has 7 rows; the attribute vocabulary has 3 assertions for 14 keys (MAJOR-1/2) |
-| Safety net for modified files | ✅ | Substrate guards re-proved biting after every widening |
+| TDD Evidence reported | ✅ | Full RED/GREEN evidence per phase, plus a per-finding correction-round audit trail in `tasks.md` and apply-progress |
+| All tasks have tests | ✅ | 45/45 in-scope phases; 8/8 closed correction rows carry a bite proof |
+| RED confirmed (test files exist) | ✅ | All 6 observability test files present; `observability_attributes_test.go` is new this round (573 lines) |
+| GREEN confirmed (tests pass) | ✅ | 1458/1458 on an uncached `-count=1 -race` run |
+| Triangulation adequate | ✅ | was ⚠️ in round 1; the attribute vocabulary now has six fixtures firing every iff-branch in both directions, and the lifecycle table gained a 6-row compaction exit table and a 4-subtest refusal test |
+| Safety net for modified files | ✅ | substrate guards re-proved biting with a **staged** plant after this round's own second widening |
 
-**Assertion quality**: no tautologies, no ghost loops, no orphan-empty assertions, no mock-heavy files.
-Every needle is runtime-assembled and proven to bite via `sweep.SelfTest`. The weaknesses are *missing*
-assertions (MAJOR-1…6), not *trivial* ones.
+**Assertion quality**: ✅ no tautologies, no ghost loops, no orphan-empty assertions, no mock-heavy files. Every denylist needle is runtime-assembled; `sweep.SelfTest` runs as a positive control before the clean scan; anti-vacuity floors are present at `observability_attributes_test.go:545`, `observability_denylist_test.go:320`, `observability_parity_test.go:186` and `import_boundary_test.go:536`. Round 1's weaknesses were *missing* assertions; they are now present.
 
 ### Quality Metrics
-**Linter**: ✅ 0 issues · **Vet**: ✅ clean · **Vulnerabilities**: ✅ 0 findings · **Coverage**: ➖ not run (no threshold configured for this change)
+
+**Linter**: ✅ 0 issues · **Vet**: ✅ clean · **Build**: ✅ clean · **Vulnerabilities**: ✅ 0 findings · **Coverage**: ➖ not run (no threshold configured for this change)
 
 ---
 
 ### Verdict
 
-**FAIL** — CRITICAL-1 (a shipped guard now passes `os/exec` and `crypto/tls` in Layer 2 production, which
-`main` rejected, unauthorized by any spec text and contrary to `NFR-AGO-003`) and CRITICAL-2 (`R-AGO-007`'s
-exactly-once MUST is violated on a reachable panic path, leaking both the run and turn spans) each block
-archive on their own. Six MAJOR findings are scenarios whose tests do not assert what the scenarios say —
-including the charter's own headline acceptance clause. Everything apply reported numerically was accurate;
-these are gaps its report did not surface.
+**PASS WITH WARNINGS** — 0 CRITICAL, 6 WARNING, 3 SUGGESTION.
+
+Both round-1 blockers are genuinely closed, not narrated as closed. I re-planted `crypto/tls` and `syscall` against the shipped tree and watched checks 3 and 4 fail; I defeated the span finalizer in both the leak and the double-end directions and watched nine assertions bite. All six MAJORs are closed with real assertions. And — the thing most at risk in a correction round — **no requirement or scenario was weakened to fit the implementation**: the entire spec delta of this round is +12/−5 lines that *add* a prohibition and three scenarios, and MAJOR-4, whose cheapest fix was to re-scope `R-AGO-009` down to what the old test could prove, was instead closed by making the test prove the requirement as written.
+
+The six warnings are documentation staleness (W-2, W-3), one unguarded duplicated constant set (W-4), one scenario whose *given* clause is undriven while all three of its *then* clauses are proven (W-1), and two follow-ups that belong to other changes (W-5, W-6). None blocks archive.
+
+**This change is ready for `sdd-archive`**, provided W-1 and W-5 are carried forward as named follow-ups rather than dropped.
