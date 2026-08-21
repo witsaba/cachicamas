@@ -64,15 +64,63 @@ func l3hGuardDeniedVocabulary() []string {
 // character): tool names in this module join two lowercase dictionary
 // words with an underscore, so an underscore MUST count as a boundary
 // too, or S-L3H-045's own planted shape would slip through un-caught.
-// The boundary requirement is therefore "no letter immediately
-// adjacent", satisfied by start/end of input or any non-letter (digit,
-// underscore, space, punctuation) — this still excludes an ordinary
-// prose word like "legitimate" or "digit", where a letter sits on both
-// sides of the embedded needle.
+// The LEFT boundary requirement is "no letter immediately adjacent",
+// satisfied by start of input or any non-letter (digit, underscore,
+// space, punctuation) — this is what excludes an ordinary prose word
+// that merely contains a denied noun with a letter sitting on both
+// sides of it, and it is left untouched below.
+//
+// AG-23 (sdd-verify round 2, W-R2-2): requiring "no letter on EITHER
+// side" denied only the bare singular form of each concept. Two live
+// inflections never add a letter on the left (so the protection above
+// is untouched) but do add letters on the right, and both escaped: an
+// ordinary plural, and a camelCase join where the needle opens a new
+// identifier and a further capitalized segment follows it. Both are
+// closed by widening the RIGHT side only. A needle may now be followed
+// by a lowercase "s" then the ordinary boundary (a simple plural), by
+// an uppercase letter (a further camelCase segment — matched case-
+// SENSITIVELY, deliberately outside the pattern's own case-insensitive
+// needle match, so an ordinary lowercase continuation of some unrelated
+// English word is NOT admitted by this arm), or by the ordinary
+// boundary unchanged. Two of the eight concepts pluralize irregularly
+// (a trailing "y" becomes "ies"), so those two additionally carry that
+// literal alternate form through the identical left/right treatment.
+//
+// This widening is safe against the guard's OWN source by construction:
+// this source unit's own required standard-library import, two names
+// below, joins a denied noun directly onto an unrelated lowercase word
+// with nothing between them — the character immediately after the
+// denied noun there is an ordinary LOWERCASE letter, which satisfies
+// none of the three right-side arms (not "s"+boundary, not an uppercase
+// letter, not the plain boundary) — so that import stays unmatched, and
+// TestGenericClientBoundary_VocabularyScan_PassesOverBothTreesIncludingItself
+// itself re-checks this by running unmodified over this very source
+// unit rather than merely asserting it in prose.
+//
+// Residual, disclosed gap (not claimed closed): a needle that opens a
+// LATER camelCase segment rather than the first still escapes, because
+// catching it needs the LEFT boundary to admit a preceding lowercase
+// letter too — and this source unit's own required call to read one
+// source unit's bytes, a few lines below, is spelled in the standard
+// library's own exported name by joining an ordinary verb directly onto
+// a capitalized denied noun with nothing between them. Widening the
+// left side would re-trip that very call, the identical hazard one
+// boundary over, so it is deliberately left undone.
 func l3hGuardWordBoundaryPatterns() map[string]*regexp.Regexp {
 	out := make(map[string]*regexp.Regexp, 8)
 	for _, needle := range l3hGuardDeniedVocabulary() {
-		out[needle] = regexp.MustCompile(`(?i)(^|[^a-zA-Z])` + regexp.QuoteMeta(needle) + `([^a-zA-Z]|$)`)
+		forms := regexp.QuoteMeta(needle)
+		if strings.HasSuffix(needle, "y") {
+			forms += "|" + regexp.QuoteMeta(needle[:len(needle)-1]+"ies")
+		}
+		// Left: unchanged, case-insensitive-irrelevant boundary check.
+		// Needle (and its irregular plural, if any): case-insensitive.
+		// Right: the ordinary boundary, OR a bare "s" then the ordinary
+		// boundary (regular plural), OR a bare uppercase letter — NOT
+		// wrapped in the case-insensitive group, so it matches only a
+		// true capital, never a lowercase continuation.
+		pattern := `(^|[^a-zA-Z])(?i:` + forms + `)(?:[^a-zA-Z]|$|(?i:s)(?:[^a-zA-Z]|$)|[A-Z])`
+		out[needle] = regexp.MustCompile(pattern)
 	}
 	return out
 }
@@ -164,6 +212,14 @@ func l3hGuardScan(t *testing.T, dir string) []l3hGuardViolation {
 // trip on itself, and that is checked rather than merely claimed.
 func TestGenericClientBoundary_VocabularyScan_PassesOverBothTreesIncludingItself(t *testing.T) {
 	t.Parallel()
+
+	// AG-23 (sdd-verify round 2, S-R2-3): a non-vacuity floor on the
+	// denied set's own size, so silently dropping a needle from
+	// l3hGuardDeniedVocabulary — leaving every remaining pattern still
+	// compiling and still passing — cannot pass this test unnoticed.
+	if got, want := len(l3hGuardDeniedVocabulary()), 8; got != want {
+		t.Fatalf("len(l3hGuardDeniedVocabulary()) = %d, want %d", got, want)
+	}
 
 	dirs := l3hGuardTreeDirs(t)
 	if len(dirs) == 0 {
