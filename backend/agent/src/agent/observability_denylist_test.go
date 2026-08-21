@@ -193,29 +193,76 @@ func TestObservability_DenylistAbsence(t *testing.T) {
 
 	var allEvents []agent.Event
 
-	// --- Run A: reasoning + a permission-gated tool call, sharing provider ---
+	// --- Run A: reasoning + a permission-gated tool call, sharing
+	// provider. The one call is DEFERRED on its first resolution and
+	// woken (mirroring harness_suspension_test.go's driveSuspendedRun,
+	// same agent_test package), so this run genuinely exercises BOTH
+	// permission_decision_required and permission_decision_made —
+	// R-AGO-008 item 4's own "permission" coverage word — rather than
+	// only the latter. An always-AllowOnce policy (the prior shape)
+	// never emits permission_decision_required at all: runPermissionGate
+	// (scheduler.go) constructs that event on the Defer verdict only. ---
 	toolName := "denylist_tool"
 	tool := NewScriptedTool(toolName, agent.EffectClassRead, agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: []byte(c.toolResult)})
 	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+	const denylistCallID = "call-ago-denylist-001"
+	resolveCount := 0
 	policy := &wiringTestPolicy{resolve: func(context.Context, ai.ToolCall) agent.PermissionVerdict {
+		resolveCount++
+		if resolveCount == 1 {
+			return agent.PermissionVerdict{Outcome: agent.PermissionDefer}
+		}
 		return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeAllowOnce}
 	}}
 
-	turnOneScript := agoDenylistReasoningToolCallScript(t, c, toolName, "call-ago-denylist-001")
+	turnOneScript := agoDenylistReasoningToolCallScript(t, c, toolName, denylistCallID)
 	turnTwoScript := agoDenylistTextScript(t, "final answer, no canaries here")
 	modelProviderA := agenttest.NewProvider(turnOneScript, turnTwoScript)
 
+	// A caller-owned Scheduler is required to reach WakeParked while the
+	// call is still parked mid-Schedule (design "Decision 2", the same
+	// injection harness_suspension_test.go's driveSuspendedRun uses).
+	schedA := &agent.Scheduler{}
 	hA := agent.Harness{
 		Provider:       modelProviderA,
 		System:         "system prompt for denylist absence proof",
 		Turn:           agent.TurnOptions{Tools: reg, PermissionPolicy: policy},
+		Scheduler:      schedA,
 		TracerProvider: provider,
 	}
 	sinkA := make(chan *agent.Event, 512)
-	if _, _, err := hA.Run(contextBackground(), agoDenylistPromptMessage(t, c.prompt), sinkA); err != nil {
+	runAErrCh := make(chan error, 1)
+	go func() {
+		_, _, err := hA.Run(contextBackground(), agoDenylistPromptMessage(t, c.prompt), sinkA)
+		runAErrCh <- err
+	}()
+
+	// Read the stream event by event (synchronization by channel reads
+	// only, never a wall clock) so the parked call can be woken once its
+	// own permission_decision_required is observed. Run closes sinkA
+	// when it returns (harness.go's defer close(sink)), which ends this
+	// range.
+	sawDecisionRequired := false
+	for ev := range sinkA {
+		allEvents = append(allEvents, *ev)
+		if sawDecisionRequired {
+			continue
+		}
+		req, isReq := ev.PermissionDecisionRequired()
+		if !isReq || req.CallID() != denylistCallID {
+			continue
+		}
+		sawDecisionRequired = true
+		if err := schedA.WakeParked(denylistCallID); err != nil {
+			t.Fatalf("WakeParked(%q) = %v, want nil", denylistCallID, err)
+		}
+	}
+	if !sawDecisionRequired {
+		t.Fatal("Run A never observed permission_decision_required on the consumer stream")
+	}
+	if err := <-runAErrCh; err != nil {
 		t.Fatalf("Run A returned err = %v, want nil", err)
 	}
-	allEvents = append(allEvents, drainSink(t, sinkA)...)
 
 	// --- Run B: a compaction call, sharing the same provider ---
 	hB, hist, _ := markedHarnessForCompaction(t, "denylist-001")
