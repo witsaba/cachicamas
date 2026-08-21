@@ -180,12 +180,12 @@ Discharges: the archive obligation for all five spec sets plus the three back-an
 
 ## Verification gates (run before PR, and again before merge)
 
-- [ ] G.1 `cd backend/agent && make test` — forces `go test -race -count=1 ./...`. A `(cached)` result is **not evidence**; confirm uncached wall-clock duration is reported (`src/ai/openaicompat` alone runs ~170s when uncached).
-- [ ] G.2 `bin/golangci-lint cache clean && cd backend/agent && make lint` — clean cache first; a stale cache artifact has previously masqueraded as a finding in this repo.
-- [ ] G.3 `cd backend/agent && make vuln-check` — run as its own gate; it is **not** part of `make all`.
-- [ ] G.4 `gofmt -l .` (backend/agent module root) — **never `make all`**, whose fmt stage rewrites committed files and manufactures failures. Confirm no newly-dirty file among this change's own additions.
-- [ ] G.5 Confirm every pre-existing guard stays green: import-boundary (now 5 checks), no-ambient-authority, doc-contract row count, `hksScopeFenceByteUnchangedFiles()` (17 entries incl. restored `scheduler.go`), `del024ByteUnchangedFiles()`, and `backend/agent/go.mod`/`go.sum`/`src/ai/` byte-freeze (`git diff main -- backend/agent/go.mod backend/agent/go.sum backend/agent/src/ai/` empty).
-- [ ] G.6 Confirm all five planted bites across WU-1/2/4 were watched FAILING for the correct reason, then reverted, with `git status --short` clean after each.
+- [x] G.1 `cd backend/agent && make test` — forces `go test -race -count=1 ./...`. A `(cached)` result is **not evidence**; confirm uncached wall-clock duration is reported (`src/ai/openaicompat` alone runs ~170s when uncached).
+- [x] G.2 `bin/golangci-lint cache clean && cd backend/agent && make lint` — clean cache first; a stale cache artifact has previously masqueraded as a finding in this repo.
+- [x] G.3 `cd backend/agent && make vuln-check` — run as its own gate; it is **not** part of `make all`.
+- [x] G.4 `gofmt -l .` (backend/agent module root) — **never `make all`**, whose fmt stage rewrites committed files and manufactures failures. Confirm no newly-dirty file among this change's own additions.
+- [x] G.5 Confirm every pre-existing guard stays green: import-boundary (now 5 checks), no-ambient-authority, doc-contract row count, `hksScopeFenceByteUnchangedFiles()` (17 entries incl. restored `scheduler.go`), `del024ByteUnchangedFiles()`, and `backend/agent/go.mod`/`go.sum`/`src/ai/` byte-freeze (`git diff main -- backend/agent/go.mod backend/agent/go.sum backend/agent/src/ai/` empty).
+- [x] G.6 Confirm all five planted bites across WU-1/2/4 were watched FAILING for the correct reason, then reverted, with `git status --short` clean after each.
 
 ---
 

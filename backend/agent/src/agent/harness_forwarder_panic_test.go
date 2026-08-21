@@ -49,7 +49,7 @@ func TestRun_PanicUnwind_ForwarderNeverSendsOnClosedSink(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		sentinel := &harnessForwarderPanicSentinel{iteration: i}
 
-		hook := func(ctx context.Context, req ai.Request) (ai.Request, error) {
+		hook := func(_ context.Context, _ ai.Request) (ai.Request, error) {
 			panic(sentinel)
 		}
 

@@ -106,7 +106,8 @@ func ExampleHarness() {
 	if _, _, err := h.Run(context.Background(), exampleUserMessage("hi"), sink); err != nil {
 		panic(err)
 	}
-	for range sink {
+	for ev := range sink {
+		_ = ev // draining to close; this example's own output does not depend on any event's content.
 	}
 
 	fmt.Println("harness built with system prompt:", h.System)
@@ -125,7 +126,8 @@ func ExampleHarness_Run() {
 
 	sink := make(chan *agent.Event, 64)
 	_, finish, err := h.Run(context.Background(), exampleUserMessage("hi"), sink)
-	for range sink {
+	for ev := range sink {
+		_ = ev // draining to close; this example's own output does not depend on any event's content.
 	}
 	if err != nil {
 		panic(err)

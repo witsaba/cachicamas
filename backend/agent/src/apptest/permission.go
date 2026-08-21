@@ -47,7 +47,7 @@ func NewScriptedPermissionPolicy(verdicts ...agent.PermissionVerdict) *ScriptedP
 // interface pin). It records call, then resolves the next queued verdict
 // in FIFO order. Once the queue is exhausted it returns AllowOnce and
 // latches Exhausted rather than blocking, panicking, or wedging the run.
-func (p *ScriptedPermissionPolicy) Resolve(ctx context.Context, call ai.ToolCall) agent.PermissionVerdict {
+func (p *ScriptedPermissionPolicy) Resolve(_ context.Context, call ai.ToolCall) agent.PermissionVerdict {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.resolved = append(p.resolved, call)
@@ -63,7 +63,7 @@ func (p *ScriptedPermissionPolicy) Resolve(ctx context.Context, call ai.ToolCall
 // Remember implements agent.PermissionPolicy. It returns RememberReturns
 // unconditionally — the scripted policy never decides for itself whether
 // a rule was committed; the consumer configures the answer up front.
-func (p *ScriptedPermissionPolicy) Remember(ctx context.Context, toolName string, outcome agent.PermissionOutcome) bool {
+func (p *ScriptedPermissionPolicy) Remember(_ context.Context, _ string, _ agent.PermissionOutcome) bool {
 	return p.RememberReturns
 }
 
