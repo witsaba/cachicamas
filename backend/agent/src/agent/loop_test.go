@@ -1079,7 +1079,14 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/observability_nesting_test.go") ||
 				strings.HasSuffix(path, "/observability_denylist_test.go") ||
 				strings.HasSuffix(path, "/observability_parity_test.go") ||
-				strings.HasSuffix(path, "/observability_lifecycle_test.go")
+				strings.HasSuffix(path, "/observability_lifecycle_test.go") ||
+				// AG-22 widening (Phase 11, S-AGS-068): observability_scope_test.go
+				// is AG-22's own new S-AGS-068 shipped-surface guard file,
+				// discovered during apply (this guard's own list did not
+				// anticipate Phase 11's new file). Exact filename, no
+				// wildcard/prefix/directory pattern. Byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/observability_scope_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
