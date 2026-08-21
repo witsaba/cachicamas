@@ -12,14 +12,12 @@
 // own measured closure contains go.opentelemetry.io/auto/sdk, an SDK
 // path S-AGP-024 forbids any allowlist entry from naming.
 //
-// This file holds only the constants, the ambient-acquisition helper and
-// one finalizer per span family (D-D's placement rule: a span opens iff
-// its bracket's Start event is emitted, via a deferred finalizer
-// registered at open). Nothing in this file is called by any production
-// seam yet — harness.go, loop.go, scheduler.go and compaction.go wire
-// these in at Phases 5-8; this commit only makes the OTel API import
-// boundary genuine and lands the scaffolding it will be instrumented
-// against.
+// This file holds the constants, the two tracer-acquisition helpers
+// (injected, for Harness.Run/Harness.Compact; ambient, for every nested
+// seam) and one finalizer per span family (D-D's placement rule: a span
+// opens iff its bracket's Start event is emitted, via a deferred
+// finalizer registered at open). harness.go, loop.go, scheduler.go and
+// compaction.go wire these in at Phases 5-8.
 //
 // # span.RecordError is never called in production code
 //
@@ -36,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // tracerScope is the instrumentation-scope name every Tracer this
@@ -105,6 +104,20 @@ func tracerFromContext(ctx context.Context) trace.Tracer {
 	return trace.SpanFromContext(ctx).TracerProvider().Tracer(tracerScope)
 }
 
+// tracerFromHarness resolves the tracer Harness.Run and Harness.Compact
+// record their own run span onto: h.TracerProvider (design D-A),
+// defaulting to the tracing API's own no-op provider when tp is nil, so
+// a zero-value Harness stays inert and nothing panics (R-AGO-001,
+// NFR-AGO-001). This is the ONE place a nil TracerProvider is resolved;
+// every nested seam (Turn, the scheduler, runCompaction) acquires its
+// own tracer ambiently instead, via tracerFromContext above.
+func tracerFromHarness(tp trace.TracerProvider) trace.Tracer {
+	if tp == nil {
+		tp = noop.NewTracerProvider()
+	}
+	return tp.Tracer(tracerScope)
+}
+
 // spanOutcome renders the closed-vocabulary status ADR 0005 § D3's
 // Layer 2 extension pins onto span: codes.Error with the category name
 // as its description iff failed is true, codes.Ok otherwise. category is
@@ -124,8 +137,9 @@ func spanOutcome(span trace.Span, failed bool, category string) {
 
 // finalizeRunSpan renders the run bracket's terminal attributes (outcome,
 // and iff failed the category) onto span and ends it exactly once
-// (design D-B, D-D). Registered as Harness.Run's deferred finalizer at
-// Phase 5 — not yet called from any production site in this commit.
+// (design D-B, D-D). Called from Harness.Run's own bracket-closing
+// funnel (failRun, windDownRun, the success tail — Phase 5), and from
+// Turn's own nil-continuation run bracket (Phase 6).
 func finalizeRunSpan(span trace.Span, outcome string, failed bool, category string) {
 	span.SetAttributes(attribute.String(runOutcomeKey, outcome))
 	spanOutcome(span, failed, category)

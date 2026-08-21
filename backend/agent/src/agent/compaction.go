@@ -32,6 +32,9 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -435,6 +438,22 @@ func (h *Harness) Compact(ctx context.Context, req CompactionRequest, sink chan<
 	if err != nil {
 		return err
 	}
+
+	// AG-22 (design D-A, D-D, R-AGO-001, R-AGO-002, R-AGO-007): the run
+	// span opens here, co-located with run_start — after both refusals
+	// above, neither of which ever emits an event — and is finalized
+	// uniformly at Compact's own two closing sites below (the failure
+	// arm, the success tail). h.TracerProvider defaults to the tracing
+	// API's own no-op provider when nil (tracerFromHarness).
+	tracer := tracerFromHarness(h.TracerProvider)
+	ctx, runSpan := tracer.Start(ctx, invokeAgentSpanName, trace.WithAttributes(
+		attribute.String(genAIOperationNameKey, genAIOperationNameInvokeAgent),
+		attribute.String(runIDKey, string(runID)),
+	))
+	if parentID, ok := runStart.Parent(); ok {
+		runSpan.SetAttributes(attribute.String(runParentIDKey, string(parentID)))
+	}
+
 	sendStamped(sink, stamper, runStart)
 
 	var total costAccumulator
@@ -445,11 +464,14 @@ func (h *Harness) Compact(ctx context.Context, req CompactionRequest, sink chan<
 	}
 
 	if compactErr != nil {
+		category := ""
 		if failure, ferr := typedHarnessFailureFromError(compactErr); ferr == nil {
 			if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
 				sendStamped(sink, stamper, runEnd)
 			}
+			category = failure.Category().String()
 		}
+		finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, category)
 		return compactErr
 	}
 
@@ -457,5 +479,6 @@ func (h *Harness) Compact(ctx context.Context, req CompactionRequest, sink chan<
 	if rerr == nil {
 		sendStamped(sink, stamper, runEnd)
 	}
+	finalizeRunSpan(runSpan, RunOutcomeCompleted.String(), false, "")
 	return nil
 }
