@@ -1,0 +1,88 @@
+# Delta — `agent-package-scaffold` (AG-22)
+
+> **Change**: `cachicamas-agent-observability` · **AG-22** · Target: `openspec/specs/agent-package-scaffold/spec.md`
+> **Ops**: MODIFIED `R-AGP-003` — its production-closure clause already **pre-authorises** *"such observability API paths as ADR 0005 § D3 authorises for Layer 2 **and** design explicitly selects"* (`agent-package-scaffold/spec.md:70`). AG-22 is the milestone that exercises it. The requirement is amended to record the exercise, to pin the two citation shapes an entry may carry, and to forbid an exact-path entry where a prefix is required; five scenarios (`S-AGP-031`…`S-AGP-035`) are appended.
+> **Decision**: design **D-A** and the design's *Import selection (C4)* section (`design.md:81-91`) with its *Addendum — closure measured by command* (`design.md:141-189`), binding.
+
+## This is a requirement AG-22 SATISFIES, not one it contradicts
+
+Read in this worktree, `R-AGP-003`'s production-closure paragraph (`:70`) already admits observability API paths on two conditions — § D3 authorises them for Layer 2, **and** a design explicitly selects them — and already requires that *"an entry admitted only as the forced closure of an authorised path MUST record that reasoning in place."* `S-AGP-024` (`:84`) already requires every entry to carry its authorising ADR clause and forbids any entry naming an SDK, exporter or `otelslog` path.
+
+The shipped guard's `allowedProductionPrefixes` (`backend/agent/src/agent/import_boundary_test.go:127-130`) currently holds two entries, `…/src/agent` and `…/src/ai`, and its comment at `:123-126` states in place that no OpenTelemetry or xxhash entry appears *"unlike ai_test's own allowlist."* The first production OpenTelemetry import therefore fails the guard, which is the guard working. The amendment ships in the **same commit** as that import, never as a follow-up.
+
+## The two citation shapes, and why conflating them would be a false citation
+
+ADR 0005 § D3's table (`0005:237-244`) has rows for `go.opentelemetry.io/otel` (declined), `…/otel/trace`, and `…/otel/attribute`, `/codes`, `/metric` (metric permitted, not selected). It has **no row** for a semantic-conventions package and **no row** for a non-OpenTelemetry hashing module. Two of the five entries the design selects are therefore **not § D3 table rows**, and citing a § D3 row beside them would be a citation to a line that does not say what the entry claims.
+
+| Allowlist entry | Citation it MUST carry |
+|---|---|
+| `go.opentelemetry.io/otel/trace` | § D3 table row (`0005:240`, ✅ L2). Its prefix covers the forced subpackages and the API's own no-op provider |
+| `go.opentelemetry.io/otel/attribute` | § D3 table row (`0005:241`) |
+| `go.opentelemetry.io/otel/codes` | § D3 table row (`0005:241`) |
+| `go.opentelemetry.io/otel/semconv` | **Not a § D3 row.** `R-AGP-003`'s forced-closure clause, with the measurement: pulled into the closure by `otel/trace` at the version `go.work` resolves. It is not an OpenTelemetry module of its own, so § D3's *"any additional OTel module requires its own ADR"* blockquote (`0005:257-261`) is not engaged |
+| `github.com/cespare/xxhash/v2` | **Not a § D3 row, and not an OpenTelemetry module at all.** Same forced-closure clause: pulled in by `otel/attribute`'s hashing |
+
+**The semconv entry MUST be a prefix, never an exact path.** The measurement resolves it to a *version-suffixed* package path, and that version is pinned by the OpenTelemetry release the module resolves; a later bump moves it. An exact-path entry would silently start failing on an unrelated dependency bump, and the failure would name a path nobody changed.
+
+## Not modified, and why
+
+| Element | Verdict |
+|---|---|
+| `R-AGP-003`'s forbidden-prefix table (`:72`) | **Byte-unchanged.** The SDK, exporters and `otelslog` rows stay exactly as written; AG-22 admits none of them and re-proves that one still bites (`S-AGP-035`) |
+| `R-AGP-003`'s exact-path standard-library table (`net`, `net/http`, `os`, `io/fs`) | **Byte-unchanged.** AG-22 adds no network or filesystem reach |
+| `S-AGP-025`, `S-AGP-026` — production and test closures asserted separately | **Reproduced verbatim below, unchanged.** The new entries land in the production allowlist, which the test allowlist already extends |
+| `R-AGP-004` (fresh closure re-measurement) and its scenarios | **Not modified.** AG-22's own measurement obligation is stated in `agent-observability-boundary/R-AGO-010` rather than by widening AG-03's Layer 1 measurement requirement |
+| `agent-module-scaffold` (`R-AGM-005`, `S-AGM-042`, `S-AGM-043`, `R-AGM-008`) | **Not modified, and checked.** That is **Layer 1's** guard over `src/ai/…`. Its third-party group already admits the OpenTelemetry API paths (`agent-module-scaffold/spec.md:124`) and `S-AGM-043` already requires no API path in the forbidden list (`:135`). AG-22 touches no file under `src/ai/` and adds no `require`, so neither its allowlist nor its closure pin moves |
+| `S-AGM-030` — *"`backend/agent/src/` contains exactly two entries"* (`agent-module-scaffold/spec.md:104`) | **Not falsified.** AG-22 creates no directory under `backend/agent/src/`; every new file lands inside existing `src/agent/` and `src/agenttest/` |
+
+## Header maintenance obligation at promotion
+
+`sdd-archive` MUST add **`S-AGP-031`** … **`S-AGP-035`** wherever this spec's scenario identifiers are enumerated, as a **range and never a total** (`S-LSK-020`). The Acceptance-criteria line reading *"Every scenario `S-AGP-001` through `S-AGP-066` has recorded evidence"* (`:178`) already states a range and needs no edit; no existing `S-AGP-` identifier is renumbered.
+
+## MODIFIED Requirements
+
+### R-AGP-003 — Forward import guard: Layer 2 import purity over both closures
+
+`backend/agent/src/agent/` MUST carry an executable guard that fails when any package of Layer 2 — including its test packages and their transitive dependencies — depends on anything outside an explicit allowlist.
+
+The guard MUST enumerate dependencies via the Go toolchain's own dependency listing with test dependencies included, MUST derive the standard-library set from the toolchain's own classification rather than a path-shape heuristic, and MUST normalize the synthesized test-variant entries the toolchain emits so that neither a test-variant suffix nor a test-binary path is mistaken for a real import. The guard MUST fail loudly rather than pass vacuously when the listing returns zero packages.
+
+The allowlist MUST be **deny-by-default**: a path that is neither standard library nor an explicitly admitted entry fails **even when no rule names it**.
+
+The **production** closure MUST admit only: the standard library; `github.com/cachicamas/backend/agent/src/ai` and its transitive closure as freshly measured under `R-AGP-004`; and such observability API paths as [ADR 0005 § D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) authorises for Layer 2 **and** design explicitly selects — no others. Every third-party entry MUST carry, in the guard's own source, the ADR clause authorising it; an entry admitted only as the forced closure of an authorised path MUST record that reasoning in place; and an entry that the fresh measurement does not show in the actual closure MUST record why an as-yet-unused path is admitted. The **test** closure MUST additionally admit `github.com/cachicamas/backend/agent/src/agenttest` and its subpackages, and MUST be asserted **separately** from the production closure.
+
+**The observability clause is exercised at AG-22, and the shape of its entries is pinned here rather than left to the guard's source.** Every admitted observability entry MUST be an OpenTelemetry **API** path or the forced closure of one. Each MUST carry exactly one of two citation shapes, and MUST NOT carry the other:
+
+1. an entry that **is** a § D3 table row cites that row; or
+2. an entry that is **not** a § D3 table row — including an entry that is not an OpenTelemetry module at all — cites the forced-closure clause of this requirement **together with the measurement that forced it**, and MUST NOT cite a § D3 row it does not have.
+
+An entry whose concrete measured path carries a version suffix MUST be admitted as a **prefix**, never as the exact measured path, so a later dependency bump that moves the version does not fail the guard on a path nobody changed. An observability path that § D3 permits but no design selects — the ecosystem's root global-getter package and its metric module — MUST NOT be admitted, and the declination MUST be recorded in place with its reason.
+
+The allowlist amendment MUST land in the **same commit** as the first production import that requires it. A commit that adds the import without the entry, or the entry without the import, is a violation of this requirement.
+
+The guard MUST maintain **two separate enforcement tables**. The first is a **forbidden-prefix table** for non-standard-library denials, matched **before** the allowlist, covering at minimum: the vendor adapter subtree `github.com/cachicamas/backend/agent/src/ai/openaicompat`; `…/agent/src/coding`; `…/agent/src/cmd`; `github.com/cachicamas/backend/database_administrator`; `github.com/cachicamas/backend/workspace_syncer`; `go.opentelemetry.io/otel/sdk`; `go.opentelemetry.io/otel/exporters`; `go.opentelemetry.io/contrib/bridges/otelslog`. The before-the-allowlist ordering of this table MUST be stated in source with its reason: the vendor subtree lives under an otherwise-admitted Layer 1 prefix, so an allowlist-first pass would admit it. This ordering applies only to the forbidden-prefix table.
+
+Standard-library network/filesystem denial (`net`, `net/http`, `os`, `io/fs`) MUST NOT be attempted via the forbidden-prefix table — the dependency lister filters the standard library out before either the forbidden-prefix table or the allowlist runs, so a row there is unreachable dead code. The guard MUST instead carry a **separate, exact-path table** matched over a dependency listing that includes the standard library, covering exactly `net`, `net/http`, `os`, and `io/fs`. Each entry in this exact-path table MUST be annotated with the rule it enforces, mirroring `ai_test`'s `TestRequestPath_DependencyClosure_ContainsNoNetworkOrFilesystemPackage` (AI-10.4).
+
+This guard closes on **bite proof**, not on green. An amendment to its allowlist MUST re-prove that a denied neighbour still bites: widening a prefix is exactly the edit that can silence a table nobody edited.
+
+(Previously: identical normative text without the three paragraphs above. The observability clause was pre-authorising but unexercised, so it fixed neither which citation an entry must carry when it is not a § D3 table row, nor that a version-suffixed measured path must be admitted as a prefix, nor that the amendment and the import it authorises are one commit. AG-22 is the milestone that admits the first such entries, and two of the five it admits are not § D3 rows.)
+
+#### Scenarios
+
+- **S-AGP-020** — Given the repository with no violation present, when `cd backend/agent && go test ./src/agent/...` runs, then the forward guard passes.
+- **S-AGP-021** — Given the guard's source, when its dependency listing is read, then it requests both transitive dependencies and test dependencies, uses a fully-qualified package pattern rather than a relative one, filters the standard library by the toolchain's own classification, normalizes the synthesized test-variant and test-binary entries, and fails the test when the listing returns zero packages.
+- **S-AGP-022** — Given the guard's source, when the matching order and its scope are read, then the forbidden-prefix table is checked before the allowlist AND a comment states that this ordering applies only to the forbidden-prefix table because the vendor adapter subtree lives under an otherwise-admitted Layer 1 prefix, so an allowlist-first pass would admit it.
+- **S-AGP-023** — Given the guard's source, when its two denial tables are read, then the forbidden-prefix table names every non-standard-library prefix listed in this requirement, each annotated with the rule it enforces, AND the separate exact-path table covers exactly `net`, `net/http`, `os`, and `io/fs`, matched over a dependency listing that includes the standard library, each entry annotated with the rule it enforces.
+- **S-AGP-024** — Given the guard's source, when its allowlist is read, then every non-standard-library, non-own-module entry carries the ADR clause authorising it for Layer 2, no entry names an observability SDK, exporter or `otelslog` path, and any entry absent from the fresh `R-AGP-004` measurement carries its own recorded reason for being admitted before use.
+- **S-AGP-025** — Given the guard, when the production closure and the test closure are asserted, then they are two separate assertions with separate allowlists, and the production assertion does not admit `…/src/agenttest` or its subpackages.
+- **S-AGP-026** — Given a test file in `backend/agent/src/agent/` importing `…/src/agenttest` and no production file importing it, when the guard runs over both closures, then the production closure passes without admitting the substrate AND the test closure passes admitting it.
+- **S-AGP-027** — **(bite 1)** Given a scratch file in `backend/agent/src/agent/` importing an application-layer path (`…/agent/src/coding/…`), when the forward guard runs, then it FAILS and its message names the violating import path and the rule. Recorded, then removed.
+- **S-AGP-028** — **(bite 2)** Given a scratch file in `backend/agent/src/agent/` importing `net/http`, when the forward guard runs, then it FAILS and its message names the violating import path. Recorded, then removed.
+- **S-AGP-029** — **(bite 3)** Given a scratch file in `backend/agent/src/agent/` importing the vendor adapter subtree `…/src/ai/openaicompat/…`, when the forward guard runs, then it FAILS naming the violating import path AND the recorded reason is the deny-by-name prefix rule, not a network side effect nor the deny-by-default rule.
+- **S-AGP-030** — Given the merged diff of this change, when it is inspected, then no scratch violation file appears in it, `git status` reports a clean tree, and `backend/agent/go.mod` gained no `require` entry.
+- **S-AGP-031** — **(AG-22)** Given the guard's source after AG-22, when its production allowlist is read, then every observability entry is an OpenTelemetry API path or the forced closure of one; each entry that **is** a § D3 table row cites that row; and each entry that is **not** a § D3 table row cites this requirement's forced-closure clause together with the measurement that forced it, and cites no § D3 row.
+- **S-AGP-032** — **(AG-22)** Given that same allowlist, when the entry covering the semantic-conventions package is read, then it is a **prefix** rather than the exact version-suffixed path the measurement returns, and a comment in place states that a later dependency bump moves that version — so an exact-path entry would fail on a path nobody changed.
+- **S-AGP-033** — **(AG-22)** Given that same allowlist, when a reader looks for the ecosystem's root global-getter package and its metric module, then neither is admitted, and a note in place records each declination with its reason: the root package's own measured closure contains an auto-instrumentation SDK path, which `S-AGP-024` forbids an entry from naming, and the metric module is permitted by § D3 but selected by no design.
+- **S-AGP-034** — **(AG-22)** Given the single commit that introduces Layer 2's first production OpenTelemetry import, when its diff is inspected, then the allowlist amendment is in that same commit; and given the commit's parent, when the forward guard is run against a tree carrying the import without the amendment, then it FAILS naming the unadmitted path and the deny-by-default rule. That red output is recorded — it is what proves the guard was working rather than absent.
+- **S-AGP-035** — **(bite 4, AG-22)** Given the widened allowlist and a scratch production file in `backend/agent/src/agent/` importing a package under `go.opentelemetry.io/otel/sdk`, when the forward guard runs, then it FAILS **on the forbidden-prefix rule**, naming the offending path — proving the widened observability prefixes did not go over-broad and did not shadow the denial table. Recorded, then removed; the merged diff contains no scratch file.

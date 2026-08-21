@@ -61,7 +61,7 @@ This applies to Layer 2 spans without exception or carve-out. Concretely it forb
 | Spec | Line | Text | Verdict |
 |---|---|---|---|
 | `agent-module-scaffold` | `:124-128`, `:135` | Third-party group admits OTel **API** paths with § D3 annotation; `S-AGM-043` requires no API path in the forbidden list | Layer 1's guard, unchanged by AG-22; **no go.mod amendment** |
-| `agent-v1-scope` | `:343` (`S-AGS-066`) | "…declares **no** concrete hook, no cache-breakpoint placement, no compaction policy and **no telemetry sink**" | AG-22 ships **no sink** (no provider registration, no exporter) and no hook — but this is an absolute quantifier over the package surface and MUST be re-read at spec time |
+| `agent-v1-scope` | `:343` (`S-AGS-066`) | "…declares **no** concrete hook, no cache-breakpoint placement, no compaction policy and **no telemetry sink**" | **FALSIFIED — verdict moved at spec time.** This row originally read "ships no sink", hedged on a re-read. The re-read happened, and design D-A settles it the other way: an injected exported `Harness.TracerProvider` seam *is* a telemetry sink on the package surface. A MODIFIED `agent-v1-scope` delta amends `S-AGS-066` and adds `S-AGO`-guarded `S-AGS-068`. Note that **no shipped test fails** — the enforcing test checks only `hooks.go` wall clocks and zero-value `Hooks` inertness — so this was a pure spec-text falsification. |
 | `agent-hook-taxonomy` | `:328` | "Any concrete hook — cache breakpoints, compaction policy, telemetry → **Layer 3**" | AG-22 instruments the runtime directly; it ships no telemetry **hook** |
 | `agent-concurrency-hardening` | `:181` | "Telemetry or spans over the hardened assembly → **AG-22**" | Pre-planned handoff; no contradiction |
 
