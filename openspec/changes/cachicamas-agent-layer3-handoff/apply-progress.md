@@ -1,6 +1,6 @@
 # Apply progress — AG-23: Publish the Layer 3 readiness contract
 
-**Status**: WU-1 through WU-9 complete, all committed, all final gates green. **WU-10 (archive) deliberately NOT run**, per the orchestrator's explicit instruction — the change folder stays in place and the delta specs stay un-promoted for `sdd-verify` to review next.
+**Status**: WU-1 through WU-9 complete, all committed, all final gates green. **WU-10 (archive) deliberately NOT run**, per the orchestrator's explicit instruction — the change folder stays in place and the delta specs stay un-promoted for `sdd-verify` to review next. **Round-1 remediation complete** (this document's final section) — sdd-verify round 1 returned FAIL (1 CRITICAL, 13 WARNING, 3 SUGGESTION); every closable finding is closed and re-verified independently in this pass, committed in 5 separate work units on top of the original 9. WU-10 is still deliberately not run.
 
 **Mode**: Strict TDD (active, per session config).
 
@@ -54,7 +54,7 @@
 | 1 | `go test -race -count=1 ./src/agent/... -run TestRun_PanicUnwind_ForwarderNeverSendsOnClosedSink -v` | PASS, 100/100 iterations, 1.324s (post-fix) | The RED test itself drives a real `Harness.Run` through the panic-unwind path — this test IS the harness | Revert `harness.go`, delete `harness_forwarder_panic_test.go` |
 | 2 | `go test -race -count=1 ./src/agent/... -run TestLayer2 -v` | PASS, all TestLayer2\* green, 1.4–1.7s | N/A — AST-only guard | Revert `import_boundary_test.go` only |
 | 3 | `go test -race -count=1 ./src/apptest/...` | PASS, 1.3–2.5s | Real scripted permission/tool scenario against a live `agent.Harness` (`determinism_test.go`'s `detRunScenario`) | Delete `src/apptest/` |
-| 4 | `go test -race -count=1 ./src/layer3handoff/...` | PASS, 6 sequential stages + vocabulary guard, 1.5–2.6s | Real, full 7-capability `agent.Harness` run sequence — this test IS the runtime harness | Delete `src/layer3handoff/` |
+| 4 | `go test -race -count=1 ./src/layer3handoff/...` | PASS, **7** sequential stages (post-remediation W-4/W-5, was 6) + vocabulary guard, 1.5–2.8s | Real, full 7-capability `agent.Harness` run sequence — this test IS the runtime harness | Delete `src/layer3handoff/` |
 | 5 | `go test -race -count=1 ./src/agent/... -run Example -v` | PASS, all 4 examples, output verified, identical in isolation and full suite | The examples themselves execute a live `Harness` | Delete `example_test.go` |
 | 6 | N/A — documentation | `TestDocContract_*` green, row count unchanged | N/A | Revert `doc.go`'s new section and delete `decision.md` |
 | 7 | `go test -race -count=1 ./src/agent/... -run TestHooks_ScopeFence` and `scope_fence_test.go` suite | PASS (2 green, 2 correctly SKIP on their own documented anti-vacuity floor since `loop.go`/`scheduler.go` are unchanged by this branch) | N/A — guard-list edit | Revert `hooks_test.go`'s two edits independently |
@@ -120,13 +120,14 @@
 
 **Tasks 4.1–4.6: all complete.**
 
-- `TestLayer3Handoff_ConsumerProof`: one sequential driver, six `t.Run` stages (capabilities 2+3 combined into one stage since they share one `Run` call — documented explicitly in the stage's own comment rather than left implicit):
+- `TestLayer3Handoff_ConsumerProof`: one sequential driver. **[Updated by Round-1 remediation, W-4/W-5 — see that section.]** At original apply time this shipped as **six** `t.Run` stages (capabilities 2+3 combined into one stage since they share one `Run` call); sdd-verify round 1's W-4 found this violated `S-L3H-002`'s own literal "one stage per capability" clause, so remediation split it into **seven** stages, one per acceptance capability, renumbering to match the capability ordinals the stage comments already used:
   1. `01_construction_from_injected_fakes` — asserts every public field is populated from fakes only.
-  2. `02_multiturn_and_scripted_permission_suspension` — Run #1: a tool-call turn whose permission decision is deferred then resolved via `Scheduler.WakeParked` (mirroring `src/agent`'s own `harness_suspension_test.go` mechanism one layer up), followed by a text-completion turn. This stage's own read loop performs exactly what `apptest.DrainAndCheck` does internally (accumulate to close, then `agent.CheckStream`) but inlined, because it must intercept mid-stream to call `WakeParked`; documented as such in the stage's own comment.
-  3. `03_interrupt` — Run #2 over an `agenttest.Hold` gate; `Interrupt()` once `gate.Reached()`; `apptest.DrainAndCheck` used directly (no mid-stream interception needed here, since the gate signal is a separate channel).
-  4. `04_resumed_prompt` — Run #3 on the same `Harness` value.
-  5. `05_second_harness_over_seeded_transcript` — `hist.Entries()` → `Entry.Message()` → `agent.NewSeededHistory` → a fresh `Harness{History: seeded}` → one more run.
-  6. `06_closing_validation_every_drain_clean` — re-confirms every one of the four `StreamReport`s is clean.
+  2. `02_multiturn_and_tool_execution` — Run #1: a tool-call turn whose permission decision is deferred then resolved via `Scheduler.WakeParked` (mirroring `src/agent`'s own `harness_suspension_test.go` mechanism one layer up), followed by a text-completion turn; asserts turn brackets, the tool's execution AND result **on the drained stream** (W-5 strengthening, not only via the fake's own invocation counter), and the run's own finish/content. This stage's own read loop performs exactly what `apptest.DrainAndCheck` does internally (accumulate to close, then `agent.CheckStream`) but inlined, because it must intercept mid-stream to call `WakeParked`; documented as such in the stage's own comment.
+  3. `03_scripted_permission_suspension` — reads the SAME Run #1 stream stage 2 already collected (no re-drive); asserts the suspension AND its resolution, in order, **on the drained stream** (W-5 strengthening — `permission_decision_required` strictly before `permission_decision_made` by stream index), plus the scripted policy's own exhaustion/resolved-count state.
+  4. `04_interrupt` — Run #2 over an `agenttest.Hold` gate; `Interrupt()` once `gate.Reached()`; `apptest.DrainAndCheck` used directly (no mid-stream interception needed here, since the gate signal is a separate channel).
+  5. `05_resumed_prompt` — Run #3 on the same `Harness` value.
+  6. `06_second_harness_over_seeded_transcript` — `hist.Entries()` → `Entry.Message()` → `agent.NewSeededHistory` → a fresh `Harness{History: seeded}` → one more run.
+  7. `07_closing_validation_every_drain_clean` — re-confirms every one of the four `StreamReport`s is clean.
 - `generic_client_guard_test.go`: a letter-boundary (not regexp's own underscore-permissive `\b`) scan for eight terms, assembled at run time via `l3hGuardConcat`. **Bite 4.5**: planted `scratch_bite_4_5_test.go` in `src/layer3handoff` containing `func read_file() {}`. Ran `TestGenericClientBoundary_VocabularyScan_PassesOverBothTreesIncludingItself`: **FAILED** — `tree "layer3handoff" carries denied vocabulary: [{base:scratch_bite_4_5_test.go needle:file}]`. Reverted; confirmed clean, re-ran green.
 - **Apply-time discovery**: my own hook-fixture attempt with regexp's own `\b` word boundary did NOT catch `read_file` (underscore counts as a word character in `\b`), which would have silently defeated the whole bite. Rewrote the boundary check to `(^|[^a-zA-Z])needle([^a-zA-Z]|$)` (a letter boundary, not a word boundary) before the bite passed.
 - **Apply-time discovery, own commit**: the guard itself needs `os.ReadDir`/`os.ReadFile` to scan its sibling trees, which check 5 (its own scope) denies inside `src/layer3handoff`. Excluded `generic_client_guard_test.go` by exact name from check 5's own scan (`layer2SiblingTreeSelfExcludedFile` in `import_boundary_test.go`), with the identical reasoning `import_boundary_test.go`'s own `os.ReadDir` use over Layer 2 production already carries: verification tooling reading already-committed source is not part of the runtime surface it scans. Recorded in both the guard source and `generic_client_guard_test.go`'s own package comment.
@@ -219,3 +220,94 @@
 ## Issues found
 
 None beyond the budget overage and the pre-existing, out-of-scope lint finding, both already detailed above.
+
+---
+
+# Round-1 remediation (sdd-verify)
+
+**Verdict remediated**: FAIL — 1 CRITICAL, 13 WARNING, 3 SUGGESTION (`verify-report.md`, round 1).
+**Mode**: Strict TDD (active). **Scope**: this remediation only; WU-10 (archive) still deliberately not run.
+**Method**: every fix below was independently re-verified by this phase — build/plant/watch-fail/revert/watch-green — not merely asserted from the verify report's own text.
+
+## TDD Cycle Evidence (functional changes only; documentation-only findings have no RED/GREEN cycle and are not listed here)
+
+| Change | RED (defect reproduced) | GREEN (fix passes) | REFACTOR |
+|---|---|---|---|
+| W-9 — check-5 (tree, filename) keying | Planted `src/apptest/generic_client_guard_test.go` importing `os`+`time` against the **unfixed** guard: `TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport` **PASSED** (bug: escape hatch confirmed live) | Added `layer2SiblingTreeSelfExcludedTreeImportPath` and keyed the exclusion on the pair; same probe now **FAILS** naming `generic_client_guard_test.go`, `os` and `time` | Probe deleted; full `TestLayer2*` sweep re-run green; `git status --porcelain` confirmed clean |
+| W-5 — stream-level tool/permission assertions | Bite: pointed all 4 new lookups (`ToolStart`/`ToolEndSuccess`/`PermissionDecisionRequired`/`PermissionDecisionMade`) at a nonexistent call ID: stages 02 and 03 both **FAILED** with the intended messages | Reverted to the real `toolCallID`; both stages **PASS** | Bite code removed via restore-from-backup; `grep` for the bite marker returned no match; full package re-run green |
+| W-10 — per-tree vacuity floor | Temporary probe test called `l3hGuardScan(t, t.TempDir())` (empty dir) against the **unfixed** scanner: no floor existed to fire (function would have returned zero violations, passing vacuously) | Added the per-tree `len(units)==0` floor; same probe now **FAILS** naming the empty path | Probe test deleted; `grep` for its name returned no match; `TestGenericClientBoundary_*` re-run green |
+
+Additional, unplanned confirmation: while wording the W-10 floor's own comment, an early draft used the literal words "file" and "directory" and the vocabulary guard immediately caught its own new comment (`tree "layer3handoff" carries denied vocabulary: [...]`) — a live, unrehearsed demonstration that `S-L3H-044`'s non-self-tripping property genuinely holds. Reworded to "source unit"/"location"; re-ran green.
+
+## Work Unit Evidence (remediation work units)
+
+| WU | Focused test command | Result | Runtime harness | Rollback boundary |
+|---|---|---|---|---|
+| R-1 (CRITICAL-1) | N/A — documentation-only correction | `openspec/specs/agent-run-driver/spec.md` promotion target unaffected pre-archive; no code path | N/A | Revert the one commit; touches only `specs/agent-run-driver/spec.md`, `design.md`, `tasks.md` inside this change's own folder |
+| R-2 (W-9, W-11) | `go clean -testcache && go test -race -count=1 ./src/agent/... -run TestLayer2` | PASS, all `TestLayer2*` green | AST-only guard; no runtime harness | Revert one commit; touches only `import_boundary_test.go` + `design.md`'s stdlib-blind-spot paragraph |
+| R-3 (W-4, W-5, W-10) | `go clean -testcache && go test -race -count=1 ./src/layer3handoff/...` | PASS, 7 stages + vocabulary guard, 2.4–2.8s | Real, full 7-capability `agent.Harness` run sequence — this test IS the runtime harness | Revert one commit; touches only `layer3handoff_test.go` + `generic_client_guard_test.go` |
+| R-4 (W-12) | `go clean -testcache && go test -race -count=1 ./src/agent/... -run TestHooks_ScopeFence` | SKIP (expected — `loop.go` untouched by this branch), message now names what already ran | N/A — message-only change | Revert one commit; touches only `hooks_test.go`'s skip message |
+| R-5 (W-2, W-6, W-7, W-8) | N/A — documentation-only | N/A | N/A | Revert one commit; touches only `decision.md`, `proposal.md`, `specs/agent-layer3-handoff/spec.md`, `tasks.md` |
+
+## Per-finding disposition
+
+**CRITICAL-1 — `S-RUN-115` false mechanism. CLOSED.**
+Re-planted defeat A myself (`select { case sink <- ev: case <-forwarderAbort: return }` → bare `sink <- ev`, join kept): confirmed **deadlock** (`panic: test timed out after 30s`, goroutine blocked on the join's receive, goroutine blocked on the forwarder's own send) — never a crash. Corrected `S-RUN-115` and the trailing "Both defeat directions are load-bearing" sentence in `specs/agent-run-driver/spec.md` so each direction names its true mechanism (A → termination → hang; B → happens-before → crash). **Grepped the entire change folder plus `harness.go`/`harness_forwarder_panic_test.go`** for every other assertion of the old ("crashes on iteration 1") mechanism: found and corrected **2 further occurrences** — `design.md`'s AD-1 "Defeat in both directions" narrative, and `tasks.md`'s WU-1.4 task description. Checked and found **already accurate** (no fix needed): `apply-progress.md` § WU-1.4 (already reports the true deadlock and explicitly disclaims the "crash on iteration 1" design prediction), `decision.md` § 4.3 (describes only the original pre-fix defect, not defeat A specifically), and the Go comments in `harness_forwarder_panic_test.go`/`harness.go` (describe only the original RED, `S-RUN-114`, correctly). **Total: 3 files corrected, 2 files independently confirmed already correct.**
+
+**W-9 — check-5 self-exclusion escape hatch. CLOSED**, see TDD Cycle Evidence above. `git diff --stat` on the fix: `import_boundary_test.go` +47/-15 lines (comment + one new const + one signature change + one call-site update).
+
+**W-1 — missing bite records. CLOSED.** Both re-executed independently:
+- `S-HKS-027` second half: added `"import_boundary_test.go"` back to `hksScopeFenceByteUnchangedFiles()`'s list, ran `TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind` → **FAILED**: `hooks_test.go:1615: backend/agent/src/agent/import_boundary_test.go is not byte-unchanged against 9c55eeda5edebe8e8dde636d9d0a0de4eef34f6a (R-HKS-010)`. Reverted (`git checkout --`); confirmed the file's diff against the pre-plant state was empty and the test returned to its baseline `--- SKIP` (`loop.go` untouched by this branch).
+- `S-AGP-041` withheld-allowlist red output: removed the two `allowedTestPrefixes` entries (`.../src/apptest`, `.../src/layer3handoff`), ran `TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction` → **FAILED**, naming, per pattern: `.../src/apptest`, `.../src/apptest_test`, and (via `layer3handoff`'s own import of the kit) `.../src/layer3handoff`, `.../src/layer3handoff_test` — a richer failure surface than the original claim, all for the same reason. Reverted; re-ran `TestLayer2*` green.
+
+**W-2 — `make test` / `-count=1` self-contradiction. CLOSED.** Grepped `openspec/specs/` first, as instructed: `agent-run-driver/spec.md:6` (a **shipped**, already-merged spec — not this change's own delta) pins `cd backend/agent && make test` (`go test -race -v ./...`) **verbatim**, with no `-count=1`. This confirms the Makefile must stay untouched — changing it would falsify an already-shipped spec pin. Corrected the **text** instead, in every place asserting the false gloss: `S-L3H-002`, `NFR-L3H-B`'s own body, `S-L3H-055` and `S-L3H-056` (`specs/agent-layer3-handoff/spec.md`), `tasks.md`'s `G.1`, and `proposal.md`'s TDD-runner row — 4 files, requiring `go clean -testcache` immediately before whole-module evidence runs and reserving `-count=1` for focused/single-package commands. The evidence itself was always sound (apply used `go clean -testcache`, reproduced twice more by this phase at 172s and 174s uncached).
+
+**W-3 — `make lint` exit code. INVESTIGATED, recorded honestly (partially divergent from the original claim).**
+- Byte-identity **confirmed**: `git diff main...HEAD --stat -- backend/agent/src/ai/openaicompat/openrouter/conformance/doc_matrix_guard_test.go` is empty; full `git diff main -- <path>` is 0 lines.
+- `S-L3H-056` re-scoped to this change's own packages (folded into the W-2 commit above): `golangci-lint cache clean && golangci-lint run --config=.golangci.yml ./src/agent/... ./src/apptest/... ./src/layer3handoff/...` → **0 issues**, reproduced twice.
+- **Divergence, reported rather than hidden**: this phase's own repeated reproduction attempts (pinned `bin/golangci-lint` v2.9.0, cache-cleaned; and the globally available v2.12.2) both returned **0 issues / exit 0** for the **whole module**, not apply's/verify's claimed exit 1. Root cause identified precisely: 8 of the 9 files in `.../openrouter/conformance` carry their own `//nolint:revive // underscore in package name...` comment; `doc_matrix_guard_test.go` is the one file that does not. `revive`'s package-name diagnostic and golangci-lint's nolint suppression appear to be sensitive to which file in that 9-file package the diagnostic gets attributed to in a given run — this phase could not pin down why that attribution differs between runs/environments in the time available. What is unaffected by this divergence: the file is genuinely byte-identical to `main` either way, so whether or not the finding surfaces in a given invocation, it is not this change's own defect, and `src/ai/` is byte-frozen regardless. Recorded as an open, unresolved environmental discrepancy rather than claimed as reproduced.
+
+**W-4 — one stage per capability. CLOSED**, see TDD Cycle Evidence and WU-4's corrected description above.
+
+**W-5 — stream-level assertions for tool execution and permission resolution. CLOSED**, see TDD Cycle Evidence above.
+
+**W-6 — self-certifying Evidence cells. CLOSED.** Confirmed via `git diff main -- docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` that for all 8 checkbox-flip rows (2161, 2162, 2164, 2165, 2166, 2167, 2169, 2181), **only the `- [ ]`→`- [x]` character changed** — the "— closed by AG-NN." annotation text is byte-identical at the merge base. Re-pointed the 7 non-self rows' Evidence cells in `decision.md` § 3 at that pre-existing, merge-base-resolvable annotation instead of "flipped this change".
+
+**W-7 — incomplete seam triples. CLOSED.** Read `Harness`/`TurnOptions` (`harness.go`, `loop.go`) to identify every seam's real behavior without naming a Go identifier. Added the explicit `**Seam —** … Injection point: … v1 default: …` triple to all 8 previously-incomplete seams: the tool registry, the wider hook-family registration surface, the caller-owned wake handle, the transcript, the tracing-API provider, the failover policy, the context-reduction policy, and the in-frame delegation door — matching the 3 that already had it (provider, decision port, singular pre-request field). All 11 named seams now carry the triple. Re-scanned for forbidden vocabulary after editing (see W-8).
+
+**W-8 — "terminal" ×3. CLOSED.** Reworded all three adjectival uses in `decision.md` (a **final** decision / a shutdown, dropping the redundant adjective / the run's own **final** figure). Re-ran the letter-boundary scan (`grep -noE "(^|[^a-zA-Z])(file|shell|skill|terminal)([^a-zA-Z]|$)"`, plus a plain-substring cross-check) over the edited file: **one** occurrence of the set remains, "terminals" inside § 6's row 1, which is a byte-verbatim quotation of doc 0003:2152's own closing-checklist wording (confirmed via `grep` against doc 0003 directly) in a column explicitly captioned "Item (doc 0003's own words)" — a required quotation for traceability, not a substantive leak, and left unchanged.
+
+**W-9 — see above, CLOSED.**
+
+**W-10 — vacuity floor. CLOSED**, see TDD Cycle Evidence above.
+
+**W-11 — stdlib blind-spot claim. CLOSED (corrected, not merely restated).** Read the actual mechanism: check 5 is direct-imports-only (zero-hop) and check 2's closure filters the standard library out **before** its allowlist ever runs — so a standard-library **intermediary** (e.g. `text/template`, which itself reaches `os`) is invisible to **both** checks. The guard's own comment (and `design.md`'s AD-2 mirror) previously claimed this was "closed elsewhere"; that claim was false for exactly this intermediary case. Corrected both comments to state the residual gap accurately: a non-standard-library intermediary is still bounded (it would need its own allowlist entry), a standard-library one is not, and `R-L3H-002`'s own "by name" phrasing is honored either way.
+
+**W-12 — SKIP ambiguity. CLOSED**, see commit R-4 above.
+
+**W-13 — review budget. RECORDED AS FACT, not resolved by narrowing scope.** Final counted total (`git diff --numstat main...HEAD -- . ':!openspec'`, post-remediation, all 5 remediation commits included): **2333 lines** (2252 insertions + 81 deletions across 20 files) — up from the original apply/verify figure of 2216/2218, because remediation added genuine new assertions (W-4/W-5's stream-level checks and the extra stage), corrected/expanded comments (W-9, W-11), and a new floor (W-10), none of which narrow scope or remove coverage. The user's `size:exception` grant covers the original overage; this remediation adds to it rather than resolving it, and that increase is reported here rather than minimized.
+
+**S-2 — a mechanical markdown vocabulary scan over `decision.md`. NOT IMPLEMENTED; reason recorded.** Investigated and declined for two concrete reasons surfaced during this same remediation, not hypothetical ones:
+1. **False-positive risk, demonstrated, not merely predicted.** `decision.md` § 6 legitimately quotes doc 0003's own checklist wording verbatim, which contains "terminals" (see W-8). A naive whole-file scan would flag this legitimate quotation, requiring a carve-out mechanism — and this phase watched, first-hand, a much simpler version of exactly this failure mode fire minutes earlier while drafting W-10's own guard comment (the vocabulary guard caught its own new prose). A carve-out precise enough to exempt only the doc-0003 quotation without also silently exempting a real future leak is not "cheap" — it is the same class of scoping problem `W-9` just proved is easy to get wrong.
+2. **Archive-path fragility.** `decision.md` lives in `openspec/changes/cachicamas-agent-layer3-handoff/` today and moves to `openspec/changes/archive/2026-08-21-cachicamas-agent-layer3-handoff/` at WU-10. A Go-level test hardcoding (or `runtime.Caller`-resolving) a path to it would need updating the moment archive runs — precisely the "the archive path moves" problem `AD-6` already solved for `src/agent/doc.go`'s own pointer section by using a name reference instead of a path. Coupling `backend/agent`'s Go test suite to an `openspec/` path this same change is about to relocate is a fragile addition for a suggestion-level item.
+
+Given both, the existing hand-check (already exercised in this remediation pass) is judged adequate for this milestone; a durable version of this check, if wanted, belongs after archive settles the path, as its own follow-up.
+
+## Final verification gates (post-remediation)
+
+- **G.1** — `cd backend/agent && go clean -testcache && make test`: **PASS**, exit 0, **14/14 packages `ok`, 0 failed**, confirmed uncached twice more by this phase (`src/ai/openaicompat` at 170.654s and 173.189s across two separate full runs post-remediation, plus the original apply/verify figures — never a `(cached)` result). Total wall-clock 172–174s both times.
+- **G.2** — `golangci-lint cache clean && make lint`: scoped to this change's own packages (`./src/agent/... ./src/apptest/... ./src/layer3handoff/...`): **0 issues**, reproduced twice. Whole-module: **0 issues / exit 0** in this phase's own repeated reproduction (see W-3's honest divergence note above) — differs from the original apply/verify claim of exit 1; the underlying file is byte-identical to `main` regardless.
+- **G.3** — `make vuln-check`: exit 0, **0** `"type": "finding"` entries.
+- **G.4** — `gofmt -l backend/agent/src`: same 15 pre-existing dirty files as at original apply time; confirmed the intersection with every file this remediation touched (`import_boundary_test.go`, `hooks_test.go`, `layer3handoff_test.go`, `generic_client_guard_test.go`) is empty.
+- **G.5** — import-boundary (5 checks, all green, including the corrected check 5), no-ambient-authority, doc-contract row count, `hksScopeFenceByteUnchangedFiles()` / `del024ByteUnchangedFiles()` (both unchanged by remediation), and `git diff main -- backend/agent/go.mod backend/agent/go.sum backend/agent/src/ai/ backend/agent/src/agenttest/` (0 lines) — all confirmed.
+- **G.6** — every plant this remediation performed (W-9's pre-fix and post-fix probes, W-1's two bite re-executions, W-5's bogus-call-ID bite, W-10's empty-tree probe) was watched producing the exact expected output, then reverted, with `git status --porcelain` confirmed clean after each and after the whole pass. **Base checkout safety**: `git -C /Users/braejan/workspace/witsaba/repositories/cachicamas status --porcelain` confirmed empty before, during (spot-checked), and after this remediation.
+
+## Commits (this remediation, on top of the original 9)
+
+1. `fix(openspec): AG-23 -- correct S-RUN-115's falsified defeat-A mechanism` — CRITICAL-1
+2. `fix(agent): AG-23 -- close the check-5 self-exclusion escape hatch` — W-9, W-11
+3. `test(layer3handoff): AG-23 -- one stage per capability, stream-level assertions, per-tree floor` — W-4, W-5, W-10
+4. `test(agent): AG-23 -- clarify the scope-fence SKIP is not "unenforced"` — W-12
+5. `docs(openspec): AG-23 -- close the remaining sdd-verify round-1 warnings` — W-2, W-3 (rescope only), W-6, W-7, W-8
+
+W-1 and W-13 required no code/doc change beyond what commits 1–5 already carry (W-1's evidence is recorded in this document only; W-13 is a fact, not a fix). S-2 was investigated and declined with reasons recorded above.
