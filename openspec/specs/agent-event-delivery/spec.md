@@ -3,7 +3,7 @@
 > **Capability**: `agent-event-delivery` (new) · **Change**: `cachicamas-agent-event-delivery`
 > **Milestone**: AG-01 — Decide event delivery and the observer model · **Node**: AG-01.1 `[decision]`
 > **Format**: RFC 2119 keywords + Given/When/Then, per `openspec/config.yaml`
-> **Requirement IDs**: `R-AGE-0NN` · **Scenario IDs**: `S-AGE-0NN`
+> **Requirement IDs**: `R-AGE-0NN` · **Scenario IDs**: `S-AGE-0NN` (allocated `S-AGE-001` through `S-AGE-031`)
 > **Binding vocabulary**: AG-00's Layer 2 register — every Layer 2 noun below is one of its rows, cited, never redefined here
 > **Frozen input, not amended**: [Layer 1 stream lifecycle](../../../../specs/ai-stream-lifecycle/spec.md)
 > **Sources**: `proposal.md` and `explore.md` of this change · doc 0003 AG-01 charter · doc 0001 § 2.2, § 2.3, § 4.3
@@ -133,6 +133,13 @@ The decision MUST make envelope invariant 3 structural. It MUST name a **decoupl
 
 (Previously: the requirement carried no record of whether the mechanism it demanded had ever been exercised against a real observing hook. `agent-event-envelope/spec.md:268` reserved invariant 3 as closed by "AG-01.1 + AG-20.2", so a reader after the AG-20 merge could not tell from this requirement whether the second half had landed, nor by what mechanism — and would have had to re-derive from the code whether `S-AGE-010`'s trace still held once observers existed.)
 
+**Back-annotation (AG-21) — the mechanism is now exercised UNDER PRESSURE and IN COMBINATION, and this paragraph closes nothing.** Two things are recorded, and the boundary between them is the point:
+
+- **What AG-21 adds is falsification, not mechanism.** AG-21 ships no production code by default (`R-CNH-008`). It stalls a real consumer **structurally** — an unbuffered sink with no receiver, so the producer is genuinely blocked at its unconditional send rather than merely slow — while the same run is simultaneously suspended, steering, compacting or hosting a child, and then signals it. That combination is what *"under pressure"* means here, and it is the first time the decoupling mechanism is observed against anything other than a single-feature fixture.
+- **What this paragraph explicitly does NOT claim.** It does **not** close envelope invariant 3: `agent-event-envelope/spec.md:269` records that as `AG-01.1 + AG-20.2 — CLOSED`, and AG-21 cannot close what is already closed. It does **not** discharge `R-AGE-009`, which remains decided-and-unbuilt. It does **not** satisfy this requirement by prose — the requirement's own clause above forbids exactly that, and **`S-AGE-031` below is the discharge; this paragraph merely records where to find it.** And it does **not** merge the consumer claim with the hook claim: `S-AGE-010`, `S-AGE-030` and `S-AGE-031` are three separate members of one family, and conflating any two of them is the error `agent-event-delivery/spec.md:143` already names.
+
+(Previously, at AG-21: the requirement recorded the mechanism as shipped and asserted against single-feature fixtures only. A reader could not tell from it whether the decoupling had ever been observed while the run was simultaneously under a second kind of pressure — a pending suspension, a queued steer, an in-flight compaction or a live child run — nor whether a structurally stalled consumer, as opposed to a merely slow one, had ever been driven at all. Both were unasserted, and doc 0003's reverse table `0003:2265` traced AG-21 to R-05 with nothing in this capability recording what that trace was owed.)
+
 #### Scenario: S-AGE-010 — The stalled-observer trace has no path back to the producer
 
 - **GIVEN** the decision's named mechanism, and an attached consumer that stops receiving indefinitely and never cancels
@@ -142,6 +149,8 @@ The decision MUST make envelope invariant 3 structural. It MUST name a **decoupl
 
 *(AG-20 update: the assertion this scenario makes is exactly what it was, and it is about a stalled **consumer**. `S-AGE-030` states the parallel claim for a stalled **hook**, which AG-20 makes possible for the first time; the two are separate and must not be conflated.)*
 
+*(AG-21 update: unchanged in claim. `S-AGE-031` states the same family's claim **under pressure and in combination**; it is a third member, not a restatement, and the three must not be conflated.)*
+
 #### Scenario: S-AGE-011 — Rejected mechanisms are judged by impossibility, not preference
 
 - **GIVEN** the merged decision
@@ -149,6 +158,8 @@ The decision MUST make envelope invariant 3 structural. It MUST name a **decoupl
 - **THEN** each row states what that mechanism makes impossible, AND the blocking synchronous multicast row records that it makes nothing impossible, AND the drop-on-overflow row is rejected against `R-AGE-004`
 
 *(AG-20 update: unchanged. AG-20 adds no mechanism to that table; it implements the one already chosen.)*
+
+*(AG-21 update: unchanged. AG-21 adds no mechanism to that table either; it stresses the one already chosen.)*
 
 #### Scenario: S-AGE-030 — AG-20: the stalled-HOOK trace has no path back to the producer either, and it is checked in code
 
@@ -162,6 +173,21 @@ The decision MUST make envelope invariant 3 structural. It MUST name a **decoupl
 - **AND** a defence resting on a doc comment, a convention or a review rule fails this scenario exactly as it fails `S-AGE-010`
 
 Cross-referenced to `R-HKS-007` / `S-HKS-017` / `S-HKS-018` and `R-HKS-008` / `S-HKS-019`.
+
+#### Scenario: S-AGE-031 — AG-21: the decoupling holds with a STRUCTURALLY stalled consumer while the run is simultaneously under a second pressure
+
+- **GIVEN** a run whose consumer sink is **unbuffered** and whose consumer has read a prefix and then stopped receiving — so the producer is blocked at its unconditional send **by construction**, with no receiver at all, rather than by any timing arrangement
+- **AND** that same run is simultaneously in one of the four combined states of `R-CNH-001` — a suspension pending, a steer queued and undelivered, a compaction call in flight, or a child harness active — with the state proven pending by a happens-before edge the production code itself provides, never by elapsed time
+- **WHEN** the consumer resumes receiving, and separately when the run is signalled while still stalled
+- **THEN** every event describing a fact already committed to the transcript is present on the stream once the consumer drains to completion, checked against the scripted event identity set — count, kinds and call identities — so that a single missing committed-fact event is a divergence (`R-AGE-006`)
+- **AND** on the never-cancelled arm the number of events absent is **zero**: `R-AGE-005`'s sanctioned loss fires only on cancellation with a saturated buffer, so on that arm it is unreachable and any absence is unsanctioned and fails this scenario
+- **AND** `CheckStream` accepts the drained stream **unmodified**, with `stream_check.go` byte-unchanged
+- **AND** on the signalled arm the run **returns**, observed by a read on its completion channel and never by a wall-clock assertion, and the run-end outcome and returned error match the firing signal
+- **AND** no assertion in this scenario reads elapsed time, sleeps or polls
+- **AND** this scenario asserts nothing about a stalled **hook** — that is `S-AGE-030`'s — and nothing about closing envelope invariant 3, which `AG-01.1 + AG-20.2` already closed
+- **AND** a defence resting on the back-annotation paragraph above, on a doc comment, or on a convention fails this scenario exactly as it fails `S-AGE-010`
+
+Discharged directly by `TestCombinedPressure_StalledSteering_NeverCancelled_LosesNothing` and `TestCombinedPressure_StalledSteering_Interrupted` (`slow_consumer_pressure_test.go`), which drive R-CNH-001's steering-queued state and R-CNH-003's structural stall on the SAME run — the literal conjunction this scenario's GIVEN clauses require (sdd-verify round-2, MAJOR-1: the standalone `S-CNH-007`/`S-CNH-008` evidence alone does not exercise it). Cross-referenced to `R-CNH-003` / `S-CNH-007` / `S-CNH-008` and `R-CNH-001` for the single-feature halves.
 
 ### R-AGE-009 — Layer 2 supports more than one attached consumer, with no privileged consumer
 

@@ -1,0 +1,79 @@
+# Delta — `agent-v1-scope` (AG-21)
+
+> **Change**: `cachicamas-agent-concurrency-hardening` · **AG-21** · Target: `openspec/specs/agent-v1-scope/spec.md`
+> **Ops**: MODIFIED `R-AGS-016` — its Wave-5 exit paragraph (`agent-v1-scope/spec.md:317`) names four postures AG-21 inherits, and the discharge of all four is recorded there, where a reader meets the inheritance. MODIFIED `R-AGS-009` — `S-AGS-035`'s reverse-pass row for AG-21 is back-annotated with what AG-21's trace actually resolves to.
+> **Decision**: proposal D3 and D5, binding. **AG-21's reverse-pass row resolves to a base-architecture requirement identifier (R-05), not to a register row** — which is the shape `S-AGS-035` already predicts for it. The forward *"Requirements → closing nodes"* row for R-05 (`0003:2204`) is **left naming `AG-01.1, AG-20.2`** and is not edited: tracing to a requirement is not closing it.
+
+## Header maintenance obligation at promotion
+
+`sdd-archive` MUST add **`S-AGS-067`** wherever this spec's scenario identifiers are enumerated, as a **range and never a total** (`S-LSK-020`). No other header line changes, and no existing `S-AGS-` identifier is renumbered.
+
+## Not modified, and why
+
+| Element | Verdict |
+|---|---|
+| `S-AGS-048`'s G11 orphan-check row (concrete hooks → CO-24.1 / CO-24.2) | **Byte-unchanged.** AG-21 ships zero concrete hooks; closing that row would over-claim on exactly the AG-15 / AG-19 argument this spec already records |
+| `R-AGS-015` (scope and vocabulary discipline) | **Byte-unchanged.** AG-21 decides no Layer 3 content and introduces no wall-clock threshold |
+| `S-AGS-065`, `S-AGS-066` | **Reproduced verbatim below, unchanged in claim.** They audit AG-20's discharge; AG-21 adds `S-AGS-067` beside them rather than re-opening either |
+| `S-AGS-032`, `S-AGS-033`, `S-AGS-034` | **Reproduced verbatim below, unchanged.** Only `S-AGS-035` gains a parenthetical |
+| Doc 0003's forward closing-node row for R-05 (`0003:2204`) | **Left as it stands.** `agent-event-envelope/spec.md:269` records invariant 3 as `AG-01.1 + AG-20.2 — CLOSED`; AG-21 cannot close what is already closed |
+
+## MODIFIED Requirements
+
+### R-AGS-009 — The reverse audit pass is keyed to doc 0003's grep-able `Closes:` fields
+
+The artifact MUST record a reverse pass with one row per doc 0003 milestone carrying a `Closes:` field. Each row MUST name the milestone, what its `Closes:` field names, and either the register row it matches **or** the base-architecture requirement identifier (R-01 … R-09, R-19 … R-21) that explains why it closes no register row. The artifact MUST state the exact grep a reviewer runs to reproduce the pass.
+
+**Back-annotation (AG-21) — AG-21's row resolves, and it resolves to a base-architecture requirement exactly as `S-AGS-035` predicts.** AG-21's reverse-pass entry is doc 0003's *"Nodes trace back to scope"* row at `0003:2265`: *"AG-21 | R-05 (invariant 3 under pressure), the assembled whole"*. Three things are recorded so no later reader mis-reads it:
+
+- **It is a trace, not a closure.** `0003:2265` sits in the **reverse** table, whose own heading is *"Nodes trace back to scope"* (`0003:2238-2240`). The **forward** *"Requirements → closing nodes"* table (`0003:2196-2221`) resolves R-05's invariant 3 to `AG-01.1, AG-20.2` at `:2204` and does **not** name AG-21. `agent-event-envelope/spec.md:269` records invariant 3 as `AG-01.1 + AG-20.2 — CLOSED`. **AG-21 cannot close what is already closed**, and this back-annotation does not claim it does.
+- **The row is a base-architecture identifier, not a register row** — which is precisely the shape `S-AGS-035` below already names as expected for AG-21, and the reason it gives holds: the register is the cross-cutting concerns with no home, not the whole layer.
+- **What AG-21 contributes is empirical.** `S-AGE-031` (`agent-event-delivery`) asserts the decoupling with a **structurally** stalled consumer while the same run is under a second pressure. That is what *"invariant 3 under pressure"* names, and it is falsifiable rather than restated.
+
+(Previously, at AG-21: the requirement recorded the reverse pass's shape and its reproduction grep, and `S-AGS-035` named AG-21 among the milestones whose row resolves to a base-architecture requirement — without recording **which** requirement, or that doc 0003 carries two different tables of which only the reverse one names AG-21. A reader could reasonably have taken `0003:2265` for a closing-node claim, which is the misreading this back-annotation forecloses.)
+
+### Scenarios
+
+- **S-AGS-032** — Given the artifact, when a reviewer reads the reverse pass, then it names the reproduction procedure explicitly — grep doc 0003 for `Closes:` and compare the result set to the table — rather than asserting the pass was performed.
+- **S-AGS-033** — Given the result of that grep, when a reviewer compares it to the reverse-pass table, then every milestone returned appears in the table, AND every table row corresponds to a returned milestone.
+- **S-AGS-034** — Given a milestone whose `Closes:` field names a G-concern, when a reviewer checks the table, then that concern maps to a register row covered by a verdict; a milestone closing a G-concern no verdict covers is a defect.
+- **S-AGS-035** — Given the foundational milestones AG-03, AG-04, AG-05, AG-12, AG-13, AG-14, AG-21, AG-22 and AG-23, when a reviewer checks their reverse-pass rows, then each names a base-architecture requirement identifier rather than a register row, AND the artifact states that this is the expected shape because the register is the cross-cutting concerns with no home, not the whole layer. *(AG-21 update: unchanged in claim, and AG-21's own row now resolves — to **R-05**, per `0003:2265`, as a **trace** and not as a closure; the forward closing-node row at `0003:2204` still names `AG-01.1, AG-20.2` and is left as it stands. See this requirement's AG-21 back-annotation.)*
+
+### R-AGS-016 — AG-20 discharges G11 / R-17 and widens seam 1; the concrete hooks stay Layer 3's and the two MUST NOT be conflated (AG-20 addition, 2026-08-20)
+
+**G11 / R-17 is DISCHARGED for its Layer 2 half, and what discharged it is recorded as a mechanism rather than as a reassurance.** The forward pass maps **R-17 to G11** (`S-AGS-030`), and doc 0003's AG-20 charter closes it. What AG-20 shipped:
+
+- **The full taxonomy behind one registration surface.** Four hook points — pre-request (AG-08's, now composed), pre-compact, post-turn and session-start — registered on **one** exported value type held as a **field** on the harness, transported to the turn loop on the harness's own per-turn copy. A registration **method** was unavailable by fence and none was added.
+- **A uniform mutate-versus-observe contract enforced BY TYPE, not by documentation.** The two mutating families take a payload and return one with an error; the two observing families **have no result parameters at all**, so a hook that could signal a mutation or a failure is unconstructible. Every payload is a value type with unexported fields and read-only accessors.
+- **The asynchrony discipline made mechanical**, which is the charter's own acceptance clause and the standard `R-AGE-008` sets: a per-run observer lane whose enqueue never blocks, dispatch on the lane's own goroutine asserted as a **goroutine-placement** property, a value-stripped observer context that makes the delegation publishing seam unreachable from a hook, a stalled observer proven to delay no event delivery by stream byte-identity, and **no wall clock anywhere** in production or test.
+- **Typed, source-named failure on both mutating points**, attributed by source name rather than by a chain-wide ordinal, so the attribution survives a later insertion.
+
+**SEAM 1 IS WIDENED, NOT RE-OWNED.** `S-AGS-023` maps seam 1 to **AG-08.1**, and that mapping is unchanged. AG-08 shipped the seam as a single callable and recorded, in its own spec, that *"AG-20 widens to chain composition"* (`agent-pre-request-hook/spec.md:19`). AG-20 discharges that promise **additively**: the shipped field is kept, runs **first**, and feeds the chain's element 0. Its removal is **AG-23**'s and AG-20 does not take it.
+
+**What is NOT discharged, and this is the clause most at risk of being wrongly closed.** `S-AGS-048` records *"G11's concrete hooks to CO-24.1 / CO-24.2"* — doc 0004's Layer 3 nodes. **AG-20 ships zero concrete hooks.** Cache-breakpoint placement, compaction policy and telemetry are Layer 3's, verbatim from the charter, and this milestone's own out-of-scope table names them. **A taxonomy is not a wiring.** The G11 row's Layer 3 half stays open with CO-24.1 / CO-24.2 named as its holders, on exactly the AG-15 argument this artifact already records: *a shipped seam with a declining implementation is a held place, not a delivered capability*.
+
+**Two further absences MUST be stated so they are inherited knowingly rather than discovered:**
+
+1. **No wall-clock timeout, deadline or "slow hook" threshold ships, and none ever will in Layer 2.** `R-RUN-010` forbids the temporal answer on a structurally similar seam, and `R-AGS-015` forbids Layer 2 deciding Layer 3's content — a threshold is Layer 3 policy. AG-20's "eventually" is the run's **terminal boundary**, a structural moment, not a duration.
+2. **`R-AGE-009`'s multi-consumer fan-out is NOT shipped.** AG-20 makes a *hook* non-blocking; it does not build consumer attachment machinery. Envelope invariant 3 closes jointly with AG-01.1; `R-AGE-009` remains decided-and-unbuilt.
+
+**Wave 5's exit is a scheduling fact, not a scope claim.** AG-20 is Wave 5's last milestone, and AG-21 inherits this milestone's frozen postures by name: the caller-owned stalled-observer goroutine leak, the release-before-baseline test rule, unrecovered mutating hooks, and cross-run hook state.
+
+**Back-annotation (AG-21) — all four inherited postures were HONOURED, and each is recorded with what honouring it actually cost.** Wave 6 opens with AG-21, so the inheritance above is now discharged posture by posture rather than left as a forward statement:
+
+| Inherited posture | How AG-21 honoured it |
+|---|---|
+| The **caller-owned stalled-observer goroutine leak** (`agent-run-driver/spec.md:321`) | **Excluded from AG-21's leak sweep by construction.** The sweep's scenario set is exactly AG-21's own cell, pressure and cross-run drivers, none of which gates an observer (`R-CNH-005`). A wholesale sweep would have sampled a baseline across AG-20's deliberately-gated observer tests and reported AG-20's by-design behavior as AG-21's leak — one of the four verified grounds on which D-B rejected the literal reading |
+| The **release-before-baseline test rule** (`NFR-HKS-005`, `agent-hook-taxonomy/spec.md:321`, *"AG-21 inherits this rule by name"*, inheritance recorded at `:265`) | **Adopted verbatim as `NFR-CNH-003`, unweakened.** No driver in the sweep samples the process goroutine count — the only sampler is the leak helper itself; every gate a driver constructs is released **inline** before that driver returns **and** carries a cleanup release registered at construction, so no abort path leaves one held |
+| **Unrecovered mutating hooks** | **Untouched and unexercised.** AG-21 registers no hook of any family except the one observing session-start hook its cross-run inventory needs (`S-CNH-015`), which has no result parameters and is unconstructible as a mutation. No mutating hook runs anywhere in AG-21 |
+| **Cross-run hook state** | **Enumerated and asserted, not merely inherited.** The session-start latch is one of exactly two rows in `R-RUN-001`'s closed inventory of run-outliving `Harness` state, and `S-CNH-015` asserts it fires **exactly once across two runs on one value** — the first time that latch's cross-run behavior is observed rather than reasoned about |
+
+**What this back-annotation does NOT claim.** It does **not** close `S-AGS-048`'s G11 Layer 3 half: AG-21 ships zero concrete hooks, exactly as AG-20 did, and closing that row would over-claim on the same AG-15 argument recorded above. It does **not** discharge `R-AGE-009`, which remains decided-and-unbuilt. It does **not** close R-05's invariant 3, already closed by `AG-01.1 + AG-20.2`. And it introduces **no** wall-clock threshold: absence 1 above holds for AG-21 too, whose one legitimate clock is the wind-down bound and is a ceiling, never a synchronization point (`NFR-CNH-002`).
+
+(Previously, at AG-21: the Wave-5 exit paragraph named four postures AG-21 would inherit and stopped there. A reader arriving after Wave 6 opened could not tell from this requirement whether any of the four had been honoured, silently dropped, or discovered as a problem — and three of the four are exactly the kind of posture a hardening milestone could violate without any test noticing.)
+
+### Scenarios
+
+- **S-AGS-065** — **AG-20: the discharge is auditable, not asserted.** Given the AG-20 statement above, when a reviewer opens each mechanism it names, then the one registration surface, the two type families, the pre-request chain, the pre-compact splice and its re-resolution, the post-turn firing enumeration, the session-start latch, the registration-order dispatch, the observer lane's non-blocking enqueue, the terminal-boundary snapshot and the source-named failure attribution each exist as a requirement in `agent-hook-taxonomy` with at least one independently verifiable scenario; and when the reviewer opens doc 0003's Traceability-spine row for **R-17**, then it names the same discharging node the verdict names, with no node moved and no count changed.
+- **S-AGS-066** — **AG-20: the Layer 3 half is checked against the shipped surface, not against this artifact's prose.** Given the merged AG-20 change, when the package's exported surface is enumerated from an external test package, then it declares **no** concrete hook, no cache-breakpoint placement, no compaction policy and no telemetry sink; no hook is registered by default and a zero-value registration value is inert on every path; and when the reviewer looks for a wall clock, then no timeout, deadline, sleep or "slow hook" threshold exists in production or in test. And when the reviewer reads `S-AGS-048`'s orphan-check row for G11's concrete hooks, then it still names CO-24.1 / CO-24.2 as their holders — a discharge that also closed those would be over-claiming, on exactly the AG-15 and AG-19 argument this artifact already records.
+- **S-AGS-067** — **AG-21: the four inherited postures are checked against the shipped change, not against this artifact's prose.** Given the merged AG-21 change, when the leak sweep's scenario set is read, then it names only AG-21's own cell, pressure and cross-run drivers and **no** test that gates an observing hook, so AG-20's caller-owned observer leak is excluded by construction rather than by tolerance; when every driver AG-21 adds is read, then **none** samples the process goroutine count, every gate it constructs is released before the driver returns, and every gate additionally carries a cleanup release registered where it is constructed; when the package's exported surface and AG-21's own files are read, then AG-21 registers **no** mutating hook of any family; when the cross-run scenario runs, then a session-start observing hook fires **exactly once across two serial runs on one harness value** — a count assertion over a shipped one-way latch, not over a spec row; when a wall clock is looked for, then no sleep, timeout, deadline or poll is used for synchronization anywhere in the change, and the only clock is the injected wind-down bound used as a ceiling; and when `S-AGS-048`'s G11 orphan-check row is read, then it **still** names CO-24.1 / CO-24.2 as the holders of G11's concrete hooks — AG-21 ships none, and a discharge that also closed those would be over-claiming on the same argument `S-AGS-066` records.

@@ -1104,7 +1104,21 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/hooks.go") ||
 				strings.HasSuffix(path, "/hooks_test.go") ||
 				strings.HasSuffix(path, "/hooks_harness_test.go") ||
-				strings.HasSuffix(path, "/hooks_compaction_test.go")
+				strings.HasSuffix(path, "/hooks_compaction_test.go") ||
+				// AG-21 widening (agent-loop-skeleton delta's ADDED
+				// R-LSK-009, S-LSK-034): AG-21 requests NO release --
+				// every entry below names a file this change CREATES,
+				// none names a pre-existing filename. Each of AG-21's
+				// five new package agent_test files gets one entry
+				// here, in the same commit as the file that first
+				// needs it. Exact filenames, no wildcard/prefix/
+				// directory pattern; byte-in-sync with loop_test.go's
+				// filterOutLoopFiles.
+				strings.HasSuffix(path, "/combined_state_fixtures_test.go") ||
+				strings.HasSuffix(path, "/combined_matrix_test.go") ||
+				strings.HasSuffix(path, "/slow_consumer_pressure_test.go") ||
+				strings.HasSuffix(path, "/cross_run_state_test.go") ||
+				strings.HasSuffix(path, "/combined_leak_sweep_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
