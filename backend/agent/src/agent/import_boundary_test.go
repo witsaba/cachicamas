@@ -645,17 +645,34 @@ func layer2SiblingTreeDirs(t *testing.T) map[string]string {
 // surface, because the scanning mechanism is not part of the surface it
 // scans. The exclusion is exact-filename, no wildcard/prefix/directory
 // pattern, matching every other named exception in this module's guards.
+//
+// The exclusion is keyed on the (tree, filename) PAIR below, never on
+// filename alone (sdd-verify round 1, W-9): a filename-only exclusion is
+// a working escape hatch — a same-named file planted in the OTHER
+// sibling tree (src/apptest) carries none of this reasoning and MUST
+// still be scanned. Proven by planting exactly that file, with a direct
+// "os" and "time" import, inside src/apptest: pre-fix the scan passed
+// green; post-fix it fails naming the file and the family, identically
+// to any other file in that tree.
 const layer2SiblingTreeSelfExcludedFile = "generic_client_guard_test.go"
+
+// layer2SiblingTreeSelfExcludedTreeImportPath is the ONLY import path
+// layer2SiblingTreeSelfExcludedFile is ever excluded from. Together with
+// layer2SiblingTreeSelfExcludedFile above, this forms the (tree,
+// filename) key: a file of that exact name in any OTHER tree this check
+// scans is not excluded and is scanned like every other file there.
+const layer2SiblingTreeSelfExcludedTreeImportPath = modulePath + "/src/layer3handoff"
 
 // layer2SiblingTreeAllSourceFiles returns the absolute path of every .go
 // file — test files INCLUDED — directly inside dir (no subpackages),
-// except layer2SiblingTreeSelfExcludedFile (above). Check 5's own
-// listing helper: unlike check 4's own layer2ProductionSourceFiles,
+// except layer2SiblingTreeSelfExcludedFile when, and only when, dir is
+// the tree named by layer2SiblingTreeSelfExcludedTreeImportPath. Check
+// 5's own listing helper: unlike check 4's own layer2ProductionSourceFiles,
 // which deliberately EXCLUDES _test.go (Layer 2 production-only scope),
 // check 5 must see test files too — the zero-I/O and no-wall-clock
 // property this change proves covers a sibling tree's own test files
 // exactly as much as its production files (R-L3H-002).
-func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
+func layer2SiblingTreeAllSourceFiles(t *testing.T, importPath, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -667,7 +684,7 @@ func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
-		if name == layer2SiblingTreeSelfExcludedFile {
+		if importPath == layer2SiblingTreeSelfExcludedTreeImportPath && name == layer2SiblingTreeSelfExcludedFile {
 			continue
 		}
 		files = append(files, filepath.Join(dir, name))
@@ -683,22 +700,37 @@ func layer2SiblingTreeAllSourceFiles(t *testing.T, dir string) []string {
 // AST mechanism (parser.ParseFile with parser.ImportsOnly), applied to a
 // different pair of trees and a different family list.
 //
-// This is a ZERO-HOP scan: it lists no dependencies at all, so a closure
-// listing filtered to exclude the standard library (as checks 1/2 filter
-// it) cannot blind it — that blind spot simply does not exist here.
-// Transitive, standard-library-mediated reach is closed elsewhere and by
-// a different mechanism: check 2 pins these two trees' own non-stdlib
-// closure to exactly the allowlist, and every admitted member carries its
-// own I/O guard. The residual floor is the test framework's own
-// unavoidable "testing" -> "os" reach, the same floor check 3's own
-// comment already records — restated here, not hidden.
+// This is a ZERO-HOP scan: it lists no dependencies at all, so the
+// filtered-closure blind spot that affects checks 1/2 (a closure listing
+// with the standard library filtered out before the allowlist ever sees
+// it) does not affect THIS check's own mechanism — there is no closure
+// here to filter in the first place.
+//
+// sdd-verify round 1, W-11 (corrected): that does NOT mean every
+// standard-library-mediated reach is closed. This check denies only a
+// DIRECT import of one of the five named families; a tree importing some
+// OTHER standard-library package that itself reaches one of those five
+// internally (an intermediary such as "text/template", which reaches
+// "os") is caught by NEITHER this check (direct-imports-only; the
+// intermediary's own name is not on the denied list) NOR check 2 (its
+// closure listing filters the standard library out before the allowlist
+// ever sees it, so a standard-library intermediary — and whatever IT
+// reaches — is invisible to that check too). This is a genuine residual
+// gap in the mechanism, not one closed elsewhere: R-L3H-002 requires
+// denial "by name", and this scan denies the five names it lists, no
+// more. A non-standard-library intermediary IS still bounded — it would
+// itself need a place in check 2's own allowlist — but a
+// standard-library one is not. The residual floor besides this gap is
+// the test framework's own unavoidable "testing" -> "os" reach, the same
+// floor check 3's own comment already records — restated here, not
+// hidden.
 func TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport(t *testing.T) {
 	t.Parallel()
 
 	dirs := layer2SiblingTreeDirs(t)
 	fset := token.NewFileSet()
 	for importPath, dir := range dirs {
-		files := layer2SiblingTreeAllSourceFiles(t, dir)
+		files := layer2SiblingTreeAllSourceFiles(t, importPath, dir)
 		if len(files) == 0 {
 			// AG-23 (S-AGP-044): the vacuity floor is PER TREE — a
 			// renamed or moved tree must fail by naming ITS OWN
