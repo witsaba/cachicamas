@@ -1157,7 +1157,12 @@ func filterOutLoopHookFiles(diff string) string {
 				// AG-22/Phase-11 discovery shape). Exact filename, no
 				// wildcard/prefix/directory pattern; byte-in-sync with
 				// loop_test.go's filterOutLoopFiles.
-				strings.HasSuffix(path, "/harness_forwarder_panic_test.go")
+				strings.HasSuffix(path, "/harness_forwarder_panic_test.go") ||
+				// AG-23 widening (design AD-5, R-L3H-005): example_test.go
+				// is AG-23's own new runnable-examples file. Exact
+				// filename, no wildcard/prefix/directory pattern;
+				// byte-in-sync with loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/example_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

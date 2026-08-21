@@ -105,9 +105,9 @@ Discharges: `R-L3H-001`, `R-L3H-004` (identity-difference proof), `R-L3H-010`.
 
 ## WU-5 — AD-5 runnable examples
 
-- [ ] 5.1 Create `src/agent/example_test.go`, package `agent_test` (already swept by WU-2 check 2). Four `Example*` functions, each with a **mandatory** `// Output:` comment block: build harness, drive run, consume events (kind names only), handle suspension (outcome sequence).
-- [ ] 5.2 Confirm each example **compiles and runs** under `go test` (Go's example-output mechanism, not merely `gofmt`/`go vet`) — run `go test -race -count=1 ./src/agent/... -run Example -v` and confirm each prints its declared output and PASSes.
-- [ ] 5.3 Confirm no example prints a minted ID (RunID/TurnID) — global counters make them order-dependent within the test process, which would make `// Output:` non-deterministic across runs.
+- [x] 5.1 Create `src/agent/example_test.go`, package `agent_test` (already swept by WU-2 check 2). Four `Example*` functions, each with a **mandatory** `// Output:` comment block: build harness, drive run, consume events (kind names only), handle suspension (outcome sequence).
+- [x] 5.2 Confirm each example **compiles and runs** under `go test` (Go's example-output mechanism, not merely `gofmt`/`go vet`) — run `go test -race -count=1 ./src/agent/... -run Example -v` and confirm each prints its declared output and PASSes.
+- [x] 5.3 Confirm no example prints a minted ID (RunID/TurnID) — global counters make them order-dependent within the test process, which would make `// Output:` non-deterministic across runs.
 
 **Focused test**: `go test -race -count=1 ./src/agent/... -run Example -v`.
 **Runtime harness**: the examples themselves execute a live `Harness` — no separate harness needed.
