@@ -64,6 +64,164 @@ func TestObservability_Lifecycle_ExactlyOnceAcrossEveryExitFamily(t *testing.T) 
 	}
 }
 
+// TestObservability_Lifecycle_CompactionExactlyOnceAcrossEveryExitFamily
+// is R-AGO-007's own compaction-family exit table (AG-22 correction,
+// MAJOR-6, sdd-verify round 1, S-AGO-053: "a table of compaction exits —
+// the success tail and each failure arm"). The run/turn/tool table above
+// never drove a single compaction call — this table closes that gap for
+// every REACHABLE exit runCompaction's own source names: the success
+// tail, and the empty-instruction, misplaced-options, cut-resolves-to-
+// zero, non-Stop-finish and mid-call-terminal-failure arms of
+// emitCompactionFailedArm. (The span-derivation-failure and
+// ReplacePrefix-commit-failure arms are structurally unreachable given
+// resolveCut's own contract, per compaction.go's own comments, and are
+// not driven here for the same reason the two "unreachable defensive
+// branches" elsewhere in this package are disclosed rather than forced.)
+func TestObservability_Lifecycle_CompactionExactlyOnceAcrossEveryExitFamily(t *testing.T) {
+	rows := []struct {
+		name   string
+		driver func(t *testing.T) *tracetest.Provider
+	}{
+		{"compaction_finished", agoLifecycleCompactionFinished},
+		{"compaction_failed_empty_instruction", agoLifecycleCompactionFailedEmptyInstruction},
+		{"compaction_failed_misplaced_options", agoLifecycleCompactionFailedMisplacedOptions},
+		{"compaction_failed_cut_zero", agoLifecycleCompactionFailedCutZero},
+		{"compaction_failed_non_stop_finish", agoLifecycleCompactionFailedNonStopFinish},
+		{"compaction_failed_mid_call", agoLifecycleCompactionFailedMidCall},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			provider := row.driver(t)
+
+			if err := provider.AssertAllEndedOnce(); err != nil {
+				t.Errorf("AssertAllEndedOnce() = %v, want nil (R-AGO-007's own exactly-once proof, S-AGO-053)", err)
+			}
+			if got := provider.Started(); got == 0 {
+				t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded on this exit family")
+			}
+			if started, ended := provider.Started(), provider.Ended(); started != ended {
+				t.Errorf("provider.Started() = %d, provider.Ended() = %d, want equal (R-AGO-007's started-count-equals-ended-count invariant)", started, ended)
+			}
+		})
+	}
+}
+
+// agoLifecycleCompactionFinished drives a compaction that FINISHES —
+// the success tail row.
+func agoLifecycleCompactionFinished(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h, hist, _ := markedHarnessForCompaction(t, "cmp-lifecycle-finished")
+	h.TracerProvider = provider
+	compactionModelProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	req := agent.CompactionRequest{Provider: compactionModelProvider, Instruction: "summarize for the compaction lifecycle table", Cut: hist.Len()}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err != nil {
+		t.Fatalf("Compact returned err = %v, want nil", err)
+	}
+	drainSink(t, sink)
+	return provider
+}
+
+// agoLifecycleCompactionFailedEmptyInstruction drives Compact with an
+// empty Instruction — runCompaction's own first refusal.
+func agoLifecycleCompactionFailedEmptyInstruction(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h, hist, _ := markedHarnessForCompaction(t, "cmp-lifecycle-empty-instr")
+	h.TracerProvider = provider
+	req := agent.CompactionRequest{Provider: agenttest.NewProvider(), Instruction: "", Cut: hist.Len()}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err == nil {
+		t.Fatal("Compact returned err = nil, want a non-nil error (empty instruction)")
+	}
+	drainSink(t, sink)
+	return provider
+}
+
+// agoLifecycleCompactionFailedMisplacedOptions drives Compact with
+// Options.Tools set — the misplaced-options refusal (R-HKS-001,
+// R-CMP-015).
+func agoLifecycleCompactionFailedMisplacedOptions(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h, hist, _ := markedHarnessForCompaction(t, "cmp-lifecycle-misplaced")
+	h.TracerProvider = provider
+	toolName := "cmp_lifecycle_misplaced_tool"
+	reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: EchoScriptedTool(toolName, agent.EffectClassRead)})
+	req := agent.CompactionRequest{
+		Provider:    agenttest.NewProvider(),
+		Instruction: "summarize",
+		Cut:         hist.Len(),
+		Options:     agent.TurnOptions{Tools: reg},
+	}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err == nil {
+		t.Fatal("Compact returned err = nil, want a non-nil error (misplaced Tools option)")
+	}
+	drainSink(t, sink)
+	return provider
+}
+
+// agoLifecycleCompactionFailedCutZero drives Compact against a FRESH
+// history with no committed turn marks at all, so resolveCut resolves
+// to 0 — the cut-resolves-to-zero refusal.
+func agoLifecycleCompactionFailedCutZero(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h := &agent.Harness{
+		Provider:       agenttest.NewProvider(),
+		System:         "system prompt for compaction lifecycle cut-zero",
+		History:        agent.NewHistory(),
+		TracerProvider: provider,
+	}
+	req := agent.CompactionRequest{Provider: agenttest.NewProvider(), Instruction: "summarize", Cut: 0}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err == nil {
+		t.Fatal("Compact returned err = nil, want a non-nil error (cut resolves to 0)")
+	}
+	drainSink(t, sink)
+	return provider
+}
+
+// agoLifecycleCompactionFailedNonStopFinish drives a compaction call
+// whose own completion carries a non-Stop finish reason (reusing
+// scriptToolCallResponse's own ToolCalls-finishing script —
+// drainCompactionCall never dispatches the call, only reads
+// FinishReason()).
+func agoLifecycleCompactionFailedNonStopFinish(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h, hist, _ := markedHarnessForCompaction(t, "cmp-lifecycle-non-stop")
+	h.TracerProvider = provider
+	compactionModelProvider := agenttest.NewProvider(scriptToolCallResponse(t, "call-cmp-lifecycle-001", "unused_tool_name", []byte(`{}`)))
+	req := agent.CompactionRequest{Provider: compactionModelProvider, Instruction: "summarize", Cut: hist.Len()}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err == nil {
+		t.Fatal("Compact returned err = nil, want a non-nil error (non-Stop finish reason)")
+	}
+	drainSink(t, sink)
+	return provider
+}
+
+// agoLifecycleCompactionFailedMidCall drives a compaction call whose
+// provider terminates mid-stream with a typed failure.
+func agoLifecycleCompactionFailedMidCall(t *testing.T) *tracetest.Provider {
+	t.Helper()
+	provider := tracetest.NewProvider()
+	h, hist, _ := markedHarnessForCompaction(t, "cmp-lifecycle-mid-call")
+	h.TracerProvider = provider
+	compactionModelProvider := agenttest.NewProvider(scriptTextThenTerminalFailure(t, ai.FailureCategoryUnavailable, true))
+	req := agent.CompactionRequest{Provider: compactionModelProvider, Instruction: "summarize", Cut: hist.Len()}
+	sink := make(chan *agent.Event, 64)
+	if err := h.Compact(contextBackground(), req, sink); err == nil {
+		t.Fatal("Compact returned err = nil, want a non-nil error (mid-call terminal failure)")
+	}
+	drainSink(t, sink)
+	return provider
+}
+
 // agoLifecycleNormalCompletion drives a plain successful text-only run.
 func agoLifecycleNormalCompletion(t *testing.T) *tracetest.Provider {
 	t.Helper()
@@ -260,6 +418,136 @@ func agoLifecyclePreRequestHookPanic(t *testing.T) (provider *tracetest.Provider
 		_, _, _ = agent.Turn(ctx, modelProvider, "system prompt for lifecycle pre-request hook panic", []ai.Message{firstMessage(t)}, opts, sink)
 	}()
 	return provider, recovered
+}
+
+// TestObservability_Lifecycle_NoSpanForPreStartRefusals is S-AGO-054
+// (AG-22 correction, MAJOR-6, sdd-verify round 1): "a run refused before
+// it emits any event, a turn refused before its start event, a tool
+// call gated out by the permission gate before its start event exists,
+// and a compaction refused before its started event... no span was
+// started for that bracket." Each subtest asserts provider.Started()
+// stays exactly what it was before the refused bracket, or 0 where
+// nothing else in the scenario opened a span first.
+func TestObservability_Lifecycle_NoSpanForPreStartRefusals(t *testing.T) {
+	t.Run("run_refused_before_any_event", func(t *testing.T) {
+		t.Parallel()
+		// S-HKS-002: a non-zero Turn.Hooks is refused before any
+		// identity is minted and before any event is emitted —
+		// hooks_test.go's own TestHooks_TransportRefusesRatherThanOverwrites
+		// establishes "no run identity was minted" for this exact path.
+		provider := tracetest.NewProvider()
+		modelProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		h := agent.Harness{
+			Provider:       modelProvider,
+			System:         "system prompt for S-AGO-054 run refusal",
+			Turn:           agent.TurnOptions{Hooks: agent.Hooks{SessionStart: []agent.SessionStartObserver{noopSessionStartObserver}}},
+			TracerProvider: provider,
+		}
+		sink := make(chan *agent.Event, 16)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err == nil {
+			t.Fatal("Run returned err = nil, want the typed misplaced-hooks refusal")
+		}
+		drainSink(t, sink)
+		if got := provider.Started(); got != 0 {
+			t.Errorf("provider.Started() = %d, want 0 — the run was refused before run_start, so no run span may open (S-AGO-054)", got)
+		}
+	})
+
+	t.Run("turn_refused_before_its_start_event", func(t *testing.T) {
+		t.Parallel()
+		// validateContinuation is Turn's own FIRST statement (S-LSK-014):
+		// a half-configured Continuation is rejected before identity
+		// minting and before turn_start.
+		provider := tracetest.NewProvider()
+		modelProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+		opts := agent.TurnOptions{
+			Continuation: &agent.TurnContinuation{Run: "run-s-ago-054-turn-refusal"}, // Stamper/Scheduler/History all nil — half-configured.
+		}
+		// S-LSK-014's own contract: this refusal touches sink not at
+		// all — "no closeSink, no partial stream" — so drainSink (which
+		// blocks for a close) does not apply here; the channel simply
+		// carries nothing to read.
+		sink := make(chan *agent.Event, 16)
+		if _, _, err := agent.Turn(contextBackground(), modelProvider, "system prompt for S-AGO-054 turn refusal", []ai.Message{firstMessage(t)}, opts, sink); err == nil {
+			t.Fatal("Turn returned err = nil, want the typed half-configured-continuation refusal")
+		}
+		if got := provider.Started(); got != 0 {
+			t.Errorf("provider.Started() = %d, want 0 — the turn was refused before turn_start, so no span may open (S-AGO-054)", got)
+		}
+	})
+
+	t.Run("tool_call_gated_out_before_its_start_event", func(t *testing.T) {
+		t.Parallel()
+		// R-AGO-005 item 3 / R-AGO-007: "no span opens for a gated-out
+		// call either — the permission gate runs entirely before this
+		// point." A Deny verdict never reaches ToolStart or Run.
+		provider := tracetest.NewProvider()
+		toolName := "s_ago_054_denied_tool"
+		tool := EchoScriptedTool(toolName, agent.EffectClassRead)
+		reg := agent.NewMapRegistry(map[string]agent.Tool{toolName: tool})
+
+		innerFailure, ferr := ai.MidStreamFailure(ai.FailureReport{Category: ai.FailureCategoryUnavailable}, false)
+		if ferr != nil {
+			t.Fatalf("ai.MidStreamFailure: %v", ferr)
+		}
+		denial, derr := agent.NewFailure(innerFailure)
+		if derr != nil {
+			t.Fatalf("agent.NewFailure: %v", derr)
+		}
+		policy := &wiringTestPolicy{resolve: func(context.Context, ai.ToolCall) agent.PermissionVerdict {
+			return agent.PermissionVerdict{Outcome: agent.PermissionOutcomeDeny, Failure: denial}
+		}}
+
+		modelProvider := agenttest.NewProvider(
+			scriptToolCallResponse(t, "call-s-ago-054-001", toolName, []byte(`{}`)),
+			scriptTextResponse(t, ai.FinishReasonStop),
+		)
+		h := agent.Harness{
+			Provider:       modelProvider,
+			System:         "system prompt for S-AGO-054 gated-out tool",
+			Turn:           agent.TurnOptions{Tools: reg, PermissionPolicy: policy},
+			TracerProvider: provider,
+		}
+		sink := make(chan *agent.Event, 256)
+		if _, _, err := h.Run(contextBackground(), firstMessage(t), sink); err != nil {
+			t.Fatalf("Run returned err = %v, want nil", err)
+		}
+		drainSink(t, sink)
+
+		if got := provider.Started(); got == 0 {
+			t.Fatal("provider.Started() = 0, want > 0 — the surrounding run/turn spans must still have opened")
+		}
+		if toolSpan := spanWithNamePrefix(provider.Spans(), toolSpanNamePrefixForTest); toolSpan != nil {
+			t.Errorf("a span named %q was recorded for a gated-out call, want none (S-AGO-054)", toolSpan.Name())
+		}
+	})
+
+	t.Run("compaction_refused_before_its_started_event", func(t *testing.T) {
+		t.Parallel()
+		// Harness.Compact's own two refusals (shutdown, run-in-flight)
+		// fire before runCompaction is ever called — before Compact's
+		// own run span opens, let alone compaction_started.
+		provider := tracetest.NewProvider()
+		h := agent.Harness{
+			Provider:       agenttest.NewProvider(),
+			System:         "system prompt for S-AGO-054 compaction refusal",
+			History:        agent.NewHistory(),
+			TracerProvider: provider,
+		}
+		h.Shutdown()
+		req := agent.CompactionRequest{Provider: agenttest.NewProvider(), Instruction: "summarize"}
+		// Compact's own shutdown/run-in-flight refusals return BEFORE
+		// its `defer close(sink)` is ever registered — sink is touched
+		// not at all, so drainSink (which blocks for a close) does not
+		// apply here.
+		sink := make(chan *agent.Event, 16)
+		if err := h.Compact(contextBackground(), req, sink); err == nil {
+			t.Fatal("Compact returned err = nil, want ErrPromptAfterShutdown")
+		}
+		if got := provider.Started(); got != 0 {
+			t.Errorf("provider.Started() = %d, want 0 — Compact refused before its own run span could open, let alone compaction_started (S-AGO-054)", got)
+		}
+	})
 }
 
 // TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce

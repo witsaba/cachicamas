@@ -246,14 +246,49 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		if got := provider.Started(); got == 0 {
 			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (the compaction seam is not instrumented until Phase 8)")
 		}
-		compactionSpan := spanNamed(provider.Spans(), compactionSpanNameForTest)
-		if compactionSpan == nil {
-			t.Fatalf("no span named %q recorded", compactionSpanNameForTest)
+
+		// AG-22 correction (MAJOR-6, sdd-verify round 1, S-AGO-019): the
+		// compaction bracket carries EXACTLY ONE span, of the
+		// compaction family, and no separate turn span was opened
+		// alongside it (R-AGO-002's "one bracket, one span" clause).
+		// markedHarnessForCompaction's own setup run uses a Harness with
+		// no TracerProvider set (an unrelated no-op provider), so every
+		// span this provider recorded belongs to THIS Compact call only
+		// — h.Compact's own run span, plus whatever runCompaction opens.
+		var compactionSpans, turnSpans []*tracetest.Span
+		for _, s := range provider.Spans() {
+			switch s.Name() {
+			case compactionSpanNameForTest:
+				compactionSpans = append(compactionSpans, s)
+			case turnSpanNameForTest:
+				turnSpans = append(turnSpans, s)
+			}
 		}
+		if len(compactionSpans) != 1 {
+			t.Fatalf("recorded %d span(s) named %q, want exactly 1 (S-AGO-019)", len(compactionSpans), compactionSpanNameForTest)
+		}
+		if len(turnSpans) != 0 {
+			t.Errorf("recorded %d span(s) named %q for a compaction bracket, want 0 — no turn span may be opened alongside the compaction span (S-AGO-019, R-AGO-002)", len(turnSpans), turnSpanNameForTest)
+		}
+		compactionSpan := compactionSpans[0]
 
 		wantCompactionID := findCompactionStartedID(t, events)
 		if got, ok := attrString(compactionSpan.Attributes(), "cachicamas.compaction.id"); !ok || got != wantCompactionID {
 			t.Errorf("compaction span cachicamas.compaction.id = (%q, present=%v), want (%q, true) — must equal the drained compaction_started's CompactionID()", got, ok, wantCompactionID)
+		}
+
+		// AG-22 correction (MAJOR-6, S-AGO-041): the compaction span's
+		// parent is the span of the bracket that REQUESTED it. On
+		// Harness.Compact's own door, the requester is Compact's own
+		// run span (runCompaction ambiently acquires from the ctx
+		// Compact already opened its run span onto) — never a turn
+		// span, since Compact opens none.
+		requesterSpan := spanNamed(provider.Spans(), invokeAgentSpanNameForTest)
+		if requesterSpan == nil {
+			t.Fatal("no run span recorded — cannot verify the compaction span's own parent")
+		}
+		if got := compactionSpan.Parent(); got != requesterSpan {
+			t.Errorf("compaction span Parent() = %v, want the exact requesting run span %v (S-AGO-041)", got, requesterSpan)
 		}
 	})
 }
