@@ -140,11 +140,11 @@ Discharges: `R-L3H-011` (guard-list portion).
 
 ## WU-8 — Docs: doc 0003 completion
 
-- [ ] 8.1 Run `rg '^- \[ \]' docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` **at edit time** — do not trust any cached count (verified at planning time as exactly 8: lines 2161, 2162, 2164, 2165, 2166, 2167, 2169, 2181). Re-verify before editing since prior sessions may have shifted line numbers.
-- [ ] 8.2 Flip the 7 stale rows (2161, 2162, 2164, 2165, 2166, 2167, 2169) from `- [ ]` to `- [x]` — each already cites its closing milestone (AG-03…AG-11.2); no new evidence text needed, only the checkbox.
-- [ ] 8.3 Flip AG-23's own row (2181) to `- [x]` **last**, after every code/test/doc work unit above is committed — this is the self-closing row and must not flip before the work it certifies exists.
-- [ ] 8.4 Update line 3's status header from "**23 of 24**" to "**24 of 24**", derived from re-reading the document's own Wave 0–6 table of contents (never restated from memory), and append an AG-23 sentence to the Wave-6 run-on narrative in the house style of the AG-21/AG-22 entries: name the forwarder-race fix (D-5), the guard's fifth check, the `src/apptest` kit, the `src/layer3handoff` consumer proof, the four runnable examples, the compatibility statement, and mark **Wave 6 complete, Layer 2 complete**.
-- [ ] 8.5 Confirm the appended sentence does not misstate the `TurnOptions.PreRequestHook` ruling (declined, frozen, not removed) or the test-wrapper relocation (delivered in `src/apptest`, not `agenttest`).
+- [x] 8.1 Run `rg '^- \[ \]' docs/architecture/milestones/0003-cachicamas-agent-layer-2-task-graph.md` **at edit time** — do not trust any cached count (verified at planning time as exactly 8: lines 2161, 2162, 2164, 2165, 2166, 2167, 2169, 2181). Re-verify before editing since prior sessions may have shifted line numbers.
+- [x] 8.2 Flip the 7 stale rows (2161, 2162, 2164, 2165, 2166, 2167, 2169) from `- [ ]` to `- [x]` — each already cites its closing milestone (AG-03…AG-11.2); no new evidence text needed, only the checkbox.
+- [x] 8.3 Flip AG-23's own row (2181) to `- [x]` **last**, after every code/test/doc work unit above is committed — this is the self-closing row and must not flip before the work it certifies exists.
+- [x] 8.4 Update line 3's status header from "**23 of 24**" to "**24 of 24**", derived from re-reading the document's own Wave 0–6 table of contents (never restated from memory), and append an AG-23 sentence to the Wave-6 run-on narrative in the house style of the AG-21/AG-22 entries: name the forwarder-race fix (D-5), the guard's fifth check, the `src/apptest` kit, the `src/layer3handoff` consumer proof, the four runnable examples, the compatibility statement, and mark **Wave 6 complete, Layer 2 complete**.
+- [x] 8.5 Confirm the appended sentence does not misstate the `TurnOptions.PreRequestHook` ruling (declined, frozen, not removed) or the test-wrapper relocation (delivered in `src/apptest`, not `agenttest`).
 
 **Focused test**: N/A (markdown-only); verification is `rg '^- \[ \]'` returning zero matches in the 2159–2181 range post-edit.
 **Runtime harness**: N/A — documentation.
