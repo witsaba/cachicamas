@@ -345,6 +345,60 @@ func TestCorpus_CapturedFieldCountMatchesAPISurface(t *testing.T) {
 	}
 }
 
+// TestSpan_Parent_RecordsParentFromContext_NilForRoot covers AG-22's
+// nesting substrate (D-F): tracer.Start captures the parent *Span from
+// trace.SpanFromContext(ctx) at Start time — a root span (no recording
+// span already on the starting ctx) reports nil, and a span started on a
+// ctx returned from a prior Start reports that exact prior span, by
+// value identity, never merely an equal-looking copy.
+func TestSpan_Parent_RecordsParentFromContext_NilForRoot(t *testing.T) {
+	t.Parallel()
+
+	p := tracetest.NewProvider()
+	tracer := p.Tracer("test-tracer")
+
+	rootCtx, _ := tracer.Start(context.Background(), "root-span-SENTINEL")
+	_, _ = tracer.Start(rootCtx, "child-span-SENTINEL")
+
+	spans := p.Spans()
+	if len(spans) != 2 {
+		t.Fatalf("p.Spans() = %d span(s), want 2 (root, child)", len(spans))
+	}
+	root, child := spans[0], spans[1]
+
+	if got := root.Parent(); got != nil {
+		t.Errorf("root span Parent() = %v, want nil — nothing was on the starting ctx", got)
+	}
+	if got := child.Parent(); got != root {
+		t.Errorf("child span Parent() = %v, want the exact root span value %v (pointer identity, not an equal copy)", got, root)
+	}
+}
+
+// TestSpan_Parent_TwoRootsFromSeparateBackgroundContexts_BothNil is the
+// triangulating case: two DIFFERENT root spans, started on two separate
+// context.Background() calls with no relation to each other, must both
+// report nil — proving Parent() reads the ctx chain rather than, for
+// example, "nil only for the first span the provider ever recorded".
+func TestSpan_Parent_TwoRootsFromSeparateBackgroundContexts_BothNil(t *testing.T) {
+	t.Parallel()
+
+	p := tracetest.NewProvider()
+	tracer := p.Tracer("test-tracer")
+
+	_, _ = tracer.Start(context.Background(), "first-root-SENTINEL")
+	_, _ = tracer.Start(context.Background(), "second-root-SENTINEL")
+
+	spans := p.Spans()
+	if len(spans) != 2 {
+		t.Fatalf("p.Spans() = %d span(s), want 2", len(spans))
+	}
+	for i, s := range spans {
+		if got := s.Parent(); got != nil {
+			t.Errorf("spans[%d].Parent() = %v, want nil — each was started on its own unrelated context.Background()", i, got)
+		}
+	}
+}
+
 // TestProvider_TwoTracersFromOneProvider_ShareTheSameCorpus covers a
 // property AI-37.2's per-attribute tests will lean on: two Tracer values
 // obtained from the same Provider (as openaicompat.New would derive once
