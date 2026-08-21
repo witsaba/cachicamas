@@ -179,8 +179,15 @@ type tracer struct {
 // Start creates a recording Span, retains it on the owning Provider, and
 // returns a context carrying it (R-AOB-003: the span starts before any
 // caller-visible work).
+//
+// AG-22 (D-F): the parent, if any, is read from ctx — trace.SpanFromContext
+// returns the real API's own noop.Span when ctx carries no recording span,
+// and a type assertion against that value fails cleanly (ok == false), so
+// a root Start never records a bogus non-nil parent. This is the ONLY
+// place a Span's parent is ever set; Parent() itself is a plain reader.
 func (t *tracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
 	cfg := trace.NewSpanStartConfig(opts...)
+	parent, _ := trace.SpanFromContext(ctx).(*Span)
 	span := &Span{
 		provider: t.provider,
 		name:     spanName,
@@ -193,7 +200,8 @@ func (t *tracer) Start(ctx context.Context, spanName string, opts ...trace.SpanS
 		// "every field the tracing API allows a caller to set on any
 		// span", and this was the one Start-option field that claim
 		// did not yet hold for.
-		links: slices.Clone(cfg.Links()),
+		links:  slices.Clone(cfg.Links()),
+		parent: parent,
 	}
 	t.provider.record(span)
 	return trace.ContextWithSpan(ctx, span), span
@@ -214,6 +222,10 @@ type Span struct {
 
 	provider *Provider
 	kind     trace.SpanKind
+	// parent is the *Span read off the starting ctx at Start (AG-22,
+	// D-F), nil for a root span. Set exactly once, at construction —
+	// never mutated afterward, so it needs no mutex of its own.
+	parent *Span
 
 	mu         sync.Mutex
 	name       string
@@ -341,6 +353,15 @@ func (s *Span) Name() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.name
+}
+
+// Parent returns the *Span s was started under — the value
+// trace.SpanFromContext(ctx) resolved to a *Span at Start — or nil for a
+// root span (AG-22, D-F). A test-support accessor, not part of trace.Span:
+// it is set once at construction and never mutated, so it is safe to read
+// without s's own mutex.
+func (s *Span) Parent() *Span {
+	return s.parent
 }
 
 // Attributes returns a copy of every attribute SetAttributes has recorded

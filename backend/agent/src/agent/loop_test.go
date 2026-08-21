@@ -1064,7 +1064,39 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/combined_matrix_test.go") ||
 				strings.HasSuffix(path, "/slow_consumer_pressure_test.go") ||
 				strings.HasSuffix(path, "/cross_run_state_test.go") ||
-				strings.HasSuffix(path, "/combined_leak_sweep_test.go")
+				strings.HasSuffix(path, "/combined_leak_sweep_test.go") ||
+				// AG-22 widening (ADR 0005 § D3 extension, design D-A/C4):
+				// import_boundary_test.go is a pre-existing substrate file
+				// released for AG-22 only (exact filename, no wildcard/
+				// prefix/directory pattern) — it gains the five OTel/xxhash
+				// allowlist entries. observability.go is AG-22's new
+				// constants-and-finalizers production file. The four
+				// suffixes after them are AG-22's own new proof-type test
+				// files (nesting, denylist, parity, lifecycle). Byte-in-sync
+				// with loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/import_boundary_test.go") ||
+				strings.HasSuffix(path, "/observability.go") ||
+				strings.HasSuffix(path, "/observability_nesting_test.go") ||
+				strings.HasSuffix(path, "/observability_denylist_test.go") ||
+				strings.HasSuffix(path, "/observability_parity_test.go") ||
+				strings.HasSuffix(path, "/observability_lifecycle_test.go") ||
+				// AG-22 widening (Phase 11, S-AGS-068): observability_scope_test.go
+				// is AG-22's own new S-AGS-068 shipped-surface guard file,
+				// discovered during apply (this guard's own list did not
+				// anticipate Phase 11's new file). Exact filename, no
+				// wildcard/prefix/directory pattern. Byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/observability_scope_test.go") ||
+				// AG-22 widening (sdd-verify correction round, MAJOR-1/
+				// MAJOR-2): observability_attributes_test.go is this
+				// round's own new R-AGO-002 full-table attribute-vocabulary
+				// proof file, discovered the same session it was created
+				// (the cross-phase-discovery lesson: a full-package run
+				// immediately after creating a new proof-type file catches
+				// this before it ships unnoticed). Exact filename, no
+				// wildcard/prefix/directory pattern. Byte-in-sync with
+				// loop_hook_test.go's filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/observability_attributes_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

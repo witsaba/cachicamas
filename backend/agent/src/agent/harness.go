@@ -25,6 +25,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -115,6 +118,17 @@ type Harness struct {
 	// (R-CTX-005). Zero-default: the zero value reads as absent, never
 	// as a budget of zero tokens.
 	ContextBudget ContextBudget
+
+	// TracerProvider is the injected OTel API tracer provider AG-22's
+	// observability boundary records the run span onto (design D-A).
+	// Nil-default: Run/Compact resolve it to the tracing API's own
+	// no-op provider (Phase 5 wiring — this field is declared now,
+	// pulled forward from task 5.1, ONLY so Phase 4's proof-type tests
+	// compile against it and RED for a genuine runtime reason; nothing
+	// reads this field yet in this commit, so it is entirely inert —
+	// Harness stays byte-identically behaved for every existing caller,
+	// zero-value Harness included).
+	TracerProvider trace.TracerProvider
 
 	// queue is the steering FIFO (R-RUN-008). Zero-value ready — a
 	// Harness{} constructs one implicitly.
@@ -349,7 +363,16 @@ func typedHarnessFailureFromError(cause error) (*Failure, error) {
 // calls' own errors, exactly as failRun is best-effort on
 // wrapHarnessFailure/NewRunEnd: cause is the authoritative return
 // value regardless.
-func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, hist *History, total costAccumulator, cause error) (ai.Message, ai.FinishReason, error) {
+//
+// AG-22 (design D-D, R-AGO-002, R-AGO-007; CRITICAL-2 correction):
+// spanClose is Run's own run span's terminal-attribute state (never nil
+// — Run only reaches windDownRun after opening the span and registering
+// its own deferred finalizer). windDownRun sets it here, at the SAME
+// bracket-closing funnel run_end is emitted through, instead of calling
+// finalizeRunSpan directly — Run's own deferred finalizer, registered at
+// open, is the only caller of finalizeRunSpan now, so a panic that never
+// reaches this function still ends the span exactly once.
+func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, hist *History, total costAccumulator, spanClose *spanCloseState, cause error) (ai.Message, ai.FinishReason, error) {
 	_, _ = hist.SynthesizeOrphans()
 	_ = hist.CloseTurn()
 
@@ -369,6 +392,7 @@ func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID Ru
 	if runEnd, rerr := NewRunEnd(runID, outcome, nil); rerr == nil {
 		sendStamped(sink, stamper, runEnd)
 	}
+	spanClose.outcome = outcome.String()
 	return ai.Message{}, 0, cause
 }
 
@@ -378,7 +402,15 @@ func (h *Harness) windDownRun(sink chan<- *Event, stamper *LaneStamper, runID Ru
 // fallback. cause is returned unwrapped as Run's own error, so the
 // caller's errors.Is/errors.As chain reaches the turn's own typed
 // rejection; the wrapped *Failure is used only for the event payload.
-func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, total costAccumulator, cause error) (ai.Message, ai.FinishReason, error) {
+//
+// AG-22 (design D-D, R-AGO-002, R-AGO-007; CRITICAL-2 correction):
+// spanClose is Run's own run span's terminal-attribute state (never nil
+// — Run only reaches failRun after opening the span and registering its
+// own deferred finalizer). Set here, uniformly, at the same funnel every
+// failRun call site already shares — Run's own deferred finalizer is
+// what actually ends the span, so a panic that never reaches failRun
+// still ends it exactly once.
+func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID, total costAccumulator, spanClose *spanCloseState, cause error) (ai.Message, ai.FinishReason, error) {
 	// AG-16 (R-CST-006): tokens spent before a failure are real spend
 	// — emit the run-scoped final cost figure immediately before the
 	// run-close, best-effort and independent of the run-close's own
@@ -388,11 +420,16 @@ func (h *Harness) failRun(sink chan<- *Event, stamper *LaneStamper, runID RunID,
 	if sessionEvent, serr := total.sessionEvent(runID, CostLabelFinal); serr == nil {
 		sendStamped(sink, stamper, sessionEvent)
 	}
+	category := ""
 	if failure, ferr := typedHarnessFailureFromError(cause); ferr == nil {
 		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
 			sendStamped(sink, stamper, runEnd)
 		}
+		category = failure.Category().String()
 	}
+	spanClose.outcome = RunOutcomeFailed.String()
+	spanClose.failed = true
+	spanClose.category = category
 	return ai.Message{}, 0, cause
 }
 
@@ -550,10 +587,41 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	if err != nil {
 		return ai.Message{}, 0, err
 	}
+
+	// AG-22 (design D-A, D-D, R-AGO-001, R-AGO-002, R-AGO-007;
+	// CRITICAL-2 correction): the run span opens here, co-located with
+	// run_start — after every pre-identity refusal above, none of which
+	// ever emits an event. h.Provider TracerProvider defaults to the
+	// tracing API's own no-op provider when nil (tracerFromHarness), so
+	// a zero-value Harness stays inert.
+	//
+	// The finalizer is registered as a `defer` IMMEDIATELY here, at
+	// open — never at an individual return site — so it runs on every
+	// exit from Run, including a panic unwinding through the frame
+	// (R-AGO-007's own MUST, taken literally: the original AG-22 commit
+	// called finalizeRunSpan explicitly at each of failRun/windDownRun/
+	// the success tail, which a panic through the deliberately-
+	// unrecovered PreRequestHook seam skipped entirely, leaking the
+	// span). Every one of those three closing funnels now WRITES
+	// runClose's fields instead of calling finalizeRunSpan itself; this
+	// defer is the only remaining caller.
+	tracer := tracerFromHarness(h.TracerProvider)
+	runCtx, runSpan := tracer.Start(runCtx, invokeAgentSpanName, trace.WithAttributes(
+		attribute.String(genAIOperationNameKey, genAIOperationNameInvokeAgent),
+		attribute.String(runIDKey, string(runID)),
+	))
+	var runClose spanCloseState
+	defer func() {
+		finalizeRunSpan(runSpan, runClose.outcome, runClose.failed, runClose.category)
+	}()
+	if parentID, ok := runStart.Parent(); ok {
+		runSpan.SetAttributes(attribute.String(runParentIDKey, string(parentID)))
+	}
+
 	sendStamped(sink, stamper, runStart)
 
 	if err := hist.Append(prompt); err != nil {
-		return h.failRun(sink, stamper, runID, total, err)
+		return h.failRun(sink, stamper, runID, total, &runClose, err)
 	}
 
 	var lastMsg ai.Message
@@ -569,12 +637,12 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// there, since Interrupt/Shutdown can only reach a live
 		// cancelRun, set above).
 		if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
-			return h.windDownRun(sink, stamper, runID, hist, total, cause)
+			return h.windDownRun(sink, stamper, runID, hist, total, &runClose, cause)
 		}
 
 		for _, m := range h.queue.drain() {
 			if err := hist.Append(m); err != nil {
-				return h.failRun(sink, stamper, runID, total, err)
+				return h.failRun(sink, stamper, runID, total, &runClose, err)
 			}
 		}
 
@@ -632,7 +700,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 				// other boundary uses — windDownRun is never entered
 				// from inside compaction itself (R-CMP-010, AD-11).
 				if cause := context.Cause(runCtx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
-					return h.windDownRun(sink, stamper, runID, hist, total, cause)
+					return h.windDownRun(sink, stamper, runID, hist, total, &runClose, cause)
 				}
 			}
 		}
@@ -787,7 +855,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 				// captured above from this attempt's own forwarded
 				// turn_end).
 				lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attempt})
-				return h.windDownRun(sink, stamper, runID, hist, total, cause)
+				return h.windDownRun(sink, stamper, runID, hist, total, &runClose, cause)
 			}
 
 			// R-RTY-001 gates G1-G5, first match wins. Any verdict
@@ -818,7 +886,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 					// outcome aborted (the preceding failed attempt's
 					// own forwarded turn_end already captured it).
 					lane.enqueuePostTurn(h.Hooks.PostTurn, PostTurnReport{run: runID, turn: capturedTurnID, outcome: capturedOutcome, cost: turnCost.figures, attempts: attempt})
-					return h.windDownRun(sink, stamper, runID, hist, total, cause)
+					return h.windDownRun(sink, stamper, runID, hist, total, &runClose, cause)
 				}
 				break
 			}
@@ -855,7 +923,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			// already forwarded by the loop above, inside each
 			// attempt's own still-open turn bracket; failRun closes
 			// the run's own bracket.
-			return h.failRun(sink, stamper, runID, total, terr)
+			return h.failRun(sink, stamper, runID, total, &runClose, terr)
 		}
 
 		// AG-20 (R-HKS-004 rows 1/2/11, site i): every successful
@@ -878,7 +946,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 		// stays reachable and semantically unchanged for every other
 		// caller (S-CMP-035).
 		if err := hist.closeTurnMarked(capturedTurnID); err != nil {
-			return h.failRun(sink, stamper, runID, total, err)
+			return h.failRun(sink, stamper, runID, total, &runClose, err)
 		}
 
 		lastMsg, lastFinish = msg, finish
@@ -897,7 +965,7 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 			if took {
 				for _, m := range queued {
 					if err := hist.Append(m); err != nil {
-						return h.failRun(sink, stamper, runID, total, err)
+						return h.failRun(sink, stamper, runID, total, &runClose, err)
 					}
 				}
 				// AG-16 (R-CST-005): a steered message arrived at the
@@ -924,5 +992,6 @@ func (h *Harness) Run(ctx context.Context, prompt ai.Message, sink chan<- *Event
 	if rerr == nil {
 		sendStamped(sink, stamper, runEnd)
 	}
+	runClose.outcome = RunOutcomeCompleted.String()
 	return lastMsg, lastFinish, nil
 }

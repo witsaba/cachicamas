@@ -249,6 +249,97 @@ are process-lifecycle concerns that belong to a composition root.
 `…cache_read_tokens`, `…cache_write_tokens`, `http.response.status_code`, `retry.count`,
 `stream.event_count`, `error.type`.
 
+**Layer 2 attribute allowlist (AG-22, extends § D3)**
+
+Layer 2 (`backend/agent/src/agent`) records four span families, mirroring AI-37's Layer 1 shape:
+one constants-and-finalizers file, spans co-located with the existing Start/End event constructors,
+failure recorded only as `Failure.Category().String()` — never `Unwrap()`'s free text. Span names
+follow the OpenTelemetry GenAI semantic conventions where one exists (`invoke_agent`,
+`execute_tool {name}`); `turn` and `compact` have no convention equivalent, so their names and keys
+are minimal inventions under the `cachicamas.` namespace — this milestone's own documented carve-out,
+exercised rather than violated. Every attribute key below is paired with the exact event accessor its
+value must equal; an allowlist entry with no accessor citation is not admissible.
+
+*Span `invoke_agent` (run bracket)*
+
+| Attribute | Go type | Mirrors (exact event accessor) |
+| --- | --- | --- |
+| `gen_ai.operation.name` = `"invoke_agent"` | string | convention-required constant on agent spans |
+| `cachicamas.run.id` | string | `Event.Run()` (`event.go:481`) |
+| `cachicamas.run.parent_id` (iff delegated) | string | `Event.Parent()` (`event.go:492`); minted by `NewDelegatedRunStart` (`run_events.go:68`) |
+| `cachicamas.run.outcome` | string | `RunEnd.Outcome().String()` (`run_events.go:130,202`) |
+| `error.type` (iff outcome = failed) | string | `RunEnd.Failure()` → `Failure.Category().String()` (`run_events.go:206`, `failure.go:44`) |
+
+*Span `turn` (turn bracket, invented — no GenAI convention equivalent)*
+
+| Attribute | Go type | Mirrors (exact event accessor) |
+| --- | --- | --- |
+| `cachicamas.run.id`, `cachicamas.turn.id` | string | `Event.Run()` / `Event.Turn()` (`event.go:481,486`) |
+| `cachicamas.turn.outcome` | string | `TurnEnd.Outcome().String()` (`turn_events.go:124,202`) |
+| `error.type` (iff outcome = aborted) | string | `TurnEnd.Failure()` → `.Category().String()` (`turn_events.go:206`; a failure is present iff the outcome is `TurnOutcomeAborted`, `turn_events.go:159-173`) |
+
+*Span `execute_tool {name}` (tool-call bracket)*
+
+| Attribute | Go type | Mirrors (exact event accessor) |
+| --- | --- | --- |
+| `gen_ai.tool.name` | string | `ToolStart.Name()` (`tool_event.go:128`) |
+| `gen_ai.tool.call.id` | string | `ToolStart.CallID()` (`tool_event.go:121`) |
+| `cachicamas.tool.ordinal` | int64 (widened losslessly from the event's `uint32`) | `ToolStart.Ordinal()` (`tool_event.go:125`) |
+| `cachicamas.tool.outcome` | string | the closing event's `Outcome() ToolOutcome` (`tool_event.go:331,406,491`) |
+| `cachicamas.tool.detached` (iff true) | bool | the detached wind-down arm (`scheduler.go:502-506`, `typedDetachedCallFailure` `:1132`) |
+| `error.type` (iff outcome = execution failure) | string | `ToolEndExecutionFailure.Failure()` → `.Category().String()` (`tool_event.go:488`) |
+
+*Span `compact` (compaction bracket, invented — exactly one span per bracket, never a turn span plus a child)*
+
+| Attribute | Go type | Mirrors (exact event accessor) |
+| --- | --- | --- |
+| `cachicamas.run.id`, `cachicamas.turn.id` | string | envelope; the compaction bracket's own minted turn (`compaction.go:259`) |
+| `cachicamas.compaction.id` | string | `CompactionStarted.CompactionID()` (`compaction_events.go:121`) |
+| `cachicamas.compaction.summary_id` (iff finished) | string | `CompactionFinished.SummaryID()` (`compaction_events.go:203`) |
+| `cachicamas.turn.outcome` | string | the closing `TurnEnd.Outcome().String()` (`compaction.go:384`), or the fail arm's outcome via `emitCompactionFailedArm` |
+| `error.type` (iff outcome = aborted) | string | `CompactionFailed.Failure()` → `.Category().String()` (`compaction_events.go:278`) |
+
+Span status: `codes.Error` iff run = Failed / turn = Aborted / tool = execution failure (including the
+detached arm) / compaction fail arm; description carries the category name only, never a failure's
+free text. `codes.Ok` otherwise.
+
+**Layer 1 keys deferred to AI-37, NOT re-recorded at Layer 2.** AI-37's request span
+(`openaicompat/trace.go`) already carries these eight attribute groups — eleven individual keys — so
+a future contributor must not re-add any of them here: `gen_ai.system`, `gen_ai.request.model`,
+`gen_ai.request.max_tokens`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`,
+`gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read_tokens`, `gen_ai.usage.cache_write_tokens`,
+`http.response.status_code`, `retry.count`, `stream.event_count`. `error.type` is the one key both
+layers use, deliberately — the shared standard key reused on a different span, not a re-record of the
+same value. Layer 1's `chat` request span nests under Layer 2's `turn` span by construction: the same
+`ctx` a turn's span occupies is what `Turn` hands to `provider.Stream`.
+
+**Deliberately NOT recorded, each with its reason:**
+
+1. **Per-delta events** (`message_text.go`/`message_reasoning.go` deltas; `ToolProgress` payloads,
+   `tool_event.go:193`) — raw model/tool output: denylisted content, and unbounded cardinality.
+2. **Hook timings** — a concrete telemetry hook is Layer 3's own (`agent-hook-taxonomy/spec.md:328`);
+   a timing hook would also require a wall clock `hooks.go` is forbidden to carry.
+3. **Permission argument content** (`permission_events.go`) — tool-argument text, denylisted. No
+   permission span and no permission attributes exist at all: the permission gate runs and resolves
+   before the tool span ever opens.
+4. **Usage/cost** (`cost_events.go` `CostTurn`/`CostSession`) — owned by Layer 1's `gen_ai.usage.*` at
+   the request span (AI-37); re-recording here would duplicate it.
+5. **Compaction instruction and summary content** — the instruction is a prompt, the summary is a
+   completion; both denylisted. Only the opaque `summary_id` is recorded.
+6. **`Failure` projections beyond `Category().String()`** — `Unwrap()`'s error text is denylisted;
+   `Delivery()`, `Retryable()` and `PartialOutput()` are individually safe but gratuitous for a span
+   attribute.
+7. **`SubagentID` and the compaction bracket's own start/end turn IDs** — opaque and safe, but
+   derivable from the event stream by an envelope join; omitted for minimality, not for safety.
+
+Restated here, byte-for-byte and unweakened, exactly as immediately below — this extension grants no
+relief from it and no future amendment to this subsection may weaken it either:
+
+**Attribute denylist, absolute:** any prompt, completion, reasoning, tool-argument or tool-result
+text; any HTTP header; any credential; any raw provider response body. Layer 1 owns this discipline
+as milestone AI-36 (redaction). Under this rule, AI-37's acceptance clause "Layer 1 does not import
+Cachicamas `otel`" stays literally true and becomes *precise* rather than accidental.
+
 **Attribute denylist, absolute:** any prompt, completion, reasoning, tool-argument or tool-result
 text; any HTTP header; any credential; any raw provider response body. Layer 1 owns this discipline
 as milestone AI-36 (redaction). Under this rule, AI-37's acceptance clause "Layer 1 does not import

@@ -1474,6 +1474,24 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 // pre-existing entries in both substrate filters since AG-18, so this
 // release needs no new filter entry, exactly as the scope_fence_test.go
 // release above needed none either.
+// AG-22 widening (ADR 0005 § D3 extension, design D-A/C4, discovered
+// during apply): "import_boundary_test.go" is removed from this list.
+// It is AG-22's own Phase 3 deliverable — the five OTel/xxhash
+// allowlist entries and the check-3 direct-importer exception are its
+// whole point — so requiring it byte-unchanged here would contradict
+// this change's own approved design.
+//
+// AG-22 widening (Phase 7, design D-D, R-AGO-002/006/007, discovered
+// during apply): "scheduler.go" is ALSO removed from this list, for the
+// identical reason — Phase 7 instruments `executeCall`'s tool span,
+// including the detached arm's own scheduler-owned wind-down bound
+// (R-AGO-007's own decided case), which is exactly this milestone's own
+// approved design, not an incidental touch. `TestScopeFence_S_TLS_020`
+// and the two `TestScheduler_SourceGuard_*` tests are the guards that
+// remain scoped to scheduler.go's own content (no PolicySlot type
+// assertion, no bare seam type/key, no errgroup import) — all three
+// re-verified green against this phase's own diff. Every other entry
+// below is untouched by AG-22 and stays frozen.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
 		"event.go",
@@ -1490,11 +1508,42 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"sequence.go",
 		"compaction_events.go",
 		"ambient_authority_test.go",
-		"import_boundary_test.go",
 		"reconstruction_test.go",
-		"scheduler.go",
 		"delegation_seam.go",
 	}
+}
+
+// hksFilterOutAG22TracetestFiles strips diff blocks for
+// backend/agent/src/agenttest/tracetest/tracetest.go and its _test.go
+// sibling out of diff — AG-22's own D-F deliverable (the Parent()
+// capture the nesting proof needs), discovered during apply to collide
+// with this test's own blanket src/agenttest/ freeze. Mirrors
+// loop_test.go's filterOutLoopFiles pattern: an exact-filename suffix
+// match, no wildcard/prefix/directory pattern, so any OTHER file this
+// change might someday touch under src/agenttest/ still fails the
+// check loudly.
+func hksFilterOutAG22TracetestFiles(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	var kept strings.Builder
+	skip := false
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			idx := strings.LastIndex(line, " b/")
+			path := line
+			if idx >= 0 {
+				path = line[idx+3:]
+			}
+			skip = strings.HasSuffix(path, "/tracetest/tracetest.go") ||
+				strings.HasSuffix(path, "/tracetest/tracetest_test.go")
+		}
+		if !skip {
+			kept.WriteString(line)
+			kept.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(kept.String())
 }
 
 // S-HKS-024 — Given the merge base of this change's branch with
@@ -1543,6 +1592,7 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git diff %s -- backend/agent/src/agenttest/ failed: %v", baseRef, err)
 	}
+	agenttestDiff = hksFilterOutAG22TracetestFiles(agenttestDiff)
 	if agenttestDiff != "" {
 		t.Errorf("backend/agent/src/agenttest/ is not byte-unchanged against %s (the gate primitive is used, not widened):\n%s", baseRef, agenttestDiff)
 	}
