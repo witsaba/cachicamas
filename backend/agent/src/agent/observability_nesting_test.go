@@ -82,7 +82,7 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		events := drainSink(t, sink)
 
 		if got := provider.Started(); got == 0 {
-			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (the run seam is not instrumented until Phase 5)")
+			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded for the run bracket")
 		}
 		runSpan := spanNamed(provider.Spans(), invokeAgentSpanNameForTest)
 		if runSpan == nil {
@@ -112,7 +112,7 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		drainSink(t, sink)
 
 		if got := provider.Started(); got == 0 {
-			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (the turn seam is not instrumented until Phase 6)")
+			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded for the turn bracket")
 		}
 		spans := provider.Spans()
 		runSpan := spanNamed(spans, invokeAgentSpanNameForTest)
@@ -153,7 +153,7 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		events := drainSink(t, sink)
 
 		if got := provider.Started(); got == 0 {
-			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (the tool seam is not instrumented until Phase 7)")
+			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded for the tool bracket")
 		}
 		spans := provider.Spans()
 		turnSpan := spanNamed(spans, turnSpanNameForTest)
@@ -207,7 +207,7 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		drainSink(t, sink)
 
 		if got := provider.Started(); got == 0 {
-			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (delegation nesting needs the tool seam, Phase 7)")
+			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded for the delegating tool call")
 		}
 		spans := provider.Spans()
 		toolSpan := spanWithNamePrefix(spans, toolSpanNamePrefixForTest)
@@ -244,7 +244,7 @@ func TestObservability_Nesting_RunTurnToolCompactionDelegation(t *testing.T) {
 		events := drainSink(t, sink)
 
 		if got := provider.Started(); got == 0 {
-			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded yet (the compaction seam is not instrumented until Phase 8)")
+			t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded for the compaction bracket")
 		}
 
 		// AG-22 correction (MAJOR-6, sdd-verify round 1, S-AGO-019): the

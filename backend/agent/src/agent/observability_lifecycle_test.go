@@ -55,7 +55,7 @@ func TestObservability_Lifecycle_ExactlyOnceAcrossEveryExitFamily(t *testing.T) 
 				t.Errorf("AssertAllEndedOnce() = %v, want nil (R-AGO-007's own exactly-once proof)", err)
 			}
 			if got := provider.Started(); got == 0 {
-				t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded on this exit family yet (the relevant seam is not instrumented until Phases 5-7)")
+				t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded on this exit family")
 			}
 			if started, ended := provider.Started(), provider.Ended(); started != ended {
 				t.Errorf("provider.Started() = %d, provider.Ended() = %d, want equal (R-AGO-007's started-count-equals-ended-count invariant)", started, ended)

@@ -295,15 +295,37 @@ func TestObservability_DenylistAbsence(t *testing.T) {
 	// --- Guard 3: corpus non-empty + attribute-count floor ---
 	corpus := provider.Corpus()
 	if len(corpus) == 0 {
-		t.Fatal("Corpus() is empty — no span has been recorded yet (the run/turn/tool/compaction seams are not instrumented until Phases 5-8); the absence claim would pass vacuously (R-AGO-008 item 2)")
+		t.Fatal("Corpus() is empty — no span was recorded; the absence claim would pass vacuously (R-AGO-008 item 2)")
 	}
-	const wantMinAttributeCount = 14 // ADR 0005 § D3 Layer 2 extension's own unique-key cardinality
-	gotAttributeCount := 0
+	// AG-22 correction (MAJOR/MINOR-2, sdd-verify round 1): the floor was
+	// a raw SUM of attribute occurrences across every span, compared
+	// against the vocabulary's own 14-key cardinality — a family that
+	// stopped recording entirely could still clear 14 on the strength of
+	// the OTHER families' own repeated attributes, so the floor could
+	// never actually detect that. The floor is now the recorded UNIQUE
+	// key SET's own size — a family that stops recording drops this
+	// count directly, one key at a time.
+	//
+	// wantMinUniqueKeys is 12, not the vocabulary's full 14: this run's
+	// own scenario mix (Run A: reasoning + a deferred-then-allowed tool
+	// call; Run B: a finishing compaction; Run C: a failed run) never
+	// delegates and never detaches a tool call, so cachicamas.run.
+	// parent_id and cachicamas.tool.detached — both iff-guarded absent
+	// on every path this run exercises — are the two vocabulary members
+	// this specific run cannot produce. Both are asserted present, with
+	// real values, elsewhere (observability_attributes_test.go's own
+	// scenarios D/E; observability_lifecycle_test.go's detached-arm
+	// tests) — this floor's own job is non-vacuity for THIS run's
+	// actually-reachable keys, not re-proving the full vocabulary.
+	const wantMinUniqueKeys = 12
+	uniqueKeys := make(map[string]bool)
 	for _, span := range provider.Spans() {
-		gotAttributeCount += len(span.Attributes())
+		for _, kv := range span.Attributes() {
+			uniqueKeys[string(kv.Key)] = true
+		}
 	}
-	if gotAttributeCount < wantMinAttributeCount {
-		t.Errorf("recorded attribute count = %d across %d span(s), want at least %d (the § D3 Layer 2 vocabulary's own cardinality, R-AGO-008 item 2)", gotAttributeCount, provider.Started(), wantMinAttributeCount)
+	if len(uniqueKeys) < wantMinUniqueKeys {
+		t.Errorf("recorded unique attribute key count = %d (keys: %v), want at least %d — a family that stopped recording would drop this floor directly (R-AGO-008 item 2)", len(uniqueKeys), uniqueKeys, wantMinUniqueKeys)
 	}
 
 	// --- Guard 4: event/outcome coverage — every drained kind this

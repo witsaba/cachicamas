@@ -216,6 +216,6 @@ func TestObservability_NoTracerParity_TracedArmRecordsAtLeastOneSpan(t *testing.
 	agoParityRun(t, "parity_tool_b", provider)
 
 	if got := provider.Started(); got == 0 {
-		t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded on the traced arm yet (the run/turn/tool seams are not instrumented until Phases 5-7)")
+		t.Fatalf("provider.Started() = 0, want > 0 — no span was recorded on the traced arm")
 	}
 }
