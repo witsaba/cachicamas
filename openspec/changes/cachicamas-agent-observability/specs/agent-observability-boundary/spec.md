@@ -295,7 +295,7 @@ Each attribute key and each span name MUST be spelled in exactly one place and r
 
 ### NFR-AGO-003 — Substrate and boundary preservation
 
-The ten substrate files named in `openspec/AGENTS.md` MUST remain byte-unchanged, including `import_boundary_test.go`'s **behaviour** — its data tables are what this change amends, per `R-AGO-010`. Production sources added by this change MUST NOT import process, filesystem, environment or network facilities; the ambient-authority guard (`R-AGP-005`) and both import-boundary guards MUST pass. No `go.mod` or `go.sum` edit. No edit under `backend/agent/src/ai/`.
+The ten substrate files named in `openspec/AGENTS.md` MUST remain byte-unchanged, including `import_boundary_test.go`'s **behaviour**, with exactly two authorised amendments, each recorded rather than silent: its data tables, per `R-AGO-010`; and its exact-path-table direct-import-edge matching mechanism together with its direct-import family scan, per `agent-package-scaffold`'s `R-AGP-003` as amended by this same change. No other behavioural amendment to this file is authorised — in particular, no amendment MAY widen a check's tolerance (for example, exempting an importer class the check previously caught) without the corresponding spec text naming that exemption and the evidence that bounds it. Production sources added by this change MUST NOT import process, filesystem, environment or network facilities; the ambient-authority guard (`R-AGP-005`) and both import-boundary guards MUST pass. No `go.mod` or `go.sum` edit. No edit under `backend/agent/src/ai/`.
 
 ### NFR-AGO-004 — Test isolation
 
