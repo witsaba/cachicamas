@@ -97,7 +97,7 @@ When a consumer stall is in progress and cancellation fires, the run MUST unbloc
 
 ### R-CNH-005 — The leak sweep is ONE new non-parallel wrapper over this change's own scenarios
 
-AG-21.3's *"wholesale"* (`0003:2037`) MUST be built as **one new top-level, non-parallel test** whose scenario callable runs, serially, the drivers this change adds — the twelve cells, the two pressure scenarios and the cross-run driver — passed to the module's goroutine-leak helper. It MUST NOT wrap the pre-existing suite. Four grounds, each verified:
+AG-21.3's *"wholesale"* (`0003:2037`) MUST be built as **one new top-level, non-parallel test** whose scenario callable runs, serially, the drivers this change adds — the twelve cells, every pressure driver this change adds (the two standalone scenarios and the combined stalled-consumer-with-pending-state driver that discharges `S-AGE-031`) and the cross-run driver — passed to the module's goroutine-leak helper. It MUST NOT wrap the pre-existing suite. Four grounds, each verified:
 
 1. **Mechanically impossible.** The helper pins a sentinel through `tb.Setenv` as its first act (`stream_kit_leak.go:110`), which the testing package panics on when the calling test or an ancestor has already called `t.Parallel()` (`:96-106`). The existing suite is overwhelmingly parallel.
 2. **Already normative.** `S-CAN-006` requires it: *"The leak-harness test MUST NOT call `t.Parallel()`"* (`agent-cancellation-tree/spec.md:154`).

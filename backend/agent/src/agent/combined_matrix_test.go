@@ -106,7 +106,12 @@ func adjustedThenCompactionFailure(t *testing.T, _ *cnhArrangement, got cnhRunOu
 }
 
 // adjustedThenSuspensionFailure — S-CNH-005. The suspension x
-// provider-failure cell, at its R-CNH-001-recorded adjusted Then.
+// provider-failure cell. Its Then is NOT adjusted: R-CNH-001's two
+// recorded exceptions are compaction x failure and child-harness-
+// active x failure, and this cell is neither. What is bounded here is
+// the firing POINT, not the outcome -- no main-provider stream is
+// live while a call is parked, so the failure fires at the next
+// reachable provider boundary and the uniform Then then holds.
 // Given a run whose call is parked on the permission gate, when the
 // park is resolved and the next reachable provider boundary fires a
 // terminal failure, then the uniform provider-failure Then holds at

@@ -44,6 +44,8 @@ func TestConcurrencyHardening_PackageLeakSweep(t *testing.T) {
 		}
 		cnhDrivePressureNeverCancelled(t)
 		cnhDrivePressureCancelledUnblocks(t)
+		cnhDriveCombinedStalledSteering(t, false)
+		cnhDriveCombinedStalledSteering(t, true)
 		cnhDriveCrossRunNilHistory(t)
 		cnhDriveCrossRunSharedHistory(t)
 	}
