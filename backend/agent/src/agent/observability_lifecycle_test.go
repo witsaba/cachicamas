@@ -210,6 +210,76 @@ func agoLifecycleCancellationInterrupted(t *testing.T) *tracetest.Provider {
 	return provider
 }
 
+// agoLifecyclePreRequestHookPanic drives a run whose PreRequestHook
+// panics — the deliberately-UNRECOVERED mutating-hook posture
+// agent-v1-scope's R-AGS-016 records by name ("Unrecovered mutating
+// hooks... Untouched and unexercised" — inherited from AG-20, honoured
+// through AG-21). Neither Turn nor Harness.Run installs a recover()
+// anywhere in this call chain, so the panic propagates all the way up;
+// this driver installs the ONLY recover, at its own top, mirroring
+// agoParityRun's own recover-and-report shape, so the test binary
+// survives and the caller can inspect what was recorded before the
+// unwind reached here.
+//
+// Driven through the BARE Turn entry point (nil continuation), not
+// Harness.Run: a panic reaching Turn from INSIDE Harness.Run's own
+// attempt loop (harness.go) never reaches that loop's own
+// `<-forwarderDone` join, abandoning the per-attempt forwarder
+// goroutine — an independent, pre-existing race between that goroutine's
+// still-in-flight `sink <- ev` and Run's own deferred close(sink), never
+// caused by this milestone's span-lifetime fix and out of its scope.
+// Turn's own nil-continuation path opens the identical run+turn span
+// pair Harness.Run does (loop.go's own D-D comments), so this drives the
+// exact same R-AGO-007 claim through a race-free entry point: a manually
+// started root span seeds ctx with this test's own tracetest.Provider,
+// since Turn acquires its tracer AMBIENTLY from ctx, never by injection
+// (R-AGO-001).
+func agoLifecyclePreRequestHookPanic(t *testing.T) (provider *tracetest.Provider, recovered any) {
+	t.Helper()
+	provider = tracetest.NewProvider()
+	modelProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+
+	rootTracer := provider.Tracer("agent_test/lifecycle_pre_request_hook_panic")
+	ctx, rootSpan := rootTracer.Start(contextBackground(), "test_root")
+	defer rootSpan.End()
+
+	sink := make(chan *agent.Event, 64)
+	opts := agent.TurnOptions{
+		PreRequestHook: func(context.Context, ai.Request) (ai.Request, error) {
+			panic("agent_test: lifecycle fixture's deliberate hook panic")
+		},
+	}
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		_, _, _ = agent.Turn(ctx, modelProvider, "system prompt for lifecycle pre-request hook panic", []ai.Message{firstMessage(t)}, opts, sink)
+	}()
+	return provider, recovered
+}
+
+// TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce
+// is R-AGO-007's own panic-unwind clause ("a panic unwinding through the
+// frame" is named explicitly among the terminal paths a finalizer
+// registered at open must cover), driven through a REAL, reachable
+// panic rather than asserted by inspection: the deliberately-unrecovered
+// PreRequestHook seam (R-AGS-016). Before the fix this fails naming
+// Started=2 Ended=0 (the run and turn spans both leak) — recorded below,
+// then closed by registering each span's finalizer as a `defer` at open
+// (matching the tool span's own already-correct pattern) instead of at
+// each individual return site.
+func TestObservability_Lifecycle_PreRequestHookPanicEndsEverySpanExactlyOnce(t *testing.T) {
+	provider, recovered := agoLifecyclePreRequestHookPanic(t)
+	if recovered == nil {
+		t.Fatal("PreRequestHook panic did not propagate through Harness.Run — want a panic reaching this test's own recover, per R-AGS-016's unrecovered-mutating-hook posture")
+	}
+	t.Logf("panic recovered by caller: %v", recovered)
+	t.Logf("Started=%d Ended=%d", provider.Started(), provider.Ended())
+	if err := provider.AssertAllEndedOnce(); err != nil {
+		t.Errorf("AssertAllEndedOnce() = %v, want nil — a panic unwinding through Turn/Harness.Run MUST still end every span exactly once (R-AGO-007)", err)
+	}
+}
+
 // agoLifecycleDetachedWindDown mirrors
 // TestHarness_WindDown_DeafToolCannotHoldRunHostage exactly (a
 // cancellation-deaf BlockingScriptedTool, a small injected

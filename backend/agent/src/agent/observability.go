@@ -136,6 +136,37 @@ func spanOutcome(span trace.Span, failed bool, category string) {
 	span.SetStatus(codes.Ok, "")
 }
 
+// spanCloseState carries a run, turn or compaction span's terminal
+// attributes, written by whichever closing funnel this bracket exits
+// through, and read exactly once by the deferred finalizer registered
+// IMMEDIATELY AT OPEN — never called directly by any individual return
+// site. This is the fix for the leak sdd-verify found (CRITICAL-2,
+// R-AGO-007's own "registered at open, never at individual return
+// sites" wording, taken literally at last): before this correction, run,
+// turn and compaction spans were finalized by an explicit call at each
+// of their several closing sites, so a panic unwinding through the
+// frame — reachable through the deliberately-unrecovered mutating
+// PreRequestHook seam, agent-v1-scope's R-AGS-016 — skipped every one of
+// them and leaked. Mirrors the tool span's own four-local pattern
+// (scheduler.go's toolFinalOutcome/toolFinalDetached/toolFinalFailed/
+// toolFinalCategory, already correct since Phase 7) as one struct
+// instead of four locals, passed by pointer to whichever helper function
+// closes the bracket (failRun, windDownRun, emitPreStreamAbort,
+// emitCompactionFailedArm) since those live outside the span-opening
+// function's own stack frame and cannot register a defer on its behalf.
+// A field left at its zero value (the panic case: nothing set it) still
+// lets the registered defer call span.End() exactly once — outcome ""
+// and status Ok is imprecise telemetry for an unexpected panic, but
+// R-AGO-007's own MUST is "ends exactly once on every terminal path
+// without exception", not a specific attribute value on that one
+// unreachable-by-design path.
+type spanCloseState struct {
+	outcome   string
+	failed    bool
+	category  string
+	summaryID string // compaction only; unused (stays "") for run/turn.
+}
+
 // finalizeRunSpan renders the run bracket's terminal attributes (outcome,
 // and iff failed the category) onto span and ends it exactly once
 // (design D-B, D-D). Called from Harness.Run's own bracket-closing
