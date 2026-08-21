@@ -39,6 +39,9 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cachicamas/backend/agent/src/ai"
 )
 
@@ -297,20 +300,58 @@ func Turn(
 	// stamper on the nil path, no shared state). AG-13 continuation
 	// path: the caller's run owns the run bracket (R-LSK-001 point 2)
 	// — Turn emits no run-open and no run-close on any path.
+	//
+	// AG-22 (design D-A, D-D, R-AGO-006): on the nil-continuation path
+	// nobody else owns the run bracket, so Turn opens its OWN run span
+	// here too — mirroring Harness.Run's own opening, but acquired
+	// AMBIENTLY from whatever's already on ctx (a bare Turn(...) call
+	// with no recording span on ctx therefore records nothing, per
+	// R-AGO-001). runSpan stays nil on the continuation path (Harness
+	// already owns that bracket's span) and its every use below is
+	// nil-guarded.
+	var runSpan trace.Span
 	if opts.Continuation == nil {
 		runStart, err := NewRunStart(runID)
 		if err != nil {
 			closeSink(sink)
 			return ai.Message{}, 0, err
 		}
+		tracer := tracerFromContext(ctx)
+		ctx, runSpan = tracer.Start(ctx, invokeAgentSpanName, trace.WithAttributes(
+			attribute.String(genAIOperationNameKey, genAIOperationNameInvokeAgent),
+			attribute.String(runIDKey, string(runID)),
+		))
+		if parentID, ok := runStart.Parent(); ok {
+			runSpan.SetAttributes(attribute.String(runParentIDKey, string(parentID)))
+		}
 		emitStamped(sink, stamper, runStart)
 	}
 
 	turnStart, err := NewTurnStart(runID, turnID)
 	if err != nil {
+		// AG-22: turn_start itself never constructed, so per D-D's iff
+		// rule no turn span opens either — but a run span MAY already
+		// be open (nil-continuation path) and must not leak even though
+		// this defensive branch (runID/turnID always freshly minted,
+		// never empty) emits no run_end on this pre-existing path.
+		if runSpan != nil {
+			finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, "")
+		}
 		closeSink(sink)
 		return ai.Message{}, 0, err
 	}
+	// AG-22 (design D-A, D-D, R-AGO-002, R-AGO-006, R-AGO-007): the turn
+	// span opens here, co-located with turn_start, acquired AMBIENTLY
+	// (from the run span just opened above on the nil-continuation
+	// path, or from whatever the caller's own ctx already carries on
+	// the continuation path — e.g. Harness.Run's own run span). ctx is
+	// reassigned so every downstream call (provider.Stream, Schedule,
+	// finishContinuationTurn) carries it.
+	tracer := tracerFromContext(ctx)
+	ctx, turnSpan := tracer.Start(ctx, turnSpanName, trace.WithAttributes(
+		attribute.String(runIDKey, string(runID)),
+		attribute.String(turnIDKey, string(turnID)),
+	))
 	emitStamped(sink, stamper, turnStart)
 
 	// Build the request from system + transcript + opts (D5a, R-LSK-001).
@@ -324,7 +365,7 @@ func Turn(
 		// and this path's original error is still returned unchanged
 		// (the ferr == nil / terr == nil guard posture already at
 		// loop.go:388-404).
-		emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, err)
+		emitPreStreamAbort(sink, stamper, runID, turnID, turnSpan, runSpan, opts.Continuation == nil, err)
 		closeSink(sink)
 		return ai.Message{}, 0, err
 	}
@@ -357,7 +398,17 @@ func Turn(
 		// failure exists to emit in that (practically unreachable)
 		// case.
 		if perr == nil {
-			emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, typedErr)
+			emitPreStreamAbort(sink, stamper, runID, turnID, turnSpan, runSpan, opts.Continuation == nil, typedErr)
+		} else {
+			// AG-22: no typed failure was constructible to emit, but the
+			// spans opened above still must not leak — finalize with an
+			// empty category rather than skip them too.
+			if turnSpan != nil {
+				finalizeTurnSpan(turnSpan, TurnOutcomeAborted.String(), true, "")
+			}
+			if opts.Continuation == nil && runSpan != nil {
+				finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, "")
+			}
 		}
 		closeSink(sink)
 		if perr != nil {
@@ -375,7 +426,7 @@ func Turn(
 		// typed error to the caller. AG-15 D1: the same
 		// bracket-closing obligation as the other two pre-stream
 		// paths, before the close.
-		emitPreStreamAbort(sink, stamper, runID, turnID, opts.Continuation == nil, streamErr)
+		emitPreStreamAbort(sink, stamper, runID, turnID, turnSpan, runSpan, opts.Continuation == nil, streamErr)
 		closeSink(sink)
 		return ai.Message{}, 0, streamErr
 	}
@@ -389,7 +440,7 @@ func Turn(
 			// bracket. The nil path below keeps the original
 			// finalize-first order byte-stable (S-LSK-015).
 			if opts.Continuation != nil {
-				return finishContinuationTurn(ctx, turn, opts, runID, turnID, stamper, sink)
+				return finishContinuationTurn(ctx, turn, opts, runID, turnID, stamper, sink, turnSpan)
 			}
 			// Completion: capture the finish reason and exit the loop.
 			// If the completion carries tool calls, dispatch them
@@ -400,7 +451,17 @@ func Turn(
 			// the loop's finalize emits its closing brackets
 			// BEFORE the scheduler runs. The wire-up is therefore:
 			// finalize-first, schedule-second, close-third.
+			//
+			// AG-22 (design D-D): finalize the turn (and, nil path,
+			// run) spans HERE, at the same finalize-first point their
+			// events close — before Schedule below opens any tool span,
+			// matching this walking-skeleton path's own pre-existing
+			// "finalize-first, schedule-second" ordering unchanged.
 			msg, finish := turn.finalize()
+			finalizeTurnSpan(turnSpan, outcomeForFinish(finish).String(), false, "")
+			if runSpan != nil {
+				finalizeRunSpan(runSpan, RunOutcomeCompleted.String(), false, "")
+			}
 			if turn.finish == ai.FinishReasonToolCalls && len(turn.toolCalls) > 0 {
 				sched := &Scheduler{MaxConcurrentReads: maxReadFanOutDefault}
 				// AG-10 (D-C): forward the caller's policy
@@ -427,6 +488,7 @@ func Turn(
 			// byte-unchanged from pre-AG-11: no emission, drain,
 			// close, return.
 			if pf, ok := turn.fatal.(*ai.Failure); ok {
+				category := ""
 				if failure, ferr := NewFailure(pf); ferr == nil {
 					// On the nil path, one NewFailure call feeds
 					// both emissions (task 5.3's identity pin):
@@ -445,12 +507,30 @@ func Turn(
 							emitStamped(sink, stamper, runEnd)
 						}
 					}
+					category = failure.Category().String()
+				}
+				// AG-22 (design D-D, R-AGO-002, R-AGO-007): the turn
+				// span (always open) and, nil path, the run span are
+				// finalized here regardless of whether NewFailure
+				// succeeded, so neither leaks on the best-effort arm.
+				finalizeTurnSpan(turnSpan, TurnOutcomeAborted.String(), true, category)
+				if opts.Continuation == nil && runSpan != nil {
+					finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, category)
 				}
 				// D7: no second provider.Stream call — the
 				// turn winds down here, after exactly one.
 				msg := turn.reconstructMessage()
 				closeSink(sink)
 				return msg, 0, turn.fatal
+			}
+			// AG-22: turn.fatal is a plain Go error (an internal event-
+			// construction failure), not a typed *ai.Failure — no
+			// turn_end/run_end is emitted on this pre-existing path
+			// either, but the always-open turn span (and, nil path, the
+			// run span) must still not leak.
+			finalizeTurnSpan(turnSpan, TurnOutcomeAborted.String(), true, "")
+			if opts.Continuation == nil && runSpan != nil {
+				finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, "")
 			}
 			closeSink(sink)
 			return ai.Message{}, 0, turn.fatal
@@ -482,10 +562,21 @@ func Turn(
 	// bracket only; R-CAN-002's "no *Failure" rule governs the RUN's
 	// run_end, which windDownRun builds separately with none.
 	if cause := context.Cause(ctx); errors.Is(cause, ErrInterrupted) || errors.Is(cause, ErrShutdown) {
+		category := ""
 		if failure, ferr := cancellationTurnFailure(cause); ferr == nil {
 			if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
 				emitStamped(sink, stamper, turnEnd)
 			}
+			category = failure.Category().String()
+		}
+		// AG-22 (design D-D, R-AGO-002, R-AGO-007): the always-open turn
+		// span closes here too — this branch emits no run_end on either
+		// path (windDownRun, reached only via Harness.Run on the
+		// continuation path, owns that; the nil path has no analogous
+		// caller here), but a nil-path run span must still not leak.
+		finalizeTurnSpan(turnSpan, TurnOutcomeAborted.String(), true, category)
+		if opts.Continuation == nil && runSpan != nil {
+			finalizeRunSpan(runSpan, RunOutcomeInterrupted.String(), true, category)
 		}
 		closeSink(sink)
 		return ai.Message{}, 0, cause
@@ -503,6 +594,15 @@ func Turn(
 		turn.finish = ai.FinishReasonStop
 	}
 	msg, finish := turn.finalize()
+	// AG-22 (design D-D, R-AGO-002, R-AGO-007): reachable on either
+	// continuation state (a provider stream that closes without a
+	// Completion is not itself continuation-specific) — the turn span
+	// is always open and closes here; the run span closes here too,
+	// only on the nil-continuation path where Turn owns it.
+	finalizeTurnSpan(turnSpan, outcomeForFinish(finish).String(), false, "")
+	if opts.Continuation == nil && runSpan != nil {
+		finalizeRunSpan(runSpan, RunOutcomeCompleted.String(), false, "")
+	}
 	closeSink(sink)
 	return msg, finish, nil
 }
@@ -530,6 +630,7 @@ func finishContinuationTurn(
 	turnID TurnID,
 	stamper *LaneStamper,
 	sink chan<- *Event,
+	turnSpan trace.Span,
 ) (ai.Message, ai.FinishReason, error) {
 	var results []Result
 	if t.finish == ai.FinishReasonToolCalls && len(t.toolCalls) > 0 {
@@ -539,10 +640,23 @@ func finishContinuationTurn(
 		// LeaveSinkOpen setting governs whether this call closes
 		// sink — it MUST NOT, since finalize below still needs to
 		// emit turn_end on it.
+		//
+		// AG-22 (design D-A, R-AGO-006): ctx already carries this
+		// turn's own span (Turn opened it before reaching this
+		// function) — every tool span Schedule/executeCall opens
+		// therefore nests under it ambiently, with zero signature
+		// change to Schedule itself.
 		results = opts.Continuation.Scheduler.Schedule(ctx, t.toolCalls, opts.Tools, runID, turnID, opts.PermissionPolicy, stamper, sink)
 	}
 
 	msg, finish := t.finalize()
+	// AG-22 (design D-D, R-AGO-002, R-AGO-007): the turn span is always
+	// non-nil here — Turn only reaches this function after opening it —
+	// finalized right after finalize()'s own turn_end emission, using
+	// the SAME outcomeForFinish(finish) value finalize() computed
+	// internally (a pure function, so this is provably the identical
+	// value, not a re-derivation that could diverge).
+	finalizeTurnSpan(turnSpan, outcomeForFinish(finish).String(), false, "")
 
 	if !msg.ID().IsZero() {
 		if err := opts.Continuation.History.Append(msg); err != nil {
@@ -649,20 +763,38 @@ func preStreamAbortFailure(err error) (*Failure, error) {
 // AG-15 D1 adds ahead of each of Turn's three pre-stream failure
 // paths, before the caller closes sink (R-LSK-001 amendment,
 // S-LSK-021). Best-effort, matching the mid-stream block's own guard
-// posture (loop.go:387-406): if preStreamAbortFailure or a
-// constructor fails, the emission is skipped silently and the
-// caller's own original error is still returned unchanged.
-func emitPreStreamAbort(sink chan<- *Event, stamper *LaneStamper, runID RunID, turnID TurnID, ownsRunBracket bool, err error) {
+// posture: if preStreamAbortFailure or a constructor fails, the EVENT
+// emission is skipped silently and the caller's own original error is
+// still returned unchanged.
+//
+// AG-22 (design D-D, R-AGO-002, R-AGO-007): turnSpan is Turn's own turn
+// span (never nil at this call's three sites — it is always opened
+// before any of them can be reached) and is finalized here regardless
+// of whether preStreamAbortFailure succeeded, so the span never leaks
+// even on the (practically unreachable) construction-failure arm.
+// runSpan is Turn's own nil-continuation-path run span (nil when
+// ownsRunBracket is false, or on the continuation path); finalized only
+// when ownsRunBracket, mirroring the run_end emission it sits beside.
+func emitPreStreamAbort(sink chan<- *Event, stamper *LaneStamper, runID RunID, turnID TurnID, turnSpan trace.Span, runSpan trace.Span, ownsRunBracket bool, err error) {
 	failure, ferr := preStreamAbortFailure(err)
-	if ferr != nil {
-		return
+	category := ""
+	if ferr == nil {
+		if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
+			emitStamped(sink, stamper, turnEnd)
+		}
+		category = failure.Category().String()
 	}
-	if turnEnd, terr := NewTurnEnd(runID, turnID, TurnOutcomeAborted, failure); terr == nil {
-		emitStamped(sink, stamper, turnEnd)
+	if turnSpan != nil {
+		finalizeTurnSpan(turnSpan, TurnOutcomeAborted.String(), true, category)
 	}
 	if ownsRunBracket {
-		if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
-			emitStamped(sink, stamper, runEnd)
+		if ferr == nil {
+			if runEnd, rerr := NewRunEnd(runID, RunOutcomeFailed, failure); rerr == nil {
+				emitStamped(sink, stamper, runEnd)
+			}
+		}
+		if runSpan != nil {
+			finalizeRunSpan(runSpan, RunOutcomeFailed.String(), true, category)
 		}
 	}
 }
