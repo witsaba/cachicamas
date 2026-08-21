@@ -1118,7 +1118,22 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/combined_matrix_test.go") ||
 				strings.HasSuffix(path, "/slow_consumer_pressure_test.go") ||
 				strings.HasSuffix(path, "/cross_run_state_test.go") ||
-				strings.HasSuffix(path, "/combined_leak_sweep_test.go")
+				strings.HasSuffix(path, "/combined_leak_sweep_test.go") ||
+				// AG-22 widening (ADR 0005 § D3 extension, design D-A/C4):
+				// import_boundary_test.go is a pre-existing substrate file
+				// released for AG-22 only (exact filename, no wildcard/
+				// prefix/directory pattern) — it gains the five OTel/xxhash
+				// allowlist entries. observability.go is AG-22's new
+				// constants-and-finalizers production file. The four
+				// suffixes after them are AG-22's own new proof-type test
+				// files (nesting, denylist, parity, lifecycle). Byte-in-sync
+				// with loop_test.go's filterOutLoopFiles.
+				strings.HasSuffix(path, "/import_boundary_test.go") ||
+				strings.HasSuffix(path, "/observability.go") ||
+				strings.HasSuffix(path, "/observability_nesting_test.go") ||
+				strings.HasSuffix(path, "/observability_denylist_test.go") ||
+				strings.HasSuffix(path, "/observability_parity_test.go") ||
+				strings.HasSuffix(path, "/observability_lifecycle_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
