@@ -121,6 +121,15 @@ func (s *scriptedBiteTool) scriptedCompletedAt() []time.Time {
 	return out
 }
 
+// scriptedRecordedPolicySlot returns the last PolicySlot value Run
+// received. Used by the minted-policy-slot pin (R-TLS-002
+// back-annotation, Layer 2 audit-fix).
+func (s *scriptedBiteTool) scriptedRecordedPolicySlot() agent.PolicySlot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.policy
+}
+
 // scriptedBiteTool constructs a fresh scripted bite tool. Default
 // effect is `EffectClassRead`; default result is `ToolOutcomeSuccess`
 // with no content.
@@ -807,18 +816,18 @@ func TestScheduler_ConcurrencyPolicy_ReadsConcurrent_MutatingsSerialized(t *test
 		t.Fatalf("Schedule returned %d results, want 5", len(results))
 	}
 
-	// Mutatings serialized: the property is "no overlap" between
-	// the two mutating Runs. The interval [m0Started,
-	// m0Completed] and [m1Started, m1Completed] must not
-	// intersect.
+	// Mutatings serialized: the property asserted HERE is "no
+	// overlap" between the two mutating Runs. The interval
+	// [m0Started, m0Completed] and [m1Started, m1Completed] must
+	// not intersect.
 	//
-	// (Goroutine start order is non-deterministic — m1's
-	// goroutine can wake up first, acquire the serial channel,
-	// and call Run before m0's goroutine even starts — but
-	// m0's goroutine then blocks on the channel until m1
-	// releases it. The serialized channel guarantees that the
-	// two Runs are sequential, not that m0 starts before
-	// m1.)
+	// (Since the Layer 2 audit fix — branch
+	// fix/agent-layer2-audit-findings — the serialized lane is a
+	// chained done-channel hand-off, so strict issuance order IS
+	// guaranteed too; that stronger property is asserted directly
+	// by TestScheduler_SerializedLane_StartsInIssuanceOrder_
+	// MutatingAndExecuteMixed below. This test keeps its original,
+	// weaker non-overlap assertion.)
 	m0 := mutTools["m0"].(*scriptedBiteTool)
 	m1 := mutTools["m1"].(*scriptedBiteTool)
 	m0Started := m0.scriptedStartedAt()
@@ -836,6 +845,236 @@ func TestScheduler_ConcurrencyPolicy_ReadsConcurrent_MutatingsSerialized(t *test
 	if overlap {
 		t.Errorf("mutating Runs overlap: m0 [%v, %v], m1 [%v, %v] — the serialized channel's contract requires the Runs to be sequential",
 			m0Started[0], m0Completed[0], m1Started[0], m1Completed[0])
+	}
+}
+
+// S-TLS-004 (issuance-order half) — the serialized lane runs
+// mutating AND execute class calls "in a single-goroutine serialized
+// channel, in issuance order among themselves" (R-TLS-004,
+// openspec/specs/agent-tool-scheduler/spec.md), and doc
+// 0003:952-954's Given names "a mix of read-class and mutating or
+// execute-class calls" — this test is the first to drive an
+// EffectClassExecute call through Scheduler.Schedule at all, and it
+// asserts the two serialized classes share ONE ordered lane
+// (Layer 2 audit-fix, branch fix/agent-layer2-audit-findings).
+//
+// Given 40 serialized calls (alternating mutating / execute, no
+// sleeps), when the scheduler runs them and every tool records its
+// start into a shared mutex-guarded log, then the recorded start
+// order equals issuance order, AND no serialized call starts before
+// its predecessor completed (single-lane, no overlap).
+//
+// RED-recorded against the pre-fix scheduler (each serialized call
+// raced its own goroutine to a capacity-1 channel; Go's channel send
+// queue orders by ARRIVAL, not spawn order, so only mutual exclusion
+// was guaranteed — the violation is probabilistic, observed with
+// `go test -count=20 -run TestScheduler_SerializedLane_StartsInIssuanceOrder`).
+// GREEN once the lane is a chained done-channel hand-off: call k
+// blocks on call k-1's done channel, so issuance order is guaranteed
+// by construction, deterministically.
+//
+// No wall-clock synchronization: the ordering assertion reads the
+// shared log after Schedule returns (happens-before via wg.Wait
+// inside Schedule); the no-overlap assertion compares each tool's
+// recorded completion to its successor's recorded start, both
+// monotonic-clock readings ordered by the lane's own hand-off edge.
+func TestScheduler_SerializedLane_StartsInIssuanceOrder_MutatingAndExecuteMixed(t *testing.T) {
+	t.Parallel()
+
+	const total = 40
+	const rounds = 5 // amplify the (pre-fix) probabilistic window per test run
+
+	for round := 0; round < rounds; round++ {
+		var mu sync.Mutex
+		startLog := make([]string, 0, total)
+
+		tools := map[string]agent.Tool{}
+		calls := make([]scheduledCall, 0, total)
+		want := make([]string, 0, total)
+		for i := 0; i < total; i++ {
+			name := "serial_" + itoa(i)
+			effect := agent.EffectClassMutating
+			if i%2 == 1 {
+				effect = agent.EffectClassExecute
+			}
+			tl := newScriptedBiteTool(t, name, effect)
+			tl.onStart = func(n string) {
+				mu.Lock()
+				startLog = append(startLog, n)
+				mu.Unlock()
+			}
+			tools[name] = tl
+			calls = append(calls, scheduledCall{id: name, name: name, args: []byte(`{}`), effect: effect})
+			want = append(want, name)
+		}
+		reg := newMapRegistry(tools)
+
+		sched := &agent.Scheduler{MaxConcurrentReads: 8}
+		sink := make(chan *agent.Event, total*4)
+		results := runSchedulerAndClose(sched, calls, reg, sink)
+
+		if len(results) != total {
+			t.Fatalf("round %d: Schedule returned %d results, want %d", round, len(results), total)
+		}
+		for i, res := range results {
+			if res.Outcome != agent.ToolOutcomeSuccess {
+				t.Fatalf("round %d: results[%d].Outcome = %v, want %v", round, i, res.Outcome, agent.ToolOutcomeSuccess)
+			}
+		}
+
+		mu.Lock()
+		got := append([]string(nil), startLog...)
+		mu.Unlock()
+		if len(got) != total {
+			t.Fatalf("round %d: start log recorded %d entries, want %d", round, len(got), total)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("round %d: serialized lane broke issuance order at position %d: started %q, want %q (full order: got %v)",
+					round, i, got[i], want[i], got)
+			}
+		}
+
+		// Single-lane no-overlap across BOTH classes: call i+1 must
+		// not start before call i completed. (The existing S-TLS-004
+		// property test asserts non-overlap for the two mutatings
+		// only; this closes the mixed mutating+execute case.)
+		for i := 0; i < total-1; i++ {
+			cur := tools[want[i]].(*scriptedBiteTool)
+			next := tools[want[i+1]].(*scriptedBiteTool)
+			curCompleted := cur.scriptedCompletedAt()
+			nextStarted := next.scriptedStartedAt()
+			if len(curCompleted) != 1 || len(nextStarted) != 1 {
+				t.Fatalf("round %d: timestamp counts: %s completed=%d, %s started=%d, want 1 and 1",
+					round, want[i], len(curCompleted), want[i+1], len(nextStarted))
+			}
+			if nextStarted[0].Before(curCompleted[0]) {
+				t.Fatalf("round %d: serialized calls overlap: %s started %v BEFORE %s completed %v (mutating+execute must share one serialized lane)",
+					round, want[i+1], nextStarted[0], want[i], curCompleted[0])
+			}
+		}
+	}
+}
+
+// S-TLS-004 (read half) — "the 3 reads overlap (concurrent start)".
+// The named property test above asserts the mutating half directly
+// but covers read overlap only via timing; the fan-out bite's floor
+// (`maxInFlight != 0`) would pass even if the read lane fully
+// serialized (Layer 2 audit-fix, branch
+// fix/agent-layer2-audit-findings). This test closes that gap with a
+// deterministic rendezvous: 3 read-class tools each signal "started"
+// and then BLOCK until all 3 have started. If the read lane can hold
+// 3 reads in flight simultaneously (MaxConcurrentReads = 8 >= 3),
+// the rendezvous completes and every read returns success; if the
+// lane serialized, the first read would block forever waiting for
+// starts that cannot happen — the guarding context deadline is the
+// FAILURE arm only (no wall-clock synchronization on the happy
+// path; channels rendezvous, the timeout only converts a would-be
+// deadlock into a legible failure).
+func TestScheduler_ReadLane_ThreeReadsOverlap_Rendezvous(t *testing.T) {
+	t.Parallel()
+
+	const readers = 3
+
+	// Generous guard: only reached if the read lane serialized.
+	guardCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	started := make(chan string, readers)
+	allStarted := make(chan struct{})
+	var rendezvousTimedOut atomic.Bool
+
+	// Coordinator: close allStarted once every reader has signalled.
+	go func() {
+		for i := 0; i < readers; i++ {
+			select {
+			case <-started:
+			case <-guardCtx.Done():
+				return
+			}
+		}
+		close(allStarted)
+	}()
+
+	tools := map[string]agent.Tool{}
+	calls := make([]scheduledCall, 0, readers)
+	for i := 0; i < readers; i++ {
+		name := "rendezvous_read_" + itoa(i)
+		rt := newScriptedBiteTool(t, name, agent.EffectClassRead)
+		rt.onStart = func(n string) {
+			started <- n
+			select {
+			case <-allStarted:
+				// All readers in flight simultaneously — overlap proven.
+			case <-guardCtx.Done():
+				rendezvousTimedOut.Store(true)
+			}
+		}
+		tools[name] = rt
+		calls = append(calls, scheduledCall{id: name, name: name, args: []byte(`{}`), effect: agent.EffectClassRead})
+	}
+	reg := newMapRegistry(tools)
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 8}
+	sink := make(chan *agent.Event, 64)
+	results := runSchedulerAndClose(sched, calls, reg, sink)
+
+	if rendezvousTimedOut.Load() {
+		t.Fatal("read-lane rendezvous timed out: the 3 read-class calls never overlapped — the read lane serialized, violating S-TLS-004's \"reads overlap (concurrent start)\" (R-TLS-004)")
+	}
+	if len(results) != readers {
+		t.Fatalf("Schedule returned %d results, want %d", len(results), readers)
+	}
+	for i, res := range results {
+		if res.Outcome != agent.ToolOutcomeSuccess {
+			t.Errorf("results[%d].Outcome = %v, want %v (every overlapping read completes successfully)", i, res.Outcome, agent.ToolOutcomeSuccess)
+		}
+	}
+}
+
+// R-TLS-002 (back-annotation pin, Layer 2 audit-fix, branch
+// fix/agent-layer2-audit-findings) — the scheduler mints
+// `PolicySlot(call.ID())` for every scheduled call (scheduler.go's
+// `executeCall`: "For AG-09 we pass the call's id as a `string`
+// policy"). The certifying S-TLS-002 tests in tool_test.go call
+// tool.Run DIRECTLY, bypassing Schedule, so the minted value was
+// never pinned through the scheduling path. Given one read-class
+// call driven through Scheduler.Schedule, when the recording tool
+// captures the PolicySlot its Run received, then the underlying
+// value is the string `call.ID()` — this pins the DOCUMENTED v1
+// minted value recorded in R-TLS-002's back-annotation. Layer 3's
+// sandbox descriptor replaces this value at this exact seam post-v1
+// (the tool or a Layer 3 sandbox interprets the slot; Layer 2 never
+// reads it), at which point this pin is the test that must be
+// consciously amended.
+func TestScheduler_PolicySlot_MintedFromCallID_ThroughSchedule(t *testing.T) {
+	t.Parallel()
+
+	const callID = "policy_pin_call_0"
+	tool := newScriptedBiteTool(t, "policy_pin_tool", agent.EffectClassRead)
+	reg := newMapRegistry(map[string]agent.Tool{"policy_pin_tool": tool})
+	calls := []scheduledCall{
+		{id: callID, name: "policy_pin_tool", args: []byte(`{}`), effect: agent.EffectClassRead},
+	}
+
+	sched := &agent.Scheduler{MaxConcurrentReads: 8}
+	sink := make(chan *agent.Event, 16)
+	results := runSchedulerAndClose(sched, calls, reg, sink)
+
+	if len(results) != 1 {
+		t.Fatalf("Schedule returned %d results, want 1", len(results))
+	}
+	if results[0].Outcome != agent.ToolOutcomeSuccess {
+		t.Fatalf("results[0].Outcome = %v, want %v", results[0].Outcome, agent.ToolOutcomeSuccess)
+	}
+
+	recorded := tool.scriptedRecordedPolicySlot()
+	got, ok := recorded.(string)
+	if !ok {
+		t.Fatalf("recorded PolicySlot's underlying value is %T, want string (v1 mints PolicySlot(call.ID()); Layer 3 replaces it at this seam post-v1)", recorded)
+	}
+	if got != callID {
+		t.Errorf("recorded PolicySlot = %q, want %q (the scheduler mints PolicySlot of the call's OWN id, R-TLS-002 v1 back-annotation)", got, callID)
 	}
 }
 

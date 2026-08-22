@@ -1188,10 +1188,13 @@ func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
 		// doc.go, doc_contract_guard_test.go and history.go are removed
 		// here -- AG-18 legitimately modifies all three (see the AG-18
 		// amendment note on this test's own doc comment above).
-		"backend/agent/src/agent/stream_check.go",
-		"backend/agent/src/agent/event.go",
+		// stream_check.go, event.go and event_registry_test.go are
+		// removed here too -- the Layer 2 audit-fix change (branch
+		// fix/agent-layer2-audit-findings) legitimately edits all
+		// three (per-tool-name CardinalityAtMostOne keying, R-APE-003,
+		// and the corrected 25-kind registry prose), the same
+		// amendment shape.
 		"backend/agent/src/agent/event_descriptor.go",
-		"backend/agent/src/agent/event_registry_test.go",
 		"backend/agent/src/agent/compaction_events.go",
 		"backend/agent/src/agent/cost_events.go",
 		"backend/agent/src/agent/cost_usage.go",

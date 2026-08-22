@@ -1508,7 +1508,11 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 //     production fix (R-RUN-014) is confined to harness.go, which was
 //     never on this list to begin with. Restoration costs nothing and
 //     re-arms a guard whose release expired with the milestone that took
-//     it.
+//     it. (Subsequently RELEASED again by the Layer 2 audit-fix change,
+//     branch fix/agent-layer2-audit-findings, which edits scheduler.go's
+//     serialized lane — see the dated release comment inside the entry
+//     list below; per this same disposition's own rule, that release
+//     expires with that branch unless renewed on the merits.)
 //   - "import_boundary_test.go" is NOT restored, and its release is made
 //     PERMANENT: this list continues to omit it, on the merits, not by
 //     oversight. That file's allowlists and scan-pattern set are the
@@ -1528,12 +1532,15 @@ func TestHooks_Reporter_NilReportsNothing_StallingStallsBothObservables(t *testi
 //     disposition for a dropped follow-up.
 func hksScopeFenceByteUnchangedFiles() []string {
 	return []string{
-		"event.go",
+		// event.go, event_registry_test.go, stream_check.go and
+		// permission_events.go are removed here — the Layer 2
+		// audit-fix change (branch fix/agent-layer2-audit-findings)
+		// legitimately edits all four (per-tool-name
+		// CardinalityAtMostOne keying, R-APE-003, and the corrected
+		// 25-kind registry prose), mirroring the AG-18 amendment
+		// precedent on TestNoRelease_SubstrateByteUnchanged.
 		"event_descriptor.go",
-		"event_registry_test.go",
-		"stream_check.go",
 		"delegation_events.go",
-		"permission_events.go",
 		"cost_events.go",
 		"cost_usage.go",
 		"turn_events.go",
@@ -1544,7 +1551,15 @@ func hksScopeFenceByteUnchangedFiles() []string {
 		"ambient_authority_test.go",
 		"reconstruction_test.go",
 		"delegation_seam.go",
-		"scheduler.go",
+		// scheduler.go is removed here — the Layer 2 audit-fix change
+		// (branch fix/agent-layer2-audit-findings) legitimately edits
+		// it: the serialized lane becomes a chained done-channel
+		// hand-off so mutating+execute calls run in strict issuance
+		// order (R-TLS-004's "in issuance order among themselves",
+		// which the previous capacity-1 channel did not guarantee).
+		// Mirrors the AG-22 release precedent recorded in this list's
+		// own doc comment; the S-HKS-024 anti-vacuity floor is loop.go
+		// and is unaffected.
 	}
 }
 

@@ -19,12 +19,15 @@ import (
 // up, at backend/agent/).
 func del024ByteUnchangedFiles() []string {
 	return []string{
-		"event.go",
+		// event.go, event_registry_test.go, stream_check.go and
+		// permission_events.go are removed here — the Layer 2
+		// audit-fix change (branch fix/agent-layer2-audit-findings)
+		// legitimately edits all four (per-tool-name
+		// CardinalityAtMostOne keying, R-APE-003, and the corrected
+		// 25-kind registry prose), mirroring the AG-18 amendment
+		// precedent on TestNoRelease_SubstrateByteUnchanged.
 		"event_descriptor.go",
-		"event_registry_test.go",
-		"stream_check.go",
 		"delegation_events.go",
-		"permission_events.go",
 		"cost_events.go",
 	}
 }

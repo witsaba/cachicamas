@@ -483,9 +483,11 @@ func TestEventKinds_AG05AllRegisterPlacementTurn(t *testing.T) {
 		// by reflecting stream_check.go's interaction with the
 		// registry. We assert the structural pin instead: every
 		// AG-05 kind's name carries the right prefix and is
-		// present in the registry, and the placement assertion
-		// holds by the stream_check rule (S-AEV-110's bite
-		// scenario, exercised in stream_check_test.go).
+		// present in the registry. The placement itself is asserted
+		// behaviorally by
+		// TestCheckStream_AG05KindBetweenTurns_RejectedNamingPlacement
+		// (stream_check_rejection_test.go), which rejects each of
+		// these 11 kinds placed outside an open turn (S-AEV-110).
 		if !containsFold(name, "message") && !containsFold(name, "tool") {
 			t.Errorf("%v's registered name %q does not match the AG-05 message/tool family prefixes", k, name)
 		}

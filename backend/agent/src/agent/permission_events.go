@@ -346,6 +346,12 @@ func (e Event) PermissionResolutionRemembered() (PermissionResolutionRemembered,
 // ToolName returns the tool's name the decision is remembered for.
 func (p PermissionResolutionRemembered) ToolName() string { return p.toolName }
 
+// cardinalityDiscriminator makes the tool name the payload's at-most-one
+// identity: R-APE-003's cardinality is per stream PER TOOL NAME, so
+// resolution_remembered events for two different tools are two
+// identities, while the same tool twice remains a repeat (S-APE-082).
+func (p PermissionResolutionRemembered) cardinalityDiscriminator() string { return p.toolName }
+
 // Outcome returns the remembered typed [PermissionOutcome].
 func (p PermissionResolutionRemembered) Outcome() PermissionOutcome { return p.outcome }
 

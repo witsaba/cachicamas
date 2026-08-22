@@ -67,6 +67,31 @@ func TestCheckEmit_NilPayload_FailsNamingTheMissingPayload(t *testing.T) {
 	}
 }
 
+// R-AEV-001 — a constructed event that never passed through a
+// [agent.LaneStamper] carries the documented "never stamped" sentinel
+// sequence 0, and CheckEmit REJECTS it naming the sequence (CheckEmit
+// rule 2): an event offered at the emission boundary must already have
+// been stamped.
+func TestCheckEmit_UnstampedEvent_RejectedNamingTheSequence(t *testing.T) {
+	t.Parallel()
+
+	unstamped, err := agent.NewRunStart("run-emit-unstamped")
+	if err != nil {
+		t.Fatalf("agent.NewRunStart() error = %v, want nil", err)
+	}
+	if got := unstamped.Sequence(); got != 0 {
+		t.Fatalf("a freshly constructed event's Sequence() = %d, want the unstamped sentinel 0", got)
+	}
+
+	err = agent.CheckEmit(unstamped)
+	if err == nil {
+		t.Fatal("agent.CheckEmit(unstamped event) = nil, want a rejection naming the sequence")
+	}
+	if !errors.Is(err, ai.ErrOutOfRange) {
+		t.Errorf("agent.CheckEmit(unstamped event) = %v, want errors.Is to match ai.ErrOutOfRange (the unstamped sentinel is out of the 1-based range)", err)
+	}
+}
+
 // S-AEV-003 — an event whose payload does not match the kind under which
 // it is offered fails validation, naming both. Kind derivation makes this
 // structurally unconstructible through the public surface (event.go's own

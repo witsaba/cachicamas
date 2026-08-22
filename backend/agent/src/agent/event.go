@@ -47,14 +47,14 @@ import (
 // the kind of an event that was never constructed, and [CheckEmit] rejects
 // it wherever an event is offered at the producer's emission boundary.
 //
-// # Registered kinds (R-AEV-010 — exactly these eighteen, no more)
+// # Registered kinds (R-AEV-010 — exactly these twenty-five, no more)
 //
-// AG-04 (merged at 967d043f) registers the run + turn bracket family
+// AG-04 (merged at 967d043f) registers the run + turn bracket families
 // (4 kinds); AG-05 (merged at 6b4a3468) registers the message + tool
-// family (11 kinds); AG-06.1 (this change) registers the permission
-// family (3 kinds). The scope-fence `S-AEV-090` retightens from
-// "exactly 15" to "exactly 25" in AG-06.5 as the remaining four
-// families (cost, delegation, compaction) land.
+// families (11 kinds); AG-06 registers the permission, cost, delegation
+// and compaction families (10 kinds), retightening the scope-fence
+// `S-AEV-090` from "exactly 15" to "exactly 25" — eight families,
+// 25 kinds in all.
 //
 //   - run_start — opens the run bracket (VL2-EVT-02).
 //   - run_end — closes the run bracket, carrying the run's typed outcome
@@ -92,9 +92,26 @@ import (
 //   - permission_resolution_remembered — records a fact about future
 //     calls; at most one per stream per tool name
 //     (CardinalityAtMostOne, R-APE-003). PlacementTurn.
+//   - cost_turn — carries per-turn token figures (VL2-EVT-07,
+//     R-APE-004). PlacementTurn.
+//   - cost_session — carries cumulative token figures over the run
+//     (VL2-EVT-07, R-APE-004). PlacementRun.
+//   - subagent_started — opens a subagent's stream inside a delegated
+//     run (VL2-EVT-08, R-APE-006). PlacementTurn.
+//   - subagent_ended — closes it (VL2-EVT-08, R-APE-006). PlacementTurn.
+//   - compaction_started — opens a context-compaction bracket
+//     (VL2-EVT-09, R-APE-007). PlacementTurn.
+//   - compaction_finished — closes one carrying the [startTurnID,
+//     endTurnID] turn bracket and the summary identity (VL2-EVT-09,
+//     R-APE-007). PlacementTurn.
+//   - compaction_failed — closes one with a typed [Failure]; not
+//     terminal, so recovery stays reachable (VL2-EVT-09, R-APE-008).
+//     PlacementTurn.
 //
-// AG-06.1 registers no cost, delegation or compaction kind under any
-// name — those belong to AG-06.2, AG-06.3 and AG-06.4.
+// A later milestone extends this list by following event_descriptor.go's
+// documented procedure — a new registry row, no edit to the validator's
+// rule engine; until it does, the scope-fence `S-AEV-090` pins the
+// count at exactly 25.
 type EventKind uint8
 
 const (
@@ -348,7 +365,7 @@ var eventRegistry = []eventRegistration{
 	// AG-06.4 (compaction family) — 3 rows. All PlacementTurn,
 	// BracketRoleNone, CardinalityAny. compaction_failed EXPLICITLY
 	// declares Terminal:false (AG-05 S1 carry-forward — the
-	// validator reads Terminal: stream_check.go:173-175); the
+	// validator reads Terminal: stream_check.go:196-198); the
 	// started/finished rows also declare Terminal:false explicitly
 	// (W3 latent-trap guard, AG-04.4 + AG-05.1).
 	EventKindCompactionStarted: {
@@ -421,6 +438,20 @@ type eventPayload interface {
 	// directly (design AD-1 — identity is envelope data, not payload
 	// data).
 	validate(at ai.Path) *ai.Violation
+}
+
+// cardinalityIdentified is the optional payload capability refining what
+// "repeat" means for a [CardinalityAtMostOne] kind: a payload
+// implementing it declares a per-stream identity discriminator, so two
+// events of the kind repeat only when their discriminators are equal —
+// R-APE-003's "at most one per stream per tool name". A kind whose
+// payload does not implement it repeats on the kind alone. The validator
+// reads the capability, never a concrete payload type, so the rule
+// engine stays generic (R-AEV-010).
+type cardinalityIdentified interface {
+	// cardinalityDiscriminator returns the identity the at-most-one
+	// rule is keyed by, beyond the kind itself.
+	cardinalityDiscriminator() string
 }
 
 // under extends at with steps, cloning first so the original is never

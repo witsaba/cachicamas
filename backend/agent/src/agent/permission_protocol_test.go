@@ -899,11 +899,18 @@ func TestPermission_FourOutcomes(t *testing.T) {
 				t.Errorf("decision_made callID = %q, want %q", madeEvs[0].CallID(), c.callID)
 			}
 
-			// AllowOnce is the one sync outcome that must not look
-			// like a defer (R-APP-001).
-			if c.verdict.Outcome == agent.PermissionOutcomeAllowOnce {
+			// A sync verdict must not look like a defer (R-APP-001).
+			// AllowOnce was asserted from the start; the Layer 2
+			// audit-fix (branch fix/agent-layer2-audit-findings)
+			// extends the same zero-decision_required assertion to the
+			// immediate-Deny path — doc 0003:1032-1034: an immediate
+			// (non-deferred) Deny emits permission_decision_made
+			// WITHOUT any permission_decision_required (the tool-never-
+			// invoked half is already asserted via wantInvocations).
+			if c.verdict.Outcome == agent.PermissionOutcomeAllowOnce ||
+				c.verdict.Outcome == agent.PermissionOutcomeDeny {
 				if got := countByKind(events)[agent.EventKindPermissionDecisionRequired]; got != 0 {
-					t.Errorf("decision_required count = %d, want 0 (AllowOnce is sync, R-APP-001)", got)
+					t.Errorf("decision_required count = %d, want 0 (%v is sync — an immediate verdict never emits decision_required, R-APP-001; doc 0003:1032-1034 for Deny)", got, c.verdict.Outcome)
 				}
 			}
 
