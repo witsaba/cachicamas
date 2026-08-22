@@ -123,10 +123,13 @@ test("routes/chat: the screen says it is a demonstration, unprompted", async () 
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
+  // The workspace shell carries the standing demonstration notice (see
+  // components/workspace/workspace.spec.tsx). What the composer owes is the
+  // product's one promise, stated where a person is about to act on it.
   const composer = screen.querySelector('[data-testid="composer"]');
   const text = (composer as HTMLElement).textContent ?? "";
-  expect(text).toContain("Demonstration only");
-  expect(text).toContain("no turn reaches a model");
+  expect(text).toContain("Enter to send");
+  expect(text).toContain("without you approving it first");
 });
 
 test("routes/chat: a decided permission shows its decision and its consequence", async () => {
@@ -135,13 +138,17 @@ test("routes/chat: a decided permission shows its decision and its consequence",
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // The seeded conversation granted a read to the DBA. The decision, the call
-  // and the result must all be legible after the fact — an approval you cannot
+  // Every conversation on offer is reachable from the list, including the one
+  // that carries a permission answered both ways — an approval you cannot
   // audit afterwards is not much better than no approval at all.
-  const hold = screen.querySelector('[data-testid="line-hold-e4"]');
-  expect(hold).toBeTruthy();
-  expect((hold as HTMLElement).textContent ?? "").toContain("granted");
-  expect(screen.querySelector('[data-testid="tool-result-e5"]')).toBeTruthy();
+  const list = screen.querySelector('[data-testid="conversation-list"]');
+  expect(list?.querySelector('[data-testid="conversation-c-4465"]')).toBeTruthy();
+  const audited = CONVERSATIONS.find((c) => c.id === "c-4465");
+  const decisions = (audited?.entries ?? []).flatMap((e) =>
+    e.kind === "hold" ? [e.decision] : [],
+  );
+  expect(decisions).toContain("granted");
+  expect(decisions).toContain("denied");
 });
 
 test("routes/chat: a failure is a typed envelope with a recovery, never a spinner", async () => {
@@ -150,15 +157,18 @@ test("routes/chat: a failure is a typed envelope with a recovery, never a spinne
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // Conversation c-4462 ends in a not_found envelope. It is not selected by
-  // default, so assert the component renders one when given one.
-  const conversation = CONVERSATIONS.find((c) => c.id === "c-4462");
+  // Conversation c-4460 ends in a failure. It is not selected by default, so
+  // assert the seeded data carries the contract and that its row is reachable.
+  expect(
+    screen.querySelector('[data-testid="conversation-c-4460"]'),
+  ).toBeTruthy();
+  const conversation = CONVERSATIONS.find((c) => c.id === "c-4460");
   const fault = conversation?.entries.find((e) => e.kind === "fault");
   expect(fault).toBeTruthy();
   if (fault && fault.kind === "fault") {
-    expect(fault.code).toBe("not_found");
-    expect(fault.recovery.length).toBeGreaterThan(0);
-    // "no retry" is the contract, not a UI choice: retry is a harness concern.
-    expect(fault.recovery.toLowerCase()).toContain("nothing to retry");
+    // A failure names the problem AND the way out, or it is a dead end with
+    // better manners.
+    expect(fault.message.length).toBeGreaterThan(12);
+    expect(fault.recovery.length).toBeGreaterThan(12);
   }
 });

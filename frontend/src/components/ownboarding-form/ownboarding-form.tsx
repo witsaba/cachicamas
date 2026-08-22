@@ -5,7 +5,7 @@ import {
   FORM_ERROR,
   FORM_INPUT,
   FORM_LABEL,
-} from "~/components/os/form-classes";
+} from "~/components/ui/form/classes";
 
 /**
  * OwnboardingForm — the first-run setup form for the unique
@@ -164,7 +164,7 @@ export const OwnboardingForm = component$<{
         <div
           role="alert"
           data-testid="ownboarding-top-error"
-          class="border-fail bg-raise font-human text-body text-fail border px-3 py-2"
+          class="border-stop/30 bg-stop/[0.05] text-stop rounded-md border px-3 py-2 text-base font-medium"
         >
           {state.topError}
         </div>

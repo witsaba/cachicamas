@@ -10,35 +10,33 @@ import "./global.css";
  * markup for `impeccable-direction` to find it.
  */
 const DIRECTION_CONTRACT = `<!--
-impeccable-direction seed 8a09c7ce (operate, form 7)
+impeccable-direction seed b489eace (persuade; standing exit taken)
 
-THESIS: a company's specialist agents are services on a dealing-room board —
-each with a code, a state and a number, all readable at once. Refuses the
-launcher grid of identical icons, which would imply six working specialists
-when five do not exist.
+THESIS: your company's specialists are staff, not features — you meet them,
+read what they do, see how long they have been here, and start a conversation.
+The direction roll dealt a wayfinding programme; the user took the standing
+exit instead, so this build is the category standard played straight, with the
+craft bar set at Intercom and Attio. It refuses the machine-facing reading of
+the same product: no codes, no terminal, no runtime figures, no architecture on
+any surface a customer sees.
 
-OWN-WORLD: deep ink-navy panels on a void ground, 1px hairlines at or above
-3:1 on every ground they sit on, hard corners, no shadow and no glow. STRUCTURE
-IS NEUTRAL — panel labels, key legends, gauges and the current dock cell carry
-no colour. Colour is reserved for what is happening: amber is the system
-speaking about itself now (wordmark, prompt, caret, focus, primary action, the
-demonstration marker, the one archetype in build), cyan is navigable, green
-running, violet suspended, red failed. State works on two axes, because five of
-six specialists are inactive: colour separates what is happening, and a filled
-versus hollow mark separates what is not. Spline Sans Mono is the machine's
-voice; Spline Sans is language.
+OWN-WORLD: white cards on a cool-neutral page, 1px lines, 6-12px radii, one
+brand blue for actions and selection, and six department hues that identify a
+department and never rank it. Onest sets every word. Elevation is reserved for
+things that float. The one form rule that carries meaning: a person is a
+circle, an agent is a rounded square — and it always ships a word beside it.
 
-STORY: this is a company of specialists with jobs and boundaries; most are not
-built yet and the board says so; the one that is being built can be opened and
-can be stopped mid-run.
+STORY: a visitor understands they can hire specialists their company is
+missing, sees exactly which five and what each one does, finds a plan, and
+signs in. Inside, an employee lands in their own company, picks a colleague
+from the left rail, and talks to them.
 
-FIRST VIEWPORT: signed out, the rail alone over the headline and the stack's
-real counts, with the register whole below it. Signed in, the rail and the
-command line over the register — six archetype cells with lamps, plans and
-gauges — the runtime beside it, and the function-key dock along the bottom
-edge. The board arrives painted; nothing stages.
+FIRST VIEWPORT: signed out, a statement headline over one live conversation
+playing as proof, with the primary action beside it and the staff strip below.
+Signed in, a persistent left rail — company, Chat, Agents, Teams,
+Organization — against a white content column that opens on the front desk.
 
-FORM: the exchange terminal; candidate 7 of the grounded list; seed 8a09c7ce.
+FORM: the standing exit, the canon at full fidelity; seed b489eace.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the
 finish review, the verdict, and DESIGN.md.
@@ -59,10 +57,9 @@ export default component$(() => {
             href={`${import.meta.env.BASE_URL}manifest.json`}
           />
         )}
-        {/* The two voices. Spline Sans Mono carries the machine — codes,
-            labels, states, tabular figures — and Spline Sans carries language.
-            Both are preconnected so the terminal does not repaint its own
-            chrome after first byte. */}
+        {/* One family for the whole product. Onest is a neutral grotesque with
+            just enough character to stay ours at 11px and at 38px, and it is
+            preconnected so no surface repaints its own type after first byte. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
@@ -71,7 +68,7 @@ export default component$(() => {
         />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Spline+Sans+Mono:wght@400;500;600&family=Spline+Sans:wght@400;500;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap"
         />
         <RouterHead />
       </head>

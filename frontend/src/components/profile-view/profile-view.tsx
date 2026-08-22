@@ -141,14 +141,14 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
         the name is missing.
       */}
       <h1
-        class="text-screen text-fg leading-none font-semibold tracking-tight"
+        class="text-ink text-xl font-semibold tracking-[-0.01em]"
         data-testid="profile-welcome"
       >
         {greetingName ? `Welcome back, ${greetingName}!` : "Welcome back!"}
       </h1>
 
       <p
-        class="font-human text-body text-fg-mid mt-4 max-w-[60ch] leading-relaxed"
+        class="text-ink-mid mt-3 max-w-[62ch] text-base leading-relaxed"
         data-testid="profile-body"
       >
         cachicamas is your home for tracking your organization's projects,

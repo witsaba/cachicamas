@@ -6,6 +6,7 @@ import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
 import { ConversationList } from "./conversation-list";
 import { CONVERSATIONS } from "~/lib/mock/chat";
+import { agentBySlug } from "~/lib/mock/staff";
 
 const noop = $((_id: string) => undefined);
 
@@ -42,7 +43,7 @@ describe("components/chat/conversation-list", () => {
     );
     const text = row?.textContent ?? "";
     expect(text).toContain(first.title);
-    expect(text).toContain(`${first.turns} turns`);
+    expect(text).toContain(agentBySlug(first.agentSlug)?.name ?? "");
     expect(text).toContain(first.age);
   });
 

@@ -68,9 +68,9 @@ test.describe("GitHub sign-in — error=access_denied", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
     await signInForm.locator('button[type="submit"]').click();
 

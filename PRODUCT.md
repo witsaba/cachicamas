@@ -8,127 +8,142 @@ web
 
 ## Users
 
-Employees of a company, signed in with GitHub, working in a browser during their normal
-working day. They are not the people who built the agents; they are the people who *talk
-and work with them* to get a job done — asking a question, handing over a task, watching
-it run, approving or refusing what it proposes to do.
+**Inside the product:** employees of a company, working in a browser during their normal
+working day. They are not the people who built the agents; they are the people who *work
+with them* — asking a question, handing over a task, reading what came back, and deciding
+whether the thing an agent proposes to do actually happens.
 
-Witsaba (witsaba.com) is the first user, not the boundary (ADR 0009 § D1). The product is
-built to be used by any company.
+Witsaba (witsaba.com) is the first company to use it, not the boundary. The product is
+built for any company.
 
-Secondary audience, on the public landing surface only: someone evaluating whether this
-is a thing their company could run.
+**On the public page:** whoever decides what their company buys. An operations lead, a
+founder, a head of finance. They arrive knowing they are short-staffed in a specific way
+and leave knowing whether this fills it.
 
 ## Product Purpose
 
-cachicamas is a **multiplayer agentic system for building and running a company**.
-Everything a company needs to operate — database administration, finance, marketing,
-ticketing, software development — exists as cooperating specialist agents that employees
-talk and work with.
+cachicamas is where a company hires specialist colleagues who are not people.
 
-Success is an employee opening the product, finding the specialist they need, handing it
-work in plain language, and being able to see and control what it does.
+A company signs up and gets an Assistant. When it knows which job it is short on, it hires
+a specialist — Finance, Support, Integrations, a Database Administrator, a Coding
+colleague — and that specialist works alongside the staff, in the same place, with a job,
+a set of tools it is allowed to use, and a limit it will not cross without asking.
+
+Success is an employee opening the product, finding the colleague they need, handing over
+work in plain language, and being able to see and stop what happens next.
 
 ## Positioning
 
-The unit of the product is the **archetype**: one specialist agent implemented whole — its
-policy, its tools, its resources, its persistence, and its own frontend (ADR 0009 § D2).
-Archetypes stand on a shared, vendor-portable agent runtime that is deliberately incapable
-of caring which archetype is running on it.
+**Colleagues with boundaries, not one assistant with a feature list.**
 
-Two consequences a neighboring product could not truthfully copy:
+Three things a neighbouring product cannot truthfully copy without rebuilding around them:
 
-- **Every business system gets its own MCP server and exactly one owning archetype**
-  (ADR 0009 § D4). Integration is a boundary, not a plugin.
-- **Each business system owns its own tables; no archetype writes another's schema**
-  (ADR 0009 § D6). When an archetype needs database work it asks the Database
-  Administrator archetype.
-
-This is a *company* of agents with jobs and boundaries, not one assistant with a tool list.
+- **Nothing leaves the building unapproved.** An email, a payment, a message to a customer
+  — anything with an outside consequence stops and asks a person, showing exactly what it
+  is about to do. This is not a setting.
+- **One colleague owns the shape of the company's data**, and everyone else asks it. The
+  boundaries between specialists are real, written on each profile, and visible to the
+  customer.
+- **A colleague that fails says so once, and stops.** Nothing retries quietly in the
+  background, because the expensive failure is the one nobody was told about.
 
 ## Operating Context
 
-- Authenticated by GitHub OAuth (Auth.js). Single organization per install; a first-run
-  "ownboarding" step names it before any other surface is reachable.
-- Work with an archetype is a **conversation that runs**: a turn is opened by request, its
-  events arrive on a subscribed stream, and it is cancelled by a discrete signal. Output
-  arrives token by token. Stop cancels. Failures arrive as a typed envelope inline, never
-  as a spinner that never ends, and the client never auto-retries.
-- An agent asking permission to act is a **suspension inside the run**, surfaced on the
-  same stream as its output — not a side channel and not an out-of-band approval.
-- Employees will run several archetypes and will move between them during a day.
+- Signed in with GitHub. One company per install; a first-run step names it before
+  anything else is reachable.
+- Work with a colleague is a conversation. The answer arrives as it is written. Anything
+  the colleague does is shown in the conversation — which tool, what for, what came back —
+  rather than summarised afterwards.
+- A colleague asking permission is a **pause inside the conversation**, not a notification
+  somewhere else. Nothing moves until a person answers.
+- An employee will talk to several colleagues in a day and will move between them.
 
 ## Capabilities and Constraints
 
-Built and frozen today:
+What exists today: identity, sign-in, the company record and its first-run setup, and the
+whole interface — the public page, the workspace shell, the staff directory, profiles,
+teams, the organisation chart, and the conversation.
 
-- Layer 1 — vendor-portable model adapter. Complete, 42 of 42.
-- Layer 2 — portable agent runtime, pure mechanism, no judgement. Complete and frozen at
-  24 of 24; the browser wire and the error envelope are frozen with it.
-- Identity, session, organization ownboarding, and the route guard chain.
+What does not exist yet: **no specialist has started work.** Every colleague, conversation,
+figure and tenure the interface shows is authored demonstration material.
 
-Not built:
+That constrains the interface rather than the copy:
 
-- **No archetype exists on disk yet.** The chat archetype is planned at 0 of 12
-  (`docs/architecture/milestones/0005-…`); the coding archetype and the Database
-  Administrator archetype are planned and unstarted.
-- Therefore **every archetype the interface shows is mocked**, and must read as mocked to
-  the person looking at it. Status is product truth here: `chat` is the one being built,
-  the rest are planned. Overstating readiness is the one lie this interface can tell.
+- The workspace carries a **standing demonstration strip** on every screen. It is part of
+  the shell, not a banner a screen can forget to render.
+- The public page's prices are **preview pricing**, and the pricing section says so in
+  words directly beneath the plans. They are a placeholder on the replacement list below,
+  not an offer.
+- No customer logos, testimonials, review counts, uptime figures or usage statistics
+  appear anywhere, and none may be added until they are real.
 
-Terminology that must survive:
+Terminology, in the product's own words:
 
-- **archetype** — one specialist agent, implemented whole. Never "app", "bot", "plugin",
-  or "assistant" in product copy.
-- **turn**, **stream**, **cancel**, **permission** — the vocabulary of a run.
-- **organization** — the single tenant that owns the work.
+- **agent** or **colleague** — one specialist. Never "bot", "assistant" (except the
+  Assistant, which is one specific colleague), "plugin" or "app".
+- **on staff**, **in training**, **available** — the three things a colleague can be.
+- **company**, **team**, **officer role** — how the organisation is described.
 - No biological metaphors: never "brain", "mind", "neural".
 - The name is lowercase: **cachicamas**.
-
-Explicitly undecided: pricing, deployment model, multi-organization support, and any
-cross-archetype coordination surface (ADR 0009 § D3 reserves the position and deliberately
-does not design the occupant).
+- **Nothing about how the product is built appears on any surface a customer sees.** Not
+  the architecture, not the layers, not the protocols, not the framework, not the
+  milestone plan. This is enforced by test, not by taste.
 
 ## Brand Commitments
 
 - The wordmark is `cachicamas`, always lowercase, never title-cased.
 - Product voice is plain, literal and unhyped. It states what a thing is and what it will
-  do. It does not sell in the app.
+  do. It sells on the public page and stops selling the moment you sign in.
+- **The interface plays the category standard straight** (recorded 2026-08-22, at the
+  user's explicit direction). This is a standing preference, not a default: the design
+  round dealt a wayfinding-programme direction and the user took the canon instead. The
+  craft bar is **Intercom and Attio** — products that ship a marketing site and an
+  application in one identity, at one level. Nothing here is quirky, and a category-fluent
+  person should be able to use it without pausing once.
+- **A person is a circle. An agent is a rounded square.** The one rule in the system that
+  carries meaning through form — and therefore the one that always ships a literal word
+  beside it.
 
 ## Evidence on Hand
 
-Real, in this repository:
+Absent, and not to be fabricated: customers, testimonials, benchmarks, uptime claims,
+review counts, and screenshots of a specialist doing real work.
 
-- `docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md` — the identity.
-- `docs/architecture/milestones/0002-…`, `0003-…`, `0004-…`, `0005-…` — the shipped and
-  planned layer plans, with real completion counts.
-- `openspec/specs/frontend-chat-layer1/spec.md` — the frozen browser wire.
+**The replacement list** — what a real launch must swap out:
 
-Absent, and not to be fabricated: customers, pricing, benchmarks, testimonials, uptime
-claims, screenshots of archetypes doing real work. Any conversation, tool call, cost
-figure or archetype status shown in the interface is **demonstration data** and must be
-labeled as such where a viewer could mistake it for a live system.
+1. Every price in `frontend/src/lib/mock/plans.ts`.
+2. Every colleague, tenure and workload figure in `frontend/src/lib/mock/staff.ts`.
+3. Every conversation in `frontend/src/lib/mock/chat.ts`.
+4. The company in `frontend/src/lib/mock/company.ts`, which stands in for the real
+   organisation record until the workspace reads it directly.
 
 ## Product Principles
 
-1. **The archetype is the unit.** The interface is organized by *which specialist*, not by
-   which feature. Everything a person does happens inside one archetype's surface.
-2. **Never overstate readiness.** A planned archetype looks planned. Mocked data looks
-   mocked. The product's credibility is the only thing it currently has.
-3. **A run is visible and interruptible.** Whatever an agent is doing, the person can see
-   it and can stop it. Permission is asked in the flow of the run, not around it.
-4. **Boundaries are shown, not hidden.** Which archetype owns what, and what it may not
-   touch, is information the employee benefits from seeing.
+1. **The colleague is the unit.** The interface is organised by *who*, not by feature.
+   Everything a person does happens with one of them.
+2. **Never overstate readiness.** A colleague who has not started work does not have a
+   tenure. Demonstration data says it is demonstration data. Credibility is the only thing
+   this product currently has.
+3. **The work is visible and interruptible.** Whatever a colleague is doing, a person can
+   see it and can stop it. Permission is asked in the flow of the conversation.
+4. **Boundaries are shown, not hidden.** What a colleague may touch, and what it will hand
+   to someone else, is on its profile. That is what makes access grantable.
 5. **Literal over evocative.** Plain nouns, real numbers, honest states.
+6. **The customer never reads the engineering.** If a surface mentions how it is built,
+   that is a defect.
 
 ## Accessibility & Inclusion
 
-- **Aphantasia-friendly (UX-4, carried forward from the shipped specs).** No meaning may
-  be carried by an image, icon, glyph or spatial metaphor alone — every affordance and
-  every status carries a literal text label beside it. No decorative photography of people
-  or places. This constrains what may carry meaning; it does not forbid color, depth,
-  material, or an icon system used *alongside* labels.
-- Keyboard reachable throughout, with a visible focus ring on every interactive element,
+- **Aphantasia-friendly (UX-4).** No meaning may be carried by an image, icon, glyph,
+  colour or shape alone — every avatar ships with a name, every status dot with its word,
+  every department hue with its department, and every icon beside a label. This constrains
+  what may *carry* meaning; it does not forbid colour, depth, material, or an icon system
+  used alongside words.
+- Contrast is measured against **every ground a token can land on** — the white surface,
+  the page, and the sunken well — never against white alone. Body text clears 4.5:1
+  everywhere; a control's border clears 3:1, because on this surface the border is how the
+  control is found.
+- Keyboard reachable throughout, with one visible focus ring on every interactive element,
   and a skip link as the first focusable element of the document.
-- Streaming output is announced politely to assistive technology, not aggressively.
-- Model output is rendered sanitized; raw model HTML is never injected.
+- Arriving output is announced politely to assistive technology, never assertively.
+- Model output is rendered sanitised; raw model HTML is never injected.

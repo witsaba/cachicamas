@@ -63,9 +63,9 @@ test("[routes/auth/signout]: page wrapper is painted by the product, not by the 
   // @auth/core page flipped with `prefers-color-scheme`, which produced a
   // page that belonged to neither the browser nor the product; this is the
   // regression guard against that returning.
-  expect(cls).toMatch(/\bbg-void\b/);
-  expect(cls).toMatch(/\btext-fg\b/);
-  expect(cls).not.toMatch(/slate|zinc|bg-white/);
+  expect(cls).toMatch(/\bbg-canvas\b/);
+  expect(cls).toMatch(/\btext-ink\b/);
+  expect(cls).not.toMatch(/slate|zinc|gray-\d|bg-white/);
 });
 
 test("[routes/auth/signout]: card carries brand + heading + description + form + footnote (S-AUTH-SIGNOUT-02)", async () => {
@@ -122,7 +122,10 @@ test("[routes/auth/signout]: Cancel is an anchor to '/' (S-AUTH-SIGNOUT-05)", as
   ) as HTMLAnchorElement | null;
   expect(cancel).toBeTruthy();
   expect(cancel?.tagName).toBe("A");
-  expect(cancel?.getAttribute("href")).toBe("/");
+  // Cancel returns you to your company, not to the public page: someone who
+  // opened sign-out by accident is already signed in, and bouncing them to
+  // marketing would be a second thing to undo.
+  expect(cancel?.getAttribute("href")).toBe("/home/");
   // The Cancel MUST NOT be type=submit — clicking it must navigate,
   // not post the form. A <a> tag has no type attribute; assert it's
   // either absent or not equal to "submit".

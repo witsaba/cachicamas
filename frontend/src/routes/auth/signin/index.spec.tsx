@@ -82,9 +82,9 @@ test("[routes/auth/signin]: page wrapper is painted by the product, not by the b
   // @auth/core page flipped with `prefers-color-scheme`, which produced a
   // page that belonged to neither the browser nor the product; this is the
   // regression guard against that returning.
-  expect(cls).toMatch(/\bbg-void\b/);
-  expect(cls).toMatch(/\btext-fg\b/);
-  expect(cls).not.toMatch(/slate|zinc|bg-white/);
+  expect(cls).toMatch(/\bbg-canvas\b/);
+  expect(cls).toMatch(/\btext-ink\b/);
+  expect(cls).not.toMatch(/slate|zinc|gray-\d|bg-white/);
 });
 
 test("[routes/auth/signin]: card carries brand + heading + description + action + footnote (S-AUTH-SIGNIN-02)", async () => {

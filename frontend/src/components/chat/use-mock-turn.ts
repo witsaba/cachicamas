@@ -60,6 +60,18 @@ export interface MockTurn {
   readonly cancel: QRL<() => void>;
   /** Answer the permission request the run is suspended on. */
   readonly decide: QRL<(granted: boolean) => void>;
+  /**
+   * Play an explicit script rather than one chosen from a typed message. The
+   * public page's proof uses this: the beats are authored, but the machine
+   * playing them is the same one the workspace conversation runs on.
+   */
+  readonly play: QRL<(beats: readonly Beat[]) => void>;
+  /**
+   * Run the same script to its end with no clock at all. This is what
+   * `prefers-reduced-motion` gets — the finished conversation, immediately,
+   * rather than an animation with its duration set to nothing.
+   */
+  readonly settle: QRL<(beats: readonly Beat[]) => void>;
 }
 
 /** Advance the machine by exactly one tick. Pure over the store. */
@@ -236,6 +248,20 @@ export function cancelTurn(s: MockTurnStore): void {
   s.status = "idle";
 }
 
+/**
+ * Advance until the machine stops of its own accord — idle, or suspended on a
+ * permission. The bound is a backstop against a malformed script, not an
+ * expected exit: every script in the product terminates in a few hundred
+ * ticks.
+ */
+export function runToEnd(s: MockTurnStore, limit = 20000): void {
+  let steps = 0;
+  while (s.status === "running" && steps < limit) {
+    advance(s);
+    steps += 1;
+  }
+}
+
 export function useMockTurn(seed: readonly TranscriptEntry[] = []): MockTurn {
   const state = useStore<MockTurnStore>(
     {
@@ -288,6 +314,24 @@ export function useMockTurn(seed: readonly TranscriptEntry[] = []): MockTurn {
     await start();
   });
 
+  const play = $(async (beats: readonly Beat[]) => {
+    if (state.status !== "idle") return;
+    state.script = [...beats];
+    state.beat = 0;
+    state.step = 0;
+    state.status = "running";
+    await start();
+  });
+
+  const settle = $((beats: readonly Beat[]) => {
+    if (state.status !== "idle") return;
+    state.script = [...beats];
+    state.beat = 0;
+    state.step = 0;
+    state.status = "running";
+    runToEnd(state);
+  });
+
   const cancel = $(() => {
     if (timer.value) {
       clearInterval(timer.value);
@@ -301,5 +345,5 @@ export function useMockTurn(seed: readonly TranscriptEntry[] = []): MockTurn {
     if (state.status === "running") await start();
   });
 
-  return { state, submit, cancel, decide };
+  return { state, submit, cancel, decide, play, settle };
 }

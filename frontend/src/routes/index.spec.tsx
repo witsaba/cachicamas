@@ -1,16 +1,17 @@
 /**
- * Behavioural spec for `routes/index.tsx` — the landing page.
+ * Behavioural spec for `routes/index.tsx` — the public page.
  *
- * The page's argument is that it shows the real board rather than describing
- * one, so these assertions are about honesty and about proof-by-rendering:
+ * A Persuade surface, so the assertions are about whether it does its job and
+ * whether it is honest doing it:
  *
- *   - the register on the landing page is the SAME component the product uses,
- *     with the SAME data, so it cannot quietly become a flattering mock-up;
- *   - the states it shows are the real ones, five of six of them admitting the
- *     specialist does not exist;
- *   - the permission suspension is quoted with the real transcript component,
- *     not re-drawn as marketing furniture;
- *   - the retired Software Development Framework identity is gone.
+ *   - the offer, the specialists and the primary action are all present;
+ *   - the proof is the product's own moment (a colleague stopping to ask),
+ *     not a claim about it;
+ *   - every specialist named in the product appears, so the page cannot
+ *     quietly advertise a roster the workspace does not have;
+ *   - the pricing says, in words, that its figures are a preview;
+ *   - nothing on the page mentions how any of it is built, and the retired
+ *     Software Development Framework identity is gone.
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { $, type QRL } from "@builder.io/qwik";
@@ -19,11 +20,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Index, { head } from "./index";
 import type { DocumentHeadValue } from "@builder.io/qwik-city";
+import { AGENTS } from "~/lib/mock/staff";
+import { PLANS } from "~/lib/mock/plans";
 
 // `DocumentHead` is a union of a static value and a resolver function; these
 // routes export the static form, so narrow once here rather than at every use.
 const landingHead = head as DocumentHeadValue;
-import { ARCHETYPES } from "~/lib/mock/registry";
 
 vi.mock("~/routes/plugin@auth", () => ({
   useSession: () => ({ value: null }),
@@ -43,100 +45,121 @@ vi.mock("~/routes/plugin@auth", () => ({
 }));
 
 const source = readFileSync(
-  fileURLToPath(import.meta.url).replace(/\.spec\.tsx$/, ".tsx"),
+  fileURLToPath(new URL("./index.tsx", import.meta.url)),
   "utf8",
 );
 
-test("[routes/index]: exactly one <h1>, and it states the product's own claim", async () => {
+async function renderLanding() {
   const { screen, render } = await createDOM();
   await render(<Index />);
-  const h1s = screen.querySelectorAll("h1");
-  expect(h1s.length).toBe(1);
-  expect(h1s[0].textContent).toContain("specialists you can talk to");
+  return screen;
+}
+
+test("[routes/index]: leads with the offer and one primary action", async () => {
+  const screen = await renderLanding();
+  const h1 = screen.querySelector("h1");
+  expect(h1?.textContent).toContain("Hire the specialists");
+  // The action is a real submit into the sign-in flow, not a link to nowhere,
+  // and it is the same affordance the rest of the product uses.
+  const forms = screen.querySelectorAll('form[data-testid="sign-in-button"]');
+  expect(forms.length).toBeGreaterThan(0);
+  const first = forms[0] as HTMLElement;
+  expect(
+    first.querySelector('input[name="providerId"]')?.getAttribute("value"),
+  ).toBe("github");
+  expect(
+    first.querySelector('input[name="redirectTo"]')?.getAttribute("value"),
+  ).toBe("/home");
 });
 
-test("[routes/index]: the primary action opens the register, the secondary reaches the mechanism", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  const primary = screen.querySelector('[data-testid="get-started"]');
-  expect(primary).toBeTruthy();
-  expect((primary as HTMLAnchorElement).getAttribute("href")).toBe("/home/");
-
-  const secondary = screen.querySelector('[data-testid="see-interface"]');
-  expect(secondary).toBeTruthy();
-  const href = (secondary as HTMLAnchorElement).getAttribute("href");
-  expect(href).toBe("#suspension");
-  // The anchor must actually land somewhere on this page.
-  expect(screen.querySelector("#suspension")).toBeTruthy();
+test("[routes/index]: opens on the product's own moment, mid-conversation", async () => {
+  // The proof PLAYS (see components/marketing/hero-proof), so first paint is
+  // the person's request with the colleague about to answer. What is asserted
+  // here is that the page mounts the real thing, seeded and named; that the
+  // exchange actually reaches the permission is asserted where it can be
+  // driven a tick at a time, in hero-proof.spec.tsx.
+  const screen = await renderLanding();
+  const proof = screen.querySelector('[data-testid="hero-proof"]');
+  expect(proof).toBeTruthy();
+  const text = proof?.textContent ?? "";
+  expect(text).toContain("Finance");
+  expect(text).toContain("Agent");
+  expect(text).toContain("Order 4471 arrived damaged");
+  expect(text).toContain("Nothing is sent until a person answers");
 });
 
-test("[routes/index]: the register is rendered from the real registry, whole", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  expect(screen.querySelector('[data-testid="landing-register"]')).toBeTruthy();
-  for (const a of ARCHETYPES) {
-    expect(
-      screen.querySelector(`[data-testid="register-cell-${a.slug}"]`),
-      a.code,
-    ).toBeTruthy();
+test("[routes/index]: names every specialist the product actually has", async () => {
+  // A landing page listing a roster the workspace cannot deliver is the
+  // cheapest lie available; this is the guard against it drifting.
+  const screen = await renderLanding();
+  const text = screen.textContent ?? "";
+  for (const agent of AGENTS) {
+    expect(text, agent.slug).toContain(agent.name);
   }
 });
 
-test("[routes/index]: the landing page admits that five of six specialists do not exist", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  const text = screen.querySelector("main")?.textContent ?? "";
-  // Not a claim in prose — the states are on the cells themselves.
-  const unbuilt = ARCHETYPES.filter((a) => a.state !== "on-duty");
-  expect(unbuilt.length).toBe(ARCHETYPES.length);
-  expect(text).toContain("Five of those six do not exist");
-  expect(text).toContain("0 on duty");
+test("[routes/index]: shows every plan, including the one with open desks", async () => {
+  const screen = await renderLanding();
+  for (const plan of PLANS) {
+    expect(
+      screen.querySelector(`[data-testid="plan-${plan.slug}"]`),
+      plan.slug,
+    ).toBeTruthy();
+  }
+  const workforce = screen.querySelector('[data-testid="plan-workforce"]');
+  const text = workforce?.textContent ?? "";
+  expect(text).toContain("open desks");
+  expect(text).toContain("paired duo");
 });
 
-test("[routes/index]: the permission suspension is quoted with the product's own component", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  const quoted = screen.querySelector('[data-testid="line-hold-landing"]');
-  expect(quoted).toBeTruthy();
-  const text = (quoted as HTMLElement).textContent ?? "";
-  expect(text).toContain("Permission required");
-  expect(text).toContain("The run is suspended here");
-  // The exact call is on screen, because an approval you cannot read is not a
-  // decision anyone can make.
-  expect(text).toContain("drop schema staging cascade");
+test("[routes/index]: exactly one plan is recommended", () => {
+  expect(PLANS.filter((p) => p.recommended)).toHaveLength(1);
 });
 
-test("[routes/index]: the runtime figures shown are the real ones", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  const stack = screen.querySelector('[data-testid="landing-stack"]');
-  expect(stack).toBeTruthy();
-  const text = (stack as HTMLElement).textContent ?? "";
-  expect(text).toContain("42/42");
-  expect(text).toContain("24/24");
+test("[routes/index]: says its prices are a preview, in words", async () => {
+  // Nobody should be able to read this page and believe they were quoted.
+  const screen = await renderLanding();
+  const note = screen.querySelector('[data-testid="pricing-disclaimer"]');
+  expect(note).toBeTruthy();
+  expect(note?.textContent).toMatch(/preview pricing/i);
+  expect(note?.textContent).toMatch(/nothing here is a quote/i);
 });
 
-test("[routes/index]: the retired Software Development Framework identity is gone", () => {
-  // ADR 0009 replaced the framework identity. These are the words the old
-  // landing page sold, and none of them may return without a decision record.
-  const text = source.toLowerCase();
-  expect(text).not.toContain("software development framework");
-  expect(text).not.toContain("requirements");
-  expect(text).not.toContain("milestones they operate on");
-  expect(text).not.toContain("the framework is the product");
+test("[routes/index]: offers both billing periods, annual by default", async () => {
+  const screen = await renderLanding();
+  const monthly = screen.querySelector('[data-testid="billing-monthly"]');
+  const annual = screen.querySelector('[data-testid="billing-annual"]');
+  expect(monthly).toBeTruthy();
+  expect(annual).toBeTruthy();
+  expect(annual?.getAttribute("aria-pressed")).toBe("true");
+  expect(monthly?.getAttribute("aria-pressed")).toBe("false");
 });
 
-test("[routes/index]: the page carries no eyebrow labels or section numbering", () => {
-  // Both were load-bearing in the retired design ("[1.0] The system"). They
-  // are the two habits most likely to creep back into a marketing page.
-  expect(source).not.toMatch(/data-section=/);
-  expect(source).not.toMatch(/\[\d\.\d\]/);
+test("[routes/index]: mentions nothing about how the product is built", async () => {
+  const screen = await renderLanding();
+  const text = screen.textContent ?? "";
+  expect(text).not.toMatch(
+    /\b(archetype|runtime|MCP|schema|Layer [123]|SSE|Qwik|token|endpoint|milestone|ADR)\b/i,
+  );
 });
 
-test("[routes/index]: head metadata describes the product, not the framework", () => {
+test("[routes/index]: the retired Framework identity is gone", () => {
+  expect(source).not.toMatch(/Software Development Framework/i);
+  expect(source).not.toMatch(/\bworkspaces?\b.*\bskills?\b/i);
+});
+
+test("[routes/index]: the document head sells the product, not the stack", () => {
   expect(landingHead.title).toContain("cachicamas");
-  const description = landingHead.meta?.find((m: { name?: string; content?: string }) => m.name === "description")?.content;
-  expect(description).toBeTruthy();
-  expect(description).toContain("multiplayer agentic system");
-  expect(description?.toLowerCase()).not.toContain("framework");
+  const description = (landingHead.meta ?? []).find(
+    (m) => m.name === "description",
+  );
+  expect(description?.content).toBeTruthy();
+  expect(description?.content).not.toMatch(/archetype|runtime|Qwik/i);
+});
+
+test("[routes/index]: has exactly one <main> and one <h1>", async () => {
+  // Two h1s on a marketing page is the tell that a section was pasted in.
+  const screen = await renderLanding();
+  expect(screen.querySelectorAll("main").length).toBe(1);
+  expect(screen.querySelectorAll("h1").length).toBe(1);
 });

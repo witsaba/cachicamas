@@ -124,7 +124,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(trigger?.querySelectorAll("img").length).toBe(0);
   });
 
-  it("avatar trigger is a hard-cornered identity cell that warms to amber", async () => {
+  it("avatar trigger is a full-width row that tints on hover", async () => {
     // The trigger overrides three of `<Button>`'s primary-variant tokens: the
     // amber fill, the label padding, and the rule colour. Tailwind 4 emits
     // utilities alphabetically, so an override that collides with a variant
@@ -149,16 +149,17 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     const cls = trigger?.className ?? "";
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
-    expect(cls).toMatch(/hover:!border-amber/);
-    expect(cls).toMatch(/!bg-transparent/);
-    expect(cls).toMatch(/!p-0/);
-    // The world has no radius and nothing scales on press.
-    expect(cls).not.toMatch(/rounded/);
+    // A full-width row in the rail's footer, tinting on hover like every
+    // other row in the product rather than filling with brand.
+    expect(cls).toMatch(/w-full/);
+    expect(cls).toMatch(/hover:bg-sunken/);
+    expect(cls).toMatch(/rounded-md/);
+    // Nothing travels or scales under the pointer.
     expect(cls).not.toMatch(/scale-/);
-    expect(cls).not.toMatch(/shadow-/);
+    expect(cls).not.toMatch(/translate/);
   });
 
-  it("panel lists Profile, Chat, System and Sign out", async () => {
+  it("panel lists Profile, Chat, Settings and Sign out", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -203,7 +204,7 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect((settings as HTMLAnchorElement).getAttribute("href")).toBe(
       "/settings/",
     );
-    expect((settings as HTMLElement).textContent ?? "").toContain("System");
+    expect((settings as HTMLElement).textContent ?? "").toContain("Settings");
 
     const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',

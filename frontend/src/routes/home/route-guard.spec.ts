@@ -14,6 +14,13 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(import.meta.url);
 const routePath = here.replace(/\/route-guard\.spec\.ts$/, "/index.tsx");
 const source = readFileSync(routePath, "utf8");
+// The `onRequest` chain moved to the section layout when the workspace shell
+// was introduced, so every screen under it inherits one copy rather than each
+// route repeating it. The order assertions below read that file, and they
+// read only the body of `onRequest` — the import block is alphabetical and
+// says nothing about execution order.
+const layoutPath = here.replace(/\/route-guard\.spec\.ts$/, "/layout.tsx");
+const guardBody = readFileSync(layoutPath, "utf8").split("export const onRequest")[1] ?? "";
 
 describe("[routes/home] protected-route wiring", () => {
   it("imports requireSession and SignInRequiredCard", () => {
@@ -32,9 +39,9 @@ describe("[routes/home] protected-route wiring", () => {
   });
 
   it("captures the SSR cookie BEFORE either guard can throw", () => {
-    const cookieAt = source.indexOf("setSsrCookieHeader(");
-    const authAt = source.indexOf("requireAuthRedirect(event)");
-    const onboardAt = source.indexOf("requireOwnboarding(event)");
+    const cookieAt = guardBody.indexOf("setSsrCookieHeader(");
+    const authAt = guardBody.indexOf("requireAuthRedirect(event)");
+    const onboardAt = guardBody.indexOf("requireOwnboarding(event)");
     expect(cookieAt).toBeGreaterThan(-1);
     expect(authAt).toBeGreaterThan(cookieAt);
     expect(onboardAt).toBeGreaterThan(authAt);
@@ -43,27 +50,28 @@ describe("[routes/home] protected-route wiring", () => {
   it("awaits requireOwnboarding so its redirect propagates as a redirect", () => {
     // It is async; a bare call would surface as a fatal server error instead
     // of the 302 to /ownboarding.
-    expect(source).toContain("await requireOwnboarding(event)");
+    expect(guardBody).toContain("await requireOwnboarding(event)");
   });
 
   it("owns the guard and the session, and nothing else", () => {
-    // The board is `<DeskBoard>`. Keeping the route this thin is what lets the
-    // board be looked at without an authenticated session — and it is why the
-    // register's data has exactly one home rather than a copy per route.
-    expect(source).toContain("<DeskBoard");
-    expect(source).not.toContain("ARCHETYPES");
-    expect(source).not.toContain("RUNTIME");
-    expect(source).not.toContain("<Panel");
+    // The screen is `<FrontDesk>`. Keeping the route this thin is what lets
+    // the screen be looked at, and tested, without an authenticated session —
+    // and it is why the staff data has exactly one home rather than a copy
+    // per route.
+    expect(source).toContain("<FrontDesk");
+    expect(source).not.toContain("AGENTS");
+    expect(source).not.toContain("TEAMS");
+    expect(source).not.toContain("CONVERSATIONS");
   });
 
-  it("reads the register from the mock module in the board it mounts", () => {
-    const boardPath = routePath.replace(
+  it("reads the staff from the mock module in the screen it mounts", () => {
+    const screenPath = routePath.replace(
       /routes\/home\/index\.tsx$/,
-      "components/os/desk-board/desk-board.tsx",
+      "components/workspace/screens/front-desk.tsx",
     );
-    const board = readFileSync(boardPath, "utf8");
-    expect(board).toMatch(/from\s+["']~\/lib\/mock\/registry["']/);
-    expect(board).toContain("ARCHETYPES");
-    expect(board).toContain("RUNTIME");
+    const screenSource = readFileSync(screenPath, "utf8");
+    expect(screenSource).toMatch(/from\s+["']~\/lib\/mock\/staff["']/);
+    expect(screenSource).toContain("AGENTS");
+    expect(screenSource).toContain("TEAMS");
   });
 });

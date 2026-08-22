@@ -44,8 +44,11 @@ describe("[routes/chat] protected-route wiring (REQ-3 / S-3.a, S-3.b)", () => {
     );
     // setSsrCookieHeader must precede requireAuthRedirect in the
     // chain (captured before the redirect throw short-circuits).
-    const cookieIdx = source.indexOf("setSsrCookieHeader");
-    const authIdx = source.indexOf("requireAuthRedirect");
+    // Read the body of `onRequest`, not the whole file: the import block is
+    // alphabetical and says nothing about the order things run in.
+    const body = source.split("export const onRequest")[1] ?? "";
+    const cookieIdx = body.indexOf("setSsrCookieHeader");
+    const authIdx = body.indexOf("requireAuthRedirect");
     expect(cookieIdx).toBeGreaterThanOrEqual(0);
     expect(authIdx).toBeGreaterThan(cookieIdx);
   });

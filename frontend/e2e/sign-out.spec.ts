@@ -45,9 +45,9 @@ test.describe("GitHub sign-out", () => {
     // 1. Sign in.
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
     await signInForm.locator('button[type="submit"]').click();
     await page.waitForURL(/\/profile(\?|$)/, { timeout: 15_000 });

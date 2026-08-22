@@ -15,59 +15,59 @@ import { Button } from "./button";
 
 describe("components/ui/button", () => {
   describe("variant rendering", () => {
-    it("primary (default) renders the amber filled cell", async () => {
+    it("primary (default) renders the brand-filled control", async () => {
       const { screen, render } = await createDOM();
       await render(<Button>Save</Button>);
       const btn = screen.querySelector("button");
       expect(btn).toBeTruthy();
-      expect(btn?.className).toContain("bg-amber");
-      expect(btn?.className).toContain("text-void");
+      expect(btn?.className).toContain("bg-brand");
+      expect(btn?.className).toContain("text-ink-inverse");
       // Drift regression guard: the retired slate world must not come back.
       expect(btn?.className).not.toMatch(/slate|indigo/);
     });
 
-    it("secondary renders an empty ruled cell", async () => {
+    it("secondary renders a white control with a findable border", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="secondary">Cancel</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("bg-transparent");
-      expect(btn?.className).toContain("border-rule-strong");
-      expect(btn?.className).toContain("text-fg");
-      expect(btn?.className).not.toContain("bg-amber");
+      expect(btn?.className).toContain("bg-surface");
+      expect(btn?.className).toContain("border-line-control");
+      expect(btn?.className).toContain("text-ink");
+      expect(btn?.className).not.toContain("bg-brand");
     });
 
-    it("destructive renders the fail colour, filled", async () => {
+    it("destructive renders the stop colour, filled", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="destructive">Delete</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("bg-fail");
-      expect(btn?.className).toContain("text-void");
+      expect(btn?.className).toContain("bg-stop");
+      expect(btn?.className).toContain("text-ink-inverse");
     });
 
-    it("link renders cyan + underline and NO surface", async () => {
+    it("link renders brand + underline and NO surface", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="link">Clear selection</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("text-cyan");
+      expect(btn?.className).toContain("text-brand");
       expect(btn?.className).toContain("underline");
       expect(btn?.className).not.toMatch(/\bbg-/);
       expect(btn?.className).not.toContain("rounded");
     });
 
-    it("sizes: md uses text-label + px-3 py-1.5", async () => {
+    it("sizes: md is a 36px control at the body size", async () => {
       const { screen, render } = await createDOM();
       await render(<Button size="md">md</Button>);
       const md = screen.querySelector("button");
-      expect(md?.className).toContain("text-label");
-      expect(md?.className).toContain("px-3 py-1.5");
+      expect(md?.className).toContain("text-base");
+      expect(md?.className).toContain("h-9 px-3.5");
     });
 
-    it("sizes: lg uses text-body + px-4 py-2.5", async () => {
+    it("sizes: lg is a 44px control", async () => {
       const { screen, render } = await createDOM();
       await render(<Button size="lg">lg</Button>);
       const lg = screen.querySelector("button");
-      expect(lg?.className).toContain("text-body");
-      expect(lg?.className).toContain("px-4 py-2.5");
+      expect(lg?.className).toContain("text-base");
+      expect(lg?.className).toContain("h-11 px-5");
     });
   });
 
@@ -86,48 +86,48 @@ describe("components/ui/button", () => {
       const btn = screen.querySelector("button");
       expect(btn?.hasAttribute("disabled")).toBe(true);
       expect(btn?.className).toContain("disabled:cursor-not-allowed");
-      expect(btn?.className).toContain("disabled:opacity-40");
+      expect(btn?.className).toContain("disabled:opacity-45");
     });
   });
 
-  describe("reverse-video interaction, and nothing that moves", () => {
-    it("primary reverses to the void on hover and press", async () => {
+  describe("press darkens, and nothing moves", () => {
+    it("primary darkens on hover and press", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="primary">Save</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
       expect(cls).toMatch(/transition-\[background-color/);
       expect(cls).toContain("duration-150");
-      expect(cls).toContain("not-disabled:hover:bg-void");
-      expect(cls).toContain("not-disabled:active:text-amber");
+      expect(cls).toContain("not-disabled:hover:bg-brand-press");
+      expect(cls).toContain("not-disabled:active:bg-brand-press");
       // A terminal key does not travel.
       expect(cls).not.toContain("translate");
     });
 
-    it("secondary warms its rule to amber rather than filling", async () => {
+    it("secondary tints its surface rather than filling with brand", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="secondary">Cancel</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("not-disabled:hover:border-amber");
-      expect(cls).toContain("not-disabled:hover:text-amber");
+      expect(cls).toContain("not-disabled:hover:bg-sunken");
+      expect(cls).toContain("not-disabled:active:bg-sunken");
       expect(cls).not.toContain("translate");
     });
 
-    it("destructive reverses to the void, keeping the fail colour", async () => {
+    it("destructive darkens, keeping the stop colour", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="destructive">Delete</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("not-disabled:hover:bg-void");
-      expect(cls).toContain("not-disabled:hover:text-fail");
+      expect(cls).toContain("bg-stop");
+      expect(cls).toContain("not-disabled:hover:brightness-90");
       expect(cls).not.toContain("translate");
     });
 
-    it("link changes colour only, with no surface swap", async () => {
+    it("link changes colour only, with no surface", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="link">Clear</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
       expect(cls).toContain("transition-colors");
       expect(cls).toContain("duration-150");
-      expect(cls).toContain("hover:text-fg");
+      expect(cls).toContain("hover:text-brand-press");
       expect(cls).not.toMatch(/not-disabled:hover:bg-/);
     });
   });
@@ -157,26 +157,26 @@ describe("components/ui/button", () => {
       const { screen, render } = await createDOM();
       await render(<Button class="h-10 w-full">Wide</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("bg-amber");
+      expect(cls).toContain("bg-brand");
       expect(cls).toContain("h-10 w-full");
     });
 
     it("consumer class on link variant is appended after VARIANT_LINK", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button variant="link" class="text-label">
+        <Button variant="link" class="text-base">
           Clear
         </Button>,
       );
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("text-cyan");
-      expect(cls).toContain("text-label");
+      expect(cls).toContain("text-brand");
+      expect(cls.endsWith("text-base")).toBe(true);
     });
 
     it("consumer class on link variant does NOT add a surface", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button variant="link" class="text-label">
+        <Button variant="link" class="text-base">
           Clear
         </Button>,
       );
@@ -229,7 +229,7 @@ describe("components/ui/button", () => {
       const a = screen.querySelector("a");
       expect(a).toBeTruthy();
       expect(a?.getAttribute("href")).toBe("/chat/");
-      expect(a?.className).toContain("bg-amber");
+      expect(a?.className).toContain("bg-brand");
       expect(a?.className).toContain("cursor-pointer");
       expect(a?.hasAttribute("disabled")).toBe(false);
     });
@@ -242,7 +242,7 @@ describe("components/ui/button", () => {
         </Button>,
       );
       const a = screen.querySelector("a");
-      expect(a?.className).toContain("bg-transparent");
+      expect(a?.className).toContain("bg-surface");
       expect(a?.className).toContain("px-5 py-2.5");
     });
   });

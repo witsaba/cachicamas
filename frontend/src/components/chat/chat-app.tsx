@@ -5,36 +5,57 @@ import {
   useTask$,
   useVisibleTask$,
 } from "@builder.io/qwik";
-import { Panel } from "~/components/os/panel/panel";
-import { StateLamp } from "~/components/os/lamp/lamp";
-import { ScreenTitle } from "~/components/os/screen/screen";
+import { Icon } from "~/components/icon/icon";
+import { AgentAvatar } from "~/components/workspace/avatar/avatar";
+import { Status } from "~/components/workspace/status/status";
+import { initialsOf } from "~/lib/initials";
 import { CONVERSATIONS } from "~/lib/mock/chat";
+import { AGENTS, agentBySlug } from "~/lib/mock/staff";
 import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
 import { TranscriptLine } from "./transcript-line";
 import { useMockTurn } from "./use-mock-turn";
 
 /**
- * ChatApp — the chat archetype's screen.
+ * Chat — a conversation with one colleague.
  *
- * Two columns: the archetype's own memory on the left, the run on the right.
- * The composer sits at the foot of the run column, and the whole thing is one
- * panel pair inside the OS shell — the same frame every other application gets.
+ * Two columns: the conversations you have had on the left, the one you are in
+ * on the right, with the composer pinned to its foot. It is the shape of every
+ * messaging surface, and it is the right one here for the same reason it is
+ * right there: the history is context, not navigation.
  *
- * What is worth pressing here, because it is the product's actual argument:
- * ask it to drop or delete something. The turn stops mid-run and asks, showing
- * the exact call it wants to make, and nothing moves until you answer. That
- * suspension is a Layer 2 mechanism, not a modal this screen invented, and it
- * is the reason a company can let a specialist agent near its systems at all.
+ * What is worth trying, because it is the product's actual argument: ask a
+ * colleague to *send* something. The conversation stops, shows the exact thing
+ * it is about to do, and waits. Nothing moves until a person answers. That
+ * pause is the whole reason a company can let an agent near its systems.
  */
-export const ChatApp = component$(() => {
+export interface ChatAppProps {
+  readonly youName: string;
+  readonly youEmail: string;
+}
+
+export const ChatApp = component$<ChatAppProps>(({ youName, youEmail }) => {
   const selected = useSignal(CONVERSATIONS[0].id);
   const turn = useMockTurn(CONVERSATIONS[0].entries);
   const scroller = useSignal<HTMLElement>();
+  const historyOpen = useSignal(false);
 
-  // Selecting a conversation loads its transcript. A turn in flight belongs to
-  // the conversation it was opened in, so switching ends it rather than
-  // carrying it across.
+  // `?with=<slug>` opens the newest conversation with that colleague. It is
+  // read from the browser rather than the router so this component stays
+  // renderable without a request context — the rail links here, the screen
+  // answers, and neither needs to know about Qwik City's location service.
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(() => {
+    if (typeof window === "undefined") return;
+    const slug = new URL(window.location.href).searchParams.get("with");
+    if (!slug) return;
+    const match = CONVERSATIONS.find((c) => c.agentSlug === slug);
+    if (match) selected.value = match.id;
+  });
+
+  // Selecting a conversation loads its transcript. Work in flight belongs to
+  // the conversation it started in, so switching ends it rather than carrying
+  // it across.
   useTask$(({ track }) => {
     const id = track(() => selected.value);
     const conversation = CONVERSATIONS.find((c) => c.id === id);
@@ -46,8 +67,8 @@ export const ChatApp = component$(() => {
     turn.state.status = "idle";
   });
 
-  // Following a stream to the bottom of a scroller is a browser-only concern
-  // by definition; there is no server-side equivalent to fall back to.
+  // Following an arriving answer to the bottom of a scroller is a browser-only
+  // concern by definition; there is no server-side equivalent to fall back to.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ track }) => {
     track(() => turn.state.entries.length);
@@ -59,55 +80,27 @@ export const ChatApp = component$(() => {
 
   const conversation =
     CONVERSATIONS.find((c) => c.id === selected.value) ?? CONVERSATIONS[0];
-
-  const statusWord =
-    turn.state.status === "running"
-      ? "Streaming"
-      : turn.state.status === "held"
-        ? "Suspended"
-        : "Idle";
+  const agent = agentBySlug(conversation.agentSlug) ?? AGENTS[0];
+  const youInitials = initialsOf(youName, youEmail);
 
   return (
-    <main
-      id="main"
-      class="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col px-3 py-4 sm:px-4"
-    >
-      <ScreenTitle
-        code="CHAT"
-        title="Chat"
-        lead="The thinnest archetype there is: one conversation, one model, and a hand-off to whichever specialist actually owns the work."
+    <div class="flex min-h-0 flex-1">
+      {/* the conversations you have had */}
+      <aside
+        class="border-line bg-surface hidden w-[17rem] shrink-0 flex-col border-r lg:flex"
+        data-testid="conversations-panel"
       >
-        <StateLamp tone="build" word="In build · doc 0005 · 0 of 12" />
-      </ScreenTitle>
-
-      {/* The archetype's memory, twice: a standing panel where there is room
-          for one, and a disclosure where there is not. Hiding it outright below
-          `lg` would take multi-conversation history off phones entirely, which
-          is a capability disappearing, not a layout adapting. */}
-      <details
-        data-testid="conversations-disclosure"
-        class="border-rule bg-panel mt-4 border lg:hidden"
-      >
-        <summary class="border-rule text-label text-fg cursor-pointer border-b px-3 py-1.5 tracking-[0.14em] uppercase">
-          Conversations · {CONVERSATIONS.length} · demo
-        </summary>
-        <ConversationList
-          conversations={CONVERSATIONS}
-          selectedId={selected.value}
-          onSelect$={$((id: string) => {
-            selected.value = id;
-          })}
-        />
-      </details>
-
-      <div class="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 lg:mt-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <Panel
-          label="Conversations"
-          note={`${CONVERSATIONS.length} · demo`}
-          padded={false}
-          testId="conversations-panel"
-          class="hidden lg:block"
-        >
+        <div class="border-line flex items-center justify-between border-b px-4 py-3">
+          <h2 class="text-ink text-base font-semibold">Conversations</h2>
+          <a
+            href="/agents/"
+            class="text-brand inline-flex items-center gap-1 rounded-sm text-xs font-medium hover:underline"
+          >
+            <Icon name="plus" size={14} />
+            New
+          </a>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto">
           <ConversationList
             conversations={CONVERSATIONS}
             selectedId={selected.value}
@@ -115,41 +108,113 @@ export const ChatApp = component$(() => {
               selected.value = id;
             })}
           />
-        </Panel>
+        </div>
+      </aside>
 
-        <Panel
-          label={conversation.title}
-          note={`${statusWord} · ${conversation.turns} turns`}
-          padded={false}
-          testId="transcript-panel"
-          class="flex min-h-0 flex-col"
-          bodyClass="flex min-h-0 flex-1 flex-col"
-        >
-          <ol
-            ref={scroller}
-            data-testid="transcript"
-            aria-live="polite"
-            aria-label="Conversation"
-            class="divide-rule min-h-0 flex-1 divide-y overflow-y-auto px-3"
+      <div class="bg-canvas flex min-w-0 flex-1 flex-col">
+        {/* who you are talking to */}
+        <header class="border-line bg-surface flex items-center gap-3 border-b px-4 py-2.5">
+          <AgentAvatar agent={agent} size="md" />
+          <div class="min-w-0 flex-1">
+            <p class="flex items-center gap-2">
+              <a
+                href={`/agents/${agent.slug}/`}
+                class="text-ink truncate rounded-sm text-base font-semibold hover:underline"
+              >
+                {agent.name}
+              </a>
+              <span class="text-2xs text-ink-soft shrink-0 font-medium">
+                Agent
+              </span>
+            </p>
+            <p class="text-ink-soft truncate text-xs">
+              {agent.departmentName} ·{" "}
+              {turn.state.status === "running"
+                ? "Working now"
+                : turn.state.status === "held"
+                  ? "Waiting for you"
+                  : agent.statusWord}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="history-toggle"
+            onClick$={() => (historyOpen.value = !historyOpen.value)}
+            class="border-line-control text-ink shrink-0 cursor-pointer rounded-md border px-2.5 py-1.5 text-xs font-medium lg:hidden"
           >
-            {turn.state.entries.map((entry) => (
-              <TranscriptLine
-                key={entry.id}
-                entry={entry}
-                onDecide$={$((granted: boolean) => {
-                  void turn.decide(granted);
-                })}
-              />
-            ))}
-          </ol>
+            {historyOpen.value ? "Hide history" : "History"}
+          </button>
+        </header>
 
-          <Composer
-            status={turn.state.status}
-            onSubmit$={turn.submit}
-            onCancel$={turn.cancel}
-          />
-        </Panel>
+        {/* history on a phone: a capability, not a layout, so it collapses
+            rather than disappearing */}
+        {historyOpen.value ? (
+          <div
+            class="border-line bg-surface border-b lg:hidden"
+            data-testid="conversations-disclosure"
+          >
+            <ConversationList
+              conversations={CONVERSATIONS}
+              selectedId={selected.value}
+              onSelect$={$((id: string) => {
+                selected.value = id;
+                historyOpen.value = false;
+              })}
+            />
+          </div>
+        ) : null}
+
+        <ol
+          ref={scroller}
+          data-testid="transcript"
+          aria-live="polite"
+          aria-label={`Conversation with ${agent.name}`}
+          // Every line keeps a reading measure. Without it an answer runs
+          // the full width of a 1440px screen, which is about twice the length
+          // anyone reads comfortably; the composer below is capped to the same
+          // column so the two never disagree about where the conversation is.
+          class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
+        >
+          <li class="pt-5 pb-1">
+            <p class="text-ink-soft text-xs">
+              {agent.tagline}{" "}
+              {agent.tenure ? <>On staff {agent.tenure}.</> : null}{" "}
+              <a
+                href={`/agents/${agent.slug}/`}
+                class="text-brand rounded-sm font-medium hover:underline"
+              >
+                See what {agent.name} can do
+              </a>
+            </p>
+            <p class="pt-2">
+              <Status
+                status={agent.status}
+                word={agent.statusWord}
+                detail={agent.statusDetail}
+              />
+            </p>
+          </li>
+          {turn.state.entries.map((entry) => (
+            <TranscriptLine
+              key={entry.id}
+              entry={entry}
+              agent={agent}
+              youName={youName}
+              youInitials={youInitials}
+              onDecide$={$((granted: boolean) => {
+                void turn.decide(granted);
+              })}
+            />
+          ))}
+        </ol>
+
+        <Composer
+          status={turn.state.status}
+          agentName={agent.name}
+          onSubmit$={turn.submit}
+          onCancel$={turn.cancel}
+        />
       </div>
-    </main>
+    </div>
   );
 });

@@ -48,6 +48,7 @@
  */
 import { component$ } from "@builder.io/qwik";
 import { type DocumentHead, useLocation } from "@builder.io/qwik-city";
+import { MarketingFooter } from "~/components/marketing/footer/footer";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { useSignIn } from "~/routes/plugin@auth";
 
@@ -103,67 +104,88 @@ export default component$(() => {
   const redirectTo = resolveRedirectTo(loc.url.searchParams.get("callbackUrl"));
 
   return (
-    <main class="bg-void text-fg flex-1" data-testid="auth-signin-page">
-      {/* The page's top rule. Flat, 1px, the system's own hairline colour —
-          there are no gradients anywhere in this world, and the comment that
-          used to call this one a "gradient accent" outlived the design it
-          described. */}
-      <div class="bg-rule h-px w-full" aria-hidden="true" />
-
-      <section
-        class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"
-        data-testid="auth-signin-card"
-      >
-        {/* Brand mark — single monospace token, same chrome as the
-            app header. Identical to routes/layout.tsx:65-71. */}
-        <a
-          href="/"
-          class="text-label text-amber font-semibold tracking-[0.22em] uppercase no-underline"
-          data-testid="auth-signin-brand"
-        >
-          cachicamas
-        </a>
-
-        <h1
-          class="text-screen text-fg mt-8 leading-none font-semibold tracking-tight"
-          data-testid="auth-signin-heading"
-        >
-          Sign in to cachicamas
-        </h1>
-
-        <p
-          class="font-human text-body text-fg-mid mt-3 leading-relaxed"
-          data-testid="auth-signin-description"
-        >
-          You'll be redirected to GitHub to authorise the sign-in. No password
-          is stored by cachicamas — your session lives in a signed cookie that
-          expires when you sign out.
-        </p>
-
-        <div class="mt-8" data-testid="auth-signin-action">
-          <SignInButton signIn={signIn} redirectTo={redirectTo} />
+    <main
+      class="bg-canvas text-ink flex min-h-screen flex-col"
+      data-testid="auth-signin-page"
+    >
+      {/* The conversion page belongs to the same world as the page it came
+          from. It used to be a bare left-aligned column on an empty viewport
+          with no framing at all — the one surface a person meets between
+          deciding and being inside, and the only one that had not been
+          designed. */}
+      <header class="border-line bg-surface border-b">
+        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+          <a
+            href="/"
+            class="text-ink rounded-sm text-lg font-bold tracking-[-0.02em] no-underline"
+            data-testid="auth-signin-brand"
+          >
+            cachicamas
+          </a>
+          <a
+            href="/"
+            class="text-ink-mid hover:text-ink rounded-sm text-base font-medium"
+          >
+            Back to the site
+          </a>
         </div>
+      </header>
 
-        <p
-          class="text-legend text-fg-dim mt-10 tracking-[0.14em] uppercase"
-          data-testid="auth-signin-footnote"
+      <div class="flex flex-1 items-center justify-center px-4 py-12">
+        <section
+          class="border-line bg-surface w-full max-w-md rounded-lg border p-8 shadow-[var(--shadow-float)]"
+          data-testid="auth-signin-card"
         >
-          By signing in you agree to cachicamas acting on your behalf with the
-          GitHub scopes you authorise (read your public profile and primary
-          email).
-        </p>
-      </section>
+          <h1
+            class="text-ink text-2xl font-bold tracking-[-0.025em]"
+            data-testid="auth-signin-heading"
+          >
+            Sign in to cachicamas
+          </h1>
+
+          {/* Says what the person gets, not how the session is stored. The
+              previous copy explained signed cookies and OAuth scopes on the
+              one page where nobody has asked how anything works. */}
+          <p
+            class="text-ink-mid pt-3 text-base leading-relaxed"
+            data-testid="auth-signin-description"
+          >
+            You will finish signing in on GitHub, then land in your company.
+            cachicamas never sees or stores a password.
+          </p>
+
+          <div class="pt-7" data-testid="auth-signin-action">
+            <SignInButton
+              signIn={signIn}
+              redirectTo={redirectTo}
+              size="lg"
+              class="w-full"
+            />
+          </div>
+
+          <p
+            class="border-line text-ink-soft mt-8 border-t pt-4 text-xs"
+            data-testid="auth-signin-footnote"
+          >
+            You are signing in as yourself. Your colleagues act on your
+            company&rsquo;s behalf, and anything that leaves the building waits
+            for a person to approve it.
+          </p>
+        </section>
+      </div>
+
+      <MarketingFooter />
     </main>
   );
 });
 
 export const head: DocumentHead = {
-  title: "Sign in — Cachicamas",
+  title: "Sign in — cachicamas",
   meta: [
     {
       name: "description",
       content:
-        "Sign in to cachicamas via GitHub. No password stored — your session lives in a signed cookie.",
+        "Sign in with GitHub and land in your company. cachicamas never sees or stores a password.",
     },
     // The built-in @auth/core page had a dark <body>. We lock the
     // signin surface to light regardless of OS theme for visual

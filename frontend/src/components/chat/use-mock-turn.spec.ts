@@ -58,7 +58,7 @@ describe("advance", () => {
     const ticks = run(s);
     expect(s.status).toBe("idle");
     expect(ticks).toBeLessThan(2000);
-    expect(s.entries[0]).toMatchObject({ kind: "note", label: "TURN OPENED" });
+    expect(s.entries[0]).toMatchObject({ kind: "note", label: "Working" });
     expect(s.entries[s.entries.length - 1]).toMatchObject({ kind: "note" });
   });
 
@@ -109,7 +109,7 @@ describe("advance", () => {
 
 describe("the suspension", () => {
   it("stops the machine dead and waits", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     expect(s.status).toBe("held");
     const last = s.entries[s.entries.length - 1];
@@ -123,7 +123,7 @@ describe("the suspension", () => {
   });
 
   it("records the grant, runs the call once, and carries on", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     resolveHold(s, true);
     expect(s.status).toBe("running");
@@ -140,7 +140,7 @@ describe("the suspension", () => {
   });
 
   it("records the refusal as an auditable non-event", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     resolveHold(s, false);
     const hold = s.entries.find((e) => e.kind === "hold");
@@ -162,7 +162,7 @@ describe("the suspension", () => {
   });
 
   it("cannot be answered twice", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     resolveHold(s, true);
     const afterFirst = s.entries.length;
@@ -201,7 +201,7 @@ describe("cancelTurn", () => {
   });
 
   it("treats cancelling a suspended run as a refusal, not as a limbo", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     cancelTurn(s);
     expect(s.entries.find((e) => e.kind === "hold")).toMatchObject({
@@ -211,7 +211,7 @@ describe("cancelTurn", () => {
   });
 
   it("leaves nothing behind that a later turn could resume", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     cancelTurn(s);
     expect(s.script).toEqual([]);
@@ -233,7 +233,7 @@ describe("cancelTurn", () => {
 
 describe("entry identity", () => {
   it("mints a unique id for every entry across a whole session", () => {
-    const s = store(scriptFor("drop the staging schema"));
+    const s = store(scriptFor("send the reminder"));
     run(s);
     resolveHold(s, true);
     run(s);
