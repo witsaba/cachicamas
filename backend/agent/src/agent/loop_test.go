@@ -1113,7 +1113,32 @@ func filterOutLoopFiles(diff string) string {
 				// filename, no wildcard/prefix/directory pattern;
 				// byte-in-sync with loop_hook_test.go's
 				// filterOutLoopHookFiles.
-				strings.HasSuffix(path, "/example_test.go")
+				strings.HasSuffix(path, "/example_test.go") ||
+				// Layer 2 audit-fix widening (branch
+				// fix/agent-layer2-audit-findings): six pre-existing
+				// files released for this change only —
+				// stream_check.go and permission_events.go key the
+				// CardinalityAtMostOne seam per stream per tool name
+				// (R-APE-003); event.go gains the capability interface
+				// and the corrected 25-kind registry prose;
+				// event_registry_test.go's stale S-AEV-110 citation now
+				// names the real behavioral test; envelope_test.go and
+				// permission_events_test.go add the previously-untested
+				// CheckEmit-unstamped and two-tool-name cardinality
+				// cases. stream_check_rejection_test.go is this
+				// change's own new rejection-branch test file
+				// (stream_check_test.go stays deliberately absent —
+				// S-LSK-031 pins it as never released). Exact
+				// filenames, no wildcard/prefix/directory pattern;
+				// byte-in-sync with loop_hook_test.go's
+				// filterOutLoopHookFiles.
+				strings.HasSuffix(path, "/stream_check.go") ||
+				strings.HasSuffix(path, "/event.go") ||
+				strings.HasSuffix(path, "/event_registry_test.go") ||
+				strings.HasSuffix(path, "/permission_events.go") ||
+				strings.HasSuffix(path, "/envelope_test.go") ||
+				strings.HasSuffix(path, "/permission_events_test.go") ||
+				strings.HasSuffix(path, "/stream_check_rejection_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

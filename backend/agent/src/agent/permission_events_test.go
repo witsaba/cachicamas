@@ -258,7 +258,7 @@ func TestPermission_ResolutionRemembered_DistinctFromDecisionMade(t *testing.T) 
 // Asserted: CheckStream returns a non-nil violation matching the rule
 //           AND the position's last index step equals 3, not the
 //           offending event's sequence value 4 (W2 carry-forward).
-// GREEN: the seam at stream_check.go:166-171 honors the descriptor's
+// GREEN: the seam at stream_check.go:185-194 honors the descriptor's
 //        CardinalityAtMostOne declaration; the test passes.
 func TestPermission_ResolutionRemembered_CardinalityAtMostOne_BitesRed(t *testing.T) {
 	t.Parallel()
@@ -314,5 +314,59 @@ func TestPermission_ResolutionRemembered_CardinalityAtMostOne_BitesRed(t *testin
 	// Rule class: must be ErrDuplicate (the seam's documented class).
 	if !errors.Is(report.Violation(), ai.ErrDuplicate) {
 		t.Errorf("rejection error = %v, want errors.Is to match ai.ErrDuplicate (CardinalityAtMostOne seam)", report.Violation())
+	}
+}
+
+// R-APE-003 — "at most one such event per stream per tool name": the
+// cardinality identity is the kind PLUS the tool name, never the kind
+// alone. Two resolution_remembered events for two DIFFERENT tools are
+// two identities, not a repeat — production legitimately emits one per
+// remembered tool (the per-Schedule remembered set) — so a valid stream
+// carrying both MUST be ACCEPTED, while the same tool twice stays
+// rejected (that direction is S-APE-082's bite, above).
+func TestCheckStream_ResolutionRememberedTwoDifferentTools_Accepted(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("run-ape-003-two-tools")
+	turnID := agent.TurnID("turn-ape-003-two-tools")
+
+	toolA, err := agent.NewPermissionResolutionRemembered(runID, "tool_a", agent.PermissionOutcomeAllowAlways)
+	if err != nil {
+		t.Fatalf("NewPermissionResolutionRemembered(tool_a) = %v, want nil", err)
+	}
+	toolB, err := agent.NewPermissionResolutionRemembered(runID, "tool_b", agent.PermissionOutcomeDeny)
+	if err != nil {
+		t.Fatalf("NewPermissionResolutionRemembered(tool_b) = %v, want nil", err)
+	}
+
+	runStart, err := agent.NewRunStart(runID)
+	if err != nil {
+		t.Fatalf("NewRunStart = %v, want nil", err)
+	}
+	turnStart, err := agent.NewTurnStart(runID, turnID)
+	if err != nil {
+		t.Fatalf("NewTurnStart = %v, want nil", err)
+	}
+	turnEnd, err := agent.NewTurnEnd(runID, turnID, agent.TurnOutcomeFinished, nil)
+	if err != nil {
+		t.Fatalf("NewTurnEnd = %v, want nil", err)
+	}
+	runEnd, err := agent.NewRunEnd(runID, agent.RunOutcomeCompleted, nil)
+	if err != nil {
+		t.Fatalf("NewRunEnd = %v, want nil", err)
+	}
+
+	var lane agent.LaneStamper
+	stream := []agent.Event{
+		lane.Stamp(runStart),
+		lane.Stamp(turnStart),
+		lane.Stamp(toolA),
+		lane.Stamp(toolB),
+		lane.Stamp(turnEnd),
+		lane.Stamp(runEnd),
+	}
+
+	if report := agent.CheckStream(stream); report.Violation() != nil {
+		t.Errorf("agent.CheckStream(resolution_remembered for tool_a AND tool_b) = %v, want no violation — two tool names are two identities under R-APE-003's per-stream-per-tool-name cardinality", report.Violation())
 	}
 }

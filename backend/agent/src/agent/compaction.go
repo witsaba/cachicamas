@@ -8,7 +8,7 @@
 // file also defines. Both run the operation inside a dedicated
 // compaction turn bracket, built from the existing exported
 // NewTurnStart/NewTurnEnd constructors, so the compaction family's
-// PlacementTurn rule (stream_check.go:161) is satisfied with the
+// PlacementTurn rule (stream_check.go:180) is satisfied with the
 // validator byte-unchanged.
 //
 // # Cut resolution (R-CMP-004, design AD-1)

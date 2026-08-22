@@ -20,7 +20,7 @@
 // since AG-07: buildLoopRequest (loop.go:304-308), the pre-request
 // hook (loop.go:317-328), and provider.Stream (loop.go:332-338) each
 // left the turn bracket open on failure, so CheckStream rejected any
-// second turn_start on the same lane (stream_check.go:141-143) — the
+// second turn_start on the same lane (stream_check.go:160-162) — the
 // exact shape a harness retry over a pre-output failure would
 // produce. Without D1, no AG-15.1 retry scenario can pass
 // (agent-loop-skeleton's R-LSK-001 delta, S-LSK-021).

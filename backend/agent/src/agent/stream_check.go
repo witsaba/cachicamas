@@ -7,7 +7,11 @@
 // The Layer 2 descriptor adds one new dimension as data — [BracketRole] —
 // so the engine holds a fixed two-level scope state machine (run open → at
 // most one turn open) driven purely by descriptor fields plus envelope
-// identity (kind, sequence, run, turn — never payload data).
+// identity (kind, sequence, run, turn — never payload data). The one
+// deliberate, blind payload read is the opaque cardinality discriminator
+// a [CardinalityAtMostOne] payload may declare (per tool name for
+// permission_resolution_remembered, R-APE-003), reached through an
+// unexported capability interface — never a concrete payload type.
 //
 // Two deliberate divergences from `ai.CheckStream`, both evidence-forced
 // (design AD-1):
@@ -55,6 +59,18 @@ const (
 	runBracketClosed
 )
 
+// atMostOnceKey identifies one occurrence class under the
+// CardinalityAtMostOne rule: the kind, plus the payload's own identity
+// discriminator when it declares one (empty otherwise). Keying the
+// seen-set by both is what makes "at most one per stream per tool name"
+// (R-APE-003) hold — the same kind for two different tools is two
+// classes, the same tool twice is one repeat — without the engine ever
+// reading a concrete payload type.
+type atMostOnceKey struct {
+	kind          EventKind
+	discriminator string
+}
+
 // CheckStream runs AG-04's ordering invariants against events, a finite
 // ordered slice offered after the fact — never a channel, and never
 // mutated (R-AEV-006). It is production-exported and callable from
@@ -84,7 +100,10 @@ const (
 //     while the run bracket is open;
 //  5. a [PlacementTurn] kind must occur while a turn is open (AG-05's
 //     seam; unused by any kind AG-04 registers);
-//  6. a [CardinalityAtMostOne] kind may not repeat (AG-06's seam; unused
+//  6. a [CardinalityAtMostOne] kind may not repeat its cardinality
+//     identity: the kind alone, or the kind plus the payload's own
+//     discriminator when the payload declares one — per tool name for
+//     permission_resolution_remembered (R-APE-003; AG-06's seam, unused
 //     by any kind AG-04 registers).
 //
 // At the end of the slice, an unclosed run bracket — including an empty
@@ -95,7 +114,7 @@ func CheckStream(events []Event) StreamReport {
 	var turnOpen bool
 	var openTurn TurnID
 	var terminalSeen bool
-	seenAtMostOnce := make(map[EventKind]bool)
+	seenAtMostOnce := make(map[atMostOnceKey]bool)
 
 	for i, e := range events {
 		seq := e.Sequence()
@@ -164,10 +183,14 @@ func CheckStream(events []Event) StreamReport {
 		}
 
 		if d.Cardinality == CardinalityAtMostOne {
-			if seenAtMostOnce[e.Kind()] {
+			key := atMostOnceKey{kind: e.Kind()}
+			if identified, ok := e.payload.(cardinalityIdentified); ok {
+				key.discriminator = identified.cardinalityDiscriminator()
+			}
+			if seenAtMostOnce[key] {
 				return violation(ai.ErrDuplicate, ai.AtIndex("event", i))
 			}
-			seenAtMostOnce[e.Kind()] = true
+			seenAtMostOnce[key] = true
 		}
 
 		if d.Terminal {

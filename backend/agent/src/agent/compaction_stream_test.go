@@ -128,10 +128,14 @@ func TestCompaction_SubstrateByteUnchanged(t *testing.T) {
 	// Every OTHER named substrate file must stay byte-unchanged.
 	untouched := []string{
 		"backend/agent/src/agent/reconstruction_test.go",
-		"backend/agent/src/agent/stream_check.go",
-		"backend/agent/src/agent/event.go",
+		// stream_check.go, event.go and event_registry_test.go are
+		// removed here — the Layer 2 audit-fix change (branch
+		// fix/agent-layer2-audit-findings) legitimately edits all
+		// three (per-tool-name CardinalityAtMostOne keying, R-APE-003,
+		// and the corrected 25-kind registry prose), mirroring the
+		// AG-18 amendment precedent on
+		// TestNoRelease_SubstrateByteUnchanged.
 		"backend/agent/src/agent/event_descriptor.go",
-		"backend/agent/src/agent/event_registry_test.go",
 		"backend/agent/src/agent/sequence.go",
 		"backend/agent/src/agent/run_events.go",
 		"backend/agent/src/agent/turn_events.go",
