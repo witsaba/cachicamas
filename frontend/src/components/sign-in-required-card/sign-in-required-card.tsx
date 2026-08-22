@@ -46,15 +46,21 @@ export const SignInRequiredCard = component$<SignInRequiredCardProps>(
   ({ signIn, description, redirectTo = "/" }) => {
     return (
       <section
-        class="mx-auto max-w-xl px-6 py-12"
+        class="border-rule bg-panel border"
         data-testid="sign-in-required-card"
       >
-        <h1 class="text-2xl font-semibold text-slate-900">
-          Sign in to continue
-        </h1>
-        <p class="mt-2 text-sm text-slate-600">{description}</p>
-        <div class="mt-6">
-          <SignInButton signIn={signIn} redirectTo={redirectTo} />
+        <header class="border-rule border-b px-3 py-1.5">
+          <h1 class="text-label text-fg tracking-[0.14em] uppercase">
+            Sign in to continue
+          </h1>
+        </header>
+        <div class="p-4">
+          <p class="font-human text-body text-fg-mid max-w-[60ch] leading-relaxed">
+            {description}
+          </p>
+          <div class="mt-5">
+            <SignInButton signIn={signIn} redirectTo={redirectTo} />
+          </div>
         </div>
       </section>
     );

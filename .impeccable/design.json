@@ -1,0 +1,625 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-22T00:00:00Z",
+  "title": "Design System: cachicamas",
+  "extensions": {
+    "colorMeta": {
+      "void": {
+        "role": "neutral",
+        "displayName": "Void",
+        "canonical": "#070a10",
+        "tonalRamp": [
+          "#03050a",
+          "#070a10",
+          "#0c121c",
+          "#131b28",
+          "#1b2536",
+          "#2a3548",
+          "#3a4a63",
+          "#8fa0b8"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel Ink-Navy",
+        "canonical": "#161e2b",
+        "tonalRamp": [
+          "#070a0e",
+          "#0e131b",
+          "#161e2b",
+          "#20293a",
+          "#2d394f",
+          "#41506c",
+          "#6b7c9b",
+          "#b4becf"
+        ]
+      },
+      "raise": {
+        "role": "neutral",
+        "displayName": "Well",
+        "canonical": "#202a3b",
+        "tonalRamp": [
+          "#0a0e14",
+          "#141b26",
+          "#202a3b",
+          "#2c384d",
+          "#3b4a64",
+          "#526486",
+          "#7889a6",
+          "#bcc6d5"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#6a7890",
+        "tonalRamp": [
+          "#1b1f27",
+          "#282f3b",
+          "#3a4453",
+          "#4c5769",
+          "#5d6a80",
+          "#6a7890",
+          "#93a0b4",
+          "#ccd3dd"
+        ]
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "#7d8da8",
+        "tonalRamp": [
+          "#20252e",
+          "#2f3743",
+          "#404a5a",
+          "#535f73",
+          "#67748b",
+          "#7d8da8",
+          "#9dabc0",
+          "#d0d7e1"
+        ]
+      },
+      "rule-faint": {
+        "role": "neutral",
+        "displayName": "Ornament Hairline",
+        "canonical": "#2b3547",
+        "tonalRamp": [
+          "#0d1016",
+          "#171d26",
+          "#212936",
+          "#2b3547",
+          "#3a465c",
+          "#4d5c78",
+          "#7b8aa4",
+          "#bcc4d2"
+        ]
+      },
+      "amber": {
+        "role": "primary",
+        "displayName": "Terminal Amber",
+        "canonical": "#ffb020",
+        "tonalRamp": [
+          "#2b1c00",
+          "#4a3005",
+          "#6b450b",
+          "#8f5c10",
+          "#b57717",
+          "#dd941c",
+          "#ffb020",
+          "#ffd68f"
+        ]
+      },
+      "amber-dim": {
+        "role": "primary",
+        "displayName": "Amber Hairline",
+        "canonical": "#7a5714",
+        "tonalRamp": [
+          "#1c1304",
+          "#2f2108",
+          "#452f0c",
+          "#5d3f10",
+          "#7a5714",
+          "#a3741d",
+          "#cf9528",
+          "#f0c878"
+        ]
+      },
+      "cyan": {
+        "role": "secondary",
+        "displayName": "Navigable Cyan",
+        "canonical": "#56c8f0",
+        "tonalRamp": [
+          "#04212c",
+          "#073848",
+          "#0b5066",
+          "#106b87",
+          "#1689a9",
+          "#2ea9cd",
+          "#56c8f0",
+          "#a8e4f8"
+        ]
+      },
+      "live": {
+        "role": "tertiary",
+        "displayName": "Running Green",
+        "canonical": "#5fd97f",
+        "tonalRamp": [
+          "#052411",
+          "#093c1e",
+          "#0e552c",
+          "#14703b",
+          "#1c8d4c",
+          "#31ae63",
+          "#5fd97f",
+          "#adecbe"
+        ]
+      },
+      "hold": {
+        "role": "tertiary",
+        "displayName": "Suspended Violet",
+        "canonical": "#b18cff",
+        "tonalRamp": [
+          "#170a3a",
+          "#241257",
+          "#331c75",
+          "#442794",
+          "#5834b5",
+          "#7a56d6",
+          "#b18cff",
+          "#dcccff"
+        ]
+      },
+      "fail": {
+        "role": "tertiary",
+        "displayName": "Refused Red",
+        "canonical": "#ff5f7a",
+        "tonalRamp": [
+          "#3a0410",
+          "#57081c",
+          "#750d28",
+          "#941436",
+          "#b51e46",
+          "#d63a5e",
+          "#ff5f7a",
+          "#ffb2bf"
+        ]
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Foreground",
+        "canonical": "#e6ecf5",
+        "tonalRamp": [
+          "#171c24",
+          "#262d38",
+          "#38414f",
+          "#4d5768",
+          "#667184",
+          "#8794a6",
+          "#b2bdcc",
+          "#e6ecf5"
+        ]
+      },
+      "fg-mid": {
+        "role": "neutral",
+        "displayName": "Foreground Mid",
+        "canonical": "#9fb0c7",
+        "tonalRamp": [
+          "#131820",
+          "#212a36",
+          "#313d4d",
+          "#455367",
+          "#5c6c83",
+          "#7891ab",
+          "#9fb0c7",
+          "#d7dfea"
+        ]
+      },
+      "fg-dim": {
+        "role": "neutral",
+        "displayName": "Foreground Dim",
+        "canonical": "#8a99b3",
+        "tonalRamp": [
+          "#12161d",
+          "#1f2530",
+          "#2f3745",
+          "#414b5d",
+          "#556076",
+          "#6d7a92",
+          "#8a99b3",
+          "#c9d1de"
+        ],
+        "purpose": "The dimmest text in the system; the value that sets its floor."
+      }
+    },
+    "typographyMeta": {
+      "board": {
+        "displayName": "Board",
+        "purpose": "The landing headline. One per document; the only place this step appears."
+      },
+      "screen": {
+        "displayName": "Screen",
+        "purpose": "The ScreenTitle heading at the head of an application."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "A panel's lead paragraph and the sentence carrying a screen's argument. Human face, 68-74ch."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Prose, role descriptions, transcript language, inputs. Human face."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "Table cells, log lines, field values, secondary notes. Machine face by default."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Panel labels, archetype codes, status chips, button labels, menu items, dock names. Machine face, uppercase, tracked."
+      },
+      "legend": {
+        "displayName": "Legend",
+        "purpose": "F-key legends, units, column heads, lamp words, gutter speaker labels, the clock, the wordmark. Machine face, uppercase, tracked."
+      }
+    },
+    "contrast": [
+      {
+        "pair": "amber on panel",
+        "ratio": "9.3:1"
+      },
+      {
+        "pair": "cyan on panel",
+        "ratio": "8.8:1"
+      },
+      {
+        "pair": "live on panel",
+        "ratio": "10.4:1"
+      },
+      {
+        "pair": "hold on panel",
+        "ratio": "7.2:1"
+      },
+      {
+        "pair": "fail on panel",
+        "ratio": "6.4:1"
+      },
+      {
+        "pair": "fg-mid on panel",
+        "ratio": "8.5:1"
+      },
+      {
+        "pair": "fg-dim",
+        "ratio": "void 6.88 / panel 5.81 / raise 5.01 — the text floor, measured on the well because argument labels sit inside raised blocks"
+      },
+      {
+        "pair": "rule",
+        "ratio": "void 4.44 / panel 3.75 / raise 3.23 — clears WCAG 1.4.11's 3:1 on every ground it can sit on"
+      },
+      {
+        "pair": "rule-strong",
+        "ratio": "void 5.89 / panel 4.98 / raise 4.29"
+      },
+      {
+        "pair": "rule-faint",
+        "ratio": "below the boundary floor by design; ornament only (the Field dotted leader)"
+      }
+    ],
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-term",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "The only easing curve in the system."
+      },
+      {
+        "name": "duration-state",
+        "value": "150ms",
+        "purpose": "Every state change, on background-color, color and border-color only."
+      },
+      {
+        "name": "term-caret",
+        "value": "1s steps(1, end) infinite — opacity 1 to 0 at 50%",
+        "purpose": "A 0.5em block caret in currentColor. Only a line that is still arriving, and the command-line idiom."
+      },
+      {
+        "name": "term-lamp",
+        "value": "1.6s cubic-bezier(0.2, 0, 0, 1) infinite — opacity 1 to 0.35 to 1",
+        "purpose": "A lamp whose state is genuinely in motion."
+      },
+      {
+        "name": "no-entrance",
+        "value": "removed",
+        "purpose": "The staggered register paint was deleted rather than tuned. The board arrives painted; an entrance that reveals it over half a second eats the first-viewport promise."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce sets animation-duration, transition-duration to 0.001ms, animation-iteration-count to 1, and animation-delay to 0s",
+        "purpose": "The delay guard matters as much as the duration: a staged fill-mode-both entrance would otherwise arrive invisible for the people who asked not to see it move."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      },
+      {
+        "name": "2xl",
+        "value": "1536px"
+      }
+    ],
+    "containers": [
+      {
+        "name": "board",
+        "value": "1800px",
+        "purpose": "The desk, the chat app, the landing."
+      },
+      {
+        "name": "reading",
+        "value": "1100px",
+        "purpose": "An archetype panel, the system panel."
+      },
+      {
+        "name": "message",
+        "value": "42rem",
+        "purpose": "A single not-found message."
+      }
+    ],
+    "risks": [
+      {
+        "name": "Third-party font delivery",
+        "value": "Spline Sans Mono and Spline Sans load from fonts.googleapis.com in src/root.tsx; they are not self-hosted.",
+        "purpose": "A tightened CSP, a blocked host or an offline client drops the world onto ui-monospace / ui-sans-serif with nothing failing loudly, collapsing the two voices that carry meaning. Known and accepted for this build; self-hosting is the fix when it stops being acceptable."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The system's own action — submit, open, confirm. Amber filled cell that reverses on interaction.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Open the register</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; cursor: pointer; border-radius: 0; padding: 6px 12px; font-size: 0.75rem; transition: background-color 150ms, color 150ms, border-color 150ms; } .ds-btn:disabled { cursor: not-allowed; opacity: 0.4; } .ds-btn:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-btn-primary { border-color: #ffb020; background: #ffb020; color: #070a10; } .ds-btn-primary:not(:disabled):hover, .ds-btn-primary:not(:disabled):active { background: #070a10; color: #ffb020; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Anything non-committal — cancel, back, refresh, secondary navigation. An empty cell with a rule.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Back to the register</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; cursor: pointer; border-radius: 0; padding: 6px 12px; font-size: 0.75rem; transition: background-color 150ms, color 150ms, border-color 150ms; } .ds-btn:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-btn-secondary { border-color: #7d8da8; background: transparent; color: #e6ecf5; } .ds-btn-secondary:not(:disabled):hover { border-color: #ffb020; color: #ffb020; } .ds-btn-secondary:not(:disabled):active { background: #202a3b; }"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Refuse, delete, cancel a run. Fail red, filled, reversing like the others; the label always names the destruction in words.",
+      "html": "<button class=\"ds-btn ds-btn-destructive\">Refuse</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; cursor: pointer; border-radius: 0; padding: 6px 12px; font-size: 0.75rem; transition: background-color 150ms, color 150ms, border-color 150ms; } .ds-btn:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-btn-destructive { border-color: #ff5f7a; background: #ff5f7a; color: #070a10; } .ds-btn-destructive:not(:disabled):hover, .ds-btn-destructive:not(:disabled):active { background: #070a10; color: #ff5f7a; }"
+    },
+    {
+      "name": "Link Button",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "A word in a sentence, not a control on a board. Cyan is reserved system-wide for 'this goes somewhere'.",
+      "html": "<button class=\"ds-btn-link\">Clear selection</button>",
+      "css": ".ds-btn-link { background: none; border: 0; padding: 0; font: inherit; color: #56c8f0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; transition: color 150ms; } .ds-btn-link:hover { color: #e6ecf5; } .ds-btn-link:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-btn-link:disabled { cursor: not-allowed; opacity: 0.4; }"
+    },
+    {
+      "name": "Menu Item",
+      "kind": "custom",
+      "refersTo": "menu-item",
+      "description": "A full-width row inside a dropped panel. Tints on hover rather than reversing a cell.",
+      "html": "<button class=\"ds-menu-item\">Your profile</button>",
+      "css": ".ds-menu-item { display: block; width: 100%; text-align: left; padding: 8px 12px; border: 0; background: transparent; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #9fb0c7; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-menu-item:hover { background: #202a3b; color: #ffb020; } .ds-menu-item:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-menu-item:disabled { cursor: not-allowed; opacity: 0.4; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The only container in the system: a hard rectangle, a 1px rule, and a header band whose label is deliberately neutral.",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-panel-head\"><h2 class=\"ds-panel-label\">Runtime</h2><span class=\"ds-panel-note\">Beneath every archetype</span></header><div class=\"ds-panel-body\"><p style=\"font-family: 'Spline Sans', sans-serif; font-size: 0.875rem; color: #9fb0c7; line-height: 1.5; margin: 0;\">A screen is composed by tiling panels.</p></div></section>",
+      "css": ".ds-panel { border: 1px solid #6a7890; background: #161e2b; border-radius: 0; } .ds-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid #6a7890; padding: 6px 12px; } .ds-panel-label { margin: 0; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; font-weight: 400; text-transform: uppercase; letter-spacing: 0.14em; color: #e6ecf5; } .ds-panel-note { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em; color: #8a99b3; } .ds-panel-body { padding: 12px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "form-input",
+      "description": "A hard-cornered well with a 1px rule, an amber rule when focused, the machine voice on the label and language in the field.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-field\">Organization</label><input class=\"ds-field\" id=\"ds-field\" placeholder=\"Type a name\" />",
+      "css": ".ds-field-label { display: block; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em; color: #8a99b3; } .ds-field { margin-top: 4px; display: block; width: 100%; border: 1px solid #6a7890; background: #202a3b; padding: 8px 10px; border-radius: 0; font-family: 'Spline Sans', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; color: #e6ecf5; transition: border-color 150ms; } .ds-field::placeholder { color: #8a99b3; opacity: 1; } .ds-field:hover { border-color: #7d8da8; } .ds-field:focus { border-color: #ffb020; } .ds-field:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-field[aria-invalid=\"true\"] { border-color: #ff5f7a; }"
+    },
+    {
+      "name": "State Lamp",
+      "kind": "chip",
+      "refersTo": "state-lamp-mark",
+      "description": "A state, said three ways: a 6px square, its fill, and the state's own word. Colour separates the states that are happening; a hollow mark separates the ones that are not.",
+      "html": "<span class=\"ds-lamp ds-lamp-live\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">On duty</span></span> <span class=\"ds-lamp ds-lamp-build\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">In build</span></span> <span class=\"ds-lamp ds-lamp-hold\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">Suspended</span></span> <span class=\"ds-lamp ds-lamp-ready\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">Planned</span></span> <span class=\"ds-lamp ds-lamp-idle\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">Unplanned</span></span>",
+      "css": ".ds-lamp { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; margin-right: 12px; } .ds-lamp-mark { height: 6px; width: 6px; flex-shrink: 0; border-radius: 0; } .ds-lamp-word { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em; } .ds-lamp-live .ds-lamp-mark { background: #5fd97f; animation: ds-lamp-pulse 1.6s cubic-bezier(0.2,0,0,1) infinite; } .ds-lamp-live .ds-lamp-word { color: #5fd97f; } .ds-lamp-build .ds-lamp-mark { background: #ffb020; } .ds-lamp-build .ds-lamp-word { color: #ffb020; } .ds-lamp-hold .ds-lamp-mark { background: #b18cff; } .ds-lamp-hold .ds-lamp-word { color: #b18cff; } .ds-lamp-ready .ds-lamp-mark { background: transparent; box-shadow: inset 0 0 0 1px #9fb0c7; } .ds-lamp-ready .ds-lamp-word { color: #9fb0c7; } .ds-lamp-idle .ds-lamp-mark { background: transparent; box-shadow: inset 0 0 0 1px #8a99b3; } .ds-lamp-idle .ds-lamp-word { color: #8a99b3; } @keyframes ds-lamp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }"
+    },
+    {
+      "name": "Gauge",
+      "kind": "custom",
+      "refersTo": "gauge-segment-partial",
+      "description": "Eight segments plus the literal figure, in neutral at two brightnesses. A quantity is not a state, so the bar carries no hue; a partial is never rounded up to full.",
+      "html": "<span class=\"ds-gauge\"><span class=\"ds-gauge-track\" aria-hidden=\"true\"><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i></i><i></i><i></i></span><span class=\"ds-gauge-figure\">26/42</span></span>",
+      "css": ".ds-gauge { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; } .ds-gauge-track { display: inline-flex; gap: 1px; } .ds-gauge-track i { display: block; height: 8px; width: 6px; background: #6a7890; border-radius: 0; } .ds-gauge-track i.lit { background: #9fb0c7; } .ds-gauge-figure { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; font-variant-numeric: tabular-nums; color: #9fb0c7; }"
+    },
+    {
+      "name": "Field Row",
+      "kind": "custom",
+      "refersTo": "panel-body",
+      "description": "One labelled reading: a dim uppercase label, a dotted rule-faint leader, the value right-aligned. The atom every dense readout is built from.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-row-label\">Authority</span><span class=\"ds-row-leader\" aria-hidden=\"true\"></span><span class=\"ds-row-value\">ADR 0009</span></div>",
+      "css": ".ds-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.8125rem; font-variant-numeric: tabular-nums; } .ds-row-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.12em; color: #8a99b3; white-space: nowrap; } .ds-row-leader { flex: 1; min-width: 16px; border-bottom: 1px dotted #2b3547; } .ds-row-value { color: #e6ecf5; text-align: right; white-space: nowrap; }"
+    },
+    {
+      "name": "Dock Cell",
+      "kind": "nav",
+      "refersTo": "dock-cell",
+      "description": "The function-key dock along the bottom edge: one cell per destination, showing the key and the name. The current cell inverts to neutral fg on void, never to an accent.",
+      "html": "<nav class=\"ds-dock\" aria-label=\"Applications\"><a class=\"ds-dock-cell is-current\" href=\"#\" aria-current=\"page\"><span class=\"k\">F1</span><span class=\"n\">Chat</span></a><a class=\"ds-dock-cell\" href=\"#\"><span class=\"k\">F2</span><span class=\"n\">DBA</span></a><a class=\"ds-dock-cell is-dim\" href=\"#\"><span class=\"k\">F3</span><span class=\"n\">Finance</span></a></nav>",
+      "css": ".ds-dock { display: flex; align-items: stretch; gap: 1px; border-top: 1px solid #6a7890; background: #161e2b; overflow-x: auto; } .ds-dock-cell { display: flex; align-items: baseline; gap: 6px; padding: 6px 12px; text-decoration: none; color: #9fb0c7; transition: background-color 150ms, color 150ms; } .ds-dock-cell .k { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; letter-spacing: 0.12em; color: #8a99b3; } .ds-dock-cell .n { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; } .ds-dock-cell:hover { background: #202a3b; color: #e6ecf5; } .ds-dock-cell.is-dim { color: #8a99b3; } .ds-dock-cell.is-dim:hover { color: #9fb0c7; } .ds-dock-cell.is-current { background: #e6ecf5; color: #070a10; } .ds-dock-cell.is-current .k { color: #070a10; } .ds-dock-cell:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; }"
+    },
+    {
+      "name": "Command Line",
+      "kind": "input",
+      "refersTo": "command-line",
+      "description": "The launcher. An amber prompt, a bare field on the void band, a key hint. Refuses out loud rather than no-opping.",
+      "html": "<div class=\"ds-cmd\"><label class=\"ds-cmd-prompt\" for=\"ds-cmd-input\">&gt;</label><input class=\"ds-cmd-input\" id=\"ds-cmd-input\" placeholder=\"Type a code — CHAT, DBA, SYSTEM — and press Enter\" /><kbd class=\"ds-cmd-kbd\">&#8984;K</kbd></div>",
+      "css": ".ds-cmd { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #6a7890; background: #070a10; padding: 6px 12px; } .ds-cmd-prompt { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; color: #ffb020; user-select: none; } .ds-cmd-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.875rem; color: #e6ecf5; } .ds-cmd-input::placeholder { color: #8a99b3; opacity: 1; } .ds-cmd-kbd { border: 1px solid #6a7890; padding: 1px 6px; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; letter-spacing: 0.12em; text-transform: uppercase; color: #8a99b3; }"
+    },
+    {
+      "name": "Register Cell",
+      "kind": "card",
+      "refersTo": "register-cell",
+      "description": "One archetype's line on the board: the key, the code, the lamp, the role, and the evidence rows. Chrome is neutral; only the lamp and the plan reference carry colour.",
+      "html": "<a class=\"ds-cell\" href=\"#\"><div class=\"ds-cell-head\"><span class=\"ds-cell-key\">F2</span><span class=\"ds-cell-code\">DBA</span><span class=\"ds-cell-gap\"></span><span class=\"ds-lamp ds-lamp-ready\"><span class=\"ds-lamp-mark\" aria-hidden=\"true\"></span><span class=\"ds-lamp-word\">Planned</span></span></div><p class=\"ds-cell-role\">Owns every schema, and no other specialist writes into one.</p><div class=\"ds-cell-foot\"><div class=\"ds-row\"><span class=\"ds-row-label\">Plan</span><span class=\"ds-row-leader\" aria-hidden=\"true\"></span><span class=\"ds-row-value\" style=\"color:#7f8ea8\">None yet</span></div></div></a>",
+      "css": ".ds-cell { display: flex; flex-direction: column; gap: 8px; border: 1px solid #6a7890; background: #161e2b; padding: 12px; text-decoration: none; border-radius: 0; transition: border-color 150ms, background-color 150ms; } .ds-cell:hover { border-color: #7d8da8; background: #202a3b; } .ds-cell:focus-visible { outline: 1px solid #ffb020; outline-offset: 1px; } .ds-cell-head { display: flex; align-items: center; gap: 8px; } .ds-cell-key { border: 1px solid #6a7890; padding: 1px 4px; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; letter-spacing: 0.12em; color: #8a99b3; } .ds-cell-code { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.16em; color: #e6ecf5; } .ds-cell-gap { flex: 1; } .ds-cell-role { margin: 0; font-family: 'Spline Sans', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.375; color: #9fb0c7; } .ds-cell-foot { margin-top: auto; border-top: 1px solid #6a7890; padding-top: 8px; } .ds-lamp { display: inline-flex; align-items: center; gap: 6px; } .ds-lamp-mark { height: 6px; width: 6px; border-radius: 0; } .ds-lamp-word { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em; } .ds-lamp-ready .ds-lamp-mark { background: transparent; box-shadow: inset 0 0 0 1px #9fb0c7; } .ds-lamp-ready .ds-lamp-word { color: #9fb0c7; } .ds-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.8125rem; } .ds-row-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.12em; color: #8a99b3; white-space: nowrap; } .ds-row-leader { flex: 1; min-width: 16px; border-bottom: 1px dotted #2b3547; } .ds-row-value { color: #e6ecf5; text-align: right; white-space: nowrap; }"
+    },
+    {
+      "name": "Permission Hold Block",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "The product's actual argument, rendered: a run suspended inside its own stream, showing the exact call before anyone decides.",
+      "html": "<li class=\"ds-hold-line\"><span class=\"ds-gutter\">Hold</span><div class=\"ds-hold\"><div class=\"ds-hold-head\"><span class=\"ds-hold-title\">Permission required</span><span class=\"ds-hold-gap\"></span><span class=\"ds-hold-note\">The run is suspended here</span></div><div class=\"ds-hold-body\"><p class=\"ds-hold-intent\">Ask the Database Administrator to drop the staging schema</p><dl class=\"ds-hold-args\"><dt>tool</dt><dd>dba.execute</dd><dt>statement</dt><dd>drop schema staging cascade</dd></dl><p class=\"ds-hold-risk\">Irreversible once it runs. The run is suspended here until you decide.</p><div class=\"ds-hold-actions\"><button class=\"ds-btn ds-btn-primary\">Allow once</button><button class=\"ds-btn ds-btn-destructive\">Refuse</button></div></div></div></li>",
+      "css": ".ds-hold-line { display: flex; gap: 12px; padding: 8px 0; list-style: none; } .ds-gutter { width: 56px; flex-shrink: 0; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em; color: #b18cff; } .ds-hold { flex: 1; min-width: 0; border: 1px solid #b18cff; background: #202a3b; } .ds-hold-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; border-bottom: 1px solid rgba(177,140,255,0.4); padding: 6px 10px; } .ds-hold-title { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.14em; color: #b18cff; } .ds-hold-gap { flex: 1; } .ds-hold-note { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.12em; color: #8a99b3; } .ds-hold-body { padding: 8px 10px; } .ds-hold-intent { margin: 0; font-family: 'Spline Sans', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.375; color: #e6ecf5; } .ds-hold-args { margin: 8px 0 0; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 2px; } .ds-hold-args dt { font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.12em; color: #8a99b3; } .ds-hold-args dd { margin: 0; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); font-size: 0.8125rem; color: #9fb0c7; word-break: break-all; } .ds-hold-risk { margin: 8px 0 0; border-top: 1px solid rgba(177,140,255,0.4); padding-top: 8px; font-family: 'Spline Sans', ui-sans-serif, system-ui, sans-serif; font-size: 0.8125rem; line-height: 1.375; color: #b18cff; } .ds-hold-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; } .ds-btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; font-family: var(--font-system, 'Spline Sans Mono', ui-monospace, Menlo, monospace); text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; border-radius: 0; padding: 6px 12px; font-size: 0.75rem; transition: background-color 150ms, color 150ms, border-color 150ms; } .ds-btn-primary { border-color: #ffb020; background: #ffb020; color: #070a10; } .ds-btn-primary:hover { background: #070a10; color: #ffb020; } .ds-btn-destructive { border-color: #ff5f7a; background: #ff5f7a; color: #070a10; } .ds-btn-destructive:hover { background: #070a10; color: #ff5f7a; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Exchange Terminal",
+    "overview": "This is a dealing-room board, not an app. A company's specialist agents are services on a board — each with a code, a state and a number, all readable at once — and the interface's whole job is to let one person hold the state of the whole company in a single glance. Deep ink-navy panels sit on a void ground, separated by 1px hairlines and by a value step rather than by shadow. Nothing is rounded, nothing glows, nothing floats. Density is high and deliberate: a screen is composed by tiling panels the way a trading board is composed by tiling readouts.\n\nThe system refuses the launcher grid of identical icons, and the refusal is load-bearing. Six specialists are on the register; five of them do not exist. A grid of six identical tiles would say the opposite. So every cell on the board carries the evidence for its own claim — a lamp, a status word, a plan reference, a gauge with the literal done/total beside it — and a specialist that has never run says so in words on its own screen.\n\nThe hardest rule here is that structure is neutral. Chrome — panel labels, key legends, gauges, hairlines, title chips, the current dock cell — carries no colour at all. Colour is reserved for what is happening: a run in flight, a suspension waiting on a person, a failure, a link you can follow, the system speaking about itself right now. An earlier build gave panel headings, dock keys, gauges and the active dock cell the accent colour, and the result was a near-black surface with one neon hue everywhere — the exact category default this world exists to refuse. A palette spent on structure is a palette that can no longer report anything.",
+    "keyCharacteristics": [
+      "Hard rectangles everywhere; border-radius is globally zeroed with !important",
+      "Flat by construction: no shadow, no blur, no gradient, no backdrop filter",
+      "Neutral structure: chrome is greyscale, colour is reserved for activity",
+      "A three-step value ladder (void to panel to raise) plus contrast-floored hairlines",
+      "Four activity colours (amber, green, violet, red) plus cyan for 'you can go here'; the two inactive lamp states are neutral",
+      "Two type faces, one fixed non-fluid seven-step scale, tabular figures by default",
+      "Every lamp is followed by its literal status word — no meaning by colour or mark alone",
+      "One focus treatment for the whole system; one transition duration (150ms)",
+      "Almost no motion: a blinking caret, a pulsing lamp, and colour transitions"
+    ],
+    "rules": [
+      {
+        "name": "The One Job Rule",
+        "body": "Each working colour has exactly one job: amber = the system speaking about itself now, cyan = you can go here, green = running, violet = suspended, red = failed. A colour used for mood is a colour that has stopped carrying information. Adding a sixth is a decision-record-level change, not a personalization.",
+        "section": "colors"
+      },
+      {
+        "name": "The Neutral Structure Rule",
+        "body": "Chrome carries no colour. Panel labels, key legends, gauges, hairlines, title chips and the current dock cell are greyscale. If a mark is describing the interface rather than reporting an event, it is neutral. This rule is what keeps the four activity colours legible on a dense board.",
+        "section": "colors"
+      },
+      {
+        "name": "The Word Beside the Lamp Rule",
+        "body": "No meaning is ever carried by colour, mark or position alone (PRODUCT.md Accessibility, UX-4). StateLamp requires its word prop — the status word is not a caption, it is half the component. A gauge draws segments and prints done/total. The dock is words, not icons. Demonstration data is marked with the word 'demo'.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Axes Rule",
+        "body": "A lamp is read twice before its word: by colour, which separates the states that are happening, and by fill, which separates the ones that are not. live, build, hold and fail are filled; ready and idle are hollow outlines. Two neutral brightnesses alone sat about 1.5:1 apart, and on a board where five of six cells are inactive that pushed the whole state read back onto the word. This rule and The Word Beside the Lamp Rule are the same commitment defended twice.",
+        "section": "colors"
+      },
+      {
+        "name": "The Boundary Floor Rule",
+        "body": "A hairline that carries structure clears WCAG 1.4.11's 3:1 against every ground it can sit on — void, panel and raise — not just the one it was sampled against. In a board built entirely out of hairlines that floor is not a detail, it is the whole structure. rule-faint is the single exemption, and only because it is ornament: it guides the eye and carries nothing.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "font-system is the machine — codes, labels, states, tabular figures, headings. font-human is language — what a person typed and what a model answered. A third face, or a face used for contrast rather than for role, breaks the only typographic signal this system has.",
+        "section": "typography"
+      },
+      {
+        "name": "The Fixed Scale Rule",
+        "body": "The ramp is fixed, never fluid. No clamp(), no viewport units in type. A screen that needs a size the ramp does not have is a screen that has invented a hierarchy level. The one exception in the build is the landing headline, which steps up to 3.25rem at the sm breakpoint; treat that as the documented exception, not as licence.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tracked Uppercase Rule",
+        "body": "Machine voice is uppercase and letter-spaced; human voice is sentence case and untracked. Uppercase without tracking, or tracked human prose, reads as a mistake in this world.",
+        "section": "typography"
+      },
+      {
+        "name": "The Chip Earns Its Place Rule",
+        "body": "ScreenTitle suppresses its code chip when the code and the title are the same word, case-insensitively. A chip that repeats the heading beneath it is an eyebrow with no payload.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Rule",
+        "body": "Surfaces are flat at rest and flat under interaction. Hover changes colour, never geometry — nothing travels, nothing scales, nothing lifts.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Every rule is exactly 1px, in rule or rule-strong, never in a working colour used decoratively. A 2px border or a double rule is a defect.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Radius Rule",
+        "body": "A radius anywhere is a defect, not a variation. This includes avatars, which are square.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Reverse Video Rule",
+        "body": "Press feedback is reverse video, uniformly. A filled cell swaps its fill and its text; that is what a terminal does when you hit a key, and it is the only press affordance in the product.",
+        "section": "components"
+      },
+      {
+        "name": "The One Focus Rule",
+        "body": "Focus is not a variant's business. The system has exactly one focus treatment, defined once globally. A primitive that restyles focus has broken the guarantee that a focused control looks identical everywhere; the primitives' tests fail on any ring-* token.",
+        "section": "components"
+      },
+      {
+        "name": "The Only Moving Thing Rule",
+        "body": "The one thing moving on any screen is the one thing actually happening. There is no entrance animation, no parallax, no scroll-linked effect, and no easing variety.",
+        "section": "motion"
+      }
+    ],
+    "dos": [
+      "Do keep structure neutral. Panel labels, key legends, gauges, hairlines, title chips and the current dock cell are greyscale; colour is for what is happening.",
+      "Do compose every screen from Panel. It is the only container; tile panels rather than inventing a card, a tile or a second surface shape.",
+      "Do pair every lamp with its literal status word, every gauge with its done/total figure, and every dock cell with a word. StateLamp enforces this in its type — keep it that way.",
+      "Do keep amber to its closed list: the wordmark, the prompt characters, the streaming caret, focus, the primary action, the demo marker, and the build lamp.",
+      "Do use cyan only for something that opens. A reference is cyan because it is navigable, never because of what it says.",
+      "Do render an inactive lamp hollow. Colour carries the states that are happening; the mark's fill carries the ones that are not.",
+      "Do clear 3:1 for any hairline that carries structure, measured against every ground it can sit on — void, panel and raise; use rule-faint only for ornament that carries nothing.",
+      "Do switch to font-human the moment content is language — a role description, a model's answer, a person's message — and back to font-system for everything the machine says about itself.",
+      "Do build dense readouts from stacked Fields with their dotted leaders rather than authoring a table.",
+      "Do tile cells on a bg-rule grid with gap-px so the background shows through as the rule.",
+      "Do mark demonstration data with the word 'demo' in the copy, and say plainly which figures are read from the repository and which are invented.",
+      "Do append consumer overrides with ! after the variant (hover:!border-amber) when they must beat a not-disabled:hover:* variant token.",
+      "Do refuse out loud. An unrecognised command prints what it does accept; a denied tool call says nothing ran."
+    ],
+    "donts": [
+      "Don't put a working colour on chrome. A coloured panel label, key legend, gauge or title chip is the specific regression this palette was corrected to remove.",
+      "Don't colour a state that is not happening, and don't fill its mark either. ready and idle are neutral and hollow; giving 'planned' a hue makes it compete with the states a person must actually notice, and giving it a fill takes back the second axis.",
+      "Don't sample a contrast ratio against the panel and call it done. The well is darker; a hairline or a dim label that passes on panel can fail on raise.",
+      "Don't introduce a radius. border-radius: 0 !important is global; a rounded-* utility is dead code and a rounded custom element is a defect.",
+      "Don't add a shadow, a glow, a blur, a gradient or a backdrop-filter. The primitives' tests fail on shadow-* and ring-*; the world has no light source.",
+      "Don't add a sixth working colour, or a tinted button variant. bg-emerald-600 as a primary is a bug, not a personalization; a returning slate-* or indigo-* is a regression the class tests catch.",
+      "Don't use rule-faint for anything that separates two regions. It is below the boundary floor by design.",
+      "Don't restyle focus per component. There is one focus treatment, defined globally.",
+      "Don't move, scale or lift anything on hover or press. Reverse video and colour change are the entire interaction vocabulary.",
+      "Don't add an entrance animation, or any staged reveal of the board.",
+      "Don't use a fluid or clamp() type size, or invent a step outside the seven-step ramp.",
+      "Don't put a control in a Panel's header note. It is a readout — a count, a state, a reference.",
+      "Don't render a chat bubble, an avatar circle, or a glyph icon standing in for a word. Every destination in this product is already a word.",
+      "Don't reach for <Button size=\"xs\"> inside a dropped panel. That is what MenuItem exists for, and the two primitives' tests assert they never converge.",
+      "Don't inject model output as raw HTML. It goes through renderSanitizedMarkdown into .prose-terminal, which is the only thing standing between a model and the DOM.",
+      "Don't spend the destructive variant on an action that is merely consequential. Red at rest means 'this stops something that is running'."
+    ]
+  }
+}

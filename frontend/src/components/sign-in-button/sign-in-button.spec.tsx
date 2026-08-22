@@ -189,31 +189,25 @@ describe("components/sign-in-button", () => {
     // do NOT apply cursor: pointer to <button> automatically)
     expect(cls).toMatch(/cursor-pointer/);
     // hover bg still there (Tailwind 4 `!important` syntax: `!` AFTER the variant)
-    expect(cls).toMatch(/hover:!bg-zinc-800/);
-// new: hover shadow + hover border emphasis (Tailwind 4 `!important` syntax)
-    expect(cls).toMatch(/hover:shadow-md/);
-    expect(cls).toMatch(/hover:!border-zinc-600/);
+    expect(cls).toMatch(/hover:!border-amber/);
+    expect(cls).toMatch(/hover:!text-amber/);
+    expect(cls).toMatch(/!bg-transparent/);
     // transition (without it the hover state is an instant flip)
     expect(cls).toMatch(/transition-/);
-    // active-state press-down for click feedback
-    expect(cls).toMatch(/active:translate-y-px/);
-// Regression guards — the SignInButton uses a zinc override on
-    // top of variant="primary". Tailwind 4 + the
-    // `not-disabled:hover:*` pseudo-class means the variant has
-    // higher specificity than bare `hover:*` overrides, so the
-    // consumer MUST use `!important` on the conflicting tokens.
-    // Without `!` the override silently loses and the button
-    // renders with slate-700 hover + slate focus ring instead of
-    // zinc-800 + zinc-500. These assertions pin the override
-    // carries the `!important` prefix.
-    //
-    // Tailwind 4 syntax gotcha: `!` goes AFTER the variant
-    // (`hover:!bg-zinc-800`), not before (`!hover:bg-zinc-800`).
-    // Tailwind silently drops the `!` when it's at the start.
-    expect(cls).toMatch(/!bg-zinc-900/);
-    expect(cls).toMatch(/!text-zinc-100/);
-    expect(cls).toMatch(/hover:!bg-zinc-800/);
-    expect(cls).toMatch(/hover:!border-zinc-600/);
-    expect(cls).toMatch(/focus-visible:!ring-zinc-500/);
+    // The world has no press travel and no lifted surfaces.
+    expect(cls).not.toMatch(/translate/);
+    expect(cls).not.toMatch(/shadow-/);
+    // Regression guards. The SignInButton overrides `variant="primary"` so the
+    // GitHub cell reads as a secondary route into the product rather than as
+    // the page's committing action. Tailwind 4 emits utilities alphabetically
+    // and the variant's `not-disabled:hover:*` tokens outrank a bare
+    // `hover:*`, so every colliding override MUST carry `!` — and the prefix
+    // goes AFTER the variant (`hover:!border-amber`), never before it, which
+    // Tailwind silently drops. Without these the button would render as a
+    // solid amber block with the Octocat punched out of it.
+    expect(cls).toMatch(/!bg-transparent/);
+    expect(cls).toMatch(/!text-fg/);
+    expect(cls).toMatch(/hover:!border-amber/);
+    expect(cls).not.toMatch(/ring-/);
   });
 });

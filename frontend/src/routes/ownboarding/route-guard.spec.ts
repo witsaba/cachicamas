@@ -50,6 +50,6 @@ describe("[routes/ownboarding] protected-route wiring", () => {
     expect(source).toMatch(
       /import.*createOrganization.*from\s+["']~\/lib\/api["']/,
     );
-    expect(source).toContain('await nav("/home")');
+    expect(source).toContain('await nav("/home/")');
   });
 });

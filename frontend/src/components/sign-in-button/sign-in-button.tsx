@@ -98,24 +98,22 @@ export const SignInButton = component$<SignInButtonProps>(
           type="submit"
           variant="primary"
           testId="sign-in-button"
-          // Tailwind 4 + `not-disabled:hover:*` specificity trap:
-          //   - The primary variant has `not-disabled:hover:bg-slate-700`,
-          //     which compiles to `:not(:disabled):hover` — specificity
-          //     (0,3,0) because `:not()` inherits the specificity of its
-          //     argument plus the `:hover` pseudo-class.
-          //   - A bare `hover:bg-zinc-800` override compiles to `:hover`
-          //     only — specificity (0,2,0).
-          //   - The variant WINS regardless of emission order, so the
-          //     consumer must use `!important` to override.
-          // Without `!` the SignInButton would render `hover:bg-slate-700`
-          // (the variant's default), not the intended zinc-800. The
-          // difference is subtle (both very dark) but the override loses.
+          // The GitHub cell is a secondary route into the product, not the
+          // page's committing action, so it overrides the primary variant's
+          // amber fill down to a ruled, empty cell that warms to amber.
           //
-          // Tailwind 4 syntax gotcha: the `!` prefix for VARIANT
-          // utilities goes AFTER the variant (`hover:!bg-zinc-800`),
-          // not before (`!hover:bg-zinc-800`). Tailwind silently
-          // ignores `!variant:` syntax — the `!` is dropped.
-          class="border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:!border-zinc-600 hover:!bg-zinc-800 hover:shadow-md focus-visible:!ring-zinc-500"
+          // Tailwind 4 + `not-disabled:hover:*` specificity trap:
+          //   - The primary variant's `not-disabled:hover:*` compiles to
+          //     `:not(:disabled):hover` — specificity (0,3,0), because
+          //     `:not()` inherits its argument's specificity plus `:hover`.
+          //   - A bare `hover:*` override compiles to `:hover` only — (0,2,0).
+          //   - The variant wins regardless of emission order, so every
+          //     colliding override needs `!important`.
+          //
+          // Syntax gotcha: the `!` prefix for VARIANT utilities goes AFTER
+          // the variant (`hover:!border-amber`), never before it. Tailwind
+          // silently drops `!variant:` and the override loses.
+          class="!border-rule-strong !text-fg hover:!border-amber hover:!text-amber !bg-transparent"
         >
           {/*
 GitHub Octocat brand mark — a recognizable visual anchor

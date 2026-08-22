@@ -83,7 +83,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
     const isOpen = forceOpen || open.value;
 
     return (
-      <div class="relative inline-block">
+      <div class="relative inline-block leading-none">
         <Button
           ref={triggerRef}
           type="button"
@@ -93,34 +93,21 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}
           onClick$={() => setOpen$(!open.value)}
-          // Tailwind 4 emits utilities in alphabetical order in the
-          // generated CSS. The consumer override classes that
-          // CONFLICT with the variant's tokens need the `!` important
-          // prefix so the override wins regardless of emission order.
-          // For the avatar trigger there are FOUR conflicts to neutralize:
-          //   - `rounded-full` vs `rounded-md` (variant default)
-          //   - `bg-transparent` vs `bg-slate-900` (variant default)
-          //   - `active:!scale-95` vs `active:translate-y-px` (variant default)
-          //   - `!p-0` vs `px-4 py-2` from BUTTON_SIZE_MD — Tailwind uses
-          //     box-sizing: border-box, so the size padding shrinks the
-          //     content area to 8×24 inside the 40×40 h-10 w-10 box,
-          //     which renders the image as a vertical strip. The avatar
-          //     is shape-driven (h-10 w-10), not size-driven, so the
-          //     padding is wrong for this consumer.
-          // Important Tailwind 4 syntax gotcha: the `!` prefix for
-          // variant utilities MUST come AFTER the variant (e.g.
-          // `hover:!bg-red-50`), NOT before (`!hover:bg-red-50`).
-          // Tailwind silently ignores `!variant:` — the override
-          // loses. See the README section "Consumer personalizations"
-          // for the full rationale.
-          class="h-10 w-10 overflow-hidden !rounded-full !bg-transparent !p-0 ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:!scale-95"
+          // The identity cell. `<Button>`'s primary variant supplies the
+          // interaction grammar; these tokens override the fill and the size,
+          // because an avatar is shape-driven (a 28px square) rather than
+          // padded like a labelled control. Tailwind 4 emits utilities in
+          // alphabetical order, so an override that COLLIDES with a variant
+          // token needs the `!` prefix — and the prefix goes AFTER the variant
+          // (`hover:!border-amber`), never before it.
+          class="!border-rule-strong hover:!border-amber h-7 w-7 overflow-hidden !bg-transparent !p-0"
         >
           {safeImage ? (
             <img
               src={safeImage}
               alt=""
-              width={40}
-              height={40}
+              width={28}
+              height={28}
               class="h-full w-full object-cover"
               data-testid="avatar-image"
             />
@@ -132,28 +119,23 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
             ref={panelRef}
             role="menu"
             data-testid="avatar-menu-panel"
-            class="absolute top-12 right-0 z-50 w-72 rounded-lg border border-slate-200 bg-white p-4 text-slate-900 shadow-lg ring-1 ring-black/5"
+            class="border-rule-strong bg-panel text-fg absolute top-9 right-0 z-50 w-64 border"
           >
-            <p class="font-semibold" data-testid="avatar-menu-name">
-              {userName}
-            </p>
-            <p class="text-sm text-slate-500" data-testid="avatar-menu-email">
-              {userEmail}
-            </p>
-            <hr class="my-3 border-slate-200" />
-            <ul class="space-y-1">
+            <div class="border-rule border-b px-3 py-2">
+              <p class="text-data text-fg" data-testid="avatar-menu-name">
+                {userName}
+              </p>
+              <p
+                class="text-legend text-fg-dim"
+                data-testid="avatar-menu-email"
+              >
+                {userEmail}
+              </p>
+            </div>
+            <ul>
               <li>
-                <MenuItem as="a" href="/profile" testId="avatar-menu-profile">
+                <MenuItem as="a" href="/profile/" testId="avatar-menu-profile">
                   Profile
-                </MenuItem>
-              </li>
-              <li>
-                <MenuItem
-                  as="a"
-                  href="/workspaces"
-                  testId="avatar-menu-workspaces"
-                >
-                  Workspaces
                 </MenuItem>
               </li>
               {/*
@@ -169,18 +151,25 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                 component) + the /chat route's onRequest guard.
               */}
               <li>
-                <MenuItem as="a" href="/chat" testId="avatar-menu-chat">
+                <MenuItem as="a" href="/chat/" testId="avatar-menu-chat">
                   Chat
                 </MenuItem>
               </li>
               <li>
-                <MenuItem as="a" href="/settings" testId="avatar-menu-settings">
-                  Settings
+                <MenuItem
+                  as="a"
+                  href="/settings/"
+                  testId="avatar-menu-settings"
+                >
+                  System
                 </MenuItem>
               </li>
             </ul>
-            <hr class="my-3 border-slate-200" />
-            <Form action={signOut} data-testid="avatar-menu-signout-form">
+            <Form
+              action={signOut}
+              data-testid="avatar-menu-signout-form"
+              class="border-rule border-t"
+            >
               {/*
                     R-HP-005 (S-HP-040): after sign-out the user lands on
                     the Auth.js sign-in surface (/auth/signin), not the
@@ -190,7 +179,7 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
               <MenuItem
                 type="submit"
                 testId="avatar-menu-signout"
-                class="inline-flex w-full items-center gap-2 text-left text-sm text-slate-700"
+                class="inline-flex w-full items-center gap-2 text-left"
               >
                 {/*
                     Functional visual anchor for "log out" (UX-4

@@ -54,13 +54,17 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
   });
 
-  it("TRIANGULATE-T-WS-2i-017: anon user has no Workspaces link in DOM", async () => {
+  it("carries no entry for the retired workspaces surface", async () => {
+    // The GitHub-workspaces surface belonged to the Software Development
+    // Framework identity that ADR 0009 retired. Its menu entry is gone with
+    // it; this assertion exists so it cannot creep back in.
     const { render, screen } = await createDOM();
-    const session: SessionShape = { user: null };
-    await render(<AvatarDropdown session={session} signOut={fakeSignOut()} />);
-    // The whole dropdown is null for anon (defensive). The Workspaces
-    // nav is auth-only via the dropdown menu (the /workspaces route
-    // itself enforces requireAuthRedirect).
+    const session: SessionShape = {
+      user: { name: "Braejan Jan", email: "braejan@example.com", image: null },
+    };
+    await render(
+      <AvatarDropdown session={session} signOut={fakeSignOut()} forceOpen />,
+    );
     expect(
       screen.querySelector('[data-testid="avatar-menu-workspaces"]'),
     ).toBeFalsy();
@@ -120,20 +124,15 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     expect(trigger?.querySelectorAll("img").length).toBe(0);
   });
 
-  it("avatar trigger renders cursor-pointer + hover ring + transition + active scale (UAT-7)", async () => {
-    // UAT-7 (2026-07-04): the avatar dropdown trigger (the small
-    // circular button in the shell's identity affordance) had the
-    // same UX gap as the SignInButton before UAT-3 — no explicit
-    // cursor-pointer (some OSes don't switch on <button>),
-    // instant ring/border changes with no transition, and no
-    // press feedback. We now:
-    //   - add cursor-pointer for cross-OS consistency
-    //   - transition the ring + shadow chrome over 150ms
-    //   - deepen the ring color on hover (slate-200 → slate-400)
-    //   - add hover:shadow-md for subtle depth
-    //   - add active:scale-95 for a press-in feel appropriate
-    //     for a circular target (better than translate-y-px here
-    //     — circular buttons "compress" rather than slide down)
+  it("avatar trigger is a hard-cornered identity cell that warms to amber", async () => {
+    // The trigger overrides three of `<Button>`'s primary-variant tokens: the
+    // amber fill, the label padding, and the rule colour. Tailwind 4 emits
+    // utilities alphabetically, so an override that collides with a variant
+    // token only wins with the `!` prefix — and the prefix goes AFTER the
+    // variant (`hover:!border-amber`), never before it, which Tailwind
+    // silently drops. These assertions pin that, because the visual
+    // regressions are invisible in review: an amber block bleeding around the
+    // avatar, and the image squeezed into a strip by the label padding.
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -148,42 +147,18 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     ) as HTMLButtonElement | null;
     expect(trigger).toBeTruthy();
     const cls = trigger?.className ?? "";
-    // cursor + transition + hover ring + active press-in
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
-    expect(cls).toMatch(/hover:ring-slate-400/);
-    expect(cls).toMatch(/hover:shadow-md/);
-    // `active:!scale-95` (Tailwind 4 syntax: `!` AFTER the variant)
-    expect(cls).toMatch(/active:!scale-95/);
-    // Regression guards — these tokens CONFLICT with the primary
-    // variant's defaults (rounded-md, bg-slate-900,
-    // active:translate-y-px) and with the size's px-4 py-2
-    // padding. Tailwind 4 emits utilities in alphabetical order
-    // in the generated CSS, so the override would silently lose
-    // without the `!important` prefix in the consumer className.
-    // The visual regressions would be:
-    //   - square avatar instead of circular (rounded-md wins)
-    //   - dark slate background bleeding around the image
-    //     (bg-slate-900 wins)
-    //   - the button sliding down 1px instead of pressing in
-    //     (active:translate-y-px wins over active:scale-95)
-    //   - the image rendered as a thin vertical strip inside the
-    //     circle (px-4 py-2 from BUTTON_SIZE_MD shrinks the
-    //     content area to 8×24 inside the 40×40 h-10 w-10 box;
-    //     box-sizing is border-box by default)
-    // These assertions pin the override carries the `!important`
-    // prefix that wins at the CSS layer.
-    //
-    // Tailwind 4 syntax gotcha: `!` goes AFTER the variant
-    // (`active:!scale-95`), not before (`!active:scale-95`).
-    // Tailwind silently drops the `!` when it's at the start.
-    expect(cls).toMatch(/!rounded-full/);
+    expect(cls).toMatch(/hover:!border-amber/);
     expect(cls).toMatch(/!bg-transparent/);
-    expect(cls).toMatch(/active:!scale-95/);
     expect(cls).toMatch(/!p-0/);
+    // The world has no radius and nothing scales on press.
+    expect(cls).not.toMatch(/rounded/);
+    expect(cls).not.toMatch(/scale-/);
+    expect(cls).not.toMatch(/shadow-/);
   });
 
-  it("panel lists Profile, Workspaces, Chat, Settings, and Sign out entries (T-WS-2i-015 + 2026-07-06 ownboarding + 2026-07-16 prompts + 2026-08-06 chat-layer1)", async () => {
+  it("panel lists Profile, Chat, System and Sign out", async () => {
     const { render, screen } = await createDOM();
     const session: SessionShape = {
       user: {
@@ -202,23 +177,12 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     const profile = screen.querySelector('[data-testid="avatar-menu-profile"]');
     expect(profile).toBeTruthy();
     expect((profile as HTMLAnchorElement).getAttribute("href")).toBe(
-      "/profile",
+      "/profile/",
     );
     expect((profile as HTMLElement).textContent ?? "").toContain("Profile");
 
-    // 2026-07-06 ownboarding (R-OW-010 / S-OW-094): the
-    // "Manage organizations" entry was removed because the
-    // /organizations surface was deleted. 2026-07-06 workspaces
-    // (T-WS-2i-015): a "Workspaces" entry was added per R-WS-016.
     const orgs = screen.querySelector('[data-testid="avatar-menu-orgs"]');
     expect(orgs).toBeFalsy();
-    const workspaces = screen.querySelector(
-      '[data-testid="avatar-menu-workspaces"]',
-    );
-    expect(workspaces).toBeTruthy();
-    expect((workspaces as HTMLAnchorElement).getAttribute("href")).toBe(
-      "/workspaces",
-    );
 
     // 2026-08-06 cachicamas-frontend-chat-layer1 (REQ-3 / T-09):
     // The "Chat" entry is the live authenticated navigation
@@ -227,24 +191,19 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     // route's onRequest guard.
     const chat = screen.querySelector('[data-testid="avatar-menu-chat"]');
     expect(chat).toBeTruthy();
-    expect((chat as HTMLAnchorElement).getAttribute("href")).toBe("/chat");
+    expect((chat as HTMLAnchorElement).getAttribute("href")).toBe("/chat/");
     expect((chat as HTMLElement).textContent ?? "").toContain("Chat");
 
-    // 2026-07-16 settings-app-grid (R-SAG-NAV-001): the "Settings"
-    // menu item now links to /settings, the Launchpad-style app
-    // launcher grid. The grid currently lists one tile (Prompts);
-    // future tiles (Profile, Billing) will render without layout
-    // change. The entry remains auth-gated by virtue of living
-    // inside the avatar dropdown (anon visitors never see this
-    // menu).
+    // The System entry is the dock's F8 cell, reachable from the identity
+    // menu too so the two navigations never disagree about what exists.
     const settings = screen.querySelector(
       '[data-testid="avatar-menu-settings"]',
     );
     expect(settings).toBeTruthy();
     expect((settings as HTMLAnchorElement).getAttribute("href")).toBe(
-      "/settings",
+      "/settings/",
     );
-    expect((settings as HTMLElement).textContent ?? "").toContain("Settings");
+    expect((settings as HTMLElement).textContent ?? "").toContain("System");
 
     const form = screen.querySelector(
       '[data-testid="avatar-menu-signout-form"]',
@@ -327,7 +286,6 @@ describe("components/avatar-dropdown/avatar-dropdown", () => {
     const cls = (button as HTMLElement).className;
     expect(cls).toMatch(/cursor-pointer/);
     expect(cls).toMatch(/transition-/);
-    expect(cls).toMatch(/active:translate-y-px/);
   });
 
   it("panel displays the user's name and email as a header (S-AS-040)", async () => {

@@ -1,6 +1,11 @@
 import { $, component$, useSignal, useStore, type QRL } from "@builder.io/qwik";
 import { Button } from "~/components/ui/button/button";
 import { createOrganization } from "~/lib/api";
+import {
+  FORM_ERROR,
+  FORM_INPUT,
+  FORM_LABEL,
+} from "~/components/os/form-classes";
 
 /**
  * OwnboardingForm — the first-run setup form for the unique
@@ -159,14 +164,14 @@ export const OwnboardingForm = component$<{
         <div
           role="alert"
           data-testid="ownboarding-top-error"
-          class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          class="border-fail bg-raise font-human text-body text-fail border px-3 py-2"
         >
           {state.topError}
         </div>
       ) : null}
 
       <div>
-        <label for="fullName" class="block text-sm font-medium text-slate-700">
+        <label for="fullName" class={FORM_LABEL}>
           What is your organization called?
         </label>
         <input
@@ -178,7 +183,7 @@ export const OwnboardingForm = component$<{
           value={state.fullName}
           onInput$={onFullNameInput}
           data-testid="ownboarding-full-name"
-          class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-slate-900"
+          class={FORM_INPUT}
           aria-describedby={
             state.fieldErrors.fullName ? "fullName-error" : undefined
           }
@@ -187,7 +192,7 @@ export const OwnboardingForm = component$<{
           <p
             id="fullName-error"
             data-testid="ownboarding-full-name-error"
-            class="mt-1 text-sm text-red-700"
+            class={FORM_ERROR}
           >
             {state.fieldErrors.fullName}
           </p>
@@ -195,10 +200,7 @@ export const OwnboardingForm = component$<{
       </div>
 
       <div>
-        <label
-          for="identification"
-          class="block text-sm font-medium text-slate-700"
-        >
+        <label for="identification" class={FORM_LABEL}>
           Pick a short identifier for your organization
         </label>
         <input
@@ -210,7 +212,7 @@ export const OwnboardingForm = component$<{
           value={state.identification}
           onInput$={onIdentificationInput}
           data-testid="ownboarding-identification"
-          class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-slate-900"
+          class={FORM_INPUT}
           aria-describedby={
             state.fieldErrors.identification
               ? "identification-error"
@@ -221,7 +223,7 @@ export const OwnboardingForm = component$<{
           <p
             id="identification-error"
             data-testid="ownboarding-identification-error"
-            class="mt-1 text-sm text-red-700"
+            class={FORM_ERROR}
           >
             {state.fieldErrors.identification}
           </p>

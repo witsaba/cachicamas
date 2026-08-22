@@ -1,190 +1,204 @@
+/**
+ * `/` — the front door.
+ *
+ * Persuade, in the same world as the product. The argument this page has to
+ * win is not "agents are exciting" — everyone has heard that — it is "these
+ * ones have jobs and boundaries, and you can stop them." So the page does not
+ * describe the register: it renders the real one, with the real states, five
+ * of six of them admitting they do not exist. An interface honest enough to
+ * show that is the proof.
+ *
+ * The one interaction quoted below the register is a permission suspension,
+ * rendered with the same component the chat screen uses. It is the mechanism
+ * that makes a company able to let a specialist near its systems at all, and
+ * quoting it is cheaper and truer than a paragraph claiming it.
+ */
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
+
+import { TranscriptLine } from "~/components/chat/transcript-line";
+import { Field } from "~/components/os/field/field";
+import { Gauge } from "~/components/os/gauge/gauge";
+import { StateLamp } from "~/components/os/lamp/lamp";
+import { Panel } from "~/components/os/panel/panel";
+import { RegisterCell } from "~/components/os/register-cell/register-cell";
 import { Button } from "~/components/ui/button/button";
+import { ARCHETYPES, RUNTIME } from "~/lib/mock/registry";
 import { useSession } from "~/routes/plugin@auth";
 
-/**
- * Landing page — the front door of cachicamas.
- *
- * Aphantasic-friendly (UX-4, spec §6.2): text-first, no
- * decorative imagery, no icons that carry meaning, no
- * hero illustration.  The visual language is built from
- * typographic hierarchy, monospace section numbers (the
- * "agentic" system feel — Linear/Cursor-style), and
- * a subtle gradient accent line at the top of the page.
- *
- * Sections:
- *   [1.0]  The system      — hero, headline, dual CTA
- *   [2.0]  What you track  — 4-item bento grid
- *   [3.0]  The interface   — CLI/code block
- *   [—]    Footer          — text-only, one line
- *
- * Locked decisions honoured:
- *   - F-1 / UX-1: brand mark is the <h1> (unique on the page).
- *   - UX-4: zero <img> elements.
- *   - F-3 (locked this iteration, updated 2026-07-06 ownboarding):
- *     primary CTA points to /ownboarding so the first-run experience
- *     is landing → sign-in → setup-state gate → /ownboarding (if no
- *     organization exists) → /home. The /ownboarding form collects
- *     the unique organization's full_name + identification, then
- *     redirects to /home on success.
- */
-
-const FEATURES = [
-  {
-    num: "01",
-    title: "Your organization",
-    body: "The single tenant that owns the work. Set it up once on first sign-in — projects, requirements, and milestones all hang off it.",
-  },
-  {
-    num: "02",
-    title: "Projects",
-    body: "Scoped efforts under an organization, each with its own timeline, owner, and set of requirements.",
-  },
-  {
-    num: "03",
-    title: "Requirements",
-    body: "What the project must deliver, written as plain text you can grep, link, and reason about.",
-  },
-  {
-    num: "04",
-    title: "Milestones",
-    body: "Measurable checkpoints that make the timeline concrete and the work shippable.",
-  },
-] as const;
+/** The suspension, quoted. Same component the chat screen renders. */
+const QUOTED_HOLD = {
+  kind: "hold",
+  id: "landing",
+  tool: "dba.execute",
+  intent: "Ask the Database Administrator to drop the staging schema",
+  args: [
+    ["system", "staging"],
+    ["statement", "drop schema staging cascade"],
+    ["mode", "destructive"],
+  ],
+  risk: "Irreversible once it runs. The run is suspended here until you decide.",
+  decision: "pending",
+} as const;
 
 export default component$(() => {
-  // useSession is read so the landing is co-located with auth-aware
-  // routes in the routing tree and so the layout's identity
-  // affordance (SignInButton for anon, AvatarDropdown for auth) is
-  // the single source of truth for the visitor's sign-in entry
-  // point.  Do NOT add a SignInButton here — UAT-1 (2026-07-04)
-  // observed that the duplicate body CTA competed with the header
-  // and made the chrome feel noisy.  See `routes/layout.tsx`.
+  // Read so the landing sits in the same auth-aware tree as every other route;
+  // the shell's status rail owns the sign-in affordance.
   const session = useSession();
   void session.value;
+
   return (
-    <main class="min-h-screen bg-white text-slate-900">
-      {/* Subtle gradient accent — the only decorative
-          element on the page.  A 1px line that nods to
-          Linear/Cursor without breaking the text-first
-          constraint. */}
-      <div
-        class="h-px w-full bg-gradient-to-r from-slate-200 via-indigo-500 to-slate-200"
-        aria-hidden="true"
-      />
+    <main id="main" class="flex-1">
+      {/* ---- the thesis, beside the proof ------------------------------- */}
+      <section class="mx-auto w-full max-w-[1800px] px-3 pt-10 pb-6 sm:px-4 sm:pt-14">
+        <div class="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div>
+            <h1 class="text-board text-fg max-w-[16ch] leading-[0.95] font-semibold tracking-tight sm:text-[3.25rem]">
+              A company of specialists you can talk to.
+            </h1>
+            <p class="font-human text-lead text-fg-mid mt-5 max-w-[58ch] leading-relaxed">
+              cachicamas is a multiplayer agentic system for building and
+              running a company. Database administration, finance, marketing,
+              ticketing, software delivery — each one a specialist agent with
+              its own job, its own systems, and a boundary it cannot cross.
+              Employees talk to them.
+            </p>
+            <div class="mt-7 flex flex-wrap items-center gap-3">
+              <Button
+                as="a"
+                href="/home/"
+                size="lg"
+                variant="primary"
+                testId="get-started"
+              >
+                Open the register
+              </Button>
+              <Button
+                as="a"
+                href="#suspension"
+                size="lg"
+                variant="secondary"
+                testId="see-interface"
+              >
+                See how it is stopped
+              </Button>
+            </div>
+          </div>
 
-      {/* ===== [1.0] HERO ===== */}
-      <section class="mx-auto max-w-5xl px-4 py-16 sm:py-24">
-        <p
-          class="font-mono text-xs tracking-widest text-slate-500 uppercase"
-          data-section="1.0"
-        >
-          [1.0] The system
-        </p>
-        <h1 class="mt-3 text-4xl leading-tight font-bold tracking-tight sm:text-5xl">
-          The multiplayer agentic system for running your company.
-        </h1>
-        <p class="mt-4 max-w-2xl text-lg text-slate-700">
-          Work alongside specialist agents — starting with the organizations,
-          projects, requirements, and milestones they operate on. Text-first,
-          built for clarity, designed for the AI era.
-        </p>
-        <div class="mt-8 flex flex-wrap items-center gap-3">
-          <Button
-            as="a"
-            href="/ownboarding"
-            size="lg"
-            variant="primary"
-            testId="get-started"
+          {/* Not an illustration of the stack — the stack, with the counts this
+              repository actually reports. It sits in the first viewport
+              because "0 of 6" is the most useful thing a visitor can learn
+              about this product in the first ten seconds. */}
+          <Panel
+            label="What is actually built"
+            note="Read from this repository"
+            testId="landing-stack"
           >
-            Get started
-          </Button>
-          <Button
-            as="a"
-            href="#interface"
-            size="lg"
-            variant="secondary"
-            testId="see-interface"
-          >
-            See the interface
-          </Button>
+            {RUNTIME.map((l) => (
+              <div
+                key={l.code}
+                class="border-rule border-b py-2.5 first:pt-0 last:border-b-0 last:pb-0"
+              >
+                <div class="flex items-baseline gap-2">
+                  <span class="text-label text-fg-mid tracking-[0.16em] uppercase">
+                    {l.code}
+                  </span>
+                  <span class="text-data text-fg flex-1">{l.name}</span>
+                  <StateLamp
+                    tone={l.state === "open" ? "ready" : "live"}
+                    word={l.stateWord}
+                  />
+                </div>
+                <p class="font-human text-data text-fg-mid pt-1 leading-snug">
+                  {l.detail}
+                </p>
+                <div class="pt-1.5">
+                  <Field label="Milestones">
+                    <Gauge done={l.done} total={l.total} />
+                  </Field>
+                </div>
+              </div>
+            ))}
+          </Panel>
         </div>
       </section>
 
-      {/* ===== [2.0] WHAT YOU CAN TRACK ===== */}
-      <section class="mx-auto max-w-5xl px-4 py-12 sm:py-16">
-        <p
-          class="font-mono text-xs tracking-widest text-slate-500 uppercase"
-          data-section="2.0"
+      {/* ---- the proof: the real board, with the real states -------------- */}
+      <section class="mx-auto w-full max-w-[1800px] px-3 py-6 sm:px-4">
+        <Panel
+          label="The register"
+          note={`${ARCHETYPES.length} decided · 0 on duty · read from this repository`}
+          padded={false}
+          testId="landing-register"
         >
-          [2.0] What you can track
+          <div class="bg-rule grid grid-cols-1 gap-px sm:grid-cols-2 xl:grid-cols-3">
+            {ARCHETYPES.map((a) => (
+              <RegisterCell key={a.code} archetype={a} />
+            ))}
+          </div>
+        </Panel>
+        <p class="font-human text-data text-fg-dim mt-2 max-w-[80ch] leading-relaxed">
+          Five of those six do not exist. That is the honest state of this
+          system today, and it is what you would see after signing in — the
+          board does not have a marketing mode.
         </p>
-        <h2 class="mt-3 text-2xl font-bold sm:text-3xl">
-          Four primitives, one connected graph.
-        </h2>
-        <p class="mt-3 max-w-2xl text-slate-700">
-          cachicamas models your work as four text-first records — the graph
-          its agents operate on. Each one is reachable from the web, the CLI,
-          and the API.
-        </p>
-        <div class="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {FEATURES.map((f) => (
-            <article
-              key={f.num}
-              data-feature={f.title.toLowerCase()}
-              class="rounded-lg border border-slate-200 bg-slate-50 p-5"
-            >
-              <p class="font-mono text-xs text-slate-500">{f.num}</p>
-              <h3 class="mt-2 text-lg font-semibold text-slate-900">
-                {f.title}
-              </h3>
-              <p class="mt-2 text-sm text-slate-700">{f.body}</p>
-            </article>
-          ))}
+      </section>
+
+      {/* ---- the mechanism ----------------------------------------------- */}
+      <section
+        id="suspension"
+        class="mx-auto w-full max-w-[1800px] scroll-mt-4 px-3 py-6 sm:px-4"
+      >
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <Panel
+            label="How a specialist is stopped"
+            padded={false}
+            testId="landing-suspension"
+          >
+            <div class="px-3">
+              <p class="font-human text-lead text-fg max-w-[70ch] py-3 leading-relaxed">
+                An agent that needs permission does not ask beside the run. It
+                suspends <em class="text-hold not-italic">inside</em> it, on the
+                same stream as its own output, and says exactly what it is about
+                to do before anyone decides. Nothing moves until you answer.
+              </p>
+              <ol class="divide-rule border-rule divide-y border-t">
+                <TranscriptLine entry={QUOTED_HOLD} />
+              </ol>
+              <p class="font-human text-data text-fg-dim max-w-[70ch] py-3 leading-relaxed">
+                If approval happened out of band, the event stream would stop
+                being a complete description of the session — and a session you
+                cannot fully replay is one you cannot audit. That is why this is
+                a runtime mechanism rather than a screen this page invented.
+              </p>
+            </div>
+          </Panel>
+
+          <div class="flex flex-col gap-3">
+            <Panel label="The rules that hold" testId="landing-rules">
+              <ul class="font-human text-data text-fg-mid flex flex-col gap-2.5 leading-snug">
+                <li>
+                  Each business system owns its own tables. No specialist writes
+                  into another's schema — it asks the one that owns it.
+                </li>
+                <li>
+                  Each business system runs its own server, with exactly one
+                  owning specialist. Integration is a boundary, not a plugin.
+                </li>
+                <li>
+                  The runtime underneath cannot tell which specialist is
+                  standing on it, which is why adding one changes nothing below.
+                </li>
+              </ul>
+            </Panel>
+          </div>
         </div>
       </section>
 
-      {/* ===== [3.0] THE INTERFACE ===== */}
-      <section id="interface" class="mx-auto max-w-5xl px-4 py-12 sm:py-16">
-        <p
-          class="font-mono text-xs tracking-widest text-slate-500 uppercase"
-          data-section="3.0"
-        >
-          [3.0] The interface
-        </p>
-        <h2 class="mt-3 text-2xl font-bold sm:text-3xl">
-          A surface your agents can drive.
-        </h2>
-        <p class="mt-3 max-w-2xl text-slate-700">
-          Every entity in cachicamas is reachable from the command line, so an
-          agent can read state, draft changes, and ship them without a human in
-          the loop.
-        </p>
-        <pre
-          data-surface="cli"
-          class="mt-6 overflow-x-auto rounded-lg bg-slate-900 px-4 py-4 font-mono text-sm text-slate-100"
-        >
-          {`$ cachicamas org create \\
-      --name "Acme Industrial" \\
-      --slug acme
-✓ created organization #1 (acme)
-
-$ cachicamas project list --org acme
-(no projects yet)
-
-$ cachicamas requirement add \\
-      --org acme \\
-      --project "Q3 launch" \\
-      --text "Track first-run onboarding events end-to-end"
-✓ requirement #7 attached to project "Q3 launch"`}
-        </pre>
-      </section>
-
-      {/* ===== FOOTER ===== */}
-      <footer class="mx-auto max-w-5xl px-4 py-12">
-        <p class="font-mono text-xs text-slate-500" data-footer>
-          cachicamas · multiplayer agentic system · text-first · aphantasia-friendly
+      <footer class="border-rule mx-auto w-full max-w-[1800px] border-t px-3 py-6 sm:px-4">
+        <p class="text-legend text-fg-dim tracking-[0.16em] uppercase">
+          cachicamas · a multiplayer agentic system for building and running a
+          company
         </p>
       </footer>
     </main>
@@ -192,12 +206,12 @@ $ cachicamas requirement add \\
 });
 
 export const head: DocumentHead = {
-  title: "Cachicamas — the multiplayer agentic system for running your company",
+  title: "cachicamas — a company of specialists you can talk to",
   meta: [
     {
       name: "description",
       content:
-        "Work alongside specialist agents on your organizations, projects, requirements, and milestones — text-first, aphantasia-friendly.",
+        "A multiplayer agentic system for building and running a company. Database administration, finance, marketing, ticketing, software delivery — each a specialist agent with its own job, its own systems, and a boundary it cannot cross.",
     },
   ],
 };

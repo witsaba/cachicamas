@@ -128,7 +128,11 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
   const greetingName = firstName(user.name);
 
   return (
-    <main class="mx-auto max-w-xl px-6 py-12" data-testid="profile-signed-in">
+    <main
+      id="main"
+      class="mx-auto w-full max-w-2xl flex-1 px-4 py-8"
+      data-testid="profile-signed-in"
+    >
       {/*
         Welcome heading (R-PH-008). Personalized to the user's first
         name (a personalization cue, not a redundant identity display
@@ -137,14 +141,14 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
         the name is missing.
       */}
       <h1
-        class="text-3xl font-bold tracking-tight text-slate-900"
+        class="text-screen text-fg leading-none font-semibold tracking-tight"
         data-testid="profile-welcome"
       >
         {greetingName ? `Welcome back, ${greetingName}!` : "Welcome back!"}
       </h1>
 
       <p
-        class="mt-4 max-w-lg text-base text-slate-700"
+        class="font-human text-body text-fg-mid mt-4 max-w-[60ch] leading-relaxed"
         data-testid="profile-body"
       >
         cachicamas is your home for tracking your organization's projects,
@@ -152,7 +156,7 @@ export const ProfileView = component$<ProfileViewProps>(({ session }) => {
         profile.
       </p>
 
-      <div class="mt-8 flex flex-wrap gap-3">
+      <div class="mt-6 flex flex-wrap gap-2">
         {/* Secondary action: external link to the user's GitHub
             profile. Renders only when github_login is set (the
             Auth.js GitHub provider populates it from the OAuth

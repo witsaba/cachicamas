@@ -1,19 +1,335 @@
 @import "tailwindcss";
-@plugin "@tailwindcss/typography";
 
-/* -----------------------------------------------------------------------------
- * Monospace stack — the "agentic" / framework feel.
+/* =============================================================================
+ * cachicamas — the exchange terminal
+ * -----------------------------------------------------------------------------
+ * Direction seed 8a09c7ce (operate, form 7).  The interface is a dealing-room
+ * terminal: a company's specialist agents are services on a board, each with a
+ * code, a state and a number, all readable at once.
  *
- * Section numbers, code blocks, CLI surface, and footer
- * signature all use `font-mono`.  We prefer the OS-native
- * `ui-monospace` (San Francisco Mono on macOS, Cascadia
- * Mono on Windows, Roboto Mono on Android) and fall back
- * to a curated set of developer mono faces before the
- * generic `monospace` keyword.  No external font is loaded
- * — this stack is text-first by design.
- * --------------------------------------------------------------------------- */
+ * The material rules, in one place, because every surface obeys them:
+ *
+ *   1. NOTHING IS ROUNDED.  Panels, buttons, inputs, lamps and wells are hard
+ *      rectangles.  A radius anywhere is a defect, not a variation.
+ *   2. NOTHING GLOWS.  There are no shadows, no blurs, no gradients and no
+ *      backdrop filters.  Separation comes from hairlines and from the value
+ *      step between --color-void, --color-panel and --color-raise.
+ *   3. COLOUR IS STATE, NEVER DECORATION — AND STRUCTURE IS NEUTRAL.  Amber
+ *      says "the system is speaking now", cyan says "you can go here",
+ *      live/hold/fail say what a run is doing.  Chrome — panel labels, key
+ *      legends, gauges, rules — carries no colour at all, because a palette
+ *      spent on structure is a palette that can no longer report anything.
+ *   4. TWO VOICES.  font-system (Spline Sans Mono) is the machine: codes,
+ *      labels, states, tabular numbers, headings.  font-human (Spline Sans) is
+ *      language: what a person typed and what a model answered.  The switch
+ *      between them is meaning, not texture.
+ *
+ * Accessibility (PRODUCT.md, UX-4): no meaning may be carried by colour, lamp
+ * or position alone.  Every lamp in this system is followed by its literal
+ * status word; every colour has a word beside it.  Palette values below are
+ * chosen against --color-panel, and the dimmest text pairing clears 5.6:1.
+ * ========================================================================== */
+
 @theme {
-  --font-mono:
-    ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular, Menlo, Monaco,
-    Consolas, "Liberation Mono", "Courier New", monospace;
+  /* --- ground ------------------------------------------------------------ */
+  /* The space between panels: the dark of the room the board hangs in. */
+  --color-void: #070a10;
+  /* A panel's own surface — one value step up from the void. */
+  --color-panel: #161e2b;
+  /* A well inside a panel: an input, a selected row, a code block. */
+  --color-raise: #202a3b;
+  /*
+   * Hairline between cells. Never thicker than 1px — and never fainter than
+   * this. In a board built entirely out of hairlines, WCAG 1.4.11's 3:1 floor
+   * for a meaningful boundary is not a detail, it is the whole structure.
+   *
+   * Measured against ALL THREE grounds, not just the panel: a rule inside a
+   * well sits on --color-raise, and a value picked against the panel alone
+   * quietly fails there. void 4.44:1 · panel 3.75:1 · raise 3.23:1.
+   */
+  --color-rule: #6a7890;
+  /* A focused, active or interactive edge. void 5.9 · panel 5.0 · raise 4.3 */
+  --color-rule-strong: #7d8da8;
+  /*
+   * Ornament only, and deliberately below the boundary floor: the dotted
+   * leader in `Field` guides the eye across a row and carries no structure, so
+   * it must not compete with the rules that do.
+   */
+  --color-rule-faint: #2b3547;
+
+  /* --- the machine's voice ------------------------------------------------ */
+  /*
+   * Amber is the system speaking about itself RIGHT NOW: the wordmark, the
+   * command-line prompt, the streaming caret, the focus ring, the primary
+   * action, the demonstration marker, and the one archetype in build.
+   *
+   * It is deliberately NOT used for structure. Panel labels, key legends,
+   * gauges and the active dock cell were all amber in the first build, and the
+   * result was a near-black surface with one neon accent — the exact category
+   * default this world exists to refuse. Structure is neutral; colour is
+   * reserved for what is happening. 9.3:1 on panel.
+   */
+  --color-amber: #ffb020;
+  --color-amber-dim: #7a5714;
+
+  /* --- state, each with exactly one job ----------------------------------- */
+  /* Cyan: anything you can navigate to — codes, references, links. 8.8:1.
+     Never a state: a plan reference is cyan because it opens, not because of
+     what it says. */
+  --color-cyan: #56c8f0;
+  /* Live: a run in progress, a connection open, an archetype on duty. 10.4:1 */
+  --color-live: #5fd97f;
+  /* Hold: a run suspended waiting on a person's decision. 7.2:1 */
+  --color-hold: #b18cff;
+  /* Fail: a typed error, a denied permission, a cancelled turn. 6.4:1 */
+  --color-fail: #ff5f7a;
+
+  /* --- text --------------------------------------------------------------- */
+  /* Primary data and what a person typed. */
+  --color-fg: #e6ecf5;
+  /* What a model answered; secondary data. 8.5:1 */
+  --color-fg-mid: #9fb0c7;
+  /*
+   * Chrome labels, units, legends — the dimmest text in the system, and the
+   * one that decides its floor. Measured on the WELL, not the panel: these
+   * labels name a tool call's arguments inside a raised block, which is the
+   * darkest surface any body text sits on. void 6.9 · panel 5.8 · raise 5.0.
+   */
+  --color-fg-dim: #8a99b3;
+
+  /* --- voices ------------------------------------------------------------- */
+  --font-system:
+    "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-human:
+    "Spline Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* --- fixed scale (Operate: never fluid) --------------------------------- */
+  --text-legend: 0.6875rem; /* 11px — F-key legends, units, column heads   */
+  --text-label: 0.75rem; /* 12px — labels, codes, status words         */
+  --text-data: 0.8125rem; /* 13px — table cells, log lines              */
+  --text-body: 0.875rem; /* 14px — prose, inputs                       */
+  --text-lead: 1rem; /* 16px — panel leads                         */
+  --text-screen: 1.75rem; /* 28px — screen titles                       */
+  --text-board: 2.5rem; /* 40px — the board headline                  */
+
+  /* --- one duration, because product motion reports state ---------------- */
+  --ease-term: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Hard rectangles, everywhere. Tailwind's `rounded-*` utilities are not used
+   anywhere in this codebase; this makes an accidental one a no-op rather than
+   a visible break in the world. */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-radius: 0 !important;
+  }
+
+  html {
+    background-color: var(--color-void);
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-fg);
+    font-family: var(--font-system);
+    font-size: var(--text-data);
+    -webkit-font-smoothing: antialiased;
+    /* The terminal aligns. Tabular figures are the default for the whole
+       machine voice so a column of counts never shifts as it updates. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment for the entire system: a 1px amber inset frame plus a
+     1px void gap, so it reads on a panel, on a well and on the void alike. */
+  :focus-visible {
+    outline: 1px solid var(--color-amber);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background-color: var(--color-amber);
+    color: var(--color-void);
+  }
+
+  ::placeholder {
+    color: var(--color-fg-dim);
+    opacity: 1;
+  }
+
+  /* Thin, valued to the world. Shape and behaviour stay native. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-rule-strong) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-rule-strong);
+  }
+  ::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+}
+
+/* =============================================================================
+ * The one authored motion moment.
+ *
+ * The caret. It blinks on a line that is still arriving and nowhere else, so
+ * the one moving thing on any screen is the one thing that is actually
+ * happening. The lamp pulse is its only companion.
+ *
+ * There was a staggered entrance on the register, and it was removed rather
+ * than tuned: this interface's first-viewport promise is that you can see the
+ * whole company at once, and an entrance that reveals it over half a second is
+ * a promise the animation itself is eating. The board arrives painted.
+ * ========================================================================== */
+
+@keyframes term-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes term-lamp {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility term-caret {
+  display: inline-block;
+  width: 0.5em;
+  background-color: currentColor;
+  animation: term-caret 1s steps(1, end) infinite;
+}
+
+@utility term-lamp {
+  animation: term-lamp 1.6s var(--ease-term) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    /*
+     * The delay matters as much as the duration. A staggered entrance using
+     * fill mode `both` leaves each element at opacity 0 for its own delay
+     * regardless of the duration above — the surface arrives INVISIBLE for the
+     * people who asked not to see it move. Nothing in this build stages any
+     * more, and this line is what keeps it that way if something ever does.
+     */
+    animation-delay: 0s !important;
+  }
+}
+
+/* =============================================================================
+ * Sanitised model output.
+ *
+ * `renderSanitizedMarkdown` emits a small, allowlisted set of tags. They are
+ * styled here rather than with a typography plugin so the rules stay visible
+ * next to the world they belong to, and so nothing arrives that the allowlist
+ * did not authorise.
+ * ========================================================================== */
+.prose-terminal > * + * {
+  margin-top: 0.75em;
+}
+.prose-terminal strong {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+.prose-terminal em {
+  font-style: italic;
+}
+.prose-terminal a {
+  color: var(--color-cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-terminal code {
+  font-family: var(--font-system);
+  font-size: 0.9em;
+  background-color: var(--color-raise);
+  border: 1px solid var(--color-rule);
+  padding: 0 0.3em;
+  color: var(--color-fg);
+}
+.prose-terminal pre {
+  font-family: var(--font-system);
+  background-color: var(--color-raise);
+  border: 1px solid var(--color-rule);
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+.prose-terminal pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.prose-terminal ul,
+.prose-terminal ol {
+  padding-left: 1.25rem;
+}
+.prose-terminal ul {
+  list-style: square;
+}
+.prose-terminal ol {
+  list-style: decimal;
+}
+.prose-terminal li + li {
+  margin-top: 0.25em;
+}
+.prose-terminal blockquote {
+  border-left: 1px solid var(--color-rule-strong);
+  padding-left: 0.75rem;
+  color: var(--color-fg-dim);
+}
+.prose-terminal h1,
+.prose-terminal h2,
+.prose-terminal h3,
+.prose-terminal h4,
+.prose-terminal h5,
+.prose-terminal h6 {
+  font-family: var(--font-system);
+  color: var(--color-fg);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: var(--text-label);
+}
+.prose-terminal hr {
+  border-color: var(--color-rule);
+}
+.prose-terminal table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-system);
+  font-size: var(--text-data);
+}
+.prose-terminal th,
+.prose-terminal td {
+  border: 1px solid var(--color-rule);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+.prose-terminal img {
+  max-width: 100%;
 }
