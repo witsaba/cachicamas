@@ -104,11 +104,30 @@ organisation chart, and a conversation.
   chain, the guard order, the CSRF helper, the SSR cookie forwarding and the Playwright
   suite are untouched; only their surrounding chrome is restyled.
 
+## Review
+
+A finish review ran against the built result and returned disposition `fix`
+with eight material findings; all eight were applied in one batch. The verdict
+pass scored **seven resolved, one partial**, and found three regressions the
+fix batch had introduced.
+
+The partial and two of the three regressions had one root: the fix for a
+duplicated person removed them from the roster while the officer-role data
+still pointed at their id, so a filled seat rendered as empty under a header
+that still counted it filled, and the Teams board went on naming them in a
+role the Organisation panel showed as vacant. Two places were counting the
+same thing. There is now one — `rosterFor` and `holdersFor` in
+`lib/mock/staff.ts` — and the filled count is derived from what actually
+resolves to a person, so a dangling id reads as an open seat.
+
+Every item the review raised is closed. Two rounds is the budget and both were
+spent.
+
 ## Evidence
 
 - `pnpm build.types` — clean.
 - `pnpm lint` — 0 errors, 0 warnings.
 - `pnpm fmt.check` — clean.
-- `pnpm test:ci` — 53 files, 546 tests, all passing.
+- `pnpm test:ci` — 58 files, 565 tests, all passing.
 - `pnpm build` — client and SSR builds succeed; the direction contract survives into
   `server/*.js` (grep `impeccable-direction`).
