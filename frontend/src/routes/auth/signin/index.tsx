@@ -103,41 +103,35 @@ export default component$(() => {
   const redirectTo = resolveRedirectTo(loc.url.searchParams.get("callbackUrl"));
 
   return (
-    <main
-      class="min-h-screen bg-white text-slate-900"
-      data-testid="auth-signin-page"
-    >
+    <main class="bg-void text-fg flex-1" data-testid="auth-signin-page">
       {/* Subtle gradient accent line — the same visual idiom as the
           landing page (`routes/index.tsx`). Nods to Linear/Cursor
           without breaking the text-first UX-4 constraint. */}
-      <div
-        class="h-px w-full bg-gradient-to-r from-slate-200 via-indigo-500 to-slate-200"
-        aria-hidden="true"
-      />
+      <div class="bg-amber h-px w-full" aria-hidden="true" />
 
       <section
-        class="mx-auto flex max-w-md flex-col items-stretch px-6 py-16 sm:py-24"
+        class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"
         data-testid="auth-signin-card"
       >
         {/* Brand mark — single monospace token, same chrome as the
             app header. Identical to routes/layout.tsx:65-71. */}
         <a
           href="/"
-          class="font-mono text-sm font-bold tracking-tight"
+          class="text-label text-amber font-semibold tracking-[0.22em] uppercase no-underline"
           data-testid="auth-signin-brand"
         >
           cachicamas
         </a>
 
         <h1
-          class="mt-10 text-2xl leading-tight font-semibold text-slate-900 sm:text-3xl"
+          class="text-screen text-fg mt-8 leading-none font-semibold tracking-tight"
           data-testid="auth-signin-heading"
         >
           Sign in to cachicamas
         </h1>
 
         <p
-          class="mt-3 text-sm leading-relaxed text-slate-600"
+          class="font-human text-body text-fg-mid mt-3 leading-relaxed"
           data-testid="auth-signin-description"
         >
           You'll be redirected to GitHub to authorise the sign-in. No password
@@ -150,7 +144,7 @@ export default component$(() => {
         </div>
 
         <p
-          class="mt-10 text-xs text-slate-500"
+          class="text-legend text-fg-dim mt-10 tracking-[0.14em] uppercase"
           data-testid="auth-signin-footnote"
         >
           By signing in you agree to cachicamas acting on your behalf with the

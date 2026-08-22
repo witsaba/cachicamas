@@ -71,19 +71,20 @@ vi.mock("~/routes/plugin@auth", () => ({
   onRequest: () => Promise.resolve(),
 }));
 
-test("[routes/auth/signin]: page wrapper is white bg + slate-900 text (S-AUTH-SIGNIN-01)", async () => {
+test("[routes/auth/signin]: page wrapper is painted by the product, not by the browser theme (S-AUTH-SIGNIN-01)", async () => {
   mockLocationUrl = "http://localhost/auth/signin";
   const { screen, render } = await createDOM();
   await render(<Index />);
   const main = screen.querySelector('[data-testid="auth-signin-page"]');
   expect(main).toBeTruthy();
   const cls = (main as HTMLElement).className;
-  // Locked palette — matches the rest of the product (routes/index.tsx,
-  // routes/home/index.tsx). The built-in @auth/core page used a dark
-  // background on prefers-color-scheme: dark browsers; this assertion
-  // is the regression guard against re-introducing that.
-  expect(cls).toMatch(/\bbg-white\b/);
-  expect(cls).toMatch(/\btext-slate-900\b/);
+  // The product paints its own ground on every route. The built-in
+  // @auth/core page flipped with `prefers-color-scheme`, which produced a
+  // page that belonged to neither the browser nor the product; this is the
+  // regression guard against that returning.
+  expect(cls).toMatch(/\bbg-void\b/);
+  expect(cls).toMatch(/\btext-fg\b/);
+  expect(cls).not.toMatch(/slate|zinc|bg-white/);
 });
 
 test("[routes/auth/signin]: card carries brand + heading + description + action + footnote (S-AUTH-SIGNIN-02)", async () => {

@@ -57,7 +57,7 @@ test("[routes/ownboarding] authed render shows the form heading and OwnboardingF
   await render(<Index />);
   const heading = screen.querySelector("h1");
   expect(heading).toBeTruthy();
-  expect(heading?.textContent).toContain("Set up your organization");
+  expect(heading?.textContent).toContain("Name the company");
   const formEl = screen.querySelector('[data-testid="ownboarding-form"]');
   expect(formEl).toBeTruthy();
   const submitBtn = screen.querySelector(

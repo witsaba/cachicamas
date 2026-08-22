@@ -1,5 +1,6 @@
 import { $, component$ } from "@builder.io/qwik";
 import { type DocumentHead, useNavigate } from "@builder.io/qwik-city";
+import { ScreenTitle } from "~/components/os/screen/screen";
 import { OwnboardingForm } from "~/components/ownboarding-form/ownboarding-form";
 import type {
   FormAction,
@@ -107,19 +108,17 @@ export default component$(() => {
     return null;
   }
   return (
-    <main class="mx-auto max-w-3xl px-4 py-16">
-      <h1 class="text-3xl font-bold text-slate-900">
-        Set up your organization
-      </h1>
-      <p class="mt-3 text-slate-700">
-        Tell us what your organization is called. You can change these details
-        later from the settings page.
-      </p>
-      <div class="mt-8">
+    <main id="main" class="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
+      <ScreenTitle
+        code="SETUP"
+        title="Name the company"
+        lead="Every specialist on the register works for exactly one organization. Name it once and the board is yours; you can change these details later from System."
+      />
+      <div class="mt-6">
         <OwnboardingForm
           action={submitAction}
           onSuccess$={$(async () => {
-            await nav("/home");
+            await nav("/home/");
           })}
         />
       </div>

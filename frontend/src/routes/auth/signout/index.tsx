@@ -51,19 +51,13 @@ export default component$(() => {
   const signOut = useSignOut();
 
   return (
-    <main
-      class="min-h-screen bg-white text-slate-900"
-      data-testid="auth-signout-page"
-    >
+    <main class="bg-void text-fg flex-1" data-testid="auth-signout-page">
       {/* Subtle gradient accent line — same idiom as /auth/signin
           and the landing page. Visual continuity, not decoration. */}
-      <div
-        class="h-px w-full bg-gradient-to-r from-slate-200 via-indigo-500 to-slate-200"
-        aria-hidden="true"
-      />
+      <div class="bg-amber h-px w-full" aria-hidden="true" />
 
       <section
-        class="mx-auto flex max-w-md flex-col items-stretch px-6 py-16 sm:py-24"
+        class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"
         data-testid="auth-signout-card"
       >
         {/* Brand mark — same chrome as the app header and the
@@ -71,21 +65,21 @@ export default component$(() => {
             without using the browser back button. */}
         <a
           href="/"
-          class="font-mono text-sm font-bold tracking-tight"
+          class="text-label text-amber font-semibold tracking-[0.22em] uppercase no-underline"
           data-testid="auth-signout-brand"
         >
           cachicamas
         </a>
 
         <h1
-          class="mt-10 text-2xl leading-tight font-semibold text-slate-900 sm:text-3xl"
+          class="text-screen text-fg mt-8 leading-none font-semibold tracking-tight"
           data-testid="auth-signout-heading"
         >
           Sign out of cachicamas?
         </h1>
 
         <p
-          class="mt-3 text-sm leading-relaxed text-slate-600"
+          class="font-human text-body text-fg-mid mt-3 leading-relaxed"
           data-testid="auth-signout-description"
         >
           Your session cookie will be cleared and you'll be returned to the
@@ -113,7 +107,7 @@ export default component$(() => {
             // bare `hover:*` overrides, so the consumer must use
             // `!important` to win. Tailwind 4 syntax: `!` goes
             // AFTER the variant (`hover:!bg-zinc-800`), not before.
-            class="border border-zinc-700 !bg-zinc-900 !text-zinc-100 shadow-sm hover:!border-zinc-600 hover:!bg-zinc-800 hover:shadow-md focus-visible:!ring-zinc-500"
+            class="!border-rule-strong !text-fg hover:!border-amber hover:!text-amber !bg-transparent"
           >
             Sign out
           </Button>
@@ -125,14 +119,14 @@ export default component$(() => {
             href="/"
             variant="secondary"
             testId="auth-signout-cancel"
-            class="focus-visible:ring-slate-400"
+            class=""
           >
             Cancel
           </Button>
         </Form>
 
         <p
-          class="mt-10 text-xs text-slate-500"
+          class="text-legend text-fg-dim mt-10 tracking-[0.14em] uppercase"
           data-testid="auth-signout-footnote"
         >
           Sign-out is final for this browser. Other devices and browsers remain
