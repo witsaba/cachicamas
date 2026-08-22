@@ -80,7 +80,27 @@ export const ChatApp = component$(() => {
         <StateLamp tone="build" word="In build · doc 0005 · 0 of 12" />
       </ScreenTitle>
 
-      <div class="mt-4 grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      {/* The archetype's memory, twice: a standing panel where there is room
+          for one, and a disclosure where there is not. Hiding it outright below
+          `lg` would take multi-conversation history off phones entirely, which
+          is a capability disappearing, not a layout adapting. */}
+      <details
+        data-testid="conversations-disclosure"
+        class="border-rule bg-panel mt-4 border lg:hidden"
+      >
+        <summary class="border-rule text-label text-fg cursor-pointer border-b px-3 py-1.5 tracking-[0.14em] uppercase">
+          Conversations · {CONVERSATIONS.length} · demo
+        </summary>
+        <ConversationList
+          conversations={CONVERSATIONS}
+          selectedId={selected.value}
+          onSelect$={$((id: string) => {
+            selected.value = id;
+          })}
+        />
+      </details>
+
+      <div class="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 lg:mt-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <Panel
           label="Conversations"
           note={`${CONVERSATIONS.length} · demo`}

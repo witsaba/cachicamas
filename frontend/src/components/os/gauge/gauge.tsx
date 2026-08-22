@@ -7,9 +7,11 @@ import { component$ } from "@builder.io/qwik";
  * literal `done/total` beside them: the segments give the shape at a glance
  * and the figure gives the fact, so neither has to be inferred from the other.
  *
- * A completed gauge fills amber; an incomplete one fills cyan and leaves the
- * remainder as the rule colour. Zero of N is a legitimate, common reading here
- * — three of the six archetypes have never started — and it must look like a
+ * The fill is NEUTRAL, at two brightnesses. A gauge reports a quantity, and a
+ * quantity is not a state: the lamp beside it already says whether the thing
+ * is running, and giving the bar a state colour too was how amber ended up on
+ * twenty marks per screen. Zero of N is a legitimate, common reading here —
+ * three of the six archetypes have never started — and it must look like a
  * real zero rather than a broken component.
  */
 export const GAUGE_SEGMENTS = 8;
@@ -44,12 +46,12 @@ export const Gauge = component$<GaugeProps>((props) => {
           <span
             key={i}
             class={`h-2 w-1.5 ${
-              i < lit ? (complete ? "bg-amber" : "bg-cyan") : "bg-rule"
+              i < lit ? (complete ? "bg-fg" : "bg-fg-mid") : "bg-rule"
             }`}
           />
         ))}
       </span>
-      <span class={`text-legend ${complete ? "text-amber" : "text-fg-mid"}`}>
+      <span class={`text-legend ${complete ? "text-fg" : "text-fg-mid"}`}>
         {props.done}/{props.total}
       </span>
     </span>

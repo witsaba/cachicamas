@@ -38,9 +38,17 @@ export const FunctionRail = component$(() => {
       const e = event as KeyboardEvent;
       if (typeof window === "undefined") return;
       if (!/^F[1-8]$/.test(e.key)) return;
-      const target = e.key === "F8" ? "/settings/" : null;
+      // Never steal a function key from a modifier combination, and never from
+      // someone who is typing: F1 fired mid-draft would navigate away and
+      // discard the composer's contents with no confirmation.
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const focused = e.target as HTMLElement | null;
+      const tag = focused?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (focused?.isContentEditable) return;
+      const system = e.key === "F8" ? "/settings/" : null;
       const archetype = ARCHETYPES.find((a) => a.fkey === e.key);
-      const href = target ?? (archetype ? archetypeHref(archetype) : null);
+      const href = system ?? (archetype ? archetypeHref(archetype) : null);
       if (!href) return;
       // A document-level key handler has no `preventdefault:` attribute to
       // declare, so this is the only place the browser's own F-key behaviour
@@ -81,14 +89,14 @@ export const FunctionRail = component$(() => {
               "flex min-w-0 shrink-0 items-baseline gap-1.5 px-3 py-1.5 no-underline transition-colors duration-150",
               i === cells.length - 1 ? "ml-auto" : "",
               active
-                ? "bg-amber text-void"
+                ? "bg-fg text-void"
                 : cell.dimmed
                   ? "text-fg-dim hover:bg-raise hover:text-fg-mid"
-                  : "text-fg-mid hover:bg-raise hover:text-amber",
+                  : "text-fg-mid hover:bg-raise hover:text-fg",
             ].join(" ")}
           >
             <span
-              class={`text-legend tracking-[0.12em] ${active ? "text-void" : "text-amber"}`}
+              class={`text-legend tracking-[0.12em] ${active ? "text-void" : "text-fg-dim"}`}
             >
               {cell.fkey}
             </span>

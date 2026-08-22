@@ -23,7 +23,7 @@ export const Field = component$<FieldProps>((props) => (
     </span>
     <span
       aria-hidden="true"
-      class="border-rule min-w-4 flex-1 border-b border-dotted"
+      class="border-rule-faint min-w-4 flex-1 border-b border-dotted"
     />
     <span class="text-fg text-right whitespace-nowrap">
       <Slot />

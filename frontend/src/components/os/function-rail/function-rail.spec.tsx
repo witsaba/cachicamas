@@ -8,6 +8,8 @@
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { FunctionRail } from "./function-rail";
 import { ARCHETYPES, archetypeHref } from "~/lib/mock/registry";
 
@@ -66,6 +68,23 @@ describe("components/os/function-rail", () => {
     const { screen, render } = await createDOM();
     await render(<FunctionRail />);
     expect(screen.querySelector('[aria-current="page"]')).toBeFalsy();
+  });
+
+  it("guards the function keys against a person who is typing", async () => {
+    // A document-level handler that fires F1 while someone is drafting in the
+    // composer navigates away and discards their work with no confirmation.
+    // The guard is asserted at the source because `createDOM` dispatches no
+    // real key events.
+    const source = readFileSync(
+      fileURLToPath(import.meta.url).replace(/\.spec\.tsx$/, ".tsx"),
+      "utf8",
+    );
+    expect(source).toMatch(/tagName\?\.toLowerCase\(\)/);
+    expect(source).toContain('tag === "input"');
+    expect(source).toContain('tag === "textarea"');
+    expect(source).toContain("isContentEditable");
+    // …and never from a modifier combination the browser or the OS owns.
+    expect(source).toMatch(/e\.metaKey \|\| e\.ctrlKey \|\| e\.altKey \|\| e\.shiftKey/);
   });
 
   it("dims the specialists that do not exist without hiding them", async () => {

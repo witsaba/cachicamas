@@ -10,8 +10,11 @@ import { component$, Slot } from "@builder.io/qwik";
  * dealing-room board is composed by tiling readouts.
  *
  * The header band is what makes a panel legible at a glance across a dense
- * board: amber says "the system is naming this region". The note on the right
- * is where a count, a state or a reference goes — never a control.
+ * board. Its label is deliberately NEUTRAL: panel headings were amber in the
+ * first build, and twenty amber marks on one screen turned the world's five
+ * working colours into a single accent. Structure is neutral; the lamps and
+ * the caret are what carry colour. The note on the right is where a count, a
+ * state or a reference goes — never a control.
  */
 export interface PanelProps {
   /** The region's name. Rendered uppercase, in the machine voice. */
@@ -37,7 +40,7 @@ export const Panel = component$<PanelProps>((props) => {
       class={`border-rule bg-panel border ${props.class ?? ""}`}
     >
       <header class="border-rule flex items-baseline justify-between gap-3 border-b px-3 py-1.5">
-        <Heading class="text-label text-amber tracking-[0.14em] uppercase">
+        <Heading class="text-label text-fg tracking-[0.14em] uppercase">
           {props.label}
         </Heading>
         {props.note ? (

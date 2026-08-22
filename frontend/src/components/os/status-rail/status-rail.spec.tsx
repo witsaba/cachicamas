@@ -65,6 +65,17 @@ describe("components/os/status-rail", () => {
     expect(marker?.getAttribute("title") ?? "").toContain("demonstration data");
   });
 
+  it("keeps the demonstration marker at every width", async () => {
+    // The organization name may fall off a phone without misleading anyone.
+    // The marker that says none of this is real may not.
+    const { screen, render } = await createDOM();
+    await render(<StatusRail authenticated={true} demo />);
+    const marker = screen.querySelector('[data-testid="status-rail-demo"]');
+    expect(marker?.className ?? "").not.toMatch(/\bhidden\b/);
+    const org = screen.querySelector('[data-testid="status-rail-org"]');
+    expect(org?.className ?? "").toMatch(/\bhidden\b/);
+  });
+
   it("shows no marker when the caller has not claimed one", async () => {
     const { screen, render } = await createDOM();
     await render(<StatusRail authenticated={true} />);

@@ -132,14 +132,8 @@ export default component$(() => {
           testId="landing-register"
         >
           <div class="bg-rule grid grid-cols-1 gap-px sm:grid-cols-2 xl:grid-cols-3">
-            {ARCHETYPES.map((a, i) => (
-              <div
-                key={a.code}
-                class="term-paint"
-                style={{ animationDelay: `${i * 55}ms` }}
-              >
-                <RegisterCell archetype={a} />
-              </div>
+            {ARCHETYPES.map((a) => (
+              <RegisterCell key={a.code} archetype={a} />
             ))}
           </div>
         </Panel>
@@ -201,7 +195,7 @@ export default component$(() => {
         </div>
       </section>
 
-      <footer class="border-rule mx-auto w-full max-w-[1400px] border-t px-3 py-6 sm:px-4">
+      <footer class="border-rule mx-auto w-full max-w-[1800px] border-t px-3 py-6 sm:px-4">
         <p class="text-legend text-fg-dim tracking-[0.16em] uppercase">
           cachicamas · a multiplayer agentic system for building and running a
           company

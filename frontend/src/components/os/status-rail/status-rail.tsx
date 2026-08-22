@@ -96,11 +96,13 @@ export const StatusRail = component$<StatusRailProps>((props) => {
         </>
       )}
 
+      {/* Shown at every width. The organization name can fall off a phone
+          without anyone being misled; the demonstration marker cannot. */}
       {props.demo ? (
         <span
           data-testid="status-rail-demo"
           title="Every figure on this board is demonstration data. No archetype is running."
-          class="border-amber-dim text-legend text-amber hidden border px-1.5 py-px tracking-[0.14em] whitespace-nowrap uppercase sm:inline"
+          class="border-amber-dim text-legend text-amber border px-1.5 py-px tracking-[0.14em] whitespace-nowrap uppercase"
         >
           Demo data
         </span>

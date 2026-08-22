@@ -48,7 +48,7 @@ export const SystemPanel = component$<SystemPanelProps>((props) => {
   return (
     <main
       id="main"
-      class="mx-auto w-full max-w-[1100px] flex-1 px-3 py-4 sm:px-4"
+      class="mx-auto w-full max-w-[1800px] flex-1 px-3 py-4 sm:px-4"
     >
       <ScreenTitle
         code="SYSTEM"
@@ -71,7 +71,7 @@ export const SystemPanel = component$<SystemPanelProps>((props) => {
             <Button as="a" href="/profile/" variant="secondary">
               Your profile
             </Button>
-            <Button as="a" href="/auth/signout/" variant="destructive">
+            <Button as="a" href="/auth/signout/" variant="secondary">
               Sign out
             </Button>
           </div>
@@ -98,10 +98,16 @@ export const SystemPanel = component$<SystemPanelProps>((props) => {
           testId="undecided-panel"
           class="lg:col-span-2"
         >
-          <ul class="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {/* Rows on the panel's own ground, not four bordered boxes inside a
+              bordered panel. A card nested in a card is the lazy container
+              twice over, and this system already owns the right atom. */}
+          <ul class="grid grid-cols-1 gap-x-8 md:grid-cols-2">
             {UNDECIDED.map((row) => (
-              <li key={row.label} class="border-rule bg-raise border p-3">
-                <p class="text-label text-fg-dim tracking-[0.14em] uppercase">
+              <li
+                key={row.label}
+                class="border-rule border-b py-2.5 last:border-b-0"
+              >
+                <p class="text-label text-fg tracking-[0.14em] uppercase">
                   {row.label}
                 </p>
                 <p class="font-human text-data text-fg-mid mt-1 leading-snug">

@@ -32,6 +32,30 @@ describe("components/chat/chat-app", () => {
     }
   });
 
+  it("keeps multi-conversation history reachable on a phone", async () => {
+    // The standing panel is hidden below `lg`; hiding it with nothing in its
+    // place would take a confirmed capability off phones entirely, which is a
+    // capability disappearing rather than a layout adapting.
+    const { screen, render } = await createDOM();
+    await render(<ChatApp />);
+    const disclosure = screen.querySelector(
+      '[data-testid="conversations-disclosure"]',
+    );
+    expect(disclosure).toBeTruthy();
+    expect(disclosure?.className ?? "").toContain("lg:hidden");
+    expect(
+      screen.querySelector('[data-testid="conversations-panel"]')?.className ??
+        "",
+    ).toContain("hidden lg:block");
+    // Both routes list every conversation, so neither can silently drift.
+    for (const c of CONVERSATIONS) {
+      expect(
+        disclosure?.querySelector(`[data-testid="conversation-${c.id}"]`),
+        c.id,
+      ).toBeTruthy();
+    }
+  });
+
   it("announces the transcript politely, never assertively", async () => {
     // Streaming output that interrupts a screen reader mid-sentence is worse
     // than output it has to be asked for.

@@ -18,12 +18,26 @@ describe("components/os/screen", () => {
     expect(h1s[0].textContent).toBe("Chat");
   });
 
-  it("shows the command that reaches this screen", async () => {
+  it("shows the command that reaches this screen when it teaches something", async () => {
     const { screen, render } = await createDOM();
-    await render(<ScreenTitle code="SYSTEM" title="System" testId="t" />);
+    await render(<ScreenTitle code="DESK" title="The register" testId="t" />);
     expect(screen.querySelector('[data-testid="t"]')?.textContent).toContain(
-      "SYSTEM",
+      "DESK",
     );
+  });
+
+  it("suppresses the chip when it only repeats the title", async () => {
+    // `SYSTEM | System` and `CHAT | Chat` are eyebrows with no payload. The
+    // chip earns its place only where the code is not already the heading.
+    for (const [code, title] of [
+      ["SYSTEM", "System"],
+      ["CHAT", "Chat"],
+    ] as const) {
+      const { screen, render } = await createDOM();
+      await render(<ScreenTitle code={code} title={title} testId="t" />);
+      const text = screen.querySelector('[data-testid="t"]')?.textContent ?? "";
+      expect(text.trim(), code).toBe(title);
+    }
   });
 
   it("renders the lead only when there is one", async () => {

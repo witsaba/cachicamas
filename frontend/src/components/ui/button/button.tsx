@@ -5,14 +5,20 @@
  * Reference: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
  *
  * Four intents:
- *   - `primary` (default) — create / update actions; `bg-slate-900`.
- *   - `secondary` — general-purpose outline; `bg-white` + `border-slate-300`.
- *   - `destructive` — delete / remove actions; `bg-red-700`.
- *   - `link` — bare-underline text button; no surface.
+ *   - `primary` (default) — the system's own action; an amber filled cell.
+ *   - `secondary` — anything non-committal; an empty cell with a rule.
+ *   - `destructive` — refuse, delete, cancel a run; the fail colour, filled.
+ *   - `link` — a word in a sentence; cyan, underlined, no surface.
+ *
+ * Every filled cell reverses on hover and press: the fill and the text swap.
+ * That is the only press affordance in the product, and nothing travels,
+ * scales or lifts. Focus is NOT per-variant — `global.css` owns the single
+ * treatment the whole system shares. See `classes.ts` for the table.
  *
  * Two sizes:
- *   - `md` (default) — `text-sm px-4 py-2`. Used by forms, headers, retry buttons.
- *   - `lg` — `text-base px-5 py-3`. Used by hero / empty-state CTAs.
+ *   - `md` (default) — `px-3 py-1.5 text-label`. Toolbar cells, panel actions,
+ *     form submits.
+ *   - `lg` — `px-4 py-2.5 text-body`. A screen's single committing action.
  *
  * Two element kinds (polymorphic via `as`):
  *   - `as="button"` (default) — native `<button>`. Default `type="button"`

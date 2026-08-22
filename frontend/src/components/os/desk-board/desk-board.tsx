@@ -83,14 +83,8 @@ export const DeskBoard = component$<DeskBoardProps>((props) => {
             testId="archetype-register"
           >
             <div class="bg-rule grid grid-cols-1 gap-px md:grid-cols-2">
-              {ARCHETYPES.map((a, i) => (
-                <div
-                  key={a.code}
-                  class="term-paint"
-                  style={{ animationDelay: `${i * 45}ms` }}
-                >
-                  <RegisterCell archetype={a} />
-                </div>
+              {ARCHETYPES.map((a) => (
+                <RegisterCell key={a.code} archetype={a} />
               ))}
             </div>
           </Panel>
@@ -109,7 +103,7 @@ export const DeskBoard = component$<DeskBoardProps>((props) => {
                   class="border-rule border-b pb-3 last:border-b-0 last:pb-0"
                 >
                   <div class="flex items-baseline gap-2">
-                    <span class="text-label text-amber tracking-[0.16em] uppercase">
+                    <span class="text-label text-fg-mid tracking-[0.16em] uppercase">
                       {l.code}
                     </span>
                     <span class="text-data text-fg">{l.name}</span>

@@ -10,19 +10,26 @@ import { component$ } from "@builder.io/qwik";
  *
  * The colour map is the system's whole state vocabulary, and every screen
  * shares it:
- *   live    — running now, connected, on duty
- *   build   — has a plan and work in flight
- *   ready   — reachable, navigable, planned
- *   hold    — suspended, waiting on a person's decision
- *   fail    — errored, denied, cancelled
- *   idle    — nothing here yet
+ *   live    — running now, connected, on duty        (green)
+ *   build   — has a plan and work in flight           (amber)
+ *   hold    — suspended, waiting on a person          (violet)
+ *   fail    — errored, denied, cancelled              (red)
+ *   ready   — planned, but nothing is happening       (neutral, bright)
+ *   idle    — nothing here yet                        (neutral, dim)
  */
 export type LampTone = "live" | "build" | "ready" | "hold" | "fail" | "idle";
 
+/*
+ * Only a state that is HAPPENING gets a colour. `ready` and `idle` are two
+ * brightnesses of neutral, because "planned" and "unplanned" describe an
+ * absence of activity — colouring them competes with the three states a person
+ * actually has to notice, and cyan in particular is reserved system-wide for
+ * "you can go here", which is not a state at all.
+ */
 const MARK: Record<LampTone, string> = {
   live: "bg-live",
   build: "bg-amber",
-  ready: "bg-cyan",
+  ready: "bg-fg-mid",
   hold: "bg-hold",
   fail: "bg-fail",
   idle: "bg-fg-dim",
@@ -31,7 +38,7 @@ const MARK: Record<LampTone, string> = {
 const WORD: Record<LampTone, string> = {
   live: "text-live",
   build: "text-amber",
-  ready: "text-cyan",
+  ready: "text-fg-mid",
   hold: "text-hold",
   fail: "text-fail",
   idle: "text-fg-dim",

@@ -70,7 +70,9 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
         data-who={e.who}
         class="flex gap-3 py-2"
       >
-        <span class={`${GUTTER} ${you ? "text-amber" : "text-cyan"}`}>
+        {/* Amber is the machine speaking, so it belongs to the archetype, not
+            to the person. The first build had these the wrong way round. */}
+        <span class={`${GUTTER} ${you ? "text-fg" : "text-amber"}`}>
           {you ? "You" : "Chat"}
         </span>
         <div class="min-w-0 flex-1">
@@ -134,7 +136,7 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
                   <dt class="text-legend text-fg-dim tracking-[0.12em] uppercase">
                     {k}
                   </dt>
-                  <dd class="text-data text-fg-mid break-all">{v}</dd>
+                  <dd class="text-data text-fg-mid overflow-x-auto">{v}</dd>
                 </div>
               ))}
             </dl>
@@ -188,7 +190,7 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
                   <dt class="text-legend text-fg-dim tracking-[0.12em] uppercase">
                     {k}
                   </dt>
-                  <dd class="text-data text-fg-mid break-all">{v}</dd>
+                  <dd class="text-data text-fg-mid overflow-x-auto">{v}</dd>
                 </div>
               ))}
             </dl>

@@ -47,7 +47,7 @@ export const RegisterCell = component$<RegisterCellProps>(
           "group border-rule bg-panel flex flex-col gap-2 border p-3 no-underline",
           "transition-[border-color,background-color] duration-150",
           reachable
-            ? "hover:border-amber hover:bg-raise"
+            ? "hover:border-rule-strong hover:bg-raise"
             : "hover:border-rule-strong",
         ].join(" ")}
       >
@@ -57,7 +57,7 @@ export const RegisterCell = component$<RegisterCellProps>(
           </span>
           <span
             class={`text-label tracking-[0.16em] uppercase ${
-              reachable ? "text-amber" : "text-fg-dim"
+              reachable ? "text-fg" : "text-fg-mid"
             }`}
           >
             {a.code}

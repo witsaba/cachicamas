@@ -132,7 +132,7 @@ export const CommandLine = component$(() => {
                 data-testid={`command-suggestion-${s.code}`}
                 class="hover:bg-raise flex items-baseline gap-3 px-3 py-1.5 no-underline"
               >
-                <span class="text-label text-amber w-24 shrink-0 tracking-[0.12em] uppercase">
+                <span class="text-label text-fg w-24 shrink-0 tracking-[0.12em] uppercase">
                   {s.code}
                 </span>
                 <span class="text-data text-fg flex-1 truncate">{s.label}</span>

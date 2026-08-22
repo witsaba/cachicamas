@@ -52,7 +52,7 @@ export const ArchetypePanel = component$<ArchetypePanelProps>((props) => {
   return (
     <main
       id="main"
-      class="mx-auto w-full max-w-[1100px] flex-1 px-3 py-4 sm:px-4"
+      class="mx-auto w-full max-w-[1800px] flex-1 px-3 py-4 sm:px-4"
     >
       <ScreenTitle code={a.code} title={a.name} lead={a.role}>
         <StateLamp tone={lampToneFor(a.state)} word={a.stateWord} />
@@ -112,10 +112,13 @@ export const ArchetypePanel = component$<ArchetypePanelProps>((props) => {
           class="lg:col-span-3"
         >
           <ul class="grid grid-cols-1 gap-x-6 gap-y-2 md:grid-cols-2">
-            {a.wouldDo.map((line, i) => (
+            {a.wouldDo.map((line) => (
+              // No numbering: these responsibilities are a set, not a sequence,
+              // and a number that carries no order is an ornament pretending to
+              // be information.
               <li key={line} class="flex gap-2.5">
-                <span class="text-legend text-amber pt-0.5 tabular-nums">
-                  {String(i + 1).padStart(2, "0")}
+                <span aria-hidden="true" class="text-rule-strong pt-0.5">
+                  —
                 </span>
                 <span class="font-human text-body text-fg-mid leading-snug">
                   {line}

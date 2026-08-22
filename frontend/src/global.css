@@ -14,10 +14,11 @@
  *   2. NOTHING GLOWS.  There are no shadows, no blurs, no gradients and no
  *      backdrop filters.  Separation comes from hairlines and from the value
  *      step between --color-void, --color-panel and --color-raise.
- *   3. COLOUR IS STATE, NEVER DECORATION.  Five working colours, each with one
- *      job: amber says "the system is speaking", cyan says "you can go here",
- *      live/hold/fail say what a run is doing.  A colour used for mood is a
- *      colour that has stopped carrying information.
+ *   3. COLOUR IS STATE, NEVER DECORATION — AND STRUCTURE IS NEUTRAL.  Amber
+ *      says "the system is speaking now", cyan says "you can go here",
+ *      live/hold/fail say what a run is doing.  Chrome — panel labels, key
+ *      legends, gauges, rules — carries no colour at all, because a palette
+ *      spent on structure is a palette that can no longer report anything.
  *   4. TWO VOICES.  font-system (Spline Sans Mono) is the machine: codes,
  *      labels, states, tabular numbers, headings.  font-human (Spline Sans) is
  *      language: what a person typed and what a model answered.  The switch
@@ -34,21 +35,44 @@
   /* The space between panels: the dark of the room the board hangs in. */
   --color-void: #070a10;
   /* A panel's own surface — one value step up from the void. */
-  --color-panel: #0e131c;
+  --color-panel: #161e2b;
   /* A well inside a panel: an input, a selected row, a code block. */
-  --color-raise: #151c28;
-  /* Hairline between cells. Never thicker than 1px. */
-  --color-rule: #212b3a;
-  /* Hairline around a focused or active panel. */
-  --color-rule-strong: #38455e;
+  --color-raise: #202a3b;
+  /*
+   * Hairline between cells. Never thicker than 1px — and never fainter than
+   * this: at 3.1:1 against --color-panel it clears WCAG 1.4.11's floor for a
+   * boundary that carries meaning. In a board built entirely out of hairlines
+   * that floor is not a detail, it is the whole structure.
+   */
+  --color-rule: #55637a;
+  /* Hairline around a focused, active or interactive edge. 4.6:1 on panel. */
+  --color-rule-strong: #6f7f99;
+  /*
+   * Ornament only, and deliberately below the boundary floor: the dotted
+   * leader in `Field` guides the eye across a row and carries no structure, so
+   * it must not compete with the rules that do.
+   */
+  --color-rule-faint: #2b3547;
 
   /* --- the machine's voice ------------------------------------------------ */
-  /* Amber: panel headers, the command line, the wordmark, the caret. 10.2:1 */
+  /*
+   * Amber is the system speaking about itself RIGHT NOW: the wordmark, the
+   * command-line prompt, the streaming caret, the focus ring, the primary
+   * action, the demonstration marker, and the one archetype in build.
+   *
+   * It is deliberately NOT used for structure. Panel labels, key legends,
+   * gauges and the active dock cell were all amber in the first build, and the
+   * result was a near-black surface with one neon accent — the exact category
+   * default this world exists to refuse. Structure is neutral; colour is
+   * reserved for what is happening. 9.3:1 on panel.
+   */
   --color-amber: #ffb020;
   --color-amber-dim: #7a5714;
 
   /* --- state, each with exactly one job ----------------------------------- */
-  /* Cyan: anything you can navigate to — codes, references, links. 9.7:1 */
+  /* Cyan: anything you can navigate to — codes, references, links. 8.8:1.
+     Never a state: a plan reference is cyan because it opens, not because of
+     what it says. */
   --color-cyan: #56c8f0;
   /* Live: a run in progress, a connection open, an archetype on duty. 10.4:1 */
   --color-live: #5fd97f;
@@ -79,7 +103,6 @@
   --text-data: 0.8125rem; /* 13px — table cells, log lines              */
   --text-body: 0.875rem; /* 14px — prose, inputs                       */
   --text-lead: 1rem; /* 16px — panel leads                         */
-  --text-panel: 1.25rem; /* 20px — panel titles                        */
   --text-screen: 1.75rem; /* 28px — screen titles                       */
   --text-board: 2.5rem; /* 40px — the board headline                  */
 
@@ -150,22 +173,15 @@
 /* =============================================================================
  * The one authored motion moment.
  *
- * A terminal paints its screen: rows arrive in sequence, then the caret sits
- * blinking and waits for you. That is the only choreography in the product —
- * everything else is a 150ms state change. Both are disabled outright under
- * prefers-reduced-motion, where the painted rows are simply already there.
+ * The caret. It blinks on a line that is still arriving and nowhere else, so
+ * the one moving thing on any screen is the one thing that is actually
+ * happening. The lamp pulse is its only companion.
+ *
+ * There was a staggered entrance on the register, and it was removed rather
+ * than tuned: this interface's first-viewport promise is that you can see the
+ * whole company at once, and an entrance that reveals it over half a second is
+ * a promise the animation itself is eating. The board arrives painted.
  * ========================================================================== */
-
-@keyframes term-paint {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 @keyframes term-caret {
   0%,
@@ -188,10 +204,6 @@
   }
 }
 
-@utility term-paint {
-  animation: term-paint 260ms var(--ease-term) both;
-}
-
 @utility term-caret {
   display: inline-block;
   width: 0.5em;
@@ -210,6 +222,14 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    /*
+     * The delay matters as much as the duration. A staggered entrance using
+     * fill mode `both` leaves each element at opacity 0 for its own delay
+     * regardless of the duration above — the surface arrives INVISIBLE for the
+     * people who asked not to see it move. Nothing in this build stages any
+     * more, and this line is what keeps it that way if something ever does.
+     */
+    animation-delay: 0s !important;
   }
 }
 

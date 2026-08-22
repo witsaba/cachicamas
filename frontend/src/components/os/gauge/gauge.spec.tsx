@@ -75,18 +75,35 @@ describe("components/os/gauge", () => {
     expect(lit.length).toBe(0);
   });
 
-  it("marks completion in amber and progress in cyan", async () => {
+  it("carries no state colour at all — a quantity is not a state", async () => {
+    // The lamp beside a gauge already reports whether the thing is running.
+    // Colouring the bar too is how amber ended up on twenty marks per screen;
+    // the fill is neutral at two brightnesses instead.
+    for (const [done, total] of [
+      [42, 42],
+      [5, 42],
+      [0, 12],
+    ] as const) {
+      const { screen, render } = await createDOM();
+      await render(<Gauge done={done} total={total} testId="g" />);
+      const html = screen.querySelector('[data-testid="g"]')?.innerHTML ?? "";
+      expect(html, `${done}/${total}`).not.toMatch(
+        /bg-(amber|cyan|live|hold|fail)/,
+      );
+    }
+  });
+
+  it("distinguishes complete from in-progress by brightness, not by hue", async () => {
     const complete = await createDOM();
     await complete.render(<Gauge done={42} total={42} testId="g" />);
     const completeHtml =
       complete.screen.querySelector('[data-testid="g"]')?.innerHTML ?? "";
-    expect(completeHtml).toContain("bg-amber");
+    expect(completeHtml).toContain("bg-fg");
 
     const partial = await createDOM();
     await partial.render(<Gauge done={5} total={42} testId="g" />);
     const partialHtml =
       partial.screen.querySelector('[data-testid="g"]')?.innerHTML ?? "";
-    expect(partialHtml).toContain("bg-cyan");
-    expect(partialHtml).not.toContain("bg-amber");
+    expect(partialHtml).toContain("bg-fg-mid");
   });
 });
