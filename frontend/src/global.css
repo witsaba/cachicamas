@@ -1,177 +1,202 @@
 @import "tailwindcss";
 
 /* =============================================================================
- * cachicamas — the exchange terminal
+ * cachicamas — the workplace
  * -----------------------------------------------------------------------------
- * Direction seed 8a09c7ce (operate, form 7).  The interface is a dealing-room
- * terminal: a company's specialist agents are services on a board, each with a
- * code, a state and a number, all readable at once.
+ * This build takes the standing exit: the category standard, played straight.
+ * The bar is Intercom and Attio — products that ship a marketing site and an
+ * application in one identity, at one craft level. Nothing here is invented for
+ * novelty's sake, and nothing here is quirky. A person who has used a modern
+ * work tool should be able to use this one without pausing once.
  *
  * The material rules, in one place, because every surface obeys them:
  *
- *   1. NOTHING IS ROUNDED.  Panels, buttons, inputs, lamps and wells are hard
- *      rectangles.  A radius anywhere is a defect, not a variation.
- *   2. NOTHING GLOWS.  There are no shadows, no blurs, no gradients and no
- *      backdrop filters.  Separation comes from hairlines and from the value
- *      step between --color-void, --color-panel and --color-raise.
- *   3. COLOUR IS STATE, NEVER DECORATION — AND STRUCTURE IS NEUTRAL.  Amber
- *      says "the system is speaking now", cyan says "you can go here",
- *      live/hold/fail say what a run is doing.  Chrome — panel labels, key
- *      legends, gauges, rules — carries no colour at all, because a palette
- *      spent on structure is a palette that can no longer report anything.
- *   4. TWO VOICES.  font-system (Spline Sans Mono) is the machine: codes,
- *      labels, states, tabular numbers, headings.  font-human (Spline Sans) is
- *      language: what a person typed and what a model answered.  The switch
- *      between them is meaning, not texture.
+ *   1. ONE FAMILY, ONE ACCENT.  Onest carries every word on the site. Brand
+ *      blue carries primary actions, the current selection, and links. It never
+ *      decorates.
+ *   2. WHITE ON A WARM-NEUTRAL PAGE.  Separation comes from a value step
+ *      between --color-canvas and --color-surface plus a 1px line — not from
+ *      heavy shadow. Elevation is reserved for things that genuinely float:
+ *      menus, dialogs, the composer.
+ *   3. DEPARTMENT COLOUR IDENTIFIES, IT DOES NOT RANK.  Six hues name six
+ *      departments so a person recognises Finance before reading the word. The
+ *      word is always there too (see the accessibility note below).
+ *   4. SHAPE SEPARATES SPECIES.  A person is a circle. An agent is a rounded
+ *      square. This is the one rule in the system that carries meaning through
+ *      form — so it is also the one rule that always ships a literal text
+ *      label beside it.
  *
- * Accessibility (PRODUCT.md, UX-4): no meaning may be carried by colour, lamp
- * or position alone.  Every lamp in this system is followed by its literal
- * status word; every colour has a word beside it.  Palette values below are
- * chosen against --color-panel, and the dimmest text pairing clears 5.6:1.
+ * Accessibility (PRODUCT.md, UX-4): no meaning may be carried by an image,
+ * icon, glyph, colour or shape alone. Every avatar is followed by a name; every
+ * status dot is followed by its word; every department colour is followed by
+ * its department. Every value below was measured against ALL THREE grounds —
+ * surface, canvas and sunken — not against white alone, because a token picked
+ * on white quietly fails inside a hovered row.
  * ========================================================================== */
 
 @theme {
   /* --- ground ------------------------------------------------------------ */
-  /* The space between panels: the dark of the room the board hangs in. */
-  --color-void: #070a10;
-  /* A panel's own surface — one value step up from the void. */
-  --color-panel: #161e2b;
-  /* A well inside a panel: an input, a selected row, a code block. */
-  --color-raise: #202a3b;
-  /*
-   * Hairline between cells. Never thicker than 1px — and never fainter than
-   * this. In a board built entirely out of hairlines, WCAG 1.4.11's 3:1 floor
-   * for a meaningful boundary is not a detail, it is the whole structure.
-   *
-   * Measured against ALL THREE grounds, not just the panel: a rule inside a
-   * well sits on --color-raise, and a value picked against the panel alone
-   * quietly fails there. void 4.44:1 · panel 3.75:1 · raise 3.23:1.
-   */
-  --color-rule: #6a7890;
-  /* A focused, active or interactive edge. void 5.9 · panel 5.0 · raise 4.3 */
-  --color-rule-strong: #7d8da8;
-  /*
-   * Ornament only, and deliberately below the boundary floor: the dotted
-   * leader in `Field` guides the eye across a row and carries no structure, so
-   * it must not compete with the rules that do.
-   */
-  --color-rule-faint: #2b3547;
+  /* The page itself. Cool-neutral, one step below a card. */
+  --color-canvas: #f7f8fa;
+  /* A card, a panel, the content column, the sidebar. */
+  --color-surface: #ffffff;
+  /* A well: an input at rest, a hovered row, a code block, a quiet band. */
+  --color-sunken: #f1f3f7;
+  /* The one dark surface in the product: the marketing page's closing band
+     and the signed-out footer. Ink, not black. */
+  --color-deep: #101724;
 
-  /* --- the machine's voice ------------------------------------------------ */
+  /* --- line --------------------------------------------------------------- */
   /*
-   * Amber is the system speaking about itself RIGHT NOW: the wordmark, the
-   * command-line prompt, the streaming caret, the focus ring, the primary
-   * action, the demonstration marker, and the one archetype in build.
-   *
-   * It is deliberately NOT used for structure. Panel labels, key legends,
-   * gauges and the active dock cell were all amber in the first build, and the
-   * result was a near-black surface with one neon accent — the exact category
-   * default this world exists to refuse. Structure is neutral; colour is
-   * reserved for what is happening. 9.3:1 on panel.
+   * Decorative separation: card edges, table rules, section dividers. These
+   * are not the sole means of identifying anything, so they sit below the
+   * 3:1 boundary floor on purpose — a 3:1 grid line at this density reads as
+   * a wireframe, and Attio and Intercom both draw this weight.
    */
-  --color-amber: #ffb020;
-  --color-amber-dim: #7a5714;
-
-  /* --- state, each with exactly one job ----------------------------------- */
-  /* Cyan: anything you can navigate to — codes, references, links. 8.8:1.
-     Never a state: a plan reference is cyan because it opens, not because of
-     what it says. */
-  --color-cyan: #56c8f0;
-  /* Live: a run in progress, a connection open, an archetype on duty. 10.4:1 */
-  --color-live: #5fd97f;
-  /* Hold: a run suspended waiting on a person's decision. 7.2:1 */
-  --color-hold: #b18cff;
-  /* Fail: a typed error, a denied permission, a cancelled turn. 6.4:1 */
-  --color-fail: #ff5f7a;
-
-  /* --- text --------------------------------------------------------------- */
-  /* Primary data and what a person typed. */
-  --color-fg: #e6ecf5;
-  /* What a model answered; secondary data. 8.5:1 */
-  --color-fg-mid: #9fb0c7;
+  --color-line: #e4e7ec;
+  /* A stronger rule where two regions genuinely divide: sidebar/main, header. */
+  --color-line-firm: #d6dae1;
   /*
-   * Chrome labels, units, legends — the dimmest text in the system, and the
-   * one that decides its floor. Measured on the WELL, not the panel: these
-   * labels name a tool call's arguments inside a raised block, which is the
-   * darkest surface any body text sits on. void 6.9 · panel 5.8 · raise 5.0.
+   * Control boundaries — inputs, selects, secondary buttons, checkboxes. WCAG
+   * 1.4.11 applies here because the border IS how you find the control, so
+   * this value clears 3:1 on every ground it can land on:
+   * surface 3.43 · canvas 3.23 · sunken 3.09.
    */
-  --color-fg-dim: #8a99b3;
+  --color-line-control: #828b9c;
 
-  /* --- voices ------------------------------------------------------------- */
-  --font-system:
-    "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", monospace;
-  --font-human:
-    "Spline Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  /* --- ink ---------------------------------------------------------------- */
+  /* Headings, names, values. surface 17.95 */
+  --color-ink: #101724;
+  /* Body copy and secondary values. surface 9.39 · sunken 8.45 */
+  --color-ink-mid: #3d4757;
+  /*
+   * The dimmest text in the system: field labels, meta lines, timestamps,
+   * placeholders. Measured on the SUNKEN ground, which is the darkest surface
+   * any small text sits on: surface 5.88 · canvas 5.53 · sunken 4.95.
+   */
+  --color-ink-soft: #5f6a78;
+  /* Text on ink, brand or a department field. */
+  --color-ink-inverse: #ffffff;
+
+  /* --- the one accent ----------------------------------------------------- */
+  /* Primary action, current selection, links, focus. surface 6.41 */
+  --color-brand: #2b4be8;
+  --color-brand-press: #1e39c4;
+  /* The selected row and the brand's own quiet band. */
+  --color-brand-tint: #eef1fe;
+
+  /* --- status, each with exactly one job ---------------------------------- */
+  /* Working, available, connected. surface 5.19 */
+  --color-ok: #0e7c5a;
+  /* Waiting on a person to decide. surface 5.02 */
+  --color-waiting: #b4530a;
+  /* Refused, failed, stopped. surface 6.28 */
+  --color-stop: #c02434;
+  /* Not started. Deliberately the ink-soft value: nothing is wrong. */
+  --color-idle: #5f6a78;
+
+  /* --- departments -------------------------------------------------------- */
+  /*
+   * Six hues, one per department, chosen so no two are adjacent on the wheel
+   * and every one clears 4.5:1 on all three grounds as text and carries white
+   * at 5:1+ as a field. They identify; they never rank, and they never imply
+   * a status.
+   */
+  --color-dept-assistant: #2b4be8;
+  --color-dept-finance: #0e7c5a;
+  --color-dept-support: #7a2fd6;
+  --color-dept-integrations: #b4530a;
+  --color-dept-data: #0e6fa8;
+  --color-dept-engineering: #c2185b;
+
+  /* --- one family --------------------------------------------------------- */
+  --font-sans:
+    "Onest", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 
-  /* --- fixed scale (Operate: never fluid) --------------------------------- */
-  --text-legend: 0.6875rem; /* 11px — F-key legends, units, column heads   */
-  --text-label: 0.75rem; /* 12px — labels, codes, status words         */
-  --text-data: 0.8125rem; /* 13px — table cells, log lines              */
-  --text-body: 0.875rem; /* 14px — prose, inputs                       */
-  --text-lead: 1rem; /* 16px — panel leads                         */
-  --text-screen: 1.75rem; /* 28px — screen titles                       */
-  --text-board: 2.5rem; /* 40px — the board headline                  */
+  /* --- fixed scale, ratio ~1.15 (Operate never goes fluid) ---------------- */
+  --text-2xs: 0.6875rem; /* 11px — badges, overline, table heads      */
+  --text-xs: 0.75rem; /* 12px — meta, timestamps, captions         */
+  --text-sm: 0.8125rem; /* 13px — dense UI, table cells, sidebar     */
+  --text-base: 0.875rem; /* 14px — the product's body size            */
+  --text-md: 0.9375rem; /* 15px — conversation prose                 */
+  --text-lg: 1.0625rem; /* 17px — card titles                        */
+  --text-xl: 1.3125rem; /* 21px — page titles                        */
+  --text-2xl: 1.75rem; /* 28px — landing section heads              */
+  --text-3xl: 2.375rem; /* 38px — landing statements                 */
 
-  /* --- one duration, because product motion reports state ---------------- */
-  --ease-term: cubic-bezier(0.2, 0, 0, 1);
+  /* --- form --------------------------------------------------------------- */
+  --radius-sm: 0.375rem; /*  6px — controls, chips, small tiles       */
+  --radius-md: 0.5rem; /*  8px — cards, panels, avatars             */
+  --radius-lg: 0.75rem; /* 12px — dialogs, feature panels            */
+
+  /*
+   * Elevation carries an offset and a soft blur, always. A zero-offset halo is
+   * decoration; nothing in this build uses one.
+   */
+  --shadow-raised: 0 1px 2px rgba(16, 23, 36, 0.06);
+  --shadow-float:
+    0 8px 24px -6px rgba(16, 23, 36, 0.12),
+    0 2px 6px -2px rgba(16, 23, 36, 0.06);
+
+  /* Users are in a task; motion reports state and gets out of the way. */
+  --ease-work: cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* Hard rectangles, everywhere. Tailwind's `rounded-*` utilities are not used
-   anywhere in this codebase; this makes an accidental one a no-op rather than
-   a visible break in the world. */
 @layer base {
-  *,
-  *::before,
-  *::after {
-    border-radius: 0 !important;
-  }
-
   html {
-    background-color: var(--color-void);
-    color-scheme: dark;
+    background-color: var(--color-canvas);
+    color-scheme: light;
   }
 
   body {
-    background-color: var(--color-void);
-    color: var(--color-fg);
-    font-family: var(--font-system);
-    font-size: var(--text-data);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
-    /* The terminal aligns. Tabular figures are the default for the whole
-       machine voice so a column of counts never shifts as it updates. */
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Every number in a column lines up: counts, tenures, prices, totals. */
+  table,
+  [data-numeric] {
     font-variant-numeric: tabular-nums;
   }
 
-  /* One focus treatment for the entire system: a 1px amber inset frame plus a
-     1px void gap, so it reads on a panel, on a well and on the void alike. */
+  /* One focus treatment for the whole product: a 2px brand ring, offset so it
+     reads on a white card, a tinted row and a coloured button alike. */
   :focus-visible {
-    outline: 1px solid var(--color-amber);
-    outline-offset: 1px;
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
   }
 
   ::selection {
-    background-color: var(--color-amber);
-    color: var(--color-void);
+    background-color: var(--color-brand-tint);
+    color: var(--color-ink);
   }
 
   ::placeholder {
-    color: var(--color-fg-dim);
+    color: var(--color-ink-soft);
     opacity: 1;
   }
 
-  /* Thin, valued to the world. Shape and behaviour stay native. */
+  /* Native shape and behaviour; only the value is ours. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-rule-strong) transparent;
+    scrollbar-color: #c4cad4 transparent;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background-color: var(--color-rule-strong);
+    background-color: #c4cad4;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
     background-color: transparent;
@@ -181,17 +206,13 @@
 /* =============================================================================
  * The one authored motion moment.
  *
- * The caret. It blinks on a line that is still arriving and nowhere else, so
- * the one moving thing on any screen is the one thing that is actually
- * happening. The lamp pulse is its only companion.
- *
- * There was a staggered entrance on the register, and it was removed rather
- * than tuned: this interface's first-viewport promise is that you can see the
- * whole company at once, and an entrance that reveals it over half a second is
- * a promise the animation itself is eating. The board arrives painted.
+ * A conversation arriving. The caret blinks only on a line that is still being
+ * written, and the working dot pulses only while an agent is actually working.
+ * Nothing else on any screen moves on its own — no page-load choreography, no
+ * staged reveals. Product loads into a task.
  * ========================================================================== */
 
-@keyframes term-caret {
+@keyframes work-caret {
   0%,
   49% {
     opacity: 1;
@@ -202,25 +223,30 @@
   }
 }
 
-@keyframes term-lamp {
+@keyframes work-pulse {
   0%,
   100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.35;
+    opacity: 0.45;
+    transform: scale(0.82);
   }
 }
 
-@utility term-caret {
+@utility work-caret {
   display: inline-block;
-  width: 0.5em;
+  width: 0.45em;
+  height: 1.05em;
+  vertical-align: text-bottom;
   background-color: currentColor;
-  animation: term-caret 1s steps(1, end) infinite;
+  border-radius: 1px;
+  animation: work-caret 1s steps(1, end) infinite;
 }
 
-@utility term-lamp {
-  animation: term-lamp 1.6s var(--ease-term) infinite;
+@utility work-pulse {
+  animation: work-pulse 1.6s var(--ease-work) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -230,106 +256,115 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
-    /*
-     * The delay matters as much as the duration. A staggered entrance using
-     * fill mode `both` leaves each element at opacity 0 for its own delay
-     * regardless of the duration above — the surface arrives INVISIBLE for the
-     * people who asked not to see it move. Nothing in this build stages any
-     * more, and this line is what keeps it that way if something ever does.
-     */
+    /* The delay matters as much as the duration: a delayed entrance with
+       fill-mode `both` leaves an element invisible for its whole delay no
+       matter how short the duration is. */
     animation-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
 }
 
 /* =============================================================================
  * Sanitised model output.
  *
- * `renderSanitizedMarkdown` emits a small, allowlisted set of tags. They are
- * styled here rather than with a typography plugin so the rules stay visible
- * next to the world they belong to, and so nothing arrives that the allowlist
- * did not authorise.
+ * `renderSanitizedMarkdown` emits a small allowlisted set of tags. They are
+ * styled here, beside the world they belong to, so nothing arrives that the
+ * allowlist did not authorise.
  * ========================================================================== */
-.prose-terminal > * + * {
-  margin-top: 0.75em;
+.prose-work {
+  font-size: var(--text-md);
+  line-height: 1.6;
+  color: var(--color-ink-mid);
 }
-.prose-terminal strong {
-  color: var(--color-fg);
+.prose-work > * + * {
+  margin-top: 0.7em;
+}
+.prose-work strong {
+  color: var(--color-ink);
   font-weight: 600;
 }
-.prose-terminal em {
+.prose-work em {
   font-style: italic;
 }
-.prose-terminal a {
-  color: var(--color-cyan);
+.prose-work a {
+  color: var(--color-brand);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.prose-terminal code {
-  font-family: var(--font-system);
-  font-size: 0.9em;
-  background-color: var(--color-raise);
-  border: 1px solid var(--color-rule);
-  padding: 0 0.3em;
-  color: var(--color-fg);
+.prose-work code {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+  background-color: var(--color-sunken);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.35em;
+  color: var(--color-ink);
 }
-.prose-terminal pre {
-  font-family: var(--font-system);
-  background-color: var(--color-raise);
-  border: 1px solid var(--color-rule);
-  padding: 0.75rem;
+.prose-work pre {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  background-color: var(--color-sunken);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.875rem;
   overflow-x: auto;
+  font-size: var(--text-sm);
 }
-.prose-terminal pre code {
+.prose-work pre code {
   background: none;
   border: 0;
   padding: 0;
 }
-.prose-terminal ul,
-.prose-terminal ol {
+.prose-work ul,
+.prose-work ol {
   padding-left: 1.25rem;
 }
-.prose-terminal ul {
-  list-style: square;
+.prose-work ul {
+  list-style: disc;
 }
-.prose-terminal ol {
+.prose-work ol {
   list-style: decimal;
 }
-.prose-terminal li + li {
+.prose-work li + li {
   margin-top: 0.25em;
 }
-.prose-terminal blockquote {
-  border-left: 1px solid var(--color-rule-strong);
+.prose-work blockquote {
+  border-left: 2px solid var(--color-line-firm);
   padding-left: 0.75rem;
-  color: var(--color-fg-dim);
+  color: var(--color-ink-soft);
 }
-.prose-terminal h1,
-.prose-terminal h2,
-.prose-terminal h3,
-.prose-terminal h4,
-.prose-terminal h5,
-.prose-terminal h6 {
-  font-family: var(--font-system);
-  color: var(--color-fg);
+.prose-work h1,
+.prose-work h2,
+.prose-work h3,
+.prose-work h4,
+.prose-work h5,
+.prose-work h6 {
+  color: var(--color-ink);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-size: var(--text-label);
+  font-size: var(--text-base);
+  letter-spacing: -0.005em;
 }
-.prose-terminal hr {
-  border-color: var(--color-rule);
+.prose-work hr {
+  border-color: var(--color-line);
 }
-.prose-terminal table {
+.prose-work table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-system);
-  font-size: var(--text-data);
+  font-size: var(--text-sm);
 }
-.prose-terminal th,
-.prose-terminal td {
-  border: 1px solid var(--color-rule);
-  padding: 0.25rem 0.5rem;
+.prose-work th,
+.prose-work td {
+  border: 1px solid var(--color-line);
+  padding: 0.35rem 0.6rem;
   text-align: left;
 }
-.prose-terminal img {
+.prose-work th {
+  background-color: var(--color-sunken);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.prose-work img {
   max-width: 100%;
+  border-radius: var(--radius-md);
 }

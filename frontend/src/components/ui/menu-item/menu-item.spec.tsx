@@ -18,11 +18,11 @@ describe("components/ui/menu-item", () => {
     await render(<MenuItem>Profile</MenuItem>);
     const btn = screen.querySelector("button");
     expect(btn).toBeTruthy();
-    expect(btn?.className).toContain("block");
+    expect(btn?.className).toContain("flex");
     expect(btn?.className).toContain("w-full");
     expect(btn?.className).toContain("text-left");
-    expect(btn?.className).toContain("px-3 py-2");
-    expect(btn?.className).toContain("text-label");
+    expect(btn?.className).toContain("px-2 py-1.5");
+    expect(btn?.className).toContain("text-base");
   });
 
   it("has cursor-pointer (R-UB-002)", async () => {
@@ -37,7 +37,7 @@ describe("components/ui/menu-item", () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem>Profile</MenuItem>);
     const cls = screen.querySelector("button")?.className ?? "";
-    expect(cls).toContain("hover:bg-raise");
+    expect(cls).toContain("hover:bg-sunken");
   });
 
   it("transitions colour at the product duration", async () => {
@@ -74,7 +74,7 @@ describe("components/ui/menu-item", () => {
     const btn = screen.querySelector("button");
     expect(btn?.hasAttribute("disabled")).toBe(true);
     expect(btn?.className).toContain("disabled:cursor-not-allowed");
-    expect(btn?.className).toContain("disabled:opacity-40");
+    expect(btn?.className).toContain("disabled:opacity-45");
   });
 
   it("renders Slot children verbatim", async () => {
@@ -101,8 +101,8 @@ describe("components/ui/menu-item", () => {
       await render(<MenuItem class="hover:bg-panel">Clear</MenuItem>);
       const cls = screen.querySelector("button")?.className ?? "";
       // Base tokens preserved
-      expect(cls).toContain("block w-full text-left");
-      expect(cls).toContain("hover:bg-raise");
+      expect(cls).toContain("w-full");
+      expect(cls).toContain("hover:bg-sunken");
       // Override appended
       expect(cls).toContain("hover:bg-panel");
     });
@@ -119,8 +119,8 @@ describe("components/ui/menu-item", () => {
       const a = screen.querySelector("a");
       expect(a).toBeTruthy();
       expect(a?.getAttribute("href")).toBe("/profile/");
-      expect(a?.className).toContain("block w-full text-left");
-      expect(a?.className).toContain("hover:bg-raise");
+      expect(a?.className).toContain("w-full");
+      expect(a?.className).toContain("hover:bg-sunken");
     });
   });
 });
