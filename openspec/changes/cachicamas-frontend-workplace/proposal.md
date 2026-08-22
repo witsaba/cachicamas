@@ -1,10 +1,10 @@
 # Proposal — `cachicamas-frontend-workplace`
 
 > **Status**: implemented on `feat/frontend-workplace`.
-> **Supersedes**: `cachicamas-frontend-os-redesign` (PR #188), which was built and
-> rejected on its direction. This change keeps its structural work — the retirement of the
-> framework-era surfaces, the mocked conversation machine, the byte-frozen wire — and
-> replaces everything a person can see.
+> **Supersedes**: `cachicamas-frontend-os-redesign` (PR #188, merged). That change shipped,
+> and its direction was rejected afterwards. This one keeps its structural work — the
+> retirement of the framework-era surfaces, the mocked conversation machine, the
+> byte-frozen wire — and replaces everything a person can see.
 > **Scope**: `frontend/` and `PRODUCT.md`. No backend file changes.
 
 ## Why
