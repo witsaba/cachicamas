@@ -142,12 +142,12 @@ export default component$(() => {
 });
 
 export const head: DocumentHead = {
-  title: "Sign out — Cachicamas",
+  title: "Sign out — cachicamas",
   meta: [
     {
       name: "description",
       content:
-        "Confirm sign-out from cachicamas. Clears the session cookie and returns you to the sign-in surface.",
+        "Sign out of cachicamas on this browser. You can sign back in with the same GitHub account whenever you like.",
     },
     // Lock the surface to light regardless of OS theme (same rationale
     // as routes/auth/signin/index.tsx).

@@ -21,7 +21,13 @@ import { Status } from "~/components/workspace/status/status";
 import { count, people } from "~/lib/plural";
 import { COMPANY } from "~/lib/mock/company";
 import { CONVERSATIONS } from "~/lib/mock/chat";
-import { AGENTS, PEOPLE, TEAMS, agentBySlug } from "~/lib/mock/staff";
+import {
+  AGENTS,
+  PEOPLE,
+  TEAMS,
+  agentBySlug,
+  rosterFor,
+} from "~/lib/mock/staff";
 
 const CARD =
   "rounded-md border border-line bg-surface shadow-[var(--shadow-raised)]";
@@ -32,6 +38,9 @@ export interface FrontDeskProps {
 
 export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
   const firstName = name.trim().split(/\s+/)[0] ?? "";
+  // The same roster the Organisation panel lists, so the two cannot
+  // disagree about how many people work here.
+  const headcount = rosterFor(name).people.length;
   const onStaff = AGENTS.filter((a) => a.status !== "available");
   const available = AGENTS.filter((a) => a.status === "available");
 
@@ -39,7 +48,7 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
     <div class={PAGE_WELL}>
       <PageHeader
         title={firstName ? `Good to see you, ${firstName}` : "Front desk"}
-        lede={`${onStaff.length} colleagues on staff at ${COMPANY.name}, ${available.length} more you could hire, and ${PEOPLE.length + 1} people working alongside them.`}
+        lede={`${count(onStaff.length, "colleague")} on staff at ${COMPANY.name}, ${available.length} more you could hire, and ${people(headcount)} working alongside them.`}
       >
         <Button as="a" href="/chat/" size="md">
           <Icon name="chat" size={16} />

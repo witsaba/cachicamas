@@ -27,7 +27,8 @@ import { Icon, type IconName } from "~/components/icon/icon";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
 import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { COMPANY } from "~/lib/mock/company";
-import { AGENTS } from "~/lib/mock/staff";
+import { AGENTS, rosterFor } from "~/lib/mock/staff";
+import { people } from "~/lib/plural";
 
 export type WorkspaceSection =
   | "home"
@@ -80,6 +81,13 @@ export const Sidebar = component$<SidebarProps>(
     // hiding them until they are ready would make the rail feel static.
     const onStaff = AGENTS.filter((a) => a.status !== "available");
 
+    // Derived, not hardcoded: the chrome used to claim five people while the
+    // Organisation panel listed four, because two places counted separately.
+    const headcount = rosterFor(
+      session?.user?.name ?? "",
+      session?.user?.email ?? "",
+    ).people.length;
+
     return (
       <div class="bg-surface flex h-full flex-col">
         {/* 1 — the company */}
@@ -101,7 +109,7 @@ export const Sidebar = component$<SidebarProps>(
                 {COMPANY.name}
               </span>
               <span class="text-2xs text-ink-soft block truncate">
-                {COMPANY.plan} plan · {COMPANY.people} people
+                {COMPANY.plan} plan · {people(headcount)}
               </span>
             </span>
           </a>

@@ -406,5 +406,56 @@ export const availableAgents = (): readonly Agent[] =>
 
 export const agentHref = (slug: string): string => `/agents/${slug}/`;
 
+/**
+ * The company's people, with the signed-in person folded in exactly once.
+ *
+ * This is one function rather than three because the first attempt at it was
+ * three, and they disagreed: the shell said five people, the Organisation
+ * panel said four, and a seat whose holder had been de-duplicated away
+ * rendered "Nobody yet" beside an avatar that still showed a face. Whoever
+ * counts the people and whoever fills the seats have to be the same code.
+ *
+ * When the signed-in person's name matches one of the examples they are the
+ * same person, so the example is replaced rather than listed beside them — and
+ * `holdersFor` below rewrites that person's officer seats to point at them.
+ */
+export interface Roster {
+  readonly people: readonly Person[];
+  /** The example person the signed-in one stands in for, if any. */
+  readonly twinId: string | null;
+}
+
+export function rosterFor(name: string, email = ""): Roster {
+  const key = (value: string) => value.trim().toLowerCase();
+  const you: Person = {
+    id: "you",
+    name: name.trim() || email.trim() || "You",
+    initials: "",
+    title: null,
+  };
+  const twin = PEOPLE.find((p) => key(p.name) === key(you.name)) ?? null;
+  return {
+    people: [you, ...PEOPLE.filter((p) => p !== twin)],
+    twinId: twin?.id ?? null,
+  };
+}
+
+/**
+ * Who holds each seat, once the signed-in person has absorbed their twin.
+ * Keyed by `OrgRole.key`; an empty string means the seat is open.
+ */
+export function holdersFor(twinId: string | null): Record<string, string> {
+  return Object.fromEntries(
+    ORG_ROLES.map((role) => [
+      role.key,
+      role.holder === null
+        ? ""
+        : role.holder === twinId
+          ? "you"
+          : role.holder,
+    ]),
+  );
+}
+
 export const teamsForAgent = (slug: string): readonly Team[] =>
   TEAMS.filter((t) => t.agentSlugs.includes(slug));

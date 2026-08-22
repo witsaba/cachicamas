@@ -184,6 +184,44 @@ describe("organisation panel", () => {
     }
   });
 
+  it("counts a seat as filled only when its holder is a real person", async () => {
+    // The regression this replaces: de-duplicating the signed-in person out of
+    // the roster left a seat pointing at an id nobody had, so the header
+    // counted it filled while the row rendered "Nobody yet" beside an empty
+    // avatar. The count is now derived from what actually resolves.
+    const { screen, render } = await createDOM();
+    await render(<OrganizationPanel name="Ana Rivas" email="ana@example.com" />);
+    // Three independent renders of the same fact have to agree: the avatar
+    // (a face, or a dashed placeholder), the select's chosen option, and the
+    // header's count. The regression made all three disagree at once.
+    const openAvatars = screen.querySelectorAll(
+      '[data-testid^="seat-open-"]',
+    ).length;
+    const chosenNobody = Array.from(
+      screen.querySelectorAll('select[data-testid^="holder-"]'),
+    ).filter(
+      (sel) =>
+        sel.querySelector("option[selected]")?.textContent?.trim() ===
+        "Nobody yet",
+    ).length;
+    expect(openAvatars).toBe(chosenNobody);
+    expect(screen.textContent).toContain(
+      `${ORG_ROLES.length - openAvatars} of ${ORG_ROLES.length} filled`,
+    );
+  });
+
+  it("keeps a person's seats when they absorb their example twin", async () => {
+    // Ana Rivas is Head of Finance in the example data. When the signed-in
+    // person IS Ana, that seat must follow her rather than fall vacant — the
+    // Teams board says she holds it, and two screens disagreeing about the
+    // same company is worse than either being wrong.
+    const { screen, render } = await createDOM();
+    await render(<OrganizationPanel name="Ana Rivas" email="ana@example.com" />);
+    const finance = screen.querySelector('[data-testid="holder-finance"]');
+    const chosen = finance?.querySelector("option[selected]");
+    expect(chosen?.textContent).toContain("Ana Rivas");
+  });
+
   it("shows an empty seat as empty, because that is the useful part", async () => {
     const open = ORG_ROLES.find((r) => r.holder === null)!;
     const { screen, render } = await createDOM();

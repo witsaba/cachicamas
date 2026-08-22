@@ -18,7 +18,7 @@ import {
 } from "~/components/workspace/page-header/page-header";
 import { initialsOf } from "~/lib/initials";
 import { COMPANY } from "~/lib/mock/company";
-import { ORG_ROLES, PEOPLE } from "~/lib/mock/staff";
+import { ORG_ROLES, holdersFor, rosterFor } from "~/lib/mock/staff";
 
 const CARD =
   "rounded-md border border-line bg-surface shadow-[var(--shadow-raised)]";
@@ -30,27 +30,22 @@ export interface OrganizationPanelProps {
 
 export const OrganizationPanel = component$<OrganizationPanelProps>(
   ({ name, email }) => {
-    // The signed-in person sits at the top of their own company's list.
-    //
-    // Two things went wrong here and both were visible on screen. Initials
-    // were `slice(0, 2)`, so "Ana Rivas" became AN while the same person's
-    // avatar everywhere else read AR. And the demonstration roster was
-    // concatenated without a de-dup, so a person whose name matches one of the
-    // examples appeared twice, in two roles, with two different faces.
-    const you = {
-      id: "you",
-      name: name || email || "You",
-      initials: initialsOf(name, email),
-      title: null as string | null,
-    };
-    const normalise = (value: string) => value.trim().toLowerCase();
-    const roster = [
-      you,
-      ...PEOPLE.filter((p) => normalise(p.name) !== normalise(you.name)),
-    ];
-    const holders = useSignal<Record<string, string>>(
-      Object.fromEntries(ORG_ROLES.map((r) => [r.key, r.holder ?? ""])),
+    // One source for who the people are and who holds which seat. The first
+    // attempt kept them apart, and they promptly disagreed: a seat whose
+    // holder had been de-duplicated away rendered "Nobody yet" beside an
+    // avatar that still showed a face, under a header that still counted it
+    // filled. See `rosterFor` / `holdersFor` in lib/mock/staff.ts.
+    const { people: roster, twinId } = rosterFor(name, email);
+    const withInitials = roster.map((p) =>
+      p.id === "you" ? { ...p, initials: initialsOf(name, email) } : p,
     );
+    const holders = useSignal<Record<string, string>>(holdersFor(twinId));
+
+    // Counted from what actually resolves to a person, not from what the data
+    // claims. A dangling id is an open seat, and the header says so.
+    const filled = ORG_ROLES.filter((role) =>
+      withInitials.some((p) => p.id === holders.value[role.key]),
+    ).length;
 
     return (
       <div class={PAGE_WELL}>
@@ -65,15 +60,14 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
               Officer roles
             </h2>
             <span class="text-ink-soft text-xs">
-              {ORG_ROLES.filter((r) => holders.value[r.key]).length} of{" "}
-              {ORG_ROLES.length} filled
+              {filled} of {ORG_ROLES.length} filled
             </span>
           </div>
 
           <ul class="divide-line divide-y">
             {ORG_ROLES.map((role) => {
               const holderId = holders.value[role.key];
-              const holder = roster.find((p) => p.id === holderId);
+              const holder = withInitials.find((p) => p.id === holderId);
               return (
                 <li
                   key={role.key}
@@ -95,6 +89,7 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
                     ) : (
                       <span
                         aria-hidden="true"
+                        data-testid={`seat-open-${role.key}`}
                         class="border-line-control text-ink-soft inline-flex h-8 w-8 items-center justify-center rounded-full border border-dashed"
                       >
                         <Icon name="plus" size={14} />
@@ -123,7 +118,7 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
                       <option value="" selected={holderId === ""}>
                         Nobody yet
                       </option>
-                      {roster.map((p) => (
+                      {withInitials.map((p) => (
                         <option
                           key={p.id}
                           value={p.id}
@@ -150,10 +145,10 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
             id="people"
             class="border-line text-ink border-b px-5 py-4 text-base font-semibold"
           >
-            People · {roster.length}
+            People · {withInitials.length}
           </h2>
           <ul class="divide-line divide-y" data-testid="people-list">
-            {roster.map((p) => (
+            {withInitials.map((p) => (
               <li key={p.id} class="flex items-center gap-3 px-5 py-3">
                 <PersonAvatar name={p.name} initials={p.initials} size="md" />
                 <span class="min-w-0 flex-1">
