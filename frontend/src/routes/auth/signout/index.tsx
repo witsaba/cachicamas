@@ -39,6 +39,7 @@
  */
 import { component$ } from "@builder.io/qwik";
 import { Form, type DocumentHead } from "@builder.io/qwik-city";
+import { MarketingFooter } from "~/components/marketing/footer/footer";
 import { Button } from "~/components/ui/button/button";
 import { useSignOut } from "~/routes/plugin@auth";
 
@@ -51,86 +52,91 @@ export default component$(() => {
   const signOut = useSignOut();
 
   return (
-    <main class="bg-canvas text-ink flex-1" data-testid="auth-signout-page">
-      {/* The page's top rule — the same flat hairline /auth/signin carries. */}
-      <div class="bg-rule h-px w-full" aria-hidden="true" />
-
-      <section
-        class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"
-        data-testid="auth-signout-card"
-      >
-        {/* Brand mark — same chrome as the app header and the
-            /auth/signin page. Lets the visitor bail to the landing
-            without using the browser back button. */}
-        <a
-          href="/"
-          class="text-ink text-lg font-bold tracking-[-0.02em] no-underline"
-          data-testid="auth-signout-brand"
-        >
-          cachicamas
-        </a>
-
-        <h1
-          class="text-ink mt-8 text-2xl font-bold tracking-[-0.025em]"
-          data-testid="auth-signout-heading"
-        >
-          Sign out of cachicamas?
-        </h1>
-
-        <p
-          class="text-ink-mid mt-3 max-w-[54ch] text-base leading-relaxed"
-          data-testid="auth-signout-description"
-        >
-          Your session cookie will be cleared and you'll be returned to the
-          sign-in surface. You can sign back in at any time with the same GitHub
-          account.
-        </p>
-
-        <Form
-          action={signOut}
-          class="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center"
-          data-testid="auth-signout-form"
-        >
-          <input
-            type="hidden"
-            name="redirectTo"
-            value={POST_SIGNOUT_REDIRECT_TO}
-          />
-          <Button
-            type="submit"
-            variant="primary"
-            testId="auth-signout-submit"
-            // See the sign-in-button.tsx for the rationale: the
-            // `not-disabled:hover:*` and `focus-visible:*` tokens
-            // from the primary variant have higher specificity than
-            // bare `hover:*` overrides, so the consumer must use
-            // `!important` to win. Tailwind 4 syntax: `!` goes
-            // AFTER the variant (`hover:!bg-zinc-800`), not before.
-          >
-            Sign out
-          </Button>
-          {/* Cancel — bails to the landing without touching the session.
-              A regular link (not a button) so the affordance reads as
-              "secondary, reversible". */}
-          <Button
-            as="a"
+    <main
+      class="bg-canvas text-ink flex min-h-screen flex-col"
+      data-testid="auth-signout-page"
+    >
+      {/* Same framing as /auth/signin, for the same reason: these are the two
+          surfaces a person meets between being outside and being inside, and
+          neither had been designed. */}
+      <header class="border-line bg-surface border-b">
+        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+          <a
             href="/"
-            variant="secondary"
-            testId="auth-signout-cancel"
-            class=""
+            class="text-ink rounded-sm text-lg font-bold tracking-[-0.02em] no-underline"
+            data-testid="auth-signout-brand"
           >
-            Cancel
-          </Button>
-        </Form>
+            cachicamas
+          </a>
+          <a
+            href="/home/"
+            class="text-ink-mid hover:text-ink rounded-sm text-base font-medium"
+          >
+            Back to your company
+          </a>
+        </div>
+      </header>
 
-        <p
-          class="text-ink-soft mt-10 text-xs"
-          data-testid="auth-signout-footnote"
+      <div class="flex flex-1 items-center justify-center px-4 py-12">
+        <section
+          class="border-line bg-surface w-full max-w-md rounded-lg border p-8 shadow-[var(--shadow-float)]"
+          data-testid="auth-signout-card"
         >
-          Sign-out is final for this browser. Other devices and browsers remain
-          signed in until you sign out from each one.
-        </p>
-      </section>
+          <h1
+            class="text-ink text-2xl font-bold tracking-[-0.025em]"
+            data-testid="auth-signout-heading"
+          >
+            Sign out of cachicamas?
+          </h1>
+
+          <p
+            class="text-ink-mid pt-3 text-base leading-relaxed"
+            data-testid="auth-signout-description"
+          >
+            You will be returned to the sign-in page, and you can sign back in
+            with the same GitHub account whenever you like.
+          </p>
+
+          <Form
+            action={signOut}
+            class="flex flex-col gap-3 pt-7 sm:flex-row sm:items-center"
+            data-testid="auth-signout-form"
+          >
+            <input
+              type="hidden"
+              name="redirectTo"
+              value={POST_SIGNOUT_REDIRECT_TO}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              testId="auth-signout-submit"
+            >
+              Sign out
+            </Button>
+            {/* Cancel bails without touching the session, so it reads as
+                secondary and reversible. */}
+            <Button
+              as="a"
+              href="/home/"
+              variant="secondary"
+              testId="auth-signout-cancel"
+            >
+              Cancel
+            </Button>
+          </Form>
+
+          <p
+            class="border-line text-ink-soft mt-8 border-t pt-4 text-xs"
+            data-testid="auth-signout-footnote"
+          >
+            This signs you out on this browser only. Other devices stay signed
+            in until you sign out from each one.
+          </p>
+        </section>
+      </div>
+
+      <MarketingFooter />
     </main>
   );
 });

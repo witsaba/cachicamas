@@ -16,6 +16,7 @@ import {
   PAGE_WELL,
   PageHeader,
 } from "~/components/workspace/page-header/page-header";
+import { initialsOf } from "~/lib/initials";
 import { COMPANY } from "~/lib/mock/company";
 import { ORG_ROLES, PEOPLE } from "~/lib/mock/staff";
 
@@ -30,13 +31,23 @@ export interface OrganizationPanelProps {
 export const OrganizationPanel = component$<OrganizationPanelProps>(
   ({ name, email }) => {
     // The signed-in person sits at the top of their own company's list.
+    //
+    // Two things went wrong here and both were visible on screen. Initials
+    // were `slice(0, 2)`, so "Ana Rivas" became AN while the same person's
+    // avatar everywhere else read AR. And the demonstration roster was
+    // concatenated without a de-dup, so a person whose name matches one of the
+    // examples appeared twice, in two roles, with two different faces.
     const you = {
       id: "you",
       name: name || email || "You",
-      initials: (name || email || "?").slice(0, 2).toUpperCase(),
+      initials: initialsOf(name, email),
       title: null as string | null,
     };
-    const roster = [you, ...PEOPLE];
+    const normalise = (value: string) => value.trim().toLowerCase();
+    const roster = [
+      you,
+      ...PEOPLE.filter((p) => normalise(p.name) !== normalise(you.name)),
+    ];
     const holders = useSignal<Record<string, string>>(
       Object.fromEntries(ORG_ROLES.map((r) => [r.key, r.holder ?? ""])),
     );
@@ -95,7 +106,6 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
                     <select
                       id={`holder-${role.key}`}
                       data-testid={`holder-${role.key}`}
-                      value={holderId}
                       onChange$={(_, el) => {
                         holders.value = {
                           ...holders.value,
@@ -104,9 +114,21 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
                       }}
                       class="border-line-control bg-surface text-ink h-9 min-w-[12rem] cursor-pointer rounded-md border px-2.5 text-base"
                     >
-                      <option value="">Nobody yet</option>
+                      {/* `selected` on the option, not `value` on the
+                          select: a browser ignores `value` on a `<select>` at
+                          parse time, so every seat rendered "Nobody yet" while
+                          the avatar beside it showed a holder and the header
+                          counted five of six filled. One screen, three
+                          statements, no two agreeing. */}
+                      <option value="" selected={holderId === ""}>
+                        Nobody yet
+                      </option>
                       {roster.map((p) => (
-                        <option key={p.id} value={p.id}>
+                        <option
+                          key={p.id}
+                          value={p.id}
+                          selected={p.id === holderId}
+                        >
                           {p.name}
                         </option>
                       ))}
@@ -130,7 +152,7 @@ export const OrganizationPanel = component$<OrganizationPanelProps>(
           >
             People · {roster.length}
           </h2>
-          <ul class="divide-line divide-y">
+          <ul class="divide-line divide-y" data-testid="people-list">
             {roster.map((p) => (
               <li key={p.id} class="flex items-center gap-3 px-5 py-3">
                 <PersonAvatar name={p.name} initials={p.initials} size="md" />

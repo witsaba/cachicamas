@@ -105,10 +105,13 @@ test("[routes/home]: shows every colleague on staff, and none that are not", asy
   }
 });
 
-test("[routes/home]: offers the ones you could hire without pretending they are here", async () => {
+test("[routes/home]: mentions the ones you could hire, below the work and quietly", async () => {
+  // A person's own front desk should not read as a store: the hire prompt
+  // closes the page as one line, after what they were actually doing.
   const screen = await renderAuthed("Ana Rivas");
   const text = screen.textContent ?? "";
-  expect(text).toContain("You could also hire");
+  expect(text).toContain("Your plan also includes");
+  expect(text).toContain("Neither has started work");
   for (const agent of AGENTS.filter((a) => a.status === "available")) {
     expect(text, agent.slug).toContain(agent.name);
   }

@@ -85,7 +85,13 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
         </ul>
       </section>
 
-      <div class="grid grid-cols-1 items-start gap-4 pt-9 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      {/* The work first, and only then the shop.
+          "You could also hire" used to sit in the second-best slot on a
+          person's own front desk, which made their company read as a store.
+          The two columns below are the work — what you were doing, and who you
+          do it with — and the plan's own suggestion closes the page as one
+          quiet line. */}
+      <div class="grid grid-cols-1 items-start gap-4 pt-9 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         {/* what you were doing */}
         <section class={CARD} aria-labelledby="recent">
           <h2
@@ -124,86 +130,82 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
           </ul>
         </section>
 
-        <div class="space-y-4">
-          {/* who you could add */}
-          <section class={CARD} aria-labelledby="could-hire">
-            <h2
-              id="could-hire"
-              class="border-line text-ink border-b px-4 py-3 text-base font-semibold"
-            >
-              You could also hire
-            </h2>
-            <ul class="divide-line divide-y">
-              {available.map((agent) => (
-                <li key={agent.slug}>
-                  <a
-                    href={`/agents/${agent.slug}/`}
-                    class="hover:bg-sunken flex items-center gap-3 px-4 py-3 transition-colors duration-150"
-                  >
-                    <AgentAvatar agent={agent} size="md" />
-                    <span class="min-w-0 flex-1">
-                      <span class="text-ink block truncate text-base font-medium">
-                        {agent.name}
-                      </span>
-                      <span class="text-ink-soft block truncate text-xs">
-                        {agent.tagline}
-                      </span>
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-            <p class="text-ink-soft px-4 py-3 text-xs">
-              Both are included on the Company plan.
-            </p>
-          </section>
-
-          {/* who works with whom */}
-          <section class={CARD} aria-labelledby="your-teams">
-            <h2
-              id="your-teams"
-              class="border-line text-ink border-b px-4 py-3 text-base font-semibold"
-            >
-              Your teams
-            </h2>
-            <ul class="divide-line divide-y">
-              {TEAMS.map((team) => (
-                <li key={team.slug} class="px-4 py-3">
-                  <a
-                    href="/teams/"
-                    class="text-ink rounded-sm text-base font-medium hover:underline"
-                  >
-                    {team.name}
-                  </a>
-                  <span class="flex flex-wrap items-center gap-1 pt-2">
-                    {team.agentSlugs.map((slug) => {
-                      const a = agentBySlug(slug);
-                      return a ? (
-                        <AgentAvatar key={slug} agent={a} size="sm" />
-                      ) : null;
-                    })}
-                    {team.personIds.map((id) => {
-                      const p = PEOPLE.find((x) => x.id === id);
-                      return p ? (
-                        <PersonAvatar
-                          key={id}
-                          name={p.name}
-                          initials={p.initials}
-                          size="sm"
-                        />
-                      ) : null;
-                    })}
-                    <span class="text-ink-soft pl-1 text-xs">
-                      {team.agentSlugs.length} agents · {team.personIds.length}{" "}
-                      people
-                    </span>
+        {/* who works with whom */}
+        <section class={CARD} aria-labelledby="your-teams">
+          <h2
+            id="your-teams"
+            class="border-line text-ink border-b px-4 py-3 text-base font-semibold"
+          >
+            Your teams
+          </h2>
+          <ul class="divide-line divide-y">
+            {TEAMS.map((team) => (
+              <li key={team.slug} class="px-4 py-3">
+                <a
+                  href="/teams/"
+                  class="text-ink rounded-sm text-base font-medium hover:underline"
+                >
+                  {team.name}
+                </a>
+                <span class="text-ink-soft block truncate text-xs">
+                  {team.purpose}
+                </span>
+                <span class="flex flex-wrap items-center gap-1 pt-2">
+                  {team.agentSlugs.map((slug) => {
+                    const a = agentBySlug(slug);
+                    return a ? (
+                      <AgentAvatar key={slug} agent={a} size="sm" />
+                    ) : null;
+                  })}
+                  {team.personIds.map((id) => {
+                    const person = PEOPLE.find((x) => x.id === id);
+                    return person ? (
+                      <PersonAvatar
+                        key={id}
+                        name={person.name}
+                        initials={person.initials}
+                        size="sm"
+                      />
+                    ) : null;
+                  })}
+                  <span class="text-ink-soft pl-1 text-xs">
+                    {team.agentSlugs.length} agents · {team.personIds.length}{" "}
+                    people
                   </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
+
+      {/* the quiet line, last */}
+      <section
+        class="border-line mt-9 flex flex-wrap items-center gap-x-6 gap-y-3 border-t pt-5"
+        aria-labelledby="could-hire"
+      >
+        <h2 id="could-hire" class="text-ink-soft text-sm">
+          Your plan also includes
+        </h2>
+        <ul class="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {available.map((agent) => (
+            <li key={agent.slug}>
+              <a
+                href={`/agents/${agent.slug}/`}
+                class="group flex items-center gap-2 rounded-sm"
+              >
+                <AgentAvatar agent={agent} size="sm" />
+                <span class="text-ink text-sm font-medium group-hover:underline">
+                  {agent.name}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p class="text-ink-soft text-xs">
+          Neither has started work. Nobody does until you say so.
+        </p>
+      </section>
     </div>
   );
 });

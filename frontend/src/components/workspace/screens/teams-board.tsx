@@ -119,23 +119,23 @@ export const TeamsBoard = component$(() => (
       ))}
     </div>
 
-    {/* The one thing this plan does not have. Named plainly rather than
-        locked behind a padlock, because a company deciding whether to move up
-        needs to read what it would get, not guess at it. */}
-    <section class="border-line-control bg-surface mt-4 rounded-md border border-dashed p-5">
-      <h2 class="text-ink text-lg font-semibold tracking-[-0.01em]">
-        Build a team nobody else has
-      </h2>
-      <p class="text-ink-mid max-w-[62ch] pt-1 text-base">
+    {/* The one thing this plan does not have, said once and quietly.
+        This is a person's own workspace, not a shop: a dashed panel with its
+        own heading and a call to action was the second-loudest thing on the
+        page, competing with the teams it was describing. */}
+    <p class="border-line text-ink-mid mt-8 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t pt-5 text-sm">
+      <Icon name="teams" size={16} class="text-ink-soft relative top-0.5" />
+      <span class="max-w-[70ch]">
         On the Workforce plan a company gets three open desks — specialists you
-        define yourself, trained on how your company actually works — and can
-        put any two agents together as a permanent pair on one team.
-      </p>
-      <p class="pt-4">
-        <Button as="a" href="/#plans" size="md" variant="secondary">
+        define yourself — and can put any two agents together as a permanent
+        pair on one team.{" "}
+        <a
+          href="/#plans"
+          class="text-brand rounded-sm font-medium hover:underline"
+        >
           See what Workforce includes
-        </Button>
-      </p>
-    </section>
+        </a>
+      </span>
+    </p>
   </div>
 ));

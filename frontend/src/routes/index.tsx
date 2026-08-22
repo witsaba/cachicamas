@@ -21,13 +21,11 @@ import { type DocumentHead } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon/icon";
 import { MarketingFooter } from "~/components/marketing/footer/footer";
 import { MarketingHeader } from "~/components/marketing/header/header";
+import { HeroProof } from "~/components/marketing/hero-proof/hero-proof";
 import { Pricing } from "~/components/marketing/pricing/pricing";
 import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { Button } from "~/components/ui/button/button";
-import {
-  AgentAvatar,
-  PersonAvatar,
-} from "~/components/workspace/avatar/avatar";
+import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { AGENTS, agentBySlug } from "~/lib/mock/staff";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
@@ -100,84 +98,8 @@ export default component$(() => {
               </p>
             </div>
 
-            {/* the proof — a conversation, not a screenshot of one */}
-            <div class={CARD} data-testid="hero-proof">
-              <header class="border-line flex items-center gap-3 border-b px-4 py-3">
-                <AgentAvatar agent={finance} size="md" />
-                <span class="min-w-0 flex-1">
-                  <span class="flex items-center gap-2">
-                    <span class="text-ink text-base font-semibold">
-                      {finance.name}
-                    </span>
-                    <span class="border-brand/25 bg-brand-tint text-2xs text-brand rounded-sm border px-1.5 py-px font-semibold tracking-wide uppercase">
-                      Agent
-                    </span>
-                  </span>
-                  <span class="text-ink-soft block text-xs">
-                    Operations · on staff {finance.tenure}
-                  </span>
-                </span>
-              </header>
-
-              <div class="space-y-4 px-4 py-4">
-                <div class="flex gap-3">
-                  <PersonAvatar name="Ana Rivas" initials="AR" size="md" />
-                  <p class="text-md text-ink-mid pt-1">
-                    Order 4471 arrived damaged. Refund it and tell them.
-                  </p>
-                </div>
-
-                <div class="flex gap-3">
-                  <AgentAvatar agent={finance} size="md" />
-                  <p class="text-md text-ink-mid pt-1">
-                    Within policy — under £200, reported inside 14 days. I have
-                    written the email. Read it before it goes.
-                  </p>
-                </div>
-
-                <div class="border-waiting/35 bg-waiting/[0.06] rounded-md border p-3">
-                  <p class="flex items-center gap-2">
-                    <Icon
-                      name="shield"
-                      size={16}
-                      class="text-waiting shrink-0"
-                    />
-                    <span class="text-ink text-base font-semibold">
-                      Waiting for you
-                    </span>
-                  </p>
-                  <dl class="border-line/70 mt-2 grid grid-cols-[minmax(4rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 border-t pt-2 text-xs">
-                    <dt class="text-ink-soft">to</dt>
-                    <dd class="text-ink-mid truncate">
-                      j.moreau@northgate.example
-                    </dd>
-                    <dt class="text-ink-soft">subject</dt>
-                    <dd class="text-ink-mid truncate">
-                      Your refund for order 4471
-                    </dd>
-                    <dt class="text-ink-soft">amount</dt>
-                    <dd class="text-ink-mid" data-numeric>
-                      £148.00
-                    </dd>
-                  </dl>
-                  <p class="text-ink-mid mt-2 text-xs">
-                    This email leaves the building and cannot be recalled.
-                  </p>
-                  <p class="mt-3 flex gap-2">
-                    <span class="bg-brand text-ink-inverse inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium">
-                      Allow it
-                    </span>
-                    <span class="border-line-control text-ink inline-flex h-7 items-center rounded-md border px-2.5 text-xs font-medium">
-                      Don&rsquo;t
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              <p class="border-line text-ink-soft border-t px-4 py-2.5 text-xs">
-                An example conversation. Nothing is sent until a person answers.
-              </p>
-            </div>
+            {/* the proof — the product doing the thing, not a picture of it */}
+            <HeroProof agent={finance} />
           </div>
         </section>
 
@@ -195,9 +117,20 @@ export default component$(() => {
               </p>
             </div>
 
-            <ul class="grid grid-cols-1 gap-4 pt-10 sm:grid-cols-2 lg:grid-cols-3">
+            {/* A roster, not a card grid.
+                Six same-size cards of avatar + heading + text is the lazy
+                scaffold, and it is what every page in this category ships. A
+                staff list is what a company actually reads: one row per
+                colleague, ruled, with the department, the job and what they do
+                laid out in columns you can scan down. It is also the only
+                section on this page that is not a grid of cards, which is what
+                stops the whole page reading as one rhythm. */}
+            <ul class="border-line mt-10 border-t">
               {AGENTS.map((agent) => (
-                <li key={agent.slug} class={`${CARD} p-5`}>
+                <li
+                  key={agent.slug}
+                  class="border-line grid grid-cols-1 gap-x-8 gap-y-3 border-b py-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_minmax(0,17rem)]"
+                >
                   <div class="flex items-start gap-3">
                     <AgentAvatar agent={agent} size="lg" />
                     <div class="min-w-0">
@@ -209,16 +142,24 @@ export default component$(() => {
                       </p>
                     </div>
                   </div>
-                  <p class="text-ink-mid pt-3 text-base">{agent.tagline}</p>
-                  <ul class="space-y-1 pt-3">
-                    {agent.skills.slice(0, 3).map((s) => (
-                      <li key={s.name} class="text-ink-mid flex gap-2 text-sm">
+
+                  <p class="text-ink-mid max-w-[52ch] text-base">
+                    <span class="text-ink font-medium">{agent.tagline}</span>{" "}
+                    {agent.summary}
+                  </p>
+
+                  <ul class="space-y-1">
+                    {agent.skills.slice(0, 3).map((skill) => (
+                      <li
+                        key={skill.name}
+                        class="text-ink-mid flex gap-2 text-sm"
+                      >
                         <Icon
                           name="check"
                           size={14}
                           class="text-ok mt-1 shrink-0"
                         />
-                        {s.name}
+                        {skill.name}
                       </li>
                     ))}
                   </ul>
@@ -245,11 +186,8 @@ export default component$(() => {
             <ol class="grid grid-cols-1 gap-4 pt-10 lg:grid-cols-3">
               {/* 1 — hire */}
               <li class={`${CARD} flex flex-col p-5`}>
-                <p class="text-2xs text-ink-soft font-semibold tracking-wide uppercase">
-                  Step one
-                </p>
-                <h3 class="text-ink pt-1 text-lg font-semibold tracking-[-0.01em]">
-                  Hire the ones you need
+                <h3 class="text-ink text-lg font-semibold tracking-[-0.01em]">
+                  First, hire the ones you need
                 </h3>
                 <p class="text-ink-mid pt-2 text-base">
                   Pick from the directory. They arrive knowing their job and
@@ -285,11 +223,8 @@ export default component$(() => {
 
               {/* 2 — access */}
               <li class={`${CARD} flex flex-col p-5`}>
-                <p class="text-2xs text-ink-soft font-semibold tracking-wide uppercase">
-                  Step two
-                </p>
-                <h3 class="text-ink pt-1 text-lg font-semibold tracking-[-0.01em]">
-                  Give them exactly what they need
+                <h3 class="text-ink text-lg font-semibold tracking-[-0.01em]">
+                  Then give them exactly what they need
                 </h3>
                 <p class="text-ink-mid pt-2 text-base">
                   Connect the tools they should use. Each one says what it may
@@ -316,11 +251,8 @@ export default component$(() => {
 
               {/* 3 — approve */}
               <li class={`${CARD} flex flex-col p-5`}>
-                <p class="text-2xs text-ink-soft font-semibold tracking-wide uppercase">
-                  Step three
-                </p>
-                <h3 class="text-ink pt-1 text-lg font-semibold tracking-[-0.01em]">
-                  You keep the last word
+                <h3 class="text-ink text-lg font-semibold tracking-[-0.01em]">
+                  And you keep the last word
                 </h3>
                 <p class="text-ink-mid pt-2 text-base">
                   They do the work and show it to you. Anything that leaves the

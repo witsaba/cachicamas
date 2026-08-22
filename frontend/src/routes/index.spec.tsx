@@ -72,17 +72,20 @@ test("[routes/index]: leads with the offer and one primary action", async () => 
   ).toBe("/home");
 });
 
-test("[routes/index]: proves the product's own moment instead of claiming it", async () => {
-  // The argument of the whole product is that a colleague stops before doing
-  // anything irreversible. A landing page that only asserts that has not
-  // shown anybody anything.
+test("[routes/index]: opens on the product's own moment, mid-conversation", async () => {
+  // The proof PLAYS (see components/marketing/hero-proof), so first paint is
+  // the person's request with the colleague about to answer. What is asserted
+  // here is that the page mounts the real thing, seeded and named; that the
+  // exchange actually reaches the permission is asserted where it can be
+  // driven a tick at a time, in hero-proof.spec.tsx.
   const screen = await renderLanding();
   const proof = screen.querySelector('[data-testid="hero-proof"]');
   expect(proof).toBeTruthy();
   const text = proof?.textContent ?? "";
-  expect(text).toContain("Waiting for you");
-  expect(text).toContain("cannot be recalled");
-  expect(text).toContain("Allow it");
+  expect(text).toContain("Finance");
+  expect(text).toContain("Agent");
+  expect(text).toContain("Order 4471 arrived damaged");
+  expect(text).toContain("Nothing is sent until a person answers");
 });
 
 test("[routes/index]: names every specialist the product actually has", async () => {

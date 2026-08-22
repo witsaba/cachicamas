@@ -335,6 +335,49 @@ export type Beat =
       readonly recovery: string;
     };
 
+/**
+ * The public page's proof, as beats rather than as a still.
+ *
+ * It is the same machine the workspace conversation runs on, played on the
+ * landing page — which is the point: the thing being demonstrated is a
+ * colleague stopping mid-work to ask, and a screenshot of a stopped colleague
+ * is not a demonstration of stopping.
+ */
+export const HERO_OPENING: TranscriptEntry = {
+  kind: "said",
+  id: "hero-you",
+  who: "you",
+  text: "Order 4471 arrived damaged. Refund it and tell them.",
+  state: "final",
+};
+
+export const HERO_SCRIPT: readonly Beat[] = [
+  { t: "note", label: "Working", detail: "Just now", tone: "live" },
+  {
+    t: "say",
+    chunks:
+      "Within policy \u2014 under \u00a3200, reported inside 14 days. I have written the email. Read it before it goes.".split(
+        /(?<=\s)/,
+      ),
+  },
+  {
+    t: "hold",
+    tool: "Helpdesk",
+    intent: "Send a refund confirmation to the customer",
+    args: [
+      ["to", "j.moreau@northgate.example"],
+      ["subject", "Your refund for order 4471"],
+      ["amount", "\u00a3148.00"],
+    ],
+    risk: "This email leaves the building and cannot be recalled.",
+    onGranted: "Sent, and logged against your name.".split(/(?<=\s)/),
+    onDenied: "Nothing was sent. The refund is still yours to decide.".split(
+      /(?<=\s)/,
+    ),
+    result: "1 message sent \u00b7 logged against your name",
+  },
+];
+
 /** Split a sentence into the chunks an answer actually arrives in. */
 function deltas(text: string): readonly string[] {
   return text.split(/(?<=\s)/);

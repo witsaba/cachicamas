@@ -144,6 +144,35 @@ describe("teams board", () => {
 });
 
 describe("organisation panel", () => {
+  it("shows the person actually holding each filled seat", async () => {
+    // The bug this replaces: every select rendered "Nobody yet" while the
+    // avatar beside it showed a holder and the header counted "5 of 6 filled".
+    const { screen, render } = await createDOM();
+    await render(<OrganizationPanel name="Sam Vale" email="sam@example.com" />);
+    for (const role of ORG_ROLES) {
+      if (role.holder === null) continue;
+      const select = screen.querySelector(`[data-testid="holder-${role.key}"]`);
+      const chosen = select?.querySelector("option[selected]");
+      expect(chosen, role.key).toBeTruthy();
+      expect(chosen?.textContent?.trim(), role.key).not.toBe("Nobody yet");
+    }
+  });
+
+  it("names each person once, however they are spelled", async () => {
+    // The signed-in person used to be concatenated onto the example roster
+    // without a de-dup, so someone whose name matched an example appeared
+    // twice, in two roles, with two different faces.
+    const { screen, render } = await createDOM();
+    await render(<OrganizationPanel name="Ana Rivas" email="ana@example.com" />);
+    const people = screen.querySelector('[data-testid="people-list"]');
+    const rows = Array.from(people?.querySelectorAll("li") ?? []).filter((li) =>
+      (li.textContent ?? "").includes("Ana Rivas"),
+    );
+    expect(rows.length).toBe(1);
+    // And it is the signed-in person's row, not the example one.
+    expect(rows[0].textContent).toContain("you");
+  });
+
   it("lists every seat with what it answers for", async () => {
     const { screen, render } = await createDOM();
     await render(<OrganizationPanel name="Ana Rivas" email="ana@example.com" />);
@@ -163,8 +192,11 @@ describe("organisation panel", () => {
       `[data-testid="holder-${open.key}"]`,
     ) as HTMLSelectElement | null;
     expect(select).toBeTruthy();
-    expect(select?.getAttribute("value")).toBe("");
-    expect(select?.textContent).toContain("Nobody yet");
+    // `selected` on the option, never `value` on the select — a browser
+    // ignores the latter at parse time, which is how every seat came to read
+    // "Nobody yet" beside an avatar that showed a holder.
+    const chosen = select?.querySelector("option[selected]");
+    expect(chosen?.textContent).toContain("Nobody yet");
   });
 
   it("puts the signed-in person in their own company", async () => {

@@ -98,7 +98,9 @@ export const Pricing = component$(() => {
                     </span>
                   ) : null}
                 </div>
-                <p class="text-ink-soft min-h-[3rem] pt-1.5 text-sm">
+                {/* The row-alignment floor is for the 4-up grid only. Left unscoped it
+                    opens a ~48px hole above the price on a stacked phone. */}
+                <p class="text-ink-soft pt-1.5 text-sm lg:min-h-[3rem]">
                   {plan.forWhom}
                 </p>
 
@@ -179,11 +181,17 @@ export const Pricing = component$(() => {
                 >
                   &nbsp;
                 </th>
+                {/* The recommendation does not stop at the card. A table that
+                    drops the emphasis makes a reader re-find the column they
+                    were just looking at. */}
                 {PLANS.map((p) => (
                   <th
                     key={p.slug}
                     scope="col"
-                    class="text-ink px-5 py-3 text-base font-semibold"
+                    class={[
+                      "px-5 py-3 text-base font-semibold",
+                      p.recommended ? "bg-brand-tint text-brand" : "text-ink",
+                    ].join(" ")}
                   >
                     {p.name}
                   </th>
@@ -202,7 +210,13 @@ export const Pricing = component$(() => {
                   {PLANS.map((p) => {
                     const value = row.values[p.slug];
                     return (
-                      <td key={p.slug} class="text-ink px-5 py-3 text-base">
+                      <td
+                        key={p.slug}
+                        class={[
+                          "text-ink px-5 py-3 text-base",
+                          p.recommended ? "bg-brand-tint/45" : "",
+                        ].join(" ")}
+                      >
                         {value === true ? (
                           <>
                             <Icon

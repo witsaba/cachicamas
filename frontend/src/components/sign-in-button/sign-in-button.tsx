@@ -68,6 +68,9 @@ export interface SignInButtonProps {
    * action on every page this appears on.
    */
   size?: ButtonSize;
+  /** Appended to the button's system tokens. Used for `w-full` on the
+   *  sign-in page, where the control is the card's whole width. */
+  class?: string;
 }
 
 /**
@@ -82,7 +85,13 @@ export interface SignInButtonProps {
  *   shape, the hidden providerId, the label, and the redirect target.
  */
 export const SignInButton = component$<SignInButtonProps>(
-  ({ signIn, label = "Sign in", redirectTo = "/profile", size = "md" }) => {
+  ({
+    signIn,
+    label = "Sign in",
+    redirectTo = "/profile",
+    size = "md",
+    class: className,
+  }) => {
     // Pre-build the form-data map so the Form action's submit sees the
     // hidden fields exactly. Auth.js looks up providerId from the form
     // data to pick which OAuth provider to start.
@@ -105,6 +114,7 @@ export const SignInButton = component$<SignInButtonProps>(
           type="submit"
           variant="primary"
           size={size}
+          class={className}
           testId="sign-in-button"
           // This button used to fight its own variant with a stack of
           // `!important` overrides, which is how a control ends up looking

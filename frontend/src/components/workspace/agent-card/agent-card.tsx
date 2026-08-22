@@ -60,25 +60,17 @@ export const AgentCard = component$<AgentCardProps>(({ agent }) => {
 
       <div class="border-line mt-4 flex items-center justify-between gap-3 border-t pt-3">
         <Status status={agent.status} word={agent.statusWord} />
-        {hired ? (
-          <Button
-            as="a"
-            href={`/chat/?with=${agent.slug}`}
-            size="sm"
-            variant="primary"
-          >
-            Talk to {agent.name.split(" ")[0]}
-          </Button>
-        ) : (
-          <Button
-            as="a"
-            href={`/agents/${agent.slug}/`}
-            size="sm"
-            variant="secondary"
-          >
-            Add to your team
-          </Button>
-        )}
+        {/* Secondary, on both branches. Six brand-filled buttons down one grid
+            is six primary actions, which is none; the colleague's own profile
+            is where a single committing action belongs. */}
+        <Button
+          as="a"
+          href={hired ? `/chat/?with=${agent.slug}` : `/agents/${agent.slug}/`}
+          size="sm"
+          variant="secondary"
+        >
+          {hired ? `Talk to ${agent.name.split(" ")[0]}` : "Add to your team"}
+        </Button>
       </div>
     </article>
   );

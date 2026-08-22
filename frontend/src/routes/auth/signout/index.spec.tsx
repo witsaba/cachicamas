@@ -122,7 +122,10 @@ test("[routes/auth/signout]: Cancel is an anchor to '/' (S-AUTH-SIGNOUT-05)", as
   ) as HTMLAnchorElement | null;
   expect(cancel).toBeTruthy();
   expect(cancel?.tagName).toBe("A");
-  expect(cancel?.getAttribute("href")).toBe("/");
+  // Cancel returns you to your company, not to the public page: someone who
+  // opened sign-out by accident is already signed in, and bouncing them to
+  // marketing would be a second thing to undo.
+  expect(cancel?.getAttribute("href")).toBe("/home/");
   // The Cancel MUST NOT be type=submit — clicking it must navigate,
   // not post the form. A <a> tag has no type attribute; assert it's
   // either absent or not equal to "submit".
