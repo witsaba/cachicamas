@@ -1,42 +1,22 @@
 /**
- * Root layout — the operating system's chrome.
+ * Root layout — the document, and nothing else.
  *
- * ┌─ StatusRail ────────── whose board · which org · demo · clock · identity ─┐
- * │  CommandLine ───────── type a code, press Enter                           │
- * │  <Slot/> ───────────── the running application, and the only thing that   │
- * │                       scrolls                                             │
- * └─ FunctionRail ──────── F1..F8, the dock                                   ┘
+ * The chrome a person sees depends on where they are, and there are only two
+ * answers: the marketing site owns its own header and footer, and every
+ * workspace screen sits inside `<Workspace>` via its section's layout. So this
+ * file is deliberately thin: the skip link, the session revalidation, and a
+ * slot.
  *
- * Two shells, not one:
- *   - Signed out, only the rail renders. There is nothing to launch and no
- *     board to look at, so the landing page gets the whole canvas.
- *   - Signed in, the command line and the dock appear and stay. Every screen
- *     under them is an application in the same frame.
- *
- * Why the layout takes no router context: `useLocation()` reads Qwik City's
- * `qc-l` context, which only exists inside a request handler and which the
- * vitest `createDOM()` harness does not provide. The chrome therefore never
- * asks where it is; the dock reads `window.location` itself on the client,
- * and every navigation from the chrome is a full document load, which is also
- * what an OS launching an application should feel like.
+ * Why it takes no router context: `useLocation()` reads Qwik City's `qc-l`
+ * context, which only exists inside a request handler and which the vitest
+ * `createDOM()` harness does not provide. Nothing here needs to know where it
+ * is, and every section layout knows statically which section it is.
  *
  * The popstate reload below predates this redesign and is kept verbatim.
  */
-import { component$, Slot, useTask$ } from "@builder.io/qwik";
-import { AvatarDropdown } from "~/components/avatar-dropdown/avatar-dropdown";
-import { CommandLine } from "~/components/os/command-line/command-line";
-import { FunctionRail } from "~/components/os/function-rail/function-rail";
-import { StatusRail } from "~/components/os/status-rail/status-rail";
-import { SignInButton } from "~/components/sign-in-button/sign-in-button";
-import { useSession, useSignIn, useSignOut } from "~/routes/plugin@auth";
+import { Slot, component$, useTask$ } from "@builder.io/qwik";
 
 export default component$(() => {
-  const session = useSession();
-  const signIn = useSignIn();
-  const signOut = useSignOut();
-  const isAuthenticated =
-    session.value?.user !== null && session.value?.user !== undefined;
-
   // UAT-8 revision 4 (2026-07-04): re-validate session on browser
   // back/forward navigation. Without this, Qwik City's SPA router serves the
   // CACHED component$ render from browser history when the user navigates back
@@ -68,41 +48,17 @@ export default component$(() => {
   });
 
   return (
-    <div class="bg-void flex min-h-screen flex-col">
-      {/* The skip link is the very first focusable element of the document,
-          visually hidden until focused. */}
+    <>
+      {/* The first focusable element of the document, visually hidden until
+          it is focused. */}
       <a
         href="#main"
         data-testid="skip-to-main"
-        class="focus:border-amber focus:bg-void focus:text-label focus:text-amber sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:border focus:px-3 focus:py-2 focus:tracking-[0.12em] focus:uppercase"
+        class="focus:bg-brand focus:text-ink-inverse sr-only rounded-md focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:px-3 focus:py-2 focus:text-base focus:font-medium"
       >
         Skip to main content
       </a>
-
-      <StatusRail
-        authenticated={isAuthenticated}
-        demo={isAuthenticated}
-        brandHref={isAuthenticated ? "/home/" : "/"}
-      >
-        <div data-testid="app-shell-identity">
-          {isAuthenticated && session.value ? (
-            <AvatarDropdown session={session.value} signOut={signOut} />
-          ) : (
-            <SignInButton signIn={signIn} redirectTo="/home" />
-          )}
-        </div>
-      </StatusRail>
-
-      {isAuthenticated ? <CommandLine /> : null}
-
-      {/* The one scrolling region in the product. An operating system's chrome
-          does not scroll away, so the rail, the command line and the dock sit
-          outside this box and the running application scrolls inside it. */}
-      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <Slot />
-      </div>
-
-      {isAuthenticated ? <FunctionRail /> : null}
-    </div>
+      <Slot />
+    </>
   );
 });

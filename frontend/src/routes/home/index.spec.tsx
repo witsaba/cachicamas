@@ -1,10 +1,10 @@
 /**
- * Behavioural spec for `routes/home/index.tsx` — the desk.
+ * Behavioural spec for `routes/home/index.tsx` — the front desk.
  *
- * The claims worth defending here are all honesty claims. The board must not
- * be able to drift into implying that something works: every archetype cell
- * carries a literal status word, the demo disclosure is present, and the
- * runtime gauges show the real counts rather than round numbers someone typed.
+ * The claims worth defending here are honesty claims and shape claims: every
+ * colleague on the screen carries a literal status word beside its dot, the
+ * word "Agent" beside its avatar, and the screen never advertises someone the
+ * company has not hired as though they were already working.
  *
  * `routes/plugin@auth.ts` is mocked so the route's `useSession()` /
  * `useSignIn()` calls do not need the Qwik City request context that
@@ -16,7 +16,8 @@ import { createDOM } from "@builder.io/qwik/testing";
 import { $, type QRL } from "@builder.io/qwik";
 import { test, expect, vi } from "vitest";
 import Index from "./index";
-import { ARCHETYPES, RUNTIME } from "~/lib/mock/registry";
+import { AGENTS, TEAMS } from "~/lib/mock/staff";
+import { CONVERSATIONS } from "~/lib/mock/chat";
 
 vi.mock("~/routes/plugin@auth", () => ({
   useSession: () => ({ value: null }),
@@ -57,110 +58,81 @@ const AUTHED = (name: string | null) => ({
 test("[routes/home]: anonymous render shows the sign-in card pointed back at /home", async () => {
   const { screen, render } = await createDOM();
   await render(<Index />);
-  expect(
-    screen.querySelector('[data-testid="sign-in-required-card"]'),
-  ).toBeTruthy();
-  const form = screen.querySelector('form[data-testid="sign-in-button"]');
-  expect(form).toBeTruthy();
-  const redirectTo = form?.querySelector(
-    'input[name="redirectTo"]',
-  ) as HTMLInputElement | null;
-  expect(redirectTo?.value).toBe("/home");
+  const card = screen.querySelector('[data-testid="sign-in-required-card"]');
+  expect(card).toBeTruthy();
+  const redirect = screen.querySelector('input[name="redirectTo"]');
+  expect(redirect?.getAttribute("value")).toBe("/home");
 });
 
-test("[routes/home]: anonymous render never leaks the board", async () => {
-  const { screen, render } = await createDOM();
-  await render(<Index />);
-  expect(screen.querySelector('[data-testid="archetype-register"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="runtime-panel"]')).toBeFalsy();
-});
+// ===== Authenticated (vi.doMock + dynamic import) =====
 
-// ===== Authed (vi.doMock / vi.resetModules) — MUST stay last =====
-
-test("[routes/home]: the board carries one cell per registered archetype", async () => {
+async function renderAuthed(name: string | null) {
   vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED("Alice"));
-  const { default: AuthedIndex } = await import("./index");
+  vi.doMock("~/routes/plugin@auth", () => AUTHED(name));
+  const mod = await import("./index");
+  const Authed = mod.default;
   const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  for (const a of ARCHETYPES) {
-    const cell = screen.querySelector(`[data-testid="register-cell-${a.slug}"]`);
-    expect(cell, a.code).toBeTruthy();
-  }
-  expect(
-    screen.querySelectorAll('[data-testid^="register-cell-"]').length,
-  ).toBe(ARCHETYPES.length);
+  await render(<Authed />);
+  return screen;
+}
+
+test("[routes/home]: greets the person by their first name", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  expect(screen.querySelector("h1")?.textContent).toContain("Ana");
 });
 
-test("[routes/home]: every archetype states its status in words, not only in colour", async () => {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED("Alice"));
-  const { default: AuthedIndex } = await import("./index");
-  const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  for (const a of ARCHETYPES) {
-    const lamp = screen.querySelector(
-      `[data-testid="register-lamp-${a.slug}"]`,
-    );
-    expect(lamp, a.code).toBeTruthy();
-    // The literal word is half the component. A lamp on its own would put the
-    // whole state vocabulary behind colour perception.
-    expect((lamp as HTMLElement).textContent ?? "").toContain(a.stateWord);
+test("[routes/home]: falls back to the desk's own name when the session has none", async () => {
+  // A greeting that renders "Good to see you, " with nothing after it is worse
+  // than no greeting.
+  const screen = await renderAuthed(null);
+  const h1 = screen.querySelector("h1")?.textContent ?? "";
+  expect(h1).toBe("Front desk");
+});
+
+test("[routes/home]: shows every colleague on staff, and none that are not", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  for (const agent of AGENTS) {
+    const card = screen.querySelector(`[data-testid="desk-agent-${agent.slug}"]`);
+    if (agent.status === "available") {
+      expect(card, agent.slug).toBeFalsy();
+    } else {
+      expect(card, agent.slug).toBeTruthy();
+      // The status word, never the dot alone.
+      expect(card?.textContent, agent.slug).toContain(agent.statusWord);
+      // And the species, in a word.
+      expect(card?.textContent, agent.slug).toContain("Agent");
+    }
   }
 });
 
-test("[routes/home]: the runtime panel shows the real milestone counts", async () => {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED("Alice"));
-  const { default: AuthedIndex } = await import("./index");
-  const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  const panel = screen.querySelector('[data-testid="runtime-panel"]');
-  expect(panel).toBeTruthy();
-  const text = (panel as HTMLElement).textContent ?? "";
-  for (const layer of RUNTIME) {
-    expect(text, layer.code).toContain(`${layer.done}/${layer.total}`);
+test("[routes/home]: offers the ones you could hire without pretending they are here", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  const text = screen.textContent ?? "";
+  expect(text).toContain("You could also hire");
+  for (const agent of AGENTS.filter((a) => a.status === "available")) {
+    expect(text, agent.slug).toContain(agent.name);
   }
-  // Layer 1 and Layer 2 are genuinely finished; Layer 3 genuinely is not.
-  expect(text).toContain("42/42");
-  expect(text).toContain("24/24");
-  expect(text).toContain(`0/${RUNTIME[2].total}`);
 });
 
-test("[routes/home]: the board discloses that its activity figures are invented", async () => {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED("Alice"));
-  const { default: AuthedIndex } = await import("./index");
-  const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  const disclosure = screen.querySelector('[data-testid="demo-disclosure"]');
-  expect(disclosure).toBeTruthy();
-  const text = (disclosure as HTMLElement).textContent ?? "";
-  expect(text).toContain("No archetype has ever run");
-  expect(text.toLowerCase()).toContain("demo");
-});
-
-test("[routes/home]: the screen names the person when their name is known", async () => {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED("Alice"));
-  const { default: AuthedIndex } = await import("./index");
-  const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  const title = screen.querySelector('[data-testid="screen-title"]');
-  expect((title as HTMLElement).textContent ?? "").toContain("Alice");
-});
-
-test("[routes/home]: a missing name degrades to the impersonal lead, not to 'undefined'", async () => {
-  for (const name of ["", null]) {
-    vi.resetModules();
-    vi.doMock("~/routes/plugin@auth", () => AUTHED(name));
-    const { default: AuthedIndex } = await import("./index");
-    const { screen, render } = await createDOM();
-    await render(<AuthedIndex />);
-    const title = screen.querySelector('[data-testid="screen-title"]');
-    const text = (title as HTMLElement).textContent ?? "";
-    expect(text).toContain("This company's specialists");
-    expect(text).not.toContain("undefined");
-    expect(text).not.toContain("null");
+test("[routes/home]: picks up the conversations you actually had", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  const text = screen.textContent ?? "";
+  for (const c of CONVERSATIONS) {
+    expect(text, c.id).toContain(c.title);
   }
+});
+
+test("[routes/home]: shows the company's teams", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  const text = screen.textContent ?? "";
+  for (const team of TEAMS) {
+    expect(text, team.slug).toContain(team.name);
+  }
+});
+
+test("[routes/home]: says nothing about how any of it is built", async () => {
+  const screen = await renderAuthed("Ana Rivas");
+  expect(screen.textContent ?? "").not.toMatch(
+    /\b(archetype|runtime|MCP|schema|Layer [123]|SSE|endpoint|milestone|ADR)\b/i,
+  );
 });

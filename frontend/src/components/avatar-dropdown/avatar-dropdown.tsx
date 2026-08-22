@@ -36,8 +36,11 @@
 import { component$ } from "@builder.io/qwik";
 import { Form } from "@builder.io/qwik-city";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
-import { Button } from "~/components/ui/button/button";
+import { Icon } from "~/components/icon/icon";
 import { MenuItem } from "~/components/ui/menu-item/menu-item";
+import { PersonAvatar } from "~/components/workspace/avatar/avatar";
+import { COMPANY } from "~/lib/mock/company";
+import { initialsOf } from "~/lib/initials";
 import { safeAvatarSrc } from "~/lib/safe-avatar-src";
 import { useClickOutside } from "./use-click-outside";
 
@@ -83,56 +86,56 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
     const isOpen = forceOpen || open.value;
 
     return (
-      <div class="relative inline-block leading-none">
-        <Button
+      <div class="relative">
+        <button
           ref={triggerRef}
           type="button"
-          variant="primary"
-          testId="avatar-dropdown"
+          data-testid="avatar-dropdown"
           aria-haspopup="menu"
           aria-label={`${userName} menu`}
           aria-expanded={isOpen}
           onClick$={() => setOpen$(!open.value)}
-          // The identity cell. `<Button>`'s primary variant supplies the
-          // interaction grammar; these tokens override the fill and the size,
-          // because an avatar is shape-driven (a 28px square) rather than
-          // padded like a labelled control. Tailwind 4 emits utilities in
-          // alphabetical order, so an override that COLLIDES with a variant
-          // token needs the `!` prefix — and the prefix goes AFTER the variant
-          // (`hover:!border-amber`), never before it.
-          class="!border-rule-strong hover:!border-amber h-7 w-7 overflow-hidden !bg-transparent !p-0"
+          class="hover:bg-sunken flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150"
         >
-          {safeImage ? (
-            <img
-              src={safeImage}
-              alt=""
-              width={28}
-              height={28}
-              class="h-full w-full object-cover"
-              data-testid="avatar-image"
-            />
-          ) : null}
-        </Button>
+          <PersonAvatar
+            name={userName}
+            initials={initialsOf(userName, userEmail)}
+            image={safeImage}
+            size="md"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="text-ink block truncate text-sm font-medium">
+              {userName || userEmail}
+            </span>
+            <span class="text-2xs text-ink-soft block truncate">
+              {COMPANY.name}
+            </span>
+          </span>
+          <Icon name="chevron-down" size={16} class="text-ink-soft shrink-0" />
+        </button>
 
         {isOpen ? (
           <div
             ref={panelRef}
             role="menu"
             data-testid="avatar-menu-panel"
-            class="border-rule-strong bg-panel text-fg absolute top-9 right-0 z-50 w-64 border"
+            class="border-line bg-surface text-ink absolute bottom-[calc(100%+0.375rem)] left-0 z-50 w-60 rounded-lg border p-1 shadow-[var(--shadow-float)]"
           >
-            <div class="border-rule border-b px-3 py-2">
-              <p class="text-data text-fg" data-testid="avatar-menu-name">
+            <div class="border-line border-b px-2 pt-1.5 pb-2">
+              <p
+                class="text-ink truncate text-base font-medium"
+                data-testid="avatar-menu-name"
+              >
                 {userName}
               </p>
               <p
-                class="text-legend text-fg-dim"
+                class="text-ink-soft truncate text-xs"
                 data-testid="avatar-menu-email"
               >
                 {userEmail}
               </p>
             </div>
-            <ul>
+            <ul class="py-1">
               <li>
                 <MenuItem as="a" href="/profile/" testId="avatar-menu-profile">
                   Profile
@@ -161,14 +164,14 @@ export const AvatarDropdown = component$<AvatarDropdownProps>(
                   href="/settings/"
                   testId="avatar-menu-settings"
                 >
-                  System
+                  Settings
                 </MenuItem>
               </li>
             </ul>
             <Form
               action={signOut}
               data-testid="avatar-menu-signout-form"
-              class="border-rule border-t"
+              class="border-line border-t pt-1"
             >
               {/*
                     R-HP-005 (S-HP-040): after sign-out the user lands on

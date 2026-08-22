@@ -1,113 +1,33 @@
 /**
- * Layout spec — covers the app shell introduced by PR-3 of
- * cachicamas-login-ux. Spec surfaces:
+ * Root layout.
  *
- *   S-AS-001 (R-AS-001) — layout.tsx file exists, exports default,
- *                       imports useSession
- *   S-AS-002 (R-AS-001) — <header> above the route's main content
- *   S-AS-010 (R-AS-002) — anon renders SignInButton
- *   S-AS-011 (R-AS-002) — anon does NOT render AvatarDropdown
- *   S-AS-020 (R-AS-003) — auth renders AvatarDropdown with avatar
- *   S-AS-021 (R-AS-003) — auth does NOT render SignInButton
- *   S-AS-022 (R-AS-003) — session avatar URL is sanitized (ADR-0009)
- *   S-AS-050 (R-AS-006) — skip link is the first focusable element
+ * The layout used to be the app shell. It is not any more: the marketing site
+ * owns its own header and footer, and every workspace screen sits inside
+ * `<Workspace>` via its section's layout (see
+ * `components/workspace/workspace.spec.tsx`, which carries the identity
+ * assertions that used to live here).
  *
- * Mocking strategy mirrors the patterns in `routes/index.spec.tsx`:
- * stub `~/routes/plugin@auth` (useSession + useSignIn + useSignOut)
- * via vi.mock so the test harness doesn't need Qwik City's
- * request context. Each scenario re-creates the DOM so the
- * sessions are independent.
+ * What is left is the part that belongs to the document rather than to any
+ * surface, and each of these is a regression guard for a real defect:
+ *
+ *   - the skip link is the FIRST focusable element (S-AS-050);
+ *   - the layout takes no router context, because `useLocation()` reads Qwik
+ *     City's `qc-l`, which only exists inside a request handler;
+ *   - back/forward re-validates the session instead of serving Qwik's cached
+ *     render of a signed-in page to someone who has signed out (UAT-8 r4).
  */
 import { createDOM } from "@builder.io/qwik/testing";
-import { $, type QRL } from "@builder.io/qwik";
-import { test, expect, vi } from "vitest";
+import { test, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import Layout from "./layout";
 
-// Stub the Auth.js plugin so the layout can call useSession +
-// useSignIn + useSignOut without Qwik City's request context.
-// The shape matches the stub in routes/index.spec.tsx so the
-// existing patterns apply cleanly.
-vi.mock("~/routes/plugin@auth", () => ({
-  useSession: () => ({ value: null }),
-  useSignIn: () => ({
-    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-      (formData: FormData) => unknown
-    >,
-    actionPath: "/auth/signin",
-  }),
-  useSignOut: () => ({
-    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-      (formData: FormData) => unknown
-    >,
-    actionPath: "/auth/signout",
-  }),
-  onRequest: () => Promise.resolve(),
-}));
+const layoutPath = resolve(
+  new URL(".", import.meta.url).pathname,
+  "layout.tsx",
+);
 
-// Stub the API client so the OrgPill's useResource$ fetch
-// resolves without a real backend. Tests that want to exercise
-// the "org exists" path should override this via vi.doMock + a
-// dynamic import of the layout (the same pattern used for the
-// session swap below).
-vi.mock("~/lib/api", () => ({
-  getCurrentOrganization: () => Promise.resolve(null),
-  getSetupState: () => Promise.resolve({ hasOrganization: false }),
-  createOrganization: () =>
-    Promise.resolve({ ok: false, kind: "server", message: "test stub" }),
-}));
-
-// Stub useLocation so the OrgPill (rendered in authed tests via
-// R-FIX-002) can run its URL-tracking useTask$ in createDOM. The
-// real useLocation reads the Qwik City `qc-l` context which
-// createDOM does not set up. The stub returns the same shape
-// (`url: URL, params: {}`) so `.url.pathname` works in the
-// task body.
-//
-// Use vi.importActual to keep the rest of the module intact
-// (Form, routeLoader$, useNavigate, etc. are imported by other
-// components like AvatarDropdown and the signin route — replacing
-// the entire module would break those).
-vi.mock("@builder.io/qwik-city", async () => {
-  const actual = await vi.importActual<typeof import("@builder.io/qwik-city")>(
-    "@builder.io/qwik-city",
-  );
-  return {
-    ...actual,
-    useLocation: () => ({
-      url: new URL("http://localhost/"),
-      params: {},
-    }),
-  };
-});
-
-// Helper — render the layout with a stubbed session. The
-// `sessionState` is captured by the stub at module-load time,
-// so to swap between anon and auth we have to re-import the
-// layout with a different mock. The simplest path: each
-// scenario gets its own top-level describe, and we use
-// vi.doMock + dynamic import for the auth-aware scenarios.
-// That keeps the assertions readable.
-async function renderWithSession(session: unknown) {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => ({
-    useSession: () => ({ value: session }),
-    useSignIn: () => ({
-      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-        (formData: FormData) => unknown
-      >,
-      actionPath: "/auth/signin",
-    }),
-    useSignOut: () => ({
-      submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-        (formData: FormData) => unknown
-      >,
-      actionPath: "/auth/signout",
-    }),
-    onRequest: () => Promise.resolve(),
-  }));
-  const mod = await import("./layout");
-  const Layout = mod.default;
+async function renderLayout() {
   const { screen, render } = await createDOM();
   await render(
     <Layout>
@@ -119,237 +39,62 @@ async function renderWithSession(session: unknown) {
   return screen;
 }
 
-const ANON_SESSION = null;
-
-const AUTH_SESSION = {
-  user: {
-    name: "Braejan",
-    email: "braejan@example.com",
-    image: "https://avatars.githubusercontent.com/u/12345",
-  },
-};
-
-test("[routes/layout]: layout.tsx exists, exports default component$, imports useSession (S-AS-001)", async () => {
-  const layoutPath = resolve(
-    new URL(".", import.meta.url).pathname,
-    "layout.tsx",
-  );
+test("[routes/layout]: exists and exports a default component$", () => {
   expect(existsSync(layoutPath)).toBe(true);
   const source = readFileSync(layoutPath, "utf8");
-  expect(source).toContain("useSession");
-  expect(source).toContain("component$");
   expect(source).toMatch(/export default component\$/);
 });
 
-test("[routes/layout]: renders a <header> above the route's main content (S-AS-002)", async () => {
-  const screen = await renderWithSession(ANON_SESSION);
-  const header = screen.querySelector("header");
-  expect(header).toBeTruthy();
-  // Exactly one <header> per page.
-  const headers = screen.querySelectorAll("header");
-  expect(headers.length).toBe(1);
-  // The <main> child is rendered below the <header>.
-  expect(screen.querySelector('[data-testid="child"]')).toBeTruthy();
+test("[routes/layout]: renders its child untouched", async () => {
+  const screen = await renderLayout();
+  const child = screen.querySelector('[data-testid="child"]');
+  expect(child).toBeTruthy();
+  expect(child?.textContent).toContain("child content");
 });
 
-test("[routes/layout]: anon shell renders SignInButton with providerId=github (S-AS-010)", async () => {
-  const screen = await renderWithSession(ANON_SESSION);
-  const form = screen.querySelector('form[data-testid="sign-in-button"]');
-  expect(form).toBeTruthy();
-  const providerId = form?.querySelector(
-    'input[name="providerId"]',
-  ) as HTMLInputElement | null;
-  expect(providerId?.value).toBe("github");
-});
-
-test("[routes/layout]: header SignInButton redirects to /home after sign-in (R-HP-004 / S-HP-031)", async () => {
-  // After cachicamas-home-page-placeholder, the anonymous → sign-in →
-  // Home Page flow lands at /home (the new authed-only Home route).
-  // The header SignInButton must carry `redirectTo="/home"` so the
-  // OAuth roundtrip terminates at the Home Page, not /profile.
-  const screen = await renderWithSession(ANON_SESSION);
-  const form = screen.querySelector('form[data-testid="sign-in-button"]');
-  expect(form).toBeTruthy();
-  const redirectTo = form?.querySelector(
-    'input[name="redirectTo"]',
-  ) as HTMLInputElement | null;
-  expect(redirectTo?.value).toBe("/home");
-});
-
-test("[routes/layout]: anon SignInButton includes the GitHub Octocat brand mark + short label (UX-4 amendment)", async () => {
-  // UX-4 was amended on 2026-07-04 (UAT-2) to permit RECOGNIZABLE
-  // BRAND MARKS as visible visual anchors. The SignInButton MUST
-  // render the GitHub Octocat inline <svg> alongside a short label
-  // ("Sign in"), not "Sign in with GitHub".
-  const screen = await renderWithSession(ANON_SESSION);
-  const form = screen.querySelector('form[data-testid="sign-in-button"]');
-  expect(form).toBeTruthy();
-  const mark = form?.querySelector(
-    'svg[data-testid="sign-in-button-github-mark"]',
+test("[routes/layout]: the skip link is the first focusable element (S-AS-050)", async () => {
+  const screen = await renderLayout();
+  const focusables = screen.querySelectorAll(
+    'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
   );
-  expect(mark).toBeTruthy();
-  expect(mark?.getAttribute("aria-hidden")).toBe("true");
-  const button = form?.querySelector('button[type="submit"]');
-  expect(button).toBeTruthy();
-  const labelSpan = button?.querySelector("span");
-  expect(labelSpan?.textContent?.trim()).toBe("Sign in");
+  expect(focusables.length).toBeGreaterThan(0);
+  const first = focusables[0] as HTMLElement;
+  expect(first.getAttribute("data-testid")).toBe("skip-to-main");
+  expect(first.getAttribute("href")).toBe("#main");
 });
 
-test("[routes/layout]: anon shell does NOT render AvatarDropdown (S-AS-011)", async () => {
-  const screen = await renderWithSession(ANON_SESSION);
-  expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
+test("[routes/layout]: the skip link is hidden until it is focused", async () => {
+  const screen = await renderLayout();
+  const link = screen.querySelector(
+    '[data-testid="skip-to-main"]',
+  ) as HTMLElement | null;
+  const cls = link?.className ?? "";
+  expect(cls).toContain("sr-only");
+  expect(cls).toContain("focus:not-sr-only");
 });
 
-test("[routes/layout]: auth shell renders AvatarDropdown with avatar image + aria-label (S-AS-020)", async () => {
-  const screen = await renderWithSession(AUTH_SESSION);
-  const trigger = screen.querySelector('button[data-testid="avatar-dropdown"]');
-  expect(trigger).toBeTruthy();
-  const img = trigger?.querySelector("img") as HTMLImageElement | null;
-  expect(img).toBeTruthy();
-  expect(img?.getAttribute("src")).toBe(
-    "https://avatars.githubusercontent.com/u/12345",
-  );
-  expect((trigger as HTMLButtonElement).getAttribute("aria-label")).toBe(
-    "Braejan menu",
-  );
+test("[routes/layout]: renders no chrome of its own", () => {
+  // A header here would be a second header on every marketing page and a
+  // stray one above every workspace rail. The shell moved; this guards the
+  // move.
+  const source = readFileSync(layoutPath, "utf8");
+  expect(source).not.toContain("<header");
+  expect(source).not.toContain("AvatarDropdown");
+  expect(source).not.toContain("SignInButton");
 });
 
-test("[routes/layout]: auth shell does NOT render SignInButton (S-AS-021)", async () => {
-  const screen = await renderWithSession(AUTH_SESSION);
-  expect(
-    screen.querySelector('form[data-testid="sign-in-button"]'),
-  ).toBeFalsy();
+test("[routes/layout]: asks for no router context (createDOM has no qc-l)", () => {
+  const source = readFileSync(layoutPath, "utf8");
+  expect(source).not.toMatch(/^import .*qwik-city/m);
 });
 
-test("[routes/layout]: non-https avatar URL is sanitized (S-AS-022, ADR-0009)", async () => {
-  // `<img src>` accepts any scheme in tests if the URL passes the
-  // browser-parsing layer. The composer rule from PR-2a's
-  // safeAvatarSrc helper is the runtime guard — at the layout
-  // boundary we assert the link between session.image and the
-  // rendered <img> src is mediated by that helper, not direct.
-  const screen = await renderWithSession({
-    user: {
-      name: "NoImg",
-      email: "noimg@example.com",
-      image: "javascript:alert(1)",
-    },
-  });
-  const trigger = screen.querySelector('button[data-testid="avatar-dropdown"]');
-  expect(trigger).toBeTruthy();
-  // The dangerous scheme MUST NOT reach the DOM — either the img
-  // is omitted entirely OR its src starts with https:.
-  const img = trigger?.querySelector("img") as HTMLImageElement | null;
-  if (img) {
-    const src = img.getAttribute("src") ?? "";
-    expect(src.startsWith("javascript:")).toBe(false);
-    if (src) {
-      expect(src.startsWith("https:")).toBe(true);
-    }
-  }
-});
-
-test("[routes/layout]: skip-to-main link is the first focusable element of <header>'s parent (S-AS-050)", async () => {
-  const screen = await renderWithSession(ANON_SESSION);
-  // The skip link is `<a href="#main">Skip to main content</a>`.
-  const skip = screen.querySelector(
-    'a[href="#main"][data-testid="skip-to-main"]',
-  );
-  expect(skip).toBeTruthy();
-  const header = screen.querySelector("header");
-  expect(header).toBeTruthy();
-  // The skip link MUST precede the header in document order. We
-  // assert via compareDocumentPosition so the test is robust to
-  // Qwik's createDOM host wrapper (which inserts an intermediate
-  // <q:host> around the rendered tree, so the parent isn't
-  // literally <body>).
-  const pos = (skip as Node).compareDocumentPosition(header as Node);
-  // DOCUMENT_POSITION_FOLLOWING = 0x04. If pos & 4 == true, the
-  // header comes AFTER the skip link in document order.
-  expect(pos & 0x04).toBeTruthy();
-});
-
-test("[routes/layout]: registers a capture-phase popstate listener that reloads (UAT-8 r4)", async () => {
-  // UAT-8 r4 (2026-07-04): the layout registers a capture-phase
-  // popstate listener on `window` via `useTask$` + raw
-  // `window.addEventListener(..., { capture: true })` that calls
-  // `e.stopImmediatePropagation()` + `window.location.reload()`.
-  // The capture phase is critical: Qwik City's own popstate
-  // listener for SPA navigation runs in the bubble phase, and
-  // if we run in the same phase we race with it -- Qwik often
-  // serves its cached component$ render before our reload takes
-  // effect. Running in capture + stopImmediatePropagation gives
-  // us a clean "block Qwik, then hard-reload" sequence.
-  //
-  // Static-source assertions (the runtime registration can't
-  // be verified in createDOM -- vitest's node env doesn't
-  // expose a global window).
-  const layoutPath = resolve(__dirname, "./layout.tsx");
-  const layoutSrc = readFileSync(layoutPath, "utf-8");
-  expect(layoutSrc).toMatch(/useTask\$/);
-  // Capture-phase raw addEventListener (bubble-phase default
-  // races with Qwik's own popstate handler for SPA navigation).
-  expect(layoutSrc).toMatch(
-    /window\.addEventListener\(\s*"popstate"\s*,\s*[^)]+,\s*\{\s*capture:\s*true\s*\}/,
-  );
-  // stopImmediatePropagation blocks Qwik's bubble-phase
-  // popstate listener from running and serving the cached
-  // component$ render.
-  expect(layoutSrc).toMatch(/stopImmediatePropagation/);
-  expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
-  // Sanity: layout still renders the header chrome.
-  const screen = await renderWithSession(ANON_SESSION);
-  expect(screen.querySelector('[data-testid="status-rail"]')).toBeTruthy();
-});
-
-test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", async () => {
-  // R-FIX-001 (2026-07-06): an anonymous visitor who clicks the
-  // cachicamas brand in the header must be taken to the landing
-  // page (/) -- NOT to /home (which would bounce them through
-  // the sign-in redirect chain). The landing page is the
-  // canonical entry point for new visitors.
-  const screen = await renderWithSession(ANON_SESSION);
-  const brand = screen.querySelector('a[data-testid="status-rail-brand"]');
-  expect(brand).toBeTruthy();
-  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/");
-});
-
-test("[routes/layout]: the anon shell drops the org reading and the whole OS chrome", async () => {
-  // An anonymous visitor has no organization context and nothing to launch,
-  // so the rail drops the org reading and the shell renders neither the
-  // command line nor the dock. The landing page gets the whole canvas.
-  const screen = await renderWithSession(ANON_SESSION);
-  expect(screen.querySelector('[data-testid="status-rail-org"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="status-rail-demo"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="command-line"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="function-rail"]')).toBeFalsy();
-  // The identity affordance is still there.
-  expect(
-    screen.querySelector('form[data-testid="sign-in-button"]'),
-  ).toBeTruthy();
-});
-
-test("[routes/layout]: the authed shell mounts the command line and the dock", async () => {
-  // Signed in, the OS chrome appears and stays: the launcher above the
-  // application, the function-key dock below it. Both are what make every
-  // screen under them read as an application in one frame.
-  const screen = await renderWithSession(AUTH_SESSION);
-  expect(screen.querySelector('[data-testid="command-line"]')).toBeTruthy();
-  expect(screen.querySelector('[data-testid="function-rail"]')).toBeTruthy();
-  expect(screen.querySelector('[data-testid="status-rail-org"]')).toBeTruthy();
-  // The board is demonstration data and the rail says so, unprompted.
-  expect(screen.querySelector('[data-testid="status-rail-demo"]')).toBeTruthy();
-});
-
-test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)", async () => {
-  // R-FIX-001 (2026-07-06): a signed-in visitor who clicks the
-  // cachicamas brand in the header must be taken to the authed-only
-  // Home Page (/home/), not the landing page (/). The landing
-  // page has no auth check and would happily render its
-  // marketing copy to a signed-in user, which is the wrong UX:
-  // the Home Page is where their dashboard (and ownboarding
-  // redirect) lives.
-  const screen = await renderWithSession(AUTH_SESSION);
-  const brand = screen.querySelector('a[data-testid="status-rail-brand"]');
-  expect(brand).toBeTruthy();
-  expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/home/");
+test("[routes/layout]: re-validates the session on back/forward (UAT-8 r4)", () => {
+  // Without this, Qwik City's SPA router serves the CACHED render from browser
+  // history when someone navigates back to a page they saw while signed in —
+  // their name and avatar still on screen after signing out.
+  const source = readFileSync(layoutPath, "utf8");
+  expect(source).toContain("popstate");
+  expect(source).toContain("capture: true");
+  expect(source).toContain("stopImmediatePropagation");
+  expect(source).toContain("window.location.reload()");
 });

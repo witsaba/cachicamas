@@ -38,30 +38,36 @@ vi.mock("~/routes/plugin@auth", () => ({
   onRequest: () => Promise.resolve(),
 }));
 
-const source = readFileSync(
-  fileURLToPath(import.meta.url).replace(/\.spec\.tsx$/, ".tsx"),
-  "utf8",
+// The guard chain moved to the section layout when the workspace shell was
+// introduced, so every screen under it inherits one copy. Read the body of
+// `onRequest`, not the whole file: the import block is alphabetical and says
+// nothing about the order things run in.
+const guardBody = (
+  readFileSync(
+    fileURLToPath(import.meta.url).replace(/index\.spec\.tsx$/, "layout.tsx"),
+    "utf8",
+  ).split("export const onRequest")[1] ?? ""
 );
 
-describe("routes/settings — System", () => {
+describe("routes/settings", () => {
   it("captures the SSR cookie before either guard can throw", () => {
-    const cookieAt = source.indexOf("setSsrCookieHeader(");
-    const authAt = source.indexOf("requireAuthRedirect(event)");
-    const onboardAt = source.indexOf("await requireOwnboarding(event)");
+    const cookieAt = guardBody.indexOf("setSsrCookieHeader(");
+    const authAt = guardBody.indexOf("requireAuthRedirect(event)");
+    const onboardAt = guardBody.indexOf("await requireOwnboarding(event)");
     expect(cookieAt).toBeGreaterThan(-1);
     expect(authAt).toBeGreaterThan(cookieAt);
     expect(onboardAt).toBeGreaterThan(authAt);
   });
 
-  it("renders exactly one <h1>, titled System", async () => {
+  it("renders exactly one <h1>, titled Settings", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
     const h1s = screen.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
-    expect(h1s[0].textContent).toContain("System");
+    expect(h1s[0].textContent).toContain("Settings");
   });
 
-  it("shows who is signed in, and how to leave", async () => {
+  it("shows who is signed in", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
     const account = screen.querySelector('[data-testid="account-panel"]');
@@ -69,33 +75,36 @@ describe("routes/settings — System", () => {
     const text = (account as HTMLElement).textContent ?? "";
     expect(text).toContain("Alice");
     expect(text).toContain("alice@example.com");
-    const signOut = Array.from(
-      (account as HTMLElement).querySelectorAll("a"),
-    ).find((a) => a.getAttribute("href") === "/auth/signout/");
-    expect(signOut).toBeTruthy();
   });
 
-  it("states what is NOT configurable rather than shipping dead toggles", async () => {
+  it("names the company and the plan it is on", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    const panel = screen.querySelector('[data-testid="undecided-panel"]');
+    const company = screen.querySelector('[data-testid="company-panel"]');
+    expect(company).toBeTruthy();
+    const text = (company as HTMLElement).textContent ?? "";
+    expect(text).toContain("Witsaba");
+    expect(text).toContain("Plan");
+  });
+
+  it("states what a customer may NOT switch off", async () => {
+    // A product that lets agents act inside a company has to be explicit about
+    // which limits cannot be loosened. A limit you cannot find is a limit
+    // nobody trusts.
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const panel = screen.querySelector('[data-testid="fixed-limits-panel"]');
     expect(panel).toBeTruthy();
     const items = (panel as HTMLElement).querySelectorAll("li");
     expect(items.length).toBeGreaterThan(0);
-    // Every open decision names itself AND says why, so the screen reads as a
-    // record rather than as an apology.
+    // Every limit names itself AND says what it means, so the section reads as
+    // a record rather than as an apology.
     for (const li of Array.from(items)) {
-      expect((li.textContent ?? "").trim().length).toBeGreaterThan(20);
+      expect((li.textContent ?? "").trim().length).toBeGreaterThan(40);
     }
-  });
-
-  it("ships no form control at all — nothing here is settable yet", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const main = screen.querySelector("main") as HTMLElement;
-    expect(main.querySelectorAll("input").length).toBe(0);
-    expect(main.querySelectorAll("select").length).toBe(0);
-    expect(main.querySelectorAll('[role="switch"]').length).toBe(0);
+    expect((panel as HTMLElement).textContent).toContain(
+      "Nothing leaves the building unapproved",
+    );
   });
 
   it("carries no link into the retired framework surfaces", async () => {
@@ -113,7 +122,15 @@ describe("routes/settings — System", () => {
     }
   });
 
+  it("says nothing about how the product is built", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    expect(screen.textContent ?? "").not.toMatch(
+      /\b(archetype|runtime|MCP|Layer [123]|SSE|endpoint|milestone|ADR)\b/i,
+    );
+  });
+
   it("exports head metadata naming the product in lowercase", () => {
-    expect(systemHead.title).toBe("System — cachicamas");
+    expect(systemHead.title).toBe("Settings — cachicamas");
   });
 });

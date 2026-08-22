@@ -1,5 +1,5 @@
 /**
- * The Chat section's chrome.
+ * The Organisation section's chrome.
  *
  * Every workspace screen sits inside `<Workspace>`. The section is passed
  * statically rather than derived from the URL, so the rail's current-item
@@ -46,7 +46,7 @@ export default component$(() => {
   }
 
   return (
-    <Workspace section="chat" session={session.value} signOut={signOut} fills>
+    <Workspace section="organization" session={session.value} signOut={signOut}>
       <Slot />
     </Workspace>
   );
