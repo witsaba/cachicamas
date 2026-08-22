@@ -16,6 +16,7 @@ import {
   PersonAvatar,
 } from "~/components/workspace/avatar/avatar";
 import { PAGE_WELL } from "~/components/workspace/page-header/page-header";
+import { count, people } from "~/lib/plural";
 import { Status } from "~/components/workspace/status/status";
 import { type Agent, personById, teamsForAgent } from "~/lib/mock/staff";
 
@@ -190,8 +191,8 @@ export const AgentProfile = component$<AgentProfileProps>(({ agent }) => {
                         ) : null;
                       })}
                       <span class="text-ink-soft pl-1 text-xs">
-                        {team.personIds.length} people ·{" "}
-                        {team.agentSlugs.length} agents
+                        {people(team.personIds.length)} ·{" "}
+                        {count(team.agentSlugs.length, "agent")}
                       </span>
                     </span>
                   </li>

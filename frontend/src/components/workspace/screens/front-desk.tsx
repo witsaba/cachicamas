@@ -18,6 +18,7 @@ import {
   PageHeader,
 } from "~/components/workspace/page-header/page-header";
 import { Status } from "~/components/workspace/status/status";
+import { count, people } from "~/lib/plural";
 import { COMPANY } from "~/lib/mock/company";
 import { CONVERSATIONS } from "~/lib/mock/chat";
 import { AGENTS, PEOPLE, TEAMS, agentBySlug } from "~/lib/mock/staff";
@@ -169,8 +170,8 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
                     ) : null;
                   })}
                   <span class="text-ink-soft pl-1 text-xs">
-                    {team.agentSlugs.length} agents · {team.personIds.length}{" "}
-                    people
+                    {count(team.agentSlugs.length, "agent")} ·{" "}
+                    {people(team.personIds.length)}
                   </span>
                 </span>
               </li>
