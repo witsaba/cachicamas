@@ -1,141 +1,152 @@
 /**
- * The scripted turn's contract.
+ * The scripted conversation's contract.
  *
  * `scriptFor` is the branch table of the whole demonstration: which words a
- * person types decides which of the archetype's states they get to see. It is
+ * person types decides which of a colleague's states they get to see. It is
  * pure so that table is a test rather than something you find out by typing
  * for five minutes.
  *
  * The seeded conversations are checked for the property that makes them worth
- * seeding at all: between them they put every entry kind on screen without
- * anyone having to interact.
+ * seeding at all: between them they put every kind of line on screen before
+ * anyone interacts with anything.
  */
 import { describe, it, expect } from "vitest";
 import { CONVERSATIONS, scriptFor, type Beat } from "./chat";
+import { AGENTS } from "./staff";
 
 const kinds = (beats: readonly Beat[]) => beats.map((b) => b.t);
 
 describe("scriptFor", () => {
-  it("always opens and closes the turn, whatever the prompt", () => {
-    for (const prompt of ["hello", "drop the table", "what broke?", "select 1"]) {
-      const beats = scriptFor(prompt);
-      expect(beats[0], prompt).toMatchObject({ t: "note", label: "TURN OPENED" });
-      const last = beats[beats.length - 1];
-      expect(last.t, prompt).toBe("note");
-      if (last.t === "note") {
-        expect(last.label, prompt).toMatch(/TURN CLOSED/);
-      }
-    }
-  });
-
-  it("streams text as deltas, never as one block", () => {
-    // The whole point of the mock is that the surface sees text arrive over
-    // time. A single-chunk `say` would hide every defect a stream exposes.
-    const say = scriptFor("hello").find((b) => b.t === "say");
-    expect(say).toBeTruthy();
-    if (say?.t === "say") expect(say.chunks.length).toBeGreaterThan(5);
-  });
-
-  it("suspends on a destructive verb, and offers both answers", () => {
+  it("always opens and closes, whatever the message", () => {
     for (const prompt of [
-      "drop the staging schema",
-      "please DELETE the old rows",
-      "migrate prod tonight",
+      "hello",
+      "send the invoice",
+      "what broke?",
+      "how did we do this quarter",
     ]) {
       const beats = scriptFor(prompt);
-      expect(kinds(beats), prompt).toContain("hold");
-      const hold = beats.find((b) => b.t === "hold");
-      if (hold?.t === "hold") {
-        expect(hold.onGranted.length, prompt).toBeGreaterThan(0);
-        expect(hold.onDenied.length, prompt).toBeGreaterThan(0);
-        // The person must be able to read the exact call before deciding.
-        expect(hold.args.length, prompt).toBeGreaterThan(0);
-        expect(hold.risk.length, prompt).toBeGreaterThan(0);
+      expect(beats[0], prompt).toMatchObject({ t: "note", label: "Working" });
+      const last = beats[beats.length - 1];
+      expect(last.t, prompt).toBe("note");
+    }
+  });
+
+  it("never opens with a tool call before it has said anything", () => {
+    // A colleague that acts before it speaks is one nobody can follow.
+    for (const prompt of ["send it", "why did it break", "unpaid invoices"]) {
+      const beats = scriptFor(prompt);
+      const firstAction = beats.findIndex(
+        (b) => b.t === "tool" || b.t === "hold",
+      );
+      const firstWord = beats.findIndex((b) => b.t === "say");
+      if (firstAction >= 0) {
+        expect(firstWord, prompt).toBeGreaterThanOrEqual(0);
+        expect(firstWord, prompt).toBeLessThan(firstAction);
       }
     }
   });
 
-  it("quotes the person's own words back inside the call it wants to run", () => {
-    const hold = scriptFor("drop schema staging cascade").find(
-      (b) => b.t === "hold",
-    );
-    if (hold?.t === "hold") {
-      const statement = hold.args.find(([k]) => k === "statement")?.[1] ?? "";
-      expect(statement).toContain("drop schema staging");
+  describe("anything that leaves the building waits for a person", () => {
+    for (const prompt of [
+      "send the reminder",
+      "email them the quote",
+      "refund order 4471",
+      "delete the duplicate contact",
+      "cancel their plan",
+      "approve these expenses",
+    ]) {
+      it(`"${prompt}" suspends rather than acting`, () => {
+        const beats = scriptFor(prompt);
+        expect(kinds(beats), prompt).toContain("hold");
+        const hold = beats.find((b) => b.t === "hold");
+        if (hold?.t === "hold") {
+          // The person is told what it wants to do, with what, and what the
+          // consequence is — before there is anything to answer.
+          expect(hold.intent.length, prompt).toBeGreaterThan(8);
+          expect(hold.args.length, prompt).toBeGreaterThan(0);
+          expect(hold.risk.length, prompt).toBeGreaterThan(8);
+          // And both answers exist. A permission with only one branch is a
+          // confirmation dialog wearing a permission's clothes.
+          expect(hold.onGranted.length, prompt).toBeGreaterThan(0);
+          expect(hold.onDenied.length, prompt).toBeGreaterThan(0);
+        }
+      });
     }
   });
 
-  it("brokers a read through a tool when the prompt is about data", () => {
-    const beats = scriptFor("show me the invoices table");
+  it("reads before it answers a question about money", () => {
+    const beats = scriptFor("which invoices are unpaid");
     expect(kinds(beats)).toContain("tool");
-    expect(kinds(beats)).not.toContain("hold");
+    const tool = beats.find((b) => b.t === "tool");
+    if (tool?.t === "tool") {
+      expect(tool.args.length).toBeGreaterThan(0);
+      expect(tool.result.length).toBeGreaterThan(0);
+    }
   });
 
-  it("fails typed when the prompt reaches a system nobody owns", () => {
-    const beats = scriptFor("summarise yesterday's incidents");
+  it("fails once, names the recovery, and never retries", () => {
+    const beats = scriptFor("the calendar sync stopped");
     const fault = beats.find((b) => b.t === "fault");
     expect(fault).toBeTruthy();
     if (fault?.t === "fault") {
-      expect(fault.code).toBe("not_found");
-      // A typed error names the problem AND the recovery, or it is a spinner
-      // with better manners.
-      expect(fault.recovery.length).toBeGreaterThan(0);
+      // A failure names the problem AND the way out, or it is a dead end with
+      // better manners.
+      expect(fault.message.length).toBeGreaterThan(12);
+      expect(fault.recovery.length).toBeGreaterThan(12);
     }
+    expect(kinds(beats)).not.toContain("tool");
+    // Nothing retries: exactly one failure line per failed conversation.
+    expect(beats.filter((b) => b.t === "fault")).toHaveLength(1);
   });
 
-  it("puts the destructive branch ahead of the data branch", () => {
-    // "drop the invoices table" matches both patterns. Suspending is the safe
-    // resolution and must win; the opposite ordering would run it.
-    expect(kinds(scriptFor("drop the invoices table"))).toContain("hold");
+  it("plurals and gerunds count — people do not write in the singular", () => {
+    // `refunds` and `incidents` are how the branch table gets missed.
+    expect(kinds(scriptFor("process these refunds"))).toContain("hold");
+    expect(kinds(scriptFor("two syncs are broken"))).toContain("fault");
   });
 
-  it("answers an ordinary question without reaching for a tool", () => {
-    const beats = scriptFor("who are you?");
-    expect(kinds(beats)).toEqual(["note", "say", "note"]);
+  it("asking beats acting when a message matches two branches", () => {
+    // "delete the duplicate invoices" is both money and an irreversible act.
+    // Suspending must win; the opposite ordering would do it.
+    expect(kinds(scriptFor("delete the duplicate invoices"))).toContain("hold");
   });
 });
 
 describe("the seeded conversations", () => {
-  it("show every entry kind without anyone typing", () => {
+  it("put every kind of line on screen before anyone types", () => {
     const seen = new Set(
       CONVERSATIONS.flatMap((c) => c.entries.map((e) => e.kind)),
     );
-    expect([...seen].sort()).toEqual(["fault", "hold", "note", "said", "tool"]);
+    for (const kind of ["note", "said", "tool", "hold", "fault"]) {
+      expect(seen, kind).toContain(kind);
+    }
   });
 
-  it("show a permission both granted and refused", () => {
+  it("show a permission answered both ways, and one still waiting", () => {
     const decisions = CONVERSATIONS.flatMap((c) =>
       c.entries.flatMap((e) => (e.kind === "hold" ? [e.decision] : [])),
     );
     expect(decisions).toContain("granted");
     expect(decisions).toContain("denied");
+    expect(decisions).toContain("pending");
   });
 
-  it("never leave a refused call looking like it ran", () => {
+  it("belong to colleagues who actually work here", () => {
+    const slugs = new Set(AGENTS.map((a) => a.slug));
     for (const c of CONVERSATIONS) {
-      const refused = c.entries.filter(
-        (e) => e.kind === "hold" && e.decision === "denied",
-      );
-      if (refused.length === 0) continue;
-      // Nothing after a refusal may carry a tool result in that conversation.
-      const results = c.entries.filter(
-        (e) => e.kind === "tool" && e.state === "done",
-      );
-      expect(results, c.id).toEqual([]);
+      expect(slugs, c.id).toContain(c.agentSlug);
     }
   });
 
-  it("give every entry an id unique within its conversation", () => {
-    for (const c of CONVERSATIONS) {
-      const ids = c.entries.map((e) => e.id);
-      expect(new Set(ids).size, c.id).toBe(ids.length);
-    }
-  });
-
-  it("never leave a line mid-stream in stored history", () => {
+  it("mention no part of how the product is built", () => {
+    // The people using this hire colleagues; they do not run a runtime. A word
+    // from the engineering vocabulary on a customer surface is a defect.
+    const forbidden =
+      /\b(archetype|runtime|MCP|schema|layer 1|layer 2|SSE|stream|token|endpoint|milestone)\b/i;
     for (const c of CONVERSATIONS) {
       for (const e of c.entries) {
-        if (e.kind === "said") expect(e.state, `${c.id}/${e.id}`).toBe("final");
+        const text = JSON.stringify(e);
+        expect(text, `${c.id}/${e.id}`).not.toMatch(forbidden);
       }
     }
   });

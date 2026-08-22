@@ -18,7 +18,7 @@ describe("components/chat/composer", () => {
   it("offers Send while idle, and no Stop", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <Composer status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     expect(screen.querySelector('[data-testid="composer-send"]')).toBeTruthy();
     expect(screen.querySelector('[data-testid="composer-stop"]')).toBeFalsy();
@@ -31,7 +31,7 @@ describe("components/chat/composer", () => {
   it("swaps Send for Stop while a turn is running, and locks the field", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <Composer status="running" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="running" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     expect(screen.querySelector('[data-testid="composer-stop"]')).toBeTruthy();
     expect(screen.querySelector('[data-testid="composer-send"]')).toBeFalsy();
@@ -44,30 +44,30 @@ describe("components/chat/composer", () => {
   it("explains why it is locked, differently for running and for suspended", async () => {
     const running = await createDOM();
     await running.render(
-      <Composer status="running" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="running" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     const runningText =
       running.screen
         .querySelector('[data-testid="composer-input"]')
         ?.getAttribute("placeholder") ?? "";
-    expect(runningText).toContain("Stop it");
+    expect(runningText).toContain("Finance is working");
 
     const held = await createDOM();
     await held.render(
-      <Composer status="held" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="held" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     const heldText =
       held.screen
         .querySelector('[data-testid="composer-input"]')
         ?.getAttribute("placeholder") ?? "";
-    expect(heldText).toContain("permission request");
+    expect(heldText).toContain("Answer the request above");
     expect(heldText).not.toBe(runningText);
   });
 
   it("offers no Stop while suspended — the run is already not moving", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <Composer status="held" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="held" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     expect(screen.querySelector('[data-testid="composer-stop"]')).toBeFalsy();
     const send = screen.querySelector(
@@ -79,23 +79,25 @@ describe("components/chat/composer", () => {
   it("labels the field for assistive technology", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <Composer status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     expect(
       screen
         .querySelector('[data-testid="composer-input"]')
         ?.getAttribute("aria-label"),
-    ).toContain("Message the chat archetype");
+    ).toContain("Message Finance");
   });
 
   it("says it is a demonstration, on the control a person is about to use", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <Composer status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
+      <Composer agentName="Finance" status="idle" onSubmit$={noopPrompt} onCancel$={noop} />,
     );
     const text =
       screen.querySelector('[data-testid="composer"]')?.textContent ?? "";
-    expect(text).toContain("Demonstration only");
-    expect(text).toContain("doc 0005 is 0 of 12");
+    // The composer states the product's one standing promise where a person
+    // is about to act on it, rather than in a settings page nobody opens.
+    expect(text).toContain("Enter to send");
+    expect(text).toContain("without you approving it first");
   });
 });

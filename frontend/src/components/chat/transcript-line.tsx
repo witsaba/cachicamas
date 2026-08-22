@@ -1,98 +1,115 @@
+/**
+ * One line of a conversation.
+ *
+ * Five kinds, and the differences between them are structural rather than
+ * decorative, because the whole point of showing a colleague's work is that a
+ * person can tell at a glance which part of it was *speech* and which part was
+ * an *action*:
+ *
+ *   said   — a name, a face, and words. Nothing else.
+ *   tool   — an inset panel: which tool, why, with what, and what came back.
+ *   hold   — the same panel, waiting, with the two answers a person can give.
+ *   fault  — said once, with the recovery, and never retried.
+ *   note   — the conversation narrating itself, set quietly between the rest.
+ *
+ * The person's own words are rendered as text. The colleague's are rendered
+ * through the sanitiser, which emits a small allowlisted set of tags — model
+ * output never reaches the DOM as raw HTML.
+ */
 import { component$, type QRL } from "@builder.io/qwik";
+import { Icon } from "~/components/icon/icon";
 import { Button } from "~/components/ui/button/button";
-import { StateLamp } from "~/components/os/lamp/lamp";
+import {
+  AgentAvatar,
+  PersonAvatar,
+} from "~/components/workspace/avatar/avatar";
 import { renderSanitizedMarkdown } from "~/lib/markdown";
 import type { TranscriptEntry } from "~/lib/mock/chat";
+import type { Agent } from "~/lib/mock/staff";
 
-/**
- * TranscriptLine — one line of a conversation, in the terminal's grammar.
- *
- * There are no chat bubbles here, and their absence is a decision. A bubble
- * column implies two peers exchanging messages; what is actually happening is
- * a run being narrated — a turn opens, language arrives, a tool is proposed, a
- * person decides, the turn closes with its cost. So the transcript is a
- * speaker-labelled log with a fixed left gutter: the gutter tells you who or
- * what is speaking, and everything lines up down the page whatever it is.
- *
- * Model prose is rendered through `renderSanitizedMarkdown`, never injected
- * raw — the allowlist in `lib/markdown.ts` is the only thing standing between
- * a model's output and the DOM.
- */
 export interface TranscriptLineProps {
   readonly entry: TranscriptEntry;
-  /**
-   * Called with the person's answer when the run is suspended on permission.
-   * A QRL, not a bare function: the handler crosses into a `$` closure, and
-   * Qwik has to be able to serialise the reference across resumption.
-   */
+  /** Whose conversation this is — supplies the name and the avatar. */
+  readonly agent: Agent;
+  readonly youName: string;
+  readonly youInitials: string;
+  /** Only a pending permission needs this; every other kind ignores it. */
   readonly onDecide$?: QRL<(granted: boolean) => void>;
 }
 
-/** The fixed gutter every line shares, so the page has one column of truth. */
-const GUTTER = "w-14 shrink-0 text-legend uppercase tracking-[0.14em]";
+const PANEL =
+  "rounded-md border border-line bg-surface p-3 shadow-[var(--shadow-raised)]";
 
 export const TranscriptLine = component$<TranscriptLineProps>((props) => {
-  const e = props.entry;
+  const { entry, agent, youName, youInitials } = props;
+  // Read the QRL into a local before the closure: a prop captured directly
+  // inside an event handler trips Qwik's lexical-scope rule.
   const decide = props.onDecide$;
 
-  if (e.kind === "note") {
-    const tone =
-      e.tone === "fail"
-        ? "text-fail"
-        : e.tone === "live"
-          ? "text-live"
-          : "text-fg-dim";
+  if (entry.kind === "note") {
     return (
       <li
-        data-testid={`line-note-${e.id}`}
-        class="flex items-center gap-3 py-2"
+        class="flex items-center gap-3 py-3"
+        data-testid={`line-note-${entry.id}`}
       >
-        <span
-          class={`${tone} text-legend tracking-[0.18em] whitespace-nowrap uppercase`}
-        >
-          {e.label}
-        </span>
-        <span aria-hidden="true" class="bg-rule h-px flex-1" />
-        {e.detail ? (
-          <span class="text-legend text-fg-dim whitespace-nowrap">
-            {e.detail}
+        <span class="bg-line h-px flex-1" aria-hidden="true" />
+        <span class="text-2xs text-ink-soft shrink-0">
+          <span
+            class={
+              entry.tone === "fail"
+                ? "text-stop font-medium"
+                : entry.tone === "live"
+                  ? "text-ok font-medium"
+                  : "text-ink-mid font-medium"
+            }
+          >
+            {entry.label}
           </span>
-        ) : null}
+          {entry.detail ? ` · ${entry.detail}` : null}
+        </span>
+        <span class="bg-line h-px flex-1" aria-hidden="true" />
       </li>
     );
   }
 
-  if (e.kind === "said") {
-    const you = e.who === "you";
+  if (entry.kind === "said") {
+    const you = entry.who === "you";
     return (
       <li
-        data-testid={`line-said-${e.id}`}
-        data-who={e.who}
-        class="flex gap-3 py-2"
+        class="flex gap-3 py-3"
+        data-testid={`line-said-${entry.id}`}
+        data-who={you ? "you" : "agent"}
       >
-        {/* Amber is the machine speaking, so it belongs to the archetype, not
-            to the person. The first build had these the wrong way round. */}
-        <span class={`${GUTTER} ${you ? "text-fg" : "text-amber"}`}>
-          {you ? "You" : "Chat"}
+        <span class="pt-0.5">
+          {you ? (
+            <PersonAvatar name={youName} initials={youInitials} size="md" />
+          ) : (
+            <AgentAvatar agent={agent} size="md" />
+          )}
         </span>
         <div class="min-w-0 flex-1">
+          <p class="flex items-baseline gap-2 pb-0.5">
+            <span class="text-ink text-base font-semibold">
+              {you ? youName || "You" : agent.name}
+            </span>
+            {you ? null : (
+              <span class="text-2xs text-ink-soft font-medium">Agent</span>
+            )}
+          </p>
           {you ? (
-            <p class="font-human text-body text-fg leading-relaxed break-words">
-              {e.text}
-            </p>
+            <p class="text-md text-ink-mid whitespace-pre-wrap">{entry.text}</p>
           ) : (
             <div
-              class="prose-terminal font-human text-body text-fg-mid leading-relaxed break-words"
-              // Sanitised by `renderSanitizedMarkdown` — a tight tag, attribute
-              // and URI-scheme allowlist. Raw model HTML never reaches here.
-              dangerouslySetInnerHTML={renderSanitizedMarkdown(e.text)}
+              class="prose-work"
+              // Sanitised at the boundary; the allowlist is in lib/markdown.ts.
+              dangerouslySetInnerHTML={renderSanitizedMarkdown(entry.text)}
             />
           )}
-          {e.state === "streaming" ? (
+          {entry.state === "streaming" ? (
             <span
+              class="work-caret text-ink-mid ml-0.5 align-baseline"
               data-testid="stream-caret"
               aria-hidden="true"
-              class="term-caret text-amber h-4 align-text-bottom"
             />
           ) : null}
         </div>
@@ -100,146 +117,132 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
     );
   }
 
-  if (e.kind === "tool") {
-    const tone =
-      e.state === "running"
-        ? { lamp: "live" as const, word: "Running", border: "border-rule" }
-        : e.state === "denied"
-          ? { lamp: "fail" as const, word: "Refused", border: "border-rule" }
-          : e.state === "failed"
-            ? { lamp: "fail" as const, word: "Failed", border: "border-fail" }
-            : {
-                lamp: "ready" as const,
-                word: "Returned",
-                border: "border-rule",
-              };
+  if (entry.kind === "tool") {
     return (
-      <li data-testid={`line-tool-${e.id}`} class="flex gap-3 py-2">
-        <span class={`${GUTTER} text-fg-dim`}>Tool</span>
-        <div class={`min-w-0 flex-1 border ${tone.border} bg-raise`}>
-          <div class="border-rule flex items-baseline gap-2 border-b px-2.5 py-1.5">
-            <span class="text-label text-fg tracking-[0.12em]">{e.tool}</span>
-            <span class="flex-1" />
-            <StateLamp
-              tone={tone.lamp}
-              word={tone.word}
-              pulse={e.state === "running"}
-            />
-          </div>
-          <div class="px-2.5 py-2">
-            <p class="font-human text-data text-fg-mid leading-snug">
-              {e.intent}
+      <li class="py-3 pl-11" data-testid={`line-tool-${entry.id}`}>
+        <div class={PANEL}>
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Icon name="tool" size={16} class="text-ink-soft shrink-0" />
+            <span class="text-ink text-base font-semibold">
+              {entry.state === "running" ? "Running" : "Used"} {entry.tool}
+            </span>
+            <span class="text-ink-soft text-xs">{entry.intent}</span>
+          </p>
+          <dl class="border-line mt-2 grid grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 border-t pt-2 text-xs">
+            {entry.args.map(([k, v]) => (
+              <div key={k} class="contents">
+                <dt class="text-ink-soft">{k}</dt>
+                <dd class="text-ink-mid overflow-x-auto">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          {/* Every state gets a word, because a colour alone never tells
+              anyone whether something happened. */}
+          {entry.state === "denied" || entry.state === "failed" ? (
+            <p class="border-line text-stop mt-2 border-t pt-2 text-xs font-medium">
+              {entry.state === "denied"
+                ? "Nothing ran — you refused it."
+                : "Failed."}
+              {entry.result ? (
+                <span class="text-ink-mid font-normal"> {entry.result}</span>
+              ) : null}
             </p>
-            <dl class="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-              {e.args.map(([k, v]) => (
-                <div key={k} class="contents">
-                  <dt class="text-legend text-fg-dim tracking-[0.12em] uppercase">
-                    {k}
-                  </dt>
-                  <dd class="text-data text-fg-mid overflow-x-auto">{v}</dd>
-                </div>
-              ))}
-            </dl>
-            {e.result ? (
-              <p
-                data-testid={`tool-result-${e.id}`}
-                class="border-rule text-data text-fg mt-2 border-t pt-2"
-              >
-                {e.result}
-              </p>
-            ) : null}
-            {e.state === "denied" ? (
-              <p class="border-rule text-data text-fail mt-2 border-t pt-2">
-                Nothing ran. The call was refused before it left the archetype.
-              </p>
-            ) : null}
-          </div>
+          ) : entry.result ? (
+            <p
+              class="border-line text-ink-mid mt-2 border-t pt-2 text-xs"
+              data-numeric
+            >
+              {entry.result}
+            </p>
+          ) : null}
         </div>
       </li>
     );
   }
 
-  if (e.kind === "hold") {
-    const pending = e.decision === "pending";
+  if (entry.kind === "hold") {
+    // Only a pending decision that something is listening for can be answered.
+    const pending = entry.decision === "pending" && decide !== undefined;
     return (
-      <li data-testid={`line-hold-${e.id}`} class="flex gap-3 py-2">
-        <span class={`${GUTTER} text-hold`}>Hold</span>
-        <div class="border-hold bg-raise min-w-0 flex-1 border">
-          <div class="border-hold/40 flex flex-wrap items-baseline gap-2 border-b px-2.5 py-1.5">
-            <span class="text-label text-hold tracking-[0.14em] uppercase">
-              Permission required
+      <li class="py-3 pl-11" data-testid={`line-hold-${entry.id}`}>
+        <div
+          class={[
+            "rounded-md border p-3",
+            pending
+              ? "border-waiting/35 bg-waiting/[0.06]"
+              : "border-line bg-surface",
+          ].join(" ")}
+        >
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Icon
+              name="shield"
+              size={16}
+              class={
+                pending ? "text-waiting shrink-0" : "text-ink-soft shrink-0"
+              }
+            />
+            <span class="text-ink text-base font-semibold">
+              {pending ? "Waiting for you" : "You were asked"}
             </span>
-            <span class="flex-1" />
-            <span class="text-legend text-fg-dim tracking-[0.12em] uppercase">
-              {pending
-                ? "The run is suspended here"
-                : `Decided · ${e.decision}`}
-            </span>
-          </div>
-          <div class="px-2.5 py-2">
-            <p class="font-human text-body text-fg leading-snug">{e.intent}</p>
-            <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-              <div class="contents">
-                <dt class="text-legend text-fg-dim tracking-[0.12em] uppercase">
-                  tool
-                </dt>
-                <dd class="text-data text-fg-mid">{e.tool}</dd>
+            <span class="text-ink-soft text-xs">{entry.intent}</span>
+          </p>
+          <dl class="border-line/70 mt-2 grid grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 border-t pt-2 text-xs">
+            {entry.args.map(([k, v]) => (
+              <div key={k} class="contents">
+                <dt class="text-ink-soft">{k}</dt>
+                <dd class="text-ink-mid overflow-x-auto">{v}</dd>
               </div>
-              {e.args.map(([k, v]) => (
-                <div key={k} class="contents">
-                  <dt class="text-legend text-fg-dim tracking-[0.12em] uppercase">
-                    {k}
-                  </dt>
-                  <dd class="text-data text-fg-mid overflow-x-auto">{v}</dd>
-                </div>
-              ))}
-            </dl>
-            <p class="border-hold/40 font-human text-data text-hold mt-2 border-t pt-2 leading-snug">
-              {e.risk}
+            ))}
+          </dl>
+          <p class="text-ink-mid mt-2 text-xs">{entry.risk}</p>
+
+          {pending ? (
+            <div class="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                testId="permission-allow"
+                onClick$={() => decide?.(true)}
+              >
+                Allow it
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                testId="permission-refuse"
+                onClick$={() => decide?.(false)}
+              >
+                Don&rsquo;t
+              </Button>
+            </div>
+          ) : (
+            <p class="border-line mt-2 border-t pt-2 text-xs font-medium">
+              {entry.decision === "granted" ? (
+                <span class="text-ok">You allowed it.</span>
+              ) : (
+                <span class="text-stop">You refused. Nothing happened.</span>
+              )}
             </p>
-            {pending ? (
-              <div class="mt-2.5 flex flex-wrap gap-2">
-                <Button
-                  variant="primary"
-                  testId="permission-allow"
-                  onClick$={() => decide?.(true)}
-                >
-                  Allow once
-                </Button>
-                <Button
-                  variant="destructive"
-                  testId="permission-refuse"
-                  onClick$={() => decide?.(false)}
-                >
-                  Refuse
-                </Button>
-              </div>
-            ) : null}
-          </div>
+          )}
         </div>
       </li>
     );
   }
 
   return (
-    <li data-testid={`line-fault-${e.id}`} class="flex gap-3 py-2">
-      <span class={`${GUTTER} text-fail`}>Fault</span>
-      <div class="border-fail bg-raise min-w-0 flex-1 border">
-        <div class="border-fail/40 flex items-baseline gap-2 border-b px-2.5 py-1.5">
-          <span class="text-label text-fail tracking-[0.14em] uppercase">
-            {e.code}
-          </span>
-          <span class="flex-1" />
-          <span class="text-legend text-fg-dim tracking-[0.12em] uppercase">
-            No automatic retry
-          </span>
-        </div>
-        <div class="px-2.5 py-2">
-          <p class="font-human text-body text-fg leading-snug">{e.message}</p>
-          <p class="font-human text-data text-fg-mid mt-1.5 leading-snug">
-            {e.recovery}
-          </p>
-        </div>
+    <li class="py-3 pl-11" data-testid={`line-fault-${entry.id}`}>
+      <div class="border-stop/30 bg-stop/[0.05] rounded-md border p-3">
+        <p class="text-stop text-base font-semibold">{entry.code}</p>
+        <p class="text-ink-mid mt-1 text-base">{entry.message}</p>
+        <p class="border-line text-ink-soft mt-2 border-t pt-2 text-xs">
+          {entry.recovery}
+        </p>
+        {/* Said once, and said out loud: nothing here quietly retries in the
+            background. A colleague that keeps trying without telling you is
+            how a small failure becomes an expensive one. */}
+        <p class="text-ink-soft pt-1 text-xs font-medium">
+          No automatic retry.
+        </p>
       </div>
     </li>
   );

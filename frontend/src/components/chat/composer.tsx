@@ -1,20 +1,21 @@
 import { component$, useSignal, type QRL } from "@builder.io/qwik";
+import { Icon } from "~/components/icon/icon";
 import { Button } from "~/components/ui/button/button";
 
 /**
- * Composer — where a turn is opened.
+ * Where you say something.
  *
- * It is deliberately the same object as the command line at the top of the
- * screen: an amber prompt character, a bare field, a key hint. One is how you
- * address the system, the other is how you address a specialist, and the
- * repetition is the point — the interface has exactly one input shape.
+ * A bordered field that grows to the message, Enter to send, Shift+Enter for a
+ * new line — the shape every messaging surface has, because a person should
+ * not have to learn how to type here.
  *
- * While a turn is running the field is disabled and the primary action becomes
- * STOP, because a run you cannot interrupt is the failure mode this product
- * exists to avoid (PRODUCT.md § Product Principles 3).
+ * While a colleague is working, the field is disabled and the action becomes
+ * Stop. A colleague you cannot interrupt is the failure this product exists to
+ * avoid, so Stop is never more than one key away.
  */
 export interface ComposerProps {
   readonly status: "idle" | "running" | "held";
+  readonly agentName: string;
   readonly onSubmit$: QRL<(prompt: string) => void>;
   readonly onCancel$: QRL<() => void>;
 }
@@ -33,31 +34,29 @@ export const Composer = component$<ComposerProps>((props) => {
         draft.value = "";
         await props.onSubmit$(text);
       }}
-      class="border-rule bg-panel border-t"
+      class="border-line bg-surface border-t px-4 py-3"
     >
-      <div class="flex items-start gap-2 px-3 py-2">
-        <label
-          for="composer-input"
-          class="text-label text-amber pt-1 select-none"
-          aria-hidden="true"
-        >
-          &gt;
-        </label>
+      <div
+        class={[
+          "bg-surface flex items-end gap-2 rounded-lg border p-2 transition-colors duration-150",
+          busy ? "border-line" : "border-line-control",
+        ].join(" ")}
+      >
         <textarea
           id="composer-input"
           data-testid="composer-input"
           rows={1}
           disabled={busy}
           value={draft.value}
-          aria-label="Message the chat archetype"
+          aria-label={`Message ${props.agentName}`}
           placeholder={
             props.status === "held"
-              ? "The run is suspended — answer the permission request above."
+              ? "Answer the request above before carrying on."
               : props.status === "running"
-                ? "The turn is running. Stop it to type again."
-                : "Ask the chat archetype something. Enter to send, Shift+Enter for a new line."
+                ? `${props.agentName} is working. Stop to type again.`
+                : `Message ${props.agentName}…`
           }
-          class="font-human text-body text-fg max-h-40 min-h-8 flex-1 resize-none border-none bg-transparent leading-relaxed outline-none disabled:opacity-40"
+          class="text-md text-ink max-h-40 min-h-9 flex-1 resize-none border-none bg-transparent px-1.5 py-1.5 leading-relaxed outline-none disabled:opacity-45"
           onInput$={(_, el) => {
             draft.value = el.value;
             el.style.height = "auto";
@@ -78,24 +77,29 @@ export const Composer = component$<ComposerProps>((props) => {
         {props.status === "running" ? (
           <Button
             variant="destructive"
+            size="sm"
             testId="composer-stop"
             onClick$={() => props.onCancel$()}
           >
+            <Icon name="stop" size={14} />
             Stop
           </Button>
         ) : (
           <Button
             type="submit"
             variant="primary"
+            size="sm"
             testId="composer-send"
             disabled={busy}
           >
+            <Icon name="send" size={14} />
             Send
           </Button>
         )}
       </div>
-      <p class="text-legend text-fg-dim px-3 pb-2 pl-7 tracking-[0.1em] uppercase">
-        Demonstration only · no turn reaches a model · doc 0005 is 0 of 12
+      <p class="text-ink-soft pt-2 text-xs">
+        Enter to send, Shift + Enter for a new line. Nothing is sent outside
+        your company without you approving it first.
       </p>
     </form>
   );

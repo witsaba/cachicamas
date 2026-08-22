@@ -7,21 +7,31 @@
  * a script tag; and a pending permission must show the exact call, because an
  * approval nobody can read is not a decision anyone made.
  */
+import { $ } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
 import { TranscriptLine } from "./transcript-line";
 import type { TranscriptEntry } from "~/lib/mock/chat";
+import { agentBySlug } from "~/lib/mock/staff";
+
+/** Every line belongs to a colleague; the screen renders their real name. */
+const FINANCE = agentBySlug("finance")!;
+const WHO = {
+  agent: FINANCE,
+  youName: "Ana Rivas",
+  youInitials: "AR",
+} as const;
 
 const HOLD: TranscriptEntry = {
   kind: "hold",
   id: "h1",
-  tool: "dba.execute",
-  intent: "Ask the Database Administrator to drop the staging schema",
+  tool: "Billing",
+  intent: "Send a payment reminder",
   args: [
-    ["system", "staging"],
-    ["statement", "drop schema staging cascade"],
+    ["to", "accounts@northgate.example"],
+    ["about", "Invoice 7712 · £7,900"],
   ],
-  risk: "Irreversible once it runs.",
+  risk: "This email leaves the building and cannot be recalled.",
   decision: "pending",
 };
 
@@ -29,7 +39,7 @@ describe("components/chat/transcript-line", () => {
   it("labels who is speaking, in a fixed gutter", async () => {
     const you = await createDOM();
     await you.render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "a",
@@ -41,11 +51,11 @@ describe("components/chat/transcript-line", () => {
     );
     const line = you.screen.querySelector('[data-testid="line-said-a"]');
     expect(line?.getAttribute("data-who")).toBe("you");
-    expect(line?.textContent).toContain("You");
+    expect(line?.textContent).toContain("Ana Rivas");
 
     const model = await createDOM();
     await model.render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "b",
@@ -57,13 +67,13 @@ describe("components/chat/transcript-line", () => {
     );
     expect(
       model.screen.querySelector('[data-testid="line-said-b"]')?.textContent,
-    ).toContain("Chat");
+    ).toContain("Finance");
   });
 
   it("renders model markdown, and strips what the allowlist forbids", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "m",
@@ -85,7 +95,7 @@ describe("components/chat/transcript-line", () => {
     // paste turn into markup in their own transcript.
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "u",
@@ -103,7 +113,7 @@ describe("components/chat/transcript-line", () => {
   it("shows a caret while a line is still arriving, and drops it when it is done", async () => {
     const streaming = await createDOM();
     await streaming.render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "s",
@@ -119,7 +129,7 @@ describe("components/chat/transcript-line", () => {
 
     const done = await createDOM();
     await done.render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "said",
           id: "d",
@@ -137,7 +147,7 @@ describe("components/chat/transcript-line", () => {
   it("prints a note as a rule with its label, hiding the rule itself", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{ kind: "note", id: "n", label: "TURN OPENED", detail: "run 1" }}
       />,
     );
@@ -150,7 +160,7 @@ describe("components/chat/transcript-line", () => {
   it("shows a running tool as running, with a word not just a colour", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "tool",
           id: "t",
@@ -170,7 +180,7 @@ describe("components/chat/transcript-line", () => {
   it("says plainly that a refused call did not run", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "tool",
           id: "t",
@@ -188,13 +198,14 @@ describe("components/chat/transcript-line", () => {
 
   it("shows a pending permission with the exact call and both answers", async () => {
     const { screen, render } = await createDOM();
-    await render(<TranscriptLine entry={HOLD} />);
+    await render(<TranscriptLine {...WHO} entry={HOLD} onDecide$={$(() => {})} />);
     const hold = screen.querySelector('[data-testid="line-hold-h1"]');
     const text = hold?.textContent ?? "";
-    expect(text).toContain("Permission required");
-    expect(text).toContain("The run is suspended here");
-    expect(text).toContain("drop schema staging cascade");
-    expect(text).toContain("Irreversible");
+    expect(text).toContain("Waiting for you");
+    expect(text).toContain("Send a payment reminder");
+    // The exact thing it wants to do, before anyone can answer.
+    expect(text).toContain("accounts@northgate.example");
+    expect(text).toContain("cannot be recalled");
     expect(
       screen.querySelector('[data-testid="permission-allow"]'),
     ).toBeTruthy();
@@ -205,7 +216,7 @@ describe("components/chat/transcript-line", () => {
 
   it("withdraws the controls once the decision is made, and keeps the record", async () => {
     const { screen, render } = await createDOM();
-    await render(<TranscriptLine entry={{ ...HOLD, decision: "denied" }} />);
+    await render(<TranscriptLine {...WHO} entry={{ ...HOLD, decision: "denied" }} />);
     expect(
       screen.querySelector('[data-testid="permission-allow"]'),
     ).toBeFalsy();
@@ -214,30 +225,30 @@ describe("components/chat/transcript-line", () => {
     ).toBeFalsy();
     const text =
       screen.querySelector('[data-testid="line-hold-h1"]')?.textContent ?? "";
-    expect(text).toContain("denied");
-    // The call it wanted to make stays on the record after the refusal.
-    expect(text).toContain("drop schema staging cascade");
+    expect(text).toContain("You refused");
+    // The thing it wanted to do stays on the record after the refusal.
+    expect(text).toContain("accounts@northgate.example");
   });
 
   it("renders a failure as a typed envelope with a recovery, never as a spinner", async () => {
     const { screen, render } = await createDOM();
     await render(
-      <TranscriptLine
+      <TranscriptLine {...WHO}
         entry={{
           kind: "fault",
           id: "f",
-          code: "not_found",
-          message: "No archetype owns the ticket system yet.",
-          recovery: "Nothing to retry — the capability does not exist.",
+          code: "No access",
+          message: "I have not been given access to the calendar account.",
+          recovery: "Someone with admin rights can grant it from Organisation.",
         }}
       />,
     );
     const text =
       screen.querySelector('[data-testid="line-fault-f"]')?.textContent ?? "";
-    expect(text).toContain("not_found");
-    expect(text).toContain("No archetype owns the ticket system yet.");
-    expect(text).toContain("Nothing to retry");
-    // Retry is a harness concern; the client must never claim it will.
+    expect(text).toContain("No access");
+    expect(text).toContain("I have not been given access");
+    expect(text).toContain("Someone with admin rights");
+    // Nothing retries quietly; the screen says so where a person reads it.
     expect(text).toContain("No automatic retry");
   });
 });
