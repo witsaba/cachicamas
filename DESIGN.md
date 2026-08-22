@@ -5,8 +5,8 @@ colors:
   void: "#070a10"
   panel: "#161e2b"
   raise: "#202a3b"
-  rule: "#55637a"
-  rule-strong: "#6f7f99"
+  rule: "#6a7890"
+  rule-strong: "#7d8da8"
   rule-faint: "#2b3547"
   amber: "#ffb020"
   amber-dim: "#7a5714"
@@ -16,7 +16,7 @@ colors:
   fail: "#ff5f7a"
   fg: "#e6ecf5"
   fg-mid: "#9fb0c7"
-  fg-dim: "#7f8ea8"
+  fg-dim: "#8a99b3"
 typography:
   board:
     fontFamily: "Spline Sans Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace"
@@ -283,12 +283,14 @@ The activity colours. They describe what a run is doing.
   the status rail and the dock.
 - **Raise** (`{colors.raise}`): a well inside a panel — an input, a selected row, a code
   block, a tool block, a hovered menu item or dock cell.
-- **Rule** (`{colors.rule}`, 3.1:1 on panel): every hairline that carries structure — panel
-  borders, header dividers, cell separators, an unlit gauge segment. Never thicker than 1px,
-  and never fainter than this.
-- **Rule Strong** (`{colors.rule-strong}`, 4.6:1 on panel): a focused, active or interactive
-  edge — a dropped panel's border, a hovered cell, the `secondary` button's border, the
-  `ScreenTitle` code chip, the scrollbar thumb.
+- **Rule** (`{colors.rule}` — void 4.44:1 · panel 3.75:1 · raise 3.23:1): every hairline that
+  carries structure — panel borders, header dividers, cell separators, an unlit gauge segment.
+  Never thicker than 1px, and never fainter than this. It is measured against **all three**
+  grounds, not just the panel: a rule inside a well sits on `raise`, and a value picked
+  against the panel alone fails there silently.
+- **Rule Strong** (`{colors.rule-strong}` — void 5.89:1 · panel 4.98:1 · raise 4.29:1): a
+  focused, active or interactive edge — a dropped panel's border, a hovered cell, the
+  `secondary` button's border, the `ScreenTitle` code chip, the scrollbar thumb.
 - **Rule Faint** (`{colors.rule-faint}`): **ornament only**, and deliberately below the
   boundary floor. Its one use is the dotted leader in `Field`, which guides the eye across a
   row and carries no structure, so it must not compete with the rules that do.
@@ -296,25 +298,30 @@ The activity colours. They describe what a run is doing.
   complete gauge, and the current dock cell's fill.
 - **Foreground Mid** (`{colors.fg-mid}`): what a model answered, secondary data, a partial
   gauge, and the `ready` lamp.
-- **Foreground Dim** (`{colors.fg-dim}`, 5.65:1): chrome labels, units, legends, key legends,
-  the `idle` lamp, and anything explicitly unavailable. This is the contrast floor for text
-  in this system.
+- **Foreground Dim** (`{colors.fg-dim}` — void 6.88:1 · panel 5.81:1 · raise 5.01:1): chrome
+  labels, units, legends, key legends, the `idle` lamp, and anything explicitly unavailable.
+  This is the dimmest text in the system and therefore the value that sets its floor, so it is
+  measured on the **well** rather than the panel: these labels name a tool call's arguments
+  inside a raised block, which is the darkest surface any body text sits on.
 
 ### The state vocabulary
 
-Six lamp tones, shared by every screen, defined once in `StateLamp`. Only a state that is
-**happening** gets a colour; "planned" and "unplanned" describe an absence of activity, so
-they are two brightnesses of neutral and do not compete with the three states a person
-actually has to notice.
+Six lamp tones, shared by every screen, defined once in `StateLamp`, and read on **two axes**.
+Colour separates what is *happening*; the mark's fill separates what is not. Only a state with
+activity behind it gets a colour and a filled square; "planned" and "unplanned" describe an
+absence of activity, so they are neutral **and hollow**.
 
-| Tone    | Colour           | Means                                     |
-| ------- | ---------------- | ----------------------------------------- |
-| `live`  | green            | Running now, connected, on duty           |
-| `build` | amber            | Has a plan and work in flight             |
-| `hold`  | violet           | Suspended, waiting on a person's decision |
-| `fail`  | red              | Errored, denied, cancelled                |
-| `ready` | neutral (fg-mid) | Planned, but nothing is happening         |
-| `idle`  | neutral (fg-dim) | Nothing here yet                          |
+| Tone    | Colour           | Mark   | Means                                     |
+| ------- | ---------------- | ------ | ----------------------------------------- |
+| `live`  | green            | filled | Running now, connected, on duty           |
+| `build` | amber            | filled | Has a plan and work in flight             |
+| `hold`  | violet           | filled | Suspended, waiting on a person's decision |
+| `fail`  | red              | filled | Errored, denied, cancelled                |
+| `ready` | neutral (fg-mid) | hollow | Planned, but nothing is happening         |
+| `idle`  | neutral (fg-dim) | hollow | Nothing here yet                          |
+
+An open runtime layer maps to `ready`, not `build`: nothing is being built at Layer 3 yet, and
+an open position is a fact rather than an activity.
 
 ### Named Rules
 
@@ -334,10 +341,18 @@ word is not a caption, it is half the component. A gauge draws segments *and* pr
 `done/total`. The dock is words, not icons. Demonstration data is marked with the word
 "demo".
 
-**The Boundary Floor Rule.** A hairline that carries structure clears 3.1:1 against the
-surface behind it (WCAG 1.4.11). In a board built entirely out of hairlines that floor is not
-a detail, it is the whole structure. `rule-faint` is the single exemption, and only because
-it is ornament: it guides the eye and carries nothing.
+**The Two Axes Rule.** A lamp is read twice before its word: by colour, which separates the
+states that are happening, and by fill, which separates the ones that are not. `live`, `build`,
+`hold` and `fail` are filled; `ready` and `idle` are hollow outlines. Two neutral brightnesses
+alone sat about 1.5:1 apart, and on a board where five of six cells are inactive that pushed
+the whole state read back onto the word. This rule and The Word Beside the Lamp Rule are the
+same commitment defended twice.
+
+**The Boundary Floor Rule.** A hairline that carries structure clears WCAG 1.4.11's 3:1
+against **every** ground it can sit on — void, panel and raise — not just the one it was
+sampled against. In a board built entirely out of hairlines that floor is not a detail, it is
+the whole structure. `rule-faint` is the single exemption, and only because it is ornament: it
+guides the eye and carries nothing.
 
 ## Typography
 
@@ -488,7 +503,11 @@ control, because a committing action *is* the system offering to act.
   confirm.
 - **Secondary:** transparent fill, `rule-strong` border, `fg` text. Anything non-committal.
   Hover warms the border and the label to amber.
-- **Destructive:** fail fill, void text, fail border. Refuse, delete, cancel a run.
+- **Destructive:** fail fill, void text, fail border. Reserved for destruction **inside a
+  run** — refusing a permission request, stopping a turn in flight. A merely consequential
+  action outside a run (signing out) is a `secondary` cell that warms to fail on hover
+  (`hover:!border-fail hover:!text-fail`), so red at rest keeps meaning "this stops something
+  that is happening".
 - **Link:** cyan, underlined, `underline-offset-2`, no cell, no padding, no uppercase. A word
   in a sentence. Hover goes to `fg`.
 - **Hover / Active:** filled variants **reverse video** — fill and text swap. Secondary darkens
@@ -571,10 +590,12 @@ a focused control looks identical everywhere; the primitives' tests fail on any 
 
 ### StateLamp (signature)
 
-A state, said twice: a 6px filled square plus the state's own word, always together, in an
-`inline-flex` with `gap-1.5`. The word is required by the component's own type. `pulse` is
-permitted only for a state genuinely in motion (`term-lamp`, 1.6s), and in practice only
-`on-duty` and a running tool call use it. `data-tone` is emitted for testing.
+A state, said three ways: a 6px square, its fill, and the state's own word, always together in
+an `inline-flex` with `gap-1.5`. An active state renders a filled square in its colour; an
+inactive one renders a hollow square — `border` in `fg-mid` or `fg-dim` over a transparent
+ground. The word is required by the component's own type. `pulse` is permitted only for a state
+genuinely in motion (`term-lamp`, 1.6s), and in practice only `on-duty` and a running tool call
+use it. `data-tone` is emitted for testing.
 
 ### Gauge (signature)
 
@@ -686,8 +707,10 @@ variety.
   caret, focus, the primary action, the demo marker, and the `build` lamp.
 - **Do** use cyan only for something that opens. A reference is cyan because it is navigable,
   never because of what it says.
-- **Do** clear 3.1:1 against the surface for any hairline that carries structure; use
-  `rule-faint` only for ornament that carries nothing.
+- **Do** render an inactive lamp hollow. Colour carries the states that are happening; the
+  mark's fill carries the ones that are not.
+- **Do** clear 3:1 for any hairline that carries structure, measured against every ground it
+  can sit on — void, panel and raise; use `rule-faint` only for ornament that carries nothing.
 - **Do** switch to `font-human` the moment content is language — a role description, a model's
   answer, a person's message — and back to `font-system` for everything the machine says about
   itself.
@@ -706,8 +729,13 @@ variety.
 
 - **Don't** put a working colour on chrome. A coloured panel label, key legend, gauge or title
   chip is the specific regression this palette was corrected to remove.
-- **Don't** colour a state that is not happening. `ready` and `idle` are neutral; giving
-  "planned" a hue makes it compete with the three states a person must actually notice.
+- **Don't** colour a state that is not happening, and don't fill its mark either. `ready` and
+  `idle` are neutral **and** hollow; giving "planned" a hue makes it compete with the states a
+  person must actually notice, and giving it a fill takes back the second axis.
+- **Don't** sample a contrast ratio against the panel and call it done. The well is darker; a
+  hairline or a dim label that passes on `panel` can fail on `raise`.
+- **Don't** spend the destructive variant on an action that is merely consequential. Red at
+  rest means "this stops something that is running".
 - **Don't** introduce a radius. `border-radius: 0 !important` is global; a `rounded-*` utility
   is dead code and a rounded custom element is a defect.
 - **Don't** add a shadow, a glow, a blur, a gradient or a `backdrop-filter`. The primitives'
@@ -734,33 +762,32 @@ variety.
 ## Divergences recorded from the build
 
 Where the direction contract, the in-repo prose and the shipped code disagree, the code is what
-is recorded above. The open disagreements, for the record:
+is recorded above. One disagreement is open, and it is a deliberate one:
 
-- **The direction contract in `src/root.tsx` is now behind the palette.** Its OWN-WORLD block
-  still reads "five working colours, each with one job: amber is the machine speaking, cyan is
-  navigable, green running, violet suspended, red failed." The built system narrowed amber to
-  *the system speaking about itself right now, never structure*, and moved two of the six lamp
-  tones (`ready`, `idle`) off colour entirely. The contract text was not updated with the fix.
-- **The contract's FIRST VIEWPORT describes the signed-in desk**, not the built `/`. The landing
-  renders the status rail, a headline and a "What is actually built" panel, then the register,
-  then the suspension. The command line and the dock are gated on `isAuthenticated` in
-  `routes/layout.tsx` and do not render for a signed-out visitor.
-- **`src/components/ui/README.md` rule 3 is stale.** It still states the pre-fix rule ("Colour
-  is state, never decoration… amber (the machine speaking)") and does not carry the
-  structure-is-neutral clause that `global.css` rule 3 now states. `global.css` is the
-  authority; the README lags it.
-- **Structural amber survives at five sites** the neutralization did not reach, all outside the
-  `os/` primitives. They are recorded as residual defects, not as design-system rules:
-  `routes/index.tsx` (the landing's layer-code chips), `os/form-classes.ts` `FORM_LEGEND`
-  (fieldset legends), `sign-in-required-card.tsx` (a panel-style heading, where `Panel`'s own
-  label is now neutral), `routes/auth/signin/index.tsx` and `routes/auth/signout/index.tsx` (a
-  full-width `bg-amber h-px` rule at the top of the page). A sixth, borderline: the conversation
-  list's active-row marker is amber, which is selection state rather than the system speaking.
-- **A stale comment on the auth pages** calls that 1px amber rule a "subtle gradient accent
-  line". There is no gradient in the build — it is a flat 1px fill — so the comment misdescribes
-  its own code rather than violating the no-glow rule.
+- **Both faces load from a third party, and the fallback is silent.** `src/root.tsx` links
+  Spline Sans Mono and Spline Sans from `fonts.googleapis.com` rather than self-hosting them.
+  A tightened CSP, a blocked host or an offline client drops the whole world onto
+  `ui-monospace` and `ui-sans-serif` — the platform faces — with nothing failing loudly, and
+  the two voices that carry meaning here collapse into whatever the OS supplies. This is a
+  known, accepted risk for this build rather than an oversight; it is recorded so the next
+  person meets it as a decision, and self-hosting is the fix when it stops being acceptable.
 
-Resolved since the previous recording, and no longer divergences: `PRODUCT.md` exists at the
-repository root and is the source of the accessibility commitment recorded above;
-`button.tsx`'s header comment has been rewritten to the terminal vocabulary and now matches
-`classes.ts`; and `--text-panel` has been deleted, so every declared type step is used.
+Closed while this file was being written, because a documentation pass that finds a defect and
+files it instead of fixing it has chosen the cheaper half of its job:
+
+- The direction contract in `src/root.tsx` now carries the structure-is-neutral clause, the
+  two-axis state vocabulary, and a FIRST VIEWPORT that describes both the signed-out and the
+  signed-in surface rather than only the desk.
+- `src/components/ui/README.md`'s material rules were rewritten from four to six, adding
+  structure-is-neutral, the two-axis rule, and the every-ground contrast floor.
+- The five residual structural-amber sites outside the `os/` primitives are neutralized: the
+  landing's layer-code chips, `FORM_LEGEND`, `sign-in-required-card`'s heading, and the 1px
+  band at the top of both auth pages. The conversation list's active-row marker went with them
+  — selection is not the system speaking.
+- The stale "subtle gradient accent line" comment on both auth pages is gone; there is no
+  gradient in this build and there never was one in the shipped CSS.
+
+Resolved before this recording: `PRODUCT.md` exists at the repository root and is the source of
+the accessibility commitment recorded above; `button.tsx`'s header comment has been rewritten to
+the terminal vocabulary and now matches `classes.ts`; and `--text-panel` has been deleted, so
+every declared type step is used.

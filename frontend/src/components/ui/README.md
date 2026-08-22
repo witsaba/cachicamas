@@ -11,7 +11,7 @@ Two families live under `src/components/`:
 The world both families render in is defined once, in `src/global.css`. Read that file
 before adding anything here; it is short, and it is the authority.
 
-## The four material rules
+## The six material rules
 
 They are stated in `global.css` and enforced by `classes.spec.ts` in each primitive:
 
@@ -21,11 +21,22 @@ They are stated in `global.css` and enforced by `classes.spec.ts` in each primit
 2. **Nothing glows.** No shadows, no blurs, no gradients, no backdrop filters. Separation
    comes from 1px hairlines and from the value step between `--color-void`,
    `--color-panel` and `--color-raise`.
-3. **Colour is state, never decoration.** Five working colours, each with one job:
-   `amber` (the machine speaking), `cyan` (navigable), `live` (running), `hold`
-   (suspended, awaiting a person), `fail` (errored or refused). A colour used for mood is
-   a colour that has stopped carrying information.
-4. **Two voices.** `font-system` (Spline Sans Mono) is the machine: codes, labels, states,
+3. **Colour is state, never decoration — and structure is neutral.** Amber is the system
+   speaking about itself _now_, and its list is closed: the wordmark, prompt characters,
+   the streaming caret, focus, the primary action, the demonstration marker, and the one
+   archetype in build. `cyan` is navigable; `live`, `hold` and `fail` say what a run is
+   doing. Panel labels, key legends, gauges, title chips and the current dock cell carry
+   **no colour** — a palette spent on chrome is a palette that can no longer report
+   anything, and the first build proved it by putting twenty amber marks on one screen.
+4. **State works on two axes.** Colour separates the states that are _happening_; a filled
+   versus hollow mark separates the ones that are not. Five of the six specialists on the
+   board are inactive, so a colour-only vocabulary put the whole state read back onto the
+   word.
+5. **Every rule clears 3:1 against every ground it can sit on** — void, panel AND well. A
+   hairline picked against the panel alone fails silently inside a raised block, which is
+   where half of them are. `--color-rule-faint` is the single declared exemption: it draws
+   the dotted leader, which is ornament.
+6. **Two voices.** `font-system` (Spline Sans Mono) is the machine: codes, labels, states,
    tabular figures, headings. `font-human` (Spline Sans) is language: what a person typed
    and what a model answered. The switch between them is meaning, not texture.
 

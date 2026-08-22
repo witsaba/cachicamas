@@ -50,7 +50,7 @@ export const SignInRequiredCard = component$<SignInRequiredCardProps>(
         data-testid="sign-in-required-card"
       >
         <header class="border-rule border-b px-3 py-1.5">
-          <h1 class="text-label text-amber tracking-[0.14em] uppercase">
+          <h1 class="text-label text-fg tracking-[0.14em] uppercase">
             Sign in to continue
           </h1>
         </header>

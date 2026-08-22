@@ -33,7 +33,7 @@ export const ConversationList = component$<ConversationListProps>((props) => (
             <span class="flex items-baseline gap-2">
               <span
                 aria-hidden="true"
-                class={`h-1.5 w-1.5 shrink-0 ${active ? "bg-amber" : "bg-rule-strong"}`}
+                class={`h-1.5 w-1.5 shrink-0 ${active ? "bg-fg" : "bg-rule-strong"}`}
               />
               <span
                 class={`font-human text-data min-w-0 flex-1 truncate ${

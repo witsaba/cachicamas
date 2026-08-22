@@ -17,18 +17,26 @@ each with a code, a state and a number, all readable at once. Refuses the
 launcher grid of identical icons, which would imply six working specialists
 when five do not exist.
 
-OWN-WORLD: deep ink-navy panels on a void ground, 1px hairlines, hard corners,
-no shadow and no glow. Five working colours, each with one job: amber is the
-machine speaking, cyan is navigable, green running, violet suspended, red
-failed. Spline Sans Mono is the machine's voice; Spline Sans is language.
+OWN-WORLD: deep ink-navy panels on a void ground, 1px hairlines at or above
+3:1 on every ground they sit on, hard corners, no shadow and no glow. STRUCTURE
+IS NEUTRAL — panel labels, key legends, gauges and the current dock cell carry
+no colour. Colour is reserved for what is happening: amber is the system
+speaking about itself now (wordmark, prompt, caret, focus, primary action, the
+demonstration marker, the one archetype in build), cyan is navigable, green
+running, violet suspended, red failed. State works on two axes, because five of
+six specialists are inactive: colour separates what is happening, and a filled
+versus hollow mark separates what is not. Spline Sans Mono is the machine's
+voice; Spline Sans is language.
 
 STORY: this is a company of specialists with jobs and boundaries; most are not
 built yet and the board says so; the one that is being built can be opened and
 can be stopped mid-run.
 
-FIRST VIEWPORT: status rail, command line, then the register — six archetype
-cells with lamps, plans and gauges — with the runtime's real counts beside it
-and the function-key dock along the bottom edge.
+FIRST VIEWPORT: signed out, the rail alone over the headline and the stack's
+real counts, with the register whole below it. Signed in, the rail and the
+command line over the register — six archetype cells with lamps, plans and
+gauges — the runtime beside it, and the function-key dock along the bottom
+edge. The board arrives painted; nothing stages.
 
 FORM: the exchange terminal; candidate 7 of the grounded list; seed 8a09c7ce.
 

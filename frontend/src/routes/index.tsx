@@ -100,7 +100,7 @@ export default component$(() => {
                 class="border-rule border-b py-2.5 first:pt-0 last:border-b-0 last:pb-0"
               >
                 <div class="flex items-baseline gap-2">
-                  <span class="text-label text-amber tracking-[0.16em] uppercase">
+                  <span class="text-label text-fg-mid tracking-[0.16em] uppercase">
                     {l.code}
                   </span>
                   <span class="text-data text-fg flex-1">{l.name}</span>

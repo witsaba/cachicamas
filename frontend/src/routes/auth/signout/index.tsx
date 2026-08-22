@@ -52,9 +52,8 @@ export default component$(() => {
 
   return (
     <main class="bg-void text-fg flex-1" data-testid="auth-signout-page">
-      {/* Subtle gradient accent line — same idiom as /auth/signin
-          and the landing page. Visual continuity, not decoration. */}
-      <div class="bg-amber h-px w-full" aria-hidden="true" />
+      {/* The page's top rule — the same flat hairline /auth/signin carries. */}
+      <div class="bg-rule h-px w-full" aria-hidden="true" />
 
       <section
         class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"

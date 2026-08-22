@@ -4,8 +4,9 @@
  * Forms are rare in this product — ownboarding is essentially the only one —
  * but the two that exist must not invent their own field chrome. A field here
  * is the same object as the command line and the composer: a hard-cornered
- * well, a 1px rule, an amber rule when focused, and the machine voice on the
- * label with language in the field itself.
+ * well, a 1px rule, an amber rule when FOCUSED — focus is one of the few
+ * things amber is still reserved for — and the machine voice on the label with
+ * language in the field itself.
  *
  * Exported as constants rather than a component so Tailwind's scanner keeps
  * the utilities and so a drift test can assert them without a DOM.
@@ -46,4 +47,4 @@ export const FORM_FIELDSET = "border border-rule bg-panel p-4";
 
 /** The legend on a grouped set. */
 export const FORM_LEGEND =
-  "px-1.5 text-label uppercase tracking-[0.14em] text-amber";
+  "px-1.5 text-label uppercase tracking-[0.14em] text-fg";

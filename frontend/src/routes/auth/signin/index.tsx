@@ -104,10 +104,11 @@ export default component$(() => {
 
   return (
     <main class="bg-void text-fg flex-1" data-testid="auth-signin-page">
-      {/* Subtle gradient accent line — the same visual idiom as the
-          landing page (`routes/index.tsx`). Nods to Linear/Cursor
-          without breaking the text-first UX-4 constraint. */}
-      <div class="bg-amber h-px w-full" aria-hidden="true" />
+      {/* The page's top rule. Flat, 1px, the system's own hairline colour —
+          there are no gradients anywhere in this world, and the comment that
+          used to call this one a "gradient accent" outlived the design it
+          described. */}
+      <div class="bg-rule h-px w-full" aria-hidden="true" />
 
       <section
         class="mx-auto flex w-full max-w-md flex-col items-stretch px-4 py-16"
