@@ -298,7 +298,7 @@ test("[routes/layout]: registers a capture-phase popstate listener that reloads 
   expect(layoutSrc).toMatch(/window\.location\.reload\(\)/);
   // Sanity: layout still renders the header chrome.
   const screen = await renderWithSession(ANON_SESSION);
-  expect(screen.querySelector('[data-testid="app-shell-header"]')).toBeTruthy();
+  expect(screen.querySelector('[data-testid="status-rail"]')).toBeTruthy();
 });
 
 test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", async () => {
@@ -308,27 +308,36 @@ test("[routes/layout]: anon brand link points to / (landing page) (R-FIX-001)", 
   // the sign-in redirect chain). The landing page is the
   // canonical entry point for new visitors.
   const screen = await renderWithSession(ANON_SESSION);
-  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  const brand = screen.querySelector('a[data-testid="status-rail-brand"]');
   expect(brand).toBeTruthy();
   expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/");
 });
 
-test("[routes/layout]: anon shell does NOT render the OrgPill (R-FIX-003)", async () => {
-  // R-FIX-003 (2026-07-06): anonymous visitors have no org
-  // context to surface. The "No organization yet" empty state
-  // is only meaningful for authed users during ownboarding.
-  // Hiding the pill on anon also avoids the SSR fetch on
-  // every anonymous page load.
+test("[routes/layout]: the anon shell drops the org reading and the whole OS chrome", async () => {
+  // An anonymous visitor has no organization context and nothing to launch,
+  // so the rail drops the org reading and the shell renders neither the
+  // command line nor the dock. The landing page gets the whole canvas.
   const screen = await renderWithSession(ANON_SESSION);
-  // No OrgPill in any state.
-  expect(screen.querySelector('[data-testid="org-pill"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="org-pill-empty"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="org-pill-loading"]')).toBeFalsy();
-  expect(screen.querySelector('[data-testid="app-shell-right"]')).toBeTruthy();
-  // The identity widget is still there (sign-in button).
+  expect(screen.querySelector('[data-testid="status-rail-org"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="status-rail-demo"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="command-line"]')).toBeFalsy();
+  expect(screen.querySelector('[data-testid="function-rail"]')).toBeFalsy();
+  // The identity affordance is still there.
   expect(
     screen.querySelector('form[data-testid="sign-in-button"]'),
   ).toBeTruthy();
+});
+
+test("[routes/layout]: the authed shell mounts the command line and the dock", async () => {
+  // Signed in, the OS chrome appears and stays: the launcher above the
+  // application, the function-key dock below it. Both are what make every
+  // screen under them read as an application in one frame.
+  const screen = await renderWithSession(AUTH_SESSION);
+  expect(screen.querySelector('[data-testid="command-line"]')).toBeTruthy();
+  expect(screen.querySelector('[data-testid="function-rail"]')).toBeTruthy();
+  expect(screen.querySelector('[data-testid="status-rail-org"]')).toBeTruthy();
+  // The board is demonstration data and the rail says so, unprompted.
+  expect(screen.querySelector('[data-testid="status-rail-demo"]')).toBeTruthy();
 });
 
 test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)", async () => {
@@ -340,7 +349,7 @@ test("[routes/layout]: auth brand link points to /home/ (home page) (R-FIX-001)"
   // the Home Page is where their dashboard (and ownboarding
   // redirect) lives.
   const screen = await renderWithSession(AUTH_SESSION);
-  const brand = screen.querySelector('a[data-testid="app-shell-brand"]');
+  const brand = screen.querySelector('a[data-testid="status-rail-brand"]');
   expect(brand).toBeTruthy();
   expect((brand as HTMLAnchorElement).getAttribute("href")).toBe("/home/");
 });
