@@ -1,50 +1,29 @@
 /**
- * Button primitive — className table.
+ * Button primitive — className table, in the terminal's own vocabulary.
  *
- * Reference: `openspec/changes/cachicamas-button-design-system/{proposal,design,specs/frontend-ui-button/spec}.md`
+ * The world (see `src/global.css`): hard rectangles, 1px rules, no shadow, no
+ * radius, colour only ever carrying state. A button here is a keyed cell on a
+ * board, not a pill — so it is a bordered rectangle with an uppercase machine
+ * label, and its press feedback is REVERSE VIDEO: the fill and the text swap.
+ * That is what a terminal does when you hit a key, and it is the only press
+ * affordance in the product.
  *
  * Why a pure-function table separate from `button.tsx`:
- *   - Unit tests for the className contract run in milliseconds (no DOM,
- *     no Qwik createDOM setup).
- *   - Tailwind 4's content scanner picks up the literal strings here, so
- *     the utilities survive tree-shaking as long as `button.tsx` imports
- *     the constants — which every consumer route does.
- *   - Anti-drift: a contributor who removes `cursor-pointer` from a
- *     variant breaks `classes.spec.ts` immediately.
+ *   - The className contract is unit-tested in milliseconds, with no DOM.
+ *   - Tailwind 4's content scanner picks up the literal strings here, so the
+ *     utilities survive tree-shaking as long as `button.tsx` imports them.
+ *   - Anti-drift: a contributor who reintroduces a radius, a shadow or a
+ *     slate-era colour breaks `classes.spec.ts` immediately.
  *
- * Variants:
- *   - `primary` (create / update): bg-slate-900, the project monochrome.
- *   - `secondary` (general-purpose outline): bg-white + border-slate-300.
- *   - `destructive` (delete / remove): bg-red-700.
- *   - `link` (bare-underline text button): no surface, just an underlined
- *     text link styled as a button. Used by `workspace-form-clear-repo`,
- *     `github-repo-picker-refresh`, etc.
+ * Variants map to intent, and intent maps to one of the five working colours:
+ *   - `primary`     — amber. The system's own action: submit, open, confirm.
+ *   - `secondary`   — a rule-bordered cell. Everything non-committal.
+ *   - `destructive` — fail red. Refuse, delete, cancel a run.
+ *   - `link`        — cyan, underlined. Cyan means "you can go there".
  *
- * All filled variants share the base affordances:
- *   - `cursor-pointer` for cross-OS consistency (some OSes don't apply
- *     cursor:pointer to <button> natively; the user reported this as a
- *     pain point).
- *   - `disabled:cursor-not-allowed` so disabled buttons read as
- *     non-interactive.
- *   - `transition-[background-color,box-shadow,transform,border-color]
- *     duration-150` for the hover/press feedback uniform across the
- *     product.
- *   - `focus:outline-none focus-visible:ring-2` so keyboard users see a
- *     clear ring (the focus ring color varies by variant).
- *
- * The `not-disabled:hover:*` utilities fix the a11y bug where disabled
- * buttons still respond visually to mouse-over. The `not-` variant
- * prefix is built into Tailwind 4 and renders as `:not(:disabled):hover:*`.
- *
- * The `link` variant is text-only and does not use the BUTTON_BASE chrome
- * (no flex, no padding, no rounded-md). It duplicates the cursor / focus
- * / active / disabled affordances inside VARIANT_LINK so the variant
- * stands alone — a text link styled like a button.
- *
- * Consumers can APPEND custom classes via the `<Button class="...">`
- * prop for shape overrides (e.g. circular, full-width, dark-surface
- * hover). The system tokens always apply first; consumer tokens layer on
- * top.
+ * Focus is NOT restyled per variant. `global.css` gives the whole system one
+ * focus treatment (a 1px amber outline with a 1px offset) so a focused control
+ * looks identical on a panel, in a well, and on the void.
  */
 
 export const BUTTON_BASE = [
@@ -52,87 +31,84 @@ export const BUTTON_BASE = [
   "items-center",
   "justify-center",
   "gap-2",
-  "rounded-md",
-  "font-medium",
+  "border",
+  "font-system",
+  "uppercase",
+  "tracking-[0.08em]",
+  "whitespace-nowrap",
   "cursor-pointer",
   "disabled:cursor-not-allowed",
-  "transition-[background-color,box-shadow,transform,border-color]",
+  "disabled:opacity-40",
+  "transition-[background-color,color,border-color]",
   "duration-150",
-  "focus:outline-none",
-  "focus-visible:ring-2",
 ].join(" ");
 
-/** Default size: `text-sm` with `px-4 py-2`. Used by all form submits, retry buttons, header CTAs. */
-export const BUTTON_SIZE_MD = "px-4 py-2 text-sm";
+/** Default size: the density of a toolbar cell. */
+export const BUTTON_SIZE_MD = "px-3 py-1.5 text-label";
 
-/** Hero / empty-state size: `text-base` with `px-5 py-3`. */
-export const BUTTON_SIZE_LG = "px-5 py-3 text-base";
+/** The one size up, for a screen's single committing action. */
+export const BUTTON_SIZE_LG = "px-4 py-2.5 text-body";
 
 /**
- * Primary intent — the "do something persistent" CTA.
- *
- * Ownboarding-form was previously `bg-indigo-600` (project monochrome
- * drift); after this system lands, all primary CTAs use `bg-slate-900`.
- * Documented as a visual regression aligned with the project rule.
+ * Primary intent — an amber filled cell that reverses on interaction.
+ * Amber is the machine's own voice, so a primary button reads as the system
+ * offering to do the thing rather than as a decorated call to action.
  */
 export const VARIANT_PRIMARY = [
-  "bg-slate-900",
-  "text-white",
-  "not-disabled:hover:bg-slate-700",
-  "active:translate-y-px",
-  "focus-visible:ring-indigo-500",
-  "disabled:opacity-50",
+  "border-amber",
+  "bg-amber",
+  "text-void",
+  "not-disabled:hover:bg-void",
+  "not-disabled:hover:text-amber",
+  "not-disabled:active:bg-void",
+  "not-disabled:active:text-amber",
 ].join(" ");
 
 /**
- * Secondary intent — general-purpose outline button.
- * Used by Cancel links, the org-pill trigger, secondary actions.
+ * Secondary intent — an empty cell with a rule around it. Used for anything
+ * that does not commit: cancel, back, refresh, secondary navigation.
  */
 export const VARIANT_SECONDARY = [
-  "bg-white",
-  "border",
-  "border-slate-300",
-  "text-slate-900",
-  "not-disabled:hover:bg-slate-50",
-  "active:translate-y-px",
-  "focus-visible:ring-indigo-500",
-  "disabled:opacity-50",
+  "border-rule-strong",
+  "bg-transparent",
+  "text-fg",
+  "not-disabled:hover:border-amber",
+  "not-disabled:hover:text-amber",
+  "not-disabled:active:bg-raise",
 ].join(" ");
 
 /**
- * Destructive intent — delete / remove actions.
- *
- * NO `active:translate-y-px`: a heavy destructive button should not
- * "press" — the visual weight signals permanence, and a press would
- * feel like the page is being shaken.
+ * Destructive intent — the fail colour, filled. Reverses like the others, so
+ * the vocabulary stays uniform; the colour alone carries the warning, and the
+ * label always names the destruction in words (PRODUCT.md § Accessibility).
  */
 export const VARIANT_DESTRUCTIVE = [
-  "bg-red-700",
-  "text-white",
-  "not-disabled:hover:bg-red-800",
-  "focus-visible:ring-red-500",
-  "disabled:opacity-50",
+  "border-fail",
+  "bg-fail",
+  "text-void",
+  "not-disabled:hover:bg-void",
+  "not-disabled:hover:text-fail",
+  "not-disabled:active:bg-void",
+  "not-disabled:active:text-fail",
 ].join(" ");
 
 /**
- * Link intent — bare-underline text button (no surface).
+ * Link intent — cyan and underlined, with no cell around it.
  *
- * Uses `transition-colors` (lighter transition than the filled variants)
- * because the hover state is a text color change, not a surface swap.
+ * Cyan is reserved system-wide for "this goes somewhere", so a link button
+ * inherits that meaning for free. It carries no border, no padding and no
+ * uppercase treatment: it is a word in a sentence, not a control on a board.
  */
 export const VARIANT_LINK = [
-  "text-slate-700",
+  "text-cyan",
   "underline",
-  "transition-colors",
-  "duration-150",
+  "underline-offset-2",
   "cursor-pointer",
   "disabled:cursor-not-allowed",
-  "hover:text-slate-900",
-  "focus:outline-none",
-  "focus-visible:ring-2",
-  "focus-visible:ring-indigo-500",
-  "active:translate-y-px",
-  "disabled:opacity-50",
+  "disabled:opacity-40",
+  "transition-colors",
+  "duration-150",
+  "hover:text-fg",
 ].join(" ");
 
 /** All four variants. */
@@ -154,16 +130,14 @@ export const ALL_SIZES: readonly ButtonSize[] = ["md", "lg"] as const;
  * Compose the final className for a `<Button>` variant × size cell.
  * Pure function — unit-tested in isolation (no DOM).
  *
- * `consumerClass` is APPENDED to the system tokens — it does NOT
- * replace them. Use it for shape overrides (circular, full-width,
- * dark-surface hover) that the variants don't anticipate.
+ * `consumerClass` is APPENDED to the system tokens — it does NOT replace them.
  */
 export function buttonClassName(
   variant: ButtonVariant,
   size: ButtonSize,
   consumerClass?: string,
 ): string {
-  // The link variant is text-only and does not use BUTTON_BASE or size.
+  // The link variant is a word, not a cell: no base chrome, no size.
   if (variant === "link") {
     return consumerClass
       ? [VARIANT_LINK, consumerClass].join(" ")

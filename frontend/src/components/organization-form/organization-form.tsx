@@ -10,6 +10,14 @@ import {
   organizationInputSchema,
   type OrganizationInput,
 } from "~/lib/organization-schema";
+import {
+  FORM_ERROR,
+  FORM_FIELDSET,
+  FORM_HELP,
+  FORM_INPUT,
+  FORM_LABEL,
+  FORM_LEGEND,
+} from "~/components/os/form-classes";
 
 /**
  * OrganizationForm — presentational + stateful form for the
@@ -322,14 +330,14 @@ export const OrganizationForm = component$<{
       {state.serverErrorMessage && (
         <div
           role="alert"
-          class="rounded border border-red-300 bg-red-50 px-4 py-2 text-red-900"
+          class="border-fail bg-raise font-human text-body text-fail border px-3 py-2"
         >
           {state.serverErrorMessage}
         </div>
       )}
 
       <div>
-        <label for="fullName" class="mb-1 block font-semibold text-slate-900">
+        <label for="fullName" class={`mb-1 ${FORM_LABEL}`}>
           What is the full legal name of the organization?
         </label>
         <input
@@ -358,20 +366,17 @@ export const OrganizationForm = component$<{
             const error = validateField("fullName", state.fullName);
             state.fieldErrors = { ...state.fieldErrors, fullName: error };
           })}
-          class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
+          class={FORM_INPUT}
         />
         {state.fieldErrors.fullName && (
-          <p class="mt-1 text-sm text-red-700" data-error="fullName">
+          <p class={FORM_ERROR} data-error="fullName">
             {state.fieldErrors.fullName}
           </p>
         )}
       </div>
 
       <div>
-        <label
-          for="identification"
-          class="mb-1 block font-semibold text-slate-900"
-        >
+        <label for="identification" class={`mb-1 ${FORM_LABEL}`}>
           Provide a short slug to identify this organization.
         </label>
         <input
@@ -409,19 +414,19 @@ export const OrganizationForm = component$<{
               identification: error,
             };
           })}
-          class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
+          class={FORM_INPUT}
         />
-        <p class="mt-1 text-sm text-slate-600">
+        <p class={FORM_HELP}>
           3 to 60 characters. Lowercase letters, digits, and hyphens. Must start
           and end with a letter or digit.
         </p>
         {state.fieldErrors.identification && (
-          <p class="mt-1 text-sm text-red-700" data-error="identification">
+          <p class={FORM_ERROR} data-error="identification">
             {state.fieldErrors.identification}
           </p>
         )}
         {state.conflictMessage && (
-          <p class="mt-1 text-sm text-red-700" data-conflict-message="true">
+          <p class={FORM_ERROR} data-conflict-message="true">
             {state.conflictMessage}
           </p>
         )}
@@ -445,19 +450,13 @@ export const OrganizationForm = component$<{
       )}
 
       {showReviewGroup.value && (
-        <fieldset
-          data-review-group="true"
-          class="space-y-4 rounded border border-slate-200 p-4"
-        >
-          <legend class="px-2 font-semibold text-slate-900">
+        <fieldset data-review-group="true" class={`space-y-4 ${FORM_FIELDSET}`}>
+          <legend class={FORM_LEGEND}>
             Review &amp; share contact details
           </legend>
 
           <div>
-            <label
-              for="shortName"
-              class="mb-1 block font-semibold text-slate-900"
-            >
+            <label for="shortName" class={`mb-1 ${FORM_LABEL}`}>
               Tell us a short name to display.
             </label>
             <input
@@ -487,17 +486,17 @@ export const OrganizationForm = component$<{
                   shortName: undefined,
                 };
               })}
-              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
+              class={FORM_INPUT}
             />
             {state.fieldErrors.shortName && (
-              <p class="mt-1 text-sm text-red-700" data-error="shortName">
+              <p class={FORM_ERROR} data-error="shortName">
                 {state.fieldErrors.shortName}
               </p>
             )}
           </div>
 
           <div>
-            <label for="email" class="mb-1 block font-semibold text-slate-900">
+            <label for="email" class={`mb-1 ${FORM_LABEL}`}>
               Where can we reach you by email?
             </label>
             <input
@@ -522,17 +521,17 @@ export const OrganizationForm = component$<{
                 state.email = v;
                 state.fieldErrors = { ...state.fieldErrors, email: undefined };
               })}
-              class="w-full rounded border border-slate-300 px-3 py-2 aria-invalid:border-red-500"
+              class={FORM_INPUT}
             />
             {state.fieldErrors.email && (
-              <p class="mt-1 text-sm text-red-700" data-error="email">
+              <p class={FORM_ERROR} data-error="email">
                 {state.fieldErrors.email}
               </p>
             )}
           </div>
 
           <div>
-            <label for="phone" class="mb-1 block font-semibold text-slate-900">
+            <label for="phone" class={`mb-1 ${FORM_LABEL}`}>
               How can we reach you by phone?
             </label>
             {/* Expert-UX phone input: country-code selector
@@ -553,7 +552,7 @@ export const OrganizationForm = component$<{
                     };
                   }
                 })}
-                class="mr-2 rounded border border-slate-300 bg-white px-2 py-2 font-mono text-sm"
+                class="border-rule bg-raise text-data text-fg mr-2 border px-2 py-2"
                 data-phone-country
               >
                 {COUNTRY_CODES.map((c) => (
@@ -630,18 +629,18 @@ export const OrganizationForm = component$<{
                     };
                   }
                 })}
-                class="flex-1 rounded border border-slate-300 px-3 py-2 font-mono text-sm aria-invalid:border-red-500"
+                class={`flex-1 ${FORM_INPUT}`}
                 data-phone-national
               />
             </div>
-            <p class="mt-1 font-mono text-xs text-slate-500" data-phone-e164>
+            <p class="text-legend text-fg-dim mt-1" data-phone-e164>
               E.164: {state.phoneCountryCode}{" "}
               {formatNational(state.phoneNational) || (
-                <span class="text-slate-400">{"<number>"}</span>
+                <span class="text-fg-dim">{"<number>"}</span>
               )}
             </p>
             {state.fieldErrors.phone && (
-              <p class="mt-1 text-sm text-red-700" data-error="phone">
+              <p class={FORM_ERROR} data-error="phone">
                 {state.fieldErrors.phone}
               </p>
             )}

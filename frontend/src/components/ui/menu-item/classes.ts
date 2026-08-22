@@ -1,42 +1,34 @@
 /**
- * MenuItem primitive — className table.
+ * MenuItem primitive — className table, in the terminal's vocabulary.
  *
- * Reference: `openspec/changes/cachicamas-button-design-system/{proposal,design,specs/frontend-ui-button/spec}.md`
+ * Why this is a separate primitive from `<Button>`: menu items live inside
+ * dropped panels (the identity menu). They are full-width rows, left-aligned,
+ * and they tint their row on hover rather than reversing a cell — a dropped
+ * panel that flashed amber on every pointer move would be unreadable.
  *
- * Why a separate primitive from `<Button>`:
- *   Menu items sit inside dropdown panels (avatar dropdown, org-pill
- *   panel). They have:
- *     - tighter padding (px-2 py-1.5 vs px-4 py-2)
- *     - block layout (full width of the panel)
- *     - text-left alignment (panel labels are left-aligned, not centered)
- *     - hover bg-slate-100 (tint the row, not swap a button surface)
+ * Promoting this to its own primitive prevents the temptation to reach for a
+ * `<Button size="xs">` inside a panel, which would bring the wrong padding,
+ * the wrong alignment and the wrong hover.
  *
- * Promoting this to a separate primitive prevents the temptation to
- * "use a Button with size='xs'" inside panels — which would produce
- * the wrong padding and the wrong hover color.
- *
- * The affordances overlap with `<Button>`:
- *   - `cursor-pointer` + `disabled:cursor-not-allowed` (R-UB-002)
- *   - the same transition set + duration-150 (R-UB-003)
- *   - `focus-visible:ring-indigo-500` (R-UB-004 — same as primary/secondary)
- *   - `active:translate-y-px` (R-UB-003 — same press feedback)
- *   - `disabled:opacity-50`
+ * Focus is the system-wide treatment from `global.css`; nothing is restyled
+ * here.
  */
 export const MENU_ITEM_BASE = [
   "block",
   "w-full",
   "text-left",
-  "px-2",
-  "py-1.5",
-  "text-sm",
+  "px-3",
+  "py-2",
+  "font-system",
+  "text-label",
+  "uppercase",
+  "tracking-[0.08em]",
+  "text-fg-mid",
   "cursor-pointer",
   "disabled:cursor-not-allowed",
-  "transition-[background-color,box-shadow,transform,border-color]",
+  "disabled:opacity-40",
+  "transition-[background-color,color]",
   "duration-150",
-  "hover:bg-slate-100",
-  "focus:outline-none",
-  "focus-visible:ring-2",
-  "focus-visible:ring-indigo-500",
-  "active:translate-y-px",
-  "disabled:opacity-50",
+  "hover:bg-raise",
+  "hover:text-amber",
 ].join(" ");

@@ -1,258 +1,155 @@
-# `@cachicamas/frontend` — UI design system
+# `@cachicamas/frontend` — the design system
 
-This folder is the home of the **frontend UI design system**. The first slice — buttons — is implemented here. Subsequent slices (inputs, cards, modals, navigation) will follow the same shape.
+Two families live under `src/components/`:
 
-## Scope
+- **`ui/`** — the interaction primitives. A `<Button>` is a cell you press; a `<MenuItem>`
+  is a row you pick. That is the whole family, and the split between them is deliberate.
+- **`os/`** — the operating system's furniture: `Panel`, `StateLamp`, `Gauge`, `Field`,
+  `ScreenTitle`, `RegisterCell`, and the shell's three bands (`StatusRail`, `CommandLine`,
+  `FunctionRail`). Every screen is composed from these.
 
-Buttons and menu items only. Anything not listed below is out of scope:
+The world both families render in is defined once, in `src/global.css`. Read that file
+before adding anything here; it is short, and it is the authority.
 
-- Inputs, textareas, selects — follow-up slice.
-- Cards, panels, modals — follow-up slice.
-- Navigation chrome (header, breadcrumb, tabs) — follow-up slice.
-- Dark mode — the project is locked to a white surface; no dark tokens yet.
-- Loading animations beyond the simple `loading` flag on `<Button>`.
+## The four material rules
+
+They are stated in `global.css` and enforced by `classes.spec.ts` in each primitive:
+
+1. **Nothing is rounded.** A radius anywhere is a defect, not a variation. `global.css`
+   zeroes `border-radius` globally so an accidental `rounded-*` is a no-op rather than a
+   visible break.
+2. **Nothing glows.** No shadows, no blurs, no gradients, no backdrop filters. Separation
+   comes from 1px hairlines and from the value step between `--color-void`,
+   `--color-panel` and `--color-raise`.
+3. **Colour is state, never decoration.** Five working colours, each with one job:
+   `amber` (the machine speaking), `cyan` (navigable), `live` (running), `hold`
+   (suspended, awaiting a person), `fail` (errored or refused). A colour used for mood is
+   a colour that has stopped carrying information.
+4. **Two voices.** `font-system` (Spline Sans Mono) is the machine: codes, labels, states,
+   tabular figures, headings. `font-human` (Spline Sans) is language: what a person typed
+   and what a model answered. The switch between them is meaning, not texture.
 
 ## The four button intents
 
-| Intent              | When to use                                                           | Visual                                                                               |
-| ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `primary` (default) | Create, update, save — actions that **mutate the database**.          | `bg-slate-900` filled button with white text, indigo focus ring, slate-700 on hover. |
-| `secondary`         | General-purpose actions (Cancel, secondary navigation, "open" links). | White button with a slate border, slate-50 on hover.                                 |
-| `destructive`       | Delete, remove, sign-out-of-account.                                  | `bg-red-700` filled button with white text, red focus ring, red-800 on hover.        |
-| `link`              | Bare-underline text button (clear selection, refresh, etc.).          | No surface; text color change on hover.                                              |
+| Intent              | When to use                                            | Visual                                                        |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------- |
+| `primary` (default) | The system's own action: submit, open, confirm.        | Amber filled cell, void text. Reverses on hover and press.    |
+| `secondary`         | Anything non-committal: cancel, back, refresh, "open". | Empty cell with a rule; the rule and the label warm to amber. |
+| `destructive`       | Refuse, delete, cancel a run.                          | Fail-red filled cell, void text. Reverses like the others.    |
+| `link`              | A word in a sentence: an inline route somewhere.       | Cyan, underlined, no cell at all.                             |
 
-The color rules are the project's monochrome rule. The `primary` intent is **always** `bg-slate-900`. Do not introduce tinted variants (no `bg-indigo-600`, `bg-emerald-600`, etc.) without an ADR — every existing primary CTA is slate-900 and any drift is a bug.
+**Press feedback is reverse video**, uniformly. A filled cell swaps its fill and its text;
+that is what a terminal does when you hit a key, and it is the only press affordance in
+the product. Nothing travels, nothing scales, nothing lifts.
+
+**Do not introduce a tinted variant.** The five working colours are the palette; a
+`bg-emerald-600` primary is a bug, not a personalization. Adding a sixth state colour is
+an ADR-level decision, because it widens the vocabulary every screen shares.
 
 ## The two sizes
 
-| Size           | Tailwind classes      | Use                                                      |
-| -------------- | --------------------- | -------------------------------------------------------- |
-| `md` (default) | `px-4 py-2 text-sm`   | Form submits, header CTAs, retry buttons, panel actions. |
-| `lg`           | `px-5 py-3 text-base` | Hero CTAs, empty-state CTAs.                             |
+| Size           | Tailwind classes         | Use                                         |
+| -------------- | ------------------------ | ------------------------------------------- |
+| `md` (default) | `px-3 py-1.5 text-label` | Toolbar cells, panel actions, form submits. |
+| `lg`           | `px-4 py-2.5 text-body`  | A screen's single committing action.        |
 
-There is no `sm` size in this slice.
+There is no `sm`. Density below `md` belongs to `<MenuItem>` or to a bare element.
 
 ## Affordances (guaranteed by the primitive)
 
-Every `<Button>` carries these tokens regardless of variant:
+Every `<Button>` carries these regardless of variant:
 
-- `cursor-pointer` (cross-OS — some OSes don't apply pointer to `<button>` natively).
-- `disabled:cursor-not-allowed` and `disabled:opacity-50`.
-- `transition-[background-color,box-shadow,transform,border-color] duration-150` — the same hover transition everywhere.
-- `focus:outline-none focus-visible:ring-2` — focus visibility is non-negotiable for keyboard users.
-- `active:translate-y-px` — uniform press feedback (except `destructive` — see below).
-- `not-disabled:hover:*` — disabled buttons do **not** respond visually to mouse-over.
+- `cursor-pointer` — some OSes do not apply it to `<button>` natively.
+- `disabled:cursor-not-allowed` and `disabled:opacity-40`.
+- `transition-[background-color,color,border-color] duration-150` — one duration, product
+  wide.
+- `not-disabled:hover:*` — a disabled control does **not** respond to mouse-over.
 
-The one carve-out:
+**Focus is not a variant's business.** `global.css` gives the whole system one focus
+treatment — a 1px amber outline with a 1px offset — so a focused control looks identical
+on a panel, in a well, and on the void. A primitive that restyles focus is a primitive
+that has broken that guarantee, and `classes.spec.ts` fails on any `ring-*` token.
 
-- `destructive` does **not** carry `active:translate-y-px`. A heavy destructive button should not "press" — the visual weight signals permanence.
+## `<MenuItem>` — why it is a separate primitive
 
-The `link` variant uses `transition-colors` (a lighter transition than the filled variants) because the hover state is a text color change, not a surface swap.
+Menu items live inside dropped panels. They are full-width, left-aligned rows, and they
+**tint** on hover (`bg-raise`) rather than reversing a cell. A panel that flashed amber on
+every pointer move would be unreadable, which is exactly the mistake a
+`<Button size="xs">` inside a panel would make.
+
+`menu-item/classes.spec.ts` asserts the two never converge.
 
 ## Consumer personalizations (the `class` prop)
 
-Every `<Button>` and `<MenuItem>` accepts an optional `class` prop. The system tokens always apply first; consumer tokens are **appended**. Use this for personalizations the variants don't anticipate:
+Every primitive accepts an optional `class`. System tokens apply **first**; consumer tokens
+are appended. Use it for what the variants do not anticipate:
 
-- **Shape**: `class="h-10 w-10 rounded-full"` for circular triggers (avatar dropdown).
-- **Color override**: `class="border border-zinc-700 bg-zinc-900 ..."` for the brand-anchored zinc dark CTA (SignInButton, SignOut confirmation).
-- **Dark-surface hover**: `class="hover:bg-slate-700"` for chips on a slate-900 background (the picker "Clear" button).
-- **Padding override**: `class="px-3 py-1"` for tighter button sizes inside dense layouts.
-- **Outline destructive**: `class="border border-red-300 bg-transparent text-red-700 hover:bg-red-50"` for the destructive-outline variant (one call site today; the solid variant is the default).
-
-The design system does not encode these as named variants because each is a one-off consumer concern. Promoting them to variants would inflate the API for marginal gain.
+- **Shape** — `class="h-7 w-7 !p-0"` for the avatar trigger, which is size-driven by its
+  square rather than by label padding.
+- **Intent override** — `class="!bg-transparent !border-rule-strong hover:!border-amber"`
+  for the GitHub sign-in cell, which is a route into the product rather than a page's
+  committing action.
+- **Width** — `class="w-full"` for a form's submit.
 
 ### The `!important` escape hatch
 
-Tailwind 4 emits utilities in alphabetical order in the generated CSS. The class attribute order does **not** affect specificity — only the CSS emission order does. When a consumer override class **conflicts** with a variant token (same property name, different value), the order of the two class strings in the HTML attribute does not decide which wins; the order in the generated CSS does.
+Tailwind 4 emits utilities in alphabetical order, and the variants use
+`not-disabled:hover:*`, which compiles to `:not(:disabled):hover` — specificity (0,3,0). A
+bare `hover:*` override compiles to `:hover` — (0,2,0). **The variant wins regardless of
+emission order**, so any colliding override needs `!`.
 
-For most conflicts (e.g. `bg-zinc-900` vs `bg-slate-900`), the alphabetical emission order happens to favor the override because `bg-zinc-900` > `bg-slate-900`. But for **three specific cases**, the override silently loses without help:
+One syntax gotcha that has bitten this codebase twice: for a variant utility the `!` goes
+**after** the variant.
 
-1. **`rounded-md` (variant) vs `rounded-full` (override)**: `'f' < 'm'` alphabetically → `rounded-md` emitted later → `rounded-md` wins → square corner instead of circle. **Affected**: the avatar trigger (`<Button variant="primary" class="h-10 w-10 …">`).
-2. **`not-disabled:hover:bg-slate-700` (variant) vs `hover:bg-zinc-800` (override)**: the variant compiles to `:not(:disabled):hover`, which has CSS specificity `(0, 3, 0)` (class + :not(:disabled) pseudo + :hover pseudo). The bare override compiles to `:hover` only, specificity `(0, 2, 0)`. **Higher specificity always wins** regardless of emission order. **Affected**: any override on a primary/secondary/destructive button that wants to change the hover color (the SignInButton zinc CTA, the destructive-outline delete button, the SignOut confirm).
-3. **`px-4 py-2` (from `BUTTON_SIZE_MD`) vs a shape-driven override like `h-10 w-10`**: Tailwind's default `box-sizing` is `border-box`, so `h-10 w-10 px-4 py-2` is a 40×40 box with the content area shrunk to `40 − 32 = 8` wide and `40 − 16 = 24` tall. A child with `h-full w-full` becomes an 8×24 vertical strip inside the 40×40 circular clip. **Affected**: the avatar trigger (a shape-driven element, not a size-driven one). Fix: `!p-0` neutralizes the size padding.
-
-The escape hatch is the `!important` prefix — Tailwind 4's standard pattern for "this utility MUST win over the cascade":
-
-```tsx
-// Avatar trigger — `!rounded-full` wins over `rounded-md` from BUTTON_BASE.
-// `!p-0` neutralizes the size's `px-4 py-2` so the content area
-// fills the full 40×40 box (otherwise the image renders as an 8×24 strip).
-// `active:!scale-95` wins over `active:translate-y-px` from the variant.
-// Tailwind 4 syntax: `!` goes AFTER the variant (`active:!scale-95`),
-// not before (`!active:scale-95` — silently ignored by Tailwind).
-<Button variant="primary" class="!rounded-full !bg-transparent !p-0 h-10 w-10 overflow-hidden ring-1 ring-slate-200 hover:shadow-md hover:ring-slate-400 active:!scale-95">
-  <img src={avatar} alt="" />
-</Button>
-
-// Brand-anchored zinc CTA — every conflicting token needs `!`.
-<Button variant="primary" class="!bg-zinc-900 !text-zinc-100 border border-zinc-700 shadow-sm !hover:border-zinc-600 !hover:bg-zinc-800 hover:shadow-md !focus-visible:ring-zinc-500">
-  Sign in
-</Button>
-
-// Outline destructive — solid red overridden with transparent + red border.
-<Button variant="destructive" class="!bg-transparent !text-red-700 border border-red-300 !hover:bg-red-50 !focus-visible:ring-red-500">
-  Delete workspace
-</Button>
+```
+hover:!border-amber   ✅  compiles, wins
+!hover:border-amber   ❌  Tailwind silently drops the `!`; the override loses
 ```
 
-When **not** to use `!important`:
-
-- Pure additions (a new utility not present in the variant): `class="px-3 py-1"` — no conflict, no need.
-- Same property, same value: `class="text-sm"` (already in the variant's size) — no-op, harmless.
-- Different property entirely: `class="shadow-sm"` — no conflict.
-
-The lint rule `no-inline-button-class` strips `!` before matching, so documented `!important` overrides don't trigger drift warnings. The presence of `!` is itself the signal that the consumer knows they are overriding a system token.
-
-## `loading` state
-
-`<Button loading={true}>` becomes disabled and gets `aria-busy="true"`. The consumer is expected to pass alternate content via children (e.g. `<Button loading>Saving…</Button>`).
-
-There is **no** built-in spinner. The project follows UX-4 (aphantasia-friendly, text-first) — a spinner icon would be a decorative affordance that requires mental visualization.
-
-## `as="a"` (link polymorphism)
-
-`<Button as="a" href="/foo">` renders an `<a>` element with the same className as the equivalent button. Standard anchor attrs (`target`, `rel`, `download`, `referrerPolicy`) are typed explicitly. The `disabled` and `loading` props are type-narrowed away in this case — links cannot be disabled in HTML.
-
-## `<MenuItem>` (separate primitive)
-
-For affordances that sit inside dropdown panels (avatar dropdown, org-pill panel, pickers), use `<MenuItem>` — not `<Button>` with a small size. The two primitives have:
-
-|           | `<Button>`                                  | `<MenuItem>`                    |
-| --------- | ------------------------------------------- | ------------------------------- |
-| Layout    | `inline-flex` (button shape)                | `block w-full` (full panel row) |
-| Padding   | `px-4 py-2` (or `px-5 py-3` for lg)         | `px-2 py-1.5`                   |
-| Hover     | surface swap (slate-700, slate-50, red-800) | panel-row tint (`bg-slate-100`) |
-| Alignment | center                                      | left                            |
-| Use for   | CTAs                                        | in-page actions inside panels   |
-
-`<MenuItem>` also supports `as="a"` for menu items that navigate to another route (e.g. avatar menu: Profile / Workspaces).
-
-## `<SettingCard>` (separate primitive — settings surface tile)
-
-For affordances that are settings surface entries — tiles in the `/settings` Launchpad-style grid, where each tile is the entry point to one settings surface (Prompts, Profile, Billing, ...). The macOS Launchpad metaphor: a centered icon-in-rounded-square with a label below, hover lift, and the same focus-visible chrome the other DS primitives use.
-
-| SettingCard                                  | `<Button>`                          | `<MenuItem>`                  |
-| -------------------------------------------- | ----------------------------------- | ----------------------------- |
-| `flex-col` (vertical tile)                   | `inline-flex` (button shape)        | `block w-full` (panel row)    |
-| `p-3` + `rounded-lg` (tile)                  | `px-4 py-2` + `rounded-md`          | `px-2 py-1.5`                 |
-| `bg-slate-100` icon well + label below       | `bg-slate-900` / `bg-white` surface | `bg-slate-100` row tint       |
-| Hover: `bg-slate-50` + group-hover text flip | surface swap                        | `bg-slate-100` row tint       |
-| Use for: settings surface tiles (Launchpad)  | CTAs                                | in-page actions inside panels |
-
-`<SettingCard>` is polymorphic via `as="a" | "button"` (default `as="a"`, matching the Launchpad's navigation semantics). The icon is passed via the `icon: JSXNode` prop and rendered inside a 64×64 slate-100 rounded-xl icon well; the label is a sibling span.
-
-The icon container's `text-slate-700 group-hover:text-slate-900` tokens drive the icon's stroke — the consumer-provided SVG MUST use `stroke="currentColor"` (or `fill="currentColor"` for filled icons). The currentColor contract is the monochrome rule: do not hard-code colors in consumer-provided icons.
-
-Currently one consumer (`/settings` index route → Prompts tile). Designed to grow without layout change — Profile, Billing, Notifications, etc. slot in as additional `<SettingCard>` children.
-
-## Migration coverage
-
-Every interactive button-like element in `@cachicamas/frontend` consumes the design system:
-
-| File                                                             | Element                              | Primitive                                                                   |
-| ---------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
-| `routes/index.tsx`                                               | "Get started" CTA                    | `<Button variant="primary" size="lg" as="a">`                               |
-| `routes/index.tsx`                                               | "See the interface" CTA              | `<Button variant="secondary" size="lg" as="a">`                             |
-| `routes/workspaces/index.tsx`                                    | Create workspace CTAs (×2)           | `<Button variant="primary" as="a">`                                         |
-| `routes/workspaces/index.tsx`                                    | Retry                                | `<Button variant="primary">`                                                |
-| `routes/workspaces/[id]/index.tsx`                               | Delete workspace (outline)           | `<Button variant="destructive" class="…outline override…">`                 |
-| `routes/workspaces/[id]/index.tsx`                               | Delete confirm (solid)               | `<Button variant="destructive">`                                            |
-| `routes/workspaces/[id]/index.tsx`                               | Cancel                               | `<Button variant="secondary">`                                              |
-| `routes/home/index.tsx`                                          | (uses HomeWorkspacesSection)         | —                                                                           |
-| `components/home-workspaces-section/home-workspaces-section.tsx` | Create workspace CTAs (×2)           | `<Button variant="primary" as="a">`                                         |
-| `components/home-workspaces-section/home-workspaces-section.tsx` | Retry                                | `<Button variant="primary">`                                                |
-| `components/workspace-card/workspace-card.tsx`                   | Open link                            | `<Button variant="primary" as="a">`                                         |
-| `components/profile-view/profile-view.tsx`                       | github.com/{login}                   | `<Button variant="secondary" size="lg" as="a">`                             |
-| `components/organization-form/organization-form.tsx`             | Submit (create organization)         | `<Button variant="primary" type="submit">`                                  |
-| `components/organization-form/organization-form.tsx`             | Add optional details                 | `<Button variant="secondary">`                                              |
-| `components/ownboarding-form/ownboarding-form.tsx`               | Submit (create organization)         | `<Button variant="primary" type="submit">`                                  |
-| `components/workspace-form/workspace-form.tsx`                   | Submit (create workspace)            | `<Button variant="primary" type="submit">`                                  |
-| `components/workspace-form/workspace-form.tsx`                   | Clear selection                      | `<Button variant="link">`                                                   |
-| `components/github-repo-picker/github-repo-picker.tsx`           | Clear (chip on dark surface)         | `<MenuItem class="hover:bg-slate-700">`                                     |
-| `components/github-repo-picker/github-repo-picker.tsx`           | Refresh repos                        | `<Button variant="link">`                                                   |
-| `components/github-repo-picker/github-repo-picker.tsx`           | Picker option row                    | `<MenuItem>`                                                                |
-| `components/github-repo-picker/github-repo-picker.tsx`           | Load more                            | `<Button variant="secondary">`                                              |
-| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Avatar trigger (circular)            | `<Button variant="primary" class="h-10 w-10 rounded-full active:scale-95">` |
-| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Profile link (menu row)              | `<MenuItem as="a">`                                                         |
-| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Workspaces link (menu row)           | `<MenuItem as="a">`                                                         |
-| `components/avatar-dropdown/avatar-dropdown.tsx`                 | Sign out (menu row submit)           | `<MenuItem type="submit">`                                                  |
-| `components/org-pill/org-pill.tsx`                               | Interactive trigger                  | `<Button variant="secondary">`                                              |
-| `components/sign-in-button/sign-in-button.tsx`                   | Sign in (zinc dark + GitHub Octocat) | `<Button variant="primary" class="…zinc override…">`                        |
-| `routes/auth/signout/index.tsx`                                  | Sign out confirm (zinc dark)         | `<Button variant="primary" class="…zinc override…">`                        |
-| `routes/auth/signout/index.tsx`                                  | Cancel                               | `<Button variant="secondary" as="a">`                                       |
+The failure is invisible in review — the class string looks right and the button renders
+with the variant's colour. `avatar-dropdown.spec.tsx` and `sign-in-button.spec.tsx` both
+pin the correct form for that reason.
 
 ## Legitimate carve-outs (NOT consuming the primitives)
 
-These are NOT buttons or button-like affordances. They are passive visual elements that happen to look button-shaped:
+- **The dock** (`os/function-rail`) renders anchors directly. Its cells are a key legend,
+  not buttons: they carry no border, invert wholesale when current, and scroll
+  horizontally as one strip.
+- **The command line and the composer** render bare `<input>` / `<textarea>`. Their chrome
+  is the surrounding band, not the field.
+- **Form fields** use the shared constants in `os/form-classes.ts` rather than a `<Field>`
+  component. There are two forms in the whole product; a component would be a wrapper
+  around one class string.
 
-| Element                                                                                                                      | Why it is a carve-out                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components/org-pill/org-pill.tsx` loading `<div>`                                                                           | Status display while fetching the current org. Not interactive.                                                                                       |
-| `components/org-pill/org-pill.tsx` empty-state `<div>` ("No organization yet")                                               | Status display when the user has no org yet. Not interactive.                                                                                         |
-| `components/org-pill/org-pill.tsx` settings-disabled `<span role="menuitem" aria-disabled>`                                  | Placeholder for a future settings link. `aria-disabled` semantics require a non-button element.                                                       |
-| `components/example/example.tsx`                                                                                             | Qwik starter demo, not user-visible.                                                                                                                  |
-| Inline chips / monograms with `bg-slate-900 text-white` (e.g. the "Selected" pill in `github-repo-picker`, the org monogram) | Not button-shaped — they sit inside other elements and have no click affordance. The lint rule skips them by checking only `<button>` and `<a>` tags. |
+## Anti-drift guardrails
 
-The `sign-in-button/sign-in-button.tsx` file is in the lint rule's allowlist because the zinc-anchored dark CTA is a documented brand override (the SignInButton's GitHub Octocat SVG is the UX-4 visual anchor; the dark zinc surface is intentional). The `<Button>` wrapper still consumes the design system — the override is what makes it a brand CTA rather than the default primary.
-
-## Anti-drift guardrail (ESLint rule)
-
-`frontend/eslint-rules/no-inline-button-class.mjs` is a custom ESLint rule that runs as part of `pnpm lint`. It flags inline className strings on `<button>` or `<a>` JSX elements that contain the design-system variant markers (primary/secondary/destructive), in any file that imports from `~/components/ui/button` or `~/components/ui/menu-item`. The rule is set to `"warn"` so a regression surfaces in CI without breaking the build.
-
-Files in the allowlist (`sign-in-button.tsx`) are not checked — their override is documented above. Dynamic class strings (``class={`...${variant}...`}``) are out of scope for v1; the rule uses string `includes()` on the literal source.
+- `button/classes.spec.ts` and `menu-item/classes.spec.ts` fail on any radius, shadow,
+  ring, or colour outside the palette — including a returning `slate-*` or `indigo-*`.
+- `os/form-classes.spec.ts` does the same for field chrome.
+- `eslint-rules/` carries the project's own rules; run `pnpm lint` before pushing.
 
 ## Quick reference
 
 ```tsx
 import { Button, MenuItem } from "~/components/ui";
+import { Panel, StateLamp, Gauge, Field, ScreenTitle } from "~/components/os";
 
-// Primary CTA — "Save", "Create", "Update"
-<Button onClick$={save} loading={saving}>Save</Button>
+<Panel label="Runtime" note="3 layers">
+  <Field label="Milestones">
+    <Gauge done={24} total={24} />
+  </Field>
+  <StateLamp tone="live" word="Frozen" />
+</Panel>
 
-// Primary CTA as a link to another route (no disabled, no loading)
-<Button as="a" href="/workspaces/new" size="lg">Create workspace</Button>
-
-// Secondary outline — "Cancel"
-<Button as="a" href="/" variant="secondary">Cancel</Button>
-
-// Destructive solid — "Delete workspace" in a confirmation dialog
-<Button variant="destructive" onClick$={onConfirmDelete}>Delete</Button>
-
-// Destructive outline — "Delete workspace" trigger
-<Button variant="destructive" onClick$={onShowConfirm}
-  class="border border-red-300 bg-transparent text-red-700 hover:bg-red-50">
-  Delete workspace
-</Button>
-
-// Bare-underline text button — "Clear selection", "Refresh repos"
-<Button variant="link" onClick$={onClear$}>Clear selection</Button>
-
-// Circular avatar trigger (custom shape)
-<Button variant="primary" onClick$={toggleMenu}
-  class="h-10 w-10 overflow-hidden rounded-full active:scale-95">
-  <img src={avatar} alt="" />
-</Button>
-
-// Brand-anchored zinc dark CTA (SignInButton, SignOut confirm)
-<Button variant="primary" type="submit"
-  class="border border-zinc-700 bg-zinc-900 text-zinc-100 shadow-sm hover:border-zinc-600 hover:bg-zinc-800 hover:shadow-md focus-visible:ring-zinc-500">
-  Sign out
-</Button>
-
-// Menu row inside a dropdown panel
-<MenuItem onClick$={openProfile}>Profile</MenuItem>
-
-// Menu row as a link
-<MenuItem as="a" href="/workspaces">Workspaces</MenuItem>
-
-// Menu row disabled (visually disabled but still selectable for SR announcements)
-<MenuItem disabled={true}>Settings (coming soon)</MenuItem>
+<Button variant="primary" size="lg">Open the register</Button>
+<Button variant="destructive" onClick$={refuse}>Refuse</Button>
+<Button as="a" href="/chat/" variant="secondary">Chat</Button>
+<Button variant="link">Clear selection</Button>
 ```
 
 ## Reference
 
-- Proposal: `openspec/changes/cachicamas-button-design-system/proposal.md`
-- Spec: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
-- Design: `openspec/changes/cachicamas-button-design-system/design.md`
-- Tasks: `openspec/changes/cachicamas-button-design-system/tasks.md`
-- Explore: `openspec/changes/cachicamas-button-design-system/explore.md`
+- `src/global.css` — the world: palette, voices, scale, motion. The authority.
+- `PRODUCT.md` (repo root) — who this is for, and the accessibility commitment every
+  primitive here inherits: no meaning carried by colour, mark or position alone.
+- `DESIGN.md` (repo root) — the built system, recorded from the shipped code.

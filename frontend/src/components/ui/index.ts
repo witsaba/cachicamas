@@ -1,17 +1,13 @@
 /**
- * Design-system barrel.
+ * Design-system barrel — the interaction primitives.
  *
- * Reference: `frontend/src/components/ui/README.md` (line 188 quick-reference
- * example uses `import { Button, MenuItem } from "~/components/ui"`).
+ * Two primitives live here, and the split between them is deliberate: a
+ * `<Button>` is a cell you press, a `<MenuItem>` is a row you pick. Everything
+ * structural — panels, lamps, gauges, fields, title blocks — lives in
+ * `~/components/os`, because those are the operating system's furniture rather
+ * than generic UI.
  *
- * ADDITIVE barrel — does NOT migrate the 21+ deep-path consumers
- * (Button, MenuItem deep imports stay as-is; out-of-band refactor).
- * The barrel only ENABLES the public-API import for future code
- * (and for the README's existing examples, which currently lie
- * because the file is missing).
- *
- * Re-exports alphabetized by component name.
+ * ADDITIVE barrel: the deep-path imports throughout the app stay valid.
  */
 export { Button } from "./button/button";
 export { MenuItem } from "./menu-item/menu-item";
-export { SettingCard } from "./setting-card/setting-card";

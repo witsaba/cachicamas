@@ -1,81 +1,77 @@
 /**
  * Component tests for `<Button>`.
  *
- * Reference: `openspec/changes/cachicamas-button-design-system/specs/frontend-ui-button/spec.md`
+ * The full (variant × size × state) matrix is exercised here. Class tokens are
+ * asserted on the rendered DOM's `className` attribute — not computed styles —
+ * so the test runs without a real CSS engine.
  *
- * The full (variant × size × state) matrix is exercised here. Class
- * tokens are asserted on the rendered DOM's `className` attribute —
- * not computed styles — so the test runs without a real CSS engine.
- *
- * Pure-function className coverage lives in `classes.spec.ts`; this
- * file focuses on the Qwik component layer (props, polymorphism,
- * default type, aria-busy, Slot children, class override).
+ * Pure-function className coverage lives in `classes.spec.ts`; this file
+ * focuses on the Qwik component layer (props, polymorphism, default type,
+ * aria-busy, Slot children, class override).
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
 import { Button } from "./button";
 
 describe("components/ui/button", () => {
-  describe("R-UB-001 — variant rendering", () => {
-    it("primary (default) renders bg-slate-900 + text-white", async () => {
+  describe("variant rendering", () => {
+    it("primary (default) renders the amber filled cell", async () => {
       const { screen, render } = await createDOM();
       await render(<Button>Save</Button>);
       const btn = screen.querySelector("button");
       expect(btn).toBeTruthy();
-      expect(btn?.className).toContain("bg-slate-900");
-      expect(btn?.className).toContain("text-white");
-      // Drift regression guard.
-      expect(btn?.className).not.toContain("bg-indigo-600");
+      expect(btn?.className).toContain("bg-amber");
+      expect(btn?.className).toContain("text-void");
+      // Drift regression guard: the retired slate world must not come back.
+      expect(btn?.className).not.toMatch(/slate|indigo/);
     });
 
-    it("secondary renders bg-white + border-slate-300 + text-slate-900", async () => {
+    it("secondary renders an empty ruled cell", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="secondary">Cancel</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("bg-white");
-      expect(btn?.className).toContain("border-slate-300");
-      expect(btn?.className).toContain("text-slate-900");
-      expect(btn?.className).not.toContain("bg-slate-900");
+      expect(btn?.className).toContain("bg-transparent");
+      expect(btn?.className).toContain("border-rule-strong");
+      expect(btn?.className).toContain("text-fg");
+      expect(btn?.className).not.toContain("bg-amber");
     });
 
-    it("destructive renders bg-red-700 + text-white + no active:translate-y-px", async () => {
+    it("destructive renders the fail colour, filled", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="destructive">Delete</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("bg-red-700");
-      expect(btn?.className).toContain("text-white");
-      expect(btn?.className).not.toContain("active:translate-y-px");
+      expect(btn?.className).toContain("bg-fail");
+      expect(btn?.className).toContain("text-void");
     });
 
-    it("link renders text-slate-700 + underline + NO surface", async () => {
+    it("link renders cyan + underline and NO surface", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="link">Clear selection</Button>);
       const btn = screen.querySelector("button");
-      expect(btn?.className).toContain("text-slate-700");
+      expect(btn?.className).toContain("text-cyan");
       expect(btn?.className).toContain("underline");
-      // No surface — must not look like a button.
       expect(btn?.className).not.toMatch(/\bbg-/);
       expect(btn?.className).not.toContain("rounded");
     });
 
-    it("sizes: md uses text-sm + px-4 py-2", async () => {
+    it("sizes: md uses text-label + px-3 py-1.5", async () => {
       const { screen, render } = await createDOM();
       await render(<Button size="md">md</Button>);
       const md = screen.querySelector("button");
-      expect(md?.className).toContain("text-sm");
-      expect(md?.className).toContain("px-4 py-2");
+      expect(md?.className).toContain("text-label");
+      expect(md?.className).toContain("px-3 py-1.5");
     });
 
-    it("sizes: lg uses text-base + px-5 py-3", async () => {
+    it("sizes: lg uses text-body + px-4 py-2.5", async () => {
       const { screen, render } = await createDOM();
       await render(<Button size="lg">lg</Button>);
       const lg = screen.querySelector("button");
-      expect(lg?.className).toContain("text-base");
-      expect(lg?.className).toContain("px-5 py-3");
+      expect(lg?.className).toContain("text-body");
+      expect(lg?.className).toContain("px-4 py-2.5");
     });
   });
 
-  describe("R-UB-002 — cursor affordance", () => {
+  describe("cursor and disabled affordance", () => {
     it("enabled button has cursor-pointer", async () => {
       const { screen, render } = await createDOM();
       await render(<Button>Click</Button>);
@@ -84,110 +80,103 @@ describe("components/ui/button", () => {
       );
     });
 
-    it("disabled button carries disabled attribute + disabled:opacity-50", async () => {
+    it("disabled button carries disabled attribute + disabled:opacity-40", async () => {
       const { screen, render } = await createDOM();
       await render(<Button disabled={true}>Disabled</Button>);
       const btn = screen.querySelector("button");
       expect(btn?.hasAttribute("disabled")).toBe(true);
       expect(btn?.className).toContain("disabled:cursor-not-allowed");
-      expect(btn?.className).toContain("disabled:opacity-50");
+      expect(btn?.className).toContain("disabled:opacity-40");
     });
   });
 
-  describe("R-UB-003 — hover / transition / active", () => {
-    it("primary has transition + duration-150 + active:translate-y-px", async () => {
+  describe("reverse-video interaction, and nothing that moves", () => {
+    it("primary reverses to the void on hover and press", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="primary">Save</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
       expect(cls).toMatch(/transition-\[background-color/);
       expect(cls).toContain("duration-150");
-      expect(cls).toContain("active:translate-y-px");
-      expect(cls).toContain("not-disabled:hover:bg-slate-700");
+      expect(cls).toContain("not-disabled:hover:bg-void");
+      expect(cls).toContain("not-disabled:active:text-amber");
+      // A terminal key does not travel.
+      expect(cls).not.toContain("translate");
     });
 
-    it("secondary has transition + not-disabled:hover:bg-slate-50", async () => {
+    it("secondary warms its rule to amber rather than filling", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="secondary">Cancel</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toMatch(/transition-\[background-color/);
-      expect(cls).toContain("duration-150");
-      expect(cls).toContain("not-disabled:hover:bg-slate-50");
+      expect(cls).toContain("not-disabled:hover:border-amber");
+      expect(cls).toContain("not-disabled:hover:text-amber");
+      expect(cls).not.toContain("translate");
     });
 
-    it("destructive has transition + not-disabled:hover:bg-red-800 + no active", async () => {
+    it("destructive reverses to the void, keeping the fail colour", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="destructive">Delete</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toMatch(/transition-\[background-color/);
-      expect(cls).toContain("duration-150");
-      expect(cls).toContain("not-disabled:hover:bg-red-800");
-      expect(cls).not.toContain("active:translate-y-px");
+      expect(cls).toContain("not-disabled:hover:bg-void");
+      expect(cls).toContain("not-disabled:hover:text-fail");
+      expect(cls).not.toContain("translate");
     });
 
-    it("link has transition-colors + active:translate-y-px + no surface swap", async () => {
+    it("link changes colour only, with no surface swap", async () => {
       const { screen, render } = await createDOM();
       await render(<Button variant="link">Clear</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
       expect(cls).toContain("transition-colors");
       expect(cls).toContain("duration-150");
-      expect(cls).toContain("active:translate-y-px");
-      expect(cls).toContain("hover:text-slate-900");
-      // No surface — must NOT have not-disabled:hover:bg-*
+      expect(cls).toContain("hover:text-fg");
       expect(cls).not.toMatch(/not-disabled:hover:bg-/);
     });
   });
 
-  describe("R-UB-004 — focus ring", () => {
-    it("primary has indigo focus ring", async () => {
-      const { screen, render } = await createDOM();
-      await render(<Button variant="primary">Save</Button>);
-      const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("focus:outline-none");
-      expect(cls).toContain("focus-visible:ring-2");
-      expect(cls).toContain("focus-visible:ring-indigo-500");
-    });
-
-    it("secondary has indigo focus ring", async () => {
-      const { screen, render } = await createDOM();
-      await render(<Button variant="secondary">Cancel</Button>);
-      const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("focus-visible:ring-indigo-500");
-    });
-
-    it("destructive has red focus ring", async () => {
-      const { screen, render } = await createDOM();
-      await render(<Button variant="destructive">Delete</Button>);
-      const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("focus-visible:ring-red-500");
+  describe("focus is the system's, not the variant's", () => {
+    it("no variant restyles focus — global.css owns the one treatment", async () => {
+      for (const variant of [
+        "primary",
+        "secondary",
+        "destructive",
+        "link",
+      ] as const) {
+        // A fresh DOM per variant: Qwik refuses to render twice into one
+        // container, and reusing it would silently assert the first render
+        // four times over.
+        const { screen, render } = await createDOM();
+        await render(<Button variant={variant}>x</Button>);
+        const cls = screen.querySelector("button")?.className ?? "";
+        expect(cls, variant).not.toMatch(/ring-/);
+        expect(cls, variant).not.toMatch(/focus-visible:outline-/);
+      }
     });
   });
 
   describe("class override (consumer personalization)", () => {
     it("consumer class is appended to the system tokens", async () => {
       const { screen, render } = await createDOM();
-      await render(<Button class="h-10 w-10 rounded-full">Circular</Button>);
+      await render(<Button class="h-10 w-full">Wide</Button>);
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("bg-slate-900");
-      expect(cls).toContain("h-10 w-10");
-      expect(cls).toContain("rounded-full");
+      expect(cls).toContain("bg-amber");
+      expect(cls).toContain("h-10 w-full");
     });
 
     it("consumer class on link variant is appended after VARIANT_LINK", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button variant="link" class="text-sm">
+        <Button variant="link" class="text-label">
           Clear
         </Button>,
       );
       const cls = screen.querySelector("button")?.className ?? "";
-      expect(cls).toContain("text-slate-700");
-      expect(cls).toContain("text-sm");
+      expect(cls).toContain("text-cyan");
+      expect(cls).toContain("text-label");
     });
 
     it("consumer class on link variant does NOT add a surface", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button variant="link" class="text-sm">
+        <Button variant="link" class="text-label">
           Clear
         </Button>,
       );
@@ -196,7 +185,7 @@ describe("components/ui/button", () => {
     });
   });
 
-  describe("R-UB-007 — loading state", () => {
+  describe("loading state", () => {
     it("loading=true renders disabled + aria-busy=true", async () => {
       const { screen, render } = await createDOM();
       await render(<Button loading={true}>Save</Button>);
@@ -229,18 +218,18 @@ describe("components/ui/button", () => {
     });
   });
 
-  describe("R-UB-008 — link polymorphism", () => {
+  describe("link polymorphism", () => {
     it("as='a' renders an <a> with the same className as the equivalent button", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button as="a" href="/workspaces/new" variant="primary">
-          Create
+        <Button as="a" href="/chat/" variant="primary">
+          Open
         </Button>,
       );
       const a = screen.querySelector("a");
       expect(a).toBeTruthy();
-      expect(a?.getAttribute("href")).toBe("/workspaces/new");
-      expect(a?.className).toContain("bg-slate-900");
+      expect(a?.getAttribute("href")).toBe("/chat/");
+      expect(a?.className).toContain("bg-amber");
       expect(a?.className).toContain("cursor-pointer");
       expect(a?.hasAttribute("disabled")).toBe(false);
     });
@@ -248,17 +237,17 @@ describe("components/ui/button", () => {
     it("as='a' passes through class override for shape tokens", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <Button as="a" href="/profile" variant="secondary" class="px-5 py-2.5">
+        <Button as="a" href="/profile/" variant="secondary" class="px-5 py-2.5">
           View profile
         </Button>,
       );
       const a = screen.querySelector("a");
-      expect(a?.className).toContain("bg-white");
+      expect(a?.className).toContain("bg-transparent");
       expect(a?.className).toContain("px-5 py-2.5");
     });
   });
 
-  describe("R-UB-010 — default type=button", () => {
+  describe("default type=button", () => {
     it("default render produces type='button' (anti-implicit-submit)", async () => {
       const { screen, render } = await createDOM();
       await render(<Button>Save</Button>);

@@ -21,8 +21,8 @@ describe("components/ui/menu-item", () => {
     expect(btn?.className).toContain("block");
     expect(btn?.className).toContain("w-full");
     expect(btn?.className).toContain("text-left");
-    expect(btn?.className).toContain("px-2 py-1.5");
-    expect(btn?.className).toContain("text-sm");
+    expect(btn?.className).toContain("px-3 py-2");
+    expect(btn?.className).toContain("text-label");
   });
 
   it("has cursor-pointer (R-UB-002)", async () => {
@@ -33,31 +33,27 @@ describe("components/ui/menu-item", () => {
     );
   });
 
-  it("hover uses bg-slate-100 (panel-row tint, not button surface)", async () => {
+  it("hover tints the row (bg-raise), it does not reverse a cell", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem>Profile</MenuItem>);
     const cls = screen.querySelector("button")?.className ?? "";
-    expect(cls).toContain("hover:bg-slate-100");
-    expect(cls).not.toContain("hover:bg-slate-50");
-    expect(cls).not.toContain("hover:bg-white");
+    expect(cls).toContain("hover:bg-raise");
   });
 
-  it("has the transition set + duration-150 + active:translate-y-px", async () => {
+  it("transitions colour at the product duration", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem>Profile</MenuItem>);
     const cls = screen.querySelector("button")?.className ?? "";
     expect(cls).toMatch(/transition-\[background-color/);
     expect(cls).toContain("duration-150");
-    expect(cls).toContain("active:translate-y-px");
   });
 
-  it("has indigo focus ring (R-UB-004)", async () => {
+  it("does not restyle focus — global.css owns the one treatment", async () => {
     const { screen, render } = await createDOM();
     await render(<MenuItem>Profile</MenuItem>);
     const cls = screen.querySelector("button")?.className ?? "";
-    expect(cls).toContain("focus:outline-none");
-    expect(cls).toContain("focus-visible:ring-2");
-    expect(cls).toContain("focus-visible:ring-indigo-500");
+    expect(cls).not.toMatch(/ring-/);
+    expect(cls).not.toMatch(/focus-visible:outline-/);
   });
 
   it("default type is 'button' (R-UB-010)", async () => {
@@ -78,7 +74,7 @@ describe("components/ui/menu-item", () => {
     const btn = screen.querySelector("button");
     expect(btn?.hasAttribute("disabled")).toBe(true);
     expect(btn?.className).toContain("disabled:cursor-not-allowed");
-    expect(btn?.className).toContain("disabled:opacity-50");
+    expect(btn?.className).toContain("disabled:opacity-40");
   });
 
   it("renders Slot children verbatim", async () => {
@@ -102,13 +98,13 @@ describe("components/ui/menu-item", () => {
   describe("class override (consumer personalization)", () => {
     it("consumer class is appended to MENU_ITEM_BASE", async () => {
       const { screen, render } = await createDOM();
-      await render(<MenuItem class="hover:bg-slate-700">Clear</MenuItem>);
+      await render(<MenuItem class="hover:bg-panel">Clear</MenuItem>);
       const cls = screen.querySelector("button")?.className ?? "";
       // Base tokens preserved
       expect(cls).toContain("block w-full text-left");
-      expect(cls).toContain("hover:bg-slate-100");
+      expect(cls).toContain("hover:bg-raise");
       // Override appended
-      expect(cls).toContain("hover:bg-slate-700");
+      expect(cls).toContain("hover:bg-panel");
     });
   });
 
@@ -116,15 +112,15 @@ describe("components/ui/menu-item", () => {
     it("as='a' renders an <a> with the panel-row className + href", async () => {
       const { screen, render } = await createDOM();
       await render(
-        <MenuItem as="a" href="/profile">
+        <MenuItem as="a" href="/profile/">
           Profile
         </MenuItem>,
       );
       const a = screen.querySelector("a");
       expect(a).toBeTruthy();
-      expect(a?.getAttribute("href")).toBe("/profile");
+      expect(a?.getAttribute("href")).toBe("/profile/");
       expect(a?.className).toContain("block w-full text-left");
-      expect(a?.className).toContain("hover:bg-slate-100");
+      expect(a?.className).toContain("hover:bg-raise");
     });
   });
 });
