@@ -55,15 +55,16 @@ export const MarketingHeader = component$<MarketingHeaderProps>(
             </Button>
           ) : (
             <>
-              <Button
-                as="a"
-                href="#plans"
-                size="md"
-                variant="secondary"
-                class="hidden sm:inline-flex"
-              >
-                See plans
-              </Button>
+              {/* The hiding lives on a wrapper, not on the control. A `hidden`
+                  passed through to the button collides with the variant's own
+                  `inline-flex`, and Tailwind 4 emits utilities in a fixed order
+                  in which the variant wins — so the button would stay visible
+                  on a phone and quietly crowd the sign-in action. */}
+              <span class="hidden sm:block">
+                <Button as="a" href="#plans" size="md" variant="secondary">
+                  See plans
+                </Button>
+              </span>
               <SignInButton signIn={signIn} redirectTo="/home" size="md" />
             </>
           )}

@@ -36,7 +36,7 @@ export const TeamsBoard = component$(() => (
       </Button>
     </PageHeader>
 
-    <div class="grid gap-4 lg:grid-cols-2">
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
       {TEAMS.map((team) => (
         <section
           key={team.slug}

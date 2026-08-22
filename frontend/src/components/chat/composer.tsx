@@ -38,7 +38,7 @@ export const Composer = component$<ComposerProps>((props) => {
     >
       <div
         class={[
-          "bg-surface flex items-end gap-2 rounded-lg border p-2 transition-colors duration-150",
+          "bg-surface mx-auto flex w-full max-w-2xl items-end gap-2 rounded-lg border p-2 transition-colors duration-150",
           busy ? "border-line" : "border-line-control",
         ].join(" ")}
       >
@@ -97,7 +97,7 @@ export const Composer = component$<ComposerProps>((props) => {
           </Button>
         )}
       </div>
-      <p class="text-ink-soft pt-2 text-xs">
+      <p class="text-ink-soft mx-auto w-full max-w-2xl pt-2 text-xs">
         Enter to send, Shift + Enter for a new line. Nothing is sent outside
         your company without you approving it first.
       </p>

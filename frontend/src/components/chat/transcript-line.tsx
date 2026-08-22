@@ -132,7 +132,7 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
             {entry.args.map(([k, v]) => (
               <div key={k} class="contents">
                 <dt class="text-ink-soft">{k}</dt>
-                <dd class="text-ink-mid overflow-x-auto">{v}</dd>
+                <dd class="text-ink-mid relative overflow-x-auto">{v}</dd>
               </div>
             ))}
           </dl>
@@ -190,7 +190,7 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
             {entry.args.map(([k, v]) => (
               <div key={k} class="contents">
                 <dt class="text-ink-soft">{k}</dt>
-                <dd class="text-ink-mid overflow-x-auto">{v}</dd>
+                <dd class="text-ink-mid relative overflow-x-auto">{v}</dd>
               </div>
             ))}
           </dl>

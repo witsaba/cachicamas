@@ -169,7 +169,11 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail }) => {
           data-testid="transcript"
           aria-live="polite"
           aria-label={`Conversation with ${agent.name}`}
-          class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6"
+          // Every line keeps a reading measure. Without it an answer runs
+          // the full width of a 1440px screen, which is about twice the length
+          // anyone reads comfortably; the composer below is capped to the same
+          // column so the two never disagree about where the conversation is.
+          class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
         >
           <li class="pt-5 pb-1">
             <p class="text-ink-soft text-xs">

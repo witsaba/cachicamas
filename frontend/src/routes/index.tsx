@@ -66,7 +66,7 @@ export default component$(() => {
       <main id="main">
         {/* ── the offer, and the proof, together ───────────────────────── */}
         <section class="border-line bg-surface border-b">
-          <div class="mx-auto grid w-full max-w-6xl gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-center lg:py-24">
+          <div class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-center lg:py-24">
             <div>
               <h1 class="text-ink max-w-[16ch] text-[clamp(2.25rem,5.5vw,3.5rem)] leading-[1.05] font-bold tracking-[-0.035em]">
                 Hire the specialists your company is missing.
@@ -195,7 +195,7 @@ export default component$(() => {
               </p>
             </div>
 
-            <ul class="grid gap-4 pt-10 sm:grid-cols-2 lg:grid-cols-3">
+            <ul class="grid grid-cols-1 gap-4 pt-10 sm:grid-cols-2 lg:grid-cols-3">
               {AGENTS.map((agent) => (
                 <li key={agent.slug} class={`${CARD} p-5`}>
                   <div class="flex items-start gap-3">
@@ -242,7 +242,7 @@ export default component$(() => {
               </p>
             </div>
 
-            <ol class="grid gap-4 pt-10 lg:grid-cols-3">
+            <ol class="grid grid-cols-1 gap-4 pt-10 lg:grid-cols-3">
               {/* 1 — hire */}
               <li class={`${CARD} flex flex-col p-5`}>
                 <p class="text-2xs text-ink-soft font-semibold tracking-wide uppercase">
@@ -358,7 +358,7 @@ export default component$(() => {
 
         {/* ── the thing that is actually different ─────────────────────── */}
         <section class="border-line bg-canvas border-t">
-          <div class="mx-auto grid w-full max-w-6xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)] lg:items-center">
+          <div class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)] lg:items-center">
             <div>
               <h2 class="text-ink max-w-[18ch] text-3xl font-bold tracking-[-0.025em]">
                 They stop before the part you would want to check
@@ -403,7 +403,7 @@ export default component$(() => {
 
         {/* ── the questions a buyer actually asks ──────────────────────── */}
         <section class="border-line bg-surface border-t">
-          <div class="mx-auto grid w-full max-w-6xl gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[minmax(0,0.6fr)_minmax(0,1fr)]">
+          <div class="mx-auto grid w-full max-w-6xl grid-cols-1 gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[minmax(0,0.6fr)_minmax(0,1fr)]">
             <h2 class="text-ink text-3xl font-bold tracking-[-0.025em]">
               Before you hand over anything
             </h2>

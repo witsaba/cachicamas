@@ -54,7 +54,7 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
         >
           On staff today
         </h2>
-        <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {onStaff.map((agent) => (
             <li key={agent.slug}>
               <a
@@ -72,7 +72,7 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
                       Agent
                     </span>
                   </span>
-                  <span class="text-ink-mid block truncate pt-0.5 text-sm">
+                  <span class="text-ink-mid block pt-0.5 text-sm">
                     {agent.tagline}
                   </span>
                   <span class="block pt-2">
@@ -85,7 +85,7 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
         </ul>
       </section>
 
-      <div class="grid gap-4 pt-9 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div class="grid grid-cols-1 items-start gap-4 pt-9 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         {/* what you were doing */}
         <section class={CARD} aria-labelledby="recent">
           <h2

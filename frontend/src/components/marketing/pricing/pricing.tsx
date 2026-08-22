@@ -74,7 +74,7 @@ export const Pricing = component$(() => {
         </div>
 
         {/* the levels */}
-        <div class="grid gap-4 lg:grid-cols-4">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-4">
           {PLANS.map((plan) => {
             const price = priceFor(plan, billing.value);
             return (
@@ -159,7 +159,16 @@ export const Pricing = component$(() => {
         </p>
 
         {/* the comparison, kept to the rows that actually differ */}
-        <div class="border-line bg-surface mt-12 overflow-x-auto rounded-md border">
+        {/*
+          `relative` is load-bearing, not decoration. The visually-hidden
+          "Included" / "Not included" labels inside the cells are
+          `position: absolute`, and an absolutely positioned element is only
+          clipped by a scroll container that is also its containing block. With
+          a static wrapper they escape, land at the table's full 672px width,
+          and drag the whole document into a 220px horizontal scroll on a phone
+          — the page scrolling sideways while the table sits still.
+        */}
+        <div class="border-line bg-surface relative mt-12 overflow-x-auto rounded-md border">
           <table class="w-full min-w-[42rem] border-collapse text-left">
             <caption class="sr-only">What each plan includes</caption>
             <thead>

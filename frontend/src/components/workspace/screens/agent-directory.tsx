@@ -31,7 +31,7 @@ export const AgentDirectory = component$(() => {
         >
           On staff · {onStaff.length}
         </h2>
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {onStaff.map((agent) => (
             <AgentCard key={agent.slug} agent={agent} />
           ))}
@@ -48,7 +48,7 @@ export const AgentDirectory = component$(() => {
         <p class="text-ink-mid max-w-[62ch] pt-1 pb-3 text-base">
           Included on the Company plan. Nobody starts work until you say so.
         </p>
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {available.map((agent) => (
             <AgentCard key={agent.slug} agent={agent} />
           ))}
