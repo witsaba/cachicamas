@@ -48,9 +48,9 @@ test.describe("GitHub sign-in — cookie attributes", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
     await signInForm.locator('button[type="submit"]').click();
 
@@ -104,9 +104,9 @@ test.describe("GitHub sign-in — cookie attributes", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
     await signInForm.locator('button[type="submit"]').click();
     await page.waitForURL(/\/profile(\?|$)/, { timeout: 15_000 });

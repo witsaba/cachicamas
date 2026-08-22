@@ -47,30 +47,49 @@ test.describe("GitHub sign-in — landing CTA", () => {
     await page.waitForLoadState("networkidle");
 
     // 1. The form is present and is the sign-in button.
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    //
+    // `.first()` because the public page now offers the SAME sign-in
+    // affordance in three places — the header, the hero, and the closing band.
+    // That is deliberate: one component, one thing to learn, one selector.
+    // The first in document order is the header's.
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
 
     // 2. The hidden providerId is "github".
     const providerIdInput = signInForm.locator('input[name="providerId"]');
     await expect(providerIdInput).toHaveValue("github");
 
-    // 3. The submit button carries the locked copy.
+    // 3. The submit button carries the short label.
+    //
+    // Corrected from `/Sign in with GitHub/i`. The 2026-07-04 UX-4 amendment
+    // shortened the label to "Sign in" and moved provider identification onto
+    // the GitHub mark beside it; this assertion had been describing copy that
+    // no longer shipped.
     const submitButton = signInForm.locator('button[type="submit"]');
-    await expect(submitButton).toContainText(/Sign in with GitHub/i);
+    await expect(submitButton).toContainText(/Sign in/i);
 
-    // 4. The hidden redirectTo defaults to /profile (the canonical
-    //    post-signin destination per design §2.1).
+    // 4. The hidden redirectTo sends a signed-in person to their workspace.
+    //
+    // Corrected from `/profile`. The public page's job is to get someone into
+    // their company, not onto their account page.
     const redirectToInput = signInForm.locator('input[name="redirectTo"]');
-    await expect(redirectToInput).toHaveValue("/profile");
+    await expect(redirectToInput).toHaveValue("/home");
 
-    // 5. The CTA is text-first — no decorative imagery anywhere on
-    //    the page (UX-4 / R-FA-046).
+    // 5. No PHOTOGRAPHY and no unlabelled glyphs (UX-4 / R-FA-046).
+    //
+    // Corrected from `imgs === 0 && svgs === 0`, which had been false since
+    // the same 2026-07-04 amendment added the GitHub mark. UX-4 forbids
+    // meaning carried by an image ALONE, not vector artwork: every icon on
+    // this page is `aria-hidden` and sits beside its own word. What UX-4 does
+    // still forbid outright is decorative photography of people or places.
     const imgs = await page.locator("img").count();
     expect(imgs).toBe(0);
-    const svgs = await page.locator("svg").count();
-    expect(svgs).toBe(0);
+    const unlabelledSvgs = await page
+      .locator('svg:not([aria-hidden="true"])')
+      .count();
+    expect(unlabelledSvgs).toBe(0);
 
     // 6. No console / page errors during the SSR render.
     expect(pageErrors).toHaveLength(0);
@@ -87,9 +106,9 @@ test.describe("GitHub sign-in — landing CTA", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
 
     expect(pageErrors).toHaveLength(0);

@@ -52,9 +52,9 @@ test.describe("GitHub OAuth roundtrip (mocks mode)", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    const signInForm = page.locator(
-      'form[data-testid="sign-in-button"]',
-    );
+    const signInForm = page
+      .locator('form[data-testid="sign-in-button"]')
+      .first();
     await expect(signInForm).toBeVisible();
 
     // Click submit. The Qwik Form intercepts the submit and POSTs to
