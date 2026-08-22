@@ -58,12 +58,11 @@ export const ArchetypePanel = component$<ArchetypePanelProps>((props) => {
         <StateLamp tone={lampToneFor(a.state)} word={a.stateWord} />
       </ScreenTitle>
 
-      <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Panel
           label="Why it is not here"
           note={a.stateWord}
           testId="blocked-panel"
-          class="lg:col-span-2"
         >
           <p class="font-human text-lead text-fg max-w-[68ch] leading-relaxed">
             {a.blockedBy}
@@ -109,7 +108,7 @@ export const ArchetypePanel = component$<ArchetypePanelProps>((props) => {
           label="What it would be responsible for"
           note={`${a.wouldDo.length} responsibilities`}
           testId="responsibilities-panel"
-          class="lg:col-span-3"
+          class="lg:col-span-2"
         >
           <ul class="grid grid-cols-1 gap-x-6 gap-y-2 md:grid-cols-2">
             {a.wouldDo.map((line) => (

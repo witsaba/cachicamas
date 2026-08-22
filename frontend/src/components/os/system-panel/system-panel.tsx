@@ -67,11 +67,24 @@ export const SystemPanel = component$<SystemPanelProps>((props) => {
           <Field label="Signed in with">
             <span class="text-fg-mid">GitHub</span>
           </Field>
-          <div class="border-rule mt-4 flex flex-wrap gap-2 border-t pt-3">
+          <div class="border-rule mt-4 flex flex-wrap items-center gap-2 border-t pt-3">
             <Button as="a" href="/profile/" variant="secondary">
               Your profile
             </Button>
-            <Button as="a" href="/auth/signout/" variant="secondary">
+            {/*
+              Separated and warned on intent. Taking this off the fail colour
+              was right — a control that has not been touched has nothing to
+              report — but leaving it identical to the navigation beside it
+              took away the only signal that it ends something. It is pushed to
+              its own edge, and it turns red under the pointer rather than at
+              rest.
+            */}
+            <Button
+              as="a"
+              href="/auth/signout/"
+              variant="secondary"
+              class="hover:!border-fail hover:!text-fail ml-auto"
+            >
               Sign out
             </Button>
           </div>
@@ -80,7 +93,7 @@ export const SystemPanel = component$<SystemPanelProps>((props) => {
         <Panel label="Runtime" note="Read-only" testId="system-runtime-panel">
           {RUNTIME.map((l) => (
             <Field key={l.code} label={`${l.code} ${l.name}`}>
-              <span class={l.state === "open" ? "text-amber" : "text-live"}>
+              <span class={l.state === "open" ? "text-fg-mid" : "text-live"}>
                 {l.stateWord} · {l.done}/{l.total}
               </span>
             </Field>

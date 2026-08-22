@@ -35,19 +35,51 @@ describe("components/os/lamp", () => {
     expect(mark?.textContent).toBe("");
   });
 
-  it("gives each tone a distinct colour, so the vocabulary stays six-valued", async () => {
-    const seen = new Set<string>();
+  it("keeps all six tones distinguishable, on two axes", async () => {
+    // Colour separates what is HAPPENING; shape separates what is not. The
+    // two inactive tones are both neutral, so a colour-only vocabulary left
+    // them ~1.5:1 apart — on a board where five of six cells are inactive,
+    // that put the whole state read back onto the word. Every tone must still
+    // be distinguishable from every other by its mark alone.
+    const marks = new Map<string, string>();
     for (const tone of TONES) {
       const { screen, render } = await createDOM();
       await render(<StateLamp tone={tone} word="x" testId="l" />);
       const mark = screen
         .querySelector('[data-testid="l"]')
         ?.querySelector('[aria-hidden="true"]');
-      const bg = (mark?.className ?? "").match(/bg-[a-z-]+/)?.[0] ?? "";
-      expect(bg, tone).not.toBe("");
-      seen.add(bg);
+      const cls = mark?.className ?? "";
+      expect(cls, tone).not.toBe("");
+      marks.set(tone, cls);
     }
-    expect(seen.size).toBe(TONES.length);
+    expect(new Set(marks.values()).size).toBe(TONES.length);
+  });
+
+  it("fills a mark only when the state has activity behind it", async () => {
+    const active = ["live", "build", "hold", "fail"] as const;
+    const inactive = ["ready", "idle"] as const;
+    for (const tone of active) {
+      const { screen, render } = await createDOM();
+      await render(<StateLamp tone={tone} word="x" testId="l" />);
+      const cls =
+        screen
+          .querySelector('[data-testid="l"]')
+          ?.querySelector('[aria-hidden="true"]')?.className ?? "";
+      expect(cls, tone).toMatch(/bg-(live|amber|hold|fail)/);
+      expect(cls, tone).not.toContain("bg-transparent");
+    }
+    for (const tone of inactive) {
+      const { screen, render } = await createDOM();
+      await render(<StateLamp tone={tone} word="x" testId="l" />);
+      const cls =
+        screen
+          .querySelector('[data-testid="l"]')
+          ?.querySelector('[aria-hidden="true"]')?.className ?? "";
+      expect(cls, tone).toContain("bg-transparent");
+      expect(cls, tone).toContain("border");
+      // An inactive state must never wear a working colour.
+      expect(cls, tone).not.toMatch(/(live|amber|hold|fail)/);
+    }
   });
 
   it("exposes its tone as data, so a screen can be asserted on state", async () => {

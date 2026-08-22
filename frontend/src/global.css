@@ -40,13 +40,16 @@
   --color-raise: #202a3b;
   /*
    * Hairline between cells. Never thicker than 1px — and never fainter than
-   * this: at 3.1:1 against --color-panel it clears WCAG 1.4.11's floor for a
-   * boundary that carries meaning. In a board built entirely out of hairlines
-   * that floor is not a detail, it is the whole structure.
+   * this. In a board built entirely out of hairlines, WCAG 1.4.11's 3:1 floor
+   * for a meaningful boundary is not a detail, it is the whole structure.
+   *
+   * Measured against ALL THREE grounds, not just the panel: a rule inside a
+   * well sits on --color-raise, and a value picked against the panel alone
+   * quietly fails there. void 4.44:1 · panel 3.75:1 · raise 3.23:1.
    */
-  --color-rule: #55637a;
-  /* Hairline around a focused, active or interactive edge. 4.6:1 on panel. */
-  --color-rule-strong: #6f7f99;
+  --color-rule: #6a7890;
+  /* A focused, active or interactive edge. void 5.9 · panel 5.0 · raise 4.3 */
+  --color-rule-strong: #7d8da8;
   /*
    * Ornament only, and deliberately below the boundary floor: the dotted
    * leader in `Field` guides the eye across a row and carries no structure, so
@@ -86,8 +89,13 @@
   --color-fg: #e6ecf5;
   /* What a model answered; secondary data. 8.5:1 */
   --color-fg-mid: #9fb0c7;
-  /* Chrome labels, units, legends. 5.65:1 — the floor of this system. */
-  --color-fg-dim: #7f8ea8;
+  /*
+   * Chrome labels, units, legends — the dimmest text in the system, and the
+   * one that decides its floor. Measured on the WELL, not the panel: these
+   * labels name a tool call's arguments inside a raised block, which is the
+   * darkest surface any body text sits on. void 6.9 · panel 5.8 · raise 5.0.
+   */
+  --color-fg-dim: #8a99b3;
 
   /* --- voices ------------------------------------------------------------- */
   --font-system:

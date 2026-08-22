@@ -24,7 +24,10 @@ import { ARCHETYPES, RUNTIME } from "~/lib/mock/registry";
 const RUNTIME_TONE: Record<string, LampTone> = {
   complete: "live",
   frozen: "live",
-  open: "build",
+  // Not "build": nothing is being built at Layer 3 yet, and amber on an open
+  // layer put a fourth coloured state on a board that had just cut down to
+  // three. An open position is a fact, not an activity.
+  open: "ready",
 };
 
 /** The state vocabulary, said once, where someone will actually read it. */

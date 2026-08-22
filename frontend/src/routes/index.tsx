@@ -105,7 +105,7 @@ export default component$(() => {
                   </span>
                   <span class="text-data text-fg flex-1">{l.name}</span>
                   <StateLamp
-                    tone={l.state === "open" ? "build" : "live"}
+                    tone={l.state === "open" ? "ready" : "live"}
                     word={l.stateWord}
                   />
                 </div>

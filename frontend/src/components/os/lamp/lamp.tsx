@@ -26,13 +26,21 @@ export type LampTone = "live" | "build" | "ready" | "hold" | "fail" | "idle";
  * actually has to notice, and cyan in particular is reserved system-wide for
  * "you can go here", which is not a state at all.
  */
+/*
+ * Two axes, because one was not enough. Colour separates what is HAPPENING;
+ * shape separates what is not. `ready` and `idle` are both neutral, and a
+ * brightness step alone left them ~1.5:1 apart — on a board where five of six
+ * cells are inactive, that put the whole state read back onto the word. A
+ * filled mark means the state has activity behind it; a hollow one means it
+ * does not, and that reads across a room.
+ */
 const MARK: Record<LampTone, string> = {
   live: "bg-live",
   build: "bg-amber",
-  ready: "bg-fg-mid",
+  ready: "border border-fg-mid bg-transparent",
   hold: "bg-hold",
   fail: "bg-fail",
-  idle: "bg-fg-dim",
+  idle: "border border-fg-dim bg-transparent",
 };
 
 const WORD: Record<LampTone, string> = {
