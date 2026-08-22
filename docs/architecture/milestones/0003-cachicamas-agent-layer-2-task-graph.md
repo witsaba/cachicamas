@@ -552,7 +552,7 @@ Scenario: real delta payloads honor the index pin
   Then each carries its index per the invariant pinned upstream, and none carries a snapshot
 
 Scenario: a whole message is indistinguishable from a fragmented one after reconstruction
-  Given one message delivered whole as start-then-end and an equivalent message delivered as deltas
+  Given one message delivered as start, one whole-content delta, then end — an end event carries only the message identity, so "whole as start-then-end" would carry no content (S-AMT-030's recorded substitution) — and an equivalent message delivered as several deltas
   When a consumer reconstructs both
   Then the reconstructions are equal
 ```
@@ -592,9 +592,9 @@ Scenario: events carry the call ordinal
 
 ```gherkin
 Scenario: interleaved streams reconstruct independently and completely
-  Given a scripted event sequence interleaving two messages' deltas and two tools' progress
+  Given a scripted event sequence interleaving the message family with the tool family — each message's own deltas stay in order and each completes before the next begins, the shape the one-lane loop actually produces; per-message delta integrity is pinned separately by the index invariant and the drop/double-delta bites (S-AMT-071/072)
   When a consumer reconstructs each message and each tool outcome
-  Then every reconstruction is independent and complete — the property a session log will depend on, proven before any producer exists
+  Then every reconstruction is independent and complete — the property a session log will depend on, proven before any producer exists (amended by the 2026-08-22 post-completion audit to state what the shipped test interleaves: the two families, not two messages' deltas within each other)
 ```
 
 - **Depends on:** AG-05.1, AG-05.2.
@@ -691,7 +691,7 @@ Scenario: compaction-finished says what was removed
   Then it identifies the replaced span of transcript entries and the summary identity — enough for a session log to persist the operation
 
 Scenario: interrupted compaction is visible
-  Given a compaction-failed terminal event
+  Given a compaction-failed event — typed non-terminal, `Terminal: false` by design (`R-APE-008`; the S-APE-084 bite pins it): a failed compaction leaves the run able to continue on the uncompacted transcript
   When a consumer inspects it
   Then it is distinct from compaction-finished — or recovery has nothing to reason from
 ```
@@ -795,7 +795,7 @@ flowchart LR
 Scenario: walking skeleton — the thinnest end-to-end turn
   Given a text response scripted on the fake provider
   When the loop runs one turn
-  Then the consumer observes turn start, message start, the deltas in order, message end, and turn end carrying the model's finish reason — and nothing else
+  Then the consumer observes turn start, message start, the deltas in order, message end, and turn end carrying the model's finish reason — and nothing else (amended by AG-16: a `cost_turn` event now precedes the turn close, and the closed-list test carries the same signed-off amendment)
 
 Scenario: the provider stream is drained and the caller's context respected
   Given a turn in progress
@@ -928,12 +928,12 @@ flowchart LR
 Scenario: a tool satisfies the contract from outside
   Given an in-test scripted tool
   When it is inspected through the contract from an external package
-  Then it exposes its Layer 1 declaration and an effect class — at minimum read, mutating, execute — that the scheduler consumes
+  Then it exposes its name, an effect class — at minimum read, mutating, execute — that the scheduler consumes, and its typed execution surface (amended by the 2026-08-22 post-completion audit: the shipped v1 contract is `Name`/`EffectClass`/`Run` per `R-TLS-001`'s normative text — the Layer 1 declaration set reaches the provider through the pre-request hook, supplied by Layer 3, not through the tool contract)
 
 Scenario: the policy slot passes through opaquely
   Given a caller injecting a per-call policy value
   When the scripted tool executes
-  Then it observes the exact value injected — confinement is a property of the call site, and this is the call site
+  Then it observes the exact value injected — confinement is a property of the call site, and this is the call site (amended by the 2026-08-22 post-completion audit: v1 proves byte-exact pass-through at the `Tool.Run` call site and pins the scheduler's opacity by source guard, while the scheduler itself mints `PolicySlot(call.ID())` — no injection point through `Schedule`/`TurnOptions` ships in v1, and Layer 3's sandbox descriptor replaces the minted value at this seam post-v1, per `R-TLS-002`'s back-annotation)
 
 Scenario: result and execution failure are distinct outcomes
   Given one tool returning a result and one failing to execute
@@ -1066,7 +1066,7 @@ Scenario: modify-input runs the modified call and says so
   Given a suspended call
   When a modify-input decision arrives
   Then execution uses the modified arguments
-  And the decision-made event carries both original and modified arguments so the session log can reconstruct what actually ran
+  And the decision-made event carries the modified arguments, byte-equal to `ToolStart`'s, so the session log can reconstruct what actually ran (amended by the 2026-08-22 post-completion audit: `R-APP-006` consciously re-scoped decision-made to modified-only — the original arguments are not re-carried on the stream)
 
 Scenario: allow-always defers remembering to the policy
   Given a suspended call
@@ -1603,9 +1603,9 @@ SDD change: `cachicamas-agent-context-strategy` · Closes: seams 5 and 6 (R-18):
 
 **Charter**
 
-- **Goal:** Before each provider call, the harness consults an injected context strategy with the transcript and the model's budget; the v1 default never compacts. Token accounting discovers the provider's optional counting capability by type assertion and falls back to a documented estimate.
+- **Goal:** Once per logical turn — before the turn's first provider call, never per retry attempt (`R-CTX-001`) — the harness consults an injected context strategy with the transcript and the model's budget; the v1 default never compacts. Token accounting discovers the provider's optional counting capability by type assertion and falls back to a documented estimate.
 - **Deliverable:** The strategy seam in the run driver; the accounting helper with capability discovery.
-- **Acceptance:** The strategy is consulted before every provider call with both inputs (transcript, budget); the never-compact default changes nothing; with a counting-capable fake the accounting uses it, without one it estimates and says so.
+- **Acceptance:** The strategy is consulted once per logical turn, before that turn's first provider call, with both inputs (transcript, budget) — a retried attempt re-sends the already-approved transcript without re-consulting (`R-CTX-001`); the never-compact default changes nothing; with a counting-capable fake the accounting uses it, without one it estimates and says so.
 - **Depends on:** AG-02, AG-12, AG-13. · **Blocks:** AG-18.
 - **Out of scope:** Compaction itself (AG-18); budget configuration (Layer 3 supplies the model's budget via options).
 
@@ -1621,10 +1621,10 @@ flowchart LR
 - **Scenarios:**
 
 ```gherkin
-Scenario: the strategy is consulted before every call
+Scenario: the strategy is consulted before every logical turn
   Given a recording strategy injected into a run of N turns
   When the run completes
-  Then the strategy was consulted exactly N times, before each provider call, receiving the current transcript and budget
+  Then the strategy was consulted exactly N times, before each logical turn's first provider call, receiving the current transcript and budget — a retried attempt re-sends the already-approved transcript without a fresh consultation (amended by the 2026-08-22 post-completion audit to match `R-CTX-001`, whose test names per-attempt consultation "the reading this requirement exists to exclude")
 
 Scenario: the never-compact default changes nothing (pin)
   Given a run with the default strategy
@@ -1798,7 +1798,7 @@ SDD change: `cachicamas-agent-delegation-readiness` · Closes: **G7**'s structur
 
 - **Goal:** Prove the harness is invocable from within a tool execution — nested run, nested cancellation, nested cost, parent-identified events, derived permission scope — using a test-only tool that hosts a child harness.
 - **Deliverable:** The structural properties, proven; the delegation events (AG-06.3) emitted by the nesting path.
-- **Acceptance:** A scripted parent run whose tool runs a child harness completes with: child events parent-identified and interleaved legally on the parent stream; parent interrupt cancelling the child; child cost aggregated into parent cumulative; child permission requests flowing through a scope derived from the parent's policy.
+- **Acceptance:** A scripted parent run whose tool runs a child harness completes with: child events parent-identified and interleaved legally on the parent stream; parent interrupt cancelling the child; child cost crossing as a consumer-side reconstruction via the parent walk — the Layer-2 fold into the parent's own cumulative is deliberately unreachable (`agent-delegation-readiness` spec, S-CST-024); child permission requests flowing through a scope derived from the parent's policy.
 - **Depends on:** AG-02, AG-06, AG-10, AG-13, AG-14, AG-16.
 - **Out of scope:** A production subagent tool, subagent configuration, and depth limits — post-v1, on this proven substrate.
 
@@ -1847,10 +1847,10 @@ Scenario: the tree cancels leaf-first
 - **Scenarios:**
 
 ```gherkin
-Scenario: child cost aggregates and stays attributable
+Scenario: child cost crosses attributably without folding into the parent's figures
   Given a child run spending tokens
   When the parent's cost events are inspected
-  Then child cost aggregates into the parent's cumulative figures and remains separately attributable by parent identity — a frontend can show both "this subagent cost X" and "the run cost Y"
+  Then the parent's cumulative figures cover the parent's own spend only, the child's `cost_session` is attributable inside the hosting tool bracket by parent identity, and the combined figure is a consumer-side reconstruction via the parent walk — a frontend can still show both "this subagent cost X" and "the run cost Y" (amended by the 2026-08-22 post-completion audit: the Layer-2 fold is deliberately unreachable, pinned by S-CST-024 and recorded in the status paragraph above)
 
 Scenario: child permission flows through a derived scope to one place
   Given a child whose calls need permission
@@ -1968,7 +1968,7 @@ SDD change: `cachicamas-agent-concurrency-hardening` · The AI-33/AI-34 of this 
 
 - **Goal:** Prove the assembled harness clean under adversarial schedules: no goroutine leaks on any exit path, lossless ordered delivery under slow consumers, race-free across every feature of waves 2–5 in combination.
 - **Deliverable:** A hardening suite over combined scenarios (suspension + interrupt + steering + compaction in one run), leak checks via the AI-22 leak-detection mechanism.
-- **Acceptance:** Full-package leak check passes; a slow consumer loses nothing and observes contract order; the combined-scenario matrix passes under the race detector; an abandoned consumer who cancels winds down within bounds.
+- **Acceptance:** The combined-assembly leak sweep passes (AG-21's own drivers serially — `NFR-CNH-003` forbids wrapping the pre-existing suite, whose stalled-observer fixtures hold goroutines by design); a slow consumer loses nothing and observes contract order; the combined-scenario matrix passes under the race detector; an abandoned consumer who cancels winds down within bounds.
 - **Depends on:** AG-14, AG-15, AG-16, AG-18, AG-19, AG-20.
 - **Out of scope:** Performance targets — correctness under pressure only.
 
@@ -2032,10 +2032,10 @@ Scenario: cancellation unblocks a stalled stream within bounds
 - **Scenarios:**
 
 ```gherkin
-Scenario: the whole package leaks nothing
-  Given the full suite including the matrix and pressure cells
-  When the package-wide goroutine-leak check runs — the AI-22 leak-detection mechanism, wholesale
-  Then it passes, with any detached-tool report from the bounded wind-down accounted, not leaked
+Scenario: the assembled hardening drivers leak nothing
+  Given AG-21's own combined-matrix, pressure and cross-run drivers, run serially under one sweep
+  When the goroutine-leak check runs — the AI-22 leak-detection mechanism over that assembly
+  Then it passes, with any detached-tool report from the bounded wind-down accounted, not leaked (amended by the 2026-08-22 post-completion audit: `NFR-CNH-003` mandates the sweep MUST NOT wrap the pre-existing suite, whose deliberately stalled-observer fixtures hold goroutines by design — the sweep covers the combined assembly, not the package wholesale)
 ```
 
 - **Depends on:** AG-21.1, AG-21.2.
@@ -2172,7 +2172,7 @@ Scenario: examples compile under the normal test run
 - [x] Interrupt and shutdown are distinguishable end to end; wind-down is bounded — closed by AG-14.
 - [x] Partial-output failures are never silently retried; retry attempts are visible events — closed by AG-15.1.
 - [x] Every turn emits a cost event; cumulative figures include retries and compaction; estimates are labelled — closed by AG-16.1, AG-18.1.
-- [x] The context strategy is consulted before every call; token counting is capability-discovered with a labelled fallback — closed by AG-17.
+- [x] The context strategy is consulted before every logical turn (once per turn, never per retry attempt — `R-CTX-001`); token counting is capability-discovered with a labelled fallback — closed by AG-17.
 - [x] Compaction protects recent turns, preserves the pairing invariant, is recorded on the stream, recovers from interruption, and is invocable on demand at a turn boundary — closed by AG-18.
 - [x] The harness is re-entrant: nested runs with nested cancellation, cost, and permission scope, parent-identified — closed by AG-19.
 - [x] All four hook points fire; observers cannot stall the stream — closed by AG-20.
