@@ -1,234 +1,119 @@
 /**
- * Behavioural spec for `routes/settings/index.tsx`.
+ * Behavioural spec for `routes/settings/index.tsx` — System.
  *
- * Reference: `sdd/settings-app-grid/{spec,design}.md` (engram #1922).
- *   - REQ-10 (`/settings` index route uses canonical guard chain)
- *   - SCN-10.1 / SCN-10.2 (auth gate + grid render)
- *   - REQ-11 (page identity section — revised 2026-07-16, was headerless)
- *   - SCN-11.1 (revised 2026-07-16: page identity section present)
- *   - REQ-17 (layout positioning near top — REVISED 2026-07-16 rev 2, was: layout centering)
- *   - SCN-17.1 (revised rev 2: <main> drops vertical centering, keeps w-full/max-w-3xl/py-; grid keeps justify-items-center)
- *
- * RED step: until `./index` exists, the import fails and the suite
- * is reported as failing by vitest. That failure IS the RED state.
- *
- * Mock strategy:
- *   The three guard helpers (`setSsrCookieHeader`,
- *   `requireAuthRedirect`, `requireOwnboarding`) are mocked with
- *   `vi.mock` factories so the test can:
- *     - call the exported `onRequest` and verify the call ORDER
- *       matches the canonical guard chain (design §7)
- *     - render the component without spinning up the full
- *       Qwik City request context (the `<main>` + `<div>` DOM
- *       needs no auth, just the three mocked guards)
- *
- * Module-level coverage:
- *   `head.title === "Settings — Cachicamas"` is asserted by reading
- *   the named `head` export and asserting its `title` property.
- *   This catches a regression where the head accidentally drops the
- *   em-dash or swaps the brand suffix.
+ * The screen this replaced was a Launchpad grid whose tiles opened the Prompts
+ * and Skills surfaces; both belonged to the retired Software Development
+ * Framework identity and went with it (ADR 0009). What is left is deliberately
+ * small, and the assertion worth having is that it stays honest: the panel of
+ * things that are NOT configurable is the point of the screen, not filler.
  */
 import { createDOM } from "@builder.io/qwik/testing";
+import { $, type QRL } from "@builder.io/qwik";
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import Index, { head } from "./index";
+import type { DocumentHeadValue } from "@builder.io/qwik-city";
 
-// Mock the three guard helpers in the canonical order. The
-// `vi.hoisted` shim is required so the mock factory closes over
-// the spy variables when vitest hoists `vi.mock` calls to the top
-// of the file (Vitest's mock hoisting contract).
-const { setSsrSpy, requireAuthSpy, requireOwnboardingSpy } = vi.hoisted(
-  () => ({
-    setSsrSpy: vi.fn(),
-    requireAuthSpy: vi.fn(),
-    requireOwnboardingSpy: vi.fn(),
+// `DocumentHead` is a union of a static value and a resolver function; these
+// routes export the static form, so narrow once here rather than at every use.
+const systemHead = head as DocumentHeadValue;
+
+vi.mock("~/routes/plugin@auth", () => ({
+  useSession: () => ({
+    value: { user: { name: "Alice", email: "alice@example.com" } },
   }),
+  useSignIn: () => ({
+    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+      (formData: FormData) => unknown
+    >,
+    actionPath: "/auth/signin",
+  }),
+  useSignOut: () => ({
+    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
+      (formData: FormData) => unknown
+    >,
+    actionPath: "/auth/signout",
+  }),
+  onRequest: () => Promise.resolve(),
+}));
+
+const source = readFileSync(
+  fileURLToPath(import.meta.url).replace(/\.spec\.tsx$/, ".tsx"),
+  "utf8",
 );
 
-vi.mock("~/lib/ssr-cookie-context", () => ({
-  setSsrCookieHeader: setSsrSpy,
-}));
-
-vi.mock("~/lib/require-auth-redirect", () => ({
-  requireAuthRedirect: requireAuthSpy,
-}));
-
-vi.mock("~/lib/require-ownboarding", () => ({
-  requireOwnboarding: requireOwnboardingSpy,
-}));
-
-import Index, { head, onRequest } from "./index";
-
-describe("routes/settings/index — canonical guard chain + grid render", () => {
-  it("REQ-10 / SCN-10.1 — onRequest runs setSsrCookieHeader → requireAuthRedirect → requireOwnboarding (in that order)", async () => {
-    setSsrSpy.mockClear();
-    requireAuthSpy.mockClear();
-    requireOwnboardingSpy.mockClear();
-
-    // Synthesise the minimum RequestEvent shape the onRequest body
-    // needs. The route only reads `event.request.headers.get("cookie")`
-    // and passes `event` through to the guards (which are mocked —
-    // they don't read any fields).
-    const fakeEvent = {
-      request: { headers: { get: () => "session=abc123" } },
-    } as unknown as Parameters<typeof onRequest>[0];
-
-    await onRequest(fakeEvent);
-
-    // 1. All three guards were invoked.
-    expect(setSsrSpy).toHaveBeenCalledTimes(1);
-    expect(requireAuthSpy).toHaveBeenCalledTimes(1);
-    expect(requireOwnboardingSpy).toHaveBeenCalledTimes(1);
-
-    // 2. setSsrCookieHeader received the inbound cookie string.
-    expect(setSsrSpy).toHaveBeenCalledWith("session=abc123");
-
-    // 3. setSsrCookieHeader was called BEFORE requireAuthRedirect,
-    //    which was called BEFORE requireOwnboarding. The canonical
-    //    guard chain (design §7) MUST hold — otherwise the SSR
-    //    cookie context misses the auth check, and the requireOwnboarding
-    //    redirect happens before the cookie is captured.
-    const setSsrOrder = setSsrSpy.mock.invocationCallOrder[0];
-    const requireAuthOrder = requireAuthSpy.mock.invocationCallOrder[0];
-    const requireOwnboardingOrder =
-      requireOwnboardingSpy.mock.invocationCallOrder[0];
-    expect(setSsrOrder).toBeLessThan(requireAuthOrder);
-    expect(requireAuthOrder).toBeLessThan(requireOwnboardingOrder);
+describe("routes/settings — System", () => {
+  it("captures the SSR cookie before either guard can throw", () => {
+    const cookieAt = source.indexOf("setSsrCookieHeader(");
+    const authAt = source.indexOf("requireAuthRedirect(event)");
+    const onboardAt = source.indexOf("await requireOwnboarding(event)");
+    expect(cookieAt).toBeGreaterThan(-1);
+    expect(authAt).toBeGreaterThan(cookieAt);
+    expect(onboardAt).toBeGreaterThan(authAt);
   });
 
-  it("SCN-10.2 — renders <main> wrapping a grid with data-testid='settings-grid'", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const grid = screen.querySelector('[data-testid="settings-grid"]');
-    expect(grid).toBeTruthy();
-    // The grid sits inside a <main> (semantic landmark; SCN-10.2).
-    const main = grid?.closest("main");
-    expect(main).toBeTruthy();
-  });
-
-  it("grid class is 2-col on mobile + 3-col on sm + 4-col on md (design §7.1)", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const grid = screen.querySelector(
-      '[data-testid="settings-grid"]',
-    ) as HTMLElement | null;
-    expect(grid).toBeTruthy();
-    expect(grid?.className).toContain("grid");
-    expect(grid?.className).toContain("grid-cols-2");
-    expect(grid?.className).toContain("sm:grid-cols-3");
-    expect(grid?.className).toContain("md:grid-cols-4");
-  });
-
-  it("renders exactly TWO <SettingCard>s (Prompts + Skills) — tile integration anti-drift gate", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const promptCards = screen.querySelectorAll(
-      '[data-testid="settings-card-prompts"]',
-    );
-    const skillCards = screen.querySelectorAll(
-      '[data-testid="settings-card-skills"]',
-    );
-    expect(promptCards.length).toBe(1);
-    expect(skillCards.length).toBe(1);
-  });
-
-  it("the Prompts tile carries href='/settings/prompts' + visible label 'Prompts'", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const card = screen.querySelector(
-      '[data-testid="settings-card-prompts"]',
-    ) as HTMLElement | null;
-    expect(card).toBeTruthy();
-    expect(card?.getAttribute("href")).toBe("/settings/prompts");
-    expect((card?.textContent ?? "").trim()).toContain("Prompts");
-  });
-
-  it("TestSettingsIndex_RendersSkillsCardWithLabelAndHref — the Skills tile carries href='/settings/skills' + visible label 'Skills' + SkillsIcon (anti-drift gate)", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const card = screen.querySelector(
-      '[data-testid="settings-card-skills"]',
-    ) as HTMLElement | null;
-    expect(card).toBeTruthy();
-    expect(card?.getAttribute("href")).toBe("/settings/skills");
-    expect((card?.textContent ?? "").trim()).toContain("Skills");
-    const icon = card?.querySelector('[data-testid="skills-icon"]');
-    expect(icon).toBeTruthy();
-  });
-
-  it("TestSettingsIndex_DoesNotBreakPromptsTile — the Prompts tile still renders correctly alongside the new Skills tile", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const card = screen.querySelector(
-      '[data-testid="settings-card-prompts"]',
-    ) as HTMLElement | null;
-    expect(card).toBeTruthy();
-    expect(card?.getAttribute("href")).toBe("/settings/prompts");
-    const icon = card?.querySelector('[data-testid="prompts-icon"]');
-    expect(icon).toBeTruthy();
-  });
-
-  it("the Prompts tile embeds the PromptsIcon (data-testid='prompts-icon') inside the icon container", async () => {
-    const { screen, render } = await createDOM();
-    await render(<Index />);
-    const card = screen.querySelector(
-      '[data-testid="settings-card-prompts"]',
-    );
-    expect(card).toBeTruthy();
-    const icon = card?.querySelector('[data-testid="prompts-icon"]');
-    expect(icon).toBeTruthy();
-  });
-
-  it("exports DocumentHead with title 'Settings — Cachicamas'", () => {
-    // Qwik 1.20's DocumentHead is a union: object OR
-    // (props) => object. The route exports the OBJECT form (the
-    // common case — see `routes/settings/prompts/index.tsx` for
-    // the same shape). Narrow with a runtime guard before reading
-    // .title so tsc accepts the access without an unsafe cast.
-    expect(typeof head).toBe("object");
-    expect((head as { title: string }).title).toBe(
-      "Settings — Cachicamas",
-    );
-  });
-
-  it("REQ-11 (rev 2026-07-16) / SCN-11.1 — renders exactly ONE <h1> with text 'Settings'", async () => {
+  it("renders exactly one <h1>, titled System", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
     const h1s = screen.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
-    expect(h1s[0]?.textContent?.trim()).toBe("Settings");
+    expect(h1s[0].textContent).toContain("System");
   });
 
-  it("REQ-11 (rev 2026-07-16) — renders a <p data-testid='settings-subtitle'> with a non-empty descriptive subtitle", async () => {
+  it("shows who is signed in, and how to leave", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    const subtitle = screen.querySelector('[data-testid="settings-subtitle"]');
-    expect(subtitle).toBeTruthy();
-    expect((subtitle?.textContent ?? "").trim().length).toBeGreaterThan(0);
+    const account = screen.querySelector('[data-testid="account-panel"]');
+    expect(account).toBeTruthy();
+    const text = (account as HTMLElement).textContent ?? "";
+    expect(text).toContain("Alice");
+    expect(text).toContain("alice@example.com");
+    const signOut = Array.from(
+      (account as HTMLElement).querySelectorAll("a"),
+    ).find((a) => a.getAttribute("href") === "/auth/signout/");
+    expect(signOut).toBeTruthy();
   });
 
-  it("REQ-17 (rev 2026-07-16 rev 2) / SCN-17.1 — <main> positions content near top of viewport (no vertical centering)", async () => {
+  it("states what is NOT configurable rather than shipping dead toggles", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    const main = screen.querySelector("main") as HTMLElement | null;
-    expect(main).toBeTruthy();
-    const cls = main?.className ?? "";
-    // Horizontal block centering via mx-auto + max-w-3xl + small top padding.
-    expect(cls).toContain("w-full");
-    expect(cls).toContain("max-w-3xl");
-    expect(cls).toMatch(/\bpy-\S+/);
-    // Vertical centering is REMOVED — these tokens must NOT be present.
-    expect(cls).not.toMatch(/min-h-/);
-    expect(cls).not.toContain("justify-center");
-    expect(cls).not.toContain("flex");
-    expect(cls).not.toContain("flex-col");
+    const panel = screen.querySelector('[data-testid="undecided-panel"]');
+    expect(panel).toBeTruthy();
+    const items = (panel as HTMLElement).querySelectorAll("li");
+    expect(items.length).toBeGreaterThan(0);
+    // Every open decision names itself AND says why, so the screen reads as a
+    // record rather than as an apology.
+    for (const li of Array.from(items)) {
+      expect((li.textContent ?? "").trim().length).toBeGreaterThan(20);
+    }
   });
 
-  it("REQ-17 (new 2026-07-16) / SCN-17.1 — grid carries justify-items-center", async () => {
+  it("ships no form control at all — nothing here is settable yet", async () => {
     const { screen, render } = await createDOM();
     await render(<Index />);
-    const grid = screen.querySelector(
-      '[data-testid="settings-grid"]',
-    ) as HTMLElement | null;
-    expect(grid).toBeTruthy();
-    expect(grid?.className).toContain("justify-items-center");
+    const main = screen.querySelector("main") as HTMLElement;
+    expect(main.querySelectorAll("input").length).toBe(0);
+    expect(main.querySelectorAll("select").length).toBe(0);
+    expect(main.querySelectorAll('[role="switch"]').length).toBe(0);
+  });
+
+  it("carries no link into the retired framework surfaces", async () => {
+    const { screen, render } = await createDOM();
+    await render(<Index />);
+    const hrefs = Array.from(screen.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    for (const dead of [
+      "/settings/prompts",
+      "/settings/skills",
+      "/workspaces",
+    ]) {
+      expect(hrefs).not.toContain(dead);
+    }
+  });
+
+  it("exports head metadata naming the product in lowercase", () => {
+    expect(systemHead.title).toBe("System — cachicamas");
   });
 });
