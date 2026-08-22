@@ -1,0 +1,686 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-22T21:05:05.945Z",
+  "title": "Design System: cachicamas",
+  "extensions": {
+    "colorMeta": {
+      "brand": {
+        "role": "primary",
+        "displayName": "Brand Blue",
+        "purpose": "The one accent: the action that commits, the current selection, links, the focus ring.",
+        "tonalRamp": [
+          "#071245",
+          "#0d1f78",
+          "#122caa",
+          "#1839dd",
+          "#4763eb",
+          "#7a8ef1",
+          "#b1bdf7",
+          "#e8ebfd"
+        ]
+      },
+      "brand-press": {
+        "role": "primary",
+        "displayName": "Brand Press",
+        "purpose": "The pressed and hovered state of a brand fill. Press darkens; it never lifts.",
+        "tonalRamp": [
+          "#0a1342",
+          "#122173",
+          "#1930a4",
+          "#203ed4",
+          "#4e66e4",
+          "#7f90eb",
+          "#b4bef3",
+          "#e9ecfc"
+        ]
+      },
+      "brand-tint": {
+        "role": "primary",
+        "displayName": "Brand Tint",
+        "purpose": "The selected rail row, the Agent chip, and the standing demonstration strip.",
+        "tonalRamp": [
+          "#041148",
+          "#071d7d",
+          "#0a2ab2",
+          "#0e36e7",
+          "#3e60f4",
+          "#738cf7",
+          "#adbcfa",
+          "#e7ebfe"
+        ]
+      },
+      "ok": {
+        "role": "secondary",
+        "displayName": "Working Green",
+        "purpose": "Working, available, connected; also the check glyph in a skills list.",
+        "tonalRamp": [
+          "#084532",
+          "#0d7756",
+          "#13aa7b",
+          "#19dca0",
+          "#48eab8",
+          "#7af0cc",
+          "#b1f6e1",
+          "#e8fcf6"
+        ]
+      },
+      "waiting": {
+        "role": "secondary",
+        "displayName": "Waiting Amber",
+        "purpose": "Waiting on a person to decide. The only state with its own panel treatment.",
+        "tonalRamp": [
+          "#482104",
+          "#7e3a07",
+          "#b3520a",
+          "#e86b0d",
+          "#f48c3e",
+          "#f7ac73",
+          "#facead",
+          "#fef1e7"
+        ]
+      },
+      "stop": {
+        "role": "secondary",
+        "displayName": "Stop Red",
+        "purpose": "Refused, failed, stopped. Destructive controls.",
+        "tonalRamp": [
+          "#400c11",
+          "#70151e",
+          "#9f1e2b",
+          "#ce2738",
+          "#df5362",
+          "#e8828d",
+          "#f1b6bc",
+          "#fbeaeb"
+        ]
+      },
+      "idle": {
+        "role": "secondary",
+        "displayName": "Idle Grey",
+        "purpose": "Not started. Deliberately the ink-soft value, because nothing is wrong.",
+        "tonalRamp": [
+          "#22262b",
+          "#3b414a",
+          "#535d69",
+          "#6c7989",
+          "#8d98a5",
+          "#acb4be",
+          "#cfd3d9",
+          "#f1f2f4"
+        ]
+      },
+      "dept-assistant": {
+        "role": "tertiary",
+        "displayName": "Assistant Blue",
+        "purpose": "Identifies the Assistant department. Never a status, never a rank.",
+        "tonalRamp": [
+          "#071245",
+          "#0d1f78",
+          "#122caa",
+          "#1839dd",
+          "#4763eb",
+          "#7a8ef1",
+          "#b1bdf7",
+          "#e8ebfd"
+        ]
+      },
+      "dept-finance": {
+        "role": "tertiary",
+        "displayName": "Finance Green",
+        "purpose": "Identifies the Finance department. Never a status, never a rank.",
+        "tonalRamp": [
+          "#084532",
+          "#0d7756",
+          "#13aa7b",
+          "#19dca0",
+          "#48eab8",
+          "#7af0cc",
+          "#b1f6e1",
+          "#e8fcf6"
+        ]
+      },
+      "dept-support": {
+        "role": "tertiary",
+        "displayName": "Support Violet",
+        "purpose": "Identifies the Support department. Never a status, never a rank.",
+        "tonalRamp": [
+          "#240d40",
+          "#3e166f",
+          "#581f9e",
+          "#7228cc",
+          "#9255dd",
+          "#b083e7",
+          "#d1b7f1",
+          "#f1eafb"
+        ]
+      },
+      "dept-integrations": {
+        "role": "tertiary",
+        "displayName": "Integrations Amber",
+        "purpose": "Identifies Integrations. The system's tightest pairing: 4.52 on sunken.",
+        "tonalRamp": [
+          "#482104",
+          "#7e3a07",
+          "#b3520a",
+          "#e86b0d",
+          "#f48c3e",
+          "#f7ac73",
+          "#facead",
+          "#fef1e7"
+        ]
+      },
+      "dept-data": {
+        "role": "tertiary",
+        "displayName": "Data Cyan-Blue",
+        "purpose": "Identifies the Data department. Never a status, never a rank.",
+        "tonalRamp": [
+          "#062f47",
+          "#0a517a",
+          "#0f73ae",
+          "#1395e2",
+          "#43afef",
+          "#76c5f4",
+          "#afddf8",
+          "#e7f5fd"
+        ]
+      },
+      "dept-engineering": {
+        "role": "tertiary",
+        "displayName": "Engineering Magenta",
+        "purpose": "Identifies Engineering. Never a status, never a rank.",
+        "tonalRamp": [
+          "#440820",
+          "#760f37",
+          "#a8154f",
+          "#da1b66",
+          "#e94988",
+          "#ef7ba9",
+          "#f5b2cc",
+          "#fce8f0"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface White",
+        "purpose": "Cards, panels, the content column, the rail, alternating marketing bands.",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#999999",
+          "#b5b5b5",
+          "#d4d4d4",
+          "#f2f2f2"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "purpose": "The page itself, one value step below a card.",
+        "tonalRamp": [
+          "#1d232f",
+          "#333d52",
+          "#495774",
+          "#5e7197",
+          "#8191b1",
+          "#a4afc6",
+          "#cad0de",
+          "#eff1f5"
+        ]
+      },
+      "sunken": {
+        "role": "neutral",
+        "displayName": "Sunken",
+        "purpose": "A well: an input at rest, a hovered row, a code block, a table head.",
+        "tonalRamp": [
+          "#1c2331",
+          "#303c54",
+          "#455678",
+          "#596f9c",
+          "#7d90b5",
+          "#a1aec9",
+          "#c8d0df",
+          "#eff1f6"
+        ]
+      },
+      "deep": {
+        "role": "neutral",
+        "displayName": "Deep Ink",
+        "purpose": "The one dark surface in the product: the public page's closing band.",
+        "tonalRamp": [
+          "#182235",
+          "#293b5c",
+          "#3a5383",
+          "#4b6ca9",
+          "#728dc0",
+          "#99add1",
+          "#c3cfe4",
+          "#edf1f7"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "purpose": "Decorative separation only: card edges, table rules, section dividers.",
+        "tonalRamp": [
+          "#20252d",
+          "#373f4e",
+          "#4e5a6f",
+          "#657590",
+          "#8795ab",
+          "#a8b2c2",
+          "#ccd2db",
+          "#f0f2f4"
+        ]
+      },
+      "line-firm": {
+        "role": "neutral",
+        "displayName": "Line Firm",
+        "purpose": "A stronger rule where two regions genuinely divide.",
+        "tonalRamp": [
+          "#20252c",
+          "#383f4d",
+          "#505a6d",
+          "#67758d",
+          "#8995a9",
+          "#aab2c1",
+          "#cdd2da",
+          "#f0f2f4"
+        ]
+      },
+      "line-control": {
+        "role": "neutral",
+        "displayName": "Line Control",
+        "purpose": "A control's own findable boundary. Clears 3:1 on all three grounds.",
+        "tonalRamp": [
+          "#22252b",
+          "#3b404a",
+          "#535b69",
+          "#6c7689",
+          "#8d95a5",
+          "#acb2be",
+          "#cfd2d9",
+          "#f1f2f4"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "purpose": "Headings, names, values.",
+        "tonalRamp": [
+          "#182235",
+          "#293b5c",
+          "#3a5383",
+          "#4b6ca9",
+          "#728dc0",
+          "#99add1",
+          "#c3cfe4",
+          "#edf1f7"
+        ]
+      },
+      "ink-mid": {
+        "role": "neutral",
+        "displayName": "Ink Mid",
+        "purpose": "Body copy and secondary values.",
+        "tonalRamp": [
+          "#20252d",
+          "#37404e",
+          "#4e5b6f",
+          "#657590",
+          "#8795ab",
+          "#a8b2c2",
+          "#ccd2db",
+          "#f0f2f4"
+        ]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Ink Soft",
+        "purpose": "Field labels, meta lines, timestamps, placeholders.",
+        "tonalRamp": [
+          "#22262b",
+          "#3b414a",
+          "#535d69",
+          "#6c7989",
+          "#8d98a5",
+          "#acb4be",
+          "#cfd3d9",
+          "#f1f2f4"
+        ]
+      },
+      "ink-inverse": {
+        "role": "neutral",
+        "displayName": "Ink Inverse",
+        "purpose": "Text on ink, on brand, or on a department field.",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#5e5e5e",
+          "#7a7a7a",
+          "#999999",
+          "#b5b5b5",
+          "#d4d4d4",
+          "#f2f2f2"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The marketing h1 and nothing else. The single fluid size in the build."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Public-page section heads."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "The one h1 of every workspace screen, always via PageHeader."
+      },
+      "card-title": {
+        "displayName": "Card Title",
+        "purpose": "A colleague's name on a card or a staff row."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The product's body size: buttons, nav rows, fields, ledes, card copy."
+      },
+      "prose": {
+        "displayName": "Prose",
+        "purpose": "Conversation text only, including sanitised model output."
+      },
+      "dense": {
+        "displayName": "Dense",
+        "purpose": "Table cells, skill lists, help and error text under a field."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Timestamps, department lines, tenure, captions, the demonstration strip."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase section overlines, the Agent/Person chip, table heads, badges."
+      }
+    },
+    "shadows": [
+      {
+        "name": "raised",
+        "value": "0 1px 2px rgba(16, 23, 36, 0.06)",
+        "purpose": "The resting hairline lift on a card, button, input, fieldset or transcript panel. Reads as a seam, not a shadow."
+      },
+      {
+        "name": "float",
+        "value": "0 8px 24px -6px rgba(16, 23, 36, 0.12), 0 2px 6px -2px rgba(16, 23, 36, 0.06)",
+        "purpose": "Reserved for things that genuinely float: menus, dialogs, the mobile drawer, and a colleague card under the pointer."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-work",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "The only easing in the system. Users are in a task; motion reports state and gets out of the way."
+      },
+      {
+        "name": "duration-state",
+        "value": "150ms",
+        "purpose": "Every hover, press, border and shadow transition in the product."
+      },
+      {
+        "name": "duration-drawer",
+        "value": "180ms",
+        "purpose": "The mobile navigation drawer: the scrim fades, the panel slides."
+      },
+      {
+        "name": "hero-beat",
+        "value": "900ms",
+        "purpose": "The pause before the hero proof begins, so the headline is read first."
+      },
+      {
+        "name": "work-caret",
+        "value": "1s steps(1, end) infinite",
+        "purpose": "Blinks only on a line that is still being written."
+      },
+      {
+        "name": "work-pulse",
+        "value": "1.6s var(--ease-work) infinite",
+        "purpose": "Pulses only on the dot of an agent that is actually working."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation-duration: 0.001ms; animation-iteration-count: 1; transition-duration: 0.001ms; animation-delay: 0s",
+        "purpose": "The delay matters as much as the duration: a delayed entrance with fill-mode both leaves an element invisible for its whole delay no matter how short the duration is."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action on a screen that commits. Brand fill; press darkens, nothing moves.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Start a conversation</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:2.25rem; padding:0 0.875rem; border:1px solid transparent; border-radius:var(--radius-md, 8px); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; font-weight:500; white-space:nowrap; cursor:pointer; transition:background-color .15s var(--ease-work, cubic-bezier(0.2,0,0,1)), color .15s, border-color .15s, box-shadow .15s; }\n.ds-btn-primary { background:var(--color-brand, #2b4be8); color:var(--color-ink-inverse, #ffffff); box-shadow:0 1px 2px rgba(16,23,36,.06); }\n.ds-btn-primary:hover, .ds-btn-primary:active { background:var(--color-brand-press, #1e39c4); }\n.ds-btn-primary:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Everything non-committal, including a card's own action. The border is how the control is found, so it uses line-control.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Meet the specialists</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:2.25rem; padding:0 0.875rem; border:1px solid transparent; border-radius:var(--radius-md, 8px); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; font-weight:500; white-space:nowrap; cursor:pointer; transition:background-color .15s var(--ease-work, cubic-bezier(0.2,0,0,1)), border-color .15s, box-shadow .15s; }\n.ds-btn-secondary { background:var(--color-surface, #ffffff); color:var(--color-ink, #101724); border-color:var(--color-line-control, #828b9c); box-shadow:0 1px 2px rgba(16,23,36,.06); }\n.ds-btn-secondary:hover, .ds-btn-secondary:active { background:var(--color-sunken, #f1f3f7); }\n.ds-btn-secondary:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Refuse, remove, stop. The label always names the destruction in words, because colour is never the only carrier.",
+      "html": "<button class=\"ds-btn ds-btn-destructive\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 8h8v8H8z\"/></svg>Stop</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:1.75rem; padding:0 0.625rem; border:1px solid transparent; border-radius:var(--radius-md, 8px); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.75rem; font-weight:500; cursor:pointer; transition:filter .15s, background-color .15s; }\n.ds-btn-destructive { background:var(--color-stop, #c02434); color:var(--color-ink-inverse, #ffffff); box-shadow:0 1px 2px rgba(16,23,36,.06); }\n.ds-btn-destructive:hover, .ds-btn-destructive:active { filter:brightness(.9); }\n.ds-btn-destructive:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }"
+    },
+    {
+      "name": "Menu Item",
+      "kind": "nav",
+      "refersTo": "menu-item",
+      "description": "A row you pick inside a floating panel. It tints its row on hover rather than filling with brand.",
+      "html": "<button class=\"ds-menu-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 8h10M18 8h2M4 16h4M12 16h8M15 5.5v5M9 13.5v5\"/></svg>Settings</button>",
+      "css": ".ds-menu-item { display:flex; width:100%; align-items:center; gap:8px; border:0; border-radius:var(--radius-sm, 6px); padding:6px 8px; text-align:left; background:transparent; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; color:var(--color-ink-mid, #3d4757); cursor:pointer; transition:background-color .15s, color .15s; }\n.ds-menu-item:hover { background:var(--color-sunken, #f1f3f7); color:var(--color-ink, #101724); }\n.ds-menu-item:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "form-input",
+      "description": "One table for every form in the product. The border is line-control because on this surface the border IS the control (WCAG 1.4.11).",
+      "html": "<label class=\"ds-field-label\" for=\"ds-field\">Company name</label><input class=\"ds-field\" id=\"ds-field\" placeholder=\"Witsaba\" /><p class=\"ds-field-help\">This is what your colleagues will call it.</p>",
+      "css": ".ds-field-label { display:block; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; font-weight:500; color:var(--color-ink, #101724); }\n.ds-field { display:block; width:100%; margin-top:6px; border:1px solid var(--color-line-control, #828b9c); border-radius:var(--radius-md, 8px); background:var(--color-surface, #ffffff); padding:8px 12px; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; color:var(--color-ink, #101724); box-shadow:0 1px 2px rgba(16,23,36,.06); transition:border-color .15s; }\n.ds-field::placeholder { color:var(--color-ink-soft, #5f6a78); opacity:1; }\n.ds-field:hover { border-color:var(--color-ink-soft, #5f6a78); }\n.ds-field:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }\n.ds-field-help { margin-top:4px; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.8125rem; line-height:1.375; color:var(--color-ink-soft, #5f6a78); }"
+    },
+    {
+      "name": "Rail Nav Row",
+      "kind": "nav",
+      "refersTo": "nav-row-current",
+      "description": "A destination in the workspace rail. Selection is the only thing in the rail allowed to use the accent.",
+      "html": "<a class=\"ds-rail-row ds-rail-row-current\" href=\"#\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 12a7 7 0 0 1-7 7H8l-4 3v-4.4A7 7 0 0 1 6 6h7a7 7 0 0 1 7 6Z\"/></svg>Chat</a><a class=\"ds-rail-row\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM3.5 20a6.5 6.5 0 0 1 13 0M17 11.5a3 3 0 0 0 0-6M18.5 20a5.5 5.5 0 0 0-2-4.3\"/></svg>Agents</a>",
+      "css": ".ds-rail-row { display:flex; align-items:center; gap:10px; border-radius:var(--radius-md, 8px); padding:6px 8px; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.875rem; color:var(--color-ink-mid, #3d4757); text-decoration:none; transition:background-color .15s, color .15s; }\n.ds-rail-row:hover { background:var(--color-sunken, #f1f3f7); color:var(--color-ink, #101724); }\n.ds-rail-row-current { background:var(--color-brand-tint, #eef1fe); color:var(--color-brand, #2b4be8); font-weight:500; }\n.ds-rail-row:focus-visible { outline:2px solid var(--color-brand, #2b4be8); outline-offset:2px; }"
+    },
+    {
+      "name": "Colleague Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The five facts a person wants before deciding to talk to someone, in the order the questions arrive. Raised at rest, floats under the pointer.",
+      "html": "<article class=\"ds-card\"><div class=\"ds-card-head\"><span class=\"ds-avatar-agent\">FN</span><div><h3 class=\"ds-card-name\">Finance <span class=\"ds-species\">Agent</span></h3><p class=\"ds-card-meta\">Finance · on staff 4 months</p></div></div><p class=\"ds-card-line\">Reads the ledger and asks before it moves anything.</p><div class=\"ds-card-foot\"><span class=\"ds-status\"><span class=\"ds-dot\"></span>Working</span><button class=\"ds-btn ds-btn-secondary\">Talk to Finance</button></div></article>",
+      "css": ".ds-card { display:flex; flex-direction:column; border:1px solid var(--color-line, #e4e7ec); border-radius:var(--radius-md, 8px); background:var(--color-surface, #ffffff); padding:16px; box-shadow:0 1px 2px rgba(16,23,36,.06); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; transition:box-shadow .15s; }\n.ds-card:hover { box-shadow:0 8px 24px -6px rgba(16,23,36,.12), 0 2px 6px -2px rgba(16,23,36,.06); }\n.ds-card-head { display:flex; align-items:flex-start; gap:12px; }\n.ds-avatar-agent { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:7px; background:var(--color-dept-finance, #0e7c5a); color:var(--color-ink-inverse, #ffffff); font-size:0.75rem; font-weight:600; letter-spacing:.025em; flex-shrink:0; }\n.ds-card-name { margin:0; font-size:1.0625rem; font-weight:600; letter-spacing:-0.01em; color:var(--color-ink, #101724); }\n.ds-species { font-size:0.6875rem; font-weight:500; color:var(--color-ink-soft, #5f6a78); }\n.ds-card-meta { margin:2px 0 0; font-size:0.75rem; color:var(--color-ink-soft, #5f6a78); }\n.ds-card-line { margin:12px 0 0; font-size:0.875rem; color:var(--color-ink-mid, #3d4757); }\n.ds-card-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px; padding-top:12px; border-top:1px solid var(--color-line, #e4e7ec); }\n.ds-status { display:inline-flex; align-items:baseline; gap:6px; font-size:0.75rem; font-weight:500; color:var(--color-ok, #0e7c5a); }\n.ds-dot { display:inline-block; width:8px; height:8px; border-radius:9999px; background:var(--color-ok, #0e7c5a); position:relative; top:1px; }\n.ds-btn { display:inline-flex; align-items:center; justify-content:center; height:1.75rem; padding:0 0.625rem; border:1px solid transparent; border-radius:var(--radius-md, 8px); font-family:inherit; font-size:0.75rem; font-weight:500; cursor:pointer; transition:background-color .15s; }\n.ds-btn-secondary { background:var(--color-surface, #ffffff); color:var(--color-ink, #101724); border-color:var(--color-line-control, #828b9c); box-shadow:0 1px 2px rgba(16,23,36,.06); }\n.ds-btn-secondary:hover { background:var(--color-sunken, #f1f3f7); }"
+    },
+    {
+      "name": "Species Label",
+      "kind": "chip",
+      "refersTo": "species-label-agent",
+      "description": "The word that keeps the shape rule honest. A person is a circle, an agent is a rounded square, and the literal word always ships beside it.",
+      "html": "<span class=\"ds-avatar-person\">AR</span><span class=\"ds-chip ds-chip-person\">Person</span><span class=\"ds-avatar-agent-sm\">FN</span><span class=\"ds-chip ds-chip-agent\">Agent</span>",
+      "css": ".ds-avatar-person { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:9999px; background:var(--color-sunken, #f1f3f7); color:var(--color-ink-mid, #3d4757); box-shadow:0 0 0 1px var(--color-line, #e4e7ec); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.6875rem; font-weight:600; vertical-align:middle; }\n.ds-avatar-agent-sm { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:6px; background:var(--color-dept-support, #7a2fd6); color:var(--color-ink-inverse, #ffffff); font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.6875rem; font-weight:600; letter-spacing:.025em; vertical-align:middle; }\n.ds-chip { display:inline-flex; align-items:center; border:1px solid; border-radius:var(--radius-sm, 6px); padding:1px 6px; margin:0 12px 0 6px; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; font-size:0.6875rem; font-weight:600; letter-spacing:.025em; text-transform:uppercase; vertical-align:middle; }\n.ds-chip-agent { border-color:rgba(43,75,232,.25); background:var(--color-brand-tint, #eef1fe); color:var(--color-brand, #2b4be8); }\n.ds-chip-person { border-color:var(--color-line, #e4e7ec); background:var(--color-sunken, #f1f3f7); color:var(--color-ink-soft, #5f6a78); }"
+    },
+    {
+      "name": "Permission Hold",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "The product's whole argument, as a component: work stops before anything leaves the building and waits for a person. The waiting treatment is composed from the waiting token at low alpha, never a new hex.",
+      "html": "<div class=\"ds-hold\"><p class=\"ds-hold-head\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3.5 5 6.2v5c0 4.4 2.9 8.1 7 9.3 4.1-1.2 7-4.9 7-9.3v-5Z\"/></svg><span class=\"ds-hold-title\">Waiting for you</span><span class=\"ds-hold-intent\">to send the reminder</span></p><dl class=\"ds-hold-args\"><dt>to</dt><dd>3 customers</dd><dt>subject</dt><dd>Invoice overdue</dd></dl><p class=\"ds-hold-risk\">This leaves the building. Nothing is sent until you answer.</p><div class=\"ds-hold-actions\"><button class=\"ds-btn ds-btn-primary\">Allow it</button><button class=\"ds-btn ds-btn-secondary\">Don't</button></div></div>",
+      "css": ".ds-hold { border:1px solid rgba(180,83,10,.35); background:rgba(180,83,10,.06); border-radius:var(--radius-md, 8px); padding:12px; font-family:Onest, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-hold-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; color:var(--color-waiting, #b4530a); }\n.ds-hold-title { font-size:0.875rem; font-weight:600; color:var(--color-ink, #101724); }\n.ds-hold-intent { font-size:0.75rem; color:var(--color-ink-soft, #5f6a78); }\n.ds-hold-args { display:grid; grid-template-columns:minmax(5rem,auto) minmax(0,1fr); gap:4px 16px; margin:8px 0 0; padding-top:8px; border-top:1px solid var(--color-line, #e4e7ec); font-size:0.75rem; }\n.ds-hold-args dt { color:var(--color-ink-soft, #5f6a78); }\n.ds-hold-args dd { margin:0; color:var(--color-ink-mid, #3d4757); position:relative; overflow-x:auto; }\n.ds-hold-risk { margin:8px 0 0; font-size:0.75rem; color:var(--color-ink-mid, #3d4757); }\n.ds-hold-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }\n.ds-btn { display:inline-flex; align-items:center; justify-content:center; height:1.75rem; padding:0 0.625rem; border:1px solid transparent; border-radius:var(--radius-md, 8px); font-family:inherit; font-size:0.75rem; font-weight:500; cursor:pointer; transition:background-color .15s; }\n.ds-btn-primary { background:var(--color-brand, #2b4be8); color:var(--color-ink-inverse, #ffffff); }\n.ds-btn-primary:hover { background:var(--color-brand-press, #1e39c4); }\n.ds-btn-secondary { background:var(--color-surface, #ffffff); color:var(--color-ink, #101724); border-color:var(--color-line-control, #828b9c); }\n.ds-btn-secondary:hover { background:var(--color-sunken, #f1f3f7); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Workplace",
+    "overview": "This is a building, not a dashboard. The product's claim is that a company's specialists are staff — you meet them, read what they do, see how long they have been here, and start a conversation — so the interface is organised by who, never by feature. A colleague has a face, a department, a tenure, a status and a way to be reached, and those five facts are what a card, a row and a rail entry each carry. Two cards side by side read differently, because every field on them is a fact about a specific colleague. That is the test for whether a card earned its place.\n\nThe build takes the standing exit: the category standard, played straight, with the craft bar set at Intercom and Attio — products that ship a marketing site and an application in one identity, at one level. Nothing here is invented for novelty and nothing here is quirky. A person who has used a modern work tool should be able to use this one without pausing once. The material is white cards on a cool-neutral page, 1px lines, 6-12px radii, one brand blue, and six department hues. Onest sets every word on both sides of the sign-in.\n\nOne token set serves two modes. The public page is Persuade: full-width bands, 38-56px headlines, a dark closing band, a live proof playing. Everything behind sign-in is Operate: a fixed 14px body size, a persistent 16rem rail, 13px table cells, and no fluid type anywhere. Same colours, same family, same radii, same shadows. The mode changes the density and the scale in use — never the vocabulary.\n\nThe system's hard floor is that nothing may mean anything on its own. No image, icon, glyph, colour or shape carries meaning without a word beside it. Every avatar ships a name, every status dot ships its word, every department hue ships its department, every icon ships its label. This is why the one rule that does carry meaning through form — a person is a circle, an agent is a rounded square — is also the one rule that always prints the literal word \"Agent\" or \"Person\" next to itself.",
+    "keyCharacteristics": [
+      "White cards on a cool-neutral page; separation is a value step plus a 1px line, never a heavy shadow.",
+      "One family (Onest), one accent (brand blue), six department hues that identify and never rank.",
+      "Fixed type scale inside the product; exactly one clamp() in the whole build, on the marketing h1.",
+      "Elevation is reserved for things that genuinely float: menus, dialogs, the drawer, a card under the pointer.",
+      "Exactly one authored motion moment; everything else is still at rest.",
+      "Every colour value is measured against all three grounds by test, not asserted.",
+      "No meaning rides on colour, shape or icon alone — ever."
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "section": "colors",
+        "body": "Brand blue means commit, current, or link. A brand fill that decorates is a defect. One brand-filled button per screen — six brand buttons down a grid is six primary actions, which is none, so a card's call to action is secondary on both of its branches."
+      },
+      {
+        "name": "The Identify-Never-Rank Rule",
+        "section": "colors",
+        "body": "A department hue names a department. It never encodes status, priority, quality or order, and it never travels without the department's name somewhere on the same screen."
+      },
+      {
+        "name": "The Three Grounds Rule",
+        "section": "colors",
+        "body": "Every colour is measured against surface, canvas and sunken, never against white alone — a token picked on white quietly fails inside a hovered row. src/__tests__/contrast.spec.ts parses the palette straight out of global.css and enforces it on every run: text >= 4.5:1 on all three grounds, a control boundary >= 3:1 on all three, and white >= 4.5:1 on every filled surface including all six departments. The tightest pairing in the whole system is dept-integrations on sunken at 4.52 — a darker well or a lighter hue breaks that one first."
+      },
+      {
+        "name": "The Derived Tint Rule",
+        "section": "colors",
+        "body": "The only pre-mixed tint token is brand-tint. Every other tinted panel is composed from an existing token at low alpha — a pending permission is border-waiting/35 over bg-waiting/[0.06], a fault is border-stop/30 over bg-stop/[0.05], the drawer scrim is bg-ink/35. Never introduce a new hex to make a tint."
+      },
+      {
+        "name": "The Decorative-Line Rule",
+        "section": "colors",
+        "body": "line and line-firm sit below the 3:1 boundary floor on purpose: a 3:1 grid rule at this density reads as a wireframe. They may only ever separate. The moment a border is how a person finds a control, it must be line-control."
+      },
+      {
+        "name": "The One Family Rule",
+        "section": "typography",
+        "body": "Onest sets every word on both sides of the sign-in. A second typeface — including a display face for the marketing page — is a defect, not a variation."
+      },
+      {
+        "name": "The Fixed-Scale Rule",
+        "section": "typography",
+        "body": "Operate never goes fluid. The nine scale steps (--text-2xs through --text-3xl, ratio ~1.15) are the only sizes; the product side never uses clamp(), vw units or a per-screen size. Exactly one arbitrary size exists in the build, on the marketing h1, and it is deliberate."
+      },
+      {
+        "name": "The Tabular Rule",
+        "section": "typography",
+        "body": "table and any [data-numeric] element gets font-variant-numeric: tabular-nums from base styles, so counts, tenures, prices and tool results line up down a column without a per-site class."
+      },
+      {
+        "name": "The Lowercase Wordmark Rule",
+        "section": "typography",
+        "body": "The name is cachicamas, always lowercase, never title-cased — in copy, in a <title>, in a route head, anywhere. src/__tests__/wordmark.spec.ts fails the build on the title-cased form in any shipped source file (the X-Cachicamas-* HTTP headers are the one carve-out; they are a wire contract, not the wordmark)."
+      },
+      {
+        "name": "The Base Column Rule",
+        "section": "layout",
+        "body": "Every grid declares grid-cols-1 before any responsive columns. A bare grid in Tailwind is one implicit column sized to max-content, so a grid whose columns only appear at sm: and up cannot shrink below its widest child and will push a phone layout sideways. Twelve grid-cols-1 declarations in the build exist for this reason."
+      },
+      {
+        "name": "The Contained Scroller Rule",
+        "section": "layout",
+        "body": "A horizontal scroll container must also be relative. An absolutely positioned child — sr-only implements visually hidden text with position: absolute — is only clipped by a scroller that is also its containing block, and a static wrapper is not. The pricing table's hidden Included / Not included cell labels escaped to the table's full 672px and dragged the whole document into a 220px sideways scroll on a 390px viewport while the table itself sat perfectly still. Nothing looked wrong; no box overflowed; overflow-x: clip on the parent did not help. The fix is one word, so the guard is one grep: src/__tests__/no-escaping-scrollers.spec.ts fails any overflow-x-auto class list without relative in it."
+      },
+      {
+        "name": "The Rail-of-Five Rule",
+        "section": "layout",
+        "body": "The workspace rail carries exactly five destinations — Front desk, Chat, Agents, Teams, Organisation. Past about seven, a rail stops being scannable and starts being a menu you read."
+      },
+      {
+        "name": "The Offset Rule",
+        "section": "elevation",
+        "body": "Every shadow in the system carries a vertical offset and a soft blur. A zero-offset halo is decoration; a hard offset shadow belongs to a different world entirely. Neither exists in this build and neither may be added."
+      },
+      {
+        "name": "The Floats-Only Rule",
+        "section": "elevation",
+        "body": "Elevation answers \"is this thing above the page?\" — menus, dialogs, drawers, and the card you are pointing at. It never answers \"is this thing important?\" That question is answered by position, size and ink."
+      },
+      {
+        "name": "The Species Rule",
+        "section": "shapes",
+        "body": "A person is a circle. An agent is a rounded square. This is the only rule in the system that carries meaning through form, which is exactly why it is the one rule that always ships the literal word beside it — SpeciesLabel prints \"Agent\" or \"Person\", and a card prints \"Agent\" under the name. The agent's radius scales with the box so the silhouette stays constant: 5px at 24px, 6px at 32px, 7px at 40px, 10px at 56px. avatar.spec.tsx pins both halves — the shapes must differ, and the word must be available. A circle for an agent, or a rounded square without its word, are both defects."
+      },
+      {
+        "name": "The One Grid Rule",
+        "section": "shapes",
+        "body": "A new icon is drawn into the existing 24x24 / 1.75px / round-cap grid or it does not ship. No second icon set, no icon font, no glyph standing in for a word."
+      },
+      {
+        "name": "The Press-Darkens Rule",
+        "section": "components",
+        "body": "Press darkens; nothing moves. No translate, no scale, no lift, on any control in the system. A control that shifts under the pointer is a control you have to re-aim at."
+      },
+      {
+        "name": "The One Focus Rule",
+        "section": "components",
+        "body": "Focus belongs to global.css and to nothing else: a 2px brand outline at 2px offset with a 6px radius, applied via :focus-visible for the entire product. No component restyles it, so a focused control looks identical on a white card, in a tinted row, and on a coloured fill."
+      },
+      {
+        "name": "The Findable Border Rule",
+        "section": "components",
+        "body": "Inputs, selects, checkboxes and secondary buttons use line-control, which clears 3:1 on all three grounds, because on this surface the border is the control (WCAG 1.4.11). The softer line is for decorative separation only. Getting this backwards is the most likely way to break the system without anything looking wrong."
+      },
+      {
+        "name": "The Facts-Not-Furniture Rule",
+        "section": "components",
+        "body": "A card is not a container for a heading and an icon. Every field on it is a fact about a specific thing, and two cards side by side must read differently. A colleague card carries exactly the five things a person wants before deciding to talk to someone, in the order the questions arrive: who they are, what they do, whether they are available, how long they have been here, and one way to start."
+      }
+    ],
+    "dos": [
+      "Do give every carrier of meaning a word: an avatar its name, a status dot its state, a department hue its department, an icon its label. This is the system's hard floor (PRODUCT.md UX-4).",
+      "Do print \"Agent\" or \"Person\" wherever an avatar appears outside its own full profile. The shape rule and the word ship together or not at all.",
+      "Do use line-control for anything whose border is how a person finds it, and line only to separate.",
+      "Do declare grid-cols-1 on every grid before any responsive columns.",
+      "Do put relative on every overflow-x-auto container.",
+      "Do reach for the token scale: nine type steps, three radii, two shadows, one easing. Anything outside them needs a reason that survives a test.",
+      "Do keep one committing (primary) action per screen; everything else is secondary.",
+      "Do open every workspace screen with PageHeader inside PAGE_WELL.",
+      "Do derive a shared count from one function. Two places independently counting the company's people produced three separate regressions in one review batch; rosterFor / holdersFor in lib/mock/staff.ts is now the single answer, and the rail, the front desk and the Organisation panel all read it.",
+      "Do state demonstration material as demonstration material, in the shell, where no screen can forget it."
+    ],
+    "donts": [
+      "Don't let colour, shape, an icon or a glyph be the only carrier of anything.",
+      "Don't put anything about how the product is built on a customer-facing surface — no architecture, no layers, no protocols, no framework, no runtime figures, no codes, no terminal. This is enforced by test, not by taste.",
+      "Don't title-case the wordmark. It is cachicamas.",
+      "Don't add a second typeface, a gradient, a hard offset shadow, a zero-offset halo, or a glow. None exist in this build.",
+      "Don't use a department hue to mean a status, a rank, a priority or an order.",
+      "Don't use --color-line on a control's boundary, or --color-line-control as a decorative rule.",
+      "Don't animate anything new. The build has exactly one authored moment (the hero proof), plus a caret on a line still being written, a pulse on a dot for an agent actually working, and a 180ms drawer. Nothing else on any surface moves on its own — no page-load choreography, no staged reveals, no scroll-triggered anything. Product loads into a task.",
+      "Don't move a control on press. Darken it.",
+      "Don't restyle focus per component.",
+      "Don't reach for Button size=\"sm\" inside a floating panel; that is what MenuItem is for.",
+      "Don't use bg-deep anywhere but the public page's closing band. There is one dark surface in this product.",
+      "Don't measure a new colour against white and ship it. Add it to contrast.spec.ts and let all three grounds decide.",
+      "Don't add customer logos, testimonials, review counts, uptime figures or usage statistics. None are real yet, and credibility is the only thing this product currently has."
+    ]
+  }
+}
