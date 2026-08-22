@@ -72,25 +72,25 @@
   /*
    * The dimmest text in the system: field labels, meta lines, timestamps,
    * placeholders. Measured on the SUNKEN ground, which is the darkest surface
-   * any small text sits on: surface 5.88 · canvas 5.53 · sunken 4.95.
+   * any small text sits on: surface 5.50 · canvas 5.17 · sunken 4.95.
    */
   --color-ink-soft: #5f6a78;
   /* Text on ink, brand or a department field. */
   --color-ink-inverse: #ffffff;
 
   /* --- the one accent ----------------------------------------------------- */
-  /* Primary action, current selection, links, focus. surface 6.41 */
+  /* Primary action, current selection, links, focus. surface 6.41 · sunken 5.77 */
   --color-brand: #2b4be8;
   --color-brand-press: #1e39c4;
   /* The selected row and the brand's own quiet band. */
   --color-brand-tint: #eef1fe;
 
   /* --- status, each with exactly one job ---------------------------------- */
-  /* Working, available, connected. surface 5.19 */
+  /* Working, available, connected. surface 5.19 · sunken 4.67 */
   --color-ok: #0e7c5a;
-  /* Waiting on a person to decide. surface 5.02 */
+  /* Waiting on a person to decide. surface 5.02 · sunken 4.52 */
   --color-waiting: #b4530a;
-  /* Refused, failed, stopped. surface 6.28 */
+  /* Refused, failed, stopped. surface 5.93 */
   --color-stop: #c02434;
   /* Not started. Deliberately the ink-soft value: nothing is wrong. */
   --color-idle: #5f6a78;
@@ -99,8 +99,10 @@
   /*
    * Six hues, one per department, chosen so no two are adjacent on the wheel
    * and every one clears 4.5:1 on all three grounds as text and carries white
-   * at 5:1+ as a field. They identify; they never rank, and they never imply
-   * a status.
+   * at 5:1+ as a field. Measured against the SHIPPED values, not estimated:
+   * the tightest pairing in the whole system is `integrations` on `sunken` at
+   * 4.52, so a darker well or a lighter hue breaks that one first.
+   * They identify; they never rank, and they never imply a status.
    */
   --color-dept-assistant: #2b4be8;
   --color-dept-finance: #0e7c5a;
