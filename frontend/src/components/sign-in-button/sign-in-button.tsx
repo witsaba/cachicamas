@@ -35,6 +35,7 @@
 import { $, component$ } from "@builder.io/qwik";
 import { Form, type ActionStore } from "@builder.io/qwik-city";
 import { Button } from "~/components/ui/button/button";
+import type { ButtonSize } from "~/components/ui/button/classes";
 
 /**
  * Loose alias for the Qwik City Action shape. The `unknown` / `any`
@@ -61,6 +62,12 @@ export interface SignInButtonProps {
   label?: string;
   /** Where to redirect after a successful sign-in. Default `/profile`. */
   redirectTo?: string;
+  /**
+   * Control size. The marketing page's calls to action are `lg`; inside the
+   * product, `md`. The variant never changes: signing in IS the committing
+   * action on every page this appears on.
+   */
+  size?: ButtonSize;
 }
 
 /**
@@ -75,7 +82,7 @@ export interface SignInButtonProps {
  *   shape, the hidden providerId, the label, and the redirect target.
  */
 export const SignInButton = component$<SignInButtonProps>(
-  ({ signIn, label = "Sign in", redirectTo = "/profile" }) => {
+  ({ signIn, label = "Sign in", redirectTo = "/profile", size = "md" }) => {
     // Pre-build the form-data map so the Form action's submit sees the
     // hidden fields exactly. Auth.js looks up providerId from the form
     // data to pick which OAuth provider to start.
@@ -97,23 +104,13 @@ export const SignInButton = component$<SignInButtonProps>(
         <Button
           type="submit"
           variant="primary"
+          size={size}
           testId="sign-in-button"
-          // The GitHub cell is a secondary route into the product, not the
-          // page's committing action, so it overrides the primary variant's
-          // amber fill down to a ruled, empty cell that warms to amber.
-          //
-          // Tailwind 4 + `not-disabled:hover:*` specificity trap:
-          //   - The primary variant's `not-disabled:hover:*` compiles to
-          //     `:not(:disabled):hover` — specificity (0,3,0), because
-          //     `:not()` inherits its argument's specificity plus `:hover`.
-          //   - A bare `hover:*` override compiles to `:hover` only — (0,2,0).
-          //   - The variant wins regardless of emission order, so every
-          //     colliding override needs `!important`.
-          //
-          // Syntax gotcha: the `!` prefix for VARIANT utilities goes AFTER
-          // the variant (`hover:!border-amber`), never before it. Tailwind
-          // silently drops `!variant:` and the override loses.
-          class="!border-rule-strong !text-fg hover:!border-amber hover:!text-amber !bg-transparent"
+          // This button used to fight its own variant with a stack of
+          // `!important` overrides, which is how a control ends up looking
+          // like neither of the two things it was trying to be. It takes the
+          // primary variant unmodified now: signing in IS the committing
+          // action on every page it appears on.
         >
           {/*
 GitHub Octocat brand mark — a recognizable visual anchor

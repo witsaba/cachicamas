@@ -1,6 +1,5 @@
 import { $, component$ } from "@builder.io/qwik";
 import { type DocumentHead, useNavigate } from "@builder.io/qwik-city";
-import { ScreenTitle } from "~/components/os/screen/screen";
 import { OwnboardingForm } from "~/components/ownboarding-form/ownboarding-form";
 import type {
   FormAction,
@@ -109,11 +108,16 @@ export default component$(() => {
   }
   return (
     <main id="main" class="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
-      <ScreenTitle
-        code="SETUP"
-        title="Name the company"
-        lead="Every specialist on the register works for exactly one organization. Name it once and the board is yours; you can change these details later from System."
-      />
+      <header>
+        <h1 class="text-ink text-xl font-semibold tracking-[-0.01em]">
+          Name your company
+        </h1>
+        <p class="text-ink-mid max-w-[62ch] pt-2 text-base">
+          Every colleague here works for exactly one company. Name it once and
+          the workspace is yours; you can change these details later from
+          Settings.
+        </p>
+      </header>
       <div class="mt-6">
         <OwnboardingForm
           action={submitAction}
@@ -127,12 +131,11 @@ export default component$(() => {
 });
 
 export const head: DocumentHead = {
-  title: "Set up your organization \u2014 Cachicamas",
+  title: "Name your company \u2014 cachicamas",
   meta: [
     {
       name: "description",
-      content:
-        "First-run setup form for the unique organization in this Cachicamas install.",
+      content: "Name the company your colleagues will work for.",
     },
   ],
 };

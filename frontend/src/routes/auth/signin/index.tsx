@@ -103,7 +103,7 @@ export default component$(() => {
   const redirectTo = resolveRedirectTo(loc.url.searchParams.get("callbackUrl"));
 
   return (
-    <main class="bg-void text-fg flex-1" data-testid="auth-signin-page">
+    <main class="bg-canvas text-ink flex-1" data-testid="auth-signin-page">
       {/* The page's top rule. Flat, 1px, the system's own hairline colour —
           there are no gradients anywhere in this world, and the comment that
           used to call this one a "gradient accent" outlived the design it
@@ -118,21 +118,21 @@ export default component$(() => {
             app header. Identical to routes/layout.tsx:65-71. */}
         <a
           href="/"
-          class="text-label text-amber font-semibold tracking-[0.22em] uppercase no-underline"
+          class="text-ink text-lg font-bold tracking-[-0.02em] no-underline"
           data-testid="auth-signin-brand"
         >
           cachicamas
         </a>
 
         <h1
-          class="text-screen text-fg mt-8 leading-none font-semibold tracking-tight"
+          class="text-ink mt-8 text-2xl font-bold tracking-[-0.025em]"
           data-testid="auth-signin-heading"
         >
           Sign in to cachicamas
         </h1>
 
         <p
-          class="font-human text-body text-fg-mid mt-3 leading-relaxed"
+          class="text-ink-mid mt-3 max-w-[54ch] text-base leading-relaxed"
           data-testid="auth-signin-description"
         >
           You'll be redirected to GitHub to authorise the sign-in. No password
@@ -145,7 +145,7 @@ export default component$(() => {
         </div>
 
         <p
-          class="text-legend text-fg-dim mt-10 tracking-[0.14em] uppercase"
+          class="text-ink-soft mt-10 text-xs"
           data-testid="auth-signin-footnote"
         >
           By signing in you agree to cachicamas acting on your behalf with the

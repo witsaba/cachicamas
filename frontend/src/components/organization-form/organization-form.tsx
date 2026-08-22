@@ -17,7 +17,7 @@ import {
   FORM_INPUT,
   FORM_LABEL,
   FORM_LEGEND,
-} from "~/components/os/form-classes";
+} from "~/components/ui/form/classes";
 
 /**
  * OrganizationForm — presentational + stateful form for the
@@ -330,7 +330,7 @@ export const OrganizationForm = component$<{
       {state.serverErrorMessage && (
         <div
           role="alert"
-          class="border-fail bg-raise font-human text-body text-fail border px-3 py-2"
+          class="border-stop/30 bg-stop/[0.05] text-stop rounded-md border px-3 py-2 text-base font-medium"
         >
           {state.serverErrorMessage}
         </div>
@@ -552,7 +552,7 @@ export const OrganizationForm = component$<{
                     };
                   }
                 })}
-                class="border-rule bg-raise text-data text-fg mr-2 border px-2 py-2"
+                class="border-line-control bg-surface text-ink mr-2 rounded-md border px-2.5 py-2 text-base"
                 data-phone-country
               >
                 {COUNTRY_CODES.map((c) => (
@@ -633,10 +633,10 @@ export const OrganizationForm = component$<{
                 data-phone-national
               />
             </div>
-            <p class="text-legend text-fg-dim mt-1" data-phone-e164>
+            <p class="text-ink-soft mt-1 text-xs" data-phone-e164>
               E.164: {state.phoneCountryCode}{" "}
               {formatNational(state.phoneNational) || (
-                <span class="text-fg-dim">{"<number>"}</span>
+                <span class="text-ink-soft">{"<number>"}</span>
               )}
             </p>
             {state.fieldErrors.phone && (

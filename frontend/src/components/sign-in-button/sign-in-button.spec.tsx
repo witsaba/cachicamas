@@ -188,26 +188,20 @@ describe("components/sign-in-button", () => {
     // explicit cursor for cross-OS consistency (some browsers/OSes
     // do NOT apply cursor: pointer to <button> automatically)
     expect(cls).toMatch(/cursor-pointer/);
-    // hover bg still there (Tailwind 4 `!important` syntax: `!` AFTER the variant)
-    expect(cls).toMatch(/hover:!border-amber/);
-    expect(cls).toMatch(/hover:!text-amber/);
-    expect(cls).toMatch(/!bg-transparent/);
+    // The primary control: brand filled, darkening on hover rather than
+    // reversing. The button no longer overrides the variant at all.
+    expect(cls).toMatch(/bg-brand/);
+    expect(cls).toMatch(/not-disabled:hover:bg-brand-press/);
     // transition (without it the hover state is an instant flip)
     expect(cls).toMatch(/transition-/);
     // The world has no press travel and no lifted surfaces.
     expect(cls).not.toMatch(/translate/);
-    expect(cls).not.toMatch(/shadow-/);
-    // Regression guards. The SignInButton overrides `variant="primary"` so the
-    // GitHub cell reads as a secondary route into the product rather than as
-    // the page's committing action. Tailwind 4 emits utilities alphabetically
-    // and the variant's `not-disabled:hover:*` tokens outrank a bare
-    // `hover:*`, so every colliding override MUST carry `!` — and the prefix
-    // goes AFTER the variant (`hover:!border-amber`), never before it, which
-    // Tailwind silently drops. Without these the button would render as a
-    // solid amber block with the Octocat punched out of it.
-    expect(cls).toMatch(/!bg-transparent/);
-    expect(cls).toMatch(/!text-fg/);
-    expect(cls).toMatch(/hover:!border-amber/);
+    // Regression guard. This button used to fight its own variant with a
+    // stack of `!important` overrides, which is how a control ends up looking
+    // like neither of the two things it is trying to be. It now takes the
+    // primary variant unmodified: signing in IS the committing action on the
+    // page it appears on, so nothing needs overriding.
+    expect(cls).not.toMatch(/!/);
     expect(cls).not.toMatch(/ring-/);
   });
 });

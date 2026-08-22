@@ -46,16 +46,16 @@ export const SignInRequiredCard = component$<SignInRequiredCardProps>(
   ({ signIn, description, redirectTo = "/" }) => {
     return (
       <section
-        class="border-rule bg-panel border"
+        class="border-line bg-surface rounded-md border shadow-[var(--shadow-raised)]"
         data-testid="sign-in-required-card"
       >
-        <header class="border-rule border-b px-3 py-1.5">
-          <h1 class="text-label text-fg tracking-[0.14em] uppercase">
+        <header class="border-line border-b px-5 py-4">
+          <h1 class="text-ink text-lg font-semibold tracking-[-0.01em]">
             Sign in to continue
           </h1>
         </header>
         <div class="p-4">
-          <p class="font-human text-body text-fg-mid max-w-[60ch] leading-relaxed">
+          <p class="text-ink-mid max-w-[62ch] text-base leading-relaxed">
             {description}
           </p>
           <div class="mt-5">

@@ -51,7 +51,7 @@ export default component$(() => {
   const signOut = useSignOut();
 
   return (
-    <main class="bg-void text-fg flex-1" data-testid="auth-signout-page">
+    <main class="bg-canvas text-ink flex-1" data-testid="auth-signout-page">
       {/* The page's top rule — the same flat hairline /auth/signin carries. */}
       <div class="bg-rule h-px w-full" aria-hidden="true" />
 
@@ -64,21 +64,21 @@ export default component$(() => {
             without using the browser back button. */}
         <a
           href="/"
-          class="text-label text-amber font-semibold tracking-[0.22em] uppercase no-underline"
+          class="text-ink text-lg font-bold tracking-[-0.02em] no-underline"
           data-testid="auth-signout-brand"
         >
           cachicamas
         </a>
 
         <h1
-          class="text-screen text-fg mt-8 leading-none font-semibold tracking-tight"
+          class="text-ink mt-8 text-2xl font-bold tracking-[-0.025em]"
           data-testid="auth-signout-heading"
         >
           Sign out of cachicamas?
         </h1>
 
         <p
-          class="font-human text-body text-fg-mid mt-3 leading-relaxed"
+          class="text-ink-mid mt-3 max-w-[54ch] text-base leading-relaxed"
           data-testid="auth-signout-description"
         >
           Your session cookie will be cleared and you'll be returned to the
@@ -106,7 +106,6 @@ export default component$(() => {
             // bare `hover:*` overrides, so the consumer must use
             // `!important` to win. Tailwind 4 syntax: `!` goes
             // AFTER the variant (`hover:!bg-zinc-800`), not before.
-            class="!border-rule-strong !text-fg hover:!border-amber hover:!text-amber !bg-transparent"
           >
             Sign out
           </Button>
@@ -125,7 +124,7 @@ export default component$(() => {
         </Form>
 
         <p
-          class="text-legend text-fg-dim mt-10 tracking-[0.14em] uppercase"
+          class="text-ink-soft mt-10 text-xs"
           data-testid="auth-signout-footnote"
         >
           Sign-out is final for this browser. Other devices and browsers remain
