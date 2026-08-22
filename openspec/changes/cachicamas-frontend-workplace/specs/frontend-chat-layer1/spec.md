@@ -1,8 +1,10 @@
 # Delta — `frontend-chat-layer1`
 
-> **Change**: `cachicamas-frontend-os-redesign` · Target: `openspec/specs/frontend-chat-layer1/spec.md`
+> **Change**: `cachicamas-frontend-workplace` · Target: `openspec/specs/frontend-chat-layer1/spec.md`
+> **Inherited from**: `cachicamas-frontend-os-redesign`, which this change supersedes.
+> Corrected in three places, marked **(corrected)**, where this change moved the evidence.
 > **Ops**: MODIFIED `REQ-1`, `REQ-2`, `REQ-4`, `REQ-5`, `REQ-6`, `REQ-7`.
-> **Decision**: proposal `D3`.
+> **Decision**: proposal `D6`.
 
 ## Read this before deciding whether the delta is honest
 
@@ -43,8 +45,11 @@ before it is visible as returned; and the composer is disabled for the duration.
   assistant line accumulates one chunk per tick and carries `state: "streaming"` until its
   final chunk, at which point it carries `state: "final"` — asserted in
   `components/chat/use-mock-turn.spec.ts`.
-- **S-1.d** Given `scriptFor` is called with any prompt, then the returned beats open with
-  `TURN OPENED` and close with a `TURN CLOSED` note — no script may end mid-turn.
+- **S-1.d** *(corrected)* Given `scriptFor` is called with any message, then the returned
+  beats open with a `Working` note and close with a note — no script may end mid-turn. The
+  labels are the words a person reads rather than machine constants; the property, that a
+  conversation always opens and always closes, is unchanged and is asserted in
+  `lib/mock/chat.spec.ts`.
 
 ### REQ-2 — Mid-stream cancellation (redesign amendment)
 
@@ -90,9 +95,12 @@ already assigns.
 
 **Scenarios.**
 
-- **S-5.c** Given the redesigned screen, when a person opens `/chat`, then the composer
-  states in words that this is a demonstration and that no turn reaches a model — the
-  honesty obligation REQ-5 exists to serve, discharged where the person can see it.
+- **S-5.c** *(corrected)* Given the redesigned workspace, when a person opens any screen
+  including `/chat`, then a standing strip states in words that the colleagues,
+  conversations and figures shown are examples. It lives in the shell rather than on the
+  composer, so no screen can forget it (`components/workspace/workspace.spec.tsx`), and
+  the composer instead states the product's one standing promise where a person is about
+  to act on it: nothing is sent outside the company without approval.
 
 ### REQ-6 — Markdown + sanitization for assistant text (redesign amendment)
 
@@ -120,7 +128,7 @@ property that actually matters is asserted directly instead.
 Every `*.ts` / `*.tsx` under `frontend/src/components/chat/`, plus `lib/chat-api.ts`, SHALL
 still have a colocated spec. `S-7.a` and `S-7.c` are unchanged and satisfied.
 
-`S-7.b` required each spec to reference `REQ-1`…`REQ-6` by identifier. That is amended: the
+`S-7.b` *(corrected)* required each spec to reference `REQ-1`…`REQ-6` by identifier. That is amended: the
 new specs assert the **behaviour** those requirements describe and cite the mechanism in
 prose, and the requirement identifiers live here, in the delta, where they can be checked
 against the spec that owns them. An identifier grep over test files proved to measure
