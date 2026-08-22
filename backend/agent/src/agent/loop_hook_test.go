@@ -20,6 +20,7 @@
 package agent_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -610,10 +611,15 @@ func TestTurn_PrefixStability_ByteStableToolsSystem(t *testing.T) {
 		if len(firstToolList) != len(secondToolList) {
 			t.Errorf("tools length differs: first=%d, second=%d", len(firstToolList), len(secondToolList))
 		}
-		// Walking-skeleton scope: no tools region by construction.
-		// The presence equality above is the AG-08 invariant; if a
-		// future milestone installs tools, this branch needs a
-		// field-by-field comparison through the accessor surface.
+		// Walking-skeleton scope: no tools region by construction,
+		// so this branch is unreachable here — the clause above
+		// compares absent-vs-absent. The NON-VACUOUS tools-region
+		// prefix-stability test (present tools, field-by-field
+		// comparison through the accessor surface) is
+		// TestTurn_PrefixStability_ToolsRegionPresentAndByteStable
+		// below (Layer 2 audit-fix, branch
+		// fix/agent-layer2-audit-findings), where the hook itself
+		// attaches a fixed ai.ToolSet via ai.WithTools.
 		_ = secondToolList
 	}
 
@@ -641,6 +647,147 @@ func TestTurn_PrefixStability_ByteStableToolsSystem(t *testing.T) {
 		if !firstMsgs[i].Equal(secondMsgs[i]) {
 			t.Errorf("message[%d] content differs:\n  first:  %+v\n  second: %+v",
 				i, firstMsgs[i].Content(), secondMsgs[i].Content())
+		}
+	}
+}
+
+// fixedPrefixToolSet builds the deterministic two-declaration
+// ai.ToolSet the tools-region prefix-stability test attaches on
+// every turn. Constructed once per test and captured by the hook, so
+// both turns attach the SAME set value (ai.WithTools stores the set;
+// ToolSet.Tools copies on the way out, R-REX-001 posture).
+func fixedPrefixToolSet(t *testing.T) ai.ToolSet {
+	t.Helper()
+	readTool, err := ai.NewTool("read_file", "reads one file by path", []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`))
+	if err != nil {
+		t.Fatalf("ai.NewTool(read_file): %v", err)
+	}
+	listTool, err := ai.NewTool("list_dir", "lists one directory", []byte(`{"type":"object","properties":{"dir":{"type":"string"}}}`))
+	if err != nil {
+		t.Fatalf("ai.NewTool(list_dir): %v", err)
+	}
+	set, err := ai.NewToolSet(readTool, listTool)
+	if err != nil {
+		t.Fatalf("ai.NewToolSet: %v", err)
+	}
+	return set
+}
+
+// S-PRH-005 (tools clause, made non-vacuous) — Layer 2 audit-fix
+// (branch fix/agent-layer2-audit-findings). S-PRH-005's clause (b)
+// above compares the tools regions of the two captured requests, but
+// buildLoopRequest (loop.go) never attaches tools, so that clause
+// compared absent-vs-absent. This test makes the property
+// non-vacuous WITHOUT changing production code: the PreRequestHook
+// itself rebuilds the outgoing request attaching a fixed ai.ToolSet
+// via ai.WithTools (R-PRH-002's "hook sees + shapes the outgoing
+// request" is exactly the seam a Layer 3 tool source will use).
+//
+// Given two consecutive Turn(...) calls whose shared hook attaches
+// the same fixed tool set, and the second transcript = first + 1
+// appended message, when both captured requests are read back, then
+// (1) BOTH carry a PRESENT tools region — presence is asserted
+// explicitly, so absent-vs-absent can never satisfy this test — and
+// (2) the tools regions are field-identical across turns through the
+// accessor surface (name, description, schema bytes, cache-boundary
+// flag, per declaration in order — ToolSet is ordered by
+// construction, V-REQ-14), and identical to the set the hook
+// attached.
+func TestTurn_PrefixStability_ToolsRegionPresentAndByteStable(t *testing.T) {
+	t.Parallel()
+
+	fixedTools := fixedPrefixToolSet(t)
+	hookAttachTools := func(_ context.Context, req ai.Request) (ai.Request, error) {
+		return req.With(ai.WithTools(fixedTools))
+	}
+
+	// First turn: a single user message.
+	firstTranscript := []ai.Message{firstMessage(t)}
+	firstProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	firstSink := make(chan *agent.Event, 16)
+
+	_, _, err := agent.Turn(
+		contextBackground(),
+		firstProvider,
+		"system prompt for prh-005-tools",
+		firstTranscript,
+		agent.TurnOptions{PreRequestHook: hookAttachTools},
+		firstSink,
+	)
+	if err != nil {
+		t.Fatalf("first Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, firstSink)
+	firstCaptured := firstProvider.Requests()
+	if len(firstCaptured) != 1 {
+		t.Fatalf("first provider captured %d request(s), want 1", len(firstCaptured))
+	}
+
+	// Second turn: same system + same hook; transcript has one
+	// appended message.
+	appendedPart, _ := ai.NewText("second-turn-appended-tools")
+	appendedMsg, _ := ai.NewMessage(ai.RoleUser, appendedPart)
+	secondTranscript := append([]ai.Message{}, firstTranscript...)
+	secondTranscript = append(secondTranscript, appendedMsg)
+
+	secondProvider := agenttest.NewProvider(scriptTextResponse(t, ai.FinishReasonStop))
+	secondSink := make(chan *agent.Event, 16)
+
+	_, _, err = agent.Turn(
+		contextBackground(),
+		secondProvider,
+		"system prompt for prh-005-tools",
+		secondTranscript,
+		agent.TurnOptions{PreRequestHook: hookAttachTools},
+		secondSink,
+	)
+	if err != nil {
+		t.Fatalf("second Turn returned err = %v, want nil", err)
+	}
+	drainSink(t, secondSink)
+	secondCaptured := secondProvider.Requests()
+	if len(secondCaptured) != 1 {
+		t.Fatalf("second provider captured %d request(s), want 1", len(secondCaptured))
+	}
+
+	// (1) Presence, asserted explicitly on BOTH captures: an
+	// absent-vs-absent pair fails here, it cannot pass vacuously.
+	firstTools, firstHasTools := firstCaptured[0].Tools()
+	secondTools, secondHasTools := secondCaptured[0].Tools()
+	if !firstHasTools {
+		t.Fatal("first turn's captured request has NO tools region — the hook attached one via ai.WithTools (R-PRH-002); presence is the non-vacuity floor of this test")
+	}
+	if !secondHasTools {
+		t.Fatal("second turn's captured request has NO tools region — the hook attached one via ai.WithTools (R-PRH-002); presence is the non-vacuity floor of this test")
+	}
+
+	// (2) Field-by-field identity across turns, and against the
+	// attached set, through the accessor surface.
+	wantList := fixedTools.Tools()
+	firstList := firstTools.Tools()
+	secondList := secondTools.Tools()
+	if len(firstList) != len(wantList) {
+		t.Fatalf("first turn's tools region carries %d declaration(s), want %d (the fixed set the hook attached)", len(firstList), len(wantList))
+	}
+	if len(secondList) != len(firstList) {
+		t.Fatalf("tools length differs across turns: first=%d, second=%d (prefix stability, R-PRH-006)", len(firstList), len(secondList))
+	}
+	for i := range firstList {
+		if firstList[i].Name() != secondList[i].Name() || firstList[i].Name() != wantList[i].Name() {
+			t.Errorf("tools[%d].Name(): first=%q, second=%q, attached=%q — must be identical (R-PRH-006/R-ACB-007 prefix stability)",
+				i, firstList[i].Name(), secondList[i].Name(), wantList[i].Name())
+		}
+		if firstList[i].Description() != secondList[i].Description() || firstList[i].Description() != wantList[i].Description() {
+			t.Errorf("tools[%d].Description(): first=%q, second=%q, attached=%q — must be identical",
+				i, firstList[i].Description(), secondList[i].Description(), wantList[i].Description())
+		}
+		if !bytes.Equal(firstList[i].Schema(), secondList[i].Schema()) || !bytes.Equal(firstList[i].Schema(), wantList[i].Schema()) {
+			t.Errorf("tools[%d].Schema(): first=%q, second=%q, attached=%q — must be byte-identical",
+				i, firstList[i].Schema(), secondList[i].Schema(), wantList[i].Schema())
+		}
+		if firstList[i].IsCacheBoundary() != secondList[i].IsCacheBoundary() {
+			t.Errorf("tools[%d].IsCacheBoundary(): first=%v, second=%v — must be identical",
+				i, firstList[i].IsCacheBoundary(), secondList[i].IsCacheBoundary())
 		}
 	}
 }

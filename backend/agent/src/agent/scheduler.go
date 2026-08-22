@@ -13,8 +13,14 @@
 //
 // # Why hand-rolled (D4a)
 //
-// Stdlib-only: `chan struct{}` semaphore for reads, single-goroutine
-// channel for mutating/execute, indexed `[]Result` for rejoin,
+// Stdlib-only: `chan struct{}` semaphore for reads, a chained
+// per-call done-channel hand-off for mutating/execute (each
+// serialized call waits on its predecessor's done channel, so the
+// lane is both exclusive AND issuance-ordered — R-TLS-004; Layer 2
+// audit fix, branch fix/agent-layer2-audit-findings: the previous
+// capacity-1 channel guaranteed only mutual exclusion, because Go's
+// channel send queue orders by arrival, not spawn order), indexed
+// `[]Result` for rejoin,
 // `defer/recover` per call goroutine for panic containment. No
 // `errgroup` (forbidden — new top-level dep + first-error
 // cancellation conflicts with R-TLS-010 "siblings complete";
@@ -41,8 +47,8 @@
 //     stamped events on `sink`.
 //   - `scheduleRead` — bounded fan-out via `chan struct{}`
 //     semaphore; one read-class call per slot.
-//   - `scheduleSerialized` — single-goroutine serialized channel
-//     for mutating + execute in call order.
+//   - `scheduleSerialized` — chained done-channel hand-off
+//     serializing mutating + execute in issuance order.
 //   - `executeCall` — resolve the tool, emit start, run the tool,
 //     emit end, write the result to the indexed slot.
 //   - `recoverCall` — panic containment in the call goroutine.
@@ -188,9 +194,18 @@ func (s *Scheduler) Schedule(
 	// slot is released.
 	readSem := make(chan struct{}, maxReads)
 
-	// Serialized channel for mutating + execute. Capacity 1:
-	// only one such call is in flight at a time, in call order.
-	serialCh := make(chan struct{}, 1)
+	// Serialized lane for mutating + execute: a chained done-channel
+	// hand-off. Each serialized call receives the PREVIOUS serialized
+	// call's done channel and closes its own when finished, so the
+	// lane is exclusive AND runs in strict issuance order among the
+	// serialized calls (R-TLS-004 / S-TLS-004). The first serialized
+	// call's predecessor is a pre-closed sentinel. (Layer 2 audit
+	// fix, branch fix/agent-layer2-audit-findings: the previous
+	// capacity-1 `serialCh` let every serialized goroutine race to
+	// the channel send — Go orders that queue by arrival, not spawn
+	// order, so only mutual exclusion was guaranteed.)
+	serialPrev := make(chan struct{})
+	close(serialPrev)
 
 	// One dispatcher goroutine owns the stamper. The call
 	// goroutines send emissions; the dispatcher stamps and
@@ -216,7 +231,9 @@ func (s *Scheduler) Schedule(
 		case tool.EffectClass() == EffectClassRead:
 			go s.scheduleRead(ctx, i, call, tool, runID, turnID, policy, parked, remembered, results, emissions, readSem, &wg)
 		default:
-			go s.scheduleSerialized(ctx, i, call, tool, runID, turnID, policy, parked, remembered, results, emissions, serialCh, &wg)
+			serialDone := make(chan struct{})
+			go s.scheduleSerialized(ctx, i, call, tool, runID, turnID, policy, parked, remembered, results, emissions, serialPrev, serialDone, &wg)
+			serialPrev = serialDone
 		}
 	}
 	wg.Wait()
@@ -333,9 +350,20 @@ func (s *Scheduler) scheduleRead(
 }
 
 // scheduleSerialized is the serialized entry for a mutating /
-// execute class call. It blocks on the serialized channel (capacity
-// 1) until the previous call's slot is free. Calls execute in
-// issuance order regardless of completion order.
+// execute class call. It blocks on `prev` — the previous serialized
+// call's done channel (a pre-closed sentinel for the first) — and
+// closes its own `done` when finished, so the serialized calls
+// execute strictly in issuance order among themselves, one at a
+// time, regardless of goroutine scheduling (R-TLS-004 / S-TLS-004;
+// Layer 2 audit fix, branch fix/agent-layer2-audit-findings — the
+// previous capacity-1 channel ordered by arrival at the channel,
+// which guaranteed only mutual exclusion, not issuance order).
+//
+// A serialized call that parks on the permission gate still HOLDS
+// the lane (`done` closes only after `executeCall` returns), exactly
+// as the capacity-1 slot was held before; cancellation still
+// releases a parked call via ctx (AG-10.3), which then closes `done`
+// and lets the successor proceed.
 //
 // `policy`, `parked` and `remembered` thread the AG-10 permission
 // gate; `ctx` is the per-Schedule context (AG-10.3 cancellation).
@@ -351,12 +379,13 @@ func (s *Scheduler) scheduleSerialized(
 	remembered *rememberedSet,
 	results []Result,
 	emissions chan<- emission,
-	serial chan struct{},
+	prev <-chan struct{},
+	done chan<- struct{},
 	wg *sync.WaitGroup,
 ) {
 	defer wg.Done()
-	serial <- struct{}{}
-	defer func() { <-serial }()
+	defer close(done)
+	<-prev
 	s.executeCall(ctx, ordinal, call, tool, runID, turnID, policy, parked, remembered, results, emissions)
 }
 
