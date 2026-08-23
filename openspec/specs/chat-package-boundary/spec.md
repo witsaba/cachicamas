@@ -306,14 +306,14 @@ This capability is written so as not to become row 5: `S-CPB-039` and `S-CPB-092
 The contract holds when:
 
 1. Every scenario this spec declares, from `S-CPB-001` to `S-CPB-096`, has recorded evidence.
-2. `backend/agent/src/chat/` is `package chat` declaring nothing, and `backend/agent/src/cmd/chat/` is `package main` whose binary builds.
+2. `backend/agent/src/chat/` is `package chat` declaring nothing at **CH-01's own merge state** — CH-02 gives the package its first declarations (`cachicamas-chat-conversation`, Engram-only artifact store) — and `backend/agent/src/cmd/chat/` is `package main` whose binary builds.
 3. One failure of the archetype check carries the file, the path, and deny-by-default framing, read off a single recorded RED block (`R-CPB-005`).
 4. The composition root's exclusion is proven by both the bite and its negative control (`R-CPB-006`).
 5. The vacuity floor has been watched to fire against a mistyped root (`R-CPB-007`).
 6. All three proofs of `R-CPB-008` pass — the per-guard effect table re-verified row by row against the post-apply tree, the hunk audit, and the re-plant bite; no existing guard was disarmed.
 7. The `otelslog` grant is present in the archetype allowlist, cited to `adr:243` under the ADR 0009 § D2 substitution, and no forbidden row shadows it; and the deviation from `R-AGP-003`'s same-commit rule is recorded over the **whole table**, in this spec and in the guard's own comment, with its declaration-versus-incremental reasoning and its two rejected alternatives (`R-CPB-004`).
 8. `backend/agent/go.mod`, `go.sum`, `Makefile` and `.golangci.yml` are byte-unchanged against the merge base.
-9. No second, self-contained guard exists inside either new tree, and no `_test.go` file was added under either.
+9. **At CH-01's own merge state**, no second, self-contained guard exists inside either new tree, and no `_test.go` file was added under either; CH-02 adds the archetype's first test files (`cachicamas-chat-conversation`).
 10. Every scratch file used a blank import and every one is removed; the merged tree is clean and the uncached suite is green with its wall-clock recorded.
 11. No recorded evidence states that an unscoped run would fail at build or would not reach the guard (`S-CPB-091`).
 12. The deferred transitive closure check is recorded here and in the guard's source with its owner (CH-02), its mechanical reason, and the bound on its exposure window.
