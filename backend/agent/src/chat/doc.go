@@ -1,9 +1,13 @@
 // Package chat is the chat archetype's own package: the Layer 3 position
-// (ADR 0009 § D2) `cachicamas_chat` occupies. It is created by CH-01.1 of
-// doc 0005 (`chat-archetype-contract` R-CHT-007) and ships empty of
-// policy until CH-02 — no port, no projection, no wiring. At CH-01 it
-// exists only to give the archetype's import boundary something on disk
-// to bite on.
+// (ADR 0009 § D2) `cachicamas_chat` occupies. It was created by CH-01.1 of
+// doc 0005 (`chat-archetype-contract` R-CHT-007) carrying no declarations
+// beyond this comment. CH-02 filled it with its first policy: a
+// Conversation that owns one agent.Harness and one *agent.History,
+// driving one browser turn per Harness.Run call and projecting Layer 2's
+// event stream onto a Go wire vocabulary — split across conversation.go
+// (Conversation, Config, Send, Cancel), wire.go (the wire vocabulary),
+// projection.go (the event projector) and errortext.go (the typed-failure
+// phrase table).
 //
 // Forbidden closure (ADR 0005 § D1 row 3, read as any Layer 3 archetype
 // under the ADR 0009 § D2 substitution): the OpenTelemetry SDK and its

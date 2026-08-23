@@ -160,6 +160,20 @@ func (p *Provider) Requests() []ai.Request {
 	return slices.Clone(p.requests)
 }
 
+// ScriptsRemaining returns the number of scripted Scripts on this
+// Provider that have not yet been consumed by a Stream call
+// (R-CCP-009 / S-CCP-082). Tests that need to distinguish "no
+// over-invocation" from "over-invocation masked by an exhausted-queue
+// early return" use this to prove a spare script was available and
+// left unconsumed; the shipped agenttest.Requests() cannot tell those
+// two cases apart because R-AFP-020's ErrScriptsExhausted path never
+// appends to p.requests.
+func (p *Provider) ScriptsRemaining() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.scripts) - p.next
+}
+
 // stampSteps assigns a fresh ai.Stamper's sequence to every Emit step's
 // event — one Stamper per Stream call, so sequencing is per-stream, never
 // per-provider, and two streams from the same fake (or two different

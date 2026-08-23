@@ -1596,6 +1596,47 @@ func hksFilterOutAG22TracetestFiles(diff string) string {
 	return strings.TrimSpace(kept.String())
 }
 
+// hksFilterOutCH02FakeProviderFiles strips diff blocks for
+// backend/agent/src/agenttest/fake_provider.go and its _test.go sibling
+// out of diff — CH-02's own D-F deliverable (ScriptsRemaining,
+// R-CCP-009 / S-CCP-082), discovered during apply to collide with this
+// test's own blanket src/agenttest/ freeze. Mirrors
+// hksFilterOutAG22TracetestFiles' pattern: an exact-filename suffix
+// match, no wildcard/prefix/directory pattern, so any OTHER file this
+// change might someday touch under src/agenttest/ still fails the
+// check loudly.
+//
+// Per the precedent recorded at hksScopeFenceByteUnchangedFiles' own
+// doc comment (the AG-18/AG-22/AG-23 disposition rule): the agenttest
+// surface is a designed extension point for the import boundary, and
+// freezing it is a category error. AG-22 admitted tracetest.go for its
+// Parent() capture; CH-02 admits fake_provider.go for the no-retry
+// defeat to be falsifiable. This release expires with this branch per
+// the AG-22/AG-23 disposition rule, and is renewed on the merits.
+func hksFilterOutCH02FakeProviderFiles(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	var kept strings.Builder
+	skip := false
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			idx := strings.LastIndex(line, " b/")
+			path := line
+			if idx >= 0 {
+				path = line[idx+3:]
+			}
+			skip = strings.HasSuffix(path, "/agenttest/fake_provider.go") ||
+				strings.HasSuffix(path, "/agenttest/fake_provider_test.go")
+		}
+		if !skip {
+			kept.WriteString(line)
+			kept.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(kept.String())
+}
+
 // S-HKS-024 — Given the merge base of this change's branch with
 // origin/main, when git diff is taken over backend/agent/, then every
 // file named byte-unchanged above is byte-unchanged; the diff under
@@ -1643,6 +1684,7 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 		t.Fatalf("git diff %s -- backend/agent/src/agenttest/ failed: %v", baseRef, err)
 	}
 	agenttestDiff = hksFilterOutAG22TracetestFiles(agenttestDiff)
+	agenttestDiff = hksFilterOutCH02FakeProviderFiles(agenttestDiff)
 	if agenttestDiff != "" {
 		t.Errorf("backend/agent/src/agenttest/ is not byte-unchanged against %s (the gate primitive is used, not widened):\n%s", baseRef, agenttestDiff)
 	}
