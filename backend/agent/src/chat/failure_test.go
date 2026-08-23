@@ -119,17 +119,25 @@ func TestFailure_NoProviderStringOnWire(t *testing.T) {
 	}
 }
 
-// TestFailure_NoArchetypeRetry — S-CCP-080, S-CCP-081 (D11: exactly 2
-// invocations, never 3). Given a scripted provider that fails retryably on
-// its first invocation and succeeds on its second, when a turn is driven
-// with Harness.RetryAttempts left unset, then the scripted provider records
-// exactly 2 invocations and the turn completes.
+// TestFailure_NoArchetypeRetry — S-CCP-080, S-CCP-081, S-CCP-082 (D11:
+// exactly 2 invocations, never 3; the third script must remain
+// unconsumed on the happy path so the no-retry defeat is observable).
+// Given a scripted provider that fails retryably on its first
+// invocation, succeeds on its second, and has a third script queued
+// that the harness is not expected to reach, when a turn is driven with
+// Harness.RetryAttempts left unset, then the scripted provider records
+// exactly 2 invocations, the third script remains unconsumed, and the
+// turn completes. The third-script assertion is the falsifier that
+// S-CCP-082 demanded: with only two scripts, an over-invocation cannot
+// be observed because the third Stream call would never reach p.requests
+// (R-AFP-020's ErrScriptsExhausted path is silent on capture).
 func TestFailure_NoArchetypeRetry(t *testing.T) {
 	t.Parallel()
 
 	failOnce := scriptTextThenFailure(t, true, false, ai.FailureCategoryUnavailable)
 	thenSucceed := scriptTextResponse(t, 1, []string{"recovered"}, ai.FinishReasonStop)
-	provider := agenttest.NewProvider(failOnce, thenSucceed)
+	unused := scriptTextResponse(t, 1, []string{"never-reached"}, ai.FinishReasonStop)
+	provider := agenttest.NewProvider(failOnce, thenSucceed, unused)
 
 	conv, err := chat.NewConversation(chat.Config{Provider: provider})
 	if err != nil {
@@ -146,6 +154,9 @@ func TestFailure_NoArchetypeRetry(t *testing.T) {
 
 	if got := len(provider.Requests()); got != 2 {
 		t.Errorf("provider recorded %d invocation(s), want exactly 2 (D11: H=3 bounds TOTAL attempts; the archetype schedules none of its own)", got)
+	}
+	if got := provider.ScriptsRemaining(); got < 1 {
+		t.Errorf("post-harness ScriptsRemaining = %d, want >= 1 (the third script was available, the harness chose not to take it — a 3rd invocation by the archetype would have consumed it)", got)
 	}
 }
 
