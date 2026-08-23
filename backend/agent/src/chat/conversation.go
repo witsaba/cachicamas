@@ -4,6 +4,7 @@
 package chat
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"sync"
@@ -65,4 +66,42 @@ func NewConversation(cfg Config) (*Conversation, error) {
 		},
 		logger: logger,
 	}, nil
+}
+
+// Send drives one browser turn — exactly one Harness.Run call (R-CCP-001) —
+// and returns the projected wire event stream. The stream carries exactly
+// one terminal event and is then closed exactly once (R-CCP-006).
+//
+// Two goroutines drive one turn: the runner calls Harness.Run over an
+// unbuffered sink (real backpressure — a buffered channel would fake it),
+// then hands its own return values to the projector over a buffered
+// result channel; the projector ranges the sink, projecting events, and
+// completes the terminal wire event once both the held run_end payload and
+// the runner's result are available.
+func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEvent, error) {
+	part, err := ai.NewText(prompt)
+	if err != nil {
+		return nil, err
+	}
+	msg, err := ai.NewMessage(ai.RoleUser, part)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.inFlight = true
+	c.mu.Unlock()
+
+	sink := make(chan *agent.Event)
+	result := make(chan runResult, 1)
+	out := make(chan WireEvent)
+
+	go func() {
+		_, finish, runErr := c.harness.Run(ctx, msg, sink)
+		result <- runResult{finish: finish, err: runErr}
+	}()
+
+	go c.project(ctx, sink, result, out)
+
+	return out, nil
 }
