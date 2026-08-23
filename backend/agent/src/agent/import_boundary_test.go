@@ -5,7 +5,7 @@
 // ai_test's import_boundary_test.go mechanism (AI-00.3) from Layer 1 to
 // Layer 2. Structural differences from that mechanism, all AD-3:
 //
-//  1. FIVE checks, not one merged scan: the production closure
+//  1. SIX checks, not one merged scan: the production closure
 //     ([TestLayer2_ProductionClosure_ImportsOnlyLayer1AndStdlib_DenyByDefault]),
 //     the test closure
 //     ([TestLayer2_TestClosure_AdmitsOnlyTheTestSubstrateBeyondProduction]),
@@ -15,13 +15,17 @@
 //     AI-10.4's pattern), a direct-import family scan over Layer 2's own
 //     production source files
 //     ([TestLayer2_ProductionSources_NoDirectForbiddenFamilyImport],
-//     AG-22 correction, below), and a fifth source-level scan over AG-23's
+//     AG-22 correction, below), a fifth source-level scan over AG-23's
 //     two new sibling trees, test files included
 //     ([TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport], AG-23,
-//     design AD-2). Production and test are asserted SEPARATELY — not
-//     L1's single `-deps -test` merge — because S-AGP-026 requires
-//     proving the production closure never admits the test substrate
-//     (src/agenttest) while the test closure does.
+//     design AD-2), and a sixth, CH-01 (cachicamas-chat-package-scaffold)'s
+//     own per-file, deny-by-default AST scan over the chat archetype's
+//     production tree
+//     ([TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault],
+//     see the "CH-01 amendment" section below). Production and test are
+//     asserted SEPARATELY — not L1's single `-deps -test` merge — because
+//     S-AGP-026 requires proving the production closure never admits the
+//     test substrate (src/agenttest) while the test closure does.
 //
 //     AG-23 also turns check 2's single scan pattern into a pattern SET:
 //     it now sweeps {layer2Pattern} ∪ layer2TestOnlyTreePatterns, one
@@ -126,6 +130,65 @@
 // left unstruck, not deleted: it explains why the allowlist started
 // empty, and remains true as a description of that milestone's own
 // evidence — it does not describe today's allowlist.
+//
+// # CH-01 amendment — the chat archetype's own boundary (check 6)
+//
+// SIX checks, not five: cachicamas-chat-package-scaffold (CH-01) adds
+// [TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault],
+// this module's first import-boundary check over a Layer 3 ARCHETYPE
+// rather than over Layer 2 itself. It is a per-file, deny-by-default AST
+// scan over backend/agent/src/chat/..., RECURSIVE (filepath.WalkDir,
+// skipping directories named "testdata" and skipping "_test.go" files) —
+// a stated amendment to proposal D-6's "directly inside" wording, because
+// the archetype tree grows subpackages at CH-02 and a top-level-only scan
+// would silently release the first one from the guard.
+//
+// Every failure this check emits cites ADR 0005 § D1 row 3 (or § D3)
+// TOGETHER WITH the ADR 0009 § D2 substitution ("read as any Layer 3
+// archetype"), written out in full at each use — the same convention
+// `chat-archetype-contract` already promoted as R-CHT-011 — and names the
+// offending file by its path RELATIVE TO THE DECLARED ROOT, never by
+// filepath.Base, because a base name stops identifying a file uniquely
+// once a recursive walk reaches a subpackage.
+//
+// backend/agent/src/cmd/chat, the archetype's own composition root, is
+// DELIBERATELY OUTSIDE this check's scanned set (chatArchetypeDirs): it
+// is the one package ADR 0005 § D3's cmd/ column (adr:242) grants the
+// OpenTelemetry SDK and exporters, so scanning it would deny the very
+// import that grant exists to permit.
+//
+// chatArchetypeForbiddenPrefixes deliberately carries NO row for
+// github.com/cachicamas/backend/database_administrator or
+// github.com/cachicamas/backend/workspace_syncer, even though this
+// file's own forbiddenPrefixes above names both for Layer 2: naming
+// either here would make a planted violation's failure cite a named
+// forbidden prefix instead of this check's deny-by-default framing,
+// falsifying the message contract's third property (R-CPB-005).
+//
+// chatArchetypeAllowedPrefixes admits
+// go.opentelemetry.io/contrib/bridges/otelslog — ADR 0005 § D3 (adr:243,
+// ✅ at L3 coding), read under the ADR 0009 § D2 substitution as this
+// archetype's own grant (user decision, Engram #3741). This is a
+// DELIBERATE, RECORDED DEVIATION from agent-package-scaffold R-AGP-003's
+// same-commit rule, and the deviation covers the WHOLE TABLE, not the
+// bridge alone: at CH-01 the archetype imports nothing at all, so every
+// entry is an allowlist entry without an import. R-AGP-003's rule governs
+// an INCREMENTAL allowlist — an existing boundary admitting one new
+// dependency; this table is a BOUNDARY DECLARATION for a new position,
+// stated once so the permitted surface is legible before any code
+// exercises it. Two alternatives were rejected: an empty allowlist grown
+// import by import would leave the allowlist branch itself unexercised;
+// a passing bite per entry would cost roughly forty further lines and
+// five further recorded runs against a change already near its
+// authorised review budget.
+//
+// The zero-hop gap: this check reads each file's own import declarations
+// and nothing further — no transitive (go list -deps) closure check runs
+// over the archetype tree. That check is owned by CH-02, deferred for a
+// mechanical reason: at CH-01 the tree is doc.go-only, so a dependency
+// listing returns zero non-stdlib packages and this repo's own pinned
+// zero-packages vacuity floor (agent-package-scaffold S-AGP-070) would
+// fail a closure check run against it today.
 package agent_test
 
 import (
@@ -749,6 +812,299 @@ func TestLayer2_SiblingTrees_NoDirectForbiddenFamilyImport(t *testing.T) {
 					t.Errorf("%s directly imports %q, which is in the forbidden %q family\n  rule: R-L3H-002/R-L3H-004: the kit and the consumer proof perform no I/O and use no wall clock — no network, filesystem, process or time package, in production or test source",
 						filepath.Base(path), imported, family)
 				}
+			}
+		}
+	}
+}
+
+// chatArchetypeForbiddenPrefixes are checked BEFORE
+// chatArchetypeAllowedPrefixes, mirroring forbiddenPrefixes above and for
+// the same load-bearing reason (CH-01, design AD-2): the allowlist admits
+// modulePath+"/src/ai" as a PREFIX, so an allowlist-first pass would
+// silently admit ".../src/ai/openaicompat" — checking this table first is
+// what carves it back out (proven by S-CPB-033's bite). Every rule string
+// is final text: ADR 0005 § D1 row 3 (or § D3) together with the ADR 0009
+// § D2 substitution ("read as any Layer 3 archetype"), written out in
+// full rather than left as an unexplained analogy, so it stays true after
+// this change's own SDD artifacts move to openspec/changes/archive/.
+//
+// Deliberately ABSENT: "github.com/cachicamas/backend/database_administrator"
+// and "github.com/cachicamas/backend/workspace_syncer", even though
+// forbiddenPrefixes above names both for Layer 2. Naming either here
+// would make a planted violation's failure cite A NAMED FORBIDDEN
+// PREFIX instead of the archetype's deny-by-default framing — precisely
+// the "missing allowlist entry" reading the message contract forbids
+// (S-CPB-042, S-CPB-043; proven wrong by S-CPB-044's defeat test, which
+// drafts either row in and watches the deny-by-default property fail).
+// R-07 stays enforced regardless: no chatArchetypeAllowedPrefixes entry
+// below reaches either module, so default denial is the mechanism.
+var chatArchetypeForbiddenPrefixes = []struct {
+	prefix string
+	rule   string
+}{
+	{modulePath + "/src/ai/openaicompat", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: the archetype reaches row 1 only through the src/ai contract — the vendor adapter subtree is denied by name"},
+	{modulePath + "/src/agenttest", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable as production contract surface only — Layer 2's test substrate is not part of that surface"},
+	{modulePath + "/src/apptest", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: Layer 2's packaged test kit is consumer-proof machinery, not row 2's production surface"},
+	// Denied to the PRODUCTION closure only. Admissible to a future TEST
+	// closure: 0005:66 (R-10) requires every harness consumer to test
+	// against the AG-23 scripted kit. At CH-01 the archetype ships no
+	// test file, so the test closure has no scanned subject; this row
+	// records the asymmetry now so CH-02 amends it rather than
+	// inventing it.
+	{modulePath + "/src/layer3handoff", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: production never imports the consumer-proof tree — a future test closure decides its own admission (CH-02)"},
+	{modulePath + "/src/cmd", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: nothing below the composition root imports src/cmd"},
+}
+
+// chatArchetypeAllowedPrefixes is check 6's deny-by-default allowlist,
+// minus the standard library (classified by
+// chatArchetypeStandardLibraryPackages, the toolchain's own answer —
+// never a maintained list or a path-shape heuristic, honoring this
+// file's own recorded warning against both). Every entry cites its
+// authority in place, as allowedProductionPrefixes above requires of its
+// own entries.
+//
+// The table ships COMPLETE at CH-01, and this is a DELIBERATE, RECORDED
+// DEVIATION from agent-package-scaffold R-AGP-003's same-commit rule
+// ("The allowlist amendment MUST land in the same commit as the first
+// production import that requires it"), and the deviation covers the
+// WHOLE TABLE, not any single entry: at CH-01 the archetype imports
+// nothing at all, so EVERY entry below — modulePath+"/src/agent" and
+// modulePath+"/src/ai" exactly as much as otelslog — is an allowlist
+// entry without an import. R-AGP-003's same-commit rule governs an
+// INCREMENTAL allowlist: an existing boundary admitting one new
+// dependency, the shape S-AGP-034/S-AGP-069 each proved with a bite.
+// This table is a different object: a BOUNDARY DECLARATION for a new
+// position, stated once so the position's permitted surface is legible
+// before any code exercises it. Two alternatives were considered and
+// rejected: (1) an empty allowlist, grown import by import, would leave
+// the permitted surface living only as doc.go prose, with the allowlist
+// branch itself shipping unexercised — a branch no evidence reaches; (2)
+// a passing bite per entry, exercising each admission, would cost
+// roughly forty further lines and five further recorded runs, against a
+// change already near its authorised review budget.
+//
+// go.opentelemetry.io/otel/sdk/... and .../exporters/... carry NO row
+// here, denied by DEFAULT rather than by a forbidden-table row: no entry
+// below — including otelslog's — reaches either prefix, so default
+// denial is the mechanism, and a forbidden row would change the
+// failure's framing in the way the message contract (R-CPB-005) forbids.
+// They are permitted only inside backend/agent/src/cmd/chat, which
+// chatArchetypeDirs below deliberately excludes from the scanned set.
+var chatArchetypeAllowedPrefixes = []string{
+	modulePath + "/src/agent",            // ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable
+	modulePath + "/src/ai",               // same row; the vendor adapter subtree carved back out by chatArchetypeForbiddenPrefixes above
+	"go.opentelemetry.io/otel/trace",     // ADR 0005 § D3 (adr:240): tracing API permitted at every layer
+	"go.opentelemetry.io/otel/attribute", // ADR 0005 § D3 (adr:241)
+	"go.opentelemetry.io/otel/codes",     // ADR 0005 § D3 (adr:241)
+	"go.opentelemetry.io/otel/semconv",   // forced closure of otel/trace (see allowedProductionPrefixes' own semconv entry)
+	// ADR 0005 § D3 (adr:243): otelslog is permitted at L3 coding, read as any
+	// Layer 3 archetype under ADR 0009 § D2 — user decision, Engram #3741.
+	// Authorised ahead of its first import by that decision; a deliberate,
+	// recorded deviation from Layer 2's same-commit amendment convention.
+	"go.opentelemetry.io/contrib/bridges/otelslog",
+}
+
+// chatArchetypeMatchForbidden mirrors matchForbidden above but is its own,
+// separate function over chatArchetypeForbiddenPrefixes (design AD-2's
+// helper policy): matchForbidden is hardcoded to Layer 2's own
+// forbiddenPrefixes, whose database_administrator/workspace_syncer rows
+// are exactly what this table deliberately omits — sharing the two
+// tables' matcher would re-couple them and silently reintroduce those
+// rows here. The honest duplication cost is six lines; drift risk is
+// bounded because the two tables are SUPPOSED to differ.
+func chatArchetypeMatchForbidden(importPath string) (rule string, forbidden bool) {
+	for _, f := range chatArchetypeForbiddenPrefixes {
+		if importPath == f.prefix || strings.HasPrefix(importPath, f.prefix+"/") {
+			return f.rule, true
+		}
+	}
+	return "", false
+}
+
+// chatArchetypeDirs resolves check 6's declared scan roots, keyed by
+// import path, mirroring layer2SiblingTreeDirs above and resolved the
+// same way: relative to THIS test file's own source location
+// (layer2AgentPackageDir's runtime.Caller(0)), never an assumed working
+// directory (NFR-CPB-001).
+//
+// modulePath+"/src/cmd/chat" is DELIBERATELY ABSENT. That absence is
+// itself the mechanism behind CH-01.2's second scenario clause — "the
+// same import inside the composition root passes" — because
+// backend/agent/src/cmd/chat is the one package of this archetype ADR
+// 0005 § D3's cmd/ column (adr:242) grants the OpenTelemetry SDK and
+// exporters; a scan that swept it would deny the very import the
+// position exists to grant. Proven by S-CPB-050's bite and S-CPB-051's
+// own negative control — a bite without its negative control does not
+// prove the exclusion.
+//
+// This map's single entry also carries D-4's test-closure asymmetry:
+// modulePath+"/src/layer3handoff" is denied to this scan's PRODUCTION
+// table (chatArchetypeForbiddenPrefixes) but stays admissible to a
+// future TEST closure this milestone does not yet scan — see that row's
+// own comment. CH-02 amends this map and that table together rather
+// than inventing the asymmetry from scratch.
+func chatArchetypeDirs(t *testing.T) map[string]string {
+	t.Helper()
+	srcDir := filepath.Dir(layer2AgentPackageDir(t))
+	return map[string]string{modulePath + "/src/chat": filepath.Join(srcDir, "chat")}
+}
+
+// chatArchetypeStandardLibraryPackages runs `go list std` once per
+// check-6 run and returns its output as a membership set (design AD-6,
+// NFR-CPB-003): the AST scan below sees literal stdlib imports directly —
+// unlike checks 1–2, whose listNonStdlibDeps filters the standard library
+// out before either allowlist ever runs — so check 6 needs its own
+// classification, and it is the TOOLCHAIN's own answer, never a
+// maintained list or a path-shape heuristic, honoring this file's own
+// recorded warning against both (see listNonStdlibDeps' package comment).
+// On subprocess failure this t.Fatalf's with the command's stderr,
+// matching every existing `go list` failure path in this file.
+func chatArchetypeStandardLibraryPackages(t *testing.T) map[string]struct{} {
+	t.Helper()
+	cmd := exec.Command("go", "list", "std")
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go list std failed: %v", &goListError{err: err, stderr: stderr.String()})
+	}
+
+	pkgs := make(map[string]struct{})
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pkgs[line] = struct{}{}
+	}
+	return pkgs
+}
+
+// TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault
+// is check 6 (CH-01.2, cachicamas-chat-package-scaffold, design AD-1…AD-9):
+// this module's first import-boundary check over a Layer 3 ARCHETYPE
+// rather than over Layer 2 itself — a per-file, deny-by-default AST scan
+// over chatArchetypeDirs' declared roots. Follows check 1's four-segment
+// name shape (Test<Subject>_<Scope>_<Behavior>_<Expectation>) because the
+// expectation — DenyByDefault — is the load-bearing property here.
+//
+// The walk is RECURSIVE per declared root (filepath.WalkDir, skipping
+// directories literally named "testdata" and skipping "_test.go" files) —
+// a STATED AMENDMENT to proposal D-6's "directly inside" wording, not a
+// silent widening: checks 4 and 5 above scan flat single packages by
+// design, but the archetype tree grows subpackages at CH-02, and a
+// top-level-only scan would silently release the first subpackage from
+// this guard — exactly the escape class this milestone exists to close.
+// A later change MAY overturn this back to a flat scan; doing so re-opens
+// the subpackage escape at CH-02 and MUST assign that gap an owner.
+//
+// A failing import is named by its path RELATIVE TO THE DECLARED ROOT
+// (filepath.Rel; a Rel error is itself fatal), NEVER by filepath.Base as
+// checks 4 and 5 do: a base name stops identifying a file uniquely the
+// moment a recursive walk reaches a subpackage — "chat.go" directly
+// inside src/chat and "chat.go" inside a future src/chat/port would
+// render identically, and a reader of a failure could not tell which
+// file to open. Checks 4 and 5 may use a base name because they scan flat
+// directories where base names are unique by construction; this check
+// does not have that guarantee. A root-level file renders identically
+// under both shapes, so nothing is lost at CH-01.
+//
+// Parse shape is parser.ParseFile(fset, path, nil, parser.ImportsOnly),
+// verbatim from checks 4 and 5: it reads each file's own import
+// declarations and RESOLVES NOTHING (NFR-CPB-001's determinism, R-CPB-009's
+// go.mod byte-freeze) — the check's verdict is a function of the import
+// path as WRITTEN, not of the module graph, so it neither requires a path
+// to be in the build list nor is weakened when one happens to be. This is
+// also this check's own ZERO-HOP boundary: it evaluates each file's
+// direct imports only, never a transitive (go list -deps) closure — that
+// check is deferred to CH-02 for a mechanical reason, not a budget one
+// (see the CH-01 amendment section of this file's package comment).
+//
+// Evaluation order per import, per AD-6: chatArchetypeForbiddenPrefixes
+// FIRST (forbidden-first is load-bearing, not cosmetic — the allowlist
+// admits ".../src/ai" as a PREFIX, so an allowlist-first pass would
+// silently admit ".../src/ai/openaicompat", proven wrong by S-CPB-033's
+// bite), then the standard library, then chatArchetypeAllowedPrefixes,
+// then deny. Forbidden and stdlib are disjoint, so this ordering is
+// preserved trivially.
+//
+// The per-declared-root vacuity floor is FILE-COUNT based, never
+// dependency-count based: a doc.go-only tree — exactly what CH-01 ships —
+// has zero non-standard-library dependencies but one file, and a
+// dependency-count floor would fail this guard on a tree that is exactly
+// as the milestone intends. Mirrors check 4's own floor above, and
+// follows agent-package-scaffold S-AGP-070's per-declared-input rule: a
+// WalkDir error names the mistyped directory and its import path; zero
+// collected files under a declared root names that root — both fatal,
+// never a silent pass. Floor granularity is the DECLARED root, never a
+// discovered subdirectory: S-AGP-070 protects declared inputs, and under
+// a recursive walk a subdirectory is discovered, not declared — a
+// mistyped subdirectory simply does not exist and is never visited, so a
+// per-subdirectory floor could never fire on the failure S-AGP-070 exists
+// to catch, while it would false-positive on a legitimately Go-free
+// directory.
+func TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault(t *testing.T) {
+	t.Parallel()
+
+	dirs := chatArchetypeDirs(t)
+	stdlib := chatArchetypeStandardLibraryPackages(t)
+	fset := token.NewFileSet()
+
+	for archetypeImportPath, rootDir := range dirs {
+		var files []string
+		walkErr := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if d.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := d.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				return nil
+			}
+			files = append(files, path)
+			return nil
+		})
+		if walkErr != nil {
+			t.Fatalf("filepath.WalkDir(%q) error = %v, want nil (chat archetype root %s)", rootDir, walkErr, archetypeImportPath)
+		}
+		if len(files) == 0 {
+			t.Fatalf("no production .go file found under %q (%s); the scan would pass vacuously", rootDir, archetypeImportPath)
+		}
+
+		for _, path := range files {
+			file, ferr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+			if ferr != nil {
+				t.Fatalf("parser.ParseFile(%q) error = %v, want nil", path, ferr)
+			}
+			relPath, relErr := filepath.Rel(rootDir, path)
+			if relErr != nil {
+				t.Fatalf("filepath.Rel(%q, %q) error = %v, want nil", rootDir, path, relErr)
+			}
+
+			for _, imp := range file.Imports {
+				importPath := strings.Trim(imp.Path.Value, `"`)
+
+				if rule, forbidden := chatArchetypeMatchForbidden(importPath); forbidden {
+					t.Errorf("%s directly imports %q\n  rule: %s", relPath, importPath, rule)
+					continue
+				}
+				if _, isStdlib := stdlib[importPath]; isStdlib {
+					continue
+				}
+				if matchesPrefix(importPath, chatArchetypeAllowedPrefixes) {
+					continue
+				}
+				t.Errorf("%s directly imports %q, which the chat archetype's deny-by-default allowlist does not admit\n"+
+					"  rule: deny-by-default allowlist (ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2) — "+
+					"this path is neither the Go standard library nor a package this archetype's allowlist admits.\n"+
+					"  No forbidden prefix names it, and that is not a licence to add it: adding a dependency "+
+					"needs its own recorded design decision in chatArchetypeAllowedPrefixes.",
+					relPath, importPath)
 			}
 		}
 	}
