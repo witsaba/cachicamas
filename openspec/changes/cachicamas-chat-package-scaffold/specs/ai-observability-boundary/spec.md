@@ -51,19 +51,39 @@ This delta therefore follows **that** file's own shape: the revised row carries 
 - **No identifier is minted and none is renumbered.** The file is append-only (`spec.md:8`); this delta appends no identifier at all, because the amended text is a table row that carries none.
 - This change adds **no** tracing anywhere. `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/` ship documentation and an empty `main` (`chat-package-boundary` `R-CPB-001`); neither imports an observability path. The row's obligation is satisfied by this change, not merely restated by it.
 
-## MODIFIED content — the `Out of scope` row at `spec.md:228`
+## MODIFIED Requirements
 
-The row becomes:
+**None.** This delta modifies no requirement, no scenario and no non-functional requirement — and that fact is stated under this heading **on purpose**, because a reader or executor that promotes by scanning for `## MODIFIED Requirements` would otherwise find no such section, conclude there was nothing to do, and silently drop this delta entirely. Its whole normative change is a **table row**, and it is mandatory. The two edits it requires are enumerated below; **both** MUST be applied.
 
-| Item | Owner |
-| --- | --- |
+## PROMOTION INSTRUCTION — the archive executor MUST apply both edits below
+
+This delta is **not** discharged by promoting a requirement block. It is discharged by making exactly two textual edits to one file. Applying neither, or only one, leaves a promoted spec carrying a claim this change falsified.
+
+**Target file**: `openspec/specs/ai-observability-boundary/spec.md`
+
+### Edit 1 of 2 — replace one row of the *Out of scope, with the owner of each* table
+
+**Location**: `spec.md:228`, the row whose **Item** cell reads `Tracing in Layer 2, Layer 3 or the composition root`. It is the seventh row of the table that runs `spec.md:220-234`.
+
+**BEFORE** (the exact line to replace):
+
+```markdown
+| Tracing in Layer 2, Layer 3 or the composition root | Docs 0003/0004 — those directories do not exist |
+```
+
+**AFTER** (the exact replacement; the **Item** cell is byte-identical, only the **Owner** cell changes):
+
+```markdown
 | Tracing in Layer 2, Layer 3 or the composition root | Those positions' own layer documents (docs 0003 / 0004 / 0005) and [ADR 0005 § D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), whose table grants each position its own observability surface — Layer 1's grant is what this capability specifies, and no other position's is. *(Reason corrected at CH-01: the cell previously read "those directories do not exist", which time falsified. `backend/agent/src/agent/` has existed since AG-03 — that clause was already false and is AG-03's back-annotation debt, inherited here rather than introduced. `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/` were created by CH-01.1 of doc 0005, which is what forced this correction. The scope fence is unchanged: tracing in those three positions is still out of scope for this capability.)* |
+```
 
-The parenthetical follows this file's own in-place revision convention (`spec.md:62`, `:86`, `:167`, `:169`, `:201`).
+No other row of that table is touched. The parenthetical follows this file's own in-place revision convention (`spec.md:62`, `:86`, `:167`, `:169`, `:201`).
 
-## Amendment note to append at promotion
+### Edit 2 of 2 — append the amendment note
 
-The archive executor MUST append the following dated paragraph to the *Status — this file is the canonical home of the contract* section, after its closing sentence at `spec.md:26`. It MUST NOT introduce a `> **Amended …**` blockquote list, which this file does not use.
+**Location**: the *Status — this file is the canonical home of the contract* section, immediately after its closing sentence at `spec.md:26`.
+
+The archive executor MUST append the dated paragraph below. It MUST NOT introduce a `> **Amended …**` blockquote list, which this file does not use.
 
 > **Amended 2026-08-23 (CH-01, `cachicamas-chat-package-scaffold`).** One row of *Out of scope, with the owner of each* is corrected: the entry fencing tracing in Layer 2, Layer 3 and the composition root previously gave its reason as "those directories do not exist". Two of the three directories now exist — `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/`, created by CH-01.1 of doc 0005 — and the third, `backend/agent/src/agent/`, has existed since AG-03, so that clause was already false when CH-01 met it and is recorded as AG-03's back-annotation debt rather than as this change's. The reason is replaced by the owner reasoning that was always the real ground: those positions' own layer documents and ADR 0005 § D3's table. **The scope fence is unchanged** — tracing in those three positions remains out of scope for this capability — and no requirement, scenario or non-functional requirement is touched, no identifier is minted, and nothing is renumbered. CH-01 adds no tracing in any position; its two new packages ship documentation and an empty `main`.
 
@@ -76,3 +96,4 @@ The archive executor MUST append the following dated paragraph to the *Status �
 - **V-5** — Given the promoted target after archive, when the amended row is read, then it states which clause was **already** false before this change and whose debt that is, and which clauses **this** merge falsified — a reader can attribute each correction without opening this delta.
 - **V-6** — Given the promoted target after archive, when its format is compared against its pre-promotion format, then no `> **Amended …**` blockquote list has been introduced and the amendment is a dated paragraph in the *Status* section, matching this file's own convention.
 - **V-7** — Given this change's merged tree, when `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/` are scanned for any OpenTelemetry import, then none exists — the fenced obligation is satisfied, not merely restated. (`chat-package-boundary` `S-CPB-002` and `S-CPB-003` carry the declares-nothing evidence.)
+- **V-8** — Given the promoted target after archive, when it is searched for the exact string `those directories do not exist`, then no occurrence remains, **and** the *Status* section carries the dated amendment paragraph. Both edits of the promotion instruction were applied; finding the first applied without the second, or neither, means this delta was promoted partially or skipped — the failure mode a delta with no `## MODIFIED Requirements` block is exposed to.

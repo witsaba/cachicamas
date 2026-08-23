@@ -12,6 +12,13 @@
 // (TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault):
 // sweeping it would deny the very import this position exists to grant.
 //
+// Nothing imports this package, and nothing can: the Go language forbids
+// importing a package main. That is the whole mechanism behind the "one
+// composition root, imported by nothing" half of R-06 (0005:62) here — it
+// is enforced by the compiler, so this change ships no test asserting it.
+// A test whose subject is "nothing imports this package" could never fail
+// and would prove only that its author had not read the language spec.
+//
 // func main below is intentionally empty. CH-04.1 owns its wiring —
 // environment reads, the OTel SDK install, and the HTTP listener are all
 // out of scope here (0005:240 puts behaviour out of scope for CH-01). A

@@ -82,18 +82,20 @@ This is a property of the **record**, discharged by reading it. This milestone i
 - **S-CHT-121** — Given the record and the seven questions at `0005:219-225`, when each question is asked in turn, then the record carries a written answer to each, and the closing-verification section of the record names where each answer lives.
 - **S-CHT-122** — Given this change as merged, when its diff is inspected, then it adds no Go file, no test file, no guard, and no change under `backend/` or `frontend/`; and `cd backend/agent && go test -race -count=1 ./...` run uncached is green with its wall-clock duration recorded.
 
-## Prose corrections (non-normative, same defect)
+## PROMOTION INSTRUCTION — prose corrections outside any requirement block
 
-These two sites carry the same false present-tense claim outside any requirement. The archive executor MUST apply them in the same promotion, because a spec whose requirements are repaired while its prose still asserts the opposite teaches the prose.
+**These two edits are mandatory and they live outside every `### Requirement:` block, so an executor that promotes by scanning requirement blocks alone will not find them.** Promoting the two MODIFIED requirements above without also applying the two edits below leaves the target asserting, in its own Purpose section, the exact claim the requirements were just repaired to stop asserting — and a reader believes the prose.
 
-| Location | Current text | Replacement |
-|---|---|---|
-| `spec.md:19` (Purpose, first sentence) | "The chat archetype does not exist yet — there is no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all." | "When CH-00 was written the chat archetype did not exist — there was no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all. CH-01.1 created both; `chat-package-boundary` `R-CPB-001` is where their existence and shape are now asserted." |
-| `spec.md:256` (Explicit non-requirements, first row's *Why* cell) | "Proposal D-1 — CH-00.1 is `[decision]`; the package a guard would protect does not exist. CH-01.2 owns the first mechanical binding" | "Proposal D-1 — CH-00.1 is `[decision]`; at CH-00 the package a guard would protect did not yet exist. CH-01.2 owns the first mechanical binding, and landed it" |
+**Target file**: `openspec/specs/chat-archetype-contract/spec.md`. Two edits, **both** required.
 
-The remainder of the Purpose section and the whole *Explicit non-requirements* table are otherwise unchanged.
+| # | Location | BEFORE (exact text to replace) | AFTER (exact replacement) |
+|---|---|---|---|
+| 1 of 2 | `spec.md:19` — the Purpose section's first sentence | "The chat archetype does not exist yet — there is no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all." | "When CH-00 was written the chat archetype did not exist — there was no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all. CH-01.1 created both; `chat-package-boundary` `R-CPB-001` is where their existence and shape are now asserted." |
+| 2 of 2 | `spec.md:256` — the *Explicit non-requirements* table, first row's **Why** cell | "Proposal D-1 — CH-00.1 is `[decision]`; the package a guard would protect does not exist. CH-01.2 owns the first mechanical binding" | "Proposal D-1 — CH-00.1 is `[decision]`; at CH-00 the package a guard would protect did not yet exist. CH-01.2 owns the first mechanical binding, and landed it" |
 
-## Amendment note to append at promotion
+The remainder of the Purpose section and the whole *Explicit non-requirements* table are otherwise unchanged. `V-3` below is what catches either edit being skipped.
+
+## PROMOTION INSTRUCTION — amendment note to append
 
 The archive executor MUST append the following blockquote to the target spec's header amendment list (after the CH-00 archive line at `spec.md:6`), matching that block's existing convention:
 
