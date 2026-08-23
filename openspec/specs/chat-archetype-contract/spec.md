@@ -4,6 +4,7 @@
 > **Nodes**: CH-00.1 `[decision]` — answer every question the record must close (`0005:215-228`), the milestone's only node.
 > **Status**: **new capability**. This file is the normative text; per the AG-14 / AG-19 / AG-20 / AG-21 / AG-22 precedent it is promoted verbatim to `openspec/specs/chat-archetype-contract/spec.md` at archive. No promoted spec's requirements are modified by this change.
 > **Amended 2026-08-23 (CH-00 archive)**: promoted verbatim as a new capability at archive. Requirements `R-CHT-001` … `R-CHT-013`, non-functional `NFR-CHT-001` … `NFR-CHT-002` and scenarios `S-CHT-001` … `S-CHT-131` carried unchanged from `openspec/changes/archive/2026-08-23-cachicamas-chat-vocabulary-and-scope/specs/chat-archetype-contract/spec.md`. Relative links were re-based from the change directory's depth to this one; no normative text changed.
+> **Amended 2026-08-23 (CH-01, `cachicamas-chat-package-scaffold`)** by the archive executor: `R-CHT-007` and `R-CHT-013` are MODIFIED. `R-CHT-007`'s "neither path exists yet" clause, and `S-CHT-061` and `S-CHT-062` with it, are scoped to **CH-00's own merge state** rather than stated as live invariants: CH-01.1 created `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/`, which made `R-CHT-007`'s clause false and `S-CHT-062`'s `Given` unreachable on the day CH-01 merged. `R-CHT-013`'s rationale clause — "the package such a guard would protect does not exist" — is scoped the same way; its normative prohibition is unchanged and no guard is retro-fitted to CH-00's acceptance. Two non-normative sites carrying the same claim (the Purpose section's opening sentence and the first *Explicit non-requirements* row) are corrected in the same promotion. `R-CHT-007`'s first paragraph, `S-CHT-060`, `R-CHT-013`'s normative sentences and `S-CHT-120`…`S-CHT-122` are **byte-unchanged**; no other requirement, scenario or non-functional requirement is touched; **no identifier is minted and none is renumbered**, so the file's append-only rule (`spec.md:9`) holds. The current-state claim these clauses used to carry now lives in `chat-package-boundary` `R-CPB-001`, promoted by the same pull request. This is one of **three** repairs of a single defect shape in one change — the others being the `agent-package-scaffold` delta on `R-AGP-001`/`S-AGP-003` and the `ai-observability-boundary` delta on that spec's out-of-scope row — found by a deliberate sweep of `openspec/specs/` that also turned up a fourth site, `agent-contract-vocabulary` `NFR-AGV-C`, recorded and deliberately not repaired here. All four are registered in `chat-package-boundary`'s **Untemporal-invariant register**.
 > **Governing ADR**: [ADR 0009](../../../docs/adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) — § D6 table ownership (`0009:152`, the quoted sentence at `:154-155`) and § D7(a) the read-with-substitution rule (`0009:174-176`). ADR 0005 § D2 fixes the target package positions cited by `0005:8`.
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml` `rules.specs`. Every scenario is independently verifiable **by reading the record** — this milestone is typed `[decision]` and ships no executable guard (proposal D-1), so no scenario here is discharged by a test and none is marked **(bite)**: there is no guard to deliberately violate.
 > **IDs**: requirements `R-CHT-0NN`, scenarios `S-CHT-0NN`, non-functional `NFR-CHT-0NN`. **Append-only.**
@@ -16,7 +17,7 @@
 
 ## Purpose
 
-The chat archetype does not exist yet — there is no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all. Every statement about it is currently a sentence in a milestone doc, which leaves each of the eleven later CH milestones free to invent its own answer to the same question with nothing to disagree.
+When CH-00 was written the chat archetype did not exist — there was no `backend/agent/src/chat/`, and no `backend/agent/src/cmd/` at all. CH-01.1 created both; `chat-package-boundary` `R-CPB-001` is where their existence and shape are now asserted. Every statement about it is currently a sentence in a milestone doc, which leaves each of the eleven later CH milestones free to invent its own answer to the same question with nothing to disagree.
 
 Layer 2 froze its surface at AG-23 and published, per seam, an injection point and a v1 default, precisely so its first consumer would have to **state** its answers rather than discover them. This capability makes CH-00's record checkable: it asserts the **shape** the record must have so that a reviewer can hold the record against it and find it wanting. It does not restate the answers — those live completely in `decision.md`, which a reader can close any of the seven questions from without this file and without source (`S-L3H-029` posture, design D-A).
 
@@ -142,17 +143,23 @@ The record MUST open with a rules block restating both inherited constraints in 
 - **S-CHT-052** — Given the record, when every occurrence of `PreRequestHook` is read, then none describes it as removed or deprecated, and each presents it as frozen-and-superseded.
 - **S-CHT-053** — Given a draft of the record in which one seam row describes `PreRequestHook` as deprecated, when the record is reviewed against `S-CHT-052`, then the review fails and names that row — the prohibition is checked, not assumed.
 
-### R-CHT-007 — The archetype's name, package path and composition root are stated, together with the fact that neither path exists yet
+### R-CHT-007 — The archetype's name, package path and composition root are stated, together with the fact that neither path existed at CH-00
 
 The record MUST state the archetype's name, its package path `backend/agent/src/chat/` and its composition root `backend/agent/src/cmd/chat/`, citing `0005:8` and ADR 0005 § D2.
 
-It MUST state plainly that **neither path exists yet**, and that there is no `backend/agent/src/cmd/` directory at all. Stating the paths as though they existed would make the record false on the day it lands, and CH-01.1 owns their creation (`0005:228`).
+It MUST state plainly that, **at CH-00's own merge state**, neither path existed and there was no `backend/agent/src/cmd/` directory at all. Stating the paths as though they existed would have made the record false on the day it landed, and CH-01.1 owns their creation (`0005:228`). That clause records the record's accuracy **at the moment CH-00 merged**; it is **not** a live invariant over the module's lifetime. From CH-01.1 onward both paths exist by design, and the live obligation moves: what remains true forever is that the record was accurate when written, and what now asserts the two packages' existence and shape is `chat-package-boundary` `R-CPB-001`, promoted by CH-01 in the same pull request as this amendment.
+
+(Previously: the non-existence clause was stated with no temporal scope, so it read as a standing invariant; CH-01.1 created both paths and falsified it on the day CH-01 merged — the same defect shape, and the same repair, as this change's `agent-package-scaffold` delta on `R-AGP-001`.)
 
 #### Scenarios
 
 - **S-CHT-060** — Given the record, when a reader asks where this archetype and its composition root live, then the record names `backend/agent/src/chat/` and `backend/agent/src/cmd/chat/` and cites `0005:8`.
-- **S-CHT-061** — Given the record, when the identity section is read, then it states that neither path exists yet and that there is no `backend/agent/src/cmd/` at all, and it names CH-01.1 as the owner of their creation.
-- **S-CHT-062** — Given a reader who checks the repository against the identity section, when the two paths are not found, then the record has already said so and no statement in it is falsified by their absence.
+- **S-CHT-061** — Given the record **as it stood at CH-00's merge state**, when the identity section is read, then it states that neither path existed yet and that there was no `backend/agent/src/cmd/` at all, and it names CH-01.1 as the owner of their creation. The live successor obligation is that the record remains accurate **as a record of CH-00's moment** — its text is not rewritten by a later milestone — while `chat-package-boundary` `R-CPB-001` carries the current-state claim.
+
+  (Previously: stated over the record with no temporal scope, so a reader checking it against any post-CH-01 tree would find a promoted scenario asserting a false present-tense fact.)
+- **S-CHT-062** — Given a reader who checks the repository **at CH-00's merge state** against the identity section, when the two paths are not found, then the record has already said so and no statement in it is falsified by their absence. From CH-01.1 onward the two paths **are** found, and the record is not falsified by their presence either, because its claim is scoped to the moment it was written; `chat-package-boundary` `S-CPB-001` and `S-CPB-003` are what assert the paths at the current tree.
+
+  (Previously: the `Given` required the two paths to be **not found**, which CH-01.1 made unreachable — a scenario nobody can run is not a satisfied scenario, and an unreachable `Given` hides that fact behind an assertion that never executes.)
 
 ### R-CHT-008 — The persistence answer names the owner of the tables, not the intent
 
@@ -223,7 +230,9 @@ The register's header line MUST state verbatim that the defects are **recorded, 
 
 The record MUST satisfy the charter's acceptance verbatim (`0005:210`): given the record, when a reader asks what this archetype's answer is to any seam Layer 2 names, then the record answers it directly and names that seam's injection point, without the reader consulting source.
 
-This is a property of the **record**, discharged by reading it. This milestone is typed `[decision]` (`0005:215`) and MUST NOT be discharged by production code, by a new Go test, or by a guard: the package such a guard would protect does not exist (`R-CHT-007`, proposal D-1). The earliest honest mechanical binding is CH-01.2's import guard, not here.
+This is a property of the **record**, discharged by reading it. This milestone is typed `[decision]` (`0005:215`) and MUST NOT be discharged by production code, by a new Go test, or by a guard: **at CH-00 the package such a guard would protect did not yet exist** (`R-CHT-007`, proposal D-1). The earliest honest mechanical binding is CH-01.2's import guard, not here — and CH-01.2 is where it landed.
+
+(Previously: the rationale clause read "the package such a guard would protect does not exist", in the present tense; CH-01.1 created it. The requirement's own prohibition is unchanged — CH-00's acceptance is still discharged by reading the record, and no guard is retro-fitted to it — only the reason is scoped to the moment it was true.)
 
 #### Scenarios
 
@@ -253,7 +262,7 @@ Closing evidence for this change is the promoted spec plus `cd backend/agent && 
 
 | Not required here | Why, and who owns it |
 |---|---|
-| Any Go file, test, guard or production code | Proposal D-1 — CH-00.1 is `[decision]`; the package a guard would protect does not exist. CH-01.2 owns the first mechanical binding |
+| Any Go file, test, guard or production code | Proposal D-1 — CH-00.1 is `[decision]`; at CH-00 the package a guard would protect did not yet exist. CH-01.2 owns the first mechanical binding, and landed it |
 | Implementing any seam answer | Charter `0005:212` — owned by every later CH milestone |
 | Creating `backend/agent/src/chat/` or `backend/agent/src/cmd/chat/` | `0005:228` — owned by CH-01.1 |
 | Renaming "application" to "archetype" in Layer 2's promoted specs | `0005:212` and ADR 0009 § D7(a)'s own SDD change |

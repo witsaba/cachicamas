@@ -1,6 +1,6 @@
 # Layer 3 milestones and task graph — `cachicamas_chat`, the chat archetype
 
-> **Status:** In progress — **1 of 12** milestones shipped. **CH-00 is the first milestone.** No Layer 3 archetype exists yet on disk; this is the first one scheduled to ship.
+> **Status:** In progress — **2 of 12** milestones shipped. **CH-00 is the first milestone.** As of CH-01 the archetype's package and its composition root exist on disk — `cachicamas_chat` is the stack's first Layer 3 archetype, and the import guard denies what this position forbids.
 > **Scope:** this is the plan for **one archetype**, not for the layer. Layer 3 is the position in the stack where policy, resources, persistence and frontends live ([ADR 0009 § D2](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)); `cachicamas_chat` is one occupant of that position, and `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) is another. Neither defines the layer.
 > **Entry gate:** [AG-23 — the Layer 3 readiness contract](./0003-cachicamas-agent-layer-2-task-graph.md) for everything that consumes the harness. Layer 2 is frozen and complete at 24 of 24; this document is its first real consumer.
 > **References:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0007 — the DAG convention](../../adr/0007-adopt-dag-convention-for-task-graphs.md) · [ADR 0009](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) · [`agent-layer3-handoff`](../../../openspec/specs/agent-layer3-handoff/spec.md) · [`frontend-chat-layer1`](../../../openspec/specs/frontend-chat-layer1/spec.md)
@@ -978,7 +978,7 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 ## Completion checklist — the chat archetype
 
 - [x] Vocabulary, every seam's v1 answer and its injection point, and v1 scope are recorded — closed by CH-00.1
-- [ ] The package and its composition root exist, and the import guard is shown to bite on the forbidden closure — closed by CH-01.2
+- [x] The package and its composition root exist, and the import guard is shown to bite on the forbidden closure — closed by CH-01.2
 - [ ] A conversation drives turns over the harness and projects its events onto the browser wire — closed by CH-02.1
 - [ ] A turn can be cancelled in flight and terminates exactly once — closed by CH-02.2, CH-03.3
 - [ ] A provider failure reaches the human as a typed error, and the archetype never retries on its own — closed by CH-02.3
