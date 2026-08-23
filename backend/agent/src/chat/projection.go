@@ -2,6 +2,7 @@
 // values (R-CCP-003, R-CCP-004, R-CCP-013). Its only inputs are the sink and
 // Harness.Run's own return values — no second channel, no Layer 2 internal
 // read.
+
 package chat
 
 import (

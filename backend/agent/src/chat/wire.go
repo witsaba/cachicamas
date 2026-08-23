@@ -1,6 +1,7 @@
 // CH-02.1 — the wire vocabulary: the five shapes the projector emits onto,
 // mirroring frontend-chat-layer1's frozen wire contract (chat-types.ts:27-32,
 // :36-43). R-CCP-003, R-CCP-006, R-CCP-007.
+
 package chat
 
 import "github.com/cachicamas/backend/agent/src/ai"

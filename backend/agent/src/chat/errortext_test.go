@@ -1,7 +1,8 @@
 // CH-02.3 — the archetype-owned failure phrase table (R-CCP-007, R-CCP-008,
-// D6). Package chat (internal/white-box): phraseFor is unexported, so a
-// direct table-driven unit test over the pure function lives here rather
-// than being driven end to end through Conversation.Send.
+// D6). Internal/white-box: phraseFor is unexported, so a direct
+// table-driven unit test over the pure function lives here rather than
+// being driven end to end through Conversation.Send.
+
 package chat
 
 import (

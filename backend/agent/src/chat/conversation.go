@@ -1,6 +1,7 @@
 // CH-02.1/.2/.3 — the archetype's first behaviour. Conversation owns one
 // agent.Harness and one *agent.History, reused across successive turns
 // (R-CCP-001, D0): one browser turn is exactly one Harness.Run call.
+
 package chat
 
 import (

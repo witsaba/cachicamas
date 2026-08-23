@@ -5,6 +5,7 @@
 // Error() on a failure value are never called from this file — that
 // prohibition is what makes this table the ONLY source of error.Message
 // text (R-CCP-008).
+
 package chat
 
 import "github.com/cachicamas/backend/agent/src/ai"
