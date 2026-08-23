@@ -929,16 +929,15 @@ var chatArchetypeForbiddenPrefixes = []struct {
 // They are permitted only inside backend/agent/src/cmd/chat, which
 // chatArchetypeDirs below deliberately excludes from the scanned set.
 var chatArchetypeAllowedPrefixes = []string{
-	// CH-02 (measured against this tree, Engram #3775, re-measured at apply
-	// rather than trusted from cache): `go list -deps` over chatArchetypePattern
-	// always includes the queried tree's OWN package among its results —
-	// exactly the same mechanical reason allowedProductionPrefixes above
-	// carries modulePath+"/src/agent" itself as its own first entry, for
-	// Layer 2's own check 1. CH-01 never observed this: check 6 is a
-	// per-file AST scan of import STATEMENTS, and a package never imports
-	// itself, so the gap was invisible until CH-02's check 7 (the first
-	// transitive closure ever run over this tree) made it visible.
-	modulePath + "/src/chat",
+	// REMEDIATION (verify #3783, CRITICAL-2): the archetype's own self-
+	// inclusion (modulePath+"/src/chat") used to live here. It was
+	// moved to chatArchetypeForcedClosurePrefixes, which only the
+	// closure check (check 7) reads, so admitting it does not widen
+	// the pre-existing per-file AST scan (R-CCP-012 forbids widening
+	// any pre-existing check). See
+	// TestChatArchetype_Check6AndCheck7_UseDistinctAllowlists and
+	// chatArchetypeForcedClosurePrefixes' own comment for the
+	// structural rationale.
 	modulePath + "/src/agent",            // ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable
 	modulePath + "/src/ai",               // same row; the vendor adapter subtree carved back out by chatArchetypeForbiddenPrefixes above
 	"go.opentelemetry.io/otel/trace",     // ADR 0005 § D3 (adr:240): tracing API permitted at every layer
@@ -955,6 +954,52 @@ var chatArchetypeAllowedPrefixes = []string{
 	// hashing (attribute/internal/xxhash), the archetype's counterpart of
 	// allowedProductionPrefixes' own identically-justified xxhash entry
 	// above (agent-package-scaffold R-AGP-003's forced-closure clause).
+	// REMEDIATION (verify #3783, CRITICAL-2): this entry was originally
+	// placed in chatArchetypeAllowedPrefixes itself, which silently
+	// widened the pre-existing per-file AST scan (check 6, R-CCP-012
+	// forbids widening any pre-existing check). It now lives in
+	// chatArchetypeForcedClosurePrefixes, read ONLY by check 7's
+	// transitive closure path. See that variable's own comment for the
+	// structural rationale and
+	// TestChatArchetype_Check6AndCheck7_UseDistinctAllowlists for the
+	// regression guard.
+	// "github.com/cespare/xxhash/v2", -- moved to chatArchetypeForcedClosurePrefixes
+}
+
+// chatArchetypeForcedClosurePrefixes is a SEPARATE, closure-only allowlist
+// read ONLY by check 7's transitive (go list -deps) closure scan
+// (TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefault,
+// R-CCP-010) and, where its own closure reaches the same paths, by check 8's
+// test closure. Check 6's per-file AST scan
+// (TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefault)
+// NEVER reads this list, so admitting a forced-closure path here does NOT
+// widen the pre-existing guard — restoring R-CCP-012's "no pre-existing
+// check may be widened" property that the shared allowlist form violated.
+//
+// This mirrors how Layer 2 already separates its own roles: allowedProductionPrefixes
+// above carries its closure-only rows (otel/semconv, cespare/xxhash/v2)
+// alongside its production-only ones because Layer 2's check 1 IS its own
+// closure check, with no companion AST scan to widen. The chat archetype
+// has check 6 (AST) and check 7 (closure) side by side, so the two roles
+// must be carried as two distinct slices.
+//
+// Every entry below was measured FRESH against this tree (Engram #3775,
+// re-measured at apply, not trusted from cache) and is justified under
+// agent-package-scaffold R-AGP-003's forced-closure clause. Each must
+// land as a PREFIX (version-suffixed paths break exact entries, S-AGP-032).
+var chatArchetypeForcedClosurePrefixes = []string{
+	// CH-02: `go list -deps` over chatArchetypePattern always includes
+	// the queried tree's OWN package among its results — the same
+	// mechanical reason allowedProductionPrefixes above carries
+	// modulePath+"/src/agent" itself as its own first entry. CH-01
+	// never observed this: check 6 is a per-file AST scan of import
+	// STATEMENTS, and a package never imports itself, so the gap was
+	// invisible until CH-02's check 7 made it visible.
+	modulePath + "/src/chat",
+	// CH-02: forced transitive closure of otel/attribute's own
+	// internal hashing (attribute/internal/xxhash), the archetype's
+	// counterpart of allowedProductionPrefixes' own identically-
+	// justified xxhash entry above.
 	"github.com/cespare/xxhash/v2",
 }
 
@@ -1242,13 +1287,22 @@ func TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefaul
 			t.Errorf("The chat archetype's production closure must not import %q\n  rule: %s", dep, rule)
 			continue
 		}
-		if !isAllowed(dep, chatArchetypeAllowedPrefixes) {
+		// REMEDIATION (verify #3783, CRITICAL-2): the closure check
+		// reads the UNION of the narrow allowlist (check 6's) and the
+		// forced-closure allowlist (closure-only). The two slices were
+		// merged before remediation, which silently widened check 6's
+		// per-file AST scan; the structural split keeps check 6 narrow
+		// (it never sees chatArchetypeForcedClosurePrefixes) while
+		// letting check 7's transitive scan still admit the measured
+		// forced closures.
+		allowed := append(slices.Clone(chatArchetypeAllowedPrefixes), chatArchetypeForcedClosurePrefixes...)
+		if !isAllowed(dep, allowed) {
 			t.Errorf("The chat archetype's production closure must not import %q\n"+
 				"  rule: deny-by-default allowlist (ADR 0005 § D1 row 3, read as any Layer 3 archetype under "+
 				"ADR 0009 § D2) — this path is neither the Go standard library nor a package this archetype's "+
 				"production allowlist admits.\n"+
 				"  No forbidden prefix names it, and that is not a licence to add it: adding a dependency needs "+
-				"its own recorded design decision in chatArchetypeAllowedPrefixes, measured fresh against this tree.",
+				"its own recorded design decision in chatArchetypeAllowedPrefixes or chatArchetypeForcedClosurePrefixes, measured fresh against this tree.",
 				dep)
 		}
 	}
@@ -1296,7 +1350,13 @@ func TestChatArchetype_TestClosure_AdmitsOnlyTheScriptedKitBeyondProduction(t *t
 			"Check that the package pattern still resolves: " + chatArchetypePattern)
 	}
 
-	allowed := append(slices.Clone(chatArchetypeAllowedPrefixes), modulePath+"/src/agenttest", modulePath+"/src/apptest")
+	// REMEDIATION (verify #3783, CRITICAL-2): test closure also reads
+	// the union (narrow allowlist + forced-closure allowlist + test
+	// substrate). Same structural rationale as check 7 above: keep
+	// check 6 narrow; let the closure-only paths through the closure
+	// checks via a distinct slice.
+	allowed := append(slices.Clone(chatArchetypeAllowedPrefixes), chatArchetypeForcedClosurePrefixes...)
+	allowed = append(allowed, modulePath+"/src/agenttest", modulePath+"/src/apptest")
 
 	for _, dep := range deps {
 		if rule, forbidden := chatArchetypeTestMatchForbidden(dep); forbidden {
@@ -1311,6 +1371,66 @@ func TestChatArchetype_TestClosure_AdmitsOnlyTheScriptedKitBeyondProduction(t *t
 				"  No forbidden prefix names it, and that is not a licence to add it.",
 				dep)
 		}
+	}
+}
+
+// TestChatArchetype_Check6AndCheck7_UseDistinctAllowlists is a structural
+// regression guard added during CH-02 remediation (verify #3783, CRITICAL-2):
+// check 6 (per-file AST scan, R-CCP-010's zero-hop precedent) and check 7
+// (transitive closure, R-CCP-010's main check) MUST NOT share a single
+// allowlist slice. R-CCP-012 forbids widening any pre-existing check, and a
+// shared slice would widen check 6 every time R-CCP-010's closure-only
+// requirements force check 7 to admit a new transitive path (e.g. a
+// stdlib-mediated reach such as otel/attribute's own internal hashing,
+// forced into github.com/cespare/xxhash/v2 at the version otel/attribute
+// pins). Layer 2 keeps its production and test closures apart structurally
+// (allowedProductionPrefixes vs allowedTestPrefixes, see check 1 / check 2
+// above); the chat archetype inherits the same separation here.
+//
+// Concretely:
+//   - chatArchetypeAllowedPrefixes is check 6's narrow allowlist. It must
+//     not contain either of the two closure-only entries this change's
+//     fresh measurement identified (modulePath+"/src/chat" and
+//     github.com/cespare/xxhash/v2), because admitting either to check 6
+//     would silently widen that pre-existing guard.
+//   - chatArchetypeForcedClosurePrefixes is the NEW, closure-only set that
+//     ONLY check 7 (and, when its own closure happens to reach the same
+//     paths, check 8) reads on top of chatArchetypeAllowedPrefixes. The
+//     two entries above live here, mirroring how Layer 2 carries
+//     modulePath+"/src/agent" and go.opentelemetry.io/otel/semconv as
+//     forced-closure entries without admitting them to its own
+//     direct-import AST scan.
+func TestChatArchetype_Check6AndCheck7_UseDistinctAllowlists(t *testing.T) {
+	t.Parallel()
+
+	// Assert the new, closure-only allowlist exists and carries the
+	// two entries this change measured as forced closure. Failure
+	// here (RED) motivates the split; this is the test the structural
+	// repair must satisfy.
+	if !slices.Contains(chatArchetypeForcedClosurePrefixes, modulePath+"/src/chat") {
+		t.Errorf("chatArchetypeForcedClosurePrefixes is missing the archetype's own self-inclusion %q (forced closure of `go list -deps` over chatArchetypePattern)",
+			modulePath+"/src/chat")
+	}
+	if !slices.Contains(chatArchetypeForcedClosurePrefixes, "github.com/cespare/xxhash/v2") {
+		t.Errorf("chatArchetypeForcedClosurePrefixes is missing %q (forced closure of otel/attribute's own internal hashing, agent-package-scaffold R-AGP-003's forced-closure clause)",
+			"github.com/cespare/xxhash/v2")
+	}
+
+	// Assert the narrow check 6 allowlist stays narrow: neither
+	// forced-closure entry leaked in via the shared slice. This is the
+	// invariant CRITICAL-2 violated at HEAD and that Plant B1
+	// (chat production file with `import _ "github.com/cespare/xxhash/v2"`,
+	// run against check 6 alone) observes: at HEAD, this assertion
+	// fails; after the split, it passes; at fdd41d9c (merge base, before
+	// CH-02), it also passes because the two entries were never in the
+	// narrow allowlist to begin with.
+	if slices.Contains(chatArchetypeAllowedPrefixes, modulePath+"/src/chat") {
+		t.Errorf("chatArchetypeAllowedPrefixes (check 6's narrow allowlist) MUST NOT contain the forced-closure self-inclusion %q — admitting it would silently widen the pre-existing per-file AST scan (R-CCP-012). Move it to chatArchetypeForcedClosurePrefixes, which only the closure check (check 7) reads.",
+			modulePath+"/src/chat")
+	}
+	if slices.Contains(chatArchetypeAllowedPrefixes, "github.com/cespare/xxhash/v2") {
+		t.Errorf("chatArchetypeAllowedPrefixes (check 6's narrow allowlist) MUST NOT contain %q — admitting it would silently widen the pre-existing per-file AST scan (R-CCP-012). Move it to chatArchetypeForcedClosurePrefixes, which only the closure check (check 7) reads.",
+			"github.com/cespare/xxhash/v2")
 	}
 }
 
