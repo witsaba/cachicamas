@@ -3,7 +3,7 @@
 > **Change**: `cachicamas-chat-package-scaffold` · **Milestone**: CH-01 (Wave 0) of doc 0005
 > **Target**: `openspec/specs/ai-observability-boundary/spec.md`
 > **Authority to amend**: that spec's own rule at `spec.md:26` — *"A later milestone that needs to change one of these invariants amends **this file**, in the same pull request, under its own ADR gate."* Its status line at `spec.md:5` calls its invariants **live**.
-> **ADR gate**: [ADR 0005 § D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), the governing ADR this file already names at `spec.md:6`. No ADR is amended; § D3's existing table supplies the replacement reasoning.
+> **ADR gate**: [ADR 0005 § D3](../../../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary), the governing ADR this file already names at `spec.md:6`. No ADR is amended; § D3's existing table supplies the replacement reasoning.
 
 ## Why this delta exists
 

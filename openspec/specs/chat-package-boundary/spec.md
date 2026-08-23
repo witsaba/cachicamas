@@ -1,9 +1,10 @@
 # Spec — Chat archetype package boundary
 
-> **Change**: `cachicamas-chat-package-scaffold` · **Milestone**: CH-01 (Wave 0) of [doc 0005](../../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md) (`0005:230-276`)
+> **Change**: `cachicamas-chat-package-scaffold` · **Milestone**: CH-01 (Wave 0) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md) (`0005:230-276`)
 > **Nodes**: CH-01.1 `[mechanical]` (`0005:243-247`) · CH-01.2 `[guard]` (`0005:249-276`)
 > **Closes**: R-06 (the boundary half), R-07 (`0005:232`)
 > **Status**: **new capability**, promoted at archive to `openspec/specs/chat-package-boundary/spec.md`
+> **Amended 2026-08-23 (CH-01 archive)**: promoted verbatim as a new capability at archive. Requirements `R-CPB-001` … `R-CPB-010`, non-functional `NFR-CPB-001` … `NFR-CPB-003` and scenarios `S-CPB-001` … `S-CPB-096` carried unchanged from `openspec/changes/cachicamas-chat-package-scaffold/specs/chat-package-boundary/spec.md`. Relative links were re-based from the change directory's depth to this one; no normative text changed.
 > **Format**: Given/When/Then + RFC 2119 per `openspec/config.yaml`. Every scenario is independently verifiable.
 > **Identifier convention**: requirements `R-CPB-0NN`, scenarios `S-CPB-0NN`. Append-only. The `CPB` prefix was verified free across the whole worktree during this phase — the only occurrences outside this file are the proposal's own prefix declaration and this change's `agent-package-scaffold` delta.
 > **Evidence gate**: `cd backend/agent && go test -race -count=1 ./...`, uncached, wall-clock recorded, plus `make lint`. `make all` MUST NOT be run.
@@ -71,7 +72,7 @@ At CH-01 the archetype ships **no** test file. The merged diff MUST therefore ad
 
 ### R-CPB-004 — The archetype's forbidden closure, as ADR 0005 read under the ADR 0009 substitution
 
-The archetype's **production** closure MUST deny, by name, each of `…/src/ai/openaicompat`, `…/src/agenttest`, `…/src/apptest`, `…/src/layer3handoff`, and `…/src/cmd`; and MUST permit `…/src/agent`, `…/src/ai`, the Go standard library, and such OpenTelemetry paths as [ADR 0005 § D3](../../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) marks ✅ for this position. Anything else MUST fail **by default**, with no rule naming it.
+The archetype's **production** closure MUST deny, by name, each of `…/src/ai/openaicompat`, `…/src/agenttest`, `…/src/apptest`, `…/src/layer3handoff`, and `…/src/cmd`; and MUST permit `…/src/agent`, `…/src/ai`, the Go standard library, and such OpenTelemetry paths as [ADR 0005 § D3](../../../docs/adr/0005-promote-agent-stack-to-own-module.md#d3--observability-boundary) marks ✅ for this position. Anything else MUST fail **by default**, with no rule naming it.
 
 **The OpenTelemetry grant is read off § D3's own table, never copied from Layer 2's forbidden rows.** § D3's `L3 coding` column, read as any Layer 3 archetype under ADR 0009 § D2, is what governs:
 
