@@ -83,11 +83,14 @@ func terminalWireEvent(re agent.RunEnd, haveRunEnd bool, res runResult) WireEven
 	case agent.RunOutcomeCompleted:
 		reason := finishReasonToWire(res.finish)
 		return TurnEnd{FinishReason: &reason}
+	case agent.RunOutcomeInterrupted, agent.RunOutcomeShutdown:
+		// windDownRun returns the zero ai.FinishReason on interrupt
+		// (harness.go:396), and the wire's cancellation discriminator is
+		// FinishReason's ABSENCE — never a minted placeholder (R-CCP-006,
+		// D5): a completed run always carries a real reason, so absence is
+		// the truthful cancellation attribution.
+		return TurnEnd{FinishReason: nil}
 	default:
-		// agent.RunOutcomeInterrupted / agent.RunOutcomeShutdown (CH-02.2,
-		// Phase 4): the wire's cancellation discriminator is FinishReason's
-		// ABSENCE, never a minted placeholder (R-CCP-006, D5) — a nil
-		// pointer here is the correct, final mapping for both.
 		// agent.RunOutcomeFailed (CH-02.3, Phase 5) lands its own
 		// Error{...} mapping (R-CCP-007, D6); until Phase 5 replaces this
 		// branch, a failed run is provisionally indistinguishable from an

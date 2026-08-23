@@ -105,3 +105,43 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 
 	return out, nil
 }
+
+// CancelOutcome is Cancel's typed result (R-CCP-006).
+type CancelOutcome int
+
+const (
+	// CancelRequested reports that a turn was in flight and its
+	// cancellation was requested.
+	CancelRequested CancelOutcome = iota
+
+	// CancelNoOp reports that no turn was in flight; nothing was touched.
+	CancelNoOp
+)
+
+// String renders the outcome for a diagnostic reader.
+func (o CancelOutcome) String() string {
+	switch o {
+	case CancelRequested:
+		return "requested"
+	case CancelNoOp:
+		return "no-op"
+	default:
+		return "cancel-outcome(invalid)"
+	}
+}
+
+// Cancel requests cancellation of the in-flight turn, if any (R-CCP-006). If
+// no turn is in flight, it reports CancelNoOp without touching the harness —
+// a distinguishable, non-error outcome, never a typed rejection. Otherwise
+// it calls Harness.Interrupt, never Harness.Shutdown: Shutdown latches a
+// terminal, one-way refusal, which is not what "cancel this turn" means for
+// a conversation that must accept the next prompt.
+func (c *Conversation) Cancel() CancelOutcome {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.inFlight {
+		return CancelNoOp
+	}
+	c.harness.Interrupt()
+	return CancelRequested
+}
