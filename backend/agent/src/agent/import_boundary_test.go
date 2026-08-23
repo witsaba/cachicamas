@@ -139,9 +139,11 @@
 // rather than over Layer 2 itself. It is a per-file, deny-by-default AST
 // scan over backend/agent/src/chat/..., RECURSIVE (filepath.WalkDir,
 // skipping directories named "testdata" and skipping "_test.go" files) —
-// a stated amendment to proposal D-6's "directly inside" wording, because
-// the archetype tree grows subpackages at CH-02 and a top-level-only scan
-// would silently release the first one from the guard.
+// a stated amendment to proposal D-6's "directly inside" wording. CH-02
+// (design AD-1) in fact kept the tree flat — no subpackage — but the
+// recursive walk was deliberately chosen ahead of that decision so a later
+// milestone that DOES add one is not silently released from the guard by a
+// top-level-only scan.
 //
 // Every failure this check emits cites ADR 0005 § D1 row 3 (or § D3)
 // TOGETHER WITH the ADR 0009 § D2 substitution ("read as any Layer 3
@@ -182,13 +184,44 @@
 // five further recorded runs against a change already near its
 // authorised review budget.
 //
-// The zero-hop gap: this check reads each file's own import declarations
-// and nothing further — no transitive (go list -deps) closure check runs
-// over the archetype tree. That check is owned by CH-02, deferred for a
-// mechanical reason: at CH-01 the tree is doc.go-only, so a dependency
-// listing returns zero non-stdlib packages and this repo's own pinned
+// The zero-hop gap this check alone leaves: at CH-01, check 6 reads each
+// file's own import declarations and nothing further — no transitive
+// (go list -deps) closure check ran over the archetype tree, deferred for
+// a mechanical reason: the tree was doc.go-only, so a dependency listing
+// returned zero non-stdlib packages and this repo's own pinned
 // zero-packages vacuity floor (agent-package-scaffold S-AGP-070) would
-// fail a closure check run against it today.
+// have failed a closure check run against it. CH-02 (R-CCP-010, R-CCP-011)
+// closes that gap below with checks 7 and 8 — see the "CH-02 amendment"
+// section immediately following this one.
+//
+// # CH-02 amendment — the archetype's transitive closure (checks 7 and 8)
+//
+// TWO more checks, not six: CH-02 (cachicamas-chat-conversation) adds
+// [TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefault]
+// (check 7, R-CCP-010) and
+// [TestChatArchetype_TestClosure_AdmitsOnlyTheScriptedKitBeyondProduction]
+// (check 8, R-CCP-011), mirroring checks 1/2's own production/test split
+// (S-AGP-025, S-AGP-026, D9) rather than one merged `go list -deps -test`
+// scan — so the production closure is provably, independently proven never
+// to admit the scripted kit (S-CCP-101).
+//
+// chatArchetypeAllowedPrefixes gains two entries, both measured fresh
+// against this tree rather than copied from Layer 2's own table (see the
+// table's own comments): the archetype's own package path (a `go list
+// -deps` self-inclusion every scanned pattern carries, the same reason
+// allowedProductionPrefixes above carries modulePath+"/src/agent" itself),
+// and github.com/cespare/xxhash/v2, the forced transitive closure of
+// otel/attribute's own internal hashing (agent-package-scaffold
+// R-AGP-003's forced-closure clause) — identically justified to Layer 2's
+// own xxhash entry above.
+//
+// Check 8 carries its OWN forbidden table, chatArchetypeTestForbiddenPrefixes,
+// deliberately distinct from chatArchetypeForbiddenPrefixes: reusing the
+// production table would wrongly deny the very admission R-CCP-011
+// requires (src/agenttest, src/apptest). src/layer3handoff remains denied
+// to BOTH closures — see its rewritten row in chatArchetypeForbiddenPrefixes
+// above, which also corrects CH-01's own forward reference on that path
+// rather than silently replacing it.
 package agent_test
 
 import (
@@ -845,13 +878,18 @@ var chatArchetypeForbiddenPrefixes = []struct {
 	{modulePath + "/src/ai/openaicompat", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: the archetype reaches row 1 only through the src/ai contract — the vendor adapter subtree is denied by name"},
 	{modulePath + "/src/agenttest", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable as production contract surface only — Layer 2's test substrate is not part of that surface"},
 	{modulePath + "/src/apptest", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: Layer 2's packaged test kit is consumer-proof machinery, not row 2's production surface"},
-	// Denied to the PRODUCTION closure only. Admissible to a future TEST
-	// closure: 0005:66 (R-10) requires every harness consumer to test
-	// against the AG-23 scripted kit. At CH-01 the archetype ships no
-	// test file, so the test closure has no scanned subject; this row
-	// records the asymmetry now so CH-02 amends it rather than
-	// inventing it.
-	{modulePath + "/src/layer3handoff", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: production never imports the consumer-proof tree — a future test closure decides its own admission (CH-02)"},
+	// CH-02 correction: CH-01's own comment here named this path as the one
+	// a future test closure would decide on. That forward reference was
+	// itself a defect: `…/src/layer3handoff` ships only `doc.go` plus two
+	// `_test.go` files, so it has NO IMPORTABLE SURFACE AT ALL — admitting
+	// it would grant nothing. It is therefore denied to BOTH the
+	// production closure (this table) and the test closure
+	// (chatArchetypeTestForbiddenPrefixes below), unconditionally. The
+	// packages `0005:66` (R-10) actually requires every harness consumer
+	// to test against are `…/src/apptest` and `…/src/agenttest` — named
+	// nowhere in CH-01's own row — and CH-02's test closure (check 8)
+	// admits both instead.
+	{modulePath + "/src/layer3handoff", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: it has no importable surface at all, so it is denied to both the production and test closures — R-10's test-substrate requirement is met by src/apptest and src/agenttest instead"},
 	{modulePath + "/src/cmd", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: nothing below the composition root imports src/cmd"},
 }
 
@@ -891,6 +929,16 @@ var chatArchetypeForbiddenPrefixes = []struct {
 // They are permitted only inside backend/agent/src/cmd/chat, which
 // chatArchetypeDirs below deliberately excludes from the scanned set.
 var chatArchetypeAllowedPrefixes = []string{
+	// CH-02 (measured against this tree, Engram #3775, re-measured at apply
+	// rather than trusted from cache): `go list -deps` over chatArchetypePattern
+	// always includes the queried tree's OWN package among its results —
+	// exactly the same mechanical reason allowedProductionPrefixes above
+	// carries modulePath+"/src/agent" itself as its own first entry, for
+	// Layer 2's own check 1. CH-01 never observed this: check 6 is a
+	// per-file AST scan of import STATEMENTS, and a package never imports
+	// itself, so the gap was invisible until CH-02's check 7 (the first
+	// transitive closure ever run over this tree) made it visible.
+	modulePath + "/src/chat",
 	modulePath + "/src/agent",            // ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable
 	modulePath + "/src/ai",               // same row; the vendor adapter subtree carved back out by chatArchetypeForbiddenPrefixes above
 	"go.opentelemetry.io/otel/trace",     // ADR 0005 § D3 (adr:240): tracing API permitted at every layer
@@ -902,6 +950,12 @@ var chatArchetypeAllowedPrefixes = []string{
 	// Authorised ahead of its first import by that decision; a deliberate,
 	// recorded deviation from Layer 2's same-commit amendment convention.
 	"go.opentelemetry.io/contrib/bridges/otelslog",
+	// CH-02 (measured against this tree, Engram #3775, re-measured at
+	// apply): forced transitive closure of otel/attribute's own internal
+	// hashing (attribute/internal/xxhash), the archetype's counterpart of
+	// allowedProductionPrefixes' own identically-justified xxhash entry
+	// above (agent-package-scaffold R-AGP-003's forced-closure clause).
+	"github.com/cespare/xxhash/v2",
 }
 
 // chatArchetypeMatchForbidden mirrors matchForbidden above but is its own,
@@ -937,12 +991,15 @@ func chatArchetypeMatchForbidden(importPath string) (rule string, forbidden bool
 // own negative control — a bite without its negative control does not
 // prove the exclusion.
 //
-// This map's single entry also carries D-4's test-closure asymmetry:
-// modulePath+"/src/layer3handoff" is denied to this scan's PRODUCTION
-// table (chatArchetypeForbiddenPrefixes) but stays admissible to a
-// future TEST closure this milestone does not yet scan — see that row's
-// own comment. CH-02 amends this map and that table together rather
-// than inventing the asymmetry from scratch.
+// This map has one entry because check 6 (CH-01) never scanned a test
+// closure at all; CH-02's checks 7/8 introduce the production/test split
+// this file's own Layer 2 checks already use, over chatArchetypePattern —
+// a go-list-based pattern, not a second entry in this AST-scan-only
+// directory map. modulePath+"/src/layer3handoff" is denied to BOTH
+// closures unconditionally — see its rewritten row in
+// chatArchetypeForbiddenPrefixes above, which corrects CH-01's own
+// forward reference on this exact point rather than silently replacing
+// it.
 func chatArchetypeDirs(t *testing.T) map[string]string {
 	t.Helper()
 	srcDir := filepath.Dir(layer2AgentPackageDir(t))
@@ -992,11 +1049,14 @@ func chatArchetypeStandardLibraryPackages(t *testing.T) map[string]struct{} {
 // directories literally named "testdata" and skipping "_test.go" files) —
 // a STATED AMENDMENT to proposal D-6's "directly inside" wording, not a
 // silent widening: checks 4 and 5 above scan flat single packages by
-// design, but the archetype tree grows subpackages at CH-02, and a
-// top-level-only scan would silently release the first subpackage from
-// this guard — exactly the escape class this milestone exists to close.
-// A later change MAY overturn this back to a flat scan; doing so re-opens
-// the subpackage escape at CH-02 and MUST assign that gap an owner.
+// design, but the archetype tree was always free to grow a subpackage
+// later, and a top-level-only scan would silently release the first one
+// from this guard — exactly the escape class this milestone exists to
+// close. CH-02 (design AD-1) in fact kept the tree flat, so this
+// recursion has not yet had a subpackage to prove itself against; it
+// stays armed for whichever milestone adds the first one. A later change
+// MAY overturn this back to a flat scan; doing so re-opens the subpackage
+// escape and MUST assign that gap an owner.
 //
 // A failing import is named by its path RELATIVE TO THE DECLARED ROOT
 // (filepath.Rel; a Rel error is itself fatal), NEVER by filepath.Base as
@@ -1016,9 +1076,10 @@ func chatArchetypeStandardLibraryPackages(t *testing.T) map[string]struct{} {
 // path as WRITTEN, not of the module graph, so it neither requires a path
 // to be in the build list nor is weakened when one happens to be. This is
 // also this check's own ZERO-HOP boundary: it evaluates each file's
-// direct imports only, never a transitive (go list -deps) closure — that
-// check is deferred to CH-02 for a mechanical reason, not a budget one
-// (see the CH-01 amendment section of this file's package comment).
+// direct imports only, never a transitive (go list -deps) closure — CH-02
+// ships that closure check as checks 7 and 8 below (see the "CH-02
+// amendment" section of this file's package comment), extending rather
+// than replacing this check's own zero-hop scan.
 //
 // Evaluation order per import, per AD-6: chatArchetypeForbiddenPrefixes
 // FIRST (forbidden-first is load-bearing, not cosmetic — the allowlist
@@ -1106,6 +1167,149 @@ func TestChatArchetype_ProductionSources_ImportsOnlyAllowedPrefixes_DenyByDefaul
 					"needs its own recorded design decision in chatArchetypeAllowedPrefixes.",
 					relPath, importPath)
 			}
+		}
+	}
+}
+
+// chatArchetypePattern scopes CH-02.4's two go-list-based checks (7 and 8)
+// to the archetype's own package tree, mirroring layer2Pattern's own role
+// for checks 1/2. Fully qualified, recursive (the "/..." suffix), matching
+// check 6's own recursive AST walk (chatArchetypeDirs) rather than a single
+// top-level package.
+const chatArchetypePattern = modulePath + "/src/chat/..."
+
+// chatArchetypeTestForbiddenPrefixes is check 8's own forbidden table
+// (R-CCP-011) — deliberately DISTINCT from chatArchetypeForbiddenPrefixes
+// above: that production table denies src/agenttest and src/apptest by
+// name, and this requirement's whole point is admitting them to the TEST
+// closure. Reusing the production table here would wrongly deny the very
+// admission R-CCP-011 requires. src/layer3handoff stays denied to BOTH
+// closures (it has no importable surface at all — see the rewritten row in
+// chatArchetypeForbiddenPrefixes above), and src/cmd and the vendor adapter
+// subtree stay denied to the test closure exactly as they are to
+// production.
+var chatArchetypeTestForbiddenPrefixes = []struct {
+	prefix string
+	rule   string
+}{
+	{modulePath + "/src/ai/openaicompat", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: the archetype reaches row 1 only through the src/ai contract — the vendor adapter subtree is denied by name"},
+	{modulePath + "/src/layer3handoff", "R-CCP-011: this path has no importable surface at all (doc.go plus two _test.go files) — admitting it would grant nothing, and it stays denied to both closures"},
+	{modulePath + "/src/cmd", "ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: nothing below the composition root imports src/cmd"},
+}
+
+// chatArchetypeTestMatchForbidden mirrors chatArchetypeMatchForbidden but is
+// its own, separate function over chatArchetypeTestForbiddenPrefixes
+// (R-CCP-011): sharing one matcher across the production and test tables
+// would re-couple two tables that are SUPPOSED to differ — the production
+// table's agenttest/apptest denial rows are exactly what the test closure
+// must NOT inherit.
+func chatArchetypeTestMatchForbidden(importPath string) (rule string, forbidden bool) {
+	for _, f := range chatArchetypeTestForbiddenPrefixes {
+		if importPath == f.prefix || strings.HasPrefix(importPath, f.prefix+"/") {
+			return f.rule, true
+		}
+	}
+	return "", false
+}
+
+// TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefault
+// is check 7 (CH-02.4, R-CCP-010): the archetype's PRODUCTION transitive
+// dependency closure — no test files — admits only the standard library and
+// chatArchetypeAllowedPrefixes. Extends check 6's zero-hop, per-file AST
+// scan with the transitive closure CH-01 deferred: at CH-01 the tree was
+// doc.go-only, so a dependency listing returned zero non-stdlib packages
+// and agent-package-scaffold S-AGP-070's vacuity floor would have fired;
+// CH-02.1's conversation now imports src/agent and src/ai, so the listing
+// is non-vacuous (S-CCP-090).
+func TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefault(t *testing.T) {
+	t.Parallel()
+
+	deps, err := listNonStdlibDeps(chatArchetypePattern, false)
+	if err != nil {
+		t.Fatalf("go list failed: %v", err)
+	}
+	if len(deps) == 0 {
+		t.Fatal("go list returned no packages; the guard would pass vacuously. " +
+			"Check that the package pattern still resolves: " + chatArchetypePattern)
+	}
+
+	for _, dep := range deps {
+		// Forbidden first (design AD-2, mirroring forbiddenPrefixes' own
+		// load-bearing order above): the allowlist admits ".../src/ai" as a
+		// prefix, so an allowlist-first pass would silently admit
+		// ".../src/ai/openaicompat".
+		if rule, forbidden := chatArchetypeMatchForbidden(dep); forbidden {
+			t.Errorf("The chat archetype's production closure must not import %q\n  rule: %s", dep, rule)
+			continue
+		}
+		if !isAllowed(dep, chatArchetypeAllowedPrefixes) {
+			t.Errorf("The chat archetype's production closure must not import %q\n"+
+				"  rule: deny-by-default allowlist (ADR 0005 § D1 row 3, read as any Layer 3 archetype under "+
+				"ADR 0009 § D2) — this path is neither the Go standard library nor a package this archetype's "+
+				"production allowlist admits.\n"+
+				"  No forbidden prefix names it, and that is not a licence to add it: adding a dependency needs "+
+				"its own recorded design decision in chatArchetypeAllowedPrefixes, measured fresh against this tree.",
+				dep)
+		}
+	}
+
+	// R-CCP-010: the unfiltered closure (standard library included) must
+	// not carry any denied prefix either — listNonStdlibDeps' own filter
+	// cannot see a stdlib-mediated boundary break (S-CCP-095).
+	allDeps, allErr := listAllProductionDeps(chatArchetypePattern)
+	if allErr != nil {
+		t.Fatalf("go list (unfiltered) failed: %v", allErr)
+	}
+	deniedUnfilteredPrefixes := []string{
+		modulePath + "/src/ai/openaicompat",
+		modulePath + "/src/agenttest",
+		modulePath + "/src/apptest",
+		modulePath + "/src/layer3handoff",
+		modulePath + "/src/cmd",
+	}
+	for _, dep := range allDeps {
+		for _, denied := range deniedUnfilteredPrefixes {
+			if dep == denied || strings.HasPrefix(dep, denied+"/") {
+				t.Errorf("The chat archetype's UNFILTERED production closure reaches denied prefix %q via %q — a stdlib-mediated break the filtered listing above cannot see", denied, dep)
+			}
+		}
+	}
+}
+
+// TestChatArchetype_TestClosure_AdmitsOnlyTheScriptedKitBeyondProduction is
+// check 8 (CH-02.4, R-CCP-011): the archetype's TEST dependency closure,
+// scanned SEPARATELY from check 7 (mirroring Layer 2's own check-1/check-2
+// split, S-AGP-025/S-AGP-026, D9) so the production closure can be proven,
+// independently, never to admit the scripted kit (S-CCP-101). Admits
+// everything chatArchetypeAllowedPrefixes admits, plus src/agenttest and
+// src/apptest as prefixes — the whole subtree deliberately, including
+// agenttest/tracetest and agenttest/sweep.
+func TestChatArchetype_TestClosure_AdmitsOnlyTheScriptedKitBeyondProduction(t *testing.T) {
+	t.Parallel()
+
+	deps, err := listNonStdlibDeps(chatArchetypePattern, true)
+	if err != nil {
+		t.Fatalf("go list failed: %v", err)
+	}
+	if len(deps) == 0 {
+		t.Fatal("go list -test returned no packages; the guard would pass vacuously. " +
+			"Check that the package pattern still resolves: " + chatArchetypePattern)
+	}
+
+	allowed := append(slices.Clone(chatArchetypeAllowedPrefixes), modulePath+"/src/agenttest", modulePath+"/src/apptest")
+
+	for _, dep := range deps {
+		if rule, forbidden := chatArchetypeTestMatchForbidden(dep); forbidden {
+			t.Errorf("The chat archetype's test closure must not import %q\n  rule: %s", dep, rule)
+			continue
+		}
+		if !isAllowed(dep, allowed) {
+			t.Errorf("The chat archetype's test closure must not import %q\n"+
+				"  rule: deny-by-default allowlist (ADR 0005 § D1 row 3, read as any Layer 3 archetype under "+
+				"ADR 0009 § D2, plus R-10's test-substrate admission) — this path is neither the Go standard "+
+				"library, a production-allowed package, nor the scripted kit (src/agenttest, src/apptest).\n"+
+				"  No forbidden prefix names it, and that is not a licence to add it.",
+				dep)
 		}
 	}
 }
