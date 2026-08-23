@@ -12,6 +12,8 @@ That is not a future tension. It is a promoted, live invariant that becomes **li
 
 **Verified during this change**: no live Go test enforces `S-AGP-003` — it is spec text only. This delta therefore has no code consequence. The module's own `…/src/cmd` forbidden-prefix row (`backend/agent/src/agent/import_boundary_test.go:204`) is untouched and is **armed** rather than disarmed by the arrival of `src/cmd/chat`: it previously named a tree that did not exist.
 
+> **This is not the only instance of this defect shape in this change.** A deliberate sweep of `openspec/specs/` found **four** sites of the same shape: this one; `chat-archetype-contract` `R-CHT-007`; `ai-observability-boundary`'s out-of-scope row (`spec.md:228`), already partly false since AG-03 and worsened here; and `agent-contract-vocabulary` `NFR-AGV-C` (`spec.md:250`), stale since AG-04 and untouched by this merge. Three are repaired by sibling deltas in this change; the fourth is recorded and deliberately not repaired. `chat-package-boundary`'s **Untemporal-invariant register** carries all four with their dispositions, so a reader who finds one finds the complete result rather than an unexplained silence.
+
 ## Scope of this delta, pinned
 
 **Changed** — and nothing else:

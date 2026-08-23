@@ -249,6 +249,31 @@ The scan's failure MUST name the offending file and path **and** the rule that r
 
 The standard library MUST be classified by the Go toolchain's own answer, never by a path-shape heuristic or a maintained list, honouring the warning the module's existing guard already records against both. If that subprocess fails, the check MUST fail **fatally, carrying the command's standard error** — matching every existing toolchain-invocation failure path in that file. A classification that silently degrades would turn every standard-library import into a deny-by-default failure, or every import into an admission, depending on which way it degraded.
 
+## Untemporal-invariant register — the complete result of a tree-wide sweep
+
+Creating two packages that promoted specs had asserted would not exist falsifies clauses across `openspec/specs/`. **The tree was swept deliberately for the whole shape** — any promoted claim that a directory does not exist, or that a layer has no code — rather than repairing only what happened to surface. This register carries **every** site the sweep found, with its disposition: three repaired by a delta in this same pull request, one recorded and deliberately not repaired. It exists so a reader sees the complete result of the sweep rather than three repairs and an unexplained silence.
+
+| # | Site | Falsified by | Disposition | Delta |
+|---|---|---|---|---|
+| 1 | `agent-package-scaffold` `R-AGP-001` (`spec.md:35`) and `S-AGP-003` (`:41`) — `…/src/coding` and `…/src/cmd` "MUST NOT exist in any form" | **This merge.** CH-01.1 creates `backend/agent/src/cmd/chat/` | **Repaired** — scoped to AG-03's own merge state; the live obligation becomes the **import** rule, and `S-CPB-074` shows this change **arms** the `…/src/cmd` forbidden row rather than disarming it | `specs/agent-package-scaffold/spec.md` |
+| 2 | `chat-archetype-contract` `R-CHT-007` (`spec.md:145-155`) with `S-CHT-061` and `S-CHT-062`; `R-CHT-013`'s rationale clause (`:226`); two prose sites (`:19`, `:256`) — "neither path exists yet" | **This merge.** CH-01.1 creates both paths, making `S-CHT-062`'s `Given` unreachable | **Repaired** — scoped to CH-00's own merge state, each changed scenario naming its live successor | `specs/chat-archetype-contract/spec.md` |
+| 3 | `ai-observability-boundary` *Out of scope* row (`spec.md:228`) — "Docs 0003/0004 — those directories do not exist" | **Partly already false; worsened by this merge.** `backend/agent/src/agent/` has existed since **AG-03** — that clause is AG-03's back-annotation debt, inherited already broken. CH-01.1 falsifies the Layer 3 and composition-root clauses | **Repaired, with split ownership recorded** — the reason becomes those positions' own layer documents and ADR 0005 § D3; the scope fence is unchanged, and the delta states which clause was already false and whose debt it is | `specs/ai-observability-boundary/spec.md` |
+| 4 | `agent-contract-vocabulary` `NFR-AGV-C` (`spec.md:250`) — *"No citation MAY point at Layer 2 code, which does not exist."* | **Not this merge.** AG-03 created `backend/agent/src/agent/` as documentation only; **AG-04** onward gave Layer 2 code. Stale since AG-04, independently of CH-01 | **Recorded, not repaired** — see below | none |
+
+### Row 4 — recorded, not repaired, with its cause
+
+`agent-contract-vocabulary` `NFR-AGV-C` (`openspec/specs/agent-contract-vocabulary/spec.md:250`) states that no citation may point at Layer 2 code, *"which does not exist"*, and requires citations to resolve instead to a contract document, an ADR, the architecture reference, or the shipped Layer 1 surface. Layer 2 code exists, so the subordinate clause has been false since **AG-04** — before this change's branch point.
+
+It is **not repaired here, by decision.** CH-01 neither causes this staleness nor worsens it: nothing in this change adds Layer 2 code, cites Layer 2 code, or touches `agent-contract-vocabulary`. Repairing it would bury an unrelated milestone's correction inside a scaffolding pull request, where no reviewer of this change is positioned to judge whether the requirement's *actual* obligation — that vocabulary citations resolve to durable documents rather than to source that moves — should also be restated while the false reason is removed. That judgement belongs to a change that owns the vocabulary capability.
+
+It is recorded rather than left silent because **an unrepaired defect recorded with its cause is a different object from one nobody looked for.** Both sides are cited above, the milestone it went stale at is named, and the deferral is a decision rather than an omission.
+
+### The shape
+
+Rows 1, 2 and 3 share one mechanism: a promoted invariant stated **without temporal scope**, falsified by a later milestone that the same document had, in two of the three cases, already named as the owner of the falsifying act. Row 4 is the same shape with a different cause — a reason that expired with no single merge to point at, which is exactly why nobody had looked for it.
+
+This capability is written so as not to become row 5: `S-CPB-039` and `S-CPB-092` carry explicit merge-state scoping, and `S-CPB-074` states the `…/src/cmd` row's arming as a property of the current tree rather than of a moment.
+
 ## Out of scope at CH-01, with the milestone that owns each
 
 - **A transitive (`go list -deps`) closure check over `backend/agent/src/chat/...` — owned by CH-02.** The archetype check shipped here is **zero-hop**: it reads each production file's own import declarations and nothing further. The transitive check is deferred for a **mechanical** reason, not a budget one: at CH-01 the archetype is `doc.go`-only and imports nothing, so a dependency listing returns **zero** non-standard-library packages, and this repo's pinned zero-packages vacuity floor (`agent-package-scaffold` `S-AGP-070`, mechanised at `import_boundary_test.go:284-287`) would **fail** the guard. Satisfying it at CH-01 would require inventing a floor shape the repo has not pinned.
