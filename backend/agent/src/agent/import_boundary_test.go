@@ -964,6 +964,10 @@ var chatArchetypeAllowedPrefixes = []string{
 	// TestChatArchetype_Check6AndCheck7_UseDistinctAllowlists for the
 	// regression guard.
 	// "github.com/cespare/xxhash/v2", -- moved to chatArchetypeForcedClosurePrefixes
+	// CH-03 (ADR at adr/echo-v5-in-agent-module, R-CHT-008, R-CPB-009):
+	// Echo v5 is the chat archetype's HTTP framework. ADR records db_admin's
+	// precedent, the rejected alternatives, and the boundary-widening row.
+	"github.com/labstack/echo/v5",
 }
 
 // chatArchetypeForcedClosurePrefixes is a SEPARATE, closure-only allowlist
