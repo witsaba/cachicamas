@@ -90,11 +90,15 @@ func terminalWireEvent(re agent.RunEnd, haveRunEnd bool, res runResult) WireEven
 		// D5): a completed run always carries a real reason, so absence is
 		// the truthful cancellation attribution.
 		return TurnEnd{FinishReason: nil}
+	case agent.RunOutcomeFailed:
+		// The error IS the terminal event; no turn.end follows it
+		// (R-CCP-007). Message is composed ONLY from phraseFor's own fixed
+		// table — never failure.Unwrap().Error() or any wrapped ai.Failure's
+		// composed string (R-CCP-008, D6): no provider-authored text may
+		// reach the wire.
+		failure, _ := re.Failure()
+		return Error{Kind: "server", Message: phraseFor(failure.Category())}
 	default:
-		// agent.RunOutcomeFailed (CH-02.3, Phase 5) lands its own
-		// Error{...} mapping (R-CCP-007, D6); until Phase 5 replaces this
-		// branch, a failed run is provisionally indistinguishable from an
-		// interrupted one here.
 		return TurnEnd{FinishReason: nil}
 	}
 }
