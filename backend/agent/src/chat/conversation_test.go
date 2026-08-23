@@ -6,7 +6,9 @@ package chat_test
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,6 +231,53 @@ func TestConversation_MessageIndex(t *testing.T) {
 	}
 }
 
+// TestConversation_UnmappedEvents — S-CCP-030, S-CCP-031, S-CCP-034. Given a
+// conversation constructed with a capturing slog handler, and a run whose
+// stream inherently carries run_start, turn_start and turn_end, when the
+// projection runs, then for each of those occurrences exactly one captured
+// record exists whose attributes carry that kind's own String() token; the
+// projected wire stream carries only message.start/delta/end and one
+// terminal event; and the run completed normally with no wire error.
+func TestConversation_UnmappedEvents(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"hi"}, ai.FinishReasonStop))
+	handler := newCapturingHandler()
+
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Logger: slog.New(handler)})
+	if err != nil {
+		t.Fatalf("chat.NewConversation returned %v, want nil", err)
+	}
+
+	out, err := conv.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Send returned %v, want nil", err)
+	}
+	events := drainWire(t, out)
+
+	for _, kind := range []string{"run_start", "turn_start", "turn_end"} {
+		if got := handler.countFor(kind); got != 1 {
+			t.Errorf("captured records for kind %q = %d, want exactly 1", kind, got)
+		}
+	}
+
+	for _, ev := range events {
+		switch ev.(type) {
+		case chat.MessageStart, chat.MessageDelta, chat.MessageEnd, chat.TurnEnd:
+			// mapped shapes only — an unmapped kind must never reach here.
+		default:
+			t.Errorf("unexpected wire event %#v projected — an unmapped kind must produce zero wire output", ev)
+		}
+	}
+
+	if len(events) == 0 {
+		t.Fatal("no wire events observed")
+	}
+	if _, ok := events[len(events)-1].(chat.TurnEnd); !ok {
+		t.Errorf("terminal event = %#v, want chat.TurnEnd (run completed normally, no wire error)", events[len(events)-1])
+	}
+}
+
 // scriptTextResponse builds a deterministic scripted text-only stream: one
 // text block opened at blockIdx, one delta per fragment (in order), the
 // block closed, then completion. Mirrors package agent_test's own
@@ -291,4 +340,54 @@ func endsWithTurnEnd(events []chat.WireEvent) bool {
 	}
 	_, ok := events[len(events)-1].(chat.TurnEnd)
 	return ok
+}
+
+// capturingHandler is a minimal slog.Handler capturing every record it
+// receives, guarded by its own mutex (concurrent-safe: the projector
+// goroutine is the only writer in practice, but a mutex costs nothing and
+// keeps -race silent regardless of future callers).
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []capturedRecord
+}
+
+type capturedRecord struct {
+	message string
+	kind    string
+}
+
+func newCapturingHandler() *capturingHandler { return &capturingHandler{} }
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	rec := capturedRecord{message: r.Message}
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "kind" {
+			rec.kind = a.Value.String()
+		}
+		return true
+	})
+	h.records = append(h.records, rec)
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+// countFor returns how many captured records carry a "kind" attribute equal
+// to kindToken — matching an identity (the kind's own String() token),
+// never a shape (NFR-CCP-003).
+func (h *capturingHandler) countFor(kindToken string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if r.kind == kindToken {
+			n++
+		}
+	}
+	return n
 }

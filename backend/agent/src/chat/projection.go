@@ -6,6 +6,7 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -54,6 +55,11 @@ func (c *Conversation) project(ctx context.Context, sink <-chan *agent.Event, re
 			// at the single site below, once Harness.Run's own returned
 			// finish reason is also known (D5).
 			runEnd, haveRunEnd = ev.RunEnd()
+
+		default:
+			c.logger.LogAttrs(ctx, slog.LevelInfo, "unmapped agent event",
+				slog.String("kind", ev.Kind().String()),
+				slog.String("run", string(ev.Run())))
 		}
 	}
 
