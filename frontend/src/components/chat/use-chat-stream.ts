@@ -32,7 +32,6 @@ import {
   cancelTurn,
   submitTurn,
   subscribeTurn,
-  type ChatStreamEvent,
   type ChatStreamError,
 } from "~/lib/chat-api";
 import type { ChatTurnError } from "~/lib/chat-types";

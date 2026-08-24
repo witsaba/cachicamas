@@ -4,7 +4,6 @@ import {
   useSignal,
   useVisibleTask$,
 } from "@builder.io/qwik";
-import { Icon } from "~/components/icon/icon";
 import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { Status } from "~/components/workspace/status/status";
 import { initialsOf } from "~/lib/initials";
