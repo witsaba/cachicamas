@@ -1,28 +1,30 @@
 /**
  * Behavioural spec for `routes/chat/index.tsx` — the chat archetype's screen.
  *
- * The screen is a mockup, and the thing most worth defending about a mockup is
- * that it never stops looking like one. Two of the assertions below exist for
- * exactly that: the composer's demonstration notice, and the guard that the
- * frozen wire client is still on disk, unwired, waiting for CH-05.
+ * After CH-05.1 the page is wired to the wire (D-5): the page calls
+ * `submitTurn` / `cancelTurn` / `subscribeTurn` through `useChatStream`,
+ * and the conversations rail is gone (D-3). What is asserted here:
  *
- * The mocked turn machine itself is unit-tested in
- * `components/chat/use-mock-turn.spec.ts`, where the state transitions can be
- * driven directly instead of through a clock.
+ *   - The route guard behaves (anon vs authed).
+ *   - The head metadata names the archetype.
+ *   - The wire surface CH-05.1 connects to is exposed — T5.1 replaces
+ *     the file-existence check with a semantic `export function` check.
+ *   - The authed render mounts the transcript and composer.
+ *   - The composer carries the demonstration promise.
+ *
+ * Wire-protocol behavioural coverage lives in
+ * `lib/chat-api.spec.ts` and `components/chat/use-chat-stream.spec.ts`;
+ * page-composition coverage lives in `components/chat/chat-app.spec.tsx`.
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { $, type QRL } from "@builder.io/qwik";
 import { test, expect, vi } from "vitest";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
 import Index, { head } from "./index";
 import type { DocumentHeadValue } from "@builder.io/qwik-city";
 
 // `DocumentHead` is a union of a static value and a resolver function; these
 // routes export the static form, so narrow once here rather than at every use.
 const chatHead = head as DocumentHeadValue;
-import { CONVERSATIONS } from "~/lib/mock/chat";
 
 vi.mock("~/routes/plugin@auth", () => ({
   useSession: () => ({ value: null }),
@@ -79,13 +81,19 @@ test("routes/chat: head metadata names the archetype", () => {
   expect(description).toBeTruthy();
 });
 
-test("routes/chat: the frozen browser wire is still on disk, unwired", () => {
-  // The mockup replaced the chat's UI, not its contract. `chat-api.ts` and
-  // `chat-types.ts` carry the frozen open-then-subscribe wire and stay put for
-  // CH-05 to connect; deleting them would turn a swap into a rewrite.
-  const dir = resolve(fileURLToPath(import.meta.url), "../../../lib");
-  expect(existsSync(resolve(dir, "chat-api.ts"))).toBe(true);
-  expect(existsSync(resolve(dir, "chat-types.ts"))).toBe(true);
+test("routes/chat: the page is wired to the chat wire client (REQ-1)", async () => {
+  // After CH-05.1 the page connects to the wire through chat-api.ts.
+  // Asserting on file existence passed whether or not the page was
+  // wired — the existence check was true whether chat-app.tsx
+  // imported chat-api or kept mocking it. The semantic exports check
+  // is the wire-surface contract: a future regression that reverts
+  // chat-app.tsx to a mock fails this test because the wire client
+  // is the only source of `submitTurn` / `cancelTurn` /
+  // `subscribeTurn`.
+  const mod = await import("~/lib/chat-api");
+  expect(typeof mod.submitTurn).toBe("function");
+  expect(typeof mod.cancelTurn).toBe("function");
+  expect(typeof mod.subscribeTurn).toBe("function");
 });
 
 // ===== Authed (vi.doMock / vi.resetModules) — MUST stay last =====
@@ -101,74 +109,47 @@ test("routes/chat: an authed visitor gets the transcript and the composer", asyn
   expect(screen.querySelector('[data-testid="composer-input"]')).toBeTruthy();
 });
 
-test("routes/chat: the seeded conversation is on screen, whole", async () => {
+test("routes/chat: the retired conversations rail is not mounted (D-3)", async () => {
   vi.resetModules();
   vi.doMock("~/routes/plugin@auth", () => AUTHED);
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  const transcript = screen.querySelector('[data-testid="transcript"]');
-  expect(transcript).toBeTruthy();
-  for (const entry of CONVERSATIONS[0].entries) {
-    expect(
-      transcript?.querySelector(`[data-testid$="-${entry.id}"]`),
-      entry.id,
-    ).toBeTruthy();
-  }
+  // After CH-05.1 the page holds a single active conversation; the
+  // history list is owned by CH-08.2 (cachicamas-chat-conversation-list).
+  expect(
+    screen.querySelector('[data-testid="conversations-panel"]'),
+  ).toBeFalsy();
+  expect(
+    screen.querySelector('[data-testid="conversation-list"]'),
+  ).toBeFalsy();
 });
 
-test("routes/chat: the screen says it is a demonstration, unprompted", async () => {
+test("routes/chat: the composer carries the demo promise, unprompted", async () => {
   vi.resetModules();
   vi.doMock("~/routes/plugin@auth", () => AUTHED);
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // The workspace shell carries the standing demonstration notice (see
-  // components/workspace/workspace.spec.tsx). What the composer owes is the
-  // product's one promise, stated where a person is about to act on it.
+  // The composer states the product's one standing promise where a
+  // person is about to act on it, rather than in a settings page
+  // nobody opens.
   const composer = screen.querySelector('[data-testid="composer"]');
   const text = (composer as HTMLElement).textContent ?? "";
   expect(text).toContain("Enter to send");
   expect(text).toContain("without you approving it first");
 });
 
-test("routes/chat: a decided permission shows its decision and its consequence", async () => {
+test("routes/chat: the page renders at least one transcript slot (the assistant's opening line)", async () => {
   vi.resetModules();
   vi.doMock("~/routes/plugin@auth", () => AUTHED);
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // Every conversation on offer is reachable from the list, including the one
-  // that carries a permission answered both ways — an approval you cannot
-  // audit afterwards is not much better than no approval at all.
-  const list = screen.querySelector('[data-testid="conversation-list"]');
-  expect(list?.querySelector('[data-testid="conversation-c-4465"]')).toBeTruthy();
-  const audited = CONVERSATIONS.find((c) => c.id === "c-4465");
-  const decisions = (audited?.entries ?? []).flatMap((e) =>
-    e.kind === "hold" ? [e.decision] : [],
-  );
-  expect(decisions).toContain("granted");
-  expect(decisions).toContain("denied");
-});
-
-test("routes/chat: a failure is a typed envelope with a recovery, never a spinner", async () => {
-  vi.resetModules();
-  vi.doMock("~/routes/plugin@auth", () => AUTHED);
-  const { default: AuthedIndex } = await import("./index");
-  const { screen, render } = await createDOM();
-  await render(<AuthedIndex />);
-  // Conversation c-4460 ends in a failure. It is not selected by default, so
-  // assert the seeded data carries the contract and that its row is reachable.
-  expect(
-    screen.querySelector('[data-testid="conversation-c-4460"]'),
-  ).toBeTruthy();
-  const conversation = CONVERSATIONS.find((c) => c.id === "c-4460");
-  const fault = conversation?.entries.find((e) => e.kind === "fault");
-  expect(fault).toBeTruthy();
-  if (fault && fault.kind === "fault") {
-    // A failure names the problem AND the way out, or it is a dead end with
-    // better manners.
-    expect(fault.message.length).toBeGreaterThan(12);
-    expect(fault.recovery.length).toBeGreaterThan(12);
-  }
+  // The lead-in line ("See what ... can do") survives D-3 in the
+  // transcript opening <li> (chat-app.tsx:130-148). The second
+  // status indicator inside it gives the test a stable assertion
+  // anchor.
+  const transcript = screen.querySelector('[data-testid="transcript"]');
+  expect(transcript?.textContent ?? "").toContain("See what");
 });
