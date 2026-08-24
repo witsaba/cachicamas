@@ -13,6 +13,7 @@ package chat
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -94,11 +95,14 @@ var ErrNilStore = errors.New("chat: Config.Store is required")
 // cfg.ParticipantID is empty after TrimSpace (D-1).
 var ErrEmptyParticipantID = errors.New("chat: Config.ParticipantID is required")
 
-// ConversationStore is the closed two-method port the chat archetype
-// owns (R-CCS-010). Adding a method is a semantic break; CH-07's
-// postgres adapter implements the same two methods against a real
-// database, and CH-08.2 widens the port to a list (out of scope here)
-// by extending, not replacing, this declaration.
+// ConversationStore is the port the chat archetype owns (R-CCS-010,
+// additively widened by R-CCS-013). The originally-closed two-method
+// surface is extended by a third method `List`; future widens MUST
+// follow the same additive pattern (R-CCS-013's "extending, not
+// replacing, this declaration" anticipatory clause). CH-07's postgres
+// adapter implements the first two methods against a real database;
+// CH-08 widens it again with `List` for the participant-scoped listing
+// surface (CH-08.2, R-CRI-002).
 type ConversationStore interface {
 	// Append records exchange for participantID. The store is
 	// responsible for assigning Exchange.Position (insertion order
@@ -112,32 +116,67 @@ type ConversationStore interface {
 	// The returned slice is a fresh copy on every call — caller-side
 	// mutation cannot corrupt the in-memory state (NFR-CCS-004).
 	Load(participantID string) ([]Exchange, error)
+
+	// List returns the participant-scoped conversation summaries for
+	// participantID (R-CCS-013). At v1, one conversation per
+	// participant (decisions #3925 D-1), so the returned slice
+	// carries 0 or 1 entry. A miss (no Append under participantID)
+	// returns (non-nil empty slice, nil) — not ErrConversationNotFound:
+	// the handler maps an empty list to `200 []` so the chat page
+	// renders an empty rail rather than a refusal (S-CRI-004, S-CCS-018).
+	// The returned slice is a fresh copy on every call (NFR-CCS-004
+	// carried forward) — caller-side mutation cannot corrupt the
+	// in-memory state.
+	List(participantID string) ([]ConversationSummary, error)
+}
+
+// ConversationSummary is the port-owned list projection (R-CCS-014).
+// The wire DTO (ConversationSummaryDTO, R-CRI-004 in the CH-08 spec)
+// is a pure transport projection defined in the chat-resume spec and
+// carries the same three fields; the wire must not invent fields
+// beyond this struct (REQ-7 closed-union enforcement at the wire's
+// edge). LiveActivity and TurnCount are set by the adapter at List
+// time; ConversationID is the participant id by the one-per-
+// participant decision (D-1, chat_resume-in-browser/decisions #3925).
+type ConversationSummary struct {
+	ConversationID string
+	LastActivityAt time.Time
+	TurnCount      int
 }
 
 // MemoryConversationStore is the v1 in-memory adapter for
 // ConversationStore (D-3, D-4). It holds map[string][]Exchange guarded
-// by sync.Mutex covering both Append and Load (NFR-CCS-001). Coarse
-// locking is sufficient at v1's request rate.
+// by sync.Mutex covering Append, Load, and List (NFR-CCS-001). Coarse
+// locking is sufficient at v1's request rate. The activity map
+// tracks the per-participant LastActivityAt so List can return it
+// alongside TurnCount (R-CCS-013).
 type MemoryConversationStore struct {
-	mu sync.Mutex
-	m  map[string][]Exchange
+	mu       sync.Mutex
+	m        map[string][]Exchange
+	activity map[string]time.Time
 }
 
 // NewMemoryConversationStore returns an empty in-memory store ready
 // to receive Append calls. Each call returns an independent store;
 // two stores do not share state.
 func NewMemoryConversationStore() *MemoryConversationStore {
-	return &MemoryConversationStore{m: make(map[string][]Exchange)}
+	return &MemoryConversationStore{
+		m:        make(map[string][]Exchange),
+		activity: make(map[string]time.Time),
+	}
 }
 
 // Append records ex under participantID, assigning its Position field
 // to the insertion index. The map is guarded by s.mu; concurrent
-// Append + Load on the same store are race-free under -race.
+// Append + Load + List on the same store are race-free under -race.
+// The activity map is bumped to time.Now() on every Append so List
+// can return LastActivityAt (R-CCS-013, R-CCS-014).
 func (s *MemoryConversationStore) Append(participantID string, ex Exchange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ex.Position = len(s.m[participantID])
 	s.m[participantID] = append(s.m[participantID], ex)
+	s.activity[participantID] = time.Now()
 	return nil
 }
 
@@ -154,6 +193,34 @@ func (s *MemoryConversationStore) Load(participantID string) ([]Exchange, error)
 	}
 	out := make([]Exchange, len(src))
 	copy(out, src)
+	return out, nil
+}
+
+// List returns the participant-scoped conversation summaries for
+// participantID. At v1 (D-1, one conversation per participant) the
+// returned slice carries 0 or 1 entry: 0 when the participant has
+// no recorded exchanges (the handler maps this to `200 []` per
+// S-CRI-004 and S-CCS-018), 1 otherwise. The returned slice is a
+// defensive copy (NFR-CCS-004); the store's map state is not mutated
+// by this call. The underlying `s.m` map iteration is over a stable
+// shape — concurrent Append can race the iteration, but the map
+// write happens under s.mu which List also takes, so under -race the
+// read is consistent.
+func (s *MemoryConversationStore) List(participantID string) ([]ConversationSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	src, ok := s.m[participantID]
+	if !ok {
+		// Non-nil empty slice — JSON serializes as [] not null (the
+		// wire contract per S-CRI-004, S-CCS-018).
+		return []ConversationSummary{}, nil
+	}
+	out := make([]ConversationSummary, 0, 1)
+	out = append(out, ConversationSummary{
+		ConversationID: participantID,
+		LastActivityAt: s.activity[participantID],
+		TurnCount:      len(src),
+	})
 	return out, nil
 }
 

@@ -276,6 +276,20 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 	return nil
 }
 
+// List returns the participant-scoped conversation summaries for
+// participantID (R-CCS-013, the third additive method on the
+// ConversationStore port). At v1 (one conversation per participant
+// per D-1) the result slice carries 0 or 1 entry.
+//
+// CH-08 WU-3: this stub returns (nil, errNotImplemented) — WU-3
+// replaces it with the real SELECT against chat_conversations and a
+// correlated subquery for chat_exchanges' position counter. Kept
+// here so the package compiles while the WU-1 red tests have not yet
+// been given their GREEN step on the postgres adapter.
+func (s *PostgresConversationStore) List(participantID string) ([]ConversationSummary, error) {
+	return nil, errNotImplemented
+}
+
 // Load returns every exchange recorded for participantID, in
 // insertion order. A miss returns (nil, ErrConversationNotFound).
 // The returned slice is a fresh copy on every call (NFR-CCS-004).
