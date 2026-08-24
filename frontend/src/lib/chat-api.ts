@@ -23,8 +23,9 @@
  *     discriminated union as lib/api.ts:96-110 (validation/conflict/
  *     not_found/server/offline).
  *   - Network errors map to { ok: false, kind: "offline", message }
- *     where the message contains the LITERAL phrase
- *     "backend not wired — see PR for backend wire" (user-locked D4).
+ *     where the message is the browser-portable dev-honest phrase
+ *     (replaced by CH-05.2 — see openspec/specs/frontend-chat-layer1
+ *     REQ-5 amendment).
  *   - EventSource onerror before any message.delta surfaces the same
  *     offline phrase via the onError callback (REQ-5 S-5.b).
  *
@@ -33,8 +34,8 @@
  *   - NO env vars for LLM selection.
  *   - NO new HTTP-client libs (we reuse stateChangingFetch from
  *     lib/csrf.ts and the EventSource browser global).
- *   - NO backend code; this file is a consumer of a wire the backend
- *     will implement in a separate change.
+ *   - NO backend code; this file is a consumer of the wire CH-04
+ *     mounted (backend/agent/src/chat/http.go:305-307).
  */
 
 import { stateChangingFetch } from "./csrf";
@@ -96,19 +97,27 @@ function fullUrl(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// REQ-5 — the user-locked literal offline phrase
+// REQ-5 — dev-honest offline phrase (amended by CH-05.2)
 // ---------------------------------------------------------------------------
 //
-// The phrase MUST contain the literal substring
-//   "backend not wired — see PR for backend wire"
-// (greppable in DevTools / CI). Hard-coded here so any refactor that
-// drops or rewrites it surfaces immediately in chat-api.spec.ts.
+// CH-05.2 retires the original literal phrasing (mandated by the
+// REQ-5 promoted spec; see openspec/specs/frontend-chat-layer1 REQ-5
+// amendment for the discharge rationale). The amended REQ-5 keeps
+// the kind:"offline" arm (D-1) and the dev-honest contract — a
+// network failure is greppable, never silently retried, never
+// fabricated — but replaces the phrase with one that points a
+// developer at the right command (`docker compose up`) without
+// claiming a backend is unwired when one now is.
+//
+// The `err` parameter is ignored (D-2 — browsers differ; explore
+// §7.1). The phrase is browser-portable across Chrome / Firefox /
+// Safari.
 // ---------------------------------------------------------------------------
-export const OFFLINE_LITERAL = "backend not wired — see PR for backend wire";
+const OFFLINE_GENERIC =
+  "Couldn't reach the chat service. Is docker compose up? (network error)";
 
-function offlineMessage(err: unknown): string {
-  const detail = err instanceof Error ? err.message : "network error";
-  return `${OFFLINE_LITERAL} (${detail})`;
+function offlineMessage(_err: unknown): string {
+  return OFFLINE_GENERIC;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +186,7 @@ async function envelopeToResult<T>(
  * subscribeTurn() which prefixes apiBaseUrl().
  *
  * On network failure resolves to { ok: false, kind: "offline",
- * message: "<OFFLINE_LITERAL> ..." } (REQ-5 S-5.a — honest dev
+ * message: <dev-honest phrase> } (REQ-5 S-5.a amended — honest dev
  * failure, no retry, no fabricated response).
  *
  * On typed HTTP error (4xx / 5xx) resolves to the corresponding
@@ -257,7 +266,7 @@ export type ChatStreamEventHandler = (ev: ChatStreamEvent) => void;
 /**
  * Offline error handler — called when the EventSource errors before
  * any message.delta is observed (REQ-5 S-5.b). The string is the
- * literal OFFLINE_LITERAL so the UI can render the typed phrase.
+ * amended dev-honest phrase so the UI can render the typed message.
  */
 export type ChatOfflineHandler = (message: string) => void;
 
@@ -401,9 +410,9 @@ export function subscribeTurn(
   es.addEventListener("error", () => {
     if (intentionalClose) return;
     if (!sawAnyDelta && onError) {
-      onError(OFFLINE_LITERAL);
+      onError(offlineMessage(new Error("connection error")));
     } else if (onError) {
-      onError(OFFLINE_LITERAL);
+      onError(offlineMessage(new Error("connection error")));
     }
   });
 
