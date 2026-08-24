@@ -1148,7 +1148,20 @@ func filterOutLoopFiles(diff string) string {
 				// Exact filename, no wildcard/prefix/directory.
 				// The diff is the documented Echo require entry;
 				// the helper itself is test-only.
-				strings.HasSuffix(path, "/ch03_carveout_test.go")
+				strings.HasSuffix(path, "/ch03_carveout_test.go") ||
+				// CH-04 widening (cachicamas-chat-composition-root,
+				// R-LSK-004 "CH-N widens this filter by one name"):
+				// ch04_carveout_test.go is the CH-04 test-only
+				// helper that owns isCH04GoModDrift; CH-04 widens
+				// the pre-authorized go.mod set from the CH-03
+				// 4-require baseline to a 7-require baseline +
+				// indirects (ADR 0005 § D3 OTel SDK + OTLP exporter,
+				// plus lestrrat-go/jwx/v2 for the in-process JWE
+				// shim and golang.org/x/crypto for hkdf). Mirror
+				// of loop_hook_test.go's filterOutLoopHookFiles
+				// below — byte-in-sync is asserted by
+				// TestScopeFence_S_LSK_031.
+				strings.HasSuffix(path, "/ch04_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
@@ -1455,7 +1468,7 @@ func TestTurn_SubstrateUntouched(t *testing.T) {
 	// module's go.mod from 3 require lines (AI-37) to 4. The drift
 	// is the recorded exception; every other go.mod / go.sum
 	// modification fails this clause.
-	if isCH03GoModDrift(goModSum) {
+	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
 		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
 	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)

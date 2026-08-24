@@ -642,22 +642,21 @@ func TestCost_ScopeFence(t *testing.T) {
 	// the chat archetype's HTTP+SSE surface requires
 	// github.com/labstack/echo/v5 v5.2.1 (ADR adr/echo-v5-in-agent-module
 	// recorded at the start of CH-03's SDD flow), bumping the agent
-	// module's go.mod from 3 require lines (AI-37) to 4. Every other
-	// cost-emission / substrate milestone is bound by R-CST-007 as
-	// stated; this clause is the one carve-out, with the bump count
-	// verified by TestLayer1_DependencySet_ExactRequiresAndClosure
-	// (import_boundary_test.go:313, wantGoModRequires updated to 4
-	// in CH-03's own amendment) and the openrouter zero-requires
-	// guard (zero_requires_test.go, wantGoModRequireLines=4 in the
-	// same commit). For CH-03 itself, the diff MAY carry the
-	// github.com/labstack/echo/v5 require entry — anything beyond
-	// that (a replace directive, a second new require, etc.) fails
-	// this check normally.
-	hasEcho := strings.Contains(goModSum, `+	github.com/labstack/echo/v5 v5.2.1`)
-	hasReplace := strings.Contains(goModSum, `replace `) || strings.Contains(goModSum, `+replace`)
-	if hasEcho && !hasReplace {
-		t.Logf("CH-03 exception: go.mod diff carries the recorded Echo require; R-CST-007 still binding for every other change.\n%s", goModSum)
+	// module's go.mod from 3 require lines (AI-37) to 4. CH-04
+	// (cachicamas-chat-composition-root) widens the pre-authorized
+	// set to include jwx/v2, OTel SDK, OTLP exporter, and
+	// golang.org/x/crypto per ADR 0005 § D3 — the chat composition
+	// root is the only package permitted to install the OTel SDK and
+	// OTLP exporter, and the only package that builds the in-process
+	// JWE IdentityResolver shim that mirrors database_administrator's
+	// middleware. Every other cost-emission / substrate milestone is
+	// bound by R-CST-007 as stated; this clause carries the carve-out
+	// for CH-03 and CH-04 combined. Anything beyond those two — a
+	// replace directive, a third new require, etc. — fails this check
+	// normally.
+	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
+		t.Logf("CH-03 / CH-04 carve-out: go.mod drift is one of the recorded exceptions (Echo / OTel SDK + otlptracegrpc / jwx + crypto per ADR 0005 § D3).\n%s", goModSum)
 	} else if len(goModSum) != 0 {
-		t.Errorf("go.mod / go.sum drifted from main (R-CST-007 violated — no new top-level Go deps; CH-03's Echo addition is the only recorded exception):\n%s", goModSum)
+		t.Errorf("go.mod / go.sum drifted from main (R-CST-007 violated — no new top-level Go deps; CH-03's Echo + CH-04's OTel SDK/otlptrace/jwx additions are the only recorded exceptions):\n%s", goModSum)
 	}
 }

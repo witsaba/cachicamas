@@ -214,26 +214,68 @@ func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 // github.com/labstack/echo/v5 v5.2.1 (ADR
 // `adr/echo-v5-in-agent-module`, recorded in engram at the start of
 // CH-03's SDD flow), bringing the module-wide table to 4 entries.
+// CH-04 (cachicamas-chat-composition-root) is the third recorded
+// bump: the chat composition root is the only package permitted to
+// install the OpenTelemetry SDK and OTLP exporter (ADR 0005 § D3,
+// adr:242) and the only package that builds an in-process JWE
+// IdentityResolver shim over the lestrrat-go/jwx/v2 envelope (mirrors
+// database_administrator's middleware without importing it, R-07 +
+// ADR 0005 § D1 row 3). That bumps the module-wide table from 4
+// direct + 1 indirect to 7 direct + 25 indirect; every entry below
+// is one of the four pre-authorized roots CH-04 ships (jwx/v2, OTel
+// SDK, OTLP exporter, golang.org/x/crypto) or a transitive closure
+// of one of them.
+//
 // The Layer-1 closure test below (which scopes to src/ai, src/ai/**,
 // src/agenttest, src/handoff, src/apptest via layer1Patterns) is
-// NOT affected: none of those packages imports Echo, so the Layer 1
-// wantExternalClosure stays at AI-37's table. The chat archetype's
-// own closure is what's pinned by chatArchetypeAllowedPrefixes and
-// chatArchetypeForcedClosurePrefixes in import_boundary_test.go
-// (Layer 2's file), verified there.
+// NOT affected: none of those packages imports jwx/v2, the OTel SDK,
+// or otlptracegrpc, so the Layer 1 wantExternalClosure stays at
+// AI-37's table + the auto/sdk forced transitive the OTel SDK
+// pulls in (recorded below as the CH-04 amendment). The chat
+// archetype's own closure is what's pinned by
+// chatArchetypeAllowedPrefixes and chatArchetypeForcedClosurePrefixes
+// in import_boundary_test.go (Layer 2's file), verified there.
 //
-// Update procedure (AD-2, S-AGM-073, extended for CH-03): on a
+// Update procedure (AD-2, S-AGM-073, extended for CH-04): on a
 // deliberate, ADR-gated dependency bump, re-run
-// `go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}'
-// ./src/chat/... ./src/agent/...`, diff each Layer's closure against
-// the corresponding wantExternalClosure, verify no
-// `go.opentelemetry.io/otel/sdk`- or `go.opentelemetry.io/auto/sdk`-
-// named path appears, and update both tables in the same commit.
+// `go mod edit -json` and diff the Require array against this
+// table; verify no path outside the pre-authorized set
+// (jwx/v2 + OTel SDK + otlptracegrpc + golang.org/x/crypto +
+// their transitives) appears, and update the table in the same
+// commit.
 var wantGoModRequires = []requireEntry{
-	{Path: "go.opentelemetry.io/otel", Version: "v1.44.0", Indirect: false},
-	{Path: "go.opentelemetry.io/otel/trace", Version: "v1.44.0", Indirect: false},
+	{Path: "github.com/cenkalti/backoff/v5", Version: "v5.0.3", Indirect: true},
 	{Path: "github.com/cespare/xxhash/v2", Version: "v2.3.0", Indirect: true},
+	{Path: "github.com/decred/dcrd/dcrec/secp256k1/v4", Version: "v4.4.1", Indirect: true},
+	{Path: "github.com/go-logr/logr", Version: "v1.4.4", Indirect: true},
+	{Path: "github.com/go-logr/stdr", Version: "v1.2.2", Indirect: true},
+	{Path: "github.com/goccy/go-json", Version: "v0.10.6", Indirect: true},
+	{Path: "github.com/google/uuid", Version: "v1.6.0", Indirect: true},
+	{Path: "github.com/grpc-ecosystem/grpc-gateway/v2", Version: "v2.29.0", Indirect: true},
 	{Path: "github.com/labstack/echo/v5", Version: "v5.2.1", Indirect: false},
+	{Path: "github.com/lestrrat-go/blackmagic", Version: "v1.0.4", Indirect: true},
+	{Path: "github.com/lestrrat-go/httpcc", Version: "v1.0.1", Indirect: true},
+	{Path: "github.com/lestrrat-go/httprc", Version: "v1.0.6", Indirect: true},
+	{Path: "github.com/lestrrat-go/iter", Version: "v1.0.2", Indirect: true},
+	{Path: "github.com/lestrrat-go/jwx/v2", Version: "v2.1.7", Indirect: false},
+	{Path: "github.com/lestrrat-go/option", Version: "v1.0.1", Indirect: true},
+	{Path: "github.com/segmentio/asm", Version: "v1.2.1", Indirect: true},
+	{Path: "go.opentelemetry.io/auto/sdk", Version: "v1.2.1", Indirect: true},
+	{Path: "go.opentelemetry.io/otel", Version: "v1.44.0", Indirect: false},
+	{Path: "go.opentelemetry.io/otel/exporters/otlp/otlptrace", Version: "v1.44.0", Indirect: true},
+	{Path: "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc", Version: "v1.44.0", Indirect: false},
+	{Path: "go.opentelemetry.io/otel/metric", Version: "v1.44.0", Indirect: true},
+	{Path: "go.opentelemetry.io/otel/sdk", Version: "v1.44.0", Indirect: false},
+	{Path: "go.opentelemetry.io/otel/trace", Version: "v1.44.0", Indirect: false},
+	{Path: "go.opentelemetry.io/proto/otlp", Version: "v1.11.0", Indirect: true},
+	{Path: "golang.org/x/crypto", Version: "v0.54.0", Indirect: false},
+	{Path: "golang.org/x/net", Version: "v0.57.0", Indirect: true},
+	{Path: "golang.org/x/sys", Version: "v0.47.0", Indirect: true},
+	{Path: "golang.org/x/text", Version: "v0.40.0", Indirect: true},
+	{Path: "google.golang.org/genproto/googleapis/api", Version: "v0.0.0-20260803160001-6ac0973c030d", Indirect: true},
+	{Path: "google.golang.org/genproto/googleapis/rpc", Version: "v0.0.0-20260803160001-6ac0973c030d", Indirect: true},
+	{Path: "google.golang.org/grpc", Version: "v1.83.0", Indirect: true},
+	{Path: "google.golang.org/protobuf", Version: "v1.36.11", Indirect: true},
 }
 
 // wantExternalClosure is the exact non-stdlib package closure LAYER 1

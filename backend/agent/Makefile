@@ -102,6 +102,23 @@ vuln-check/ci: vuln-check  ## Same as vuln-check; alias kept explicit for future
 build:  ## Compile all packages
 	$(GO) build $(GOFLAGS) ./...
 
+## build/chat: build the chat composition root binary
+.PHONY: build/chat
+build/chat:  ## Compile the chat composition root into ./bin/chat
+	@mkdir -p $(LOCALBIN)
+	$(GO) build $(GOFLAGS) -o $(LOCALBIN)/chat ./src/cmd/chat
+
+## run/chat: build and run the chat composition root (env-driven)
+.PHONY: run/chat
+run/chat: build/chat  ## Build and run ./bin/chat
+	@echo ">> starting chat composition root (Ctrl+C to stop)"
+	@echo ">> required env: CACHICAMAS_CHAT_PROVIDER_API_KEY, CACHICAMAS_CHAT_PROVIDER_MODEL, AUTH_SECRET (>=32 bytes)"
+	@echo ">> optional env: CACHICAMAS_CHAT_PORT (default 8080), AUTH_COOKIE_NAME (default authjs.session-token), OTEL_EXPORTER_OTLP_ENDPOINT"
+	@test -n "$$CACHICAMAS_CHAT_PROVIDER_API_KEY" || { echo ">> CACHICAMAS_CHAT_PROVIDER_API_KEY is unset"; exit 1; }
+	@test -n "$$CACHICAMAS_CHAT_PROVIDER_MODEL" || { echo ">> CACHICAMAS_CHAT_PROVIDER_MODEL is unset"; exit 1; }
+	@test -n "$$AUTH_SECRET" || { echo ">> AUTH_SECRET is unset"; exit 1; }
+	$(LOCALBIN)/chat
+
 # ---------- Tests -------------------------------------------------------------
 
 ## test: run all tests with race detector
