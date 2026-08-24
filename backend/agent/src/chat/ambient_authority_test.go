@@ -43,9 +43,14 @@
 package chat_test
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -114,12 +119,12 @@ func isChatArchetypeSourceFile(name string) bool {
 // violation string per forbidden call site or forbidden dot-import
 // found. Each message names its file, line and forbidden package.
 //
-// RED-stage stub (CH-04.2 work unit 1.1): the scan returns an empty
-// slice. The bite-proof test (TestChatArchetype_FailsOnStagedMutation)
-// plants an os.Getenv fixture and expects ≥1 violation; with this stub
-// the test fails — proving the bite-proof is wired and the test is not
-// vacuous. GREEN (work unit 1.2) replaces this stub with the real
-// AST walk that flags each forbidden call site.
+// GREEN (CH-04.2 work unit 1.2): each admitted file is parsed with
+// parser.ParseFile, scanFileForAmbientAuthority walks its imports and
+// AST SelectorExprs, and every forbidden call site or dot-import is
+// returned as a violation. Aliases are honoured: a renamed import
+// ("osys" for "os") is still flagged because the walk resolves call
+// sites by the local identifier, not the import path.
 func scanNonTestSourcesForAmbientAuthority(t *testing.T, dir string) []string {
 	t.Helper()
 
@@ -128,8 +133,104 @@ func scanNonTestSourcesForAmbientAuthority(t *testing.T, dir string) []string {
 		t.Fatalf("os.ReadDir(%q) error = %v, want nil", dir, err)
 	}
 
-	_ = entries // RED stub: directory listing is read but no AST walk runs yet.
-	return nil
+	fset := token.NewFileSet()
+	var violations []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !isChatArchetypeSourceFile(name) {
+			continue
+		}
+
+		path := filepath.Join(dir, name)
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parser.ParseFile(%q) error = %v, want nil", path, err)
+		}
+
+		violations = append(violations, scanFileForAmbientAuthority(fset, name, file)...)
+	}
+	return violations
+}
+
+// scanFileForAmbientAuthority resolves file's imports to local
+// identifiers (alias-aware, via file.Imports) and flags every call site
+// whose selector resolves to a forbidden package, plus every dot-import
+// of a forbidden package in its own right, independent of any call site.
+func scanFileForAmbientAuthority(fset *token.FileSet, fileName string, file *ast.File) []string {
+	localNameToPackage := make(map[string]forbiddenAmbientAuthorityPackage)
+	var violations []string
+
+	for _, imp := range file.Imports {
+		importPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			importPath = strings.Trim(imp.Path.Value, `"`)
+		}
+		entry, forbidden := findForbiddenAmbientAuthorityPackage(importPath)
+		if !forbidden {
+			continue
+		}
+
+		switch {
+		case imp.Name != nil && imp.Name.Name == "_":
+			// Blank import: inert. It binds no callable identifier, and
+			// an unused non-blank import fails compilation, so a blank
+			// import of a forbidden package can never reach a call
+			// site.
+			continue
+
+		case imp.Name != nil && imp.Name.Name == ".":
+			// A dot-import is a violation in its own right: resolving a
+			// bare identifier back to this import would need full type
+			// information (the recorded limitation above), so the
+			// import itself is flagged regardless of whether a call to
+			// it is found.
+			pos := fset.Position(imp.Pos())
+			violations = append(violations, fmt.Sprintf(
+				"%s:%d: dot-import of forbidden package %q (%s)",
+				fileName, pos.Line, importPath, entry.rule))
+			continue
+
+		case imp.Name != nil:
+			// A named alias: resolved by its local identifier, not by
+			// the import path, so renaming the import does not bypass
+			// the scan.
+			localNameToPackage[imp.Name.Name] = entry
+
+		default:
+			localNameToPackage[entry.defaultLocalName] = entry
+		}
+	}
+
+	if len(localNameToPackage) == 0 {
+		return violations
+	}
+
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		entry, forbidden := localNameToPackage[ident.Name]
+		if !forbidden {
+			return true
+		}
+
+		pos := fset.Position(call.Pos())
+		violations = append(violations, fmt.Sprintf(
+			"%s:%d: call %s.%s reaches forbidden package %q (%s)",
+			fileName, pos.Line, ident.Name, sel.Sel.Name, entry.importPath, entry.rule))
+		return true
+	})
+
+	return violations
 }
 
 // TestChatArchetype_NonTestSourcesCarryNoForbiddenCallSite is the guard's
