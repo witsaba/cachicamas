@@ -17,14 +17,25 @@ import "sync"
 // composition-time defect, not a runtime one.
 type ConversationFactory func(participantID string) (*Conversation, error)
 
-// Registry maps participant ids to their *Conversation. The map is
-// read-mostly at steady state (one entry per participant, looked up per
-// request) and write-only on first use, so a single mutex is sufficient
+// streamEntry is the per-turn state the registry tracks so the GET
+// and DELETE handlers can locate the right stream and enforce the
+// cross-participant guard (R-CHS-004.b). nil stream = turn already
+// terminated; non-nil = turn in flight, drain it.
+type streamEntry struct {
+	ownerID   string
+	stream    <-chan WireEvent
+	completed bool
+}
+
+// Registry maps participant ids to their *Conversation and turn-ids
+// to the per-turn stream Channel. The map is read-mostly at steady
+// state and write-only on first use, so a single mutex is sufficient
 // — a finer-grained design would add complexity without measurable
 // benefit at v1's request rate.
 type Registry struct {
 	mu           sync.Mutex
 	conversations map[string]*Conversation
+	streams      map[string]*streamEntry
 	newConv      ConversationFactory
 }
 
@@ -37,6 +48,7 @@ func NewRegistry(newConv ConversationFactory) *Registry {
 	}
 	return &Registry{
 		conversations: make(map[string]*Conversation),
+		streams:       make(map[string]*streamEntry),
 		newConv:       newConv,
 	}
 }
@@ -99,4 +111,75 @@ func (r *Registry) CancelByTurnID(participantID, _ string) bool {
 		return false
 	}
 	return conv.Cancel() == CancelRequested
+}
+
+// StoreStream records the just-opened turn's stream so the GET and
+// DELETE handlers can find it. Per-turn, keyed by turnID. Called by
+// HandleOpenTurn after Conversation.Send returns.
+func (r *Registry) StoreStream(ownerID, turnID string, stream <-chan WireEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.streams[turnID] = &streamEntry{ownerID: ownerID, stream: stream}
+}
+
+// MarkStreamCompleted marks the turn's stream as terminated but keeps
+// the entry so a late GET can still observe completion (S-CHS-002.b).
+// The stream field is set to nil to signal "already terminated" without
+// removing the entry.
+func (r *Registry) MarkStreamCompleted(turnID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry, ok := r.streams[turnID]; ok {
+		entry.completed = true
+		entry.stream = nil
+	}
+}
+
+// LoadStream returns the entry for a turn so the GET handler can
+// stream it. (stream, ownerID, true) on hit; (nil, "", false) on miss.
+// The caller (the GET handler) checks ownerID == caller.ParticpantID()
+// for the cross-participant guard (R-CHS-004.b).
+func (r *Registry) LoadStream(turnID string) (<-chan WireEvent, string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.streams[turnID]
+	if !ok {
+		return nil, "", false
+	}
+	return entry.stream, entry.ownerID, true
+}
+
+// OwnerOf returns the participantID that owns turnID, if any. Used by
+// the DELETE handler for the cross-participant guard.
+func (r *Registry) OwnerOf(turnID string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.streams[turnID]
+	if !ok {
+		return "", false
+	}
+	return entry.ownerID, true
+}
+
+// ClearStream removes the stream entry. Called after a DELETE so a
+// follow-up POST with the same id is treated as a fresh turn (not
+// 403 not_found). Entries are small enough that the cost of leaking
+// one on the no-DELETE path is negligible over v1's request rate.
+func (r *Registry) ClearStream(turnID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.streams, turnID)
+}
+
+// IsCompleted reports whether the stream has already terminated —
+// the GET handler reads this to drive the S-CHS-002.b "already-
+// terminated" fast path which returns a single turn.end frame.
+func (r *Registry) IsCompleted(turnID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.streams[turnID]
+	if !ok {
+		return false
+	}
+	return entry.completed
 }
