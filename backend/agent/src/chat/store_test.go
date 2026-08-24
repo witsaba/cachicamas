@@ -96,6 +96,161 @@ func TestConversationStore_LoadReturnsSliceInOrder(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// TestConversationStore_List — RED scaffold for the third additive method
+// `List(participantID) ([]ConversationSummary, error)` on ConversationStore
+// (R-CCS-013, S-CCS-015..018, design D-CCS-013). This WU is RED at compile
+// time: `ConversationStore.List` and `chat.ConversationSummary` do NOT exist
+// in chat/store.go yet. Each sub-test MUST compile after WU-2 and run
+// for the right reason — the assertions are the spec's, not the test
+// framework's. Three cases transcribed from the open scenarios:
+//
+//   - S-CCS-017: List(participant) returns that participant's own
+//     conversation summary (the own-list half of CH-08.2).
+//   - S-CCS-018: List of a participant the store has nothing under
+//     returns []ConversationSummary{} — not nil (mirrors Load's empty
+//     successor semantics; explicit "no ghost entry" assertion).
+//   - cross-participant-absent: List(alice) MUST NOT contain bob's
+//     entry even when both participants have appended — the
+//     participant-scoped read is the contract (R-CCS-013's "third
+//     method widens additively" wording preserves Load's
+//     participant-scoped invariant, per NFR-CCS-007).
+//
+// GREEN at WU-2: MemoryConversationStore.List is the implementation.
+// ----------------------------------------------------------------------------
+
+// TestConversationStore_List covers the additive third method on the
+// ConversationStore port (R-CCS-013, decisions #3925). The three
+// sub-tests fail to compile at WU-1 (the method and type do not yet
+// exist) and pass under `-race -count=1` after WU-2 lands.
+func TestConversationStore_List(t *testing.T) {
+	t.Parallel()
+
+	// S-CCS-017 — own-list: appends for both alice and bob end in
+	// two distinct summaries, each List call returns exactly the
+	// caller's own row. One conversation per participant (decisions
+	// D-1) means each participant has exactly one ConversationSummary
+	// entry after an Append.
+	t.Run("S-CCS-017_List_returns_participant_scoped_entry", func(t *testing.T) {
+		t.Parallel()
+
+		store := chat.NewMemoryConversationStore()
+
+		// Two participants each hold a conversation (one conversation per
+		// participant — D-1; the schema enforces it).
+		if err := store.Append("alice", chat.Exchange{PromptText: "a1", AssistantText: "r-a1"}); err != nil {
+			t.Fatalf("Append(alice) returned %v, want nil", err)
+		}
+		if err := store.Append("bob", chat.Exchange{PromptText: "b1", AssistantText: "r-b1"}); err != nil {
+			t.Fatalf("Append(bob) returned %v, want nil", err)
+		}
+
+		aliceList, err := store.List("alice")
+		if err != nil {
+			t.Fatalf("List(alice) returned %v, want nil", err)
+		}
+		if len(aliceList) != 1 {
+			t.Fatalf("List(alice) returned %d entries, want 1 (one conversation per participant)", len(aliceList))
+		}
+		if aliceList[0].ConversationID != "alice" {
+			t.Errorf("List(alice)[0].ConversationID = %q, want %q", aliceList[0].ConversationID, "alice")
+		}
+		if aliceList[0].TurnCount != 1 {
+			t.Errorf("List(alice)[0].TurnCount = %d, want 1", aliceList[0].TurnCount)
+		}
+
+		bobList, err := store.List("bob")
+		if err != nil {
+			t.Fatalf("List(bob) returned %v, want nil", err)
+		}
+		if len(bobList) != 1 {
+			t.Fatalf("List(bob) returned %d entries, want 1", len(bobList))
+		}
+		if bobList[0].ConversationID != "bob" {
+			t.Errorf("List(bob)[0].ConversationID = %q, want %q", bobList[0].ConversationID, "bob")
+		}
+		if bobList[0].TurnCount != 1 {
+			t.Errorf("List(bob)[0].TurnCount = %d, want 1", bobList[0].TurnCount)
+		}
+	})
+
+	// S-CCS-018 — empty-list: a participant the store has nothing
+	// under returns an empty (non-nil) slice, not an error. The
+	// handler maps this to `200 []` so the chat page renders an
+	// empty rail rather than refusing it (REQ-8/REQ-9 amendment).
+	t.Run("S-CCS-018_List_returns_empty_for_unknown_participant", func(t *testing.T) {
+		t.Parallel()
+
+		store := chat.NewMemoryConversationStore()
+
+		got, err := store.List("never-existed")
+		if err != nil {
+			t.Fatalf("List(never-existed) returned %v, want nil (S-CCS-018: empty list is success, not not-found)", err)
+		}
+		if got == nil {
+			t.Errorf("List(never-existed) returned nil; want []ConversationSummary{} (non-nil empty slice — JSON serializes as [] not null)")
+		}
+		if len(got) != 0 {
+			t.Errorf("List(never-existed) returned %d entries, want 0", len(got))
+		}
+
+		// Follow-up: Append under a different id then List(never-existed)
+		// — the original miss must not have synthesised an entry.
+		if err := store.Append("another-id", chat.Exchange{PromptText: "x", AssistantText: "y"}); err != nil {
+			t.Fatalf("Append(another-id) returned %v, want nil", err)
+		}
+		got2, err2 := store.List("never-existed")
+		if err2 != nil {
+			t.Fatalf("List(never-existed) after follow-up Append returned %v, want nil", err2)
+		}
+		if len(got2) != 0 {
+			t.Errorf("List(never-existed) after follow-up Append returned %d entries, want 0 (no ghost entry)", len(got2))
+		}
+	})
+
+	// cross-participant-absent — participant-scoped read invariant:
+	// alice's list MUST NOT contain bob's row, even when both have
+	// recorded exchanges. This is NFR-CCS-007 (the additive List is
+	// a participant-scoped read like Load). Catches a regression that
+	// over-returns rows from the store iteration.
+	t.Run("List_is_participant_scoped_no_other_participants", func(t *testing.T) {
+		t.Parallel()
+
+		store := chat.NewMemoryConversationStore()
+		if err := store.Append("alice", chat.Exchange{PromptText: "a1", AssistantText: "r-a1"}); err != nil {
+			t.Fatalf("Append(alice) returned %v, want nil", err)
+		}
+		if err := store.Append("alice", chat.Exchange{PromptText: "a2", AssistantText: "r-a2"}); err != nil {
+			t.Fatalf("Append(alice) #2 returned %v, want nil", err)
+		}
+		if err := store.Append("bob", chat.Exchange{PromptText: "b1", AssistantText: "r-b1"}); err != nil {
+			t.Fatalf("Append(bob) returned %v, want nil", err)
+		}
+
+		aliceList, err := store.List("alice")
+		if err != nil {
+			t.Fatalf("List(alice) returned %v, want nil", err)
+		}
+		if len(aliceList) != 1 {
+			t.Fatalf("List(alice) returned %d entries, want 1", len(aliceList))
+		}
+		if aliceList[0].ConversationID != "alice" {
+			t.Errorf("List(alice)[0].ConversationID = %q, want alice", aliceList[0].ConversationID)
+		}
+		if aliceList[0].TurnCount != 2 {
+			t.Errorf("List(alice)[0].TurnCount = %d, want 2 (both alice exchanges count toward alice's turnCount)", aliceList[0].TurnCount)
+		}
+		// The cross-participant guard: alice's list MUST NOT include bob's
+		// row. Concrete assertion so a regression that over-returns fails
+		// the spec, not the harness.
+		for _, entry := range aliceList {
+			if entry.ConversationID != "alice" {
+				t.Errorf("alice's list leaked entry %q (NFR-CCS-007 violation)", entry.ConversationID)
+			}
+		}
+	})
+}
+
 // TestConversationStore_LoadUnknownReturnsErrConversationNotFound —
 // S-CCS-009. Load of an unknown participant id returns
 // ErrConversationNotFound and a follow-up Append under a different id
