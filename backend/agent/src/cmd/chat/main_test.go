@@ -28,6 +28,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,6 +38,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
@@ -679,5 +682,88 @@ func TestChatRoot_LiveSmoke(t *testing.T) {
 	}
 	if !terminalOnce {
 		t.Fatal("stream did not produce exactly one completion event (CH-04.3: turn terminates once)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CH-04.1 / scenario 2.2 — graceful shutdown calls the OTel shutdown.
+//
+// Spec scenario 2.2 (chat-composition-root § Requirement: OpenTelemetry SDK
+// Is Installed in the Composition Root and Nowhere Else, scenario
+// "OTel SDK shutdown flushes spans on signal"):
+//
+//	Given the binary is running and bound
+//	When SIGTERM is received
+//	Then the binary calls the OTel shutdown function with a bounded timeout
+//	And exits 0 within that timeout
+//
+// The implementation (main.go:run) calls otelShutdown(shutdownCtx) with
+// a 10-second bounded timeout after the Echo listener drains. No
+// automated test exercised this path; the verify report flagged it as
+// WARNING. This test closes the gap by:
+//
+//  1. Injecting a startAndWait that returns immediately (no real port
+//     binding) so the post-`e.Start` shutdown path is reachable.
+//  2. Injecting a tracking otelShutdown that records every call's
+//     context-deadline state.
+//  3. Asserting otelShutdown was called exactly once AND the context
+//     carried a deadline (the bounded-timeout contract).
+//
+// The test stays inside _test.go so the chat-archetype ambient-
+// authority guard (which scopes `os.Getenv` denial to chat/
+// production sources) is not triggered.
+// ---------------------------------------------------------------------------
+
+// TestComposeRoot_GracefulShutdown_CallsOTelShutdown exercises the
+// post-listener shutdown path without binding a real port. The
+// injected startAndWait returns nil immediately, simulating an Echo
+// listener that drained gracefully (the SIGTERM case).
+func TestComposeRoot_GracefulShutdown_CallsOTelShutdown(t *testing.T) {
+	t.Parallel()
+
+	// Tracking otelShutdown: records every call + the deadline state
+	// of the context the call carries.
+	var (
+		shutdownCalls   int
+		lastDeadline    time.Time
+		lastHasDeadline bool
+	)
+	otelShutdownTracked := func(ctx context.Context) error {
+		shutdownCalls++
+		lastDeadline, lastHasDeadline = ctx.Deadline()
+		return nil
+	}
+
+	// Inject a startAndWait that returns immediately, simulating a
+	// listener that drained (e.g. after SIGTERM).
+	startAndWait := func(_ *echo.Echo, _ string) error {
+		return nil
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	err := run(
+		context.Background(),
+		syntheticEnv(map[string]string{
+			"CACHICAMAS_CHAT_PROVIDER_API_KEY": "test-key",
+			"CACHICAMAS_CHAT_PROVIDER_MODEL":   "openai/gpt-4o-mini",
+			"AUTH_SECRET":                      validAuthSecret,
+		}),
+		otelShutdownTracked,
+		noop.NewTracerProvider(),
+		logger,
+		startAndWait,
+	)
+	if err != nil {
+		t.Fatalf("run() error = %v, want nil", err)
+	}
+
+	if shutdownCalls != 1 {
+		t.Errorf("otelShutdown calls = %d, want exactly 1 (spec scenario 2.2: shutdown fires once after the listener drains)", shutdownCalls)
+	}
+	if !lastHasDeadline {
+		t.Errorf("otelShutdown context had no deadline; spec scenario 2.2 requires a bounded timeout (the production code passes context.WithTimeout(ctx, 10*time.Second))")
+	}
+	if lastHasDeadline && time.Until(lastDeadline) > 11*time.Second {
+		t.Errorf("otelShutdown context deadline was %v from now; spec scenario 2.2 caps at 10s (production code uses 10*time.Second)", time.Until(lastDeadline))
 	}
 }
