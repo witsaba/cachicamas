@@ -1138,7 +1138,17 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/permission_events.go") ||
 				strings.HasSuffix(path, "/envelope_test.go") ||
 				strings.HasSuffix(path, "/permission_events_test.go") ||
-				strings.HasSuffix(path, "/stream_check_rejection_test.go")
+				strings.HasSuffix(path, "/stream_check_rejection_test.go") ||
+				// CH-03 widening (cachicamas-chat-http-surface
+				// remediation, R-LSK-004 "CH-03 widens this filter
+				// by one name", D3): ch03_carveout_test.go is the
+				// CH-03 test-only helper that owns isCH03GoModDrift
+				// for every byte-unchanged / scope-fence guard
+				// looking at go.mod / go.sum against this branch.
+				// Exact filename, no wildcard/prefix/directory.
+				// The diff is the documented Echo require entry;
+				// the helper itself is test-only.
+				strings.HasSuffix(path, "/ch03_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
@@ -1439,7 +1449,15 @@ func TestTurn_SubstrateUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git diff %s -- backend/agent/go.mod go.sum failed: %v", mainRef, err)
 	}
-	if len(goModSum) != 0 {
+	// CH-03 (cachicamas-chat-http-surface) carve-out: the chat
+	// archetype's HTTP+SSE surface requires github.com/labstack/echo/v5
+	// v5.2.1 (ADR adr/echo-v5-in-agent-module), bumping the
+	// module's go.mod from 3 require lines (AI-37) to 4. The drift
+	// is the recorded exception; every other go.mod / go.sum
+	// modification fails this clause.
+	if isCH03GoModDrift(goModSum) {
+		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
+	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
 	}
 }

@@ -71,7 +71,8 @@ func NewConversation(cfg Config) (*Conversation, error) {
 
 // Send drives one browser turn — exactly one Harness.Run call (R-CCP-001) —
 // and returns the projected wire event stream. The stream carries exactly
-// one terminal event and is then closed exactly once (R-CCP-006).
+// one terminal event and is then closed exactly once (R-CHS-006 — was
+// R-CCP-006 before CH-03.1 widened it).
 //
 // Two goroutines drive one turn: the runner calls Harness.Run over an
 // unbuffered sink (real backpressure — a buffered channel would fake it),
@@ -79,6 +80,14 @@ func NewConversation(cfg Config) (*Conversation, error) {
 // result channel; the projector ranges the sink, projecting events, and
 // completes the terminal wire event once both the held run_end payload and
 // the runner's result are available.
+//
+// The projected wire stream is BUFFERED (capacity wireChannelBuffer,
+// small enough to bound memory but large enough that a POST can return
+// 200 before the SSE subscriber attaches — R-CHS-001.a's invariant "the
+// turn is driving before the response is written" is preserved because
+// the projector goroutine writes into the buffered channel; if no
+// subscriber ever arrives, only the buffer's worth of events sit in the
+// channel until the terminal close lands).
 func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEvent, error) {
 	part, err := ai.NewText(prompt)
 	if err != nil {
@@ -95,7 +104,7 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 
 	sink := make(chan *agent.Event)
 	result := make(chan runResult, 1)
-	out := make(chan WireEvent)
+	out := make(chan WireEvent, wireChannelBuffer)
 
 	go func() {
 		_, finish, runErr := c.harness.Run(ctx, msg, sink)
@@ -106,6 +115,17 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 
 	return out, nil
 }
+
+// wireChannelBuffer sizes the projected wire channel. A small buffer
+// (capacity 8) lets a POST return 200 immediately while the projector
+// concurrently writes message.start / message.delta / message.end /
+// turn.end without blocking — the SSE subscriber can attach slightly
+// later and still see the ordered frames (S-CHS-002.a). Memory cost
+// is bounded: the buffer stores, at most, the events from a single
+// short turn; for a long turn, the projector blocks on the SSE
+// subscriber's read pace, which is the backpressure the HTTP path
+// requires.
+const wireChannelBuffer = 8
 
 // CancelOutcome is Cancel's typed result (R-CCP-006).
 type CancelOutcome int
@@ -145,4 +165,18 @@ func (c *Conversation) Cancel() CancelOutcome {
 	}
 	c.harness.Interrupt()
 	return CancelRequested
+}
+
+// IsInFlight reports whether a turn is currently driving through this
+// Conversation. The read happens under c.mu so callers outside the
+// package — chiefly chat.Registry.GetOrCreate, which needs to decide
+// whether a fresh POST may proceed or must be refused with a 409
+// (S-CHS-001.c) — do not race the writer in chat/projection.go's
+// terminal-event site. Returning the bool (not a copy of the struct)
+// is the durable property; the field itself can change shape in a
+// future refactor without breaking the call site.
+func (c *Conversation) IsInFlight() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inFlight
 }

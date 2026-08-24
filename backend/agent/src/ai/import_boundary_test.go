@@ -205,34 +205,50 @@ func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 	}
 }
 
-// wantGoModRequires is the exact require set ADR 0005 § D3 authorises at
-// AI-37 — measured under the repo-root go.work, where a sibling module
-// (backend/database_administrator) already pins the OpenTelemetry API at
-// v1.44.0 and the unified workspace build list resolves the same version
-// here (design.md AD-1). `go get go.opentelemetry.io/otel/trace@v1.44.0
-// go.opentelemetry.io/otel@v1.44.0` is expected to land exactly this table.
+// wantGoModRequires is the exact require set the agent module's
+// go.mod is authorised to declare. AI-37 (ADR 0005 § D3) bumped this
+// from zero with the two direct OpenTelemetry entries plus the
+// single-line indirect xxhash require — the table at AI-37 archive.
+// CH-03 (cachicamas-chat-http-surface) is the second recorded bump:
+// the chat archetype's HTTP+SSE surface requires
+// github.com/labstack/echo/v5 v5.2.1 (ADR
+// `adr/echo-v5-in-agent-module`, recorded in engram at the start of
+// CH-03's SDD flow), bringing the module-wide table to 4 entries.
+// The Layer-1 closure test below (which scopes to src/ai, src/ai/**,
+// src/agenttest, src/handoff, src/apptest via layer1Patterns) is
+// NOT affected: none of those packages imports Echo, so the Layer 1
+// wantExternalClosure stays at AI-37's table. The chat archetype's
+// own closure is what's pinned by chatArchetypeAllowedPrefixes and
+// chatArchetypeForcedClosurePrefixes in import_boundary_test.go
+// (Layer 2's file), verified there.
 //
-// Update procedure (AD-2, S-AGM-073): on a deliberate, ADR-gated dependency
-// bump, re-run `go list -deps -test -f '{{if not .Standard}}{{.ImportPath}}{{end}}'
-// github.com/cachicamas/backend/agent/...`, diff it against
-// wantExternalClosure below, verify no `go.opentelemetry.io/otel/sdk`- or
-// `go.opentelemetry.io/auto/sdk`-named path appears, and update both this
-// table and wantExternalClosure in the same commit.
+// Update procedure (AD-2, S-AGM-073, extended for CH-03): on a
+// deliberate, ADR-gated dependency bump, re-run
+// `go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}'
+// ./src/chat/... ./src/agent/...`, diff each Layer's closure against
+// the corresponding wantExternalClosure, verify no
+// `go.opentelemetry.io/otel/sdk`- or `go.opentelemetry.io/auto/sdk`-
+// named path appears, and update both tables in the same commit.
 var wantGoModRequires = []requireEntry{
 	{Path: "go.opentelemetry.io/otel", Version: "v1.44.0", Indirect: false},
 	{Path: "go.opentelemetry.io/otel/trace", Version: "v1.44.0", Indirect: false},
 	{Path: "github.com/cespare/xxhash/v2", Version: "v2.3.0", Indirect: true},
+	{Path: "github.com/labstack/echo/v5", Version: "v5.2.1", Indirect: false},
 }
 
-// wantExternalClosure is the exact non-stdlib package closure AI-37 pins by
-// SET EQUALITY, not by prefix subset (R-AGM-008) — the load-bearing half,
-// because allowedNonStdlibPrefixes' matcher (isAllowed, below) is
-// prefix-based and would silently admit a future otel/metric,
-// otel/baggage or otel/propagation import under the same "otel/trace" or
-// "otel/attribute" entries. A version bump that grows this set — the
-// vendored semconv path in particular, which is otel/trace's own
-// version-numbered subpackage — is a build failure here, not a quiet
-// drift (AD-2).
+// wantExternalClosure is the exact non-stdlib package closure LAYER 1
+// pins by SET EQUALITY, not by prefix subset (R-AGM-008) — the
+// load-bearing half, because allowedNonStdlibPrefixes' matcher
+// (isAllowed, below) is prefix-based and would silently admit a
+// future otel/metric, otel/baggage or otel/propagation import under
+// the same "otel/trace" or "otel/attribute" entries. A version bump
+// that grows this set — the vendored semconv path in particular,
+// which is otel/trace's own version-numbered subpackage — is a build
+// failure here, not a quiet drift (AD-2). The Layer-1 scan does NOT
+// include src/chat/ — that package's closure is checked separately
+// by chatArchetypeAllowedPrefixes and chatArchetypeForcedClosurePrefixes,
+// which is where CH-03's Echo row was admitted under the R-AGP-003
+// fresh-measurement clause.
 var wantExternalClosure = []string{
 	"github.com/cespare/xxhash/v2",
 	"go.opentelemetry.io/otel/attribute",
