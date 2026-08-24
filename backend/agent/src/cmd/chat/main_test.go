@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -385,7 +384,3 @@ func TestEnvString_RealEnvMissingKey(t *testing.T) {
 		t.Errorf("envString(%q) with unset key returned %q, want %q", probeKey, got, "/default-value")
 	}
 }
-
-// ensure fmt is referenced even when no path uses it directly — keeps
-// the imports list intentional as the file grows.
-var _ = fmt.Sprintf
