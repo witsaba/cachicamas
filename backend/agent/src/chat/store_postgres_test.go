@@ -223,3 +223,87 @@ func TestPostgresConversationStore_LoadUnknownReturnsErrConversationNotFound(t *
 		t.Fatalf("Load returned %d exchanges, want 1", len(loaded))
 	}
 }
+// TestPostgresConversationStore_ListEmptyParticipantIDRejected
+// (INTEGRATION-gated) — boundary check on List's empty participantID
+// refusal: matches Load's D-1 contract (ErrEmptyParticipantID).
+// INTEGRATION-gated because the constructor dials + pings, matching
+// the project's existing INTEGRATION-gate convention for any real-
+// store micro-test.
+func TestPostgresConversationStore_ListEmptyParticipantIDRejected(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	got, lerr := store.List("")
+	if !errors.Is(lerr, chat.ErrEmptyParticipantID) {
+		t.Errorf("List(empty) error = %v, want errors.Is(_, chat.ErrEmptyParticipantID)", lerr)
+	}
+	if got != nil {
+		t.Errorf("List(empty) returned %v, want nil on empty-participant-id refusal", got)
+	}
+}
+
+// TestPostgresConversationStore_CH08ListScenario is the WU-3
+// INTEGRATION-gated micro-test for the new List method: appends two
+// exchanges for a participant, then reads back via List and asserts
+// the summary carries the right ConversationID + TurnCount +
+// LastActivityAt (the round-trip path).
+func TestPostgresConversationStore_CH08ListScenario(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (the postgres List path dials a real Postgres)")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	const participant = "ch08-list-scenario-participant"
+	if err := store.Append(participant, chat.Exchange{PromptText: "first", AssistantText: "reply-A"}); err != nil {
+		t.Fatalf("Append(first) returned %v, want nil", err)
+	}
+	if err := store.Append(participant, chat.Exchange{PromptText: "second", AssistantText: "reply-B"}); err != nil {
+		t.Fatalf("Append(second) returned %v, want nil", err)
+	}
+
+	list, lerr := store.List(participant)
+	if lerr != nil {
+		t.Fatalf("List(%q) returned %v, want nil", participant, lerr)
+	}
+	if len(list) != 1 {
+		t.Fatalf("List returned %d entries, want 1 (one conversation per participant — D-1)", len(list))
+	}
+	if list[0].ConversationID != participant {
+		t.Errorf("List[0].ConversationID = %q, want %q", list[0].ConversationID, participant)
+	}
+	if list[0].TurnCount != 2 {
+		t.Errorf("List[0].TurnCount = %d, want 2 (both appends count toward turn_count)", list[0].TurnCount)
+	}
+	if list[0].LastActivityAt.IsZero() {
+		t.Error("List[0].LastActivityAt is the zero time, want a real timestamp from chat_conversations.updated_at")
+	}
+}
+
+// TestPostgresConversationStore_CH08Scenarios_PassUnchanged
+// (INTEGRATION-gated) — WU-4 binding acceptance: the CH-06 + CH-08
+// scenario helper runs unchanged against the postgres adapter.
+func TestPostgresConversationStore_CH08Scenarios_PassUnchanged(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (the WU-4 scenario helper extended at S-CCS-015..018 against a real Postgres)")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	RunConversationStoreScenarios(t, store)
+}
