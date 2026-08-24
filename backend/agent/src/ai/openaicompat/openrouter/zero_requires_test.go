@@ -73,16 +73,21 @@ const openrouterModulePath = "github.com/cachicamas/backend/agent"
 // and counts required modules.
 const goModPath = "../../../../go.mod"
 
-// wantGoModRequireLines is the exact required-module count AI-37 (ADR
-// 0005 § D3, D-6) authorises: the two direct OpenTelemetry entries
-// inside the "require ( ... )" block, plus the single-line indirect
-// xxhash require — 3 total, counted by countGoModRequireLines's own
-// module-entry walk (Judgment Day remediation: this counts entries, not
-// "require"-prefixed lines, so an addition inside the block is no
-// longer invisible). Any further required module is either a later
-// ADR-gated addition — which must update this constant in the same
-// commit — or an unauthorized dependency.
-const wantGoModRequireLines = 3
+// wantGoModRequireLines is the exact required-module count the agent
+// module's go.mod is authorised to declare. AI-37 (ADR 0005 § D3, D-6)
+// bumped this from zero with the two direct OpenTelemetry entries
+// plus the single-line indirect xxhash require — 3 total. CH-03
+// (cachicamas-chat-http-surface) is the second recorded bump: the
+// chat archetype's HTTP+SSE surface requires github.com/labstack/echo/v5
+// v5.2.1 (ADR `adr/echo-v5-in-agent-module`, recorded in engram at the
+// start of CH-03's SDD flow), bringing the count to 4. Counted by
+// countGoModRequireLines's own module-entry walk (Judgment Day
+// remediation: this counts entries, not "require"-prefixed lines, so
+// an addition inside the block is no longer invisible). Any further
+// required module is either a later ADR-gated addition — which must
+// update this constant in the same commit — or an unauthorized
+// dependency.
+const wantGoModRequireLines = 4
 
 // wantAllowedNonStdlibPrefixes is the exact, ordered
 // allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus
