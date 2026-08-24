@@ -1341,7 +1341,9 @@ func filterOutLoopHookFiles(diff string) string {
 				strings.HasSuffix(path, "/permission_events.go") ||
 				strings.HasSuffix(path, "/envelope_test.go") ||
 				strings.HasSuffix(path, "/permission_events_test.go") ||
-				strings.HasSuffix(path, "/stream_check_rejection_test.go")
+				strings.HasSuffix(path, "/stream_check_rejection_test.go") ||
+				// CH-03 widening — see loop_test.go's mirror entry.
+				strings.HasSuffix(path, "/ch03_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

@@ -1138,7 +1138,17 @@ func filterOutLoopFiles(diff string) string {
 				strings.HasSuffix(path, "/permission_events.go") ||
 				strings.HasSuffix(path, "/envelope_test.go") ||
 				strings.HasSuffix(path, "/permission_events_test.go") ||
-				strings.HasSuffix(path, "/stream_check_rejection_test.go")
+				strings.HasSuffix(path, "/stream_check_rejection_test.go") ||
+				// CH-03 widening (cachicamas-chat-http-surface
+				// remediation, R-LSK-004 "CH-03 widens this filter
+				// by one name", D3): ch03_carveout_test.go is the
+				// CH-03 test-only helper that owns isCH03GoModDrift
+				// for every byte-unchanged / scope-fence guard
+				// looking at go.mod / go.sum against this branch.
+				// Exact filename, no wildcard/prefix/directory.
+				// The diff is the documented Echo require entry;
+				// the helper itself is test-only.
+				strings.HasSuffix(path, "/ch03_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
