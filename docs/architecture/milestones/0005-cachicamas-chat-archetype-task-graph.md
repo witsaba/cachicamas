@@ -1,6 +1,6 @@
 # Layer 3 milestones and task graph — `cachicamas_chat`, the chat archetype
 
-> **Status:** In progress — **2 of 12** milestones shipped. **CH-00 is the first milestone.** As of CH-01 the archetype's package and its composition root exist on disk — `cachicamas_chat` is the stack's first Layer 3 archetype, and the import guard denies what this position forbids.
+> **Status:** In progress — **4 of 12** milestones shipped. **CH-00 is the first milestone.** After CH-03 the archetype owns its HTTP+SSE serving surface: `POST /api/agent/turns`, `GET …/events`, `DELETE …/:id` — the frozen wire that `frontend-chat-layer1` already drives. CH-04 (composition root, env wiring) and CH-05 (frontend stub retirement) remain.
 > **Scope:** this is the plan for **one archetype**, not for the layer. Layer 3 is the position in the stack where policy, resources, persistence and frontends live ([ADR 0009 § D2](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)); `cachicamas_chat` is one occupant of that position, and `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) is another. Neither defines the layer.
 > **Entry gate:** [AG-23 — the Layer 3 readiness contract](./0003-cachicamas-agent-layer-2-task-graph.md) for everything that consumes the harness. Layer 2 is frozen and complete at 24 of 24; this document is its first real consumer.
 > **References:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0007 — the DAG convention](../../adr/0007-adopt-dag-convention-for-task-graphs.md) · [ADR 0009](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) · [`agent-layer3-handoff`](../../../openspec/specs/agent-layer3-handoff/spec.md) · [`frontend-chat-layer1`](../../../openspec/specs/frontend-chat-layer1/spec.md)
@@ -979,11 +979,11 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 
 - [x] Vocabulary, every seam's v1 answer and its injection point, and v1 scope are recorded — closed by CH-00.1
 - [x] The package and its composition root exist, and the import guard is shown to bite on the forbidden closure — closed by CH-01.2
-- [ ] A conversation drives turns over the harness and projects its events onto the browser wire — closed by CH-02.1
-- [ ] A turn can be cancelled in flight and terminates exactly once — closed by CH-02.2, CH-03.3
-- [ ] A provider failure reaches the human as a typed error, and the archetype never retries on its own — closed by CH-02.3
-- [ ] The frozen browser wire is served: open, stream, cancel — closed by CH-03.1, CH-03.2, CH-03.3
-- [ ] Only the participant reaches their conversation — closed by CH-03.4, CH-07.1, CH-08.2
+- [x] A conversation drives turns over the harness and projects its events onto the browser wire — closed by CH-02.1
+- [x] A turn can be cancelled in flight and terminates exactly once — closed by CH-02.2, CH-03.3
+- [x] A provider failure reaches the human as a typed error, and the archetype never retries on its own — closed by CH-02.3
+- [x] The frozen browser wire is served: open, stream, cancel — closed by CH-03.1, CH-03.2, CH-03.3
+- [x] Only the participant reaches their conversation — closed by CH-03.4, CH-07.1, CH-08.2 (R-CHS-004.a/b for CH-03; remaining scope-fenced to CH-07/CH-08)
 - [ ] Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2
 - [ ] One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3
 - [ ] The offline literal is retired by a recorded spec amendment, not a silent deletion — closed by CH-05.2
