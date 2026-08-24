@@ -57,16 +57,17 @@ Conventions: RFC 2119 keywords; Given/When/Then scenarios (project `openspec/con
 - **S-4.b** Given the user submits a prompt the backend rejects with 400 `kind: "validation"`, then the input shows the per-field validation inline and remains submittable, and no retry fires.
 - **S-4.c** Given the backend returns 409 `kind: "conflict"` mid-stream, then the bubble displays the conflict message and no auto-retry fires.
 
-### REQ-5 — Dev-mode honest offline failure
+### REQ-5 — Dev-mode honest offline failure (amended 2026-08-24)
 
-**Statement.** When the backend is unreachable from a dev browser, `chat-api.ts` SHALL surface `ApiErrorKind = "offline"` whose `message` contains the literal `"backend not wired — see PR for backend wire"`; the client SHALL NOT silently retry, SHALL NOT fabricate a response, and SHALL NOT log only to console.
+**Statement.** When the chat endpoint is unreachable from a dev browser, `chat-api.ts` SHALL surface `ApiErrorKind = "offline"` whose `message` contains the substring `"Couldn't reach the chat service. Is docker compose up?"`; the client SHALL NOT silently retry, SHALL NOT fabricate a response, and SHALL NOT log only to console.
 
-**Rationale.** User-locked D4 (proposal §5) + explore.md R1. The backend HTTP surface does not yet exist (doc 0001 §5.2 lines 518–535 — `cmd/cachicamas` is not on disk). Surfacing the literal phrase makes the gap greppable in DevTools/CI; a fake success would mask an architectural gap.
+**Rationale.** The original REQ-5 stated the purpose was to make an architectural gap greppable. The gap is now closed: the archetype's composition root (`backend/agent/src/cmd/chat/`, CH-04, PR #194, commit `2b891117`) serves `POST /api/agent/turns`, and `frontend/src/components/chat/use-chat-stream.ts` (CH-05.1) submits against it. The literal that REQ-5 mandated — `"backend not wired — see PR for backend wire"` — is therefore no longer true. Deleting it without a recorded spec delta would leave a promoted requirement falsified by shipped code and nothing would fail (`0005:97`, `0005:637`). This amendment retires the literal **on the record**, replacing it with a generic dev-honest phrase that preserves the original REQ-5's intent: a dev-mode network failure is greppable, never silently retried or fabricated, without claiming a backend is unwired when one now is. The `kind: "offline"` arm of `ApiResult<T>` (`frontend/src/lib/api.ts:89-94`, `chat-types.ts:93-98`) survives — it is the right shape for any transient network failure and is never produced by the server (D-1).
 
 **Scenarios.**
 
-- **S-5.a** Given `pnpm dev` runs with no backend on the chat endpoint, when the user submits a prompt, then `chat-api.ts` resolves to `{ ok: false, kind: "offline", message: "backend not wired — see PR for backend wire" }`, the input shows that message inline, no retry timer starts, no fake assistant bubble is inserted.
-- **S-5.b** Given `EventSource` opens in dev with no backend, when `onerror` fires before any `message.delta`, then the client converts the error into the same `kind: "offline"` payload and the conversation accepts a fresh submit.
+- **S-5.a (amended)** — Given `pnpm dev` runs with no backend reachable on the chat endpoint, when the user submits a prompt, then `chat-api.ts` resolves to `{ ok: false, kind: "offline", message: "Couldn't reach the chat service. Is docker compose up? (network error)" }`, the input shows that message inline, no retry timer starts, no fake assistant bubble is inserted.
+- **S-5.b (amended)** — Given `EventSource` opens in dev with no backend reachable, when `onerror` fires before any `message.delta`, then the client converts the error into the same `kind: "offline"` payload and the conversation accepts a fresh submit.
+- **S-5.c (new, 2026-08-24)** — Given the archetype's composition root is serving at `POST /api/agent/turns` (`backend/agent/src/cmd/chat/`, CH-04), when the chat page submits a prompt, then the resolved message MUST NOT contain the retired literal `"backend not wired — see PR for backend wire"`. The `kind: "offline"` arm MAY still fire if the network itself fails; its message must be the amended phrase.
 
 ### REQ-6 — Markdown + sanitization for assistant text
 
@@ -142,7 +143,7 @@ Conventions: RFC 2119 keywords; Given/When/Then scenarios (project `openspec/con
 - [ ] every REQ has ≥1 happy-path AND ≥1 failure-path in Given/When/Then.
 - [ ] REQ-2 cites the harness-cancellation rationale from §4.2 (not just code reuse).
 - [ ] REQ-4 explicitly forbids client-side retry — no `setTimeout(retry)` in the implementation.
-- [ ] REQ-5 names the **literal** error string (`"backend not wired — see PR for backend wire"`) — greppable.
+- [ ] REQ-5 names an error string (amended post-CH-05.2: substring `"Couldn't reach the chat service. Is docker compose up?"`) — the literal `OFFLINE_LITERAL` constant is retired in the merged tree.
 - [ ] REQ-6 forbids `dangerouslySetInnerHTML` and asserts the sanitizer allowlist, not a hand-rolled one.
 - [ ] REQ-7 forces per-file spec coverage — a future contributor cannot land impl without a green-then-violet proof.
 - [ ] zero file in `backend/`, `infra/`, or `docker-compose*.yaml` is touched by this spec's contract.
