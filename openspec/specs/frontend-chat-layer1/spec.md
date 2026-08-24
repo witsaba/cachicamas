@@ -148,3 +148,48 @@ Conventions: RFC 2119 keywords; Given/When/Then scenarios (project `openspec/con
 - [ ] REQ-7 forces per-file spec coverage — a future contributor cannot land impl without a green-then-violet proof.
 - [ ] zero file in `backend/`, `infra/`, or `docker-compose*.yaml` is touched by this spec's contract.
 - [ ] no requirement contradicts `frontend-auth`, `frontend-runtime`, or `home-page` (all read-only).
+
+---
+
+# Amendments added by CH-08 (2026-08-24) — `cachicamas-chat-resume-in-browser`
+
+> **Change**: `cachicamas-chat-resume-in-browser` · **CH-08** (Wave 2) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-08--resume-a-conversation-in-the-browser) (`0005:842-899`)
+> **Amends**: this spec (`frontend-chat-layer1`) — **additive only**. Every REQ-1..REQ-7 requirement is **byte-unchanged**. The closed `ChatStreamEvent` union (REQ-1, REQ-7) is **not widened**. New identifiers: **REQ-8**, **REQ-9**, **S-FCL-008**, **S-FCL-009**, **S-FCL-010**, **S-FCL-011**. The header-trimmed README pointer records the CH-08 charter and the Gherkin scenarios at `0005:859-873` and `0005:880-895` as the source-of-truth wording the new S-FCL-NNN scenarios transcribe.
+
+## ADDED Requirements
+
+### REQ-8 — On mount, the page fetches the participant's recorded transcript and conversation summary list and renders them
+
+On the Qwik `useVisibleTask$` mount of `chat-app.tsx`, the page MUST issue `GET /api/agent/conversations/:id` (CH-08.1, R-CRI-001) and `GET /api/agent/conversations` (CH-08.2, R-CRI-002) in parallel against the participant id surfaced from `requireSession` (`routes/chat/index.tsx`). The page MUST call `useChatStream.reset(entries)` (CH-05 hook API) with the recorded exchanges from the reload endpoint, seeding the buffer without opening an `EventSource`. The page MUST re-mount the `ConversationList` component (`conversation-list.tsx`, surviving from CH-05.1, dropped per CH-05 D-3) against the wire summary list — `id` is the participant id, `age` is derived from `lastActivityAt` via a relative-time helper, `turnCount` is rendered alongside. The deep-link `?with=<slug>` MUST continue to resolve to an `agentSlug` from `staff.ts` (CH-05 D-6, decisions D-4) but MUST NOT drive which conversation loads — the participant's recorded transcript is the source of truth.
+
+#### Scenario: S-FCL-008 — reloading the page restores the conversation (Gherkin verbatim, `0005:862-866`)
+
+- Given an employee who has completed two turns and reloads the page
+- When the page loads
+- Then both exchanges are shown in their original order
+- And the input accepts a new prompt that continues the same conversation
+
+#### Scenario: S-FCL-009 — a reload during a streaming turn shows what was recorded (Gherkin verbatim, `0005:868-872`)
+
+- Given an employee who reloads while a turn is streaming
+- When the page loads
+- Then the exchanges recorded before the reload are shown
+- And the page does not claim the turn is still streaming
+
+#### Scenario: S-FCL-010 — a participant sees their own conversations and no others (Gherkin verbatim, `0005:885-889`)
+
+- Given two participants who have each held conversations
+- When one of them requests their list
+- Then the list contains only their own conversations
+- And each entry identifies its conversation well enough to open it
+
+#### Scenario: S-FCL-011 — a participant with no conversations gets an empty list (Gherkin verbatim, `0005:891-895`)
+
+- Given an authenticated participant who has never held a conversation
+- When they request their list
+- Then the list is empty
+- And the response is a success rather than a not-found
+
+### REQ-9 — A reload that catches an in-flight turn MUST NOT claim streaming
+
+On a reload that catches an in-flight turn (the participant reloaded the tab mid-stream), the page MUST render the exchanges recorded before the reload (REQ-8, S-FCL-009). The page MUST NOT claim the turn is still streaming — `Composer`'s `status` MUST resolve to `"idle"` once both GETs return; `turn.status` (the `useChatStream` signal) MUST NOT be set to `"streaming"` on mount. The page MUST NOT auto-open an `EventSource` for the prior conversation id; the next `EventSource` is opened only on the next `submit()` call. The closed `ChatStreamEvent` union (REQ-1, REQ-7) is not widened by this delta — the read-side wire types `ConversationSummaryDTO` and `ExchangeDTO` are new types adjacent to it, never additions to it.

@@ -298,3 +298,60 @@ The single v1 migration `backend/agent/src/chat/migrations/0001_init.sql` MUST c
 ## Untemporal-invariant register (CH-07 addition)
 
 The D-5 record ("no promoted spec is amended") is preserved here as an **absence marker**, the same way `chat-package-boundary` records the analogous invariant. The amendment is additive only — see the CH-07 amendment header at the top of this file. R-AGP-003 / R-AGP-005 are the precedent this entry cites.
+
+---
+
+# Amendments added by CH-08 (2026-08-24) — `cachicamas-chat-resume-in-browser`
+
+> **Change**: `cachicamas-chat-resume-in-browser` · **CH-08** (Wave 2) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-08--resume-a-conversation-in-the-browser) (`0005:842-899`) · leaves CH-08.1 `[leaf]` (`0005:855-876`) · CH-08.2 `[leaf]` (`0005:878-899`)
+> **Amends**: this spec (`chat-conversation-store`) — **additive only**; identical pattern to the CH-07 amendment above. Identifier-append-only per the CH-07 precedent. The widening is **third method on the same declaration**, not a replacement of R-CCS-010's two-method surface.
+
+## ADDED Requirements
+
+### R-CCS-013 — `ConversationStore` widens with a third additive method `List`
+
+The `ConversationStore` interface (R-CCS-010) MUST be extended by adding a third method `List(participantID string) ([]ConversationSummary, error)` to the same declaration. The two existing methods `Append` and `Load` MUST remain byte-unchanged. `MemoryConversationStore` (R-CCS-002) and `PostgresConversationStore` (R-CCS-011) MUST both implement `List`. `MemoryConversationStore.List` MUST iterate the `m` map and return `[]ConversationSummary` (possibly empty) without mutating map state; `PostgresConversationStore.List` MUST execute `SELECT participant_id, updated_at, COALESCE((SELECT MAX(position)+1 FROM chat_exchanges WHERE participant_id = $1), 0) AS turn_count FROM chat_conversations WHERE participant_id = $1 ORDER BY updated_at DESC` against the existing schema. The widening is **additive** — it does not replace R-CCS-010's two-method declaration; future widens MUST follow the same additive pattern.
+
+### R-CCS-014 — `ConversationSummary` is the port's list projection
+
+The system MUST expose a `ConversationSummary` struct carrying `ConversationID string`, `LastActivityAt time.Time`, and `TurnCount int`. `ConversationSummary` is defined in `chat-conversation-store` because it is the port's projection (the rule: the port owns its own projections). The wire DTO `ConversationSummaryDTO` is defined in the resume spec (`cachicamas-chat-resume-in-browser`, R-CRI-004) and is a pure transport projection — the wire MUST NOT invent fields beyond what `ConversationSummary` carries.
+
+### NFR-CCS-007 — `List` is a participant-scoped read under identity middleware
+
+`ConversationStore.List` MUST be a participant-scoped read. Implementations MUST NOT return rows for any other participant even under a corrupted or missing identity. The guard pattern: identity middleware runs the participant through `getIdentity(c)` (R-CHS-004.b shape) before `List` is called; the handler uses the resolved id, not any URL or header value.
+
+### Scenarios
+
+#### Scenario: S-CCS-015 — reloading the page restores the conversation (Gherkin verbatim, `0005:862-866`)
+
+- Given an employee who has completed two turns and reloads the page
+- When the page loads
+- Then both exchanges are shown in their original order
+- And the input accepts a new prompt that continues the same conversation
+
+#### Scenario: S-CCS-016 — a reload during a streaming turn shows what was recorded (Gherkin verbatim, `0005:868-872`)
+
+- Given an employee who reloads while a turn is streaming
+- When the page loads
+- Then the exchanges recorded before the reload are shown
+- And the page does not claim the turn is still streaming
+
+#### Scenario: S-CCS-017 — a participant sees their own conversations and no others (Gherkin verbatim, `0005:885-889`)
+
+- Given two participants who have each held conversations
+- When one of them requests their list
+- Then the list contains only their own conversations
+- And each entry identifies its conversation well enough to open it
+
+#### Scenario: S-CCS-018 — a participant with no conversations gets an empty list (Gherkin verbatim, `0005:891-895`)
+
+- Given an authenticated participant who has never held a conversation
+- When they request their list
+- Then the list is empty
+- And the response is a success rather than a not-found
+
+---
+
+# Untemporal-invariant register (CH-08 addition)
+
+The D-5 / CH-07-2 records above are preserved here as **absence markers**. The CH-08 amendment is additive only — see the CH-08 amendment header at the top of this file. R-CCS-013 widens the port to N+1 methods, not "opens" it; future widens keep the additive pattern.
