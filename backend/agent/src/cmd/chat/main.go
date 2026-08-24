@@ -142,7 +142,14 @@ func buildProvider(cfg config, tp trace.TracerProvider) (ai.ModelProvider, error
 // StartConfig.GracefulTimeout, default 10s) before returning. run()
 // waits for that return, then fires the OTel shutdown so any in-flight
 // spans are flushed before the TracerProvider tears down.
-func run(_ context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger) error {
+//
+// startAndWait is injected so tests can return immediately without
+// binding a real port; main() passes e.Start, which blocks until the
+// listener drains. This is the seam that lets
+// TestComposeRoot_GracefulShutdown_CallsOTelShutdown exercise the
+// post-listener shutdown path (spec scenario 2.2) without owning a
+// process.
+func run(_ context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger, startAndWait func(*echo.Echo, string) error) error {
 	cfg, err := loadConfig(getenv)
 	if err != nil {
 		return err
@@ -166,7 +173,7 @@ func run(_ context.Context, getenv func(string) string, otelShutdown func(contex
 	_ = registry // held for future graceful-shutdown hooks; CH-04 has no per-turn cleanup
 
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
-	startErr := e.Start(":" + cfg.Port)
+	startErr := startAndWait(e, ":"+cfg.Port)
 
 	// Echo has drained. Now flush the OTel pipeline so any spans held
 	// in the BatchSpanProcessor make it to the collector before exit.
@@ -195,7 +202,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := run(ctx, os.Getenv, otelShutdown, otelTP, logger); err != nil {
+	if err := run(ctx, os.Getenv, otelShutdown, otelTP, logger, startEcho); err != nil {
 		fmt.Fprintf(os.Stderr, "chat: %v\n", err)
 		os.Exit(1)
 	}
@@ -211,4 +218,13 @@ func installProductionOTelSDK(ctx context.Context) (func(context.Context) error,
 		return nil, nil, err
 	}
 	return shutdown, otel.GetTracerProvider(), nil
+}
+
+// startEcho is the production startAndWait injected into run(): blocks
+// until the Echo listener drains (graceful shutdown on SIGINT/SIGTERM,
+// bounded by StartConfig.GracefulTimeout, default 10s). main() uses
+// this; tests inject a function that returns immediately to exercise
+// the post-listener shutdown path without binding a real port.
+func startEcho(e *echo.Echo, address string) error {
+	return e.Start(address)
 }
