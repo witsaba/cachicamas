@@ -1,6 +1,6 @@
 # Layer 3 milestones and task graph — `cachicamas_chat`, the chat archetype
 
-> **Status:** In progress — **4 of 12** milestones shipped. **CH-00 is the first milestone.** After CH-03 the archetype owns its HTTP+SSE serving surface: `POST /api/agent/turns`, `GET …/events`, `DELETE …/:id` — the frozen wire that `frontend-chat-layer1` already drives. CH-04 (composition root, env wiring) and CH-05 (frontend stub retirement) remain.
+> **Status:** In progress — **5 of 12** milestones shipped. **CH-00 is the first milestone.** After CH-03 the archetype owns its HTTP+SSE serving surface: `POST /api/agent/turns`, `GET …/events`, `DELETE …/:id` — the frozen wire that `frontend-chat-layer1` already drives. CH-04 (composition root, env wiring) shipped 2026-08-24: `backend/agent/src/cmd/chat/` now reads every required env var, installs the OpenTelemetry SDK, builds the openrouter provider + JWE IdentityResolver shim, mounts the chat surface, and binds Echo with graceful OTel shutdown on SIGTERM/SIGINT. CH-05 (frontend stub retirement) remains.
 > **Scope:** this is the plan for **one archetype**, not for the layer. Layer 3 is the position in the stack where policy, resources, persistence and frontends live ([ADR 0009 § D2](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)); `cachicamas_chat` is one occupant of that position, and `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) is another. Neither defines the layer.
 > **Entry gate:** [AG-23 — the Layer 3 readiness contract](./0003-cachicamas-agent-layer-2-task-graph.md) for everything that consumes the harness. Layer 2 is frozen and complete at 24 of 24; this document is its first real consumer.
 > **References:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0007 — the DAG convention](../../adr/0007-adopt-dag-convention-for-task-graphs.md) · [ADR 0009](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) · [`agent-layer3-handoff`](../../../openspec/specs/agent-layer3-handoff/spec.md) · [`frontend-chat-layer1`](../../../openspec/specs/frontend-chat-layer1/spec.md)
@@ -318,9 +318,11 @@ flowchart TB
   classDef decision fill:#ede9fe,stroke:#8b5cf6,color:#1f2937
   classDef mechanical fill:#f1f5f9,stroke:#cbd5e1,color:#1f2937
   classDef compound fill:#ccfbf1,stroke:#14b8a6,color:#1f2937
-  class CH02_1,CH02_2,CH02_3,CH03_1,CH03_2,CH03_3,CH03_4,CH04_1,CH04_3,CH05_1 leaf
+  classDef done fill:#f1f5f9,stroke:#475569,color:#1f2937,stroke-dasharray: 4 3
+  class CH02_1,CH02_2,CH02_3,CH03_1,CH03_2,CH03_3,CH03_4,CH05_1 leaf
   class CH04_2 guard
   class CH05_2 mechanical
+  class CH04_1,CH04_2,CH04_3 done
 ```
 
 ### CH-02 — Assemble the conversation over the harness
