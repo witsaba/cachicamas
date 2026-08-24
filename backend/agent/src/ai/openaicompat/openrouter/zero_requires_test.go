@@ -80,14 +80,22 @@ const goModPath = "../../../../go.mod"
 // (cachicamas-chat-http-surface) is the second recorded bump: the
 // chat archetype's HTTP+SSE surface requires github.com/labstack/echo/v5
 // v5.2.1 (ADR `adr/echo-v5-in-agent-module`, recorded in engram at the
-// start of CH-03's SDD flow), bringing the count to 4. Counted by
-// countGoModRequireLines's own module-entry walk (Judgment Day
-// remediation: this counts entries, not "require"-prefixed lines, so
-// an addition inside the block is no longer invisible). Any further
-// required module is either a later ADR-gated addition — which must
-// update this constant in the same commit — or an unauthorized
-// dependency.
-const wantGoModRequireLines = 4
+// start of CH-03's SDD flow), bringing the count to 4. CH-04
+// (cachicamas-chat-composition-root) is the third recorded bump: the
+// chat composition root is the only package permitted to install the
+// OpenTelemetry SDK and OTLP exporter (ADR 0005 § D3, adr:242) and the
+// only package that builds an in-process JWE IdentityResolver shim
+// over the lestrrat-go/jwx/v2 envelope, bringing the count to 32
+// (7 direct requires: echo, jwx/v2, otel, otel/exporters/otlp/otlptracegrpc,
+// otel/sdk, otel/trace, golang.org/x/crypto; 25 transitive indirects).
+//
+// Counted by countGoModRequireLines's own module-entry walk (Judgment
+// Day remediation: this counts entries, not "require"-prefixed lines,
+// so an addition inside the block is no longer invisible). Any
+// further required module is either a later ADR-gated addition —
+// which must update this constant in the same commit — or an
+// unauthorized dependency.
+const wantGoModRequireLines = 32
 
 // wantAllowedNonStdlibPrefixes is the exact, ordered
 // allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus
