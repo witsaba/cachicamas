@@ -64,6 +64,24 @@
 //     under the ADR 0009 § D2 substitution.
 //   - github.com/labstack/echo/v5 v5.2.1 and its measured transitive
 //     closure (CH-03 ADR `adr/echo-v5-in-agent-module`).
+//   - CH-07 (cachicamas-chat-store-adapter): chat owns its tables
+//     and its migration runner. Two new top-level deps are admitted
+//     in the same PR as this widening — github.com/jackc/pgx/v5
+//     v5.10.0 (Postgres driver via the stdlib shim) and
+//     github.com/pressly/goose/v3 v3.27.1 (migration runner, scoped
+//     to the chat-package-local migrations/). ADR
+//     `0010-add-pgx-and-goose-to-backend-agent.md` is the dep
+//     admission; the chat archetype's import-boundary allowlist
+//     widens per R-AGP-003 same-commit rule (recorded in
+//     backend/agent/src/agent/import_boundary_test.go's
+//     chatArchetypeAllowedPrefixes and
+//     chatArchetypeForcedClosurePrefixes). The Postgres adapter
+//     implements the same two methods of the same
+//     `ConversationStore` port the in-memory adapter satisfied
+//     (R-CCS-010, R-CCS-011); v1 carries the postgres-backed
+//     adapter behind the same closed two-method surface. CH-08
+//     may extend the port to a list (CH-08.2 widens it; CH-08.1
+//     is the browser reload surface).
 //
 // Both closures are enforced mechanically, not by this comment alone:
 // backend/agent/src/agent/import_boundary_test.go's check 6

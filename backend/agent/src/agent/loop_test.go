@@ -1161,7 +1161,18 @@ func filterOutLoopFiles(diff string) string {
 				// of loop_hook_test.go's filterOutLoopHookFiles
 				// below — byte-in-sync is asserted by
 				// TestScopeFence_S_LSK_031.
-				strings.HasSuffix(path, "/ch04_carveout_test.go")
+				strings.HasSuffix(path, "/ch04_carveout_test.go") ||
+				// CH-07 widening (cachicamas-chat-store-adapter,
+				// ADR 0010): ch07_carveout_test.go is the CH-07
+				// test-only helper that owns isCH07GoModDrift;
+				// CH-07 widens the pre-authorized go.mod set
+				// from the CH-04 7-require baseline to a
+				// 9-require baseline (github.com/jackc/pgx/v5
+				// + github.com/pressly/goose/v3) + indirects.
+				// Mirror of loop_hook_test.go's
+				// filterOutLoopHookFiles below — byte-in-sync
+				// asserted by TestScopeFence_S_LSK_031.
+				strings.HasSuffix(path, "/ch07_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)
@@ -1470,6 +1481,8 @@ func TestTurn_SubstrateUntouched(t *testing.T) {
 	// modification fails this clause.
 	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
 		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
+	} else if isCH07GoModDrift(goModSum) {
+		t.Logf("CH-07 carve-out: go.mod / go.sum drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", goModSum)
 	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
 	}

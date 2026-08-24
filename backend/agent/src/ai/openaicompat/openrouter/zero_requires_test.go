@@ -95,7 +95,15 @@ const goModPath = "../../../../go.mod"
 // further required module is either a later ADR-gated addition —
 // which must update this constant in the same commit — or an
 // unauthorized dependency.
-const wantGoModRequireLines = 32
+//
+// CH-07 (cachicamas-chat-store-adapter, ADR
+// 0010-add-pgx-and-goose-to-backend-agent.md) is the next ADR-gated
+// bump after CH-04: github.com/jackc/pgx/v5 v5.10.0 is the chat
+// archetype's Postgres driver, plus pgx/v5's transitive closure
+// (pgpassfile, pgservicefile, puddle/v2, x/sync v0.22.0) — 5 net
+// additions, bringing the total to 37. pressly/goose/v3 lands at
+// WU-3 when runner.go imports it (additional 5 transitives).
+const wantGoModRequireLines = 37
 
 // wantAllowedNonStdlibPrefixes is the exact, ordered
 // allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus

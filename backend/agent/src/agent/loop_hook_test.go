@@ -999,6 +999,8 @@ func TestTurn_PreRequestHook_SubstrateUntouched(t *testing.T) {
 	// modification fails this clause.
 	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
 		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
+	} else if isCH07GoModDrift(goModSum) {
+		t.Logf("CH-07 carve-out: go.mod / go.sum drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", goModSum)
 	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
 	}
@@ -1345,7 +1347,9 @@ func filterOutLoopHookFiles(diff string) string {
 				// CH-03 widening — see loop_test.go's mirror entry.
 				strings.HasSuffix(path, "/ch03_carveout_test.go") ||
 				// CH-04 widening — see loop_test.go's mirror entry.
-				strings.HasSuffix(path, "/ch04_carveout_test.go")
+				strings.HasSuffix(path, "/ch04_carveout_test.go") ||
+				// CH-07 widening — see loop_test.go's mirror entry.
+				strings.HasSuffix(path, "/ch07_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

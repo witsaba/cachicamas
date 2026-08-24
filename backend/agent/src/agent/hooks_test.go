@@ -1733,6 +1733,8 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 	// exception; every other modification fails.
 	if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
 		t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
+	} else if isCH07GoModDrift(modDiff) {
+		t.Logf("CH-07 carve-out: go.mod drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", modDiff)
 	} else if modDiff != "" {
 		t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
 	}
@@ -2631,6 +2633,8 @@ func TestHooks_S_AIV_032_ExclusionCheckedAgainstShippedCode(t *testing.T) {
 	// CH-03 carve-out for go.mod / go.sum drift.
 	if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
 		t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
+	} else if isCH07GoModDrift(modDiff) {
+		t.Logf("CH-07 carve-out: go.mod drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", modDiff)
 	} else if modDiff != "" {
 		t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
 	}

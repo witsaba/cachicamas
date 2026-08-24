@@ -14,6 +14,8 @@
 // conformance suite, any adapter, or the committed expectation itself —
 // it only reads doc.go's bytes and expectedOpenRouterRecord()'s already-
 // existing return value.
+//
+//nolint:revive // underscore in package name per task plan § PR #2 2.1: "package openrouter_conformance"
 package openrouter_conformance
 
 import (
