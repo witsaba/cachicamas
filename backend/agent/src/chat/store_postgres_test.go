@@ -167,6 +167,30 @@ func TestPostgresConversationStore_AppendPersists(t *testing.T) {
 	}
 }
 
+// TestPostgresConversationStore_CH06Scenarios_PassUnchanged is
+// the WU-10 binding acceptance: the CH-06 scenario set runs
+// unchanged against `PostgresConversationStore` via the shared
+// `RunConversationStoreScenarios` helper. S-CCS-011 ("the port's
+// scenarios run unchanged against both adapters") is discharged
+// when the helper's sub-tests all pass against this adapter.
+//
+// Gated by `INTEGRATION=1` — the helper dials a real Postgres.
+// Without the gate, the test SKIPs (the unit-level memory
+// scenarios still pass via the chat package's own store_test.go).
+func TestPostgresConversationStore_CH06Scenarios_PassUnchanged(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (the shared scenario helper exercises Append+Load against a real Postgres)")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	RunConversationStoreScenarios(t, store)
+}
+
 // TestPostgresConversationStore_LoadUnknownReturnsErrConversationNotFound
 // (S-CCS-009 mirror, INTEGRATION-gated). Load of an unknown
 // participant returns ErrConversationNotFound and a follow-up
