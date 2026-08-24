@@ -37,16 +37,6 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// authJSCookiePayload mirrors the canonical Auth.js JWT claims the shim
-// reads. Field names are LOCKED — they match @auth/core's Encode<JWT>()
-// shape (sub/email/exp/iat).
-type authJSCookiePayload struct {
-	Sub   string `json:"sub,omitempty"`
-	Email string `json:"email,omitempty"`
-	Exp   int64  `json:"exp,omitempty"`
-	Iat   int64  `json:"iat,omitempty"`
-}
-
 // testAuthSecret is a 32-byte test secret the JWE fixtures sign with.
 // It MUST be ≥32 bytes — the chat shim's constructor panics on a
 // shorter value (mirroring database_administrator's S-BAM-081).
@@ -92,6 +82,7 @@ func testEncryptJWECookie(t *testing.T, secret []byte, cookieName string, payloa
 	encrypted, err := jwe.Encrypt(
 		plaintext,
 		jwe.WithKey(jwa.DIRECT, jwkKey),
+		jwe.WithContentEncryption(jwa.A256CBC_HS512),
 	)
 	if err != nil {
 		t.Fatalf("jwe.Encrypt: %v", err)
@@ -210,13 +201,20 @@ func TestAuthShim_TamperedCookieReturnsNilFalse(t *testing.T) {
 func TestAuthShim_PanicsOnShortSecret(t *testing.T) {
 	t.Parallel()
 
+	// 31-byte secret (one byte shy of the 32-byte minimum HKDF requires
+	// for A256CBC-HS512): exactly 26 lowercase letters + "12345".
+	const shortSecret = "abcdefghijklmnopqrstuvwxyz12345"
+	if len(shortSecret) != 31 {
+		t.Fatalf("test setup error: shortSecret is %d bytes, want 31", len(shortSecret))
+	}
+
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("NewResolver did not panic on a 31-byte secret; want panic per S-BAM-081")
 		}
 	}()
 
-	_ = NewResolver([]byte("31-byte-secret-not-quite-long-enou"), testCookieName)
+	_ = NewResolver([]byte(shortSecret), testCookieName)
 }
 
 // TestAuthShim_PanicsOnEmptyCookieName covers the related fail-fast:
