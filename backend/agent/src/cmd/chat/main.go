@@ -161,8 +161,9 @@ func run(_ context.Context, getenv func(string) string, otelShutdown func(contex
 	}
 
 	resolver := NewResolver([]byte(cfg.AuthSecret), cfg.CookieName)
+	chatStore := chat.NewMemoryConversationStore() // CH-06 composition-root seam (CH-07 swaps this one line)
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider})
+		return chat.NewConversation(chat.Config{Provider: provider, Store: chatStore})
 	}
 
 	e := echo.New()

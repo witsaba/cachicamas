@@ -44,7 +44,7 @@ func TestConversation_DrivesOneTurn(t *testing.T) {
 	fragments := []string{"alpha", "beta", "gamma"}
 	provider := agenttest.NewProvider(scriptTextResponse(t, 1, fragments, ai.FinishReasonStop))
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-conv"})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -137,7 +137,7 @@ func TestConversation_TwoTurnContinuation(t *testing.T) {
 	script2 := scriptTextResponse(t, 1, []string{"second-reply"}, ai.FinishReasonStop)
 	provider := agenttest.NewProvider(script1, script2)
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-conv"})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -200,7 +200,7 @@ func TestConversation_MessageIndex(t *testing.T) {
 	script := scriptTextResponse(t, nonZeroFragmentIdx, []string{"hello"}, ai.FinishReasonStop)
 	provider := agenttest.NewProvider(script)
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-conv"})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -244,7 +244,7 @@ func TestConversation_UnmappedEvents(t *testing.T) {
 	provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"hi"}, ai.FinishReasonStop))
 	handler := newCapturingHandler()
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Logger: slog.New(handler)})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Logger: slog.New(handler), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-conv"})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}

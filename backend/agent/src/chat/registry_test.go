@@ -26,7 +26,7 @@ func TestRegistry_GetOrCreate_Reuses(t *testing.T) {
 	var factoryCalls int
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalls++
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider()})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry"})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -66,7 +66,7 @@ gate := agenttest.NewGate()
 	provider := agenttest.NewProvider(scriptWithGate(t, gate))
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider})
+		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry"})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -126,7 +126,7 @@ func TestRegistry_GetOrCreate_ConcurrentIsRaceFree(t *testing.T) {
 		factoryMu.Lock()
 		factoryCalls++
 		factoryMu.Unlock()
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider()})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry"})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -174,7 +174,7 @@ func TestRegistry_CancelByTurnID_NoOpWhenNotInflight(t *testing.T) {
 	t.Parallel()
 
 	registry := chat.NewRegistry(func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider()})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry"})
 	})
 
 	// Unknown participant.
