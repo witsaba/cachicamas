@@ -430,7 +430,7 @@ func TestConversationStore_LoadSeedsHistoryForThirdTurn(t *testing.T) {
 	}
 
 	// And turn-one's prompt must appear before turn-two's prompt.
-	var turnOnePos, turnTwoPos int = -1, -1
+	var turnOnePos, turnTwoPos = -1, -1
 	for i, e := range seen {
 		if e.role == ai.RoleUser && len(e.prompts) > 0 && e.prompts[0] == "turn-one" {
 			turnOnePos = i

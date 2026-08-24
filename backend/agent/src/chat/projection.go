@@ -145,7 +145,7 @@ func terminalWireEvent(re agent.RunEnd, haveRunEnd bool, res runResult) WireEven
 func buildTerminalExchange(prompt string, runEnd agent.RunEnd, haveRunEnd bool, res runResult, assistantText string, messageIDs []string) Exchange {
 	kind := TerminalKindCompleted
 	var fin *ai.FinishReason
-	var cat ai.FailureCategory = 0
+	var cat ai.FailureCategory
 	partial := false
 
 	if !haveRunEnd {

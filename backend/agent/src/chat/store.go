@@ -1,10 +1,11 @@
-// CH-06 — conversation durability port and its v1 in-memory adapter
-// (R-CCS-001, R-CCS-010). One *Conversation.Send produces exactly one
-// *Exchange record appended to the ConversationStore (R-CCS-001,
-// R-CCS-003). Reload rebuilds the harness's *agent.History from the
-// recorded exchanges via ExchangesToHistory (R-CCS-006). v1 is
-// stdlib-only; CH-07's postgres adapter implements the same two
-// methods against a real database.
+// Package chat conversation durability port and its v1 in-memory adapter
+// (CH-06, R-CCS-001, R-CCS-010).
+//
+// One *Conversation.Send produces exactly one *Exchange record appended
+// to the ConversationStore (R-CCS-001, R-CCS-003). Reload rebuilds the
+// harness's *agent.History from the recorded exchanges via
+// ExchangesToHistory (R-CCS-006). v1 is stdlib-only; CH-07's postgres
+// adapter implements the same two methods against a real database.
 //
 // Mirrors chat/identity.go's port + adapter-in-one-file precedent (D-3).
 package chat
@@ -63,11 +64,6 @@ const (
 	// typed provider failure (R-CCS-005).
 	TerminalKindFailed
 )
-
-// terminalKindLimit is the first value outside the vocabulary. It must
-// stay last; moving it is what makes a newly declared member visible
-// to String.
-const terminalKindLimit = TerminalKindFailed + 1
 
 // String renders the terminal kind for a diagnostic reader. The
 // form is this package's own spelling, not the run_outcome's own.
