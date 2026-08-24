@@ -30,7 +30,9 @@ import (
 )
 
 // errNotImplemented is reserved for future stubs (no longer
-// returned by Append/Load after WU-6 GREEN).
+// returned by Append/Load after WU-6 GREEN; WU-5 RED consumed it).
+//
+//nolint:unused // kept for future WU regressions on the stub contract.
 var errNotImplemented = errors.New("chat: postgres adapter: not implemented")
 
 // Default pool settings — match the DBA precedent at

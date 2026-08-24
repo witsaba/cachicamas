@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,17 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
 	"github.com/cachicamas/backend/agent/src/chat"
+	"github.com/cachicamas/backend/agent/src/chat/migrations"
+	"github.com/cachicamas/backend/agent/src/chat/migrator"
+
+	// pgx stdlib adapter registers "pgx" as a database/sql driver.
+	// Blank import: side-effect only (driver's init()), no runtime
+	// cost. Mirrors the DBA precedent at
+	// backend/database_administrator/src/migration/postgres/driver.go:30-33.
+	// ADR 0010-admit pgx + goose in backend/agent is the dep
+	// admission; this is the chat composition root's first
+	// production import site.
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // config is the validated runtime configuration the composition root
@@ -62,6 +74,15 @@ type config struct {
 	// exports to. Default: localhost:4317 (read from the standard
 	// OTEL_EXPORTER_OTLP_ENDPOINT env var by otlptracegrpc itself).
 	OTLPEndpoint string
+
+	// ChatStoreDSN is the Postgres connection string the chat
+	// adapter dials through. Required — the chat binary refuses to
+	// start without it (mirrors DBA's LoadConfigFromEnv pattern).
+	// Read from CACHICAMAS_CHAT_STORE_DSN. CH-07 (closes R-08):
+	// the chat archetype owns its own tables, and the only durable
+	// surface for conversations is the postgres adapter behind
+	// the closed ConversationStore port.
+	ChatStoreDSN string
 }
 
 // envString returns the value of an env var, or def if unset/empty.
@@ -89,6 +110,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		AuthSecret:     getenv("AUTH_SECRET"),
 		CookieName:     envStringFrom(getenv, "AUTH_COOKIE_NAME", "authjs.session-token"),
 		OTLPEndpoint:   getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		ChatStoreDSN:   getenv("CACHICAMAS_CHAT_STORE_DSN"),
 	}
 
 	if cfg.ProviderAPIKey == "" {
@@ -102,6 +124,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 	}
 	if len(cfg.AuthSecret) < 32 {
 		return cfg, fmt.Errorf("AUTH_SECRET must be at least 32 raw bytes, got %d (S-BAM-081: Auth.js HKDF requires ≥32 bytes)", len(cfg.AuthSecret))
+	}
+	if cfg.ChatStoreDSN == "" {
+		return cfg, fmt.Errorf("missing required environment variable: CACHICAMAS_CHAT_STORE_DSN (the chat binary refuses to start without a postgres DSN; conversations persist in tables the chat archetype owns, per ADR 0009 § D6)")
 	}
 	return cfg, nil
 }
@@ -150,7 +175,7 @@ func buildProvider(cfg config, tp trace.TracerProvider) (ai.ModelProvider, error
 // TestComposeRoot_GracefulShutdown_CallsOTelShutdown exercise the
 // post-listener shutdown path (spec scenario 2.2) without owning a
 // process.
-func run(_ context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger, startAndWait func(*echo.Echo, string) error) error {
+func run(ctx context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger, startAndWait func(*echo.Echo, string) error) error {
 	cfg, err := loadConfig(getenv)
 	if err != nil {
 		return err
@@ -162,7 +187,43 @@ func run(_ context.Context, getenv func(string) string, otelShutdown func(contex
 	}
 
 	resolver := NewResolver([]byte(cfg.AuthSecret), cfg.CookieName)
-	chatStore := chat.NewMemoryConversationStore() // CH-06 composition-root seam (CH-07 swaps this one line)
+
+	// CH-07 (closes R-08): the chat-owned Postgres adapter is the
+	// conversation store. The composition root dials the pool,
+	// pings, runs the chat-owned forward-only migrations, and
+	// constructs the adapter behind the same ConversationStore
+	// port the CH-06 in-memory adapter satisfied. The factory
+	// closure body below is BYTE-UNCHANGED from CH-06 — that is
+	// the proof the swap was a swap (R-CCS-010).
+	db, err := sql.Open("pgx", cfg.ChatStoreDSN)
+	if err != nil {
+		return fmt.Errorf("open postgres for chat store: %w", err)
+	}
+	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+	if err := db.PingContext(pingCtx); err != nil {
+		cancelPing()
+		_ = db.Close()
+		return fmt.Errorf("ping postgres for chat store: %w", err)
+	}
+	cancelPing()
+
+	migrationProvider, err := migrator.NewProvider(ctx, db, migrations.MigrationsFS, "chat_schema_migrations")
+	if err != nil {
+		_ = db.Close()
+		return fmt.Errorf("build chat migration provider: %w", err)
+	}
+	if _, err := migrationProvider.Up(ctx); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("apply chat migrations: %w", err)
+	}
+
+	chatStore, closeStore, err := chat.NewPostgresConversationStore(ctx, cfg.ChatStoreDSN)
+	if err != nil {
+		_ = db.Close()
+		return fmt.Errorf("build postgres conversation store: %w", err)
+	}
+	// closeStore is invoked AFTER otelShutdown so spans flush
+	// before the pool tears down (design D-E).
 	factory := func(participantID string) (*chat.Conversation, error) {
 		exchanges, lerr := chatStore.Load(participantID)
 		if lerr != nil {
@@ -201,6 +262,12 @@ func run(_ context.Context, getenv func(string) string, otelShutdown func(contex
 		if err := otelShutdown(shutdownCtx); err != nil {
 			logger.Warn("otel shutdown", "error", err)
 		}
+	}
+
+	// CH-07: close the postgres pool AFTER OTel shutdown, so spans
+	// (which may log pool stats) flush before the pool tears down.
+	if err := closeStore(); err != nil {
+		logger.Warn("close chat store", "error", err)
 	}
 
 	return startErr

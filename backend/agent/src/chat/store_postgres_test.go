@@ -98,6 +98,8 @@ func TestPostgresConversationStore_AppendInsertsRow(t *testing.T) {
 
 // errIs is a tiny errors.Is shim so the test does not need a
 // direct "errors" import in addition to the chat package's own.
+//
+//nolint:unused // kept for future ErrConversationNotFound assertions.
 func errIs(err, target error) bool {
 	return errors.Is(err, target)
 }
