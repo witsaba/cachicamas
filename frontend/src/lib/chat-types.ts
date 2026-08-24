@@ -85,11 +85,12 @@ export interface ChatCancelRequest {
   readonly id: string;
 }
 
-// REQ-4 + REQ-5 — union of offline-path + typed-API errors.
+// REQ-4 + REQ-5 (amended) — union of offline-path + typed-API errors.
 // Mirrors lib/api.ts:96-110 ApiResult's error half verbatim so the
 // chat's error surface is indistinguishable from the rest of the
-// frontend. The literal `"backend not wired — see PR for backend
-// wire"` is greppable per REQ-5.
+// frontend. The offline kind survives (D-1); the dev-honest phrase
+// was amended by CH-05.2 (see
+// openspec/specs/frontend-chat-layer1 REQ-5 amendment).
 export type ChatTurnError =
   | { readonly kind: "offline"; readonly message: string }
   | { readonly kind: "validation"; readonly message: string; readonly fields: Record<string, string> }

@@ -377,7 +377,9 @@ describe("chat recorded SSE transcript (REQ-1, REQ-7)", () => {
 //      ChatStreamError and closes the stream (REQ-4 S-4.a).
 //
 // EventSource is mocked with the FakeES pattern from
-// lib/api.sse.spec.ts:75-307 (capturing onmessage / onerror / close).
+// chat-api.spec.ts:394-425 inline (capturing onmessage / onerror
+// / close). The earlier lib/api.sse.spec.ts:75-307 reference was
+// stale — the FakeES is now inline here per explore §8.1.
 // fetch is mocked via vi.stubGlobal.
 // ---------------------------------------------------------------------------
 
@@ -469,10 +471,11 @@ describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     expect(headers.get("Content-Type")).toBe("application/json");
   });
 
-  it("submitTurn maps network errors to kind=offline with the literal phrase (REQ-5)", async () => {
-    // The literal phrase is user-locked (D4). The vitest spec asserts
-    // the EXACT substring so a future refactor that drops or rewrites
-    // the message goes red.
+  it("submitTurn maps network errors to kind=offline with the amended dev-honest phrase (REQ-5 S-5.a amended)", async () => {
+    // The amended REQ-5 (CH-05.2) replaces the prior literal phrase
+    // with a generic dev-honest phrase. The vitest spec asserts the
+    // new substring so a future refactor that drops or rewrites the
+    // message goes red.
     const fetchMock = vi.fn(async () => {
       throw new TypeError("Failed to fetch");
     });
@@ -483,7 +486,9 @@ describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.kind).toBe("offline");
-      expect(result.message).toContain("backend not wired — see PR for backend wire");
+      expect(result.message).toContain(
+        "Couldn't reach the chat service. Is docker compose up?",
+      );
     }
   });
 
@@ -642,7 +647,7 @@ describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     unsubscribe();
   });
 
-  it("subscribeTurn treats EventSource onerror before any message as offline (REQ-5 S-5.b)", async () => {
+  it("subscribeTurn treats EventSource onerror before any message as offline (REQ-5 S-5.b amended)", async () => {
     const { subscribeTurn } = await import("./chat-api");
     const errors: string[] = [];
     const unsubscribe = subscribeTurn(
@@ -656,10 +661,12 @@ describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     (lastCreated!.listeners["error"] ?? []).forEach((cb) =>
       cb({} as MessageEvent<string>),
     );
-    // The exact error surface from the runtime path: a literal
-    // string containing the user-locked offline phrase.
+    // The amended offline surface from the runtime path: the
+    // dev-honest phrase, not the retired literal.
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]).toContain("backend not wired — see PR for backend wire");
+    expect(errors[0]).toContain(
+      "Couldn't reach the chat service. Is docker compose up?",
+    );
     unsubscribe();
   });
 
