@@ -33,10 +33,10 @@ type streamEntry struct {
 // — a finer-grained design would add complexity without measurable
 // benefit at v1's request rate.
 type Registry struct {
-	mu           sync.Mutex
+	mu            sync.Mutex
 	conversations map[string]*Conversation
-	streams      map[string]*streamEntry
-	newConv      ConversationFactory
+	streams       map[string]*streamEntry
+	newConv       ConversationFactory
 }
 
 // NewRegistry constructs a Registry with the given factory. The factory

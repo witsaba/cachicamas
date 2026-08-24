@@ -16,25 +16,25 @@
 //   - CH-03 (`cachicamas-chat-http-surface`): the HTTP+SSE serving
 //     surface that `frontend-chat-layer1`'s frozen wire contract
 //     drives. Three new files join the package:
-//       identity.go      — the `IdentityResolver` port and a
-//                          NoopIdentityResolver for tests.
-//       registry.go      — a mutex-guarded `map[participantID]*Conversation`
-//                          plus a per-turn stream lookup keyed by
-//                          turnID; one *Conversation per participant
-//                          (D2, mirrors CH-02 R-CHS-001 / R-CCP-001),
-//                          409 on concurrent POSTs (S-CHS-001.c).
-//       eventsource.go   — channel-driven `fmt.Fprintf` + `http.Flusher`
-//                          SSE writer mirroring
-//                          database_administrator's `sync_stream_handler.go`;
-//                          writes `event: <name>\ndata: <json>\n\n`
-//                          bytes-exact against frontend-chat-layer1's
-//                          wire (frontend/src/lib/chat-types.ts:158-178).
-//       http.go          — Echo v5 handlers mounted by
-//                          RegisterRoutes(e *echo.Echo, resolver
-//                          IdentityResolver, newConv
-//                          ConversationFactory) *Registry; the
-//                          composition root (CH-04) calls this with
-//                          the production wiring.
+//     identity.go      — the `IdentityResolver` port and a
+//     NoopIdentityResolver for tests.
+//     registry.go      — a mutex-guarded `map[participantID]*Conversation`
+//     plus a per-turn stream lookup keyed by
+//     turnID; one *Conversation per participant
+//     (D2, mirrors CH-02 R-CHS-001 / R-CCP-001),
+//     409 on concurrent POSTs (S-CHS-001.c).
+//     eventsource.go   — channel-driven `fmt.Fprintf` + `http.Flusher`
+//     SSE writer mirroring
+//     database_administrator's `sync_stream_handler.go`;
+//     writes `event: <name>\ndata: <json>\n\n`
+//     bytes-exact against frontend-chat-layer1's
+//     wire (frontend/src/lib/chat-types.ts:158-178).
+//     http.go          — Echo v5 handlers mounted by
+//     RegisterRoutes(e *echo.Echo, resolver
+//     IdentityResolver, newConv
+//     ConversationFactory) *Registry; the
+//     composition root (CH-04) calls this with
+//     the production wiring.
 //
 //     The byte-exact projection invariant and the cancel discriminator
 //     (turn.end with `FinishReason` absent for cancelled turns) live

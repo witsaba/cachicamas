@@ -22,8 +22,8 @@ import (
 // connection closes exactly once" — the same invariant at the per-frame
 // granularity).
 type stubFlusher struct {
-	mu       sync.Mutex
-	flushes  int
+	mu      sync.Mutex
+	flushes int
 }
 
 func (f *stubFlusher) Flush() {
@@ -51,9 +51,9 @@ func newRecordingRW(flusher *stubFlusher) *recordingResponseWriter {
 	return &recordingResponseWriter{headers: make(http.Header), flusher: flusher}
 }
 
-func (w *recordingResponseWriter) Header() http.Header        { return w.headers }
+func (w *recordingResponseWriter) Header() http.Header         { return w.headers }
 func (w *recordingResponseWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
-func (w *recordingResponseWriter) WriteHeader(statusCode int)  {}
+func (w *recordingResponseWriter) WriteHeader(_ int)  {}
 
 // writeSSEHeaders is internal in eventsource.go, so the test sets the
 // headers manually before calling writeFrame. The handlers in http.go

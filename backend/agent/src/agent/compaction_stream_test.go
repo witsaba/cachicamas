@@ -166,7 +166,7 @@ func TestCompaction_SubstrateByteUnchanged(t *testing.T) {
 	// openrouter/zero_requires_test.go's wantGoModRequireLines)
 	// per each test's own documented "update in the same commit"
 	// instruction. Anything beyond the two carve-out files fails.
-	ch03_ai_carveout := []string{
+	ch03AiCarveout := []string{
 		"backend/agent/src/ai/import_boundary_test.go",
 		"backend/agent/src/ai/openaicompat/openrouter/zero_requires_test.go",
 	}
@@ -180,7 +180,7 @@ func TestCompaction_SubstrateByteUnchanged(t *testing.T) {
 				header = chunk[:nl]
 			}
 			allowed := false
-			for _, file := range ch03_ai_carveout {
+			for _, file := range ch03AiCarveout {
 				if strings.Contains(header, file) {
 					allowed = true
 					break

@@ -24,7 +24,7 @@ func TestRegistry_GetOrCreate_Reuses(t *testing.T) {
 	t.Parallel()
 
 	var factoryCalls int
-	newConv := func(participantID string) (*chat.Conversation, error) {
+	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalls++
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider()})
 	}
@@ -61,11 +61,11 @@ func TestRegistry_GetOrCreate_Reuses(t *testing.T) {
 // provider because Conversation reuses it.
 func TestRegistry_GetOrCreate_409OnInflight(t *testing.T) {
 	t.Parallel()
+gate := agenttest.NewGate()
 
-	gate := agenttest.NewGate()
 	provider := agenttest.NewProvider(scriptWithGate(t, gate))
 
-	newConv := func(participantID string) (*chat.Conversation, error) {
+	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider})
 	}
 	registry := chat.NewRegistry(newConv)
@@ -101,7 +101,13 @@ func TestRegistry_GetOrCreate_409OnInflight(t *testing.T) {
 	// Release the gate so the first turn completes cleanly before the
 	// test exits — prevents goroutine leaks across the suite.
 	gate.Release()
+	// drain the stream so the projector goroutine sees the
+	// channel close and exits. Reading without binding the
+	// values keeps the lint explicit about the empty-body
+	// intent (revive's empty-block check); the comment above
+	// is the durable record of WHY this loop exists.
 	for range stream {
+		_ = stream
 	}
 }
 
@@ -116,7 +122,7 @@ func TestRegistry_GetOrCreate_ConcurrentIsRaceFree(t *testing.T) {
 
 	var factoryCalls int
 	var factoryMu sync.Mutex
-	newConv := func(participantID string) (*chat.Conversation, error) {
+	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryMu.Lock()
 		factoryCalls++
 		factoryMu.Unlock()
@@ -167,7 +173,7 @@ func TestRegistry_GetOrCreate_ConcurrentIsRaceFree(t *testing.T) {
 func TestRegistry_CancelByTurnID_NoOpWhenNotInflight(t *testing.T) {
 	t.Parallel()
 
-	registry := chat.NewRegistry(func(participantID string) (*chat.Conversation, error) {
+	registry := chat.NewRegistry(func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider()})
 	})
 

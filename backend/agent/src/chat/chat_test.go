@@ -67,7 +67,7 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	res.Body.Close()
+_ = 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
@@ -80,7 +80,7 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET events: %v", err)
 	}
-	defer getResp.Body.Close()
+defer func() { _ = getResp.Body.Close() }()
 
 	// Wait for the producer to reach the gate so the projector is
 	// parked and the SSE connection is mid-stream.
@@ -96,7 +96,7 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	delRes.Body.Close()
+_ = 	delRes.Body.Close()
 	if delRes.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE status=%d, want 204", delRes.StatusCode)
 	}
@@ -187,7 +187,7 @@ func TestChatHTTP_AlreadyTerminatedGet(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]string{"id": "t-fast", "prompt": "hi"})
-	http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+	_, _ = http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
 
 	// Drain the stream to let the turn complete (so MarkStreamCompleted fires).
 	drainReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-fast/events", nil)
@@ -196,7 +196,7 @@ func TestChatHTTP_AlreadyTerminatedGet(t *testing.T) {
 		t.Fatalf("first GET: %v", err)
 	}
 	_, _ = io.Copy(io.Discard, drainResp.Body)
-	drainResp.Body.Close()
+_ = 	drainResp.Body.Close()
 
 	// Second GET: the stream should already be marked completed.
 	// The handler returns a single `event: turn.end\n\n`.
@@ -205,7 +205,7 @@ func TestChatHTTP_AlreadyTerminatedGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second GET: %v", err)
 	}
-	defer secondResp.Body.Close()
+defer func() { _ = secondResp.Body.Close() }()
 
 	if got := secondResp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type=%q, want text/event-stream", got)
@@ -265,7 +265,7 @@ func TestChatHTTP_ClientDisconnectDoesNotLeakGoroutine(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"id": "t-leak", "prompt": "hi"})
 	res, _ := http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	// GET to subscribe; close early to simulate a client disconnect.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -278,7 +278,7 @@ func TestChatHTTP_ClientDisconnectDoesNotLeakGoroutine(t *testing.T) {
 			return
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+_ = 		resp.Body.Close()
 	}()
 
 	// Let the producer reach the gate so the GET handler is mid-stream.
@@ -313,7 +313,7 @@ func TestChatHTTP_ClientDisconnectDoesNotLeakGoroutine(t *testing.T) {
 		if err != nil {
 			return false, err.Error()
 		}
-		res.Body.Close()
+_ = 		res.Body.Close()
 		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusConflict {
 			return false, "unexpected status"
 		}
@@ -336,14 +336,14 @@ func TestChatHTTP_PostStreamCancelFlow_NaturalCompletion(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]string{"id": "t-natural", "prompt": "hi"})
-	http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+	_, _ = http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-natural/events", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+defer func() { _ = resp.Body.Close() }()
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

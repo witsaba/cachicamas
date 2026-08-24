@@ -592,7 +592,7 @@ func TestCost_ScopeFence(t *testing.T) {
 	// same commit" instruction each test carries. No other ai/
 	// source is edited. Anything beyond the two documented files
 	// fails this check normally.
-	ch03_ai_carveout_files := []string{
+	ch03AiCarveoutFiles := []string{
 		"ai/import_boundary_test.go",
 		"ai/openaicompat/openrouter/zero_requires_test.go",
 	}
@@ -612,7 +612,7 @@ func TestCost_ScopeFence(t *testing.T) {
 				header = chunk[:nl]
 			}
 			allowed := false
-			for _, allow := range ch03_ai_carveout_files {
+			for _, allow := range ch03AiCarveoutFiles {
 				// `diff --git a/path b/path` repeats the path
 				// on both sides of the diff header, so a
 				// Contains check on either side is enough.

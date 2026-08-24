@@ -144,7 +144,7 @@ func TestHandleOpenTurn_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer res.Body.Close()
+defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
@@ -188,7 +188,7 @@ func TestHandleOpenTurn_EmptyPrompt(t *testing.T) {
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("body=%v status=%d, want 400", body, res.StatusCode)
 		}
-		res.Body.Close()
+_ = 		res.Body.Close()
 	}
 	if factoryCalled {
 		t.Error("Conversation factory was called for a malformed prompt (the factory must be bypassed on validation failure)")
@@ -244,7 +244,7 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST #1: %v", err)
 	}
-	res1.Body.Close()
+_ = 	res1.Body.Close()
 	if res1.StatusCode != http.StatusOK {
 		t.Fatalf("POST #1 status=%d, want 200", res1.StatusCode)
 	}
@@ -260,7 +260,7 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST #2: %v", err)
 	}
-	defer res2.Body.Close()
+defer func() { _ = res2.Body.Close() }()
 	if res2.StatusCode != http.StatusConflict {
 		t.Errorf("POST #2 status=%d, want 409", res2.StatusCode)
 	}
@@ -274,7 +274,7 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 		t.Fatalf("GET stream: %v", err)
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+_ = 	resp.Body.Close()
 }
 
 // TestHandleStreamEvents_FullTurn — S-CHS-002.a + S-CHS-002.d. After a
@@ -290,14 +290,14 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
 	body, _ := json.Marshal(map[string]string{"id": "t-1", "prompt": "hi"})
-	http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+	_, _ = http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1/events", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
-	defer resp.Body.Close()
+defer func() { _ = resp.Body.Close() }()
 
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type=%q, want text/event-stream", got)
@@ -344,14 +344,14 @@ func TestIdentityRefusal_401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer res.Body.Close()
+defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status=%d, want 401", res.StatusCode)
 	}
 	var env struct {
 		Error string `json:"error"`
 	}
-	json.NewDecoder(res.Body).Decode(&env)
+	_ = json.NewDecoder(res.Body).Decode(&env)
 	if env.Error != "server" {
 		t.Errorf("error.kind=%q, want server", env.Error)
 	}
@@ -391,7 +391,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST as alice: %v", err)
 	}
-	resAlice.Body.Close()
+_ = 	resAlice.Body.Close()
 	if resAlice.StatusCode != http.StatusOK {
 		t.Fatalf("alice POST status=%d, want 200", resAlice.StatusCode)
 	}
@@ -406,7 +406,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 		t.Fatalf("alice GET (drain): %v", err)
 	}
 	_, _ = io.Copy(io.Discard, drainResp.Body)
-	drainResp.Body.Close()
+_ = 	drainResp.Body.Close()
 
 	// Bob cannot subscribe to Alice's stream. The single Registry
 	// holds Alice's stream under her ownerID; bob's identity
@@ -421,7 +421,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bob GET: %v", err)
 	}
-	defer resBobGet.Body.Close()
+defer func() { _ = resBobGet.Body.Close() }()
 	if resBobGet.StatusCode != http.StatusForbidden {
 		t.Errorf("cross-participant GET status=%d, want 403 not_found (R-CHS-004.b)", resBobGet.StatusCode)
 	}
@@ -440,7 +440,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bob DELETE: %v", err)
 	}
-	resBobDel.Body.Close()
+_ = 	resBobDel.Body.Close()
 	if resBobDel.StatusCode != http.StatusNoContent {
 		t.Errorf("cross-participant DELETE status=%d, want 204 (R-CHS-003.b/c: DELETE-on-other's-turn is a no-op)", resBobDel.StatusCode)
 	}
@@ -455,7 +455,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice GET (post-bob): %v", err)
 	}
-	resAliceGet.Body.Close()
+_ = 	resAliceGet.Body.Close()
 	// Either 403 (already cleared by bob's no-op DELETE which is
 	// keyed to bob's identity but ALSO clears the entry — see
 	// HandleCancelTurn's OwnerRefusesClearStream path) or 404/200
@@ -479,7 +479,7 @@ func TestHandleCancelTurn_Unknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	defer res.Body.Close()
+defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusNoContent {
 		t.Errorf("status=%d, want 204", res.StatusCode)
 	}

@@ -293,7 +293,7 @@ func TestObservability_S_AGS_068_SeamNotSinkCheckedAgainstShippedSurface(t *test
 		// is bumped from 3 to 4 entries in two ai/ test files
 		// (import_boundary_test.go and zero_requires_test.go). Anything
 		// beyond these two files fails.
-		ch03_ai_carveout := []string{
+		ch03AiCarveout := []string{
 			"backend/agent/src/ai/import_boundary_test.go",
 			"backend/agent/src/ai/openaicompat/openrouter/zero_requires_test.go",
 		}
@@ -307,7 +307,7 @@ func TestObservability_S_AGS_068_SeamNotSinkCheckedAgainstShippedSurface(t *test
 					header = chunk[:nl]
 				}
 				allowed := false
-				for _, file := range ch03_ai_carveout {
+				for _, file := range ch03AiCarveout {
 					if strings.Contains(header, file) {
 						allowed = true
 						break
