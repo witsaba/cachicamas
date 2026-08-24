@@ -484,3 +484,279 @@ defer func() { _ = res.Body.Close() }()
 		t.Errorf("status=%d, want 204", res.StatusCode)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// CH-08 (WU-5): the resume handlers — RED scaffold. The two new GET
+// endpoints land in WU-6:
+//   - GET /api/agent/conversations/:id    -> HandleReloadConversation (R-CRI-001)
+//   - GET /api/agent/conversations        -> HandleListConversations  (R-CRI-002)
+//
+// Both go behind the existing `identityMiddleware`. Both take the
+// `chat.ConversationStore` directly (not the Registry) so a future
+// rewrite of the in-flight pipeline does not invalidate the read
+// path. At WU-5 the helper `chat.RegisterResumeRoutes(...)` does not
+// exist — the test code's reference compiles-fail, which is the
+// strict-TDD RED signal per openspec/AGENTS.md "Strict TDD is on".
+//
+// Five sub-tests cover the spec's Gherkin + boundary cases:
+//   - S-CRI-001 happy path: 200 OK with a JSON array of exchanges
+//   - R-CRI-001 cross-participant refusal: 403 not_found (mirrors
+//     R-CHS-004.b; existence is not leaked to non-owners)
+//   - R-CRI-001 unknown conversation: 404 not_found (ErrConversationNotFound
+//     surfaced; the participant-id matches but the store has nothing)
+//   - R-CRI-002 list happy path: 200 OK with one summary entry
+//   - R-CRI-002 + S-CCS-018 / S-CRI-004 empty list: 200 OK with []
+//     (NOT 404 — the empty list is success per the spec)
+// ----------------------------------------------------------------------------
+
+// resumeMountedServer is the test parallel of mountedServer for the
+// CH-08 routes. At WU-5 it compiles-fail (Referenced
+// `chat.RegisterResumeRoutes` does not exist); WU-6 introduces it.
+// The helper keeps the resume handlers behind the same identity
+// middleware used by the CH-03 routes — exercise the full chain
+// (resolver → middleware → handler), not a stub bypass.
+func resumeMountedServer(t *testing.T, resolver chat.IdentityResolver, store chat.ConversationStore) (*httptest.Server, error) {
+	t.Helper()
+
+	e := echo.New()
+	registry, err := chat.RegisterRoutes(e, resolver, func(_ string) (*chat.Conversation, error) {
+		// The CH-03 routes require a factory; the CH-08 test path
+		// does not exercise them. The factory here uses an unrelated
+		// memory store so a stray request to /api/agent/turns does
+		// not interfere with the resume handlers' shared store.
+		return chat.NewConversation(chat.Config{
+			Provider:      agenttest.NewProvider(scriptForOneTurn(t)),
+			Store:         chat.NewMemoryConversationStore(),
+			ParticipantID: "test-resume-factory",
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	_ = registry // not used by the CH-08 tests; registration only
+
+	if err := chat.RegisterResumeRoutes(e, resolver, store); err != nil {
+		return nil, err
+	}
+	srv := httptest.NewServer(e)
+	t.Cleanup(srv.Close)
+	return srv, nil
+}
+
+// TestHandleReloadConversation_HappyPath — S-CRI-001 / Gherkin
+// verbatim (`0005:862-866`). GET /api/agent/conversations/:id where
+// :id matches the authenticated participant and the store has two
+// recorded exchanges returns 200 with a JSON array of those
+// exchanges (mirror of chat.Exchange's eight fields — D-7).
+func TestHandleReloadConversation_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	if err := store.Append("alice", chat.Exchange{PromptText: "turn-one", AssistantText: "reply-one"}); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+	if err := store.Append("alice", chat.Exchange{PromptText: "turn-two", AssistantText: "reply-two"}); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations/alice", nil)
+	req.Header.Set("X-Test-Participant", "alice")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", res.StatusCode)
+	}
+	var got []struct {
+		Position      int    `json:"Position"`
+		PromptText    string `json:"PromptText"`
+		AssistantText string `json:"AssistantText"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d exchanges, want 2", len(got))
+	}
+	if got[0].Position != 0 || got[1].Position != 1 {
+		t.Errorf("positions = (%d, %d), want (0, 1)", got[0].Position, got[1].Position)
+	}
+	if got[0].PromptText != "turn-one" {
+		t.Errorf("got[0].PromptText = %q, want turn-one", got[0].PromptText)
+	}
+	if got[1].PromptText != "turn-two" {
+		t.Errorf("got[1].PromptText = %q, want turn-two", got[1].PromptText)
+	}
+}
+
+// TestHandleReloadConversation_CrossParticipant — R-CRI-001 +
+// R-CHS-004.b shape. A non-owner request to GET
+// /api/agent/conversations/:id MUST be refused as 403 not_found —
+// not 404 (do not probe existence).
+func TestHandleReloadConversation_CrossParticipant(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	if err := store.Append("alice", chat.Exchange{PromptText: "alice-1", AssistantText: "r-a"}); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	// Bob asks for alice's conversation. He is authenticated as bob,
+	// so :id == "alice" does not match bob's participant id. The
+	// refusal MUST be 403 not_found — identical to a truly-nonexistent
+	// id (so the existence is not leaked).
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations/alice", nil)
+	req.Header.Set("X-Test-Participant", "bob")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status=%d, want 403 (R-CRI-001: cross-participant refused as not_found, not 404)", res.StatusCode)
+	}
+	var env struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&env)
+	if env.Error != "not_found" {
+		t.Errorf("error.kind=%q, want not_found (R-CRI-001)", env.Error)
+	}
+}
+
+// TestHandleReloadConversation_Unknown — R-CRI-001 boundary case.
+// :id matches the authenticated participant but the store has no
+// record under it (ErrConversationNotFound). Response MUST be 404
+// not_found, not an empty body / 200.
+func TestHandleReloadConversation_Unknown(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	// alice has nothing recorded.
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations/alice", nil)
+	req.Header.Set("X-Test-Participant", "alice")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status=%d, want 404 (R-CRI-001: ErrConversationNotFound → 404 not_found)", res.StatusCode)
+	}
+}
+
+// TestHandleListConversations_HappyPath — R-CRI-002 + S-CRI-003 +
+// D-1 one-per-participant. GET /api/agent/conversations with one
+// recorded conversation returns 200 with a JSON array carrying the
+// one ConversationSummaryDTO.
+func TestHandleListConversations_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	if err := store.Append("alice", chat.Exchange{PromptText: "a1", AssistantText: "r-a1"}); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations", nil)
+	req.Header.Set("X-Test-Participant", "alice")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", res.StatusCode)
+	}
+	var got []struct {
+		ConversationID string `json:"conversationID"`
+		TurnCount      int    `json:"turnCount"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got[0].ConversationID != "alice" {
+		t.Errorf("got[0].ConversationID = %q, want alice", got[0].ConversationID)
+	}
+	if got[0].TurnCount != 1 {
+		t.Errorf("got[0].TurnCount = %d, want 1", got[0].TurnCount)
+	}
+}
+
+// TestHandleListConversations_Empty — R-CRI-002 + S-CRI-004 /
+// S-CCS-018. Authenticated participant with no recorded
+// conversation MUST get 200 with an empty JSON array ([]), NOT 404
+// — the empty list is success, not not-found (the spec's exact
+// Gherkin: "the response is a success rather than a not-found").
+func TestHandleListConversations_Empty(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	// alice has nothing recorded.
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations", nil)
+	req.Header.Set("X-Test-Participant", "alice")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200 (S-CRI-004: empty list returns 200 [], NOT 404)", res.StatusCode)
+	}
+	// Decode into a raw shape so a `null` body or a non-array body
+	// would surface distinctly from an empty array. A correct
+	// response is `[]` (a non-null, length-0 array).
+	var raw json.RawMessage
+	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("empty response body")
+	}
+	if string(raw) == "null" {
+		t.Errorf("response body is null; want \"[]\" (non-null empty array)")
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		t.Fatalf("body is not a JSON array: %v (body=%s)", err, string(raw))
+	}
+	if len(entries) != 0 {
+		t.Errorf("got %d entries, want 0", len(entries))
+	}
+}
