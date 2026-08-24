@@ -1161,7 +1161,18 @@ func filterOutLoopFiles(diff string) string {
 				// of loop_hook_test.go's filterOutLoopHookFiles
 				// below — byte-in-sync is asserted by
 				// TestScopeFence_S_LSK_031.
-				strings.HasSuffix(path, "/ch04_carveout_test.go")
+				strings.HasSuffix(path, "/ch04_carveout_test.go") ||
+				// CH-07 widening (cachicamas-chat-store-adapter,
+				// ADR 0010): ch07_carveout_test.go is the CH-07
+				// test-only helper that owns isCH07GoModDrift;
+				// CH-07 widens the pre-authorized go.mod set
+				// from the CH-04 7-require baseline to a
+				// 9-require baseline (github.com/jackc/pgx/v5
+				// + github.com/pressly/goose/v3) + indirects.
+				// Mirror of loop_hook_test.go's
+				// filterOutLoopHookFiles below — byte-in-sync
+				// asserted by TestScopeFence_S_LSK_031.
+				strings.HasSuffix(path, "/ch07_carveout_test.go")
 		}
 		if !skip {
 			kept.WriteString(line)

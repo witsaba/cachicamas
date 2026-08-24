@@ -1042,6 +1042,10 @@ var chatArchetypeForcedClosurePrefixes = []string{
 	// against the tree at WU-2.
 	"github.com/pressly/goose/v3",
 	"github.com/sethvargo/go-retry",
+	// CH-07: goose's transitive closure pulls in go.uber.org/multierr
+	// (used by goose's error-aggregation helpers). Admitted under the
+	// same forced-closure clause.
+	"go.uber.org/multierr",
 }
 
 // chatArchetypeMatchForbidden mirrors matchForbidden above but is its own,
