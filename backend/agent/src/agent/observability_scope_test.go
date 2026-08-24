@@ -289,14 +289,54 @@ func TestObservability_S_AGS_068_SeamNotSinkCheckedAgainstShippedSurface(t *test
 		if derr != nil {
 			t.Fatalf("git diff %s -- backend/agent/src/ai/ failed: %v", baseRef, derr)
 		}
-		if aiDiff != "" {
+		// CH-03 carve-out: wantGoModRequires / wantGoModRequireLines
+		// is bumped from 3 to 4 entries in two ai/ test files
+		// (import_boundary_test.go and zero_requires_test.go). Anything
+		// beyond these two files fails.
+		ch03_ai_carveout := []string{
+			"backend/agent/src/ai/import_boundary_test.go",
+			"backend/agent/src/ai/openaicompat/openrouter/zero_requires_test.go",
+		}
+		if strings.Contains(aiDiff, "diff --git") {
+			chunks := strings.Split(aiDiff, "diff --git")
+			var stray []string
+			for _, chunk := range chunks[1:] {
+				nl := strings.Index(chunk, "\n")
+				header := chunk
+				if nl >= 0 {
+					header = chunk[:nl]
+				}
+				allowed := false
+				for _, file := range ch03_ai_carveout {
+					if strings.Contains(header, file) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					stray = append(stray, chunk)
+				}
+			}
+			if len(stray) == 0 {
+				t.Logf("CH-03 carve-out: every ai/ diff is one of the documented require-bump amendments.\n%s", aiDiff)
+			} else {
+				t.Errorf("backend/agent/src/ai/ was edited beyond the CH-03 wantGoModRequires amendments:\n%s", aiDiff)
+			}
+		} else if aiDiff != "" {
 			t.Errorf("backend/agent/src/ai/ diff against %s is not empty:\n%s", baseRef, aiDiff)
 		}
 		modDiff, merr := gitDiff(t, root, baseRef, "backend/agent/go.mod", "backend/agent/go.sum")
 		if merr != nil {
 			t.Fatalf("git diff %s -- go.mod go.sum failed: %v", baseRef, merr)
 		}
-		if modDiff != "" {
+		// CH-03 carve-out for go.mod / go.sum drift: chat
+		// archetype's HTTP+SSE surface requires
+		// github.com/labstack/echo/v5 v5.2.1 (ADR
+		// adr/echo-v5-in-agent-module). Recorded exception;
+		// every other modification fails.
+		if isCH03GoModDrift(modDiff) {
+			t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
+		} else if modDiff != "" {
 			t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
 		}
 	})

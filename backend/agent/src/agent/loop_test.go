@@ -1439,7 +1439,15 @@ func TestTurn_SubstrateUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git diff %s -- backend/agent/go.mod go.sum failed: %v", mainRef, err)
 	}
-	if len(goModSum) != 0 {
+	// CH-03 (cachicamas-chat-http-surface) carve-out: the chat
+	// archetype's HTTP+SSE surface requires github.com/labstack/echo/v5
+	// v5.2.1 (ADR adr/echo-v5-in-agent-module), bumping the
+	// module's go.mod from 3 require lines (AI-37) to 4. The drift
+	// is the recorded exception; every other go.mod / go.sum
+	// modification fails this clause.
+	if isCH03GoModDrift(goModSum) {
+		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
+	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
 	}
 }

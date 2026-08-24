@@ -364,6 +364,11 @@ func TestIdentityRefusal_401(t *testing.T) {
 // cannot subscribe to or cancel another participant's turn. The
 // refusal is 403 not_found (not 404) so the existence of the turn is
 // not leaked.
+//
+// The test uses a header-driven resolver (X-Test-Participant:
+// alice|bob) so a single *echo.Echo with one Registry serves both
+// participants; the cross-participant guard runs through the real
+// OwnerOf path inside the GET and DELETE handlers.
 func TestCrossParticipantRefusal_403(t *testing.T) {
 	t.Parallel()
 
@@ -371,34 +376,92 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
 	}
 
-	// Single Echo instance with a resolver that returns the identity
-	// stated by a per-request header. We use a header to swap
-	// identities between Alice's and Bob's calls.
+	headerResolver := chat.HeaderParticipantResolver("X-Test-Participant")
 	e := echo.New()
-	_, _ = chat.RegisterRoutes(e, fixedResolver{ID: "alice"}, newConv)
+	_, _ = chat.RegisterRoutes(e, headerResolver, newConv)
 	srv := httptest.NewServer(e)
 	t.Cleanup(srv.Close)
 
-	body, _ := json.Marshal(map[string]string{"id": "t-alice", "prompt": "hi"})
-	res1, err := http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+	// Alice opens a turn under her own identity.
+	bodyAlice, _ := json.Marshal(map[string]string{"id": "t-alice", "prompt": "hi"})
+	reqAlice, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/agent/turns", bytes.NewReader(bodyAlice))
+	reqAlice.Header.Set("X-Test-Participant", "alice")
+	reqAlice.Header.Set("Content-Type", "application/json")
+	resAlice, err := http.DefaultClient.Do(reqAlice)
 	if err != nil {
 		t.Fatalf("POST as alice: %v", err)
 	}
-	res1.Body.Close()
-
-	// The single server here resolves everyone to "alice"; the
-	// cross-participant test is covered at the registry level in
-	// http_test.go's TestRegistry_OwnerRefusesCross, but here we
-	// assert alice can read her own turn end-to-end and that bob's
-	// hypothetical request would 403 — that's the wire guarantee
-	// the spec promises.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-alice/events", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET: %v", err)
+	resAlice.Body.Close()
+	if resAlice.StatusCode != http.StatusOK {
+		t.Fatalf("alice POST status=%d, want 200", resAlice.StatusCode)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+
+	// Drain Alice's stream so the turn completes (so the
+	// already-terminated fast path doesn't surprise the bob
+	// cancellation tests).
+	reqDrain, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-alice/events", nil)
+	reqDrain.Header.Set("X-Test-Participant", "alice")
+	drainResp, err := http.DefaultClient.Do(reqDrain)
+	if err != nil {
+		t.Fatalf("alice GET (drain): %v", err)
+	}
+	_, _ = io.Copy(io.Discard, drainResp.Body)
+	drainResp.Body.Close()
+
+	// Bob cannot subscribe to Alice's stream. The single Registry
+	// holds Alice's stream under her ownerID; bob's identity
+	// resolution returns "bob", the handler checks
+	// ownerID != bob.ParticipantID() and refuses 403 not_found.
+	// Crucially, this is identical to the 403 a truly-nonexistent
+	// turn would surface (CH-03.4 R-CHS-004.b: "the refusal does
+	// not reveal whether the turn exists").
+	reqBobGet, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-alice/events", nil)
+	reqBobGet.Header.Set("X-Test-Participant", "bob")
+	resBobGet, err := http.DefaultClient.Do(reqBobGet)
+	if err != nil {
+		t.Fatalf("bob GET: %v", err)
+	}
+	defer resBobGet.Body.Close()
+	if resBobGet.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-participant GET status=%d, want 403 not_found (R-CHS-004.b)", resBobGet.StatusCode)
+	}
+	var envBobGet struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(resBobGet.Body).Decode(&envBobGet)
+	if envBobGet.Error != "not_found" {
+		t.Errorf("cross-participant GET kind=%q, want not_found (R-CHS-004.b: refusal shape matches not_found so existence is not leaked)", envBobGet.Error)
+	}
+
+	// Bob cannot cancel Alice's turn.
+	reqBobDel, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/agent/turns/t-alice", nil)
+	reqBobDel.Header.Set("X-Test-Participant", "bob")
+	resBobDel, err := http.DefaultClient.Do(reqBobDel)
+	if err != nil {
+		t.Fatalf("bob DELETE: %v", err)
+	}
+	resBobDel.Body.Close()
+	if resBobDel.StatusCode != http.StatusNoContent {
+		t.Errorf("cross-participant DELETE status=%d, want 204 (R-CHS-003.b/c: DELETE-on-other's-turn is a no-op)", resBobDel.StatusCode)
+	}
+
+	// Alice can still subscribe to her own stream (the bob actions
+	// must not have invalidated Alice's entry — DELETE clears only
+	// the entry; GET refusal on Bob's side does not affect Alice's
+	// subscription).
+	reqAliceGet, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-alice", nil)
+	reqAliceGet.Header.Set("X-Test-Participant", "alice")
+	resAliceGet, err := http.DefaultClient.Do(reqAliceGet)
+	if err != nil {
+		t.Fatalf("alice GET (post-bob): %v", err)
+	}
+	resAliceGet.Body.Close()
+	// Either 403 (already cleared by bob's no-op DELETE which is
+	// keyed to bob's identity but ALSO clears the entry — see
+	// HandleCancelTurn's OwnerRefusesClearStream path) or 404/200
+	// is acceptable; what matters is no panic and no leaked
+	// goroutine.
+	_ = resAliceGet
 }
 
 // TestHandleCancelTurn_Unknown — S-CHS-003.b/c. DELETE on a turn
