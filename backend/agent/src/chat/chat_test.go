@@ -26,8 +26,9 @@ import (
 
 // TestChatHTTP_PostStreamCancelFlow — happy path. POST opens a turn;
 // GET streams the projected events in order; DELETE cancels and the
-// stream emits a single `event: turn.end\n\n` with no finishReason
-// (the cancellation discriminator).
+// stream emits `event: turn.end\n\n` with NO `FinishReason` in the
+// data line (R-CHS-003.a's cancellation discriminator observed at
+// the HTTP layer).
 func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 	t.Parallel()
 
@@ -71,14 +72,25 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
 
-	// Wait for the producer to reach the gate so we know it's mid-turn.
+	// GET subscribes. The held script emits message.start + one
+	// delta, then parks. We open the GET FIRST so the cancellation
+	// observes the same stream the user subscribed to.
+	getReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1/events", nil)
+	getResp, err := http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("GET events: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	// Wait for the producer to reach the gate so the projector is
+	// parked and the SSE connection is mid-stream.
 	select {
 	case <-gate.Reached():
-	case <-time.After(3 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("producer never reached the gate")
 	}
 
-	// DELETE cancels the turn while the producer is still parked.
+	// DELETE cancels the turn while the producer is parked.
 	delReq, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/agent/turns/t-1", nil)
 	delRes, err := http.DefaultClient.Do(delReq)
 	if err != nil {
@@ -89,30 +101,65 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 		t.Errorf("DELETE status=%d, want 204", delRes.StatusCode)
 	}
 
-	// The GET after the DELETE may see the cancelled turn.end frame
-	// if the projector has finished. In v1 the spec promises that
-	// the cancellation arrives on the SAME stream that was open when
-	// DELETE was issued. We assert the registry state: the stream
-	// entry has been cleared by DELETE.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1", nil)
-	getReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1/events", nil)
-	_ = req
-	resp, err := http.DefaultClient.Do(getReq)
-	if err != nil {
-		// DELETE cleared the entry — surface as not_found, this is
-		// expected and proves R-CHS-003.b's "unknown turn → no-op DELETE"
-		// from the GET side.
-		t.Logf("GET after DELETE: %v (expected: DELETE cleared the entry)", err)
-		resp = nil
-	} else {
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusOK {
-			t.Errorf("GET after DELETE status=%d, want 403 (the cleared stream appears as unknown)", resp.StatusCode)
+	// Release the gate so the producer emits message.end then
+	// turn.end. Read the SSE stream until turn.end arrives.
+	gate.Release()
+
+	scanner := bufio.NewScanner(getResp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var frame strings.Builder
+	var sawTurnEnd bool
+	var sawTurnEndFinishReason *string // nil means absent
+	deadline := time.After(5 * time.Second)
+read:
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out reading SSE; sawTurnEnd=%v, sawTurnEndFinishReason=%v", sawTurnEnd, sawTurnEndFinishReason)
+		default:
 		}
+		if !scanner.Scan() {
+			break read
+		}
+		line := scanner.Text()
+		if line == "" {
+			// End of a frame — parse it.
+			if frame.Len() == 0 {
+				continue
+			}
+			var event string
+			var data string
+			for _, l := range strings.Split(strings.TrimRight(frame.String(), "\n"), "\n") {
+				switch {
+				case strings.HasPrefix(l, "event: "):
+					event = strings.TrimPrefix(l, "event: ")
+				case strings.HasPrefix(l, "data: "):
+					data = strings.TrimPrefix(l, "data: ")
+				}
+			}
+			frame.Reset()
+			if event == "turn.end" {
+				sawTurnEnd = true
+				var payload struct {
+					FinishReason *string `json:"finishReason"`
+				}
+				_ = json.Unmarshal([]byte(data), &payload)
+				sawTurnEndFinishReason = payload.FinishReason
+				break read
+			}
+			continue
+		}
+		frame.WriteString(line)
+		frame.WriteString("\n")
 	}
 
-	// Release the gate so the producer doesn't hang the suite.
-	gate.Release()
+	if !sawTurnEnd {
+		t.Fatal("turn.end frame never observed on the SSE stream")
+	}
+	if sawTurnEndFinishReason != nil {
+		t.Errorf("turn.end carried finishReason=%q, want nil/absent (R-CHS-003.a: cancellation discriminator)",
+			*sawTurnEndFinishReason)
+	}
 }
 
 // TestChatHTTP_AlreadyTerminatedGet — S-CHS-002.b. After a turn
