@@ -123,3 +123,77 @@ func TestPostgresConversationStore_EmptyDSNRejected(t *testing.T) {
 		t.Errorf("error must be non-empty")
 	}
 }
+
+// TestPostgresConversationStore_AppendPersists (S-CCS-007 mirror,
+// INTEGRATION-gated). Asserts Append persists exchanges in arrival
+// order, matching MemoryConversationStore's S-CCS-007 contract.
+// Cross-process semantics are exercised in the WU-11 scenario
+// (TestPostgresConversationStore_CrossProcess_RoundTrips); this
+// test covers the in-process path.
+func TestPostgresConversationStore_AppendPersists(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	const participant = "s-ccs-007-participant"
+	exA := chat.Exchange{PromptText: "first", AssistantText: "reply-A"}
+	exB := chat.Exchange{PromptText: "second", AssistantText: "reply-B"}
+	if err := store.Append(participant, exA); err != nil {
+		t.Fatalf("Append(exA) returned %v, want nil", err)
+	}
+	if err := store.Append(participant, exB); err != nil {
+		t.Fatalf("Append(exB) returned %v, want nil", err)
+	}
+	loaded, err := store.Load(participant)
+	if err != nil {
+		t.Fatalf("Load returned %v, want nil", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("Load returned %d exchanges, want 2", len(loaded))
+	}
+	if loaded[0].PromptText != "first" || loaded[1].PromptText != "second" {
+		t.Errorf("Load order = [%q, %q], want [first, second]", loaded[0].PromptText, loaded[1].PromptText)
+	}
+	if loaded[0].AssistantText != "reply-A" || loaded[1].AssistantText != "reply-B" {
+		t.Errorf("Load assistant text = [%q, %q], want [reply-A, reply-B]", loaded[0].AssistantText, loaded[1].AssistantText)
+	}
+}
+
+// TestPostgresConversationStore_LoadUnknownReturnsErrConversationNotFound
+// (S-CCS-009 mirror, INTEGRATION-gated). Load of an unknown
+// participant returns ErrConversationNotFound and a follow-up
+// Append under a different id does not collide.
+func TestPostgresConversationStore_LoadUnknownReturnsErrConversationNotFound(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+
+	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore: %v", err)
+	}
+	t.Cleanup(func() { _ = closer() })
+
+	_, err = store.Load("never-existed-sccs009")
+	if !errors.Is(err, chat.ErrConversationNotFound) {
+		t.Errorf("Load(never-existed) error = %v, want errors.Is(_, chat.ErrConversationNotFound)", err)
+	}
+
+	ex := chat.Exchange{PromptText: "x", AssistantText: "y"}
+	if err := store.Append("another-id-sccs009", ex); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+	loaded, err := store.Load("another-id-sccs009")
+	if err != nil {
+		t.Fatalf("Load returned %v, want nil", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("Load returned %d exchanges, want 1", len(loaded))
+	}
+}
