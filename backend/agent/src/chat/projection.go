@@ -2,6 +2,11 @@
 // values (R-CCP-003, R-CCP-004, R-CCP-013). Its only inputs are the sink and
 // Harness.Run's own return values — no second channel, no Layer 2 internal
 // read.
+//
+// CH-06 — widens the projector to track assistantText (accumulated from
+// MessageDelta text, R-CCS-004) and messageIDs (pushed from MessageStart
+// MessageID, R-CCS-009), and to call c.store.Append at the terminal
+// wire event site (R-CCS-008, D-6) BEFORE clearing inFlight.
 
 package chat
 
@@ -30,22 +35,37 @@ type runResult struct {
 // (D1) — until the range ends, then reads result to complete the ONE
 // terminal wire event this turn emits (R-CCP-006), clears inFlight, and
 // closes out exactly once.
-func (c *Conversation) project(ctx context.Context, sink <-chan *agent.Event, result <-chan runResult, out chan<- WireEvent) {
+//
+// CH-06: prompt is the user-submitted prompt that drives this turn
+// (D-7). The projector tracks assistantText (accumulated from
+// MessageDelta.Fragment, R-CCS-004) and messageIDs (pushed from
+// MessageStart.MessageID, R-CCS-009). Between the terminal wire event
+// send and the inFlight clear, the projector builds an Exchange and
+// appends it to c.store — the append runs BEFORE inFlight clears
+// (R-CCS-008, D-6) so a subscriber that receives the terminal wire
+// event and fires a fast reload sees the just-finished exchange.
+func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *agent.Event, result <-chan runResult, out chan<- WireEvent) {
 	defer close(out)
 
 	msgIndex := -1
 	var runEnd agent.RunEnd
 	var haveRunEnd bool
 
+	// CH-06 accumulators (D-7, R-CCS-004 / R-CCS-009).
+	var assistantText string
+	var messageIDs []string
+
 	for ev := range sink {
 		switch ev.Kind() {
 		case agent.EventKindMessageStartText:
 			start, _ := ev.MessageStartText()
 			msgIndex++
+			messageIDs = append(messageIDs, start.MessageID().String())
 			out <- MessageStart{MessageID: start.MessageID().String(), Index: msgIndex}
 
 		case agent.EventKindMessageDeltaText:
 			delta, _ := ev.MessageDeltaText()
+			assistantText += delta.Fragment()
 			out <- MessageDelta{Index: msgIndex, Delta: delta.Fragment()}
 
 		case agent.EventKindMessageEndText:
@@ -66,6 +86,18 @@ func (c *Conversation) project(ctx context.Context, sink <-chan *agent.Event, re
 
 	res := <-result
 	out <- terminalWireEvent(runEnd, haveRunEnd, res)
+
+	// CH-06 (R-CCS-008, D-6): append BEFORE clearing inFlight. The
+	// store's own mutex is taken inside Append; the Conversation.mu
+	// is taken below. No lock cycles. A subscriber that receives
+	// turn.end and fires a fast reload (CH-08.1) sees the
+	// just-finished exchange.
+	exchange := buildTerminalExchange(prompt, runEnd, haveRunEnd, res, assistantText, messageIDs)
+	if err := c.store.Append(c.participantID, exchange); err != nil {
+		c.logger.LogAttrs(ctx, slog.LevelError, "conversation store append failed",
+			slog.String("participant_id", c.participantID),
+			slog.String("error", err.Error()))
+	}
 
 	c.mu.Lock()
 	c.inFlight = false
@@ -101,5 +133,56 @@ func terminalWireEvent(re agent.RunEnd, haveRunEnd bool, res runResult) WireEven
 		return Error{Kind: "server", Message: phraseFor(failure.Category())}
 	default:
 		return TurnEnd{FinishReason: nil}
+	}
+}
+
+// buildTerminalExchange translates the held run_end + buffered res +
+// accumulators into the eight-field Exchange the store persists (D-7,
+// R-CCS-004, R-CCS-005, R-CCS-006, R-CCS-009). It is package-private
+// — called only from project() above. Position is left at its zero
+// value here; the in-memory adapter (and CH-07's postgres adapter)
+// assigns the insertion index on Append.
+func buildTerminalExchange(prompt string, runEnd agent.RunEnd, haveRunEnd bool, res runResult, assistantText string, messageIDs []string) Exchange {
+	kind := TerminalKindCompleted
+	var fin *ai.FinishReason
+	var cat ai.FailureCategory
+	partial := false
+
+	if !haveRunEnd {
+		// Defensive only: Harness.Run always emits exactly one
+		// run_end before its sink closes (terminalWireEvent:77-78).
+		// Default to completed with empty FinishReason and zero
+		// failure category — same shape a fresh Exchange would carry.
+		kind = TerminalKindCompleted
+	} else {
+		switch runEnd.Outcome() {
+		case agent.RunOutcomeCompleted:
+			reason := res.finish
+			fin = &reason
+		case agent.RunOutcomeInterrupted, agent.RunOutcomeShutdown:
+			kind = TerminalKindCancelled
+			partial = true
+		case agent.RunOutcomeFailed:
+			kind = TerminalKindFailed
+			if f, ok := runEnd.Failure(); ok {
+				cat = f.Category()
+			}
+		}
+	}
+
+	// Copy the messageIDs slice so caller-side mutation cannot corrupt
+	// the persisted record. The slice is short (one entry per
+	// message-start in the turn) — the copy is bounded.
+	ids := make([]string, len(messageIDs))
+	copy(ids, messageIDs)
+
+	return Exchange{
+		PromptText:      prompt,
+		AssistantText:   assistantText,
+		Partial:         partial,
+		TerminalKind:    kind,
+		FailureCategory: cat,
+		FinishReason:    fin,
+		MessageIDs:      ids,
 	}
 }

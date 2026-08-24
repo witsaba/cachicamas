@@ -135,7 +135,7 @@ func TestHandleOpenTurn_Valid(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -172,7 +172,7 @@ func TestHandleOpenTurn_EmptyPrompt(t *testing.T) {
 	var factoryCalled bool
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -235,7 +235,7 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 	)
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider})
+		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -285,7 +285,7 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -335,7 +335,7 @@ func TestIdentityRefusal_401(t *testing.T) {
 	var factoryCalled bool
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: ""}, newConv) // empty Participant id → refusal
 
@@ -373,7 +373,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 
 	headerResolver := chat.HeaderParticipantResolver("X-Test-Participant")
@@ -470,7 +470,7 @@ func TestHandleCancelTurn_Unknown(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t))})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 

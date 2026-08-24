@@ -1,6 +1,6 @@
 # Layer 3 milestones and task graph — `cachicamas_chat`, the chat archetype
 
-> **Status:** In progress — **6 of 12** milestones shipped. **CH-00 is the first milestone.** After CH-03 the archetype owns its HTTP+SSE serving surface: `POST /api/agent/turns`, `GET …/events`, `DELETE …/:id` — the frozen wire that `frontend-chat-layer1` already drives. CH-04 (composition root, env wiring) shipped 2026-08-24: `backend/agent/src/cmd/chat/` now reads every required env var, installs the OpenTelemetry SDK, builds the openrouter provider + JWE IdentityResolver shim, mounts the chat surface, and binds Echo with graceful OTel shutdown on SIGTERM/SIGINT. CH-05 (frontend stub retirement) remains.
+> **Status:** In progress — **7 of 12** milestones shipped. **CH-00 is the first milestone.** After CH-03 the archetype owns its HTTP+SSE serving surface: `POST /api/agent/turns`, `GET …/events`, `DELETE …/:id` — the frozen wire that `frontend-chat-layer1` already drives. CH-04 (composition root, env wiring) shipped 2026-08-24: `backend/agent/src/cmd/chat/` now reads every required env var, installs the OpenTelemetry SDK, builds the openrouter provider + JWE IdentityResolver shim, mounts the chat surface, and binds Echo with graceful OTel shutdown on SIGTERM/SIGINT. CH-05 (frontend stub retirement) remains.
 > **Scope:** this is the plan for **one archetype**, not for the layer. Layer 3 is the position in the stack where policy, resources, persistence and frontends live ([ADR 0009 § D2](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md)); `cachicamas_chat` is one occupant of that position, and `cachicamas_coding` ([doc 0004](./0004-cachicamas-coding-layer-3-task-graph.md)) is another. Neither defines the layer.
 > **Entry gate:** [AG-23 — the Layer 3 readiness contract](./0003-cachicamas-agent-layer-2-task-graph.md) for everything that consumes the harness. Layer 2 is frozen and complete at 24 of 24; this document is its first real consumer.
 > **References:** [cachicamas agent stack v2](../0001-cachicamas-agent-stack-v2.md) · [ADR 0004](../../adr/0004-adopt-tau-3-layer-agentic-architecture.md) · [ADR 0005](../../adr/0005-promote-agent-stack-to-own-module.md) · [ADR 0007 — the DAG convention](../../adr/0007-adopt-dag-convention-for-task-graphs.md) · [ADR 0009](../../adr/0009-redefine-cachicamas-as-a-multiplayer-agentic-system.md) · [`agent-layer3-handoff`](../../../openspec/specs/agent-layer3-handoff/spec.md) · [`frontend-chat-layer1`](../../../openspec/specs/frontend-chat-layer1/spec.md)
@@ -989,8 +989,8 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 - [ ] Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2
 - [ ] One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3
 - [x] The offline literal is retired by a recorded spec amendment, not a silent deletion — closed by CH-05.2
-- [ ] Conversations persist behind a port this archetype owns, in tables it owns — closed by CH-06.1, CH-07.1
-- [ ] A conversation reloads faithfully and continues the same transcript — closed by CH-06.2, CH-08.1
+- [x] Conversations persist behind a port this archetype owns, in tables it owns — closed by CH-06.1, CH-07.1
+- [x] A conversation reloads faithfully and continues the same transcript — closed by CH-06.2, CH-08.1
 - [ ] Swapping the store adapter changed no caller — closed by CH-07.2
 - [ ] The model can call a tool and the human can approve or decline it, on the same event stream — closed by CH-09, CH-10
 - [ ] One deterministic acceptance drives the whole archetype uncached — closed by CH-11
@@ -1041,7 +1041,7 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 | Research 6 — approval rides the stream and must carry context | CH-10's charter note |
 | Register 1 — the doc number | This document's number; ADR 0009 left unedited |
 | Register 2 — doc 0004's first-archetype claim | This § What this document is; doc 0004 unamended |
-| Register 3 — home-directory sessions are not a layer rule | CH-06, CH-07 |
+| Register 3 — home-directory sessions are not a layer rule | closed by CH-06 (this PR); CH-07 carries the postgres adapter |
 | Register 4 — the mandated offline literal | closed by CH-05.2 (PR <TBD>, this PR) |
 | Register 5 — MCP binds archetypes with a business system | Deferred register |
 | Register 6 — read "application" as "archetype" | CH-00.1 item 7 |
@@ -1061,7 +1061,7 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 | CH-04.3 | R-10's single marked exception |
 | CH-05.1 | R-12, R-16 |
 | CH-05.2 | R-13, register 4 (closed by CH-05.2) |
-| CH-06.1, CH-06.2 | R-04, R-16, research 5, register 3 |
+| CH-06.1, CH-06.2 | closed by CH-06 (R-04, R-16, research 5, register 3) |
 | CH-07.1 | R-08 |
 | CH-07.2 | R-04 |
 | CH-08.1, CH-08.2 | R-14, R-16 |

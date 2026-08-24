@@ -1,6 +1,12 @@
 // CH-02.1/.2/.3 — the archetype's first behaviour. Conversation owns one
 // agent.Harness and one *agent.History, reused across successive turns
 // (R-CCP-001, D0): one browser turn is exactly one Harness.Run call.
+//
+// CH-06 — extends the conversation with conversation-store durability
+// (R-CCS-001, D-1, D-2): Config gains Store (required), ParticipantID
+// (required), and InitialHistory (optional seed). The terminal wire
+// event site at projection.go calls c.store.Append before clearing
+// inFlight (R-CCS-008, D-6).
 
 package chat
 
@@ -8,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -23,7 +30,7 @@ const SystemPrompt = "You are the cachicamas chat assistant; answer the particip
 // ErrNilProvider is returned by NewConversation when cfg.Provider is nil.
 var ErrNilProvider = errors.New("chat: Config.Provider is required")
 
-// Config configures a Conversation (design AD-2).
+// Config configures a Conversation (design AD-2 + CH-06 D-1, D-2).
 type Config struct {
 	// Provider is the model provider every turn streams from. Required.
 	Provider ai.ModelProvider
@@ -31,41 +38,82 @@ type Config struct {
 	// Logger receives one structured record per unmapped Layer 2 event
 	// (R-CCP-004, D4). Nil defaults to slog.Default().
 	Logger *slog.Logger
+
+	// Store is the conversation-store port this Conversation persists
+	// every completed turn into (R-CCS-001, D-1). Required: nil is
+	// rejected by NewConversation with ErrNilStore. The store is
+	// addressed at the terminal wire event site in projection.go by
+	// the participant id below (D-6).
+	Store ConversationStore
+
+	// ParticipantID is the store's addressable key — the identity the
+	// reload path consults (R-CCS-001, D-1). Required: an empty or
+	// whitespace-only value is rejected by NewConversation with
+	// ErrEmptyParticipantID. A defaulted UUID would be a stable
+	// per-process identity, catastrophic in production; the participant
+	// id must come from the HTTP layer (Registry.GetOrCreate passes it
+	// through to the factory).
+	ParticipantID string
+
+	// InitialHistory is the reload seam (R-CCS-006, D-2). Non-nil is
+	// passed directly to the harness (the door at
+	// agent.NewSeededHistory validates the message slice). Nil falls
+	// back to agent.NewHistory(), today's default.
+	InitialHistory *agent.History
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
 // successive turns (R-CCP-001, D0). It drives one browser turn per
 // Harness.Run call and projects Layer 2's event stream onto WireEvent
-// values.
+// values. CH-06 widens this with the store + participant id the
+// projector addresses at the terminal wire event site (R-CCS-008,
+// D-6).
 type Conversation struct {
 	harness *agent.Harness
 	logger  *slog.Logger
+
+	store         ConversationStore
+	participantID string
 
 	mu       sync.Mutex
 	inFlight bool
 }
 
-// NewConversation constructs a Conversation. cfg.Provider is required; every
-// other harness seam — including RetryAttempts, left unset so
-// defaultRetryAttempts applies (R-CCP-009) — is left at CH-00's recorded v1
-// answer. Harness.Shutdown is never called by this package (R-CCP-001): it
-// latches a terminal, one-way refusal, which is not what "cancel this turn"
-// means for a conversation that must accept the next prompt.
+// NewConversation constructs a Conversation. cfg.Provider is required;
+// cfg.Store is required (R-CCS-001); cfg.ParticipantID is required and
+// non-whitespace (D-1); every other harness seam — including
+// RetryAttempts, left unset so defaultRetryAttempts applies (R-CCP-009)
+// — is left at CH-00's recorded v1 answer. Harness.Shutdown is never
+// called by this package (R-CCP-001): it latches a terminal, one-way
+// refusal, which is not what "cancel this turn" means for a
+// conversation that must accept the next prompt.
 func NewConversation(cfg Config) (*Conversation, error) {
 	if cfg.Provider == nil {
 		return nil, ErrNilProvider
+	}
+	if cfg.Store == nil {
+		return nil, ErrNilStore
+	}
+	if strings.TrimSpace(cfg.ParticipantID) == "" {
+		return nil, ErrEmptyParticipantID
 	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	history := cfg.InitialHistory
+	if history == nil {
+		history = agent.NewHistory()
+	}
 	return &Conversation{
 		harness: &agent.Harness{
 			Provider: cfg.Provider,
 			System:   SystemPrompt,
-			History:  agent.NewHistory(),
+			History:  history,
 		},
-		logger: logger,
+		logger:        logger,
+		store:         cfg.Store,
+		participantID: cfg.ParticipantID,
 	}, nil
 }
 
@@ -111,7 +159,9 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 		result <- runResult{finish: finish, err: runErr}
 	}()
 
-	go c.project(ctx, sink, result, out)
+	// The projector receives the prompt verbatim so it can stamp the
+	// resulting Exchange's PromptText field (D-7, R-CCS-004 / R-CCS-006).
+	go c.project(ctx, prompt, sink, result, out)
 
 	return out, nil
 }
