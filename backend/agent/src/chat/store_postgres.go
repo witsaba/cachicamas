@@ -55,6 +55,20 @@ type PostgresConversationStore struct {
 	db *sql.DB
 }
 
+// RawDB exposes the underlying *sql.DB. Test code (notably
+// store_postgres_integration_test.go's cross-process scenario)
+// uses this to run the chat-owned migrations against the same
+// connection the adapter uses, without forcing callers to
+// construct the migrator separately.
+//
+// Production code MUST NOT call RawDB — the migration runner is
+// invoked by the composition root exactly once at startup
+// (cmd/chat/main.go:198-217), and the adapter's own Append/Load
+// are the only supported paths after that.
+func (s *PostgresConversationStore) RawDB() *sql.DB {
+	return s.db
+}
+
 // NewPostgresConversationStore opens the connection pool and
 // returns the store + a closer. The closer MUST be invoked by the
 // composition root AFTER the OTel pipeline flushes (post-listener
