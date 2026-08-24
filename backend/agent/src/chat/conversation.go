@@ -166,3 +166,17 @@ func (c *Conversation) Cancel() CancelOutcome {
 	c.harness.Interrupt()
 	return CancelRequested
 }
+
+// IsInFlight reports whether a turn is currently driving through this
+// Conversation. The read happens under c.mu so callers outside the
+// package — chiefly chat.Registry.GetOrCreate, which needs to decide
+// whether a fresh POST may proceed or must be refused with a 409
+// (S-CHS-001.c) — do not race the writer in chat/projection.go's
+// terminal-event site. Returning the bool (not a copy of the struct)
+// is the durable property; the field itself can change shape in a
+// future refactor without breaking the call site.
+func (c *Conversation) IsInFlight() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inFlight
+}

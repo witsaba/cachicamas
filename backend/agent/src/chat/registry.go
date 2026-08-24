@@ -68,10 +68,31 @@ func NewRegistry(newConv ConversationFactory) *Registry {
 // surfaces in the failing test, never as a silent refusal.
 func (r *Registry) GetOrCreate(participantID string) (*Conversation, bool) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	conv, exists := r.conversations[participantID]
+	r.mu.Unlock()
 
+	// Reading inFlight under the Conversation's own mutex avoids the
+	// race against chat/projection.go:71's write — the Registry's
+	// lock protects the map only; the per-turn flag lives in the
+	// Conversation. Re-entering r.mu to call IsInFlight would also
+	// be wrong: that would invert the lock order
+	// (Conversation.mu → Registry.mu) and reintroduce a deadlock
+	// surface.
+	if exists {
+		if conv.IsInFlight() {
+			return nil, true
+		}
+		return conv, false
+	}
+
+	// First-use path: synchronise the map insert under r.mu. We
+	// re-check after the lock is taken to avoid two callers racing
+	// past the existence check above and synthesising two
+	// Conversations.
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if conv, ok := r.conversations[participantID]; ok {
-		if conv.inFlight {
+		if conv.IsInFlight() {
 			return nil, true
 		}
 		return conv, false
