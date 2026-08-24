@@ -334,10 +334,12 @@ func TestObservability_S_AGS_068_SeamNotSinkCheckedAgainstShippedSurface(t *test
 		// github.com/labstack/echo/v5 v5.2.1 (ADR
 		// adr/echo-v5-in-agent-module). Recorded exception;
 		// every other modification fails.
-		if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
-			t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
-		} else if modDiff != "" {
-			t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
+if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
+			t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", modDiff)
+		} else if isCH07GoModDrift(modDiff) {
+			t.Logf("CH-07 carve-out: go.mod / go.sum drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", modDiff)
+		} else if len(modDiff) != 0 {
+			t.Errorf("go.mod / go.sum drifted from main:\n%s", modDiff)
 		}
 	})
 

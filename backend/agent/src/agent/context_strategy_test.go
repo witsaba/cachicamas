@@ -1260,10 +1260,12 @@ func TestNoRelease_SubstrateByteUnchanged(t *testing.T) {
 	// module's go.mod from 3 require lines (AI-37) to 4. The drift
 	// is the recorded exception; every other go.mod / go.sum
 	// modification fails this clause.
-	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
+if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
 		t.Logf("CH-03 carve-out: go.mod / go.sum drift is the recorded Echo require (4th require line per wantGoModRequires); passes per D3.\n%s", goModSum)
+	} else if isCH07GoModDrift(goModSum) {
+		t.Logf("CH-07 carve-out: go.mod / go.sum drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", goModSum)
 	} else if len(goModSum) != 0 {
-		t.Errorf("go.mod / go.sum drifted from %s:\n%s", mainRef, goModSum)
+		t.Errorf("go.mod / go.sum drifted from main:\n%s", goModSum)
 	}
 
 	if len(expectedLayer2ContractRows) != 8 {

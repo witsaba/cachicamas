@@ -656,6 +656,8 @@ func TestCost_ScopeFence(t *testing.T) {
 	// normally.
 	if isCH03GoModDrift(goModSum) || isCH04GoModDrift(goModSum) {
 		t.Logf("CH-03 / CH-04 carve-out: go.mod drift is one of the recorded exceptions (Echo / OTel SDK + otlptracegrpc / jwx + crypto per ADR 0005 § D3).\n%s", goModSum)
+	} else if isCH07GoModDrift(goModSum) {
+		t.Logf("CH-07 carve-out: go.mod drift is the recorded pgx + goose require (per ch07_carveout_test.go); passes per ADR 0010.\n%s", goModSum)
 	} else if len(goModSum) != 0 {
 		t.Errorf("go.mod / go.sum drifted from main (R-CST-007 violated — no new top-level Go deps; CH-03's Echo + CH-04's OTel SDK/otlptrace/jwx additions are the only recorded exceptions):\n%s", goModSum)
 	}

@@ -241,8 +241,16 @@ func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 // `go mod edit -json` and diff the Require array against this
 // table; verify no path outside the pre-authorized set
 // (jwx/v2 + OTel SDK + otlptracegrpc + golang.org/x/crypto +
-// their transitives) appears, and update the table in the same
-// commit.
+// pgx/v5 (CH-07) + their transitives) appears, and update the
+// table in the same commit.
+//
+// CH-07 (cachicamas-chat-store-adapter, ADR
+// 0010-add-pgx-and-goose-to-backend-agent.md) adds github.com/jackc/pgx/v5
+// as the chat archetype's Postgres driver (the chat-owned forward-only
+// migration runner + the postgres adapter behind the closed
+// `chat.ConversationStore` port). This entry is admitted in the
+// same PR as ADR 0010. pressly/goose/v3 arrives with WU-3 (the
+// runner.go file that imports it).
 var wantGoModRequires = []requireEntry{
 	{Path: "github.com/cenkalti/backoff/v5", Version: "v5.0.3", Indirect: true},
 	{Path: "github.com/cespare/xxhash/v2", Version: "v2.3.0", Indirect: true},
@@ -252,6 +260,14 @@ var wantGoModRequires = []requireEntry{
 	{Path: "github.com/goccy/go-json", Version: "v0.10.6", Indirect: true},
 	{Path: "github.com/google/uuid", Version: "v1.6.0", Indirect: true},
 	{Path: "github.com/grpc-ecosystem/grpc-gateway/v2", Version: "v2.29.0", Indirect: true},
+	// CH-07: pgx/v5 is the chat-owned Postgres driver
+	// (ADR 0010-add-pgx-and-goose-to-backend-agent.md).
+	// chat/migrator/runner.go + chat/store_postgres.go import it.
+	{Path: "github.com/jackc/pgx/v5", Version: "v5.10.0", Indirect: false},
+	// CH-07: pgx/v5 transitive closures.
+	{Path: "github.com/jackc/pgpassfile", Version: "v1.0.0", Indirect: true},
+	{Path: "github.com/jackc/pgservicefile", Version: "v0.0.0-20240606120523-5a60cdf6a761", Indirect: true},
+	{Path: "github.com/jackc/puddle/v2", Version: "v2.2.2", Indirect: true},
 	{Path: "github.com/labstack/echo/v5", Version: "v5.2.1", Indirect: false},
 	{Path: "github.com/lestrrat-go/blackmagic", Version: "v1.0.4", Indirect: true},
 	{Path: "github.com/lestrrat-go/httpcc", Version: "v1.0.1", Indirect: true},
@@ -270,6 +286,10 @@ var wantGoModRequires = []requireEntry{
 	{Path: "go.opentelemetry.io/proto/otlp", Version: "v1.11.0", Indirect: true},
 	{Path: "golang.org/x/crypto", Version: "v0.54.0", Indirect: false},
 	{Path: "golang.org/x/net", Version: "v0.57.0", Indirect: true},
+	// CH-07: x/sync version bumped from v0.21.0 to v0.22.0 by pgx/v5's
+	// transitive closure (semaphore + errgroup). Same module, same
+	// indirect status; the version bump is the pgx resolution.
+	{Path: "golang.org/x/sync", Version: "v0.22.0", Indirect: true},
 	{Path: "golang.org/x/sys", Version: "v0.47.0", Indirect: true},
 	{Path: "golang.org/x/text", Version: "v0.40.0", Indirect: true},
 	{Path: "google.golang.org/genproto/googleapis/api", Version: "v0.0.0-20260803160001-6ac0973c030d", Indirect: true},

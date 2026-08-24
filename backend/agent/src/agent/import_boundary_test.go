@@ -968,6 +968,18 @@ var chatArchetypeAllowedPrefixes = []string{
 	// Echo v5 is the chat archetype's HTTP framework. ADR records db_admin's
 	// precedent, the rejected alternatives, and the boundary-widening row.
 	"github.com/labstack/echo/v5",
+	// CH-07 (ADR 0010-add-pgx-and-goose-to-backend-agent, NFR-CCS-005
+	// allowlist amendment clause, R-AGP-003 same-commit rule): the chat
+	// archetype admits pgx/v5/stdlib as a blank-imported driver registration
+	// so chat/migrator/runner.go and chat/store_postgres.go can call
+	// sql.Open("pgx", dsn). The dep is admitted in the same PR as this
+	// widening (the ADR is WU-1 in the same change).
+	"github.com/jackc/pgx/v5/stdlib",
+	// CH-07 (ADR 0010-add-pgx-and-goose-to-backend-agent, same R-AGP-003
+	// same-commit clause): the chat archetype admits pressly/goose/v3 as
+	// the migration runner for the chat-owned forward-only SQL migrations.
+	// chat/migrator/runner.go imports it for goose.NewProvider.
+	"github.com/pressly/goose/v3",
 }
 
 // chatArchetypeForcedClosurePrefixes is a SEPARATE, closure-only allowlist
@@ -1005,6 +1017,31 @@ var chatArchetypeForcedClosurePrefixes = []string{
 	// counterpart of allowedProductionPrefixes' own identically-
 	// justified xxhash entry above.
 	"github.com/cespare/xxhash/v2",
+	// CH-07 (ADR 0010-add-pgx-and-goose-to-backend-agent, R-AGP-003
+	// forced-closure clause): pgx/v5 is admitted as a top-level dep
+	// in chatArchetypeAllowedPrefixes above; its transitive closure
+	// (pgxpool, pgconn, puddle, pgpassfile, pgservicefile, interpolate)
+	// is admitted here in the closure-only list — check 7 reads this
+	// list, check 6 does not. The pre-existing chat-archetype pattern
+	// (allowed + forced-closure as two distinct slices) is preserved.
+	"github.com/jackc/pgx/v5",
+	"github.com/jackc/pgx/v5/pgxpool",
+	"github.com/jackc/pgx/v5/pgconn",
+	"github.com/jackc/puddle/v2",
+	"github.com/jackc/pgpassfile",
+	"github.com/jackc/pgservicefile",
+	"github.com/mfridman/interpolate",
+	// CH-07: pgx's transitive closure pulls in x/text and x/sync
+	// (runes, bidi, secure/precis, width, semaphore, etc.). Admitted
+	// here under the same forced-closure clause.
+	"golang.org/x/text",
+	"golang.org/x/sync",
+	// CH-07: pressly/goose/v3 is admitted as a top-level dep above;
+	// its transitive closure (logrus adapter internals, retry, the
+	// io/fs virtual-filesystem helpers) lives here. Measured fresh
+	// against the tree at WU-2.
+	"github.com/pressly/goose/v3",
+	"github.com/sethvargo/go-retry",
 }
 
 // chatArchetypeMatchForbidden mirrors matchForbidden above but is its own,
