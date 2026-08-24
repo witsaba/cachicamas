@@ -26,7 +26,6 @@
 // fail to verify against whichever side serves the next request — the
 // chat shim's testDeriveKey in auth_shim_test.go is the byte-identical
 // fixture that catches drift.
-
 package main
 
 import (

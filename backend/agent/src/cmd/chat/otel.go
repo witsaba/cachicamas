@@ -18,7 +18,6 @@
 // two modules' OTel installs is a maintainer hazard a future PR
 // should address via an internal package only when the import
 // boundary explicitly widens.
-
 package main
 
 import (

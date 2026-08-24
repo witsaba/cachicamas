@@ -225,7 +225,7 @@ func TestLoadConfig_DefaultsApplied(t *testing.T) {
 // the live smoke's job (CH-04.3).
 type stubProvider struct{}
 
-func (stubProvider) Stream(ctx context.Context, req ai.Request) (<-chan ai.Event, error) {
+func (stubProvider) Stream(ctx context.Context, _ ai.Request) (<-chan ai.Event, error) {
 	responseStart, _ := ai.NewResponseStart("resp-stub", "model-stub")
 	textDelta, _ := ai.NewTextDelta(0, "hello from stub")
 	completion, _ := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
@@ -265,7 +265,7 @@ func TestWiredRoot_PostsWithoutCookieReturns401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http.Post error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 (identity not resolved)", resp.StatusCode)
@@ -298,7 +298,7 @@ func TestWiredRoot_PostsWithValidCookieButEmptyPromptReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 (validation: prompt required)", resp.StatusCode)
@@ -314,7 +314,7 @@ func buildWiredEcho(t *testing.T) (*echo.Echo, *chat.Registry) {
 	t.Helper()
 
 	resolver := NewResolver([]byte(validAuthSecret), "authjs.session-token")
-	factory := func(participantID string) (*chat.Conversation, error) {
+	factory := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: stubProvider{}})
 	}
 
@@ -333,7 +333,7 @@ func buildWiredEcho(t *testing.T) (*echo.Echo, *chat.Registry) {
 func TestBuildConversationFactory_WrapsProviderInConversation(t *testing.T) {
 	t.Parallel()
 
-	factory := func(participantID string) (*chat.Conversation, error) {
+	factory := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: stubProvider{}})
 	}
 
@@ -376,10 +376,14 @@ func TestEnvString_RealEnvMissingKey(t *testing.T) {
 	// Unset on purpose for the duration of the test.
 	const probeKey = "CACHICAMAS_TEST_PROBE_NOT_SET_42"
 	orig, hadOrig := os.LookupEnv(probeKey)
-	os.Unsetenv(probeKey)
+	if err := os.Unsetenv(probeKey); err != nil {
+		t.Fatalf("os.Unsetenv: %v", err)
+	}
 	defer func() {
 		if hadOrig {
-			os.Setenv(probeKey, orig)
+			if err := os.Setenv(probeKey, orig); err != nil {
+				t.Errorf("os.Setenv restore: %v", err)
+			}
 		}
 	}()
 
@@ -625,7 +629,7 @@ func TestChatRoot_LiveSmoke(t *testing.T) {
 	}
 
 	resolver := chat.NoopIdentityResolver{Participant: "live-smoke-participant"}
-	factory := func(participantID string) (*chat.Conversation, error) {
+	factory := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider})
 	}
 

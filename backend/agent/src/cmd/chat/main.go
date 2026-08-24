@@ -142,7 +142,7 @@ func buildProvider(cfg config, tp trace.TracerProvider) (ai.ModelProvider, error
 // StartConfig.GracefulTimeout, default 10s) before returning. run()
 // waits for that return, then fires the OTel shutdown so any in-flight
 // spans are flushed before the TracerProvider tears down.
-func run(ctx context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger) error {
+func run(_ context.Context, getenv func(string) string, otelShutdown func(context.Context) error, otelTP trace.TracerProvider, logger *slog.Logger) error {
 	cfg, err := loadConfig(getenv)
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	}
 
 	resolver := NewResolver([]byte(cfg.AuthSecret), cfg.CookieName)
-	factory := func(participantID string) (*chat.Conversation, error) {
+	factory := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider})
 	}
 
