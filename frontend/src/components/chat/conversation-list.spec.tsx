@@ -1,65 +1,87 @@
 /**
  * ConversationList — the archetype's own memory.
+ *
+ * CH-08.2 (R-CRI-005): the rail is wire-driven. This spec passes
+ * wire-shaped ConversationSummary values, NOT the legacy mock
+ * Conversation type from lib/mock/chat.ts. The mock still serves
+ * the demonstration surfaces (`hero-proof`, `front-desk`); this
+ * component's typed prop surface is the wire (R-CRI-004).
  */
 import { $ } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
 import { ConversationList } from "./conversation-list";
-import { CONVERSATIONS } from "~/lib/mock/chat";
-import { agentBySlug } from "~/lib/mock/staff";
+import type { ConversationSummary } from "~/lib/chat-types";
 
 const noop = $((_id: string) => undefined);
 
-describe("components/chat/conversation-list", () => {
-  it("renders one row per conversation", async () => {
+const wireSummaries: ConversationSummary[] = [
+  {
+    conversationID: "c-4471",
+    lastActivityAt: "2026-08-24T17:00:00Z",
+    turnCount: 4,
+  },
+  {
+    conversationID: "c-4468",
+    lastActivityAt: "2026-08-23T17:00:00Z",
+    turnCount: 3,
+  },
+];
+
+describe("components/chat/conversation-list (R-CRI-005 wire shape)", () => {
+  it("renders one row per conversation summary", async () => {
     const { screen, render } = await createDOM();
     await render(
       <ConversationList
-        conversations={CONVERSATIONS}
-        selectedId={CONVERSATIONS[0].id}
+        conversations={wireSummaries}
+        selectedId={wireSummaries[0].conversationID}
         onSelect$={noop}
       />,
     );
-    for (const c of CONVERSATIONS) {
+    for (const c of wireSummaries) {
       expect(
-        screen.querySelector(`[data-testid="conversation-${c.id}"]`),
-        c.id,
+        screen.querySelector(`[data-testid="conversation-${c.conversationID}"]`),
+        c.conversationID,
       ).toBeTruthy();
     }
   });
 
-  it("shows what a person actually scans by: title, turns, age", async () => {
+  it("renders turnCount + relative-time age derived from lastActivityAt", async () => {
     const { screen, render } = await createDOM();
     await render(
       <ConversationList
-        conversations={CONVERSATIONS}
-        selectedId={CONVERSATIONS[0].id}
+        conversations={wireSummaries}
+        selectedId={wireSummaries[0].conversationID}
         onSelect$={noop}
       />,
     );
-    const first = CONVERSATIONS[0];
+    const first = wireSummaries[0];
     const row = screen.querySelector(
-      `[data-testid="conversation-${first.id}"]`,
+      `[data-testid="conversation-${first.conversationID}"]`,
     );
     const text = row?.textContent ?? "";
-    expect(text).toContain(first.title);
-    expect(text).toContain(agentBySlug(first.agentSlug)?.name ?? "");
-    expect(text).toContain(first.age);
+    // turnCount surfaces in the row's meta line ("4 turns · 12 minutes ago")
+    expect(text).toContain("4 turns");
+    // The id surfaces as the row title
+    expect(text).toContain(first.conversationID);
+    // The relative-time age is derived from the wire's ISO timestamp;
+    // the helper returns "Just now" / "X minutes ago" / etc.
+    expect(text).toMatch(/Just now|minute|hour|Yesterday|days|ago/);
   });
 
   it("marks exactly one row current, and announces it", async () => {
     const { screen, render } = await createDOM();
     await render(
       <ConversationList
-        conversations={CONVERSATIONS}
-        selectedId={CONVERSATIONS[1].id}
+        conversations={wireSummaries}
+        selectedId={wireSummaries[1].conversationID}
         onSelect$={noop}
       />,
     );
     const current = screen.querySelectorAll('[aria-current="true"]');
     expect(current.length).toBe(1);
     expect(current[0].getAttribute("data-testid")).toBe(
-      `conversation-${CONVERSATIONS[1].id}`,
+      `conversation-${wireSummaries[1].conversationID}`,
     );
   });
 
@@ -67,19 +89,19 @@ describe("components/chat/conversation-list", () => {
     const { screen, render } = await createDOM();
     await render(
       <ConversationList
-        conversations={CONVERSATIONS}
-        selectedId={CONVERSATIONS[0].id}
+        conversations={wireSummaries}
+        selectedId={wireSummaries[0].conversationID}
         onSelect$={noop}
       />,
     );
-    for (const c of CONVERSATIONS) {
-      const row = screen.querySelector(`[data-testid="conversation-${c.id}"]`);
-      expect(row?.tagName.toLowerCase(), c.id).toBe("button");
-      expect(row?.getAttribute("type"), c.id).toBe("button");
+    for (const c of wireSummaries) {
+      const row = screen.querySelector(`[data-testid="conversation-${c.conversationID}"]`);
+      expect(row?.tagName.toLowerCase(), c.conversationID).toBe("button");
+      expect(row?.getAttribute("type"), c.conversationID).toBe("button");
     }
   });
 
-  it("renders an empty list as an empty list, not as a crash", async () => {
+  it("renders an empty list as an empty list, not as a crash (S-CRI-004 / S-CCS-018)", async () => {
     const { screen, render } = await createDOM();
     await render(
       <ConversationList conversations={[]} selectedId="" onSelect$={noop} />,
@@ -87,5 +109,23 @@ describe("components/chat/conversation-list", () => {
     const list = screen.querySelector('[data-testid="conversation-list"]');
     expect(list).toBeTruthy();
     expect(list?.querySelectorAll("li").length).toBe(0);
+  });
+
+  it("pluralises turnCount correctly (1 turn vs N turns)", async () => {
+    const { screen, render } = await createDOM();
+    const summaries: ConversationSummary[] = [
+      { conversationID: "single", lastActivityAt: "2026-08-24T17:00:00Z", turnCount: 1 },
+      { conversationID: "many", lastActivityAt: "2026-08-24T17:00:00Z", turnCount: 5 },
+    ];
+    await render(
+      <ConversationList
+        conversations={summaries}
+        selectedId={summaries[0].conversationID}
+        onSelect$={noop}
+      />,
+    );
+    const rowsText = screen.textContent ?? "";
+    expect(rowsText).toContain("1 turn ");
+    expect(rowsText).toContain("5 turns ");
   });
 });

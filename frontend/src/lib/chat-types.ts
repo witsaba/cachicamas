@@ -127,6 +127,45 @@ export interface TranscriptFixture {
   readonly expectTerminalClose: boolean;
 }
 
+// CH-08 (REQ-8, R-CRI-004) — read-side wire types.
+//
+// These types back GET /api/agent/conversations/:id and
+// GET /api/agent/conversations. They are NEW TYPES adjacent to the
+// closed ChatStreamEvent union (REQ-7 preserved); the union is
+// NOT widened. The DTOs are pure transport projections — the wire
+// MUST NOT invent fields beyond what the backend port's types
+// carry (chat.ConversationSummary + chat.Exchange, both
+// field-for-field with the D7 / R-CRI-004 contract).
+//
+// `ConversationSummary` carries the list endpoint's row. The page
+// surfaces `id`, a relative-time `age` derived from `lastActivityAt`,
+// and `turnCount`. `conversationID` doubles as the participant id
+// (D-1: one conversation per participant; the schema's PK is
+// participant_id), so the wire re-uses the participant id field
+// name with the wire-natural `conversationID` spelling.
+//
+// `ExchangeDTO` mirrors chat.Exchange's eight fields per D-7 —
+// position, promptText, assistantText, partial, terminalKind,
+// failureCategory, finishReason (optional), and messageIDs. The
+// page reads this DTO into `useChatStream.reset(entries)` to seed
+// the transcript on first paint (REQ-8).
+export interface ExchangeDTO {
+  readonly position: number;
+  readonly promptText: string;
+  readonly assistantText: string;
+  readonly partial: boolean;
+  readonly terminalKind: "completed" | "cancelled" | "failed";
+  readonly failureCategory: string;
+  readonly finishReason?: string;
+  readonly messageIDs: readonly string[];
+}
+
+export interface ConversationSummary {
+  readonly conversationID: string;
+  readonly lastActivityAt: string;
+  readonly turnCount: number;
+}
+
 /**
  * Exhaustiveness probe for the discriminated union.
  *

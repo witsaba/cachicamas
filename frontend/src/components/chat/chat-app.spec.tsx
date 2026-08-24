@@ -1,16 +1,17 @@
 /**
- * ChatApp — a conversation with one colleague (CH-05.1).
+ * ChatApp — a conversation with one colleague (CH-05.1 + CH-08).
  *
- * After CH-05.1 the page is wired to the wire (D-5). The
- * conversations rail is gone (D-3): the active conversation is
- * single, the entry list is owned by `useChatStream` against the
- * real SSE stream, and the testid rail (`conversations-panel`,
- * `history-toggle`, `conversation-list`, `conversation-c-4460`,
- * `c-4465`) is retired. What remains: the transcript +
- * composer data-testids, the chat window announces output to
- * assistive technology via `aria-live="polite"`, and the active
- * agent is the first in `staff.ts` by default (overridable via
- * `?with=<slug>`).
+ * CH-05.1 wired the page to the SSE stream (D-5): `useChatStream`
+ * drives submit / cancel / subscribe via `chat-api.ts`. CH-08
+ * re-mounts the conversation rail against the wire shape
+ * (R-CRI-005, REQ-8); the page's `useVisibleTask$` fires both
+ * resume GETs in parallel on first paint (REQ-8), seeds
+ * `useChatStream.reset(entries)`, and populates the rail.
+ *
+ * The D-3 test ("the conversations rail is gone") is now wrong —
+ * CH-08 unmounted that drop. The replacement below proves the rail
+ * mounts against the wire shape with its `data-testid`. The
+ * transcript + composer data-testids persist.
  *
  * Behavioural coverage of the wire client lives in
  * `use-chat-stream.spec.ts`; `chat-app.spec.tsx` defends the page
@@ -21,9 +22,13 @@ import { describe, it, expect } from "vitest";
 import { ChatApp } from "./chat-app";
 import { AGENTS } from "~/lib/mock/staff";
 
-const WHO = { youName: "Ana Rivas", youEmail: "ana@example.com" } as const;
+const WHO = {
+  youName: "Ana Rivas",
+  youEmail: "ana@example.com",
+  participantID: "alice",
+} as const;
 
-describe("components/chat/chat-app", () => {
+describe("components/chat/chat-app (CH-05.1 + CH-08)", () => {
   it("renders the transcript and the composer", async () => {
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
@@ -31,22 +36,27 @@ describe("components/chat/chat-app", () => {
     expect(screen.querySelector('[data-testid="composer"]')).toBeTruthy();
   });
 
-  it("does not render the retired conversations rail (D-3)", async () => {
+  it("mounts the conversation rail (R-CRI-005) — CH-08 undoes the CH-05.1 D-3 drop", async () => {
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
-    expect(
-      screen.querySelector('[data-testid="conversations-panel"]'),
-    ).toBeFalsy();
-    expect(
-      screen.querySelector('[data-testid="conversations-disclosure"]'),
-    ).toBeFalsy();
+    // The rail's container is the data-testid="conversation-list" <ul>.
+    // An empty rail is still a mounted rail (S-CRI-004: empty list is
+    // success, not a crash).
+    expect(screen.querySelector('[data-testid="conversation-list"]')).toBeTruthy();
+  });
+
+  it("does not render the retired conversations panel (CH-05.1 D-3 retired surfaces)", async () => {
+    const { screen, render } = await createDOM();
+    await render(<ChatApp {...WHO} />);
+    // CH-05.1 retired the panel + disclosure + history-toggle testids;
+    // CH-08 only re-mounts the rail itself, never re-introduces the
+    // panel/disclosure/toggle chrome. Verify those stay gone.
+    expect(screen.querySelector('[data-testid="conversations-panel"]')).toBeFalsy();
+    expect(screen.querySelector('[data-testid="conversations-disclosure"]')).toBeFalsy();
     expect(screen.querySelector('[data-testid="history-toggle"]')).toBeFalsy();
-    expect(screen.querySelector('[data-testid="conversation-list"]')).toBeFalsy();
   });
 
   it("names the colleague you are talking to, and calls them an agent", async () => {
-    // The shape rule (a person is a circle, an agent is a rounded square) is
-    // never the only carrier: the word is always beside it.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
     const header = screen.querySelector("header");
@@ -56,9 +66,6 @@ describe("components/chat/chat-app", () => {
   });
 
   it("falls back to the first agent from staff.ts when no ?with= is set (D-6)", async () => {
-    // The deep-link useVisibleTask$ reads window.location.href in a browser;
-    // under createDOM there is no window, so activeSlug stays at AGENTS[0]
-    // (the default). Verifies the default-vs-deep-link contract.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
     const header = screen.querySelector("header");
@@ -66,19 +73,14 @@ describe("components/chat/chat-app", () => {
   });
 
   it("announces the conversation politely, never assertively", async () => {
-    // Output that interrupts a screen reader mid-sentence is worse than output
-    // it has to be asked for.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
     const transcript = screen.querySelector('[data-testid="transcript"]');
     expect(transcript?.getAttribute("aria-live")).toBe("polite");
-    expect(transcript?.getAttribute("aria-label")).toContain(
-      "Conversation with",
-    );
+    expect(transcript?.getAttribute("aria-label")).toContain("Conversation with");
   });
 
   it("says nothing about how any of it is built", async () => {
-    // The people using this hire colleagues; they do not run a runtime.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
     const text = screen.textContent ?? "";
