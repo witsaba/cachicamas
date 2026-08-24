@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -162,8 +163,24 @@ func run(_ context.Context, getenv func(string) string, otelShutdown func(contex
 
 	resolver := NewResolver([]byte(cfg.AuthSecret), cfg.CookieName)
 	chatStore := chat.NewMemoryConversationStore() // CH-06 composition-root seam (CH-07 swaps this one line)
-	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider, Store: chatStore})
+	factory := func(participantID string) (*chat.Conversation, error) {
+		exchanges, lerr := chatStore.Load(participantID)
+		if lerr != nil {
+			if !errors.Is(lerr, chat.ErrConversationNotFound) {
+				return nil, lerr
+			}
+			exchanges = nil
+		}
+		history, herr := chat.ExchangesToHistory(exchanges)
+		if herr != nil {
+			return nil, herr
+		}
+		return chat.NewConversation(chat.Config{
+			Provider:       provider,
+			Store:          chatStore,
+			ParticipantID:  participantID,
+			InitialHistory: history,
+		})
 	}
 
 	e := echo.New()
