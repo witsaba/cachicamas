@@ -117,6 +117,20 @@ record — the accessor set is local to `failure.go`. The release is
 scoped to AG-11 only, exact-filename, and does not extend to any later
 milestone without its own recorded delta.
 
+**CH-07** (`cachicamas-chat-store-adapter`) is the first chat-archetype
+milestone to admit new top-level deps in `backend/agent` — `pgx/v5` and
+`pressly/goose/v3` — via the `ch07_carveout_test.go` carve-out pattern.
+Nine existing `backend/agent/src/agent/*_test.go` files gain an
+`isCH07GoModDrift(...)` clause so their `TestTurn_SubstrateUntouched`
+checks route the go.mod drift through the helper instead of failing
+outright; `import_boundary_test.go` widens its chat allowlist per
+R-AGP-003. The pattern is consistent with `ch03_carveout_test.go` and
+`ch04_carveout_test.go` and is documented in ADR
+`0010-add-pgx-and-goose-to-backend-agent.md`. Future chat or
+chat-adjacent milestones admitting new `go.mod` deps in `backend/agent`
+MUST follow the same pattern (or its milestone-specific equivalent)
+and SHOULD append a one-line pointer here.
+
 ## Review checklist (for reviewers)
 
 - [ ] reviewer can confirm the Makefile targets listed above exist and match this file
