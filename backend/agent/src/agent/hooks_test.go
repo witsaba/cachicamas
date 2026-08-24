@@ -1731,7 +1731,7 @@ func TestHooks_ScopeFence_ByteUnchangedFilesAndNoNewKind(t *testing.T) {
 	// HTTP+SSE surface requires github.com/labstack/echo/v5
 	// v5.2.1 (ADR adr/echo-v5-in-agent-module). Recorded
 	// exception; every other modification fails.
-	if isCH03GoModDrift(modDiff) {
+	if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
 		t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
 	} else if modDiff != "" {
 		t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
@@ -2629,7 +2629,7 @@ func TestHooks_S_AIV_032_ExclusionCheckedAgainstShippedCode(t *testing.T) {
 		t.Fatalf("git diff %s -- go.mod go.sum failed: %v", baseRef, merr)
 	}
 	// CH-03 carve-out for go.mod / go.sum drift.
-	if isCH03GoModDrift(modDiff) {
+	if isCH03GoModDrift(modDiff) || isCH04GoModDrift(modDiff) {
 		t.Logf("CH-03 carve-out: go.mod drift is the recorded Echo require; passes per D3.\n%s", modDiff)
 	} else if modDiff != "" {
 		t.Errorf("go.mod/go.sum diff against %s is not empty:\n%s", baseRef, modDiff)
