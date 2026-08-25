@@ -26,6 +26,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -286,6 +287,19 @@ func HandleOpenTurn(registry *Registry) echo.HandlerFunc {
 		// per participant, enforced both here and in GetOrCreate's
 		// inFlight check above.
 		registry.StoreStream(ident.ParticipantID(), req.ID, stream)
+
+		// Fix C (observability): the POST returns 200 even when the
+		// projected stream's terminal frame is a failure — the
+		// failure is in the stream, not the POST envelope. The
+		// "chat turn opened" line is the only log entry on the
+		// open path that pairs with the projector's "chat turn
+		// failed" line on the failure path; without it an operator
+		// who reads only the open path cannot correlate a
+		// subsequent failure log back to the originating turn.
+		slog.InfoContext(turnCtx, "chat turn opened",
+			slog.String("participant_id", ident.ParticipantID()),
+			slog.String("turn_id", req.ID),
+		)
 
 		return c.JSON(http.StatusOK, openTurnResponse{
 			TurnID:    req.ID,

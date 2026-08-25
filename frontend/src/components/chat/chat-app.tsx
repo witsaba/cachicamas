@@ -10,8 +10,7 @@ import { Status } from "~/components/workspace/status/status";
 import { initialsOf } from "~/lib/initials";
 import { AGENTS, agentBySlug } from "~/lib/mock/staff";
 import {
-  listConversations,
-  loadConversation,
+  loadMostRecentConversation,
 } from "~/lib/chat-api";
 import type {
   ConversationSummary,
@@ -214,14 +213,27 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // unknown — the mount does not throw, so a transient wire
   // failure leaves the page in its CH-05.1 empty-seed shape
   // rather than a blank-by-error state.
+  //
+  // Fix B (server-issued conversationID): `loadMostRecentConversation`
+  // composes the two resume GETs — list first, then load — so the
+  // reload URL carries the server-issued conversationID, NOT the
+  // route-level `participantID` prop (which falls back to the user's
+  // email when Auth.js issued no `user.id`; the backend refuses
+  // that with 403 not_found, R-CHS-004.b).
   const railState = useStore<{
     summaries: ConversationSummary[];
     loaded: boolean;
     loadError: boolean;
+    selectedId: string;
   }>({
     summaries: [],
     loaded: false,
     loadError: false,
+    // Rail selection id starts as the route prop and is replaced
+    // with the server-issued conversationID once the list resolves.
+    // An empty string keeps the rail unhighlighted until the helper
+    // resolves (no false-positive "current row" on a stale prop).
+    selectedId: "",
   });
 
   // eslint-disable-next-line qwik/no-use-visible-task
@@ -230,21 +242,19 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
     if (typeof window === "undefined") return;
 
     void (async () => {
-      const [listResult, reloadResult] = await Promise.all([
-        listConversations(),
-        loadConversation(participantID),
-      ]);
+      const resumed = await loadMostRecentConversation();
 
-      // Reload — seed the buffer if the participant has recorded
-      // exchanges; a miss or refusal leaves the seed empty.
-      if (reloadResult.ok && reloadResult.value.length > 0) {
-        await turn.reset(exchangesToEntries(reloadResult.value));
-      }
-
-      // List — populate the rail; an offline / 403 / 500 leaves
-      // the rail empty rather than falsely populated.
-      if (listResult.ok) {
-        railState.summaries = listResult.value;
+      if (resumed.ok) {
+        // Reload — seed the buffer if the participant has recorded
+        // exchanges; an empty list (S-CRI-004: 200 []) or no
+        // exchanges leaves the seed empty.
+        if (resumed.value.exchanges.length > 0) {
+          await turn.reset(exchangesToEntries(resumed.value.exchanges));
+        }
+        // List — populate the rail with the server-issued
+        // conversationID; the rail marks only that row current.
+        railState.summaries = [...resumed.value.summaries];
+        railState.selectedId = resumed.value.conversationID;
         railState.loaded = true;
         railState.loadError = false;
       } else {
@@ -300,7 +310,7 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
       >
         <ConversationList
           conversations={railState.summaries}
-          selectedId={participantID}
+          selectedId={railState.selectedId}
           onSelect$={$(async (id: string) => {
             // v1: the rail is informational. The page holds one
             // active conversation; future CH work wires the rail

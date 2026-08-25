@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -58,6 +59,40 @@ func (w *recordingResponseWriter) WriteHeader(_ int)  {}
 // writeSSEHeaders is internal in eventsource.go, so the test sets the
 // headers manually before calling writeFrame. The handlers in http.go
 // call writeSSEHeaders before driveStream — tested in http_test.go.
+
+// TestWriteSSEHeaders_ContentType — Fix D. The Content-Type header
+// MUST be `text/event-stream; charset=utf-8` so DevTools' Response
+// viewer decodes UTF-8 multi-byte characters correctly instead of
+// mis-decoding them as windows-1252 and producing mojibake for
+// non-ASCII chat turns. Without the charset parameter the browser
+// falls back to its default encoding, which is windows-1252 in
+// DevTools' Response viewer; the chat page then renders
+// non-ASCII bytes as replacement glyphs.
+func TestWriteSSEHeaders_ContentType(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	chat.WriteSSEHeadersForTest(w)
+
+	got := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(got, "text/event-stream") {
+		t.Errorf("Content-Type = %q, want prefix %q", got, "text/event-stream")
+	}
+	if !strings.Contains(got, "charset=utf-8") {
+		t.Errorf("Content-Type = %q, want substring %q (Fix D: charset prevents DevTools windows-1252 mojibake)", got, "charset=utf-8")
+	}
+
+	// Other headers MUST stay unchanged (R-CHS-002.d).
+	for k, want := range map[string]string{
+		"Cache-Control":     "no-cache",
+		"Connection":        "keep-alive",
+		"X-Accel-Buffering": "no",
+	} {
+		if got := w.Header().Get(k); got != want {
+			t.Errorf("header %q = %q, want %q (Fix D preserves the R-CHS-002.d quartet)", k, got, want)
+		}
+	}
+}
 
 // TestWriteFrame_AllVariants — S-CHS-002.d (wire shape) + R-CHS-002.a.
 // For each WireEvent variant, assert:

@@ -210,8 +210,8 @@ _ = 	drainResp.Body.Close()
 	}
 defer func() { _ = secondResp.Body.Close() }()
 
-	if got := secondResp.Header.Get("Content-Type"); got != "text/event-stream" {
-		t.Errorf("Content-Type=%q, want text/event-stream", got)
+	if got := secondResp.Header.Get("Content-Type"); got != "text/event-stream; charset=utf-8" {
+		t.Errorf("Content-Type=%q, want text/event-stream; charset=utf-8 (Fix D)", got)
 	}
 
 	scanner := bufio.NewScanner(secondResp.Body)

@@ -339,6 +339,16 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 func main() {
 	logger := slog.Default()
 
+	// Fix C (observability): surface a missing OTLP endpoint BEFORE
+	// the OTel install, so an operator who reads only `docker logs
+	// cachicamas-agent-chat` sees a clear warning that traces will
+	// not reach a collector. Without this the otlptracegrpc exporter
+	// silently dials localhost:4317 (its default) and the chat
+	// binary appears healthy while exporting zero spans.
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
+		logger.Warn("OTEL_EXPORTER_OTLP_ENDPOINT is unset; chat traces will not reach a collector (the otlptracegrpc default localhost:4317 is unreachable from this container)")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

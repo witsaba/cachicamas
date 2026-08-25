@@ -304,8 +304,8 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 	}
 defer func() { _ = resp.Body.Close() }()
 
-	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
-		t.Errorf("Content-Type=%q, want text/event-stream", got)
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream; charset=utf-8" {
+		t.Errorf("Content-Type=%q, want text/event-stream; charset=utf-8 (Fix D)", got)
 	}
 	if got := resp.Header.Get("X-Accel-Buffering"); got != "no" {
 		t.Errorf("X-Accel-Buffering=%q, want no", got)

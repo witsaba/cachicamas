@@ -617,3 +617,76 @@ export async function loadConversation(id: string): Promise<ApiResult<ExchangeDT
     return Array.isArray(body) ? body : [];
   });
 }
+
+// ---------------------------------------------------------------------------
+// Fix B — the rail reload path must NOT call loadConversation(<email>).
+//
+// `routes/chat/index.tsx` derives `participantID` from the session, falling
+// back to `session.user.email` when no `user.id` is set. Auth.js issues the
+// `user.id` server-side as a UUID; passing the email into
+// /api/agent/conversations/<email> is refused with 403 not_found (the
+// backend's cross-participant guard compares the URL :id to
+// ident.ParticipantID() — R-CHS-004.b).
+//
+// `loadMostRecentConversation` is the page's mount-time shape: it lists the
+// authenticated participant's conversations, takes the first (most-recent)
+// entry's server-issued conversationID, and reloads that conversation. The
+// server-issued id is what the backend's HandleReloadConversation expects —
+// not the route-level `participantID` prop, which may carry the email.
+// ---------------------------------------------------------------------------
+
+export interface ResumedConversation {
+  /** Server-issued conversation id (the wire's `ConversationSummary.conversationID`). */
+  readonly conversationID: string;
+  /** Recorded exchanges for that conversation, newest last. */
+  readonly exchanges: readonly ExchangeDTO[];
+  /** All summaries returned by the list endpoint (newest first). */
+  readonly summaries: readonly ConversationSummary[];
+}
+
+/**
+ * Compose `list → most-recent → load` (Fix B).
+ *
+ * Resolves with `{ ok: true, value: ResumedConversation }` when the list
+ * returns at least one entry — the seed transcript is the exchanges from
+ * `loadConversation(<serverConversationID>)`, and `summaries` carries the
+ * full rail.
+ *
+ * Resolves with `{ ok: true, value: { summaries, exchanges: [] } }` when
+ * the list returns empty (S-CRI-004: 200 [] is success, not a refusal).
+ *
+ * Resolves with the failure half on any list/load transport error. Network
+ * failures map to `kind: "offline"`; backend envelopes map to their typed
+ * kind (validation / conflict / not_found / server).
+ */
+export async function loadMostRecentConversation(): Promise<
+  ApiResult<ResumedConversation>
+> {
+  const listResult = await listConversations();
+  if (!listResult.ok) {
+    return listResult;
+  }
+  const mostRecent = listResult.value[0];
+  if (!mostRecent) {
+    return {
+      ok: true,
+      value: {
+        conversationID: "",
+        exchanges: [],
+        summaries: listResult.value,
+      },
+    };
+  }
+  const reloadResult = await loadConversation(mostRecent.conversationID);
+  if (!reloadResult.ok) {
+    return reloadResult;
+  }
+  return {
+    ok: true,
+    value: {
+      conversationID: mostRecent.conversationID,
+      exchanges: reloadResult.value,
+      summaries: listResult.value,
+    },
+  };
+}

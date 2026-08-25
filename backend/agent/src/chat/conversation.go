@@ -212,6 +212,22 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 	c.inFlight = true
 	c.mu.Unlock()
 
+	// Fix C (observability): record the chat turn's start so an
+	// operator can correlate the projected wire stream with the
+	// upstream provider's request, the participant's reload surface,
+	// and the failure logs (when the run fails). Without this log
+	// `docker logs cachicamas-agent-chat` is silent until something
+	// goes wrong, and even then the failure-only log line leaves no
+	// breadcrumb back to the originating turn. The participant id is
+	// already on the Conversation struct; the prompt size is the
+	// only new attribute — kept off the body itself to avoid leaking
+	// user input through the structured logs (the prompt is also
+	// persisted via buildTerminalExchange, where it belongs).
+	c.logger.LogAttrs(ctx, slog.LevelInfo, "chat turn started",
+		slog.String("participant_id", c.participantID),
+		slog.Int("prompt_bytes", len(prompt)),
+	)
+
 	sink := make(chan *agent.Event)
 	result := make(chan runResult, 1)
 	out := make(chan WireEvent, wireChannelBuffer)

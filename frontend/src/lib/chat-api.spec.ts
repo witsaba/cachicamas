@@ -935,3 +935,126 @@ describe("chat-api resume wire client (R-CRI-001, R-CRI-002, REQ-8)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix B slice — loadMostRecentConversation.
+//
+// The mount-time loader MUST:
+//   - call GET /api/agent/conversations (list) before
+//     GET /api/agent/conversations/:id (reload), and
+//   - pass the server-issued conversationID from the list (NOT
+//     an email-shaped fallback) into the reload URL.
+//
+// Why this test exists: the rail reload was previously firing
+// loadConversation(participantID) where participantID fell back
+// to session.user.email. The backend's HandleReloadConversation
+// refuses a URL :id that does not equal ident.ParticipantID() with
+// 403 not_found (R-CHS-004.b). The fix moves the source of truth
+// from the route prop to the server-issued list response.
+// ---------------------------------------------------------------------------
+
+describe("chat-api loadMostRecentConversation (Fix B)", () => {
+  beforeEach(() => {
+    // fetch is reset by vi.restoreAllMocks in the outer afterEach.
+  });
+
+  it("lists first, then loads the most-recent conversation by server-issued conversationID (Fix B)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/agent/conversations")) {
+        return new Response(
+          JSON.stringify([
+            {
+              conversationID: "46a1233e-5829-49b8-906e-e68197580fa0",
+              lastActivityAt: "2026-08-24T17:00:00Z",
+              turnCount: 2,
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (
+        url.endsWith(
+          "/api/agent/conversations/46a1233e-5829-49b8-906e-e68197580fa0",
+        )
+      ) {
+        return new Response(JSON.stringify(fixtureExchanges), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadMostRecentConversation } = await import("./chat-api");
+
+    const result = await loadMostRecentConversation();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    // The resumed payload carries the SERVER-issued conversationID,
+    // not an email. This is the regression guard for Fix B.
+    expect(result.value.conversationID).toBe(
+      "46a1233e-5829-49b8-906e-e68197580fa0",
+    );
+    expect(result.value.conversationID).not.toContain("@");
+    expect(result.value.exchanges).toHaveLength(2);
+    expect(result.value.summaries).toHaveLength(1);
+
+    // Sequence: list FIRST, reload SECOND. The reload URL carries
+    // the server-issued UUID, NOT an email-shaped value.
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls[0]).toContain("/api/agent/conversations");
+    expect(urls[0].endsWith("/api/agent/conversations")).toBe(true);
+    expect(urls[1]).toContain(
+      "/api/agent/conversations/46a1233e-5829-49b8-906e-e68197580fa0",
+    );
+    // Negative assertion: the reload URL MUST NOT contain an
+    // `@` (an email would carry one). This is the strict guard
+    // the orchestrator's spec called out.
+    expect(urls[1]).not.toContain("@");
+  });
+
+  it("returns an empty seed when the list is empty (S-CRI-004: 200 [])", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/agent/conversations")) {
+        return new Response(JSON.stringify([]), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadMostRecentConversation } = await import("./chat-api");
+
+    const result = await loadMostRecentConversation();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.conversationID).toBe("");
+    expect(result.value.exchanges).toHaveLength(0);
+    expect(result.value.summaries).toHaveLength(0);
+    // No reload GET fired — there was no conversation to load.
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("propagates the list failure half when the list endpoint refuses (R-CRI-002)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/agent/conversations")) {
+        return new Response(
+          JSON.stringify({ error: "server", message: "db down" }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadMostRecentConversation } = await import("./chat-api");
+
+    const result = await loadMostRecentConversation();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected error");
+    expect(result.kind).toBe("server");
+    // Critical: the reload GET MUST NOT fire when the list
+    // already failed. Pre-Fix-B the loader fired both in
+    // parallel and the reload fired against an email-shaped id.
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+});

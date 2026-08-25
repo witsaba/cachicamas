@@ -75,12 +75,15 @@ func wireFrameName(ev WireEvent) string {
 }
 
 // writeSSEHeaders sets the four headers the frozen wire contract
-// requires: Content-Type:text/event-stream, Cache-Control:no-cache,
-// Connection:keep-alive, X-Accel-Buffering:no (the last defeats nginx
-// proxy buffering — R-CHS-002.d).
+// requires: Content-Type:text/event-stream;charset=utf-8,
+// Cache-Control:no-cache, Connection:keep-alive, X-Accel-Buffering:no
+// (the last defeats nginx proxy buffering — R-CHS-002.d). The
+// charset parameter stops DevTools' Response viewer from
+// mis-decoding multi-byte UTF-8 frames as windows-1252 when a chat
+// turn carries non-ASCII text (Fix D).
 func writeSSEHeaders(w http.ResponseWriter) {
 	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
+	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
@@ -138,6 +141,15 @@ func writeFrames(ctx context.Context, w http.ResponseWriter, flusher http.Flushe
 // write + flush.
 func WriteFrameForTest(w http.ResponseWriter, flusher http.Flusher, ev WireEvent) error {
 	return writeFrame(w, flusher, ev)
+}
+
+// WriteSSEHeadersForTest exposes writeSSEHeaders to the chat_test
+// package so the Content-Type charset assertion (Fix D) lives in the
+// test tree without making the production helper exported. The HTTP
+// handlers in http.go call writeSSEHeaders before driveStream;
+// production callers go through that path unchanged.
+func WriteSSEHeadersForTest(w http.ResponseWriter) {
+	writeSSEHeaders(w)
 }
 
 // WriteFramesForTest exposes writeFrames to the chat_test package so
