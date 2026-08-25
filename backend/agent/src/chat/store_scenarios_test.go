@@ -18,6 +18,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/agenttest"
 	"github.com/cachicamas/backend/agent/src/chat"
@@ -123,6 +124,7 @@ func RunConversationStoreScenarios(t *testing.T, store chat.ConversationStore) {
 			Provider:      provider,
 			Store:         store,
 			ParticipantID: "scn-001-participant",
+			ToolSource:    chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 		})
 		if err != nil {
 			t.Fatalf("chat.NewConversation returned %v, want nil", err)

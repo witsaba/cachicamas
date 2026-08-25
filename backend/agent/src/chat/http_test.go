@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
 )
@@ -135,7 +136,8 @@ func TestHandleOpenTurn_Valid(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -172,7 +174,8 @@ func TestHandleOpenTurn_EmptyPrompt(t *testing.T) {
 	var factoryCalled bool
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -235,7 +238,8 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 	)
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -285,7 +289,8 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -335,7 +340,8 @@ func TestIdentityRefusal_401(t *testing.T) {
 	var factoryCalled bool
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: ""}, newConv) // empty Participant id → refusal
 
@@ -373,7 +379,8 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 
 	headerResolver := chat.HeaderParticipantResolver("X-Test-Participant")
@@ -470,7 +477,8 @@ func TestHandleCancelTurn_Unknown(t *testing.T) {
 	t.Parallel()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http"})
+		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -528,6 +536,7 @@ func resumeMountedServer(t *testing.T, resolver chat.IdentityResolver, store cha
 			Provider:      agenttest.NewProvider(scriptForOneTurn(t)),
 			Store:         chat.NewMemoryConversationStore(),
 			ParticipantID: "test-resume-factory",
+			ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 		})
 	})
 	if err != nil {

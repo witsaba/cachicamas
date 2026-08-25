@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
 )
@@ -28,7 +29,8 @@ func TestFailure_TerminatesWithTypedError(t *testing.T) {
 	successScript := scriptTextResponse(t, 1, []string{"recovered"}, ai.FinishReasonStop)
 	provider := agenttest.NewProvider(failScript, successScript)
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure"})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -91,7 +93,8 @@ func TestFailure_NoProviderStringOnWire(t *testing.T) {
 	}
 	provider := agenttest.NewProvider(agenttest.Script{Steps: []agenttest.Step{agenttest.Emit(terminal)}})
 
-	conv, cerr := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure"})
+	conv, cerr := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if cerr != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", cerr)
 	}
@@ -139,7 +142,8 @@ func TestFailure_NoArchetypeRetry(t *testing.T) {
 	unused := scriptTextResponse(t, 1, []string{"never-reached"}, ai.FinishReasonStop)
 	provider := agenttest.NewProvider(failOnce, thenSucceed, unused)
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure"})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-failure",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}

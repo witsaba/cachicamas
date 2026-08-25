@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
 )
@@ -342,6 +343,7 @@ func TestConversationStore_RecordsTwoTurnsInOrder(t *testing.T) {
 		Provider:      provider,
 		Store:         store,
 		ParticipantID: "alice",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -400,6 +402,7 @@ func TestConversationStore_CancelledTurnCarriesPartialText(t *testing.T) {
 		Provider:      provider,
 		Store:         store,
 		ParticipantID: "alice",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -462,6 +465,7 @@ func TestConversationStore_FailedTurnAppendsLater(t *testing.T) {
 		Provider:      provider,
 		Store:         store,
 		ParticipantID: "alice",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -516,6 +520,7 @@ func TestConversationStore_LoadSeedsHistoryForThirdTurn(t *testing.T) {
 		Provider:      providerTurn1And2,
 		Store:         store,
 		ParticipantID: "alice",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn1-2) returned %v, want nil", err)
@@ -537,6 +542,7 @@ func TestConversationStore_LoadSeedsHistoryForThirdTurn(t *testing.T) {
 		Store:         store,
 		ParticipantID: "alice",
 		InitialHistory: history,
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn3) returned %v, want nil", err)
@@ -619,6 +625,7 @@ func TestConversationStore_IdentifierMintedDuringTurnSurvivesReload(t *testing.T
 		Provider:      provider1,
 		Store:         store,
 		ParticipantID: "alice",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn1) returned %v, want nil", err)
@@ -661,6 +668,7 @@ func TestConversationStore_IdentifierMintedDuringTurnSurvivesReload(t *testing.T
 		Store:         store,
 		ParticipantID: "alice",
 		InitialHistory: history,
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn2) returned %v, want nil", err)

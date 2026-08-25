@@ -40,6 +40,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
@@ -320,7 +321,7 @@ func buildWiredEcho(t *testing.T) (*echo.Echo, *chat.Registry) {
 
 	resolver := NewResolver([]byte(validAuthSecret), "authjs.session-token")
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main"})
+		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 
 	e := echo.New()
@@ -339,7 +340,7 @@ func TestBuildConversationFactory_WrapsProviderInConversation(t *testing.T) {
 	t.Parallel()
 
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main"})
+		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	}
 
 	conv, err := factory("participant-1")

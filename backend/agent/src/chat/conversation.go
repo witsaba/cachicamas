@@ -30,7 +30,8 @@ const SystemPrompt = "You are the cachicamas chat assistant; answer the particip
 // ErrNilProvider is returned by NewConversation when cfg.Provider is nil.
 var ErrNilProvider = errors.New("chat: Config.Provider is required")
 
-// Config configures a Conversation (design AD-2 + CH-06 D-1, D-2).
+// Config configures a Conversation (design AD-2 + CH-06 D-1, D-2 +
+// CH-09.1 D-1 + R-CTS-001).
 type Config struct {
 	// Provider is the model provider every turn streams from. Required.
 	Provider ai.ModelProvider
@@ -60,6 +61,15 @@ type Config struct {
 	// agent.NewSeededHistory validates the message slice). Nil falls
 	// back to agent.NewHistory(), today's default.
 	InitialHistory *agent.History
+
+	// ToolSource is the chat-owned port for tool resolution (CH-09.1,
+	// D-1, R-CTS-001). The conversation adapts it back to Layer 2's
+	// agent.Registry for harness.Tools (loop.go:112). Required: nil
+	// is rejected by NewConversation with ErrNilToolSource (typed,
+	// never panic). Constructed once at the composition root via
+	// chat.FromAgentRegistry(agent.NewMapRegistry(...)); see
+	// cmd/chat/main.go for the production wire.
+	ToolSource ToolSource
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
@@ -81,12 +91,13 @@ type Conversation struct {
 
 // NewConversation constructs a Conversation. cfg.Provider is required;
 // cfg.Store is required (R-CCS-001); cfg.ParticipantID is required and
-// non-whitespace (D-1); every other harness seam — including
-// RetryAttempts, left unset so defaultRetryAttempts applies (R-CCP-009)
-// — is left at CH-00's recorded v1 answer. Harness.Shutdown is never
-// called by this package (R-CCP-001): it latches a terminal, one-way
-// refusal, which is not what "cancel this turn" means for a
-// conversation that must accept the next prompt.
+// non-whitespace (D-1); cfg.ToolSource is required (R-CTS-001,
+// CH-09.1); every other harness seam — including RetryAttempts, left
+// unset so defaultRetryAttempts applies (R-CCP-009) — is left at
+// CH-00's recorded v1 answer. Harness.Shutdown is never called by
+// this package (R-CCP-001): it latches a terminal, one-way refusal,
+// which is not what "cancel this turn" means for a conversation that
+// must accept the next prompt.
 func NewConversation(cfg Config) (*Conversation, error) {
 	if cfg.Provider == nil {
 		return nil, ErrNilProvider
@@ -97,6 +108,9 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	if strings.TrimSpace(cfg.ParticipantID) == "" {
 		return nil, ErrEmptyParticipantID
 	}
+	if cfg.ToolSource == nil {
+		return nil, ErrNilToolSource
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -105,11 +119,20 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	if history == nil {
 		history = agent.NewHistory()
 	}
+	// chat.ToolSource wraps agent.Registry; we hand it to the harness
+	// as the executor-side registry. chat.ToolSource's method set is
+	// byte-identical to agent.Registry's, so the dynamic type
+	// (agentRegistryAdapter or an in-test stub) satisfies both
+	// interfaces and Go's interface assignment accepts the value
+	// without an explicit conversion.
 	return &Conversation{
 		harness: &agent.Harness{
 			Provider: cfg.Provider,
 			System:   SystemPrompt,
 			History:  history,
+			Turn: agent.TurnOptions{
+				Tools: cfg.ToolSource,
+			},
 		},
 		logger:        logger,
 		store:         cfg.Store,
