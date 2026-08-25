@@ -302,6 +302,31 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 		}
 	}
 
+	// 3c. CH-10 (R-CPM-006, R-CCS-018): insert sibling-table rows
+	// for the permission-decision records. Same transaction; the
+	// chat_permission_decisions table mirrors the tool-record
+	// sibling pattern (0004_permission_decisions.sql). Outcome
+	// is CHECK-constrained to the chat wire's CLOSED 2-value
+	// vocabulary; the projector translates Layer 2's 4-value
+	// PermissionOutcome into the 2-value wire form BEFORE the
+	// records reach the store (D-12 collapse).
+	for i, pd := range ex.PermissionDecisions {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO chat_permission_decisions (
+				participant_id, exchange_position, position,
+				wire_call_id, tool, outcome
+			) VALUES ($1, $2, $3, $4, $5, $6)`,
+			participantID,
+			nextPos,
+			i,
+			pd.WireCallID,
+			pd.Tool,
+			pd.Outcome,
+		); err != nil {
+			return fmt.Errorf("chat.PostgresConversationStore.Append: insert chat_permission_decisions[%d]: %w", i, err)
+		}
+	}
+
 	// 4. Bump the parent row's updated_at so an operator querying
 	// chat_conversations can find the most-recently-active
 	// participant without scanning chat_exchanges.
@@ -469,18 +494,27 @@ func (s *PostgresConversationStore) Load(participantID string) ([]Exchange, erro
 		if err != nil {
 			return nil, err
 		}
+		// CH-10 (R-CPM-006, R-CCS-018): same sibling-table pattern;
+		// 0004_permission_decisions.sql mirrors the tool-record
+		// shape (wire_call_id + tool + outcome). Empty result
+		// produces a nil slice (NFR-CCS-009).
+		permissionDecisions, err := s.loadPermissionDecisions(ctx, participantID, position)
+		if err != nil {
+			return nil, err
+		}
 
 		out = append(out, Exchange{
-			Position:        position,
-			PromptText:      promptText,
-			AssistantText:   assistantText,
-			Partial:         partial,
-			TerminalKind:    parseTerminalKind(terminalKindStr),
-			FailureCategory: parseFailureCategory(failureCatStr),
-			FinishReason:    fr,
-			MessageIDs:      ids,
-			ToolCalls:       toolCalls,
-			ToolResults:     toolResults,
+			Position:           position,
+			PromptText:         promptText,
+			AssistantText:      assistantText,
+			Partial:            partial,
+			TerminalKind:       parseTerminalKind(terminalKindStr),
+			FailureCategory:    parseFailureCategory(failureCatStr),
+			FinishReason:       fr,
+			MessageIDs:         ids,
+			ToolCalls:          toolCalls,
+			ToolResults:        toolResults,
+			PermissionDecisions: permissionDecisions,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -499,7 +533,7 @@ func (s *PostgresConversationStore) Load(participantID string) ([]Exchange, erro
 
 	// Defensive copy — caller-side mutation cannot corrupt the
 	// adapter's read state (NFR-CCS-004). make + copy gives an
-	// independent backing array; the slice header is itself a
+	// independent array; the slice header is itself a
 	// value, so returning it without copying would leak the
 	// adapter's growable capacity.
 	cp := make([]Exchange, len(out))
@@ -628,4 +662,50 @@ func (s *PostgresConversationStore) UpdateSummary(participantID, summary string)
 		return fmt.Errorf("chat.PostgresConversationStore.UpdateSummary: %w", err)
 	}
 	return nil
+}
+
+// loadPermissionDecisions queries chat_permission_decisions for
+// one exchange position, returning a fresh slice of
+// PermissionDecisionRecord in issuance order (R-CPM-006, NFR-CCS-009).
+// The returned slice's backing array is independent of the
+// adapter's state; caller-side mutation cannot corrupt it. Empty
+// result set returns a nil slice (matching the in-memory adapter's
+// nil-for-empty posture).
+func (s *PostgresConversationStore) loadPermissionDecisions(ctx context.Context, participantID string, exchangePosition int) ([]PermissionDecisionRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT wire_call_id, tool, outcome
+		   FROM chat_permission_decisions
+		  WHERE participant_id = $1 AND exchange_position = $2
+		  ORDER BY position ASC`,
+		participantID,
+		exchangePosition,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: query chat_permission_decisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]PermissionDecisionRecord, 0)
+	for rows.Next() {
+		var (
+			wireCallID string
+			tool      string
+			outcome   string
+		)
+		if err := rows.Scan(&wireCallID, &tool, &outcome); err != nil {
+			return nil, fmt.Errorf("chat.PostgresConversationStore.Load: scan chat_permission_decisions: %w", err)
+		}
+		out = append(out, PermissionDecisionRecord{
+			WireCallID: wireCallID,
+			Tool:       tool,
+			Outcome:    outcome,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: rows chat_permission_decisions: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
