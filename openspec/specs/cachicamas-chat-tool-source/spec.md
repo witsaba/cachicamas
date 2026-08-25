@@ -99,11 +99,11 @@ Each new variant MUST carry an `isWireEvent()` marker (mirroring `wire.go:25, 35
 - When `writeFrame(w, flusher, ev)` serializes via `httptest.ResponseRecorder`
 - Then the SSE bytes are exactly `event: tool.call.start\ndata: {"wireCallId":"c1","tool":"current_time","arguments":"{}"}\n\n` (lowercase JSON keys, per the closed `ExchangeDTO` precedent at `chat-types.ts:152-167`)
 
-#### Scenario: S-CTS-007 — a new variant without a `wireFrameName` case panics at runtime (Gherkin verbatim, explore #3952)
+#### Scenario: S-CTS-007 — a new variant without a `wireFrameName` case panics at runtime (Gherkin verbatim, explore #3952; **F-CHT-9.2 wording amendment**)
 
 - Given a new variant added to `WireEvent` without updating `wireFrameName`
 - When `wireFrameName(newVariant{})` runs at runtime
-- Then it panics naming the missing case (the `default` branch fires; `S-CTS-024` binds the inverse — adding a case without a parser arm surfaces as a frontend drop)
+- Then it panics naming the missing case (the `default` branch fires; **Go 1.26 does NOT enforce type-switch exhaustiveness at compile time when a `default` arm exists** — the build passes with a missing case; the runtime panic from the `default` branch is the binding invariant; the test `TestWire_AllNewVariants_SerialiseViaWireFrameName` enforces it by round-tripping every variant). `S-CTS-024` binds the inverse — adding a case without a parser arm surfaces as a frontend drop.
 
 ### R-CTS-005 — The chat projector collapses Layer 2's tool bracket into chat-side events
 
@@ -193,11 +193,11 @@ The frontend-mirror scenarios (`S-CTS-013, S-CTS-014, S-CTS-019..022`) are also 
 - When received
 - Then the tool entry's `state` becomes `"failed"` and `result` carries the failure phrase (no provider text — R-CCP-008 / D6 mirror on the wire)
 
-#### Scenario: S-CTS-022 — `finishReason: "tool_calls"` allows the assistant bubble to continue (Gherkin verbatim, explore #3952)
+#### Scenario: S-CTS-022 — `turn.end` after a tool execution allows the next assistant bubble to stream tool-result-aware text (**F-CHT-9.3 wording amendment** — "by construction" via assistantId-keyed delta accumulation; the `finishReason: "tool_calls"` field is the model's signal but is not explicitly gated in the hook)
 
-- Given a tool call whose model emits `finishReason: "tool_calls"` immediately after `tool.result`
-- When the page receives `turn.end` with `finishReason: "tool_calls"`
-- Then the assistant text bubble that follows the tool entry is allowed to stream and accumulate the model's tool-result-aware text
+- Given a tool call whose model emits `turn.end` after the `tool.result` frame
+- When the page receives the `turn.end` frame (any `finishReason`, including `"tool_calls"`)
+- Then the assistant text bubble that follows the tool entry continues to accumulate any subsequent `message.delta` frames — keyed on the original `assistantId` captured in `submit()`'s closure at `use-chat-stream.ts:163-181`. The entry's `state` resolves to `"final"` on `turn.end` (handler at `use-chat-stream.ts:269-281`), but `message.delta` accumulation at `use-chat-stream.ts:202-209` is **finishReason-agnostic** — the next delta appends to the same entry rather than opening a new bubble. This is the "by construction" behaviour: any continuation delta lands in the prior assistant entry because the delta-accumulation switch matches on `e.id === assistantId`, never on `finishReason`. A future contributor adding an early-return on `finishReason === "tool_calls"` would silently break the scenario; the covering test at `use-chat-stream.spec.tsx` (`S-CTS-022: turn.end{finishReason: "tool_calls"} does NOT cancel assistantId-keyed delta accumulation`) is the trip.
 
 #### Scenario: S-CTS-023 — substrate-untouched guard (Gherkin verbatim, explore #3952)
 
@@ -253,6 +253,8 @@ The frontend-mirror scenarios (`S-CTS-013, S-CTS-014, S-CTS-019..022`) are also 
 ## Spec defects found (recorded, not repaired)
 
 - **F-CHT-9.1 (state name discrepancy) — RESOLVED at design phase (#3965 §13)**. `S-CTS-019` originally said the rendered entry's `state` is `"complete"`, but the existing `TranscriptLine` component at `frontend/src/components/chat/transcript-line.tsx:42` and `frontend/src/lib/mock/chat.ts:42` declare `"done"` — spec text and implementation disagreed. The design phase resolved this by aligning the spec text from `"complete"` to `"done"` (one-line amendment in the explore report's scenario wording). This spec carries the aligned wording verbatim. No code ripple; tests assert `"done"` per the implementation.
+- **F-CHT-9.2 (S-CTS-007 wording) — RESOLVED at verify recovery (this commit)**. `S-CTS-007` originally read "When `go build ./backend/agent/...` runs, Then compile fails naming the default branch", implying compile-time exhaustiveness. Go 1.26 does NOT enforce type-switch exhaustiveness at compile time when a `default` arm exists — the build passes with a missing case; the runtime panics from the `default` branch. The amendment aligns the scenario wording to "panics naming the missing case" + an explicit note about Go 1.26's runtime-not-compile-time exhaustiveness + a reference to the runtime probe test `TestWire_AllNewVariants_SerialiseViaWireFrameName` that enforces the invariant. The structural binding holds at runtime; only the spec wording was imprecise. Mirrored in `frontend-chat-layer1/spec.md` via the underlying `REQ-8..11` rationale lines (no S-FCL-* mirror of S-CTS-007 needed because the type-switch exhaustiveness is a Go-side concern).
+- **F-CHT-9.3 (S-CTS-022 wording) — RESOLVED at verify recovery (this commit)**. `S-CTS-022` originally read "When the page receives `turn.end` with `finishReason: 'tool_calls'`, Then the assistant text bubble that follows the tool entry is allowed to stream and accumulate the model's tool-result-aware text", implying an explicit gate. Implementation is "by construction" via assistantId-keyed delta accumulation at `use-chat-stream.ts:202-209` and `use-chat-stream.ts:269-281` — the `finishReason: "tool_calls"` value carries the model's signal but is not explicitly checked; the continuation works because the delta-accumulation switch matches on `e.id === assistantId`, not on `finishReason`. The amendment aligns the scenario wording to "any `finishReason`" + the "by construction" rationale + the covering test (`use-chat-stream.spec.tsx` `S-CTS-022`) that trips any future early-return on `finishReason === "tool_calls"`. Mirrored in `frontend-chat-layer1/spec.md` S-FCL-017.
 
 ## Cross-references
 

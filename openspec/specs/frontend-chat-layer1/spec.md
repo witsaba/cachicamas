@@ -261,11 +261,11 @@ A new SSE event with `event: tool.result` MUST be added as a **new variant** on 
 - When received
 - Then the tool entry's `state` becomes `"failed"` and `result` carries the failure phrase (no provider text — R-CCP-008 / D6 mirror on the wire)
 
-#### Scenario: S-FCL-017 — `finishReason: "tool_calls"` allows the assistant bubble to continue (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-022)
+#### Scenario: S-FCL-017 — `turn.end` after a tool execution allows the next assistant bubble to stream tool-result-aware text (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-022 with **F-CHT-9.3 wording amendment**)
 
-- Given a tool call whose model emits `finishReason: "tool_calls"` immediately after `tool.result`
-- When the page receives `turn.end` with `finishReason: "tool_calls"`
-- Then the assistant text bubble that follows the tool entry is allowed to stream and accumulate the model's tool-result-aware text
+- Given a tool call whose model emits `turn.end` after the `tool.result` frame
+- When the page receives the `turn.end` frame (any `finishReason`, including `"tool_calls"`)
+- Then the assistant text bubble that follows the tool entry continues to accumulate any subsequent `message.delta` frames — keyed on the original `assistantId`. The continuation is finishReason-agnostic; the `finishReason: "tool_calls"` value carries the model's signal but is not explicitly gated in the hook (`use-chat-stream.ts:269-281` marks the entry final on `turn.end`; `use-chat-stream.ts:202-209` continues to append subsequent `message.delta` frames to the same entry). See `cachicamas-chat-tool-source/spec.md` S-CTS-022 for the implementation rationale and the `use-chat-stream.spec.tsx` `S-CTS-022` covering test.
 
 ## Untemporal-invariant register (CH-09 addition)
 
