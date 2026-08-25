@@ -68,6 +68,70 @@ type Error struct {
 
 func (Error) isWireEvent() {}
 
+// CH-09 — tool-call wire projection (D-3, D-6).
+//
+// Four new variants on the closed WireEvent interface:
+//
+//   - ToolCallStart, ToolResult — emitted at v1 by the chat projector
+//     (R-CTS-004, R-CTS-005). ToolCallStart carries the wire call id,
+//     tool name, and arguments bytes; ToolResult carries the outcome
+//     enum and either content bytes (success / result_failure) or a
+//     typed failure category string (execution_failure, no provider
+//     text — R-CCP-008 / D6 mirror).
+//   - ToolCallDelta, ToolCallEnd — reserved-but-unused at v1 (D-6).
+//     They keep the union closed against future progress-bearing
+//     tools (a long-running MCP tool would need a 5th chat-side event);
+//     no chat projector arm emits them at v1.
+//
+// All four carry `isWireEvent()` markers (mirroring the five pre-
+// existing variants). The new variants trigger a compile error in
+// `wireFrameName`'s default branch until T-04 finalizes the four cases
+// — that is the strict-TDD RED scaffold pre-empting the GREEN.
+type ToolCallStart struct {
+	WireCallID string
+	Tool       string
+	Arguments  string
+}
+
+func (ToolCallStart) isWireEvent() {}
+
+// ToolCallDelta is reserved for future progress-bearing tools (D-6 /
+// NFR-CTS-002). v1 does not emit this variant; the wireFrameName case
+// exists so a future long-running tool can land here without a wire
+// shape change.
+type ToolCallDelta struct {
+	WireCallID string
+	Delta      string
+}
+
+func (ToolCallDelta) isWireEvent() {}
+
+// ToolCallEnd is reserved for v2 dynamic-source surfaces (D-6 /
+// NFR-CTS-002). v1 collapses Layer 2's three ToolEnd* kinds into
+// ToolResult; ToolCallEnd marks the future extension slot.
+type ToolCallEnd struct {
+	WireCallID string
+	Outcome    string
+}
+
+func (ToolCallEnd) isWireEvent() {}
+
+// ToolResult is projected from any of the three Layer 2 ToolEnd* kinds
+// (R-CTS-005, D-6 collapse): Success → "success"; ResultFailure →
+// "result_failure"; ExecutionFailure → "execution_failure" with the
+// typed category string in FailureCategory and empty Content (no
+// provider text leaks, R-CCP-008 / D6 mirror). FailureCategory is
+// non-empty ONLY when Outcome == "execution_failure".
+type ToolResult struct {
+	WireCallID     string
+	Tool           string
+	Outcome        string
+	Content        string
+	FailureCategory string
+}
+
+func (ToolResult) isWireEvent() {}
+
 // The wire's closed, seven-value finish-reason vocabulary (chat-types.ts:36-43).
 const (
 	FinishReasonStop          = "stop"
