@@ -12,6 +12,7 @@ package chat
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -454,10 +455,26 @@ func (s *MemoryConversationStore) SummaryForTest(participantID string) (string, 
 // prompt + assistant pair would be rejected by the seed's
 // append-time rules; the function surfaces the same error
 // NewSeededHistory would.
+//
+// Exchanges with empty PromptText or AssistantText are skipped — a
+// chat turn's prompt is required by the HTTP handler
+// (chat/http.go:257), but failed turns may persist an Exchange with
+// no assistant text, and replaying those would produce invalid
+// history (ai.NewText rejects an empty string with
+// Invalid(ai.ErrEmpty, At("text")), which then surfaced as a panic
+// in chat.Registry's factory path; most upstream providers also
+// reject an empty assistant message in a seeded transcript).
 func ExchangesToHistory(exchanges []Exchange) (*agent.History, error) {
 	messages := make([]ai.Message, 0, len(exchanges)*2)
 	for _, ex := range exchanges {
-		// User turn: the prompt that drove the recorded run.
+		// User turn: the prompt that drove the recorded run. A
+		// prompt empty after trimming never reaches this path
+		// through the HTTP handler, but a future adapter that
+		// bypasses that check is dropped here rather than
+		// surfaced as an Invalid(ErrEmpty) and a Registry panic.
+		if strings.TrimSpace(ex.PromptText) == "" {
+			continue
+		}
 		userPart, err := ai.NewText(ex.PromptText)
 		if err != nil {
 			return nil, err
@@ -476,6 +493,18 @@ func ExchangesToHistory(exchanges []Exchange) (*agent.History, error) {
 		// reconstructs the IDs from the recorded Exchange via
 		// its own load path; the harness's History round-trips
 		// the textual transcript only.
+		//
+		// Skip when the assistant produced no tokens — failed
+		// turns persist an Exchange with AssistantText == "". A
+		// fabricated empty assistant message poisons the next
+		// provider request and also trips ai.NewText's empty-
+		// string validation. Skipping means the resume transcript
+		// contains the user's prompt (from a failed turn)
+		// without a paired empty assistant turn, which is closer
+		// to the truth than fabricating one.
+		if strings.TrimSpace(ex.AssistantText) == "" {
+			continue
+		}
 		assistantPart, err := ai.NewText(ex.AssistantText)
 		if err != nil {
 			return nil, err

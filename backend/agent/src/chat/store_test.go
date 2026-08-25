@@ -756,6 +756,102 @@ func TestConversationStore_LoadUnknownRefused(t *testing.T) {
 	}
 }
 
+// TestExchangesToHistory_SkipsEmptyAssistantText — a failed turn
+// persists an Exchange with AssistantText == "". Calling
+// ExchangesToHistory on a slice that contains one such exchange must
+// not return Invalid(ai.ErrEmpty, At("text")); it must drop the empty
+// assistant side and keep the user's prompt, producing user/hi,
+// user/ok, assistant/all-good in that order.
+//
+// This is the bug that crashed cachicamas-agent-chat via
+// chat.Registry's factory panic ("chat: Registry factory error:
+// text: required value is empty") on the first POST
+// /api/agent/turns for any participant with prior failed turns.
+func TestExchangesToHistory_SkipsEmptyAssistantText(t *testing.T) {
+	t.Parallel()
+
+	exchanges := []chat.Exchange{
+		{PromptText: "hi", AssistantText: ""},
+		{PromptText: "ok", AssistantText: "all good"},
+	}
+
+	history, err := chat.ExchangesToHistory(exchanges)
+	if err != nil {
+		t.Fatalf("ExchangesToHistory returned %v, want nil (empty AssistantText must be skipped, not surfaced)", err)
+	}
+	if history == nil {
+		t.Fatal("ExchangesToHistory returned nil history with nil error; want non-nil empty history")
+	}
+
+	entries := history.Entries()
+	if got, want := len(entries), 3; got != want {
+		t.Fatalf("Entries() returned %d messages, want %d (user/hi + user/ok + assistant/all-good)", got, want)
+	}
+
+	// Order is user("hi"), user("ok"), assistant("all good") — the
+	// failed turn contributes its prompt but no assistant message.
+	want := []struct {
+		role ai.Role
+		text string
+	}{
+		{ai.RoleUser, "hi"},
+		{ai.RoleUser, "ok"},
+		{ai.RoleAssistant, "all good"},
+	}
+	for i, w := range want {
+		entry := entries[i]
+		if entry.Message().Role() != w.role {
+			t.Errorf("entries[%d].Role() = %v, want %v", i, entry.Message().Role(), w.role)
+		}
+		parts := entry.Message().Content()
+		if len(parts) != 1 {
+			t.Fatalf("entries[%d] carries %d part(s), want 1", i, len(parts))
+		}
+		text, ok := parts[0].Text()
+		if !ok {
+			t.Fatalf("entries[%d] part kind = %v, want text", i, parts[0].Kind())
+		}
+		if text != w.text {
+			t.Errorf("entries[%d] text = %q, want %q", i, text, w.text)
+		}
+	}
+}
+
+// TestExchangesToHistory_AllEmptyAssistantText_ReturnsUserOnlyHistory —
+// a participant whose only recorded exchanges are failed turns must
+// reload as a history of user messages with no paired assistant
+// messages, not a panic from chat.Registry's factory closure.
+func TestExchangesToHistory_AllEmptyAssistantText_ReturnsUserOnlyHistory(t *testing.T) {
+	t.Parallel()
+
+	exchanges := []chat.Exchange{
+		{PromptText: "first prompt", AssistantText: ""},
+		{PromptText: "second prompt", AssistantText: ""},
+		{PromptText: "third prompt", AssistantText: ""},
+	}
+
+	history, err := chat.ExchangesToHistory(exchanges)
+	if err != nil {
+		t.Fatalf("ExchangesToHistory returned %v, want nil (all-empty AssistantText slice must reload as user-only history)", err)
+	}
+	if history == nil {
+		t.Fatal("ExchangesToHistory returned nil history with nil error; want non-nil empty history")
+	}
+
+	entries := history.Entries()
+	if got, want := len(entries), 3; got != want {
+		t.Fatalf("Entries() returned %d messages, want %d (one user message per failed turn)", got, want)
+	}
+	for i, entry := range entries {
+		if entry.Message().Role() != ai.RoleUser {
+			t.Errorf("entries[%d].Role() = %v, want %v (no assistant turn survived)", i, entry.Message().Role(), ai.RoleUser)
+		}
+	}
+	if got := history.Len(); got != 3 {
+		t.Errorf("history.Len() = %d, want 3", got)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Test helpers reused from the chat_test package's existing vocabulary.
 // All helper functions used by this file (heldAfterTwoFragmentsScript,
