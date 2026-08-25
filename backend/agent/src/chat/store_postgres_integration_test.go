@@ -29,6 +29,7 @@ func TestPostgresConversationStore_CrossProcess_RoundTrips(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run (S-CCS-010 requires a real Postgres; two adapters over the same DSN)")
 	}
+	resetChatTables(t)
 
 	dsn := chatPostgresTestDSN()
 	const participant = "cross-process-sccs010"
