@@ -260,6 +260,48 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 		return fmt.Errorf("chat.PostgresConversationStore.Append: insert chat_exchanges: %w", err)
 	}
 
+	// 3b. CH-09 (R-CCS-015): insert sibling-table rows for the
+	// tool-call and tool-result records. Same transaction; the
+	// exchange-row + sibling-rows land together or not at all. Empty
+	// input is a no-op (no INSERT issued) — a tool-free turn leaves
+	// the sibling tables empty for this exchange_position. Future
+	// widens (e.g. MCP `source` column) can land here via a
+	// forward-only ALTER on the NEW sibling tables.
+	for i, tc := range ex.ToolCalls {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO chat_tool_calls (
+				participant_id, exchange_position, position,
+				wire_call_id, tool, arguments
+			) VALUES ($1, $2, $3, $4, $5, $6)`,
+			participantID,
+			nextPos,
+			i,
+			tc.WireCallID,
+			tc.Tool,
+			tc.Arguments,
+		); err != nil {
+			return fmt.Errorf("chat.PostgresConversationStore.Append: insert chat_tool_calls[%d]: %w", i, err)
+		}
+	}
+	for i, tr := range ex.ToolResults {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO chat_tool_results (
+				participant_id, exchange_position, position,
+				wire_call_id, tool, outcome, content, failure_category
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			participantID,
+			nextPos,
+			i,
+			tr.WireCallID,
+			tr.Tool,
+			tr.Outcome,
+			tr.Content,
+			tr.FailureCategory,
+		); err != nil {
+			return fmt.Errorf("chat.PostgresConversationStore.Append: insert chat_tool_results[%d]: %w", i, err)
+		}
+	}
+
 	// 4. Bump the parent row's updated_at so an operator querying
 	// chat_conversations can find the most-recently-active
 	// participant without scanning chat_exchanges.
@@ -406,6 +448,21 @@ func (s *PostgresConversationStore) Load(participantID string) ([]Exchange, erro
 		if finishReason.Valid && finishReason.String != "" {
 			fr = parseFinishReason(finishReason.String)
 		}
+
+		// CH-09 (R-CCS-015, NFR-CCS-008): fetch the sibling-table
+		// rows for this exchange_position and project them into the
+		// Exchange's ToolCalls / ToolResults slices. Empty result
+		// sets produce nil slices, matching the in-memory adapter's
+		// nil-for-empty posture.
+		toolCalls, err := s.loadToolCalls(ctx, participantID, position)
+		if err != nil {
+			return nil, err
+		}
+		toolResults, err := s.loadToolResults(ctx, participantID, position)
+		if err != nil {
+			return nil, err
+		}
+
 		out = append(out, Exchange{
 			Position:        position,
 			PromptText:      promptText,
@@ -415,6 +472,8 @@ func (s *PostgresConversationStore) Load(participantID string) ([]Exchange, erro
 			FailureCategory: parseFailureCategory(failureCatStr),
 			FinishReason:    fr,
 			MessageIDs:      ids,
+			ToolCalls:       toolCalls,
+			ToolResults:     toolResults,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -439,4 +498,94 @@ func (s *PostgresConversationStore) Load(participantID string) ([]Exchange, erro
 	cp := make([]Exchange, len(out))
 	copy(cp, out)
 	return cp, nil
+}
+
+// loadToolCalls queries chat_tool_calls for one exchange position,
+// returning a fresh slice of ToolCallRecord in issuance order. The
+// returned slice's backing array is independent of the adapter's
+// state (NFR-CCS-008 carries NFR-CCS-004 forward). Empty result
+// set returns a nil slice.
+func (s *PostgresConversationStore) loadToolCalls(ctx context.Context, participantID string, exchangePosition int) ([]ToolCallRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT wire_call_id, tool, arguments
+		   FROM chat_tool_calls
+		  WHERE participant_id = $1 AND exchange_position = $2
+		  ORDER BY position ASC`,
+		participantID,
+		exchangePosition,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: query chat_tool_calls: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]ToolCallRecord, 0)
+	for rows.Next() {
+		var (
+			wireCallID string
+			tool       string
+			arguments  string
+		)
+		if err := rows.Scan(&wireCallID, &tool, &arguments); err != nil {
+			return nil, fmt.Errorf("chat.PostgresConversationStore.Load: scan chat_tool_calls: %w", err)
+		}
+		out = append(out, ToolCallRecord{
+			WireCallID: wireCallID,
+			Tool:       tool,
+			Arguments:  arguments,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: rows chat_tool_calls: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// loadToolResults queries chat_tool_results for one exchange
+// position, returning a fresh slice of ToolResultRecord in issuance
+// order. Empty result set returns a nil slice.
+func (s *PostgresConversationStore) loadToolResults(ctx context.Context, participantID string, exchangePosition int) ([]ToolResultRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT wire_call_id, tool, outcome, content, failure_category
+		   FROM chat_tool_results
+		  WHERE participant_id = $1 AND exchange_position = $2
+		  ORDER BY position ASC`,
+		participantID,
+		exchangePosition,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: query chat_tool_results: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]ToolResultRecord, 0)
+	for rows.Next() {
+		var (
+			wireCallID      string
+			tool            string
+			outcome         string
+			content         string
+			failureCategory string
+		)
+		if err := rows.Scan(&wireCallID, &tool, &outcome, &content, &failureCategory); err != nil {
+			return nil, fmt.Errorf("chat.PostgresConversationStore.Load: scan chat_tool_results: %w", err)
+		}
+		out = append(out, ToolResultRecord{
+			WireCallID:      wireCallID,
+			Tool:            tool,
+			Outcome:         outcome,
+			Content:         content,
+			FailureCategory: failureCategory,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.Load: rows chat_tool_results: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }

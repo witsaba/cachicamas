@@ -50,14 +50,14 @@ type openTurnResponse struct {
 	StreamURL string `json:"streamUrl"`
 }
 
-// exchangeDTO mirrors chat.Exchange's eight fields (D-7) and is
-// the transport projection the GET /api/agent/conversations/:id
-// handler emits (R-CRI-001, R-CRI-004). The DTO lives in the
-// transport layer (this file) and is a pure projection of the port
-// type — the DTO must NOT invent fields beyond Exchange (REQ-7
-// closed-union enforcement on the wire). Mirrors
-// frontend/src/lib/chat-types.ts:ExchangeDTO verbatim (the TS spec
-// owns the JSON surface; the Go DTO aligns field-for-field).
+// exchangeDTO mirrors chat.Exchange's ten fields (D-7, CH-09
+// R-CCS-015 widening) and is the transport projection the GET
+// /api/agent/conversations/:id handler emits (R-CRI-001, R-CRI-004).
+// The DTO lives in the transport layer (this file) and is a pure
+// projection of the port type — the DTO must NOT invent fields
+// beyond Exchange (REQ-7 closed-union enforcement on the wire).
+// Mirrors frontend/src/lib/chat-types.ts:ExchangeDTO verbatim (the
+// TS spec owns the JSON surface; the Go DTO aligns field-for-field).
 type exchangeDTO struct {
 	Position        int      `json:"position"`
 	PromptText      string   `json:"promptText"`
@@ -67,6 +67,37 @@ type exchangeDTO struct {
 	FailureCategory string   `json:"failureCategory"`
 	FinishReason    *string  `json:"finishReason,omitempty"`
 	MessageIDs      []string `json:"messageIDs"`
+	// CH-09 — two new optional fields widen the DTO additively.
+		// The frontend mirror (chat-types.ts) gains the same two
+		// fields; their omission from the wire (a tool-free turn)
+		// is JSON-encoded as missing keys, never null slices — the
+		// optional `omitempty` keeps the wire tidy.
+	ToolCalls   []toolCallDTO   `json:"toolCalls,omitempty"`
+	ToolResults []toolResultDTO `json:"toolResults,omitempty"`
+}
+
+// toolCallDTO is the wire projection of chat.ToolCallRecord
+// (R-CCS-015, R-CTS-006). JSON keys lowercase per the closed
+// ExchangeDTO precedent. Field names match the wire's event
+// payload (chat.ToolCallStart.WireCallID / Tool / Arguments) so a
+// reload-side replay and a live-stream event agree byte-for-byte.
+type toolCallDTO struct {
+	WireCallID string `json:"wireCallId"`
+	Tool       string `json:"tool"`
+	Arguments  string `json:"arguments"`
+}
+
+// toolResultDTO is the wire projection of chat.ToolResultRecord
+// (R-CCS-015, R-CTS-006). Outcome is the closed three-value
+// vocabulary (\"success\" | \"result_failure\" | \"execution_failure\").
+// FailureCategory is non-empty ONLY when Outcome == \"execution_failure\"
+// (R-CCP-008 / D6 mirror — no provider text).
+type toolResultDTO struct {
+	WireCallID      string `json:"wireCallId"`
+	Tool            string `json:"tool"`
+	Outcome         string `json:"outcome"`
+	Content         string `json:"content"`
+	FailureCategory string `json:"failureCategory"`
 }
 
 // conversationSummaryDTO mirrors chat.ConversationSummary's three
@@ -83,13 +114,19 @@ type conversationSummaryDTO struct {
 // exchangeToDTO projects a recorded Exchange to the wire form.
 // finishReason is omitempty via a nil pointer (matches the wire's
 // FinishReason ABSENCE for cancelled/failed turns per D-7 / R-CCS-004).
+//
+// CH-09 (R-CCS-015): ToolCalls and ToolResults are projected with
+// the same JSON-key surface as the wire's live ToolCallStart /
+// ToolResult events; an empty slice is omitted (omitempty) so a
+// tool-free turn's reload surface stays byte-equal to the
+// pre-CH-09 shape.
 func exchangeToDTO(ex Exchange) exchangeDTO {
 	var fr *string
 	if ex.FinishReason != nil {
 		s := ex.FinishReason.String()
 		fr = &s
 	}
-	return exchangeDTO{
+	dto := exchangeDTO{
 		Position:        ex.Position,
 		PromptText:      ex.PromptText,
 		AssistantText:   ex.AssistantText,
@@ -99,6 +136,19 @@ func exchangeToDTO(ex Exchange) exchangeDTO {
 		FinishReason:    fr,
 		MessageIDs:      ex.MessageIDs,
 	}
+	if len(ex.ToolCalls) > 0 {
+		dto.ToolCalls = make([]toolCallDTO, len(ex.ToolCalls))
+		for i, tc := range ex.ToolCalls {
+			dto.ToolCalls[i] = toolCallDTO(tc)
+		}
+	}
+	if len(ex.ToolResults) > 0 {
+		dto.ToolResults = make([]toolResultDTO, len(ex.ToolResults))
+		for i, tr := range ex.ToolResults {
+			dto.ToolResults[i] = toolResultDTO(tr)
+		}
+	}
+	return dto
 }
 
 // conversationSummaryToDTO projects a ConversationSummary to the wire
