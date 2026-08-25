@@ -81,6 +81,17 @@ type Config struct {
 	// chat.NewDefaultPermissionPolicy(deferToolNames); see
 	// cmd/chat/main.go for the production wire.
 	PermissionPolicy PermissionPolicy
+
+	// Scheduler is the wake handle the HTTP reverse-channel
+	// handler reaches to unblock a parked gate (CH-10.1, R-CPM-004,
+	// D-11). Optional: nil leaves the harness's Scheduler field
+	// at zero, which Harness.Run lazily initializes to a fresh
+	// *agent.Scheduler per Run (per-Run construction at
+	// agent/harness.go:446-449). Tests inject a real Scheduler
+	// so the HTTP handler's WakeParked call has a non-nil
+	// receiver; production callers leave this nil and rely on
+	// the per-Run lazy default.
+	Scheduler *agent.Scheduler
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
@@ -146,13 +157,19 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	// harness.Turn.PermissionPolicy. The harness threads it into
 	// Schedule via the per-turn Continuation's field (CH-09.1 D-1
 	// precedent + CH-10.1 widening).
+	//
+	// CH-10.1 (D-11): the harness's Scheduler field is the
+	// caller-owned wake handle. nil leaves Harness.Run's per-Run
+	// lazy default (agent/harness.go:446-449); a non-nil value
+	// (test injection) threads through Conversation.Scheduler().
 	return &Conversation{
 		harness: &agent.Harness{
-			Provider: cfg.Provider,
-			System:   SystemPrompt,
-			History:  history,
+			Provider:  cfg.Provider,
+			System:    SystemPrompt,
+			History:   history,
+			Scheduler: cfg.Scheduler,
 			Turn: agent.TurnOptions{
-				Tools:           cfg.ToolSource,
+				Tools:            cfg.ToolSource,
 				PermissionPolicy: cfg.PermissionPolicy,
 			},
 		},
@@ -292,4 +309,14 @@ func (c *Conversation) IsInFlight() bool {
 // the scheduler; this method is a pure pass-through.
 func (c *Conversation) Scheduler() *agent.Scheduler {
 	return c.harness.Scheduler
+}
+
+// ParticipantIDForTest returns the participantID the Conversation
+// was constructed with. Test-only surface (the production path
+// reads participantID via the registry's per-conversation lookup;
+// production code MUST NOT call this). Exposed so the CH-10 HTTP
+// test helpers can register the test conversation with the
+// chat-package Registry.
+func (c *Conversation) ParticipantIDForTest() string {
+	return c.participantID
 }

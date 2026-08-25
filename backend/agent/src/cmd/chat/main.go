@@ -302,6 +302,18 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		return fmt.Errorf("chat.RegisterResumeRoutes: %w", err)
 	}
 
+	// CH-10.1 (closes R-15 + R-CPM-004): the reverse-channel
+	// surface — one POST endpoint behind the same
+	// identityMiddleware. The handler reaches the chat-owned
+	// policy state via the chat.Conversation, then calls
+	// conv.Scheduler().WakeParked(callID) to unblock the parked
+	// gate (D-11). The composition root passes the same Registry
+	// RegisterRoutes returned; both handlers consult the same
+	// per-participant lookup seam.
+	if err := chat.RegisterPermissionRoutes(e, resolver, registry); err != nil {
+		return fmt.Errorf("chat.RegisterPermissionRoutes: %w", err)
+	}
+
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
 	startErr := startAndWait(e, ":"+cfg.Port)
 

@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/cachicamas/backend/agent/src/agent"
 )
 
 // openTurnRequest is the POST body the client sends. Mirrors
@@ -568,5 +570,177 @@ func RegisterResumeRoutes(e *echo.Echo, resolver IdentityResolver, store Convers
 	api.GET("/conversations/:id", HandleReloadConversation(store))
 	api.GET("/conversations", HandleListConversations(store))
 
+	return nil
+}
+
+// permissionDecisionRequest is the POST body for the CH-10.1
+// reverse-channel endpoint. Body shape is the chat wire's CLOSED
+// 2-value vocabulary (R-CPM-003, D-12 collapse):
+// `{"outcome": "allow_once" | "deny"}`. Out-of-vocab values are
+// refused typed (S-CPM-013).
+type permissionDecisionRequest struct {
+	Outcome string `json:"outcome"`
+}
+
+// permissionDecisionResponse is the 200 OK envelope on the happy
+// path (S-CPM-010). The body carries the recorded verdict's
+// outcome for client-side confirmation.
+type permissionDecisionResponse struct {
+	CallID  string `json:"callID"`
+	Outcome string `json:"outcome"`
+}
+
+// HandlePermissionDecision is the CH-10.1 reverse-channel POST
+// handler (R-CPM-004, S-CPM-010..013, S-CPM-017a.5). It receives
+// the participant's click on a parked tool's hold row, writes the
+// verdict into the chat-owned policy state, and wakes the gate.
+//
+// Routes: `POST /api/agent/turns/:id/permissions/:callID`
+//
+// Responses:
+//   - 200 OK — verdict recorded; WakeParked returned nil.
+//   - 403 not_found — cross-participant (R-CHS-004.b shape).
+//   - 404 not_found — unknown callID; WakeParked returned
+//     ErrStrayDecision (caller-side race: the parked entry was
+//     already woken or never parked).
+//   - 409 conflict — second click on the same callID; RecordVerdict
+//     returned ErrDecisionAlreadyMade (S-CPM-017a.5).
+//   - 422 validation — body outside the closed 2-value vocabulary.
+func HandlePermissionDecision(registry *Registry) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ident, _ := getIdentity(c)
+		if ident == nil {
+			return writeError(c, http.StatusUnauthorized, "server",
+				"identity not resolved", nil)
+		}
+
+		turnID := c.Param("id")
+		callID := strings.TrimSpace(c.Param("callID"))
+		if turnID == "" {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"turn id is required", map[string]string{"id": "required"})
+		}
+		if callID == "" {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"call id is required", map[string]string{"callID": "required"})
+		}
+
+		// Cross-participant guard (R-CHS-004.b shape, mirror of
+		// HandleStreamEvents). The turn belongs to the participant
+		// who opened it; a foreign click is refused as 403
+		// not_found so existence is not leaked.
+		ownerID, ok := registry.OwnerOf(turnID)
+		if !ok {
+			// Unknown turn: surface as 403 not_found so the
+			// existence of the turn is not leaked (R-CHS-004.b).
+			return writeError(c, http.StatusForbidden, "not_found",
+				"turn not found", nil)
+		}
+		if ownerID != ident.ParticipantID() {
+			return writeError(c, http.StatusForbidden, "not_found",
+				"turn not found", nil)
+		}
+
+		// Parse body. The handler accepts ONLY the closed 2-value
+		// vocabulary; out-of-vocab yields 422 validation (S-CPM-013).
+		var req permissionDecisionRequest
+		if err := c.Bind(&req); err != nil {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"malformed request body", map[string]string{"body": "invalid JSON"})
+		}
+		if req.Outcome != "allow_once" && req.Outcome != "deny" {
+			return writeError(c, http.StatusUnprocessableEntity, "validation",
+				"outcome must be \"allow_once\" or \"deny\"",
+				map[string]string{"outcome": req.Outcome})
+		}
+
+		// Locate the conversation for this participant.
+		target, found := registry.ConversationByTurnID(ident.ParticipantID(), turnID)
+		if !found || target == nil {
+			//nolint:revive // closed registry surface mirrors CH-03 HandleStreamEvents.
+			return writeError(c, http.StatusForbidden, "not_found",
+				"conversation not found", nil)
+		}
+
+		// Write the verdict into the chat-owned policy state.
+		// The policy is *chat.DefaultPermissionPolicy (D-2) at
+		// v1; the type assertion reaches the chat-only
+		// RecordVerdict method (not on the Layer 2 interface).
+		if err := recordVerdict(target, callID, req.Outcome); err != nil {
+			if errors.Is(err, ErrDecisionAlreadyMade) {
+				return writeError(c, http.StatusConflict, "conflict",
+					"decision already made for this call",
+					map[string]string{"callID": callID})
+			}
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to record verdict", nil)
+		}
+
+		// Wake the parked gate. ErrStrayDecision → 404 not_found
+		// (caller-side race; the parked entry was already cleared
+		// or never existed). Any other error → 500 server.
+		if err := target.Scheduler().WakeParked(callID); err != nil {
+			if errors.Is(err, agent.ErrStrayDecision) {
+				return writeError(c, http.StatusNotFound, "not_found",
+					"callID not parked", map[string]string{"callID": callID})
+			}
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to wake parked call", nil)
+		}
+
+		return c.JSON(http.StatusOK, permissionDecisionResponse{
+			CallID:  callID,
+			Outcome: req.Outcome,
+		})
+	}
+}
+
+// recordVerdict is the type-assertion wrapper that reaches the
+// chat-only RecordVerdict method on *chat.DefaultPermissionPolicy.
+// S-CPM-017a.5: the typed sentinel ErrDecisionAlreadyMade surfaces
+// here so the handler can map it to 409 conflict.
+func recordVerdict(conv *Conversation, callID, outcome string) error {
+	policy, ok := conv.harness.Turn.PermissionPolicy.(*DefaultPermissionPolicy)
+	if !ok {
+		return errors.New("chat: handler requires *chat.DefaultPermissionPolicy; got another implementation")
+	}
+	return policy.RecordVerdict(callID, outcome)
+}
+
+// RegisterPermissionRoutes wires the CH-10.1 reverse-channel route
+// onto e. The route rides the existing `identityMiddleware` (no
+// second middleware instance) — the identity path is identical
+// to the CH-03 / CH-08 surface.
+//
+// The handler reads the conversation from the Registry (OwnerOf +
+// ConversationByTurnID). The production composition root passes
+// the same Registry RegisterRoutes returned; tests construct their
+// own via chat.NewRegistry(testFactory) and seed it the same way
+// (StoreStream + GetOrCreate).
+//
+// Production wire (from cmd/chat/main.go):
+//
+//   registry, err := chat.RegisterRoutes(e, resolver, factory)
+//   chat.RegisterPermissionRoutes(e, resolver, registry)
+//
+// Test wire (mountPermissionRoutes helper):
+//
+//   reg := chat.NewRegistry(testFactory)
+//   reg.conversations[pid] = conv
+//   reg.StoreStream(pid, "T1", nil) // or similar
+//   chat.RegisterPermissionRoutes(e, resolver, reg)
+func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry *Registry) error {
+	if e == nil {
+		return errors.New("chat: RegisterPermissionRoutes requires a non-nil *echo.Echo")
+	}
+	if resolver == nil {
+		return errors.New("chat: RegisterPermissionRoutes requires a non-nil IdentityResolver")
+	}
+	if registry == nil {
+		return errors.New("chat: RegisterPermissionRoutes requires a non-nil *Registry")
+	}
+
+	api := e.Group("/api/agent", identityMiddleware(resolver))
+	api.POST("/turns/:id/permissions/:callID", HandlePermissionDecision(registry))
 	return nil
 }

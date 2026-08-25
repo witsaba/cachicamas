@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v5"
 )
 
 // productionSymbolMatches returns the number of occurrences of sym in
@@ -123,4 +125,13 @@ func countInProductionFiles(chatDir, sym string) int {
 		_ = f.Close()
 	}
 	return count
+}
+
+// newEchoServerForTest builds a fresh Echo instance for handler
+// tests. Echo v5 + a single route group suffices; the test drives
+// the server via httptest.NewRecorder.
+func newEchoServerForTest(t *testing.T) *echo.Echo {
+	t.Helper()
+	e := echo.New()
+	return e
 }
