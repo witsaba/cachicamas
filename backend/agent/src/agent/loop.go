@@ -1104,6 +1104,28 @@ func (t *turnAccumulator) translate(ev ai.Event) bool {
 
 	case ai.EventKindTextDelta:
 		delta, _ := ev.TextDelta()
+		// Several OpenRouter-routed upstreams (e.g. google/gemini-3.7-flash)
+		// emit TextDelta events with empty content: content-filter
+		// placeholders, reasoning-text-only chunks, and SSE heartbeats
+		// the openaicompat decoder passes through verbatim. Layer 1
+		// accepts the empty fragment (ai.NewTextDelta does not reject
+		// it), but agent.MessageDeltaText.validate rejects
+		// fragment == "" with Invalid(ErrEmpty, At("fragment")), so
+		// NewMessageDeltaText("",...) below would surface the
+		// empty-delta as a typed *ai.Violation, which the chat wire
+		// surface cannot category-route (errors.As(&*ai.Failure)
+		// does not match a *ai.Violation) — the user sees
+		// "model provider is temporarily unavailable" with no
+		// actionable cause. Empty text carries no information and
+		// the chat wire surface already drops empty deltas at the
+		// consumer end, so the right disposition is to drop them at
+		// the producer: skip BEFORE the idx increment and the
+		// fragments append (those record EMITTED deltas, not
+		// RECEIVED deltas), so the index counter and the fragment
+		// accumulator stay consistent for the next non-empty delta.
+		if delta.Delta() == "" {
+			return false
+		}
 		idx := t.textBracket.idx
 		t.textBracket.idx++
 		t.textBracket.fragments = append(t.textBracket.fragments, delta.Delta())

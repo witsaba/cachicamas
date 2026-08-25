@@ -1726,3 +1726,150 @@ func TestTurn_ProviderPreStreamFailureSurfacesOnReturn(t *testing.T) {
 		t.Error("sink was empty after Turn returned; expected the run_start + turn_start the loop emits before the Stream call")
 	}
 }
+
+// scriptTextOneEmptyDeltaInMiddle builds a script that opens a text
+// bracket, then emits an empty TextDelta (the upstream shape that
+// several OpenRouter-routed providers — google/gemini-3.7-flash
+// included — produce for content-filter placeholders, reasoning-text
+// chunks, and SSE heartbeat lines), then a single non-empty TextDelta
+// "hello", then closes the bracket and completes with stop. Layer 1
+// accepts ai.NewTextDelta(block, "") (R-ATE-007), so the empty event
+// is constructible from the script side; the test asserts that the
+// loop layer drops it on the producer side rather than handing it to
+// agent.NewMessageDeltaText (whose strict validate at
+// message_text.go:130 rejects fragment == "" with ErrEmpty).
+func scriptTextOneEmptyDeltaInMiddle(t *testing.T) agenttest.Script {
+	t.Helper()
+
+	start, err := ai.NewTextBlockStart(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockStart returned %v, want no failure", err)
+	}
+	emptyDelta, err := ai.NewTextDelta(1, "")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta(\"\") returned %v, want no failure", err)
+	}
+	realDelta, err := ai.NewTextDelta(1, "hello")
+	if err != nil {
+		t.Fatalf("ai.NewTextDelta(\"hello\") returned %v, want no failure", err)
+	}
+	end, err := ai.NewTextBlockEnd(1)
+	if err != nil {
+		t.Fatalf("ai.NewTextBlockEnd returned %v, want no failure", err)
+	}
+	completion, err := ai.NewCompletion(ai.FinishReasonStop, ai.Usage{})
+	if err != nil {
+		t.Fatalf("ai.NewCompletion returned %v, want no failure", err)
+	}
+	return agenttest.Script{Steps: []agenttest.Step{
+		agenttest.Emit(start),
+		agenttest.Emit(emptyDelta),
+		agenttest.Emit(realDelta),
+		agenttest.Emit(end),
+		agenttest.Emit(completion),
+	}}
+}
+
+// TestTurn_LoopSkipsEmptyTextDeltaFromUpstream drives the loop's
+// empty-upstream-delta branch in turnAccumulator.translate's
+// EventKindTextDelta case. Several OpenRouter-routed upstreams
+// (notably google/gemini-3.7-flash) emit TextDelta events with
+// empty content: content-filter placeholders, reasoning-text-only
+// chunks, or SSE heartbeat lines the openaicompat decoder passes
+// through verbatim. Layer 1 (ai.NewTextDelta) accepts the empty
+// fragment; Layer 2's agent.MessageDeltaText.validate rejects it
+// with Invalid(ErrEmpty, At("fragment")), so without the guard the
+// loop would set t.fatal, propagate as a Turn error, and surface
+// in the chat projection as a Kind:server "model provider is
+// temporarily unavailable" message with no actionable cause.
+//
+// The fix drops the empty delta at the producer (in
+// translate's TextDelta arm) BEFORE the idx increment and the
+// fragments append, so:
+//   - the loop does NOT attempt to construct a
+//     MessageDeltaText with fragment == "" (the strict validation
+//     rule is preserved for any non-loop caller that calls
+//     NewMessageDeltaText directly),
+//   - no MessageDeltaText with empty fragment is ever emitted on
+//     the sink,
+//   - the next non-empty delta emits with idx == 0 (the empty
+//     delta's slot is skipped, not consumed), and
+//   - t.fatal is never set: Turn returns err == nil with finish
+//     reason stop.
+func TestTurn_LoopSkipsEmptyTextDeltaFromUpstream(t *testing.T) {
+	t.Parallel()
+
+	provider := agenttest.NewProvider(scriptTextOneEmptyDeltaInMiddle(t))
+	sink := make(chan *agent.Event, 16)
+
+	msg, finish, err := agent.Turn(
+		contextBackground(),
+		provider,
+		"system prompt for empty-delta branch",
+		[]ai.Message{firstMessage(t)},
+		agent.TurnOptions{},
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("Turn returned err = %v, want nil (empty upstream deltas must not surface as a typed failure)", err)
+	}
+	if finish != ai.FinishReasonStop {
+		t.Errorf("finish = %v, want %v (completion with stop after the empty-delta is skipped)", finish, ai.FinishReasonStop)
+	}
+
+	got := drainSink(t, sink)
+
+	// Walk the drained sink and assert the empty-delta branch
+	// (translate -> NewMessageDeltaText skipped, no emission).
+	var deltaCount int
+	var sawEmptyFragment bool
+	for _, ev := range got {
+		if ev.Kind() != agent.EventKindMessageDeltaText {
+			continue
+		}
+		payload, ok := ev.MessageDeltaText()
+		if !ok {
+			t.Fatal("MessageDeltaText event carries no payload")
+		}
+		deltaCount++
+		if payload.Fragment() == "" {
+			sawEmptyFragment = true
+		}
+	}
+
+	// Strict validation is still in force at the constructor: an
+	// emitted MessageDeltaText MUST carry a non-empty fragment.
+	if sawEmptyFragment {
+		t.Errorf("sink received a MessageDeltaText with empty fragment; the constructor's validate rule is supposed to make this unconstructible")
+	}
+
+	// Exactly ONE delta survived: the non-empty "hello". The empty
+	// upstream delta was dropped at the producer.
+	if deltaCount != 1 {
+		t.Errorf("sink received %d MessageDeltaText events, want 1 (empty upstream deltas are skipped, not stored)", deltaCount)
+	}
+
+	// Find the one surviving delta and assert its fragment + idx.
+	foundRealDelta := false
+	for _, ev := range got {
+		if ev.Kind() != agent.EventKindMessageDeltaText {
+			continue
+		}
+		payload, _ := ev.MessageDeltaText()
+		if payload.Fragment() != "hello" {
+			t.Errorf("surviving delta fragment = %q, want %q", payload.Fragment(), "hello")
+		}
+		if payload.Index() != 0 {
+			t.Errorf("surviving delta idx = %d, want 0 (the empty delta's slot was skipped, not consumed)", payload.Index())
+		}
+		foundRealDelta = true
+	}
+	if !foundRealDelta {
+		t.Error("no MessageDeltaText with fragment \"hello\" reached the sink; the real upstream content was dropped with the empty one")
+	}
+
+	// The reconstructed message carries only the surviving fragment.
+	if got := msgContentText(msg); got != "hello" {
+		t.Errorf("reconstructed message text = %q, want %q (empty upstream delta must not contribute to msg)", got, "hello")
+	}
+}
