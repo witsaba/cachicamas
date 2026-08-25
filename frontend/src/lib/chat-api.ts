@@ -68,10 +68,27 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
-// SSR-vs-browser base URL (mirrors lib/api.ts:133-157 + lib/prompts-api.ts:85-102)
+// SSR-vs-browser base URL.
+//
+// DELIBERATELY DIFFERENT from lib/api.ts / lib/prompts-api.ts: the chat
+// wire paths passed to fullUrl() are ALREADY backend-absolute
+// ("/api/agent/turns", "/api/agent/conversations", and the server-issued
+// streamUrl "/api/agent/turns/:id/events"). The db_admin-oriented clients
+// pass UNPREFIXED paths ("/organizations") and rely on PUBLIC_API_BASE_URL
+// ("= /api") to add the proxy prefix. Reusing that convention here produced
+// "/api/api/agent/..." in the browser (2026-08-25 fix, fix/chat-stack-wiring).
+//
+// Browser: same-origin relative URLs — the Qwik Node server proxies
+// /api/agent/* to the chat service (entry.express.tsx, AGENT_CHAT_TARGET).
+//
+// Node SSR: today no SSR path fetches chat endpoints (every call site is
+// client-guarded), but if one ever does, it must target the chat service
+// directly — SERVER_AGENT_CHAT_BASE_URL (compose: http://agent_chat:8080),
+// falling back to the documented dev port 8090. NEVER SERVER_API_BASE_URL:
+// that points at database_administrator, which does not serve /api/agent/*.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BASE_URL = "http://localhost:8080";
+const DEFAULT_NODE_CHAT_BASE_URL = "http://localhost:8090";
 
 function isNode(): boolean {
   return (
@@ -82,25 +99,21 @@ function isNode(): boolean {
 
 function apiBaseUrl(): string {
   if (isNode()) {
-    const fromEnv = process.env.SERVER_API_BASE_URL;
+    const fromEnv = process.env.SERVER_AGENT_CHAT_BASE_URL;
     return (
-      fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_BASE_URL
+      fromEnv && fromEnv.trim().length > 0
+        ? fromEnv
+        : DEFAULT_NODE_CHAT_BASE_URL
     ).replace(/\/+$/, "");
   }
-  // Browser: Vite-inlined PUBLIC_* env at build time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromEnv = (import.meta as any).env?.PUBLIC_API_BASE_URL as
-    | string
-    | undefined;
-  return (
-    fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_BASE_URL
-  ).replace(/\/+$/, "");
+  // Browser: same origin. The /api/agent prefix in each path is what the
+  // Qwik proxy matches on; adding a base would double-prefix it.
+  return "";
 }
 
-// Build the full URL for a relative path. SSR uses the absolute base
-// URL; browser uses the same base URL (relative paths work too, but
-// we always go absolute to keep the chat client identical to
-// lib/api.ts's serverAwareFetch and lib/prompts-api.ts's safeFetch).
+// Build the full URL for an already-prefixed chat path. Absolute URLs
+// (server-issued stream URLs) pass through untouched; relative paths get
+// the base prepended (empty string in the browser → same-origin request).
 function fullUrl(path: string): string {
   if (path.startsWith("http")) return path;
   return `${apiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
