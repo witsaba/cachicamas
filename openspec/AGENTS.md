@@ -149,21 +149,42 @@ MUST follow the same pattern (or its milestone-specific equivalent)
 and SHOULD append a one-line pointer here.
 
 **CH-08** (`cachicamas-chat-resume-in-browser`) is the first
-chat-archetype milestone after CH-07 to widen the closed
-`ConversationStore` port (R-CCS-010) by adding — not replacing — a
-third method `List(participantID) ([]ConversationSummary, error)`, in
-the same declaration; the new method is additive per R-CCS-010's
-anticipatory clause, and the project keeps the additive pattern as
-the binding precedent for any future widening (per R-AGP-003 / R-AGP-005).
-The CH-08 read surface lands behind the existing `identityMiddleware`
-via a fresh `RegisterResumeRoutes` helper, leaving the CH-03 frozen
-three-route surface untouched. No file under `backend/agent/src/agent/`
-is modified; the ten-file substrate list survives byte-clean. No new
-top-level Go deps (CH-07's `pgx/v5` and `pressly/goose/v3` already
-cover the postgres surface). The read-side wire is closed under
-REQ-7 — the frontend's `ChatStreamEvent` union is preserved; new DTOs
-(`ExchangeDTO`, `ConversationSummary`) live adjacent to it, never as
-additions to it.
+	chat-archetype milestone after CH-07 to widen the closed
+	`ConversationStore` port (R-CCS-010) by adding — not replacing — a
+	third method `List(participantID) ([]ConversationSummary, error)`, in
+	the same declaration; the new method is additive per R-CCS-010's
+	anticipatory clause, and the project keeps the additive pattern as
+	the binding precedent for any future widening (per R-AGP-003 / R-AGP-005).
+	The CH-08 read surface lands behind the existing `identityMiddleware`
+	via a fresh `RegisterResumeRoutes` helper, leaving the CH-03 frozen
+	three-route surface untouched. No file under `backend/agent/src/agent/`
+	is modified; the ten-file substrate list survives byte-clean. No new
+	top-level Go deps (CH-07's `pgx/v5` and `pressly/goose/v3` already
+	cover the postgres surface). The read-side wire is closed under
+	REQ-7 — the frontend's `ChatStreamEvent` union is preserved; new DTOs
+	(`ExchangeDTO`, `ConversationSummary`) live adjacent to it, never as
+	additions to it.
+
+	**CH-10** (`cachicamas-chat-permission`) is the first
+	chat-archetype milestone to land a NEW ENDPOINT
+	(`POST /api/agent/turns/:id/permissions/:callID`, R-CPM-004, the
+	permission-decision reverse-channel — the participant's click on
+	the inline `hold` row). The port widening follows the additive
+	precedent: `chat.PermissionPolicy = agent.PermissionPolicy` (type
+	alias — byte-identical, S-CPM-001), `ConversationStore.UpdateSummary`
+	(4th method, R-CCS-017), `Exchange.PermissionDecisions` (12th field,
+	R-CPM-006). Two new SSE event names (`permission.decision.required` /
+	`permission.decision.made`) extend the wire-fragmentation guard from
+	9 → 11 entries; lockstep is verified by `TestWire_FrameNameSet_IsClosed`
+	+ `chat-api.spec.ts`'s `KNOWN_EVENTS.length === 11`. The CH-10.5
+	fix is the F-CPM-001 closure: three parallel accumulators
+	(`toolCalls` / `toolResults` / `permissionDecisions`) thread state
+	into `buildTerminalExchange` so production reload surfaces tool +
+	permission activity (the same defect CH-09 left unfixed for
+	`ToolCalls` / `ToolResults`). The substrate guard continues to
+	verify zero files under `backend/agent/src/agent/` modified —
+	chat depends on `agent.PermissionPolicy` by interface, never by
+	import-of-internals.
 
 ## Review checklist (for reviewers)
 

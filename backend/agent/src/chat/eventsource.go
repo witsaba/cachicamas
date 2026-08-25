@@ -56,6 +56,17 @@ func wireFrameName(ev WireEvent) string {
 		return "tool.call.end"
 	case ToolResult:
 		return "tool.result"
+	// CH-10 (R-CPM-003, D-3) — two new wire frame names for the
+	// permission event family. The chat wire's CLOSED 2-value
+	// Outcome vocabulary "allow_once" | "deny" (D-12 collapse)
+	// carries here; Layer 2's 4-value outcome collapses to 2 at
+	// the projector arm in chat/projection.go (D-12). The
+	// frontend mirror at frontend/src/lib/chat-types.ts:284-360
+	// parses the same field names (REQ-12, REQ-13).
+	case PermissionDecisionRequired:
+		return "permission.decision.required"
+	case PermissionDecisionMade:
+		return "permission.decision.made"
 	default:
 		// Unreachable while WireEvent remains a closed interface; kept
 		// to make the exhaustiveness intentional rather than implicit.

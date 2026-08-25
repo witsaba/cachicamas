@@ -17,6 +17,7 @@ import type {
   ConversationSummary,
   ToolCallDTO,
   ToolResultDTO,
+  PermissionDecisionDTO,
 } from "~/lib/chat-types";
 import type { TranscriptEntry } from "~/lib/mock/chat";
 import { Composer } from "./composer";
@@ -80,10 +81,17 @@ export interface ChatAppProps {
  *      execution_failure → state "failed" with the typed failure
  *      category (R-CCP-008 / D6 mirror — no provider text on
  *      failure).
+ *   4. hold {tool, intent, args, decision} — appended AFTER the
+ *      tool entries, one per recorded permission decision
+ *      (R-CPM-006, S-FCL-022). The decision is "granted" for
+ *      "allow_once", "denied" for "deny". The decision is
+ *      terminal — the wire does not carry "waiting" on the reload
+ *      surface (the participant's click happened before the
+ *      exchange was committed to the store).
  *
- * The DTO shape carries ToolCalls + ToolResults as optional
- * readonly arrays; a tool-free turn omits them (the JSON wire
- * omits the keys entirely per `omitempty`).
+ * The DTO shape carries ToolCalls + ToolResults + PermissionDecisions
+ * as optional readonly arrays; a turn without activity omits the
+ * keys entirely (the JSON wire omits them per `omitempty`).
  *
  * Exported for direct testability of the S-CTS-019 covering test
  * (CH-09 WU-4a — verify #3974 found the function had no runtime
@@ -97,6 +105,7 @@ export function exchangesToEntries(
     partial: boolean;
     toolCalls?: readonly ToolCallDTO[];
     toolResults?: readonly ToolResultDTO[];
+    permissionDecisions?: readonly PermissionDecisionDTO[];
   }[],
 ): TranscriptEntry[] {
   const out: TranscriptEntry[] = [];
@@ -145,6 +154,28 @@ export function exchangesToEntries(
         args: parseToolArgs(call?.arguments ?? ""),
         result: resultText,
         state,
+      });
+    }
+    // CH-10 (R-CPM-006, S-FCL-022) — permission-decision entries
+    // from the reload surface. Issued in the same order as the
+    // stored records (the store's position field, projected
+    // by the postgres sibling-table ORDER BY position ASC or
+    // the in-memory slice order). Decision is terminal — the
+    // reload surface does not carry the "waiting" state because
+    // the click happened before the exchange committed.
+    const decisions = ex.permissionDecisions ?? [];
+    for (let i = 0; i < decisions.length; i++) {
+      const pd = decisions[i];
+      const decision: "granted" | "denied" =
+        pd.outcome === "allow_once" ? "granted" : "denied";
+      out.push({
+        kind: "hold",
+        id: `hold-${pd.wireCallId}-${idx}`,
+        tool: pd.tool,
+        intent: pd.tool,
+        args: [],
+        risk: "",
+        decision,
       });
     }
   });

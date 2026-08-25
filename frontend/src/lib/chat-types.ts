@@ -34,6 +34,16 @@
 // switch below cover the same field shapes; `assertNever` in
 // the default branch surfaces a compile error if a future variant
 // is added without a `case`.
+//
+// CH-10 (REQ-12, REQ-13, D-3, D-7) — two new variants widen the
+// union for the permission event family. The wire carries
+// `permission.decision.required` (the ask) and
+// `permission.decision.made` (the answer) — both NEW VARIANTS on
+// the closed union, not new fields on existing variants (the
+// D-7 explicit wording carried into REQ-12/13). The chat wire's
+// CLOSED 2-value Outcome vocabulary "allow_once" | "deny" (D-12
+// collapse of Layer 2's 4-value PermissionOutcome) lands in the
+// made variant.
 export type ChatStreamEvent =
   | { readonly kind: "message.start"; readonly messageId: string; readonly index: number }
   | { readonly kind: "message.delta"; readonly index: number; readonly delta: string }
@@ -43,7 +53,9 @@ export type ChatStreamEvent =
   | { readonly kind: "tool.call.start"; readonly wireCallId: string; readonly tool: string; readonly arguments: string }
   | { readonly kind: "tool.call.delta"; readonly wireCallId: string; readonly delta: string }
   | { readonly kind: "tool.call.end"; readonly wireCallId: string; readonly outcome: string }
-  | { readonly kind: "tool.result"; readonly wireCallId: string; readonly tool: string; readonly outcome: ToolResultOutcome; readonly content: string; readonly failureCategory: string };
+  | { readonly kind: "tool.result"; readonly wireCallId: string; readonly tool: string; readonly outcome: ToolResultOutcome; readonly content: string; readonly failureCategory: string }
+  | { readonly kind: "permission.decision.required"; readonly wireCallId: string; readonly tool: string; readonly arguments: string }
+  | { readonly kind: "permission.decision.made"; readonly wireCallId: string; readonly outcome: "allow_once" | "deny" };
 
 // AI-13.1 seven-value finish-reason vocabulary (design §2). The UI
 // surfaces these as plain labels in v1.
@@ -179,12 +191,23 @@ export interface ExchangeDTO {
   // keys (`omitempty`); an empty array serializes as `[]`.
   readonly toolCalls?: readonly ToolCallDTO[];
   readonly toolResults?: readonly ToolResultDTO[];
+  // CH-10 (R-CPM-006, R-CCS-018) — third new optional field widens
+  // the read-side wire projection additively (NFR-CPM-004 carry).
+  // A turn without permission activity omits the key entirely
+  // (`omitempty`); an empty array serializes as `[]`.
+  readonly permissionDecisions?: readonly PermissionDecisionDTO[];
 }
 
 export interface ConversationSummary {
   readonly conversationID: string;
   readonly lastActivityAt: string;
   readonly turnCount: number;
+  // CH-10 (R-CCS-017) — optional summary string written by
+  // SummarizeConversationTool via ConversationStore.UpdateSummary.
+  // Missing when UpdateSummary has not been called; omitempty on
+  // the Go side (chat_conversations.summary NULL after the
+  // forward-only ADD COLUMN migration lands, before any update).
+  readonly summary?: string;
 }
 
 // CH-09 — wire projections of chat.ToolCallRecord / chat.ToolResultRecord
@@ -212,6 +235,19 @@ export interface ToolResultDTO {
   // category). Mirrors R-CCP-008 / D6: provider text MUST NOT
   // reach the wire.
   readonly failureCategory: string;
+}
+
+// CH-10 (R-CPM-006, R-CCS-018) — wire projection of
+// chat.PermissionDecisionRecord (chat package's port-side type).
+// Adjacent to the closed `ChatStreamEvent` union; never widening
+// it. The Outcome is the chat wire's CLOSED 2-value vocabulary
+// "allow_once" | "deny" (D-12 collapse). The Projection stores the
+// COLLAPSED form — Layer 2's 4-value PermissionOutcome reduces to
+// 2 at the chat wire BEFORE the records reach the store.
+export interface PermissionDecisionDTO {
+  readonly wireCallId: string;
+  readonly tool: string;
+  readonly outcome: "allow_once" | "deny";
 }
 
 /**
@@ -353,6 +389,27 @@ export function parseTranscript(raw: string): ChatStreamEvent[] {
           outcome: (payload.outcome ?? "success") as ToolResultOutcome,
           content: String(payload.content ?? ""),
           failureCategory: String(payload.failureCategory ?? ""),
+        });
+        break;
+      // CH-10 (REQ-12, REQ-13, D-3) — two new wire event names
+      // for the permission event family. The wire's CLOSED 2-value
+      // Outcome vocabulary "allow_once" | "deny" is the source of
+      // truth (D-12 collapse from Layer 2's 4-value
+      // PermissionOutcome). The frontend mirror at chat/wire.go
+      // (Go) emits the same field names.
+      case "permission.decision.required":
+        events.push({
+          kind: "permission.decision.required",
+          wireCallId: String(payload.wireCallId ?? ""),
+          tool: String(payload.tool ?? ""),
+          arguments: String(payload.arguments ?? ""),
+        });
+        break;
+      case "permission.decision.made":
+        events.push({
+          kind: "permission.decision.made",
+          wireCallId: String(payload.wireCallId ?? ""),
+          outcome: ((payload.outcome ?? "deny") as "allow_once" | "deny"),
         });
         break;
       default:

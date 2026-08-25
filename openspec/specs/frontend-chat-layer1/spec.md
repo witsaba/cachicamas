@@ -270,3 +270,65 @@ A new SSE event with `event: tool.result` MUST be added as a **new variant** on 
 ## Untemporal-invariant register (CH-09 addition)
 
 The D-7 record above is preserved here as a **structural marker**: REQ-7's closed-union wording at `frontend-chat-layer1/spec.md:83-94` is **not modified**; the widening allowance lives in REQ-8..11's rationale lines. The CTS-* scenarios (S-CTS-013, S-CTS-014, S-CTS-019..022) are the source of truth for the S-FCL-012..017 scenarios above; any future amendment MUST update CTS-* first and reference it from S-FCL-*.
+
+---
+
+# CH-10 amendment — `cachicamas-chat-permission`
+
+> **Change**: `cachicamas-chat-permission` · **CH-10** (Wave 3, 11 of 12) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-10--approve-a-tool-call-from-the-browser) (`0005:936-947`)
+> **Amends**: this spec (`frontend-chat-layer1`) — **additive only**. **REQ-1..7 byte-unchanged**. New identifiers: **REQ-12**, **REQ-13**, **S-FCL-018**, **S-FCL-019**, **S-FCL-020**, **S-FCL-021**, **S-FCL-022**. Identifier-append-only per CH-08 / CH-09 precedent at `frontend-chat-layer1/spec.md:154-157` and `:199-202`.
+>
+> **D-7 surfacing (deliberate)** — the closed `ChatStreamEvent` union (REQ-1, REQ-7) is widened by two new variants below. REQ-7's spec text forbids **new fields on existing variants**; CH-10 widens with **new variants on the union, not new fields on existing variants**. Each of REQ-12..13 below carries explicit wording that distinguishes variant-addition from field-addition, so a future reviewer cannot misread the original REQ-7 as forbidding it. The wording is the source-of-truth distinction this amendment records (mirroring CH-09's REQ-8..11 wording precedent at `:204, 214, 232, 238, 244`).
+>
+> **REQ-7 preserved verbatim** — REQ-7's "closed union" wording at `frontend-chat-layer1/spec.md:83-94` is **not modified**. The widening allowance lives in REQ-12..13's rationale lines, NOT in a modification of REQ-7's text.
+>
+> **F-CPM-002/003 alignment** (recorded, design-time fixed in `cachicamas-chat-permission/spec.md` § "Spec defect F-CPM-002/003 resolution" and operationalised in R-CPM-008 / S-CPM-019): the deny-state collapse is enforced at the chat projector (`chat/projection.go`) so the wire never carries `tool.result{outcome: "execution_failure"}` for a denied `wireCallId`. The frontend `use-chat-stream.ts` correlation is the redundant frontend-side path so reload-side entries that bypassed the projector also map correctly. The closed tool-state union `"running" | "done" | "denied" | "failed"` (`mock/chat.ts:42`) is reachable in its `"denied"` state only via the prior hold entry's `decision: "denied"` correlation. S-FCL-021 asserts this end-to-end on the frontend consumer.
+
+## ADDED Requirements
+
+### REQ-12 — `permission.decision.required` SSE event
+
+A new SSE event with `event: permission.decision.required` MUST be added as a **new variant** on the closed `ChatStreamEvent` union (`frontend/src/lib/chat-types.ts:27-32`). The payload shape MUST be `{ wireCallId: string, tool: string, arguments: string }` — all field names lowercase JSON keys, parallel to the closed `ExchangeDTO` precedent (`chat-types.ts:152-161`) and the CH-09 `tool.call.start` precedent at REQ-8. The variant discriminator MUST be `"permission.decision.required"`.
+
+**D-7: this requirement adds a new variant on the closed `ChatStreamEvent` union; it does NOT add new fields on existing variants REQ-1..11 enumerate. The "closed union" wording in REQ-7 forbids field additions, not variant additions — see `cachicamas-chat-permission/proposal.md` D-3 + D-7 and `cachicamas-chat-permission/explore.md` for the deliberate additive widening. The wire's `wireFrameName` switch at `backend/agent/src/chat/eventsource.go:31-48` and the `parseTranscript` switch at `chat-types.ts:284-360` are extended by this requirement; on the TypeScript side a missing `parseTranscript` case is a compile error via the `assertNever` probe at `chat-types.ts:233-235`, while on the Go side a missing `wireFrameName` case panics at runtime via its `default` arm — Go 1.26 does not enforce type-switch exhaustiveness at compile time when a `default` arm exists (S-CTS-007 mirror as amended by F-CHT-9.2; S-CPM-022 / F-CPM-005). The wire's 11-event vocabulary includes this variant.**
+
+#### Scenarios
+
+- **S-FCL-018** — `parseTranscript` parses `permission.decision.required` into a typed variant (Gherkin verbatim, explore #3985; mirrors `cachicamas-chat-permission/spec.md` S-CPM-014).
+  - Given `parseTranscript` reading a `permission.decision.required` frame with payload `{"wireCallId":"c1","tool":"summarize_conversation","arguments":"{}"}`
+  - When the frame is parsed
+  - Then the resulting `ChatStreamEvent` is `{kind: "permission.decision.required", wireCallId: "c1", tool: "summarize_conversation", arguments: "{}"}` (typed and exhaustive)
+
+- **S-FCL-019** — a live `permission.decision.required` SSE frame pushes a `waiting` hold entry into the transcript (Gherkin verbatim, explore #3985; mirrors `cachicamas-chat-permission/spec.md` S-CPM-014).
+  - Given a `permission.decision.required` SSE frame arriving mid-turn
+  - When the page receives it
+  - Then a new transcript entry with `kind: "hold"`, `id: "c1"`, `decision: "waiting"`, and two visible buttons (Allow once, Deny) is appended between the assistant said entry and the tool result entry (the existing `transcript-line.tsx:163-230` `hold` branch renders this)
+
+### REQ-13 — `permission.decision.made` SSE event
+
+A new SSE event with `event: permission.decision.made` MUST be added as a **new variant** on the closed `ChatStreamEvent` union. The payload shape MUST be `{ wireCallId: string, outcome: "allow_once" | "deny" }`. The variant discriminator MUST be `"permission.decision.made"`. The `outcome` field is the chat wire's closed 2-value vocabulary (D-12 collapse — Layer 2's 4-value `AllowOnce | AllowAlways | Deny | ModifyInput` vocabulary collapses to 2 at the chat projector per `cachicamas-chat-permission/spec.md` R-CPM-003; `"allow_always"` and `"modify_input"` never reach the browser).
+
+**D-7: new variant, not new field. The discriminator value `"permission.decision.made"` is new; no existing REQ-1..11 variant is modified. Mirrors `cachicamas-chat-permission/spec.md` R-CPM-003 (`PermissionDecisionMade` variant) byte-for-byte. The frontend `use-chat-stream.ts:248-260` correlates `wireCallId` with the prior hold entry and morphs the entry's `decision` to `"granted"` (for `"allow_once"`) or `"denied"` (for `"deny"`); the by-`wireCallId` correlation also covers the F-CPM-002/003 reload-side path (S-FCL-021).**
+
+#### Scenarios
+
+- **S-FCL-020** — a `permission.decision.made{outcome: "allow_once"}` SSE frame morphs the matching hold entry to `granted` (Gherkin verbatim, explore #3985; mirrors `cachicamas-chat-permission/spec.md` S-CPM-015).
+  - Given a `waiting` hold entry for `wireCallId: "c1"`
+  - When the page receives `permission.decision.made{wireCallId: "c1", outcome: "allow_once"}`
+  - Then the entry's `decision` becomes `"granted"` and the buttons are removed (the `transcript-line.tsx:163-230` pending-vs-decided branch is conditional on `entry.decision`)
+
+- **S-FCL-021** — a `permission.decision.made{outcome: "deny"}` SSE frame morphs the matching hold entry to `denied` and the suppressed tool entry is not pushed (Gherkin verbatim, explore #3985; mirrors `cachicamas-chat-permission/spec.md` S-CPM-016 / S-CPM-019 — F-CPM-002/003 closure proof on the frontend consumer side).
+  - Given a `waiting` hold entry for `wireCallId: "c1"`
+  - When the page receives `permission.decision.made{wireCallId: "c1", outcome: "deny"}`
+  - Then the entry's `decision` becomes `"denied"` and the buttons are removed
+  - And NO `kind: "tool"` entry for `wireCallId: "c1"` is appended — the projector-suppressed `tool.result` never reaches the wire, so the consumer never sees it
+  - And if a future Layer-2 change were to leak a `tool.result{outcome: "execution_failure"}` for `c1` to the wire, the `use-chat-stream.ts:248-260` by-`wireCallId` correlation would map it to `state: "denied"` (defense-in-depth; the projector is the primary enforcement site)
+
+- **S-FCL-022** — `exchangesToEntries` renders hold entries from `ExchangeDTO.PermissionDecisions` (Gherkin verbatim, explore #3985; mirrors `cachicamas-chat-permission/spec.md` R-CPM-006 / S-CCS-023..025 reload-side projection).
+  - Given an `ExchangeDTO{PermissionDecisions: [d1]}` where `d1.WireCallID = "c1"` and `d1.Outcome = "allow_once"`
+  - When `exchangesToEntries([exchange])` runs
+  - Then the returned array contains exactly one `kind: "hold"` entry with `id: "c1"`, `tool: d1.Tool`, `decision: "granted"` — appended AFTER the assistant said entry AND interleaved with any `kind: "tool"` entries in issuance order (the `position` field on each record drives the ordering; ties broken by the canonical sibling order `tool_calls` → `tool_results` → `permission_decisions`)
+
+## Untemporal-invariant register (CH-10 addition)
+
+The D-7 record above is preserved here as a **structural marker**: REQ-7's closed-union wording at `frontend-chat-layer1/spec.md:83-94` is **not modified**; the widening allowance lives in REQ-12..13's rationale lines. The CPM-* scenarios (S-CPM-014..016, S-CPM-019) in `cachicamas-chat-permission/spec.md` are the source of truth for the S-FCL-018..021 scenarios above; any future amendment MUST update CPM-* first and reference it from S-FCL-*. The CH-10 amendment widens the closed `ChatStreamEvent` union by exactly two new variants (`permission.decision.required`, `permission.decision.made`); the 9-variant CH-09 surface at `chat-types.ts:37-46` extends to 11, with the wire-fragmentation guard (`chat-api.spec.ts`'s `KNOWN_EVENTS` at 11 entries + the `parseTranscript` switch covering all 11 names) proving exhaustiveness.

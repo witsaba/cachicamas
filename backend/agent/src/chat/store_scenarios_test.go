@@ -125,6 +125,7 @@ func RunConversationStoreScenarios(t *testing.T, store chat.ConversationStore) {
 			Store:         store,
 			ParticipantID: "scn-001-participant",
 			ToolSource:    chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 		})
 		if err != nil {
 			t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -427,6 +428,118 @@ func RunConversationStoreScenarios(t *testing.T, store chat.ConversationStore) {
 		for i, ex := range loadedP2 {
 			if len(ex.ToolCalls) > 0 || len(ex.ToolResults) > 0 {
 				t.Errorf("p2's exchanges[%d] leaked p1's tool records: ToolCalls=%d ToolResults=%d", i, len(ex.ToolCalls), len(ex.ToolResults))
+			}
+		}
+	})
+
+	// CH-10 (R-CCS-017, R-CCS-018, NFR-CCS-009): the scenario helper
+	// gains S-CCS-023..025 for the 4th port method (UpdateSummary)
+	// and the Exchange.PermissionDecisions widening. Both adapters
+	// run them with scenario text unchanged (R-CCS-012 + design
+	// D-L precedent).
+
+	// S-CCS-023 — UpdateSummary + Load round-trips verbatim
+	// (Gherkin verbatim, spec #3989 R-CCS-017). The adapter's
+	// own UpdateSummary writes the summary; a follow-up List
+	// (the natural way to read the summary at v1 — Load returns
+	// []Exchange which does NOT carry summary; the reload
+	// surface reads via List) returns the byte-equal string.
+	t.Run("S-CCS-023_UpdateSummary_round_trips_verbatim", func(t *testing.T) {
+		const participant = "scn-023-participant"
+		// Seed an exchange so the participant's row exists
+		// (UpdateSummary expects chat_conversations.participant_id
+		// to be present; the in-memory adapter creates the entry
+		// lazily on first Append).
+		if err := store.Append(participant, chat.Exchange{PromptText: "p", TerminalKind: chat.TerminalKindCompleted}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		const want = "the participant asked about cats"
+		// The 4th port method's signature is identical for both
+		// adapters (per R-CCS-013's "extending, not replacing"
+		// clause). Test-only type assertion reaches the concrete
+		// method when the in-memory adapter is used.
+		if err := store.UpdateSummary(participant, want); err != nil {
+			t.Fatalf("UpdateSummary returned %v, want nil", err)
+		}
+		// Read via List (the summary is on ConversationSummary, not
+		// Exchange). The chat reload surface reads
+		// ConversationSummaryDTO.Summary.
+		list, err := store.List(participant)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(list) != 1 {
+			t.Fatalf("List returned %d entries, want 1", len(list))
+		}
+		if list[0].Summary != want {
+			t.Errorf("List[0].Summary = %q, want %q (S-CCS-023 round-trip)", list[0].Summary, want)
+		}
+	})
+
+	// S-CCS-024 — defensive copy on Load extends to the new
+	// PermissionDecisions slice (Gherkin verbatim, spec #3989
+	// R-CCS-018, NFR-CCS-009).
+	t.Run("S-CCS-024_load_returns_defensive_copy_of_permission_decisions", func(t *testing.T) {
+		const participant = "scn-024-defensive"
+		ex := chat.Exchange{
+			PromptText:   "p",
+			TerminalKind: chat.TerminalKindCompleted,
+			PermissionDecisions: []chat.PermissionDecisionRecord{
+				{WireCallID: "c1", Tool: "summarize_conversation", Outcome: "allow_once"},
+				{WireCallID: "c2", Tool: "summarize_conversation", Outcome: "deny"},
+			},
+		}
+		if err := store.Append(participant, ex); err != nil {
+			t.Fatalf("Append returned %v, want nil", err)
+		}
+		loaded, err := store.Load(participant)
+		if err != nil {
+			t.Fatalf("Load returned %v, want nil", err)
+		}
+		if len(loaded) != 1 {
+			t.Fatalf("Load returned %d exchanges, want 1", len(loaded))
+		}
+
+		// Caller-side mutation: overwrite both slices and the
+		// elements of the first record. Re-Load must still return
+		// the ORIGINAL data (NFR-CCS-009).
+		loaded[0].PermissionDecisions = nil
+
+		reloaded, err := store.Load(participant)
+		if err != nil {
+			t.Fatalf("re-Load returned %v, want nil", err)
+		}
+		if len(reloaded[0].PermissionDecisions) != 2 {
+			t.Errorf("after caller mutation, PermissionDecisions=%d, want 2 (NFR-CCS-009 defensive copy)", len(reloaded[0].PermissionDecisions))
+		}
+		if reloaded[0].PermissionDecisions[0].WireCallID != "c1" {
+			t.Errorf("after caller mutation, PermissionDecisions[0].WireCallID=%q, want %q",
+				reloaded[0].PermissionDecisions[0].WireCallID, "c1")
+		}
+	})
+
+	// S-CCS-025 — permission decisions never leak across
+	// participants (Gherkin verbatim, R-CHS-004.b shape preserved).
+	t.Run("S-CCS-025_permission_decisions_never_leak_across_participants", func(t *testing.T) {
+		const p1 = "scn-025-alice"
+		const p2 = "scn-025-bob"
+		exP1 := chat.Exchange{
+			PromptText:   "alice",
+			TerminalKind: chat.TerminalKindCompleted,
+			PermissionDecisions: []chat.PermissionDecisionRecord{
+				{WireCallID: "c1", Tool: "summarize_conversation", Outcome: "allow_once"},
+			},
+		}
+		if err := store.Append(p1, exP1); err != nil {
+			t.Fatalf("Append(p1) returned %v, want nil", err)
+		}
+		loadedP2, err := store.Load(p2)
+		if err != nil && !errors.Is(err, chat.ErrConversationNotFound) {
+			t.Fatalf("Load(p2) returned %v, want nil or ErrConversationNotFound", err)
+		}
+		for i, ex := range loadedP2 {
+			if len(ex.PermissionDecisions) > 0 {
+				t.Errorf("p2's exchanges[%d] leaked p1's permission decisions: count=%d", i, len(ex.PermissionDecisions))
 			}
 		}
 	})

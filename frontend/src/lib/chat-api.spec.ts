@@ -159,6 +159,13 @@ describe("chat-types contract surface (REQ-1, REQ-4, REQ-6)", () => {
             `tool.result:${ev.wireCallId}:${ev.tool}:${ev.outcome}`,
           );
           break;
+        // CH-10 (REQ-12, REQ-13, D-3) — two new wire event names.
+        case "permission.decision.required":
+          labels.push(`perm.required:${ev.wireCallId}:${ev.tool}`);
+          break;
+        case "permission.decision.made":
+          labels.push(`perm.made:${ev.wireCallId}:${ev.outcome}`);
+          break;
         default:
           // assertNever returns never — if a new variant is added
           // to ChatStreamEvent without updating this switch,

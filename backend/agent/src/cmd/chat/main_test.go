@@ -321,7 +321,7 @@ func buildWiredEcho(t *testing.T) (*echo.Echo, *chat.Registry) {
 
 	resolver := NewResolver([]byte(validAuthSecret), "authjs.session-token")
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 
 	e := echo.New()
@@ -340,7 +340,7 @@ func TestBuildConversationFactory_WrapsProviderInConversation(t *testing.T) {
 	t.Parallel()
 
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		return chat.NewConversation(chat.Config{Provider: stubProvider{}, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 
 	conv, err := factory("participant-1")
@@ -678,7 +678,7 @@ func TestChatRoot_LiveSmoke(t *testing.T) {
 
 	resolver := chat.NoopIdentityResolver{Participant: "live-smoke-participant"}
 	factory := func(_ string) (*chat.Conversation, error) {
-		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main"})
+		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-main", PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 
 	e := echo.New()

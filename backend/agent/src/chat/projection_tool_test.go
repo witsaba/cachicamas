@@ -239,6 +239,7 @@ func TestWire_NoToolEvents_EmitsNoToolWireEvents(t *testing.T) {
 		Store:         chat.NewMemoryConversationStore(),
 		ParticipantID: "scn-no-tool",
 		ToolSource:    chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("NewConversation returned %v, want nil", err)

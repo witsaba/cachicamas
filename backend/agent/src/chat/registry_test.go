@@ -28,7 +28,7 @@ func TestRegistry_GetOrCreate_Reuses(t *testing.T) {
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalls++
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -69,7 +69,7 @@ gate := agenttest.NewGate()
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -130,7 +130,7 @@ func TestRegistry_GetOrCreate_ConcurrentIsRaceFree(t *testing.T) {
 		factoryCalls++
 		factoryMu.Unlock()
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	registry := chat.NewRegistry(newConv)
 
@@ -179,7 +179,7 @@ func TestRegistry_CancelByTurnID_NoOpWhenNotInflight(t *testing.T) {
 
 	registry := chat.NewRegistry(func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-registry",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	})
 
 	// Unknown participant.

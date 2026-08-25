@@ -20,7 +20,7 @@ import (
 )
 
 // Exchange is the record ConversationStore.Append persists (D-7,
-// R-CCS-001, R-CCS-006). Ten fields round-trip through the reload
+// R-CCS-001, R-CCS-006). Eleven fields round-trip through the reload
 // path: each field maps to a Gherkin scenario the spec enforces.
 // Cutting any field collapses one of those scenarios.
 //
@@ -40,9 +40,7 @@ import (
 //     during the turn (identifier-survival round-trip).
 //
 // CH-09 (R-CTS-006, R-CCS-015): two new fields widen the record
-// additively to carry tool-call records. The eight pre-existing
-// fields are byte-unchanged; identifier-append-only per CH-07 /
-// CH-08 precedent at chat-conversation-store/spec.md:9.
+// additively to carry tool-call records.
 //
 //   - ToolCalls: port-side projection of the wire's ToolCallDTO —
 //     one record per tool call the model emitted during the turn,
@@ -50,22 +48,29 @@ import (
 //     (byte-equal to what the wire emitted). NFR-CCS-008 / S-CTS-019
 //     bind the reload surface.
 //   - ToolResults: port-side projection of the wire's ToolResultDTO
-//     — one record per tool call's outcome (success /
-//     result_failure / execution_failure with a typed category
-//     string). Carries WireCallID, Tool, Outcome, Content,
-//     FailureCategory. Empty Content when Outcome is
-//     execution_failure (no provider text — R-CCP-008 / D6 mirror).
+//     — one record per tool call's outcome.
+//
+// CH-10 (R-CPM-006, R-CCS-018): a third field widens the record
+// additively to carry permission-decision records.
+//
+//   - PermissionDecisions: port-side projection of the wire's
+//     permissionDecisionDTO — one record per ask/made pair the
+//     gate produced during the turn, in issuance order. Carries
+//     WireCallID, Tool, Outcome (chat wire's closed 2-value vocab
+//     "allow_once" | "deny"). NFR-CCS-009 / S-CPM-023 bind the
+//     reload surface; S-CCS-024 cross-participant isolation.
 type Exchange struct {
-	Position        int
-	PromptText      string
-	AssistantText   string
-	Partial         bool
-	TerminalKind    TerminalKind
-	FailureCategory ai.FailureCategory
-	FinishReason    *ai.FinishReason
-	MessageIDs      []string
-	ToolCalls       []ToolCallRecord
-	ToolResults     []ToolResultRecord
+	Position           int
+	PromptText         string
+	AssistantText      string
+	Partial            bool
+	TerminalKind       TerminalKind
+	FailureCategory    ai.FailureCategory
+	FinishReason       *ai.FinishReason
+	MessageIDs         []string
+	ToolCalls          []ToolCallRecord
+	ToolResults        []ToolResultRecord
+	PermissionDecisions []PermissionDecisionRecord
 }
 
 // ToolCallRecord is the port-side projection of the wire's
@@ -93,6 +98,24 @@ type ToolResultRecord struct {
 	Outcome         string
 	Content         string
 	FailureCategory string
+}
+
+// PermissionDecisionRecord is the port-side projection of the
+// wire's permissionDecisionDTO (R-CPM-006, R-CCS-018). It carries
+// the ask/made pair produced by the gate: WireCallID, Tool, and
+// the chat wire's CLOSED 2-value Outcome vocabulary
+// "allow_once" | "deny" (D-12 collapse — Layer 2's 4-value
+// PermissionOutcome reduces to 2 at the chat wire).
+//
+// The projection stores the COLLAPSED form; the projector at
+// chat/projection.go translates Layer 2's typed outcomes into the
+// 2-value wire vocab BEFORE the records reach the store
+// (R-CPM-003 / D-12). No re-derivation is needed at the reload
+// surface — the closed vocab is the source of truth.
+type PermissionDecisionRecord struct {
+	WireCallID string
+	Tool       string
+	Outcome    string
 }
 
 // TerminalKind is the typed outcome carried by Exchange (D-7).
@@ -142,13 +165,17 @@ var ErrNilStore = errors.New("chat: Config.Store is required")
 var ErrEmptyParticipantID = errors.New("chat: Config.ParticipantID is required")
 
 // ConversationStore is the port the chat archetype owns (R-CCS-010,
-// additively widened by R-CCS-013). The originally-closed two-method
-// surface is extended by a third method `List`; future widens MUST
-// follow the same additive pattern (R-CCS-013's "extending, not
-// replacing, this declaration" anticipatory clause). CH-07's postgres
-// adapter implements the first two methods against a real database;
-// CH-08 widens it again with `List` for the participant-scoped listing
-// surface (CH-08.2, R-CRI-002).
+// additively widened by R-CCS-013, R-CCS-017). The originally-closed
+// two-method surface is extended by a third method `List` (CH-08,
+// R-CRI-002) and a fourth method `UpdateSummary` (CH-10, R-CCS-017,
+// NFR-CPM-005 forward-only ADD COLUMN nullable affordance). Future
+// widens MUST follow the same additive pattern (R-CCS-013's
+// "extending, not replacing, this declaration" anticipatory clause).
+// CH-07's postgres adapter implements the first two methods against
+// a real database; CH-08 widens it again with `List` for the
+// participant-scoped listing surface (CH-08.2, R-CRI-002); CH-10
+// widens with `UpdateSummary` for the SummarizeConversationTool's
+// mutation target (D-9, R-CCS-017).
 type ConversationStore interface {
 	// Append records exchange for participantID. The store is
 	// responsible for assigning Exchange.Position (insertion order
@@ -174,6 +201,20 @@ type ConversationStore interface {
 	// carried forward) — caller-side mutation cannot corrupt the
 	// in-memory state.
 	List(participantID string) ([]ConversationSummary, error)
+
+	// UpdateSummary writes summary for participantID (R-CCS-017,
+	// D-9). The mutation target for SummarizeConversationTool — the
+	// tool's Run method calls this on the schema `{participantID,
+	// summary}`. The implementation writes the chat_conversations
+	// row's `summary` column (forward-only ADD COLUMN nullable per
+	// NFR-CPM-005 / 0003_summarize.sql) or the in-memory adapter's
+	// equivalent field.
+	//
+	// The method is additive: pre-CH-10 stores never see the call;
+	// CH-10 wires both adapters. A pre-existing row's summary
+	// column is NULL until the first UpdateSummary — the migration
+	// is nullable so an empty value is the legitimate v1 default.
+	UpdateSummary(participantID, summary string) error
 }
 
 // ConversationSummary is the port-owned list projection (R-CCS-014).
@@ -184,10 +225,18 @@ type ConversationStore interface {
 // edge). LiveActivity and TurnCount are set by the adapter at List
 // time; ConversationID is the participant id by the one-per-
 // participant decision (D-1, chat_resume-in-browser/decisions #3925).
+//
+// CH-10 (R-CPM-006, R-CCS-017): the optional Summary field carries
+// the conversation summary string written via UpdateSummary
+// (SummarizeConversationTool's mutation target). Nil for a
+// conversation whose summary was never written; the migration
+// 0003_summarize.sql is nullable (NFR-CPM-005 / forward-only
+// ADD COLUMN affordance).
 type ConversationSummary struct {
 	ConversationID string
 	LastActivityAt time.Time
 	TurnCount      int
+	Summary        string
 }
 
 // MemoryConversationStore is the v1 in-memory adapter for
@@ -196,10 +245,16 @@ type ConversationSummary struct {
 // locking is sufficient at v1's request rate. The activity map
 // tracks the per-participant LastActivityAt so List can return it
 // alongside TurnCount (R-CCS-013).
+//
+// CH-10 (R-CCS-017, D-9): a third map `summary` tracks the
+// per-participant summary string. The v1 in-memory equivalent of
+// chat_conversations.summary (the postgres sibling lives at
+// chat_conversations.summary, added by 0003_summarize.sql).
 type MemoryConversationStore struct {
 	mu       sync.Mutex
 	m        map[string][]Exchange
 	activity map[string]time.Time
+	summary  map[string]string
 }
 
 // NewMemoryConversationStore returns an empty in-memory store ready
@@ -209,6 +264,7 @@ func NewMemoryConversationStore() *MemoryConversationStore {
 	return &MemoryConversationStore{
 		m:        make(map[string][]Exchange),
 		activity: make(map[string]time.Time),
+		summary:  make(map[string]string),
 	}
 }
 
@@ -246,6 +302,10 @@ func (s *MemoryConversationStore) Append(participantID string, ex Exchange) erro
 // (ToolCallRecord / ToolResultRecord) so a shallow element copy
 // is sufficient; the slice headers need are independent backing
 // arrays.
+//
+// CH-10 (NFR-CCS-009, S-CPM-023): the defensive-copy discipline
+// extends to PermissionDecisions. Same value-type element shape;
+// same backing-array isolation.
 func (s *MemoryConversationStore) Load(participantID string) ([]Exchange, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -258,6 +318,7 @@ func (s *MemoryConversationStore) Load(participantID string) ([]Exchange, error)
 		out[i] = ex
 		out[i].ToolCalls = copyToolCallRecords(ex.ToolCalls)
 		out[i].ToolResults = copyToolResultRecords(ex.ToolResults)
+		out[i].PermissionDecisions = copyPermissionDecisionRecords(ex.PermissionDecisions)
 		out[i].MessageIDs = copyStrings(ex.MessageIDs)
 	}
 	return out, nil
@@ -298,6 +359,19 @@ func copyStrings(src []string) []string {
 	return out
 }
 
+// copyPermissionDecisionRecords is the CH-10 sister of
+// copyToolCallRecords / copyToolResultRecords. NFR-CCS-009 / S-CPM-023
+// extend the Load defensive-copy discipline to PermissionDecisions.
+// Nil-safe matches the in-memory adapter's nil-for-empty posture.
+func copyPermissionDecisionRecords(src []PermissionDecisionRecord) []PermissionDecisionRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]PermissionDecisionRecord, len(src))
+	copy(out, src)
+	return out
+}
+
 // List returns the participant-scoped conversation summaries for
 // participantID. At v1 (D-1, one conversation per participant) the
 // returned slice carries 0 or 1 entry: 0 when the participant has
@@ -308,6 +382,12 @@ func copyStrings(src []string) []string {
 // shape — concurrent Append can race the iteration, but the map
 // write happens under s.mu which List also takes, so under -race the
 // read is consistent.
+//
+// CH-10 (R-CPM-006, R-CCS-017): the summary string is read from
+// s.summary[participantID] (the in-memory equivalent of the
+// postgres chat_conversations.summary column written by
+// UpdateSummary). Empty string when never written; the wire DTO
+// serializes the empty value as the missing JSON key (omitempty).
 func (s *MemoryConversationStore) List(participantID string) ([]ConversationSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -322,8 +402,42 @@ func (s *MemoryConversationStore) List(participantID string) ([]ConversationSumm
 		ConversationID: participantID,
 		LastActivityAt: s.activity[participantID],
 		TurnCount:      len(src),
+		Summary:        s.summary[participantID],
 	})
 	return out, nil
+}
+
+// UpdateSummary writes summary for participantID (R-CCS-017, D-9).
+// The in-memory equivalent of the postgres UPDATE chat_conversations
+// SET summary = $1 path. The map is guarded by s.mu; concurrent
+// UpdateSummary + Append + Load + List on the same store are
+// race-free under -race.
+//
+// The method is additive: pre-CH-10 stores never see the call.
+// CH-10 wires this adapter; the activity map is not bumped here
+// (UpdateSummary is a metadata write, not a turn — the
+// conversation's last activity remains the last Append time).
+func (s *MemoryConversationStore) UpdateSummary(participantID, summary string) error {
+	if participantID == "" {
+		return ErrEmptyParticipantID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.summary[participantID] = summary
+	return nil
+}
+
+// SummaryForTest returns the in-memory store's recorded summary for
+// participantID and whether one was recorded. Test-only surface
+// (production code MUST NOT use this; the wire-side reload reads
+// summaries via ConversationSummary's widened Summary field in
+// T-05a). Lives in the production file so tests can drive it
+// without exposing the underlying map.
+func (s *MemoryConversationStore) SummaryForTest(participantID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	got, ok := s.summary[participantID]
+	return got, ok
 }
 
 // ExchangesToHistory rebuilds a *agent.History from a recorded slice
