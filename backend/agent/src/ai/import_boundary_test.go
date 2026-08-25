@@ -248,9 +248,13 @@ func TestLayer1_ImportsOnlyStdlibAndItsOwnPackages_DenyByDefault(t *testing.T) {
 // 0010-add-pgx-and-goose-to-backend-agent.md) adds github.com/jackc/pgx/v5
 // as the chat archetype's Postgres driver (the chat-owned forward-only
 // migration runner + the postgres adapter behind the closed
-// `chat.ConversationStore` port). This entry is admitted in the
-// same PR as ADR 0010. pressly/goose/v3 arrives with WU-3 (the
-// runner.go file that imports it).
+// same PR as ADR 0010. pressly/goose/v3 was planned for WU-3 but
+// never actually landed in go.mod — host-side builds under the
+// repo-root go.work silently borrowed it from
+// database_administrator's requirement graph until the isolated
+// Docker build (-mod=readonly, single-module) exposed the hole.
+// Goose and its transitives below complete the recorded ADR 0010
+// authorization (2026-08-25 repair, fix/chat-stack-wiring).
 var wantGoModRequires = []requireEntry{
 	{Path: "github.com/cenkalti/backoff/v5", Version: "v5.0.3", Indirect: true},
 	{Path: "github.com/cespare/xxhash/v2", Version: "v2.3.0", Indirect: true},
@@ -275,7 +279,14 @@ var wantGoModRequires = []requireEntry{
 	{Path: "github.com/lestrrat-go/iter", Version: "v1.0.2", Indirect: true},
 	{Path: "github.com/lestrrat-go/jwx/v2", Version: "v2.1.7", Indirect: false},
 	{Path: "github.com/lestrrat-go/option", Version: "v1.0.1", Indirect: true},
+	// CH-07 WU-3 completion (2026-08-25 repair): goose is the
+	// chat-owned forward-only migration runner's engine, imported by
+	// chat/migrator/runner.go (ADR 0010-add-pgx-and-goose-to-backend-agent.md).
+	{Path: "github.com/pressly/goose/v3", Version: "v3.27.1", Indirect: false},
+	// CH-07 WU-3 completion: goose transitive closures.
+	{Path: "github.com/mfridman/interpolate", Version: "v0.0.2", Indirect: true},
 	{Path: "github.com/segmentio/asm", Version: "v1.2.1", Indirect: true},
+	{Path: "github.com/sethvargo/go-retry", Version: "v0.3.0", Indirect: true},
 	{Path: "go.opentelemetry.io/auto/sdk", Version: "v1.2.1", Indirect: true},
 	{Path: "go.opentelemetry.io/otel", Version: "v1.44.0", Indirect: false},
 	{Path: "go.opentelemetry.io/otel/exporters/otlp/otlptrace", Version: "v1.44.0", Indirect: true},
@@ -284,6 +295,7 @@ var wantGoModRequires = []requireEntry{
 	{Path: "go.opentelemetry.io/otel/sdk", Version: "v1.44.0", Indirect: false},
 	{Path: "go.opentelemetry.io/otel/trace", Version: "v1.44.0", Indirect: false},
 	{Path: "go.opentelemetry.io/proto/otlp", Version: "v1.11.0", Indirect: true},
+	{Path: "go.uber.org/multierr", Version: "v1.11.0", Indirect: true},
 	{Path: "golang.org/x/crypto", Version: "v0.54.0", Indirect: false},
 	{Path: "golang.org/x/net", Version: "v0.57.0", Indirect: true},
 	// CH-07: x/sync version bumped from v0.21.0 to v0.22.0 by pgx/v5's
