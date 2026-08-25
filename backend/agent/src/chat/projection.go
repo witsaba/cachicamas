@@ -55,6 +55,16 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 	var assistantText string
 	var messageIDs []string
 
+	// CH-10 (R-CPM-008, D-8): the per-wireCallId "denied" set the
+	// projector populates on permission_decision_made{deny} and
+	// consults in the tool.result arm to suppress the wire event
+	// for the same wireCallId (the F-CPM-002/003 closure at
+	// design time). In T-02 the set is declared but stays empty
+	// because no projection arm yet populates it; T-04 finalizes
+	// the population rule + the consultation suppression. Declared
+	// above the switch so the consultation site compiles.
+	deniedSet := map[string]bool{}
+
 	for ev := range sink {
 		switch ev.Kind() {
 		case agent.EventKindMessageStartText:
@@ -125,14 +135,62 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 			}
 
 		case agent.EventKindToolEndExecutionFailure:
+			// CH-10 RED scaffold #2 (R-CPM-008, D-8) — the
+			// deny-state collapse site. In T-02 the consultation
+			// rule is a placeholder; the deniedSet stays empty
+			// because no projection arm yet populates it. T-04
+			// finalizes the suppression rule: when the prior
+			// event for this wireCallId was
+			// permission_decision_made{deny}, this arm SUPPRESSES
+			// emission. Until T-04 the production projection
+			// still emits the tool.result wire event normally.
 			end, _ := ev.ToolEndExecutionFailure()
 			failure, _ := end.Failure()
+			_ = deniedSet // T-04 reads this map; T-02 declares it
 			out <- ToolResult{
 				WireCallID:      end.CallID(),
 				Outcome:         "execution_failure",
 				Content:         "",
 				FailureCategory: failure.Category().String(),
 			}
+
+		// CH-10 (R-CPM-003, D-3) — permission event family projection
+		// RED scaffold #2. Three arms pre-empt T-04's GREEN:
+		//
+		//   - EventKindPermissionDecisionRequired → PermissionDecisionRequired (placeholder)
+		//   - EventKindPermissionDecisionMade     → PermissionDecisionMade (placeholder;
+		//                                            T-04 also populates deniedSet on Deny)
+		//   - EventKindPermissionResolutionRemembered → DROPPED at the chat wire
+		//                                            (D-12 collapse: no chat-side
+		//                                            vocabulary; falls through the
+		//                                            switch's default arm's
+		//                                            "unmapped agent event" log)
+		//
+		// In T-02 each arm is a no-op placeholder so the projector
+		// compiles and the wireFrameName switch stays exhaustive
+		// once T-04 lands. The strict-TDD RED scaffold pre-empts
+		// the GREEN; S-CPM-007/008/009 close at T-04.
+		case agent.EventKindPermissionDecisionRequired:
+			// Placeholder body; T-04 projects this to a real
+			// PermissionDecisionRequired wire event.
+			_ = ev
+
+		case agent.EventKindPermissionDecisionMade:
+			// Placeholder body; T-04 projects this to a real
+			// PermissionDecisionMade wire event AND populates
+			// deniedSet when Layer 2's outcome is Deny or
+			// ModifyInput (the D-12 chat-side collapse).
+			_ = ev
+
+		case agent.EventKindPermissionResolutionRemembered:
+			// D-12 wire collapse — DROPPED at the chat wire.
+			// The closed chat vocabulary has no
+			// "permission.decision.remembered" variant; chat
+			// does not surface rule persistence. The default
+			// arm below still records one "unmapped agent
+			// event" log so an operator can see the event
+			// landed if tracing.
+			_ = ev
 
 		case agent.EventKindRunEnd:
 			// Held, not projected here: the terminal wire event is built
