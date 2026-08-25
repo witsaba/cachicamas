@@ -156,3 +156,83 @@ Substrate:
 - `git diff --stat main..HEAD -- backend/agent/src/agent/` → empty (NFR-TLS-003 binding)
 - `TestChat_SubstrateUntouched` PASS (S-CTS-023)
 - `TestWire_FrameNameSet_IsClosed` PASS (S-CTS-024, 9-frame vocabulary)
+
+---
+
+## Recovery pass — verify FAIL recovery (2026-08-25)
+
+> Verify #3974 returned **FAIL** with 4 CRITICAL UNTESTED scenarios (S-CTS-019, S-CTS-020, S-CTS-021, S-CTS-022). The orchestrator's recovery decision (#3975) was: write the 4 missing frontend covering tests in this PR + apply 2 spec wording amendments (F-CHT-9.2, F-CHT-9.3). This section documents the recovery pass that closes those gaps.
+
+### T-06a — `7b640b3a` test(chat,web): CH-09 WU-4a — cover live-stream tool scenarios
+
+- **Why**: Verify (#3974) caught 4 CRITICAL UNTESTED scenarios — production code at `chat-app.tsx:88-147` and `use-chat-stream.ts:226-281` was structurally correct per the verify walk but lacked runtime covering tests. Strict TDD requires a covering test per Gherkin scenario.
+- **Status**: GREEN — 7 new tests pass; baseline 587 preserved.
+- **Files**:
+  - MODIFIED: `frontend/src/components/chat/chat-app.tsx` — minor refactor: export `exchangesToEntries` for direct testability (signature unchanged; mirrors `parseTranscript` / `scriptFor` testability pattern).
+  - MODIFIED: `frontend/src/components/chat/chat-app.spec.tsx` — 3 new tests in `describe("exchangesToEntries (S-CTS-019, CH-09)")`:
+    1. Main S-CTS-019: kind: "tool" entry from `ExchangeDTO{ToolCalls: [c1], ToolResults: [r1]}` — appended AFTER the assistant said entry. Asserts `{state: "done", tool: "current_time", args: parseArgs(arguments), result: r1.content, id: contains "c1"}` per spec acceptance.
+    2. Triangulation: `execution_failure` outcome → state "failed", result carries typed category, NOT provider text (R-CCP-008 / D6 mirror on reload surface).
+    3. Baseline: turn with no tool calls/omits — `exchangesToEntries` emits no tool entry (D-4 baseline preserved).
+  - MODIFIED: `frontend/src/components/chat/use-chat-stream.spec.tsx` — 4 new tests in `describe("useChatStream live tool lifecycle (S-CTS-020 / S-CTS-021 / S-CTS-022, CH-09)")`:
+    1. S-CTS-020: live `tool.call.start` mid-turn appends `{kind: "tool", state: "running", tool, intent, args: parseArgs, id: "tool-${wireCallId}"}`; subsequent `message.delta` continues to accumulate into the SAME assistant entry (no tearing — assistantId-keyed delta accumulation trip).
+    2. S-CTS-021 (execution_failure): matching `tool.result{outcome: "execution_failure"}` transitions the entry from "running" to "failed", `result` carries `failureCategory`, NOT `content`.
+    3. S-CTS-021 (success triangulation): matching `tool.result{outcome: "success"}` closes the entry as "done" with content.
+    4. S-CTS-022: `turn.end{finishReason: "tool_calls"}` does NOT cancel assistantId-keyed delta accumulation — a subsequent `message.delta` continues into the SAME assistant entry (same id, text appended across turn.end boundary). The trip against any future early-return on `finishReason === "tool_calls"`.
+- **Scenarios newly COMPLIANT**: S-CTS-019, S-CTS-020, S-CTS-021, S-CTS-022.
+- **Verification** (all uncached, race-clean):
+  - `pnpm --filter @cachicamas/frontend test:ci` → 159 suites, 594/594 tests pass (was 587 at CH-09 close; +7 from the recovery pass).
+  - `pnpm --filter @cachicamas/frontend lint` → 0 errors / 0 warnings (suppressedMessages are pre-existing).
+  - `pnpm --filter @cachicamas/frontend build.types` → clean (exit 0).
+- **Strict TDD evidence** (characterization tests for already-implemented behavior; production code was correct per verify walk):
+
+| Scenario | Test File:Line | Layer | RED | GREEN | TRIANGULATE | REFACTOR |
+|----------|----------------|-------|-----|-------|-------------|----------|
+| S-CTS-019 main | `chat-app.spec.tsx`:106 | Unit (pure function) | ✅ Written — spec acceptance verbatim | ✅ Passed (1.5s) | ✅ 2 cases (execution_failure + no-tool baseline) | ➖ None needed |
+| S-CTS-020 | `use-chat-stream.spec.tsx`:392 | Unit (mocked stream) | ✅ Written | ✅ Passed | ➖ Single happy path | ➖ None needed |
+| S-CTS-021 | `use-chat-stream.spec.tsx`:445 | Unit (mocked stream) | ✅ Written | ✅ Passed | ✅ 2 cases (execution_failure main + success variant) | ➖ None needed |
+| S-CTS-022 | `use-chat-stream.spec.tsx`:531 | Unit (mocked stream) | ✅ Written — multi-step turn.end{finishReason: "tool_calls"} sequence | ✅ Passed — same id, text continues | ➖ Single happy path | ➖ None needed |
+- **Wall-clock**: ~12 min (test design + chat-app.tsx export refactor + 7 new tests + 3 evidence gate commands).
+- **Refs**: #3971 (prior apply-progress), #3974 (verify-report FAIL), #3975 (recovery decision).
+
+### T-08 part 2 amended — `45fb69b9` docs(openspec): CH-09 spec wording — F-CHT-9.2 / F-CHT-9.3 amendments
+
+- **Why**: Verify (#3974) surfaced 2 NEW spec defects (F-CHT-9.2, F-CHT-9.3) where the spec wording diverged from the actual implementation. Recorded per the project's "record, don't repair" pattern, but as non-blocking WARNING-level findings, the simplest fix is one-line wording amendments per the design's F-CHT-9.1 precedent.
+- **Status**: documentation-only; baseline preserved.
+- **Files**:
+  - MODIFIED: `openspec/specs/cachicamas-chat-tool-source/spec.md`:
+    - **F-CHT-9.2**: S-CTS-007 wording amended from "compile error" to "panics naming the missing case (the `default` branch fires; Go 1.26 does NOT enforce type-switch exhaustiveness at compile time when a `default` arm exists — the build passes with a missing case; the runtime panic from the `default` branch is the binding invariant; the test `TestWire_AllNewVariants_SerialiseViaWireFrameName` enforces it by round-tripping every variant)".
+    - **F-CHT-9.3**: S-CTS-022 wording amended to "by construction" rationale — assistantId-keyed delta accumulation at `use-chat-stream.ts:202-209` and `use-chat-stream.ts:269-281` makes the continuation finishReason-agnostic; the `finishReason: "tool_calls"` value carries the model's signal but is not explicitly gated.
+    - Spec defects section appended with F-CHT-9.2 and F-CHT-9.3 RESOLVED entries (mirrors F-CHT-9.1's RESOLVED pattern).
+  - MODIFIED: `openspec/specs/frontend-chat-layer1/spec.md`:
+    - S-FCL-017 wording amended to mirror S-CTS-022's F-CHT-9.3 wording.
+- **Verification**:
+  - `cd backend/agent && go test -count=1 -race ./src/chat/...` → `ok` chat + migrator; focused regression on `TestWire_AllNewVariants_SerialiseViaWireFrameName` (4 sub-tests) + `TestChat_SubstrateUntouched` + `TestToolSource_NilConfigReturnsErrNilToolSource` + `TestCurrentTimeTool*` + `TestMemoryConversationStore_CH09Scenarios_PassUnchanged` ALL PASS.
+  - `git diff --stat main..HEAD -- backend/agent/src/agent/` → empty (NFR-TLS-003 / NFR-CTS-003 binding — substrate preserved).
+- **Wall-clock**: ~5 min (2 spec amendments + Spec defects section append + 1 regression evidence command).
+- **Refs**: #3965 (design §13 F-CHT-9.1 RESOLVED precedent), #3974 (verify-report F-CHT-9.2/9.3 surface).
+
+## Recovery-pass final evidence gate (extends the prior gate)
+
+Backend (uncached, race-clean):
+- `cd backend/agent && go test -count=1 -race ./src/chat/...` → chat + migrator OK (no new Go changes; this evidence confirms substrate preservation after the export-only refactor of `exchangesToEntries`)
+- `TestChat_SubstrateUntouched` PASS (S-CTS-023 — confirms no Go-side substrate drift)
+- `TestWire_AllNewVariants_SerialiseViaWireFrameName` PASS (S-CTS-007 — runtime exhaustiveness probe)
+- `git diff --stat main..HEAD -- backend/agent/src/agent/` → empty (NFR-TLS-003 / NFR-CTS-003 binding)
+
+Frontend (recovery-pass deltas):
+- `pnpm --filter @cachicamas/frontend test:ci` → **594/594 tests pass** (was 587 at CH-09 close; +7 from recovery pass)
+  - 159 test suites (was 157; +2 from new describes)
+  - 0 failures, 0 pending
+- `pnpm --filter @cachicamas/frontend lint` → 0 errors / 0 warnings (suppressedMessages are pre-existing `qwik/no-use-visible-task` directives, not new errors)
+- `pnpm --filter @cachicamas/frontend build.types` → clean (exit 0)
+
+Substrate (recovery-pass):
+- `git diff --stat main..HEAD -- backend/agent/src/agent/` → empty (NFR-TLS-003 / NFR-CTS-003 binding held across both recovery commits)
+
+Stats (recovery-pass only):
+- 5 files changed, 434 insertions(+), 12 deletions(-) = 422 net
+- 2 commits landed (T-06a + T-08 part 2 amended)
+
+Stats (CH-09 total — 12 commits on `feat/chat-tool-source-ch09` from `main @ 670cef7d`):
+- 41 files changed, 3511 insertions(+), 72 deletions(-) = 3439 net
+- Pre-authorised `size:exception` at preflight #3948 (review budget 1500 lines, up from CH-08's 1000). Variance: +1939 lines (all justified: CH-09 ships a new tool source, current_time tool, wire projection, persistence widening, frontend delta, and the recovery pass closes the 4 missing tests).
