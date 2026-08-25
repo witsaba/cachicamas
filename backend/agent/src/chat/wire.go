@@ -127,7 +127,7 @@ func (ToolCallEnd) isWireEvent() {}
 // R-CTS-005, D-6 collapse): Success → "success"; ResultFailure →
 // "result_failure"; ExecutionFailure → "execution_failure" with the
 // typed category string in FailureCategory and empty Content (no
-// provider text leaks, R-CCP-008 / D6 mirror). FailureCategory is
+// provider text — R-CCP-008 / D6 mirror). FailureCategory is
 // non-empty ONLY when Outcome == "execution_failure".
 type ToolResult struct {
 	WireCallID      string `json:"wireCallId"`
@@ -138,6 +138,49 @@ type ToolResult struct {
 }
 
 func (ToolResult) isWireEvent() {}
+
+// PermissionDecisionRequired is one of two CH-10 variants on the
+// closed WireEvent interface (R-CPM-003, D-3, D-7). It is projected
+// from Layer 2's EventKindPermissionDecisionRequired. The chat wire
+// carries the ask — WireCallID + Tool + Arguments — so the frontend
+// can render the inline `hold` row that asks the participant.
+//
+// CH-10 RED scaffold #1: the variant is declared with full fields
+// already so T-04 does not need to touch the struct; only the
+// wireFrameName case + projection arm land in T-04. The struct
+// triggers a compile error in wireFrameName's default branch until
+// T-04 finalizes the case — that is the strict-TDD RED scaffold
+// pre-empting the GREEN (S-CPM-007).
+//
+// JSON keys lowercase camelCase per the closed ExchangeDTO
+// precedent (REQ-7 / D-3): the wire must NOT invent field names
+// beyond what the chat port types carry.
+type PermissionDecisionRequired struct {
+	WireCallID string `json:"wireCallId"`
+	Tool       string `json:"tool"`
+	Arguments  string `json:"arguments"`
+}
+
+func (PermissionDecisionRequired) isWireEvent() {}
+
+// PermissionDecisionMade is the second CH-10 variant on the closed
+// WireEvent interface (R-CPM-003, D-3, D-7, D-12). It is projected
+// from Layer 2's EventKindPermissionDecisionMade. The Outcome field
+// carries the chat wire's CLOSED 2-value vocabulary
+// "allow_once" | "deny" (D-12 collapse: Layer 2's 4 outcomes
+// collapse to 2 at the chat projector; AllowAlways → "allow_once",
+// ModifyInput → "deny", Deny → "deny", AllowOnce → "allow_once").
+//
+// CH-10 RED scaffold #1: declared with full fields already; the
+// wireFrameName case + projection arm land in T-04 (S-CPM-008).
+// The struct triggers a compile error in wireFrameName's default
+// branch until T-04 finalizes the case.
+type PermissionDecisionMade struct {
+	WireCallID string `json:"wireCallId"`
+	Outcome    string `json:"outcome"`
+}
+
+func (PermissionDecisionMade) isWireEvent() {}
 
 // The wire's closed, seven-value finish-reason vocabulary (chat-types.ts:36-43).
 const (
