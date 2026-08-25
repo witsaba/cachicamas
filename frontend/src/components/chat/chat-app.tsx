@@ -84,8 +84,13 @@ export interface ChatAppProps {
  * The DTO shape carries ToolCalls + ToolResults as optional
  * readonly arrays; a tool-free turn omits them (the JSON wire
  * omits the keys entirely per `omitempty`).
+ *
+ * Exported for direct testability of the S-CTS-019 covering test
+ * (CH-09 WU-4a — verify #3974 found the function had no runtime
+ * test). The export is a pure testability seam; the function
+ * signature is unchanged from its prior module-private form.
  */
-function exchangesToEntries(
+export function exchangesToEntries(
   exchanges: readonly {
     promptText: string;
     assistantText: string;

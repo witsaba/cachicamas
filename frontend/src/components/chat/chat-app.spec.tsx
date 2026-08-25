@@ -19,8 +19,9 @@
  */
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, it, expect } from "vitest";
-import { ChatApp } from "./chat-app";
+import { exchangesToEntries, ChatApp } from "./chat-app";
 import { AGENTS } from "~/lib/mock/staff";
+import type { ToolCallDTO, ToolResultDTO } from "~/lib/chat-types";
 
 const WHO = {
   youName: "Ana Rivas",
@@ -97,5 +98,123 @@ describe("components/chat/chat-app (CH-05.1 + CH-08)", () => {
     ) as HTMLTextAreaElement;
     expect(input).toBeTruthy();
     expect(input.hasAttribute("disabled")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CH-09 WU-4a (recovery pass) — exchangesToEntries tool entry rendering.
+//
+// S-CTS-019 (verify #3974 UNTESTED → COMPLIANT): exchangesToEntries
+// emits one `kind: "tool"` entry appended AFTER the assistant said
+// entry, walking toolCalls + toolResults in lockstep with the typed
+// 4-value state union ("running" | "done" | "denied" | "failed").
+// The function is exported purely as a testability seam so the
+// covering test exercises it without going through the live chat
+// reload path.
+// ---------------------------------------------------------------------------
+
+describe("exchangesToEntries (S-CTS-019, CH-09)", () => {
+  it("renders a kind: 'tool' entry from ExchangeDTO{ToolCalls: [c1], ToolResults: [r1]} — appended AFTER the assistant said entry", () => {
+    const callDTO: ToolCallDTO = {
+      wireCallId: "c1",
+      tool: "current_time",
+      arguments: '{"format":"rfc3339"}',
+    };
+    const resultDTO: ToolResultDTO = {
+      wireCallId: "c1",
+      tool: "current_time",
+      outcome: "success",
+      content: "2026-08-25T07:17:00Z",
+      failureCategory: "",
+    };
+    const out = exchangesToEntries([
+      {
+        promptText: "What time is it?",
+        assistantText: "Let me look it up.",
+        partial: false,
+        toolCalls: [callDTO],
+        toolResults: [resultDTO],
+      },
+    ]);
+
+    // Three entries: said:you, said:chat, tool — tool comes LAST.
+    expect(out).toHaveLength(3);
+    const [youEntry, chatEntry, toolEntry] = out;
+    expect(youEntry?.kind).toBe("said");
+    if (youEntry?.kind === "said") {
+      expect(youEntry.who).toBe("you");
+      expect(youEntry.text).toBe("What time is it?");
+      expect(youEntry.state).toBe("final");
+    }
+    expect(chatEntry?.kind).toBe("said");
+    if (chatEntry?.kind === "said") {
+      expect(chatEntry.who).toBe("chat");
+      expect(chatEntry.text).toBe("Let me look it up.");
+      expect(chatEntry.state).toBe("final");
+    }
+    expect(toolEntry?.kind).toBe("tool");
+    if (toolEntry?.kind === "tool") {
+      // Per S-CTS-019 acceptance: kind: "tool", tool, args parsed
+      // from call.arguments, result from r1.content, state "done".
+      expect(toolEntry.state).toBe("done");
+      expect(toolEntry.tool).toBe("current_time");
+      expect(toolEntry.intent).toBe("current_time");
+      expect(toolEntry.args).toEqual([["format", "rfc3339"]]);
+      expect(toolEntry.result).toBe("2026-08-25T07:17:00Z");
+      // The entry id is the wire call id bound with the exchange
+      // index — the assistant entry MUST appear earlier in the
+      // array (asserted above); the tool entry's id is grounded
+      // by the wire call id so a transcript-line can render it.
+      expect(toolEntry.id).toContain("c1");
+    }
+  });
+
+  it("execution_failure outcome → state: 'failed', result carries the typed failure category (R-CCP-008 / D6 mirror on the reload surface)", () => {
+    const callDTO: ToolCallDTO = {
+      wireCallId: "c2",
+      tool: "current_time",
+      arguments: '{"timezone":"UTC"}',
+    };
+    const resultDTO: ToolResultDTO = {
+      wireCallId: "c2",
+      tool: "current_time",
+      outcome: "execution_failure",
+      // Provider text MUST NOT reach the entry on the reload surface
+      // either — only the typed category is carried (D6 mirror).
+      content: "provider text that must not leak",
+      failureCategory: "invalid_argument",
+    };
+    const out = exchangesToEntries([
+      {
+        promptText: "What's the time in UTC?",
+        assistantText: "Calling the tool.",
+        partial: false,
+        toolCalls: [callDTO],
+        toolResults: [resultDTO],
+      },
+    ]);
+    const toolEntry = out[2];
+    expect(toolEntry?.kind).toBe("tool");
+    if (toolEntry?.kind === "tool") {
+      expect(toolEntry.state).toBe("failed");
+      expect(toolEntry.result).toBe("invalid_argument");
+      expect(toolEntry.result).not.toBe("provider text that must not leak");
+    }
+  });
+
+  it("a turn with no tool calls/omits — exchangesToEntries omits the tool entry (D-4 baseline preserved)", () => {
+    const out = exchangesToEntries([
+      {
+        promptText: "Hi.",
+        assistantText: "Hello.",
+        partial: false,
+        // toolCalls + toolResults deliberately omitted (the JSON
+        // wire omits both keys via omitempty).
+      },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.kind).toBe("said");
+    expect(out[1]?.kind).toBe("said");
+    expect(out.find((e) => e.kind === "tool")).toBeUndefined();
   });
 });
