@@ -324,7 +324,7 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 // per D-1) the result slice carries 0 or 1 entry.
 //
 // Implementation (CH-08 WU-3 GREEN):
-//   - SELECT participant_id, updated_at,
+//   - SELECT participant_id, updated_at, summary,
 //            COALESCE((SELECT MAX(position)+1 FROM chat_exchanges
 //                      WHERE participant_id = $1), 0) AS turn_count
 //     FROM chat_conversations
@@ -339,6 +339,11 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 //     run for the participant (the Append path INSERTs with
 //     ON CONFLICT DO NOTHING).
 //   - The defensive copy follows Load's pattern (NFR-CCS-004).
+//
+// CH-10.3a (T-05a) widening: the SELECT adds `summary` so the
+// reload surface carries the SummarizeConversationTool's mutation
+// target (R-CCS-017, NFR-CPM-005 forward-only ADD COLUMN nullable).
+// The column is NULL when UpdateSummary has not been called.
 func (s *PostgresConversationStore) List(participantID string) ([]ConversationSummary, error) {
 	if participantID == "" {
 		return nil, ErrEmptyParticipantID
@@ -346,7 +351,7 @@ func (s *PostgresConversationStore) List(participantID string) ([]ConversationSu
 
 	ctx := context.Background()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT participant_id, updated_at,
+		`SELECT participant_id, updated_at, summary,
 		        COALESCE((SELECT MAX(position)+1 FROM chat_exchanges
 		                  WHERE participant_id = $1), 0) AS turn_count
 		   FROM chat_conversations
@@ -365,15 +370,17 @@ func (s *PostgresConversationStore) List(participantID string) ([]ConversationSu
 		var (
 			pid        string
 			updatedAt  time.Time
+			summary    sql.NullString
 			turnCount  int
 		)
-		if err := rows.Scan(&pid, &updatedAt, &turnCount); err != nil {
+		if err := rows.Scan(&pid, &updatedAt, &summary, &turnCount); err != nil {
 			return nil, fmt.Errorf("chat.PostgresConversationStore.List: scan: %w", err)
 		}
 		out = append(out, ConversationSummary{
 			ConversationID: pid,
 			LastActivityAt: updatedAt,
 			TurnCount:      turnCount,
+			Summary:        summary.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -590,20 +597,35 @@ func (s *PostgresConversationStore) loadToolResults(ctx context.Context, partici
 	return out, nil
 }
 
-// UpdateSummary writes summary for participantID (R-CCS-017, D-9).
+// UpdateSummary writes summary for participantID (R-CCS-017, D-9,
+// NFR-CPM-005 forward-only ADD COLUMN nullable).
 //
-// CH-10.1 (T-03a) — STUB: returns nil. The real implementation
-// (UPDATE chat_conversations SET summary = $1) lands in T-05b
-// alongside the 0003_summarize.sql migration (forward-only
-// ADD COLUMN nullable affordance per NFR-CPM-005). The stub keeps
-// the build green and lets the SummarizeConversationTool compile
-// against both adapters while the postgres path is staged.
-func (s *PostgresConversationStore) UpdateSummary(participantID, _ string) error {
+// CH-10.3a (T-05a): REAL implementation. The 0003_summarize.sql
+// migration adds chat_conversations.summary TEXT (nullable) so
+// the column exists when UpdateSummary is first called. The
+// migration is applied by the composition root's migrator at
+// startup (cmd/chat/main.go calls migrator.Up before constructing
+// the adapter).
+//
+// The UPDATE is idempotent: the column starts NULL (no default
+// written); UpdateSummary overwrites the existing value. The
+// participant_id row exists by the time UpdateSummary is called
+// because the tool runs only after a prior conversation
+// (SummarizeConversationTool is registered in the factory closure
+// — CH-10.1 + CH-10.3 widening).
+func (s *PostgresConversationStore) UpdateSummary(participantID, summary string) error {
 	if participantID == "" {
 		return ErrEmptyParticipantID
 	}
-	// T-05b GREEN replaces this body with the
-	// UPDATE chat_conversations SET summary = $1 ... statement
-	// after the 0003 migration has added the summary column.
+
+	ctx := context.Background()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE chat_conversations SET summary = $1 WHERE participant_id = $2`,
+		summary,
+		participantID,
+	)
+	if err != nil {
+		return fmt.Errorf("chat.PostgresConversationStore.UpdateSummary: %w", err)
+	}
 	return nil
 }

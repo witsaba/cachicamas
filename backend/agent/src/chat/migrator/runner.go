@@ -74,6 +74,14 @@ func NewProvider(ctx context.Context, db *sql.DB, fsys fs.FS, tableName string) 
 // Every regex is case-insensitive (?i) except the blank-line and
 // comment-line patterns (which are pure whitespace / punctuation
 // and have no SQL semantics to normalize).
+//
+// CH-10 (R-CPM-006, NFR-CPM-005): ALTER TABLE ADD COLUMN is the
+// documented forward-only affordance per AGENTS.md "Substrate
+// preservation" paragraph. The ADD COLUMN form adds a NEW column
+// to an EXISTING table — destructive only if the column already
+// exists, which the runner's per-line forward-only check refuses.
+// The narrower form (ADD COLUMN NOT NULL, DROP COLUMN, ALTER
+// COLUMN, RENAME, etc.) remains outside the allowlist.
 var allowedMigrationStmts = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^\s*CREATE\s+TABLE\s+`),
 	regexp.MustCompile(`(?i)^\s*CREATE\s+INDEX\s+`),
@@ -81,6 +89,7 @@ var allowedMigrationStmts = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^\s*CREATE\s+UNIQUE\s+INDEX\s+`),
 	regexp.MustCompile(`(?i)^\s*COMMENT\s+ON\s+`),
 	regexp.MustCompile(`(?i)^\s*INSERT\s+INTO\s+`),
+	regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\s+`), // CH-10 forward-only affordance
 	regexp.MustCompile(`^\s*$`),  // blank lines
 	regexp.MustCompile(`^\s*--`), // SQL line comments
 }
