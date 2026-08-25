@@ -282,12 +282,23 @@ export type ChatOfflineHandler = (message: string) => void;
 
 // The full set of typed `event:` names the chat client knows. Any
 // frame with an event name outside this list is dropped (REQ-1 S-1.b).
+//
+// CH-09 (REQ-8..11, D-3) — four new event names. tool.call.delta and
+// tool.call.end are reserved-but-unused at v1 (NFR-CTS-002 / D-6):
+// the chat projector collapses Layer 2's 5-event-per-call bracket
+// model into 2 chat-side events per call. The reserved variants exist
+// so a future long-running MCP tool can land here without a wire
+// shape change.
 const KNOWN_EVENTS = [
   "message.start",
   "message.delta",
   "message.end",
   "turn.end",
   "error",
+  "tool.call.start",
+  "tool.call.delta",
+  "tool.call.end",
+  "tool.result",
 ] as const;
 
 type KnownEventName = (typeof KNOWN_EVENTS)[number];

@@ -24,12 +24,26 @@
 // (start → deltas → end → terminal). Doc 0001 §4.3 invariant 1
 // (deltas carry an index, consumers accumulate) is honored by the
 // `index` field on message.* variants.
+//
+// CH-09 (REQ-8..11, D-3, D-7) — four new variants widen the union
+// additively. REQ-7's spec text forbids NEW FIELDS ON EXISTING
+// VARIANTS; CH-09 adds NEW VARIANTS to the closed union. Each new
+// variant carries explicit "D-7: new variant, not new field"
+// documentation in the frontend-chat-layer1 spec amendment. The
+// wire-side mirror at chat/wire.go (Go) and the parseTranscript
+// switch below cover the same field shapes; `assertNever` in
+// the default branch surfaces a compile error if a future variant
+// is added without a `case`.
 export type ChatStreamEvent =
   | { readonly kind: "message.start"; readonly messageId: string; readonly index: number }
   | { readonly kind: "message.delta"; readonly index: number; readonly delta: string }
   | { readonly kind: "message.end"; readonly index: number; readonly finishReason: ChatFinishReason }
   | { readonly kind: "turn.end"; readonly usage?: ChatUsage; readonly finishReason?: ChatFinishReason }
-  | { readonly kind: "error"; readonly error: ChatStreamError };
+  | { readonly kind: "error"; readonly error: ChatStreamError }
+  | { readonly kind: "tool.call.start"; readonly wireCallId: string; readonly tool: string; readonly arguments: string }
+  | { readonly kind: "tool.call.delta"; readonly wireCallId: string; readonly delta: string }
+  | { readonly kind: "tool.call.end"; readonly wireCallId: string; readonly outcome: string }
+  | { readonly kind: "tool.result"; readonly wireCallId: string; readonly tool: string; readonly outcome: ToolResultOutcome; readonly content: string; readonly failureCategory: string };
 
 // AI-13.1 seven-value finish-reason vocabulary (design §2). The UI
 // surfaces these as plain labels in v1.
@@ -158,12 +172,46 @@ export interface ExchangeDTO {
   readonly failureCategory: string;
   readonly finishReason?: string;
   readonly messageIDs: readonly string[];
+  // CH-09 (R-CCS-015, S-CTS-019) — two new optional fields widen
+  // the read-side wire projection additively. The Go mirror
+  // (backend/agent/src/chat/http.go:exchangeDTO) emits the same
+  // shape with lowercase JSON keys. A tool-free turn omits both
+  // keys (`omitempty`); an empty array serializes as `[]`.
+  readonly toolCalls?: readonly ToolCallDTO[];
+  readonly toolResults?: readonly ToolResultDTO[];
 }
 
 export interface ConversationSummary {
   readonly conversationID: string;
   readonly lastActivityAt: string;
   readonly turnCount: number;
+}
+
+// CH-09 — wire projections of chat.ToolCallRecord / chat.ToolResultRecord
+// (frontend mirror of the chat package's port-side types). Adjacent
+// to the closed `ChatStreamEvent` union; never widening it. JSON
+// keys lowercase per the closed `ExchangeDTO` precedent.
+export interface ToolCallDTO {
+  readonly wireCallId: string;
+  readonly tool: string;
+  readonly arguments: string;
+}
+
+// ToolResultOutcome is the closed three-value vocabulary mirroring
+// agent.ToolOutcome (backend/agent/src/agent/tool_event.go:227-246)
+// projected to wire-shape strings. execution_failure carries a
+// typed failure category (R-CCP-008 / D6 mirror — no provider text).
+export type ToolResultOutcome = "success" | "result_failure" | "execution_failure";
+
+export interface ToolResultDTO {
+  readonly wireCallId: string;
+  readonly tool: string;
+  readonly outcome: ToolResultOutcome;
+  readonly content: string;
+  // Non-empty ONLY when outcome === "execution_failure" (typed
+  // category). Mirrors R-CCP-008 / D6: provider text MUST NOT
+  // reach the wire.
+  readonly failureCategory: string;
 }
 
 /**
@@ -268,6 +316,43 @@ export function parseTranscript(raw: string): ChatStreamEvent[] {
         events.push({
           kind: "error",
           error: payload as unknown as ChatStreamError,
+        });
+        break;
+      // CH-09 (REQ-8..11, D-3, D-6) — four new wire event names. The
+      // "tool.call.delta" and "tool.call.end" cases are reserved
+      // (NFR-CTS-002); v1's chat projector never emits them. parseTranscript
+      // admits them so a future long-running MCP tool can land here
+      // without a frontend wire change.
+      case "tool.call.start":
+        events.push({
+          kind: "tool.call.start",
+          wireCallId: String(payload.wireCallId ?? ""),
+          tool: String(payload.tool ?? ""),
+          arguments: String(payload.arguments ?? ""),
+        });
+        break;
+      case "tool.call.delta":
+        events.push({
+          kind: "tool.call.delta",
+          wireCallId: String(payload.wireCallId ?? ""),
+          delta: String(payload.delta ?? ""),
+        });
+        break;
+      case "tool.call.end":
+        events.push({
+          kind: "tool.call.end",
+          wireCallId: String(payload.wireCallId ?? ""),
+          outcome: String(payload.outcome ?? ""),
+        });
+        break;
+      case "tool.result":
+        events.push({
+          kind: "tool.result",
+          wireCallId: String(payload.wireCallId ?? ""),
+          tool: String(payload.tool ?? ""),
+          outcome: (payload.outcome ?? "success") as ToolResultOutcome,
+          content: String(payload.content ?? ""),
+          failureCategory: String(payload.failureCategory ?? ""),
         });
         break;
       default:
