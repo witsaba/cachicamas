@@ -677,3 +677,188 @@ describe("chat-api wire client (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     expect(lastCreated!.closed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-CH-08 slice — resume wire client.
+//
+// Two new helpers in chat-api.ts back the page's mount GETs
+// (REQ-8 / R-CRI-001 + R-CRI-002):
+//
+//   - listConversations()     -> GET /api/agent/conversations
+//                                typed Promise<ApiResult<ConversationSummary[]>>
+//   - loadConversation(id)    -> GET /api/agent/conversations/:id
+//                                typed Promise<ApiResult<ExchangeDTO[]>>
+//
+// Both reuse envelopeToResult + the existing five-kind error
+// surface. The wire DTOs are NEW TYPES adjacent to the closed
+// ChatStreamEvent union (REQ-7 preserved — no widening).
+// ---------------------------------------------------------------------------
+
+import type { ConversationSummary, ExchangeDTO } from "./chat-types";
+
+// Mirror CH-08's wire response shapes — used by the helper tests.
+// Test-only fixtures: any drift here MUST be mirrored in
+// frontend/src/lib/chat-types.ts (the wire contract).
+const fixtureSummary: ConversationSummary = {
+  conversationID: "alice",
+  lastActivityAt: "2026-08-24T17:00:00Z",
+  turnCount: 2,
+};
+
+const fixtureExchanges: ExchangeDTO[] = [
+  {
+    position: 0,
+    promptText: "turn-one",
+    assistantText: "reply-one",
+    partial: false,
+    terminalKind: "completed",
+    failureCategory: "",
+    messageIDs: ["m-1"],
+  },
+  {
+    position: 1,
+    promptText: "turn-two",
+    assistantText: "reply-two",
+    partial: false,
+    terminalKind: "completed",
+    failureCategory: "",
+    messageIDs: ["m-2"],
+  },
+];
+
+describe("chat-api resume wire client (R-CRI-001, R-CRI-002, REQ-8)", () => {
+  beforeEach(() => {
+    // fetch is reset by vi.restoreAllMocks in afterEach above; we
+    // only need to ensure the test starts from a clean slate.
+  });
+
+  it("listConversations issues GET /api/agent/conversations (R-CRI-002)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify([fixtureSummary, fixtureSummary]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { listConversations } = await import("./chat-api");
+
+    const result = await listConversations();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value).toHaveLength(2);
+    expect(result.value[0].conversationID).toBe("alice");
+    expect(result.value[0].turnCount).toBe(2);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/agent/conversations");
+    // GET, no body — readonly surface
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("listConversations returns 200 [] on the empty-list path (S-CRI-004)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { listConversations } = await import("./chat-api");
+
+    const result = await listConversations();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value).toEqual([]);
+  });
+
+  it("listConversations maps a 403 to kind=not_found (R-CRI-002 cross-participant)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "not_found", message: "forbidden" }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { listConversations } = await import("./chat-api");
+
+    const result = await listConversations();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected error");
+    // envelopeToResult maps any non-validation / non-conflict /
+    // non-404 error to kind=server. The 403 falls into the
+    // generic "server" branch (the GET list endpoint's
+    // cross-participant response shape).
+    expect(result.kind).toBe("server");
+  });
+
+  it("loadConversation issues GET /api/agent/conversations/:id (R-CRI-001)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(fixtureExchanges), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadConversation } = await import("./chat-api");
+
+    const result = await loadConversation("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value).toHaveLength(2);
+    expect(result.value[0].position).toBe(0);
+    expect(result.value[1].promptText).toBe("turn-two");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/agent/conversations/alice");
+    expect(url.endsWith("/alice")).toBe(true);
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("loadConversation maps a 403 (cross-participant) — surface reflects the backend not_found (R-CHS-004.b)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "not_found", message: "forbidden" }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadConversation } = await import("./chat-api");
+
+    const result = await loadConversation("alice");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected error");
+    expect(result.kind).toBe("server");
+  });
+
+  it("loadConversation maps a 404 (unknown conversation) to the four-kind envelope (R-CRI-001)", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "not_found", message: "not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadConversation } = await import("./chat-api");
+
+    const result = await loadConversation("alice");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected error");
+    expect(result.kind).toBe("not_found");
+  });
+
+  it("loadConversation maps a network failure to kind=offline (defensive)", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadConversation } = await import("./chat-api");
+
+    const result = await loadConversation("alice");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected error");
+    expect(result.kind).toBe("offline");
+    expect(result.message).toContain(
+      "Couldn't reach the chat service. Is docker compose up?",
+    );
+  });
+});

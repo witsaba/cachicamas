@@ -48,6 +48,8 @@ import {
   type ChatStreamEvent,
   type ChatTurnRequest,
   type ChatTurnResponse,
+  type ConversationSummary,
+  type ExchangeDTO,
 } from "./chat-types";
 
 // Re-export the discriminated union types this module's API returns so
@@ -55,7 +57,15 @@ import {
 // (The errors are typed identically to lib/api.ts's ApiResult error
 // half — we mirror the shape, not the source.)
 export type { ApiResult };
-export type { ChatCancelRequest, ChatStreamError, ChatStreamEvent, ChatTurnRequest, ChatTurnResponse };
+export type {
+  ChatCancelRequest,
+  ChatStreamError,
+  ChatStreamEvent,
+  ChatTurnRequest,
+  ChatTurnResponse,
+  ConversationSummary,
+  ExchangeDTO,
+};
 
 // ---------------------------------------------------------------------------
 // SSR-vs-browser base URL (mirrors lib/api.ts:133-157 + lib/prompts-api.ts:85-102)
@@ -420,4 +430,98 @@ export function subscribeTurn(
     intentionalClose = true;
     es.close();
   };
+}
+
+// ---------------------------------------------------------------------------
+// CH-08 (REQ-8, R-CRI-001, R-CRI-002) — read-side wire client.
+//
+//   - listConversations()  → GET /api/agent/conversations
+//                              returns ApiResult<ConversationSummary[]>
+//   - loadConversation(id) → GET /api/agent/conversations/:id
+//                              returns ApiResult<ExchangeDTO[]>
+//
+// Both helpers fire in parallel on the page's useVisibleTask$ mount
+// (chat-app.tsx) — seed `useChatStream.reset(entries)` from the
+// reload endpoint, populate the conversation rail from the list
+// endpoint. Both reuse `envelopeToResult` so the five-kind
+// discriminated union surface is identical to submitTurn +
+// cancelTurn.
+//
+// Network errors map to { kind: "offline", message: <dev-honest
+// phrase> } (REQ-5 S-5.a). HTTP errors map via the existing
+// envelope parser. The helpers send credentials via cookie
+// (same-origin; withCredentials is implicit on relative fetches
+// via the EventSource path; here we set it explicitly so cross-
+// origin SSR vs browser behaves identically).
+// ---------------------------------------------------------------------------
+
+/**
+ * List the authenticated participant's conversations (CH-08.2).
+ *
+ * Returns an empty array on the success-with-no-rows path (S-CRI-004);
+ * the backend emits `[]` not `null` for that case.
+ *
+ * @example
+ *   const result = await listConversations();
+ *   if (result.ok) {
+ *     result.value.forEach((c) => console.log(c.conversationID, c.turnCount));
+ *   }
+ */
+export async function listConversations(): Promise<ApiResult<ConversationSummary[]>> {
+  let res: Response;
+  try {
+    res = await fetch(fullUrl("/api/agent/conversations"), {
+      method: "GET",
+      credentials: "include",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as ConversationSummary[];
+    return Array.isArray(body) ? body : [];
+  });
+}
+
+/**
+ * Load the authenticated participant's recorded conversation
+ * (CH-08.1). `id` MUST equal the authenticated participant id (the
+ * backend enforces this — cross-participant requests are refused
+ * as 403 not_found per R-CRI-001 / R-CHS-004.b shape; the page
+ * passes its own participant id here, never a value from the URL
+ * or a header).
+ *
+ * Returns an array of `ExchangeDTO` values in insertion order
+ * (matching chat.Exchange.Position). The page reads this DTO via
+ * `useChatStream.reset(entries)` to seed the transcript without
+ * opening an EventSource.
+ *
+ * @example
+ *   const result = await loadConversation(participantID);
+ *   if (result.ok) {
+ *     await turn.reset(result.value);
+ *   }
+ */
+export async function loadConversation(id: string): Promise<ApiResult<ExchangeDTO[]>> {
+  let res: Response;
+  try {
+    res = await fetch(fullUrl(`/api/agent/conversations/${encodeURIComponent(id)}`), {
+      method: "GET",
+      credentials: "include",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as ExchangeDTO[];
+    return Array.isArray(body) ? body : [];
+  });
 }

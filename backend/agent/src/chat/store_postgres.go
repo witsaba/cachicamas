@@ -276,6 +276,70 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 	return nil
 }
 
+// List returns the participant-scoped conversation summaries for
+// participantID (R-CCS-013, the third additive method on the
+// ConversationStore port). At v1 (one conversation per participant
+// per D-1) the result slice carries 0 or 1 entry.
+//
+// Implementation (CH-08 WU-3 GREEN):
+//   - SELECT participant_id, updated_at,
+//            COALESCE((SELECT MAX(position)+1 FROM chat_exchanges
+//                      WHERE participant_id = $1), 0) AS turn_count
+//     FROM chat_conversations
+//    WHERE participant_id = $1
+//    ORDER BY updated_at DESC
+//   - The correlated subquery reads chat_exchanges' position counter
+//     (R-CCS-001's `position` is contiguous per participant; MAX+1
+//     equals COUNT(*) but never over-counts on gaps, future-proof).
+//   - A miss (no chat_conversations row) returns a non-nil empty
+//     slice — the empty list is success, not not-found (S-CCS-018,
+//     S-CRI-004). The chat_conversations row exists iff Append has
+//     run for the participant (the Append path INSERTs with
+//     ON CONFLICT DO NOTHING).
+//   - The defensive copy follows Load's pattern (NFR-CCS-004).
+func (s *PostgresConversationStore) List(participantID string) ([]ConversationSummary, error) {
+	if participantID == "" {
+		return nil, ErrEmptyParticipantID
+	}
+
+	ctx := context.Background()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT participant_id, updated_at,
+		        COALESCE((SELECT MAX(position)+1 FROM chat_exchanges
+		                  WHERE participant_id = $1), 0) AS turn_count
+		   FROM chat_conversations
+		  WHERE participant_id = $1
+		  ORDER BY updated_at DESC`,
+		participantID,
+		participantID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.List: query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]ConversationSummary, 0)
+	for rows.Next() {
+		var (
+			pid        string
+			updatedAt  time.Time
+			turnCount  int
+		)
+		if err := rows.Scan(&pid, &updatedAt, &turnCount); err != nil {
+			return nil, fmt.Errorf("chat.PostgresConversationStore.List: scan: %w", err)
+		}
+		out = append(out, ConversationSummary{
+			ConversationID: pid,
+			LastActivityAt: updatedAt,
+			TurnCount:      turnCount,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat.PostgresConversationStore.List: rows: %w", err)
+	}
+	return out, nil
+}
+
 // Load returns every exchange recorded for participantID, in
 // insertion order. A miss returns (nil, ErrConversationNotFound).
 // The returned slice is a fresh copy on every call (NFR-CCS-004).

@@ -109,20 +109,36 @@ test("routes/chat: an authed visitor gets the transcript and the composer", asyn
   expect(screen.querySelector('[data-testid="composer-input"]')).toBeTruthy();
 });
 
-test("routes/chat: the retired conversations rail is not mounted (D-3)", async () => {
+test("routes/chat: the retired conversations panel (CH-05.1 D-3) stays gone — CH-08 re-mounts only the rail, not the panel chrome", async () => {
   vi.resetModules();
   vi.doMock("~/routes/plugin@auth", () => AUTHED);
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // After CH-05.1 the page holds a single active conversation; the
-  // history list is owned by CH-08.2 (cachicamas-chat-conversation-list).
+  // After CH-05.1 the conversations-panel chrome is retired; CH-08
+  // only re-mounts the rail (data-testid="conversation-list"), not
+  // the panel/disclosure/toggle surfaces.
   expect(
     screen.querySelector('[data-testid="conversations-panel"]'),
   ).toBeFalsy();
-  expect(
-    screen.querySelector('[data-testid="conversation-list"]'),
-  ).toBeFalsy();
+});
+
+test("routes/chat: the page passes participantID into ChatApp (REQ-8 / D-1)", async () => {
+  // The route surfaces the session's resolved participant id into
+  // ChatApp so the page knows which conversation to load on mount.
+  // The mock returns a session with user.name="Alice"; the route's
+  // participantID falls back to the email when no user.id is set.
+  vi.resetModules();
+  vi.doMock("~/routes/plugin@auth", () => AUTHED);
+  const { default: AuthedIndex } = await import("./index");
+  const { screen, render } = await createDOM();
+  await render(<AuthedIndex />);
+  // The page must mount the chat surface (transcript + composer)
+  // and the rail — proving participantID flowed through without
+  // crashing the useVisibleTask$ mount hook.
+  expect(screen.querySelector('[data-testid="transcript"]')).toBeTruthy();
+  expect(screen.querySelector('[data-testid="composer"]')).toBeTruthy();
+  expect(screen.querySelector('[data-testid="conversation-list"]')).toBeTruthy();
 });
 
 test("routes/chat: the composer carries the demo promise, unprompted", async () => {

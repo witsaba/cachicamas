@@ -131,6 +131,23 @@ chat-adjacent milestones admitting new `go.mod` deps in `backend/agent`
 MUST follow the same pattern (or its milestone-specific equivalent)
 and SHOULD append a one-line pointer here.
 
+**CH-08** (`cachicamas-chat-resume-in-browser`) is the first
+chat-archetype milestone after CH-07 to widen the closed
+`ConversationStore` port (R-CCS-010) by adding — not replacing — a
+third method `List(participantID) ([]ConversationSummary, error)`, in
+the same declaration; the new method is additive per R-CCS-010's
+anticipatory clause, and the project keeps the additive pattern as
+the binding precedent for any future widening (per R-AGP-003 / R-AGP-005).
+The CH-08 read surface lands behind the existing `identityMiddleware`
+via a fresh `RegisterResumeRoutes` helper, leaving the CH-03 frozen
+three-route surface untouched. No file under `backend/agent/src/agent/`
+is modified; the ten-file substrate list survives byte-clean. No new
+top-level Go deps (CH-07's `pgx/v5` and `pressly/goose/v3` already
+cover the postgres surface). The read-side wire is closed under
+REQ-7 — the frontend's `ChatStreamEvent` union is preserved; new DTOs
+(`ExchangeDTO`, `ConversationSummary`) live adjacent to it, never as
+additions to it.
+
 ## Review checklist (for reviewers)
 
 - [ ] reviewer can confirm the Makefile targets listed above exist and match this file

@@ -28,6 +28,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 )
@@ -47,6 +48,68 @@ type openTurnRequest struct {
 type openTurnResponse struct {
 	TurnID    string `json:"turnId"`
 	StreamURL string `json:"streamUrl"`
+}
+
+// exchangeDTO mirrors chat.Exchange's eight fields (D-7) and is
+// the transport projection the GET /api/agent/conversations/:id
+// handler emits (R-CRI-001, R-CRI-004). The DTO lives in the
+// transport layer (this file) and is a pure projection of the port
+// type — the DTO must NOT invent fields beyond Exchange (REQ-7
+// closed-union enforcement on the wire). Mirrors
+// frontend/src/lib/chat-types.ts:ExchangeDTO verbatim (the TS spec
+// owns the JSON surface; the Go DTO aligns field-for-field).
+type exchangeDTO struct {
+	Position        int      `json:"position"`
+	PromptText      string   `json:"promptText"`
+	AssistantText   string   `json:"assistantText"`
+	Partial         bool     `json:"partial"`
+	TerminalKind    string   `json:"terminalKind"`
+	FailureCategory string   `json:"failureCategory"`
+	FinishReason    *string  `json:"finishReason,omitempty"`
+	MessageIDs      []string `json:"messageIDs"`
+}
+
+// conversationSummaryDTO mirrors chat.ConversationSummary's three
+// fields (R-CCS-014, R-CRI-004). `lastActivityAt` is rendered as
+// RFC3339 — the spec's "ISO8601" form. `turnCount` is the count of
+// exchanges recorded under the participant (one conversation per
+// participant at v1 — D-1).
+type conversationSummaryDTO struct {
+	ConversationID string `json:"conversationID"`
+	LastActivityAt string `json:"lastActivityAt"`
+	TurnCount      int    `json:"turnCount"`
+}
+
+// exchangeToDTO projects a recorded Exchange to the wire form.
+// finishReason is omitempty via a nil pointer (matches the wire's
+// FinishReason ABSENCE for cancelled/failed turns per D-7 / R-CCS-004).
+func exchangeToDTO(ex Exchange) exchangeDTO {
+	var fr *string
+	if ex.FinishReason != nil {
+		s := ex.FinishReason.String()
+		fr = &s
+	}
+	return exchangeDTO{
+		Position:        ex.Position,
+		PromptText:      ex.PromptText,
+		AssistantText:   ex.AssistantText,
+		Partial:         ex.Partial,
+		TerminalKind:    ex.TerminalKind.String(),
+		FailureCategory: ex.FailureCategory.String(),
+		FinishReason:    fr,
+		MessageIDs:      ex.MessageIDs,
+	}
+}
+
+// conversationSummaryToDTO projects a ConversationSummary to the wire
+// form. `lastActivityAt` becomes RFC3339 so the frontend's
+// relative-time helper can consume the timestamp directly.
+func conversationSummaryToDTO(s ConversationSummary) conversationSummaryDTO {
+	return conversationSummaryDTO{
+		ConversationID: s.ConversationID,
+		LastActivityAt: s.LastActivityAt.UTC().Format(time.RFC3339),
+		TurnCount:      s.TurnCount,
+	}
 }
 
 // errorEnvelope is the canonical error shape (mirrors
@@ -281,6 +344,125 @@ func streamURLFor(turnID string) string {
 	return "/api/agent/turns/" + turnID + "/events"
 }
 
+// reloadConversationResponse is the wire body of GET
+// /api/agent/conversations/:id on the happy path (200 OK). The
+// shape is exactly the JSON array of ExchangeDTO — wrapped here as
+// a named slice so the JSON encoder emits `[]`, not `null`, on the
+// empty case (an authenticated participant with zero recorded
+// exchanges never hits this path: that case is unknown → 404, not
+// empty → 200; the empty 200 only ever happens with zero rows on
+// the list endpoint).
+type reloadConversationResponse = []exchangeDTO
+
+// listConversationsResponse is the wire body of GET
+// /api/agent/conversations on the happy path (200 OK). A non-nil
+// empty slice ensures the JSON encoder emits `[]` not `null` — the
+// S-CRI-004 / S-CCS-018 contract ("the list is empty, AND the
+// response is a success rather than a not-found").
+type listConversationsResponse = []conversationSummaryDTO
+
+// HandleReloadConversation is the CH-08.1 GET handler. R-CRI-001 +
+// S-CRI-001 / S-CRI-002.
+//
+// Behaviour:
+//   - 403 not_found if :id does not match the authenticated
+//     participant (R-CHS-004.b shape; refuse rather than probe
+//     existence)
+//   - 404 not_found if :id matches but the store returns
+//     ErrConversationNotFound (the participant's first GET before
+//     any Append has happened)
+//   - 200 []ExchangeDTO on hit; the slice is a fresh projection
+//     (no caller-side mutation can corrupt the store — NFR-CCS-004
+//     carries forward)
+//
+// The handler does NOT mutate store state. Reads only; the page's
+// Reload button is offline-only at v1 per the deferred register
+// (doct 0005's "Resumable mid-turn reconnect" row).
+func HandleReloadConversation(store ConversationStore) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ident, _ := getIdentity(c)
+		if ident == nil {
+			// Defence in depth: the identity middleware aborts the
+			// chain with 401 if Identity is missing, so a non-nil
+			// ident is the contract. This branch is unreachable in
+			// production; a violation here means the routing was
+			// changed without also fixing this handler.
+			return writeError(c, http.StatusUnauthorized, "server",
+				"identity not resolved", nil)
+		}
+		requestedID := strings.TrimSpace(c.Param("id"))
+		if requestedID == "" {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"id is required", map[string]string{"id": "required"})
+		}
+
+		// Cross-participant guard (R-CRI-001 + R-CHS-004.b shape).
+		// The participant reads ONLY their own conversation. The
+		// refusal is 403 not_found — identical to a truly-
+		// nonexistent :id, so existence is not leaked.
+		if requestedID != ident.ParticipantID() {
+			return writeError(c, http.StatusForbidden, "not_found",
+				"conversation not found", nil)
+		}
+
+		// Same participant — call the store.
+		exchanges, err := store.Load(requestedID)
+		if err != nil {
+			if errors.Is(err, ErrConversationNotFound) {
+				return writeError(c, http.StatusNotFound, "not_found",
+					"conversation not found", nil)
+			}
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to load conversation", nil)
+		}
+
+		dtos := make(reloadConversationResponse, len(exchanges))
+		for i, ex := range exchanges {
+			dtos[i] = exchangeToDTO(ex)
+		}
+		return c.JSON(http.StatusOK, dtos)
+	}
+}
+
+// HandleListConversations is the CH-08.2 GET handler. R-CRI-002 +
+// S-CRI-003 / S-CRI-004.
+//
+// Behaviour:
+//   - 401 not_found if the identity middleware has no resolved
+//     identity (defence in depth; the middleware aborts the chain
+//     before this handler runs)
+//   - 200 []ConversationSummaryDTO on hit, sorted most-recent-first
+//     by the adapter (D-3 — chat_conversations.updated_at DESC)
+//   - The empty list is 200 [], NEVER 404 (S-CRI-004 / S-CCS-018
+//     verdict: "the response is a success rather than a not-found")
+//
+// The handler does NOT mutate store state.
+func HandleListConversations(store ConversationStore) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ident, _ := getIdentity(c)
+		if ident == nil {
+			return writeError(c, http.StatusUnauthorized, "server",
+				"identity not resolved", nil)
+		}
+
+		summaries, err := store.List(ident.ParticipantID())
+		if err != nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to list conversations", nil)
+		}
+
+		// Defensive copy: store.List already returns a defensive
+		// copy (NFR-CCS-004), but projecting to DTOs produces a
+		// fresh slice regardless. Empty input → empty output
+		// (non-nil) so the JSON encoder emits `[]` not `null`.
+		dtos := make(listConversationsResponse, 0, len(summaries))
+		for _, s := range summaries {
+			dtos = append(dtos, conversationSummaryToDTO(s))
+		}
+		return c.JSON(http.StatusOK, dtos)
+	}
+}
+
 // RegisterRoutes wires every route this file owns onto e. The
 // identityMiddleware runs on every route. CH-04 calls this from the
 // composition root with the production IdentityResolver and a
@@ -307,4 +489,34 @@ func RegisterRoutes(e *echo.Echo, resolver IdentityResolver, newConv Conversatio
 	api.DELETE("/turns/:id", HandleCancelTurn(registry))
 
 	return registry, nil
+}
+
+// RegisterResumeRoutes wires the CH-08 read surface onto e. Both
+// routes go behind the existing `identityMiddleware`; the same one
+// the CH-03 routes ride (no second middleware instance). The store
+// is the same `ConversationStore` the composition root already holds
+// — the resume handlers are read-only over the same adapter.
+//
+// The CH-03 signature is preserved byte-unchanged (R-CCS-010 closed
+// surface); the resume surface is additive (R-CCS-013 + the
+// extension-namespace the spec reserves for additive widens). The
+// composition root (cmd/chat/main.go) is the single place that
+// calls both RegisterRoutes and RegisterResumeRoutes.
+func RegisterResumeRoutes(e *echo.Echo, resolver IdentityResolver, store ConversationStore) error {
+	if e == nil {
+		return errors.New("chat: RegisterResumeRoutes requires a non-nil *echo.Echo")
+	}
+	if resolver == nil {
+		return errors.New("chat: RegisterResumeRoutes requires a non-nil IdentityResolver")
+	}
+	if store == nil {
+		return errors.New("chat: RegisterResumeRoutes requires a non-nil ConversationStore")
+	}
+
+	api := e.Group("/api/agent", identityMiddleware(resolver))
+
+	api.GET("/conversations/:id", HandleReloadConversation(store))
+	api.GET("/conversations", HandleListConversations(store))
+
+	return nil
 }

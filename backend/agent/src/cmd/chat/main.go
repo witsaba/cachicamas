@@ -251,6 +251,18 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	}
 	_ = registry // held for future graceful-shutdown hooks; CH-04 has no per-turn cleanup
 
+	// CH-08 (closes R-14, R-16): the resume read surface — two GET
+	// endpoints behind the same identityMiddleware. The store is the
+	// same adapter the factory closure consumes; RegisterResumeRoutes
+	// only registers the routes (it does not own the store's
+	// lifecycle). The factory closure body above is BYTE-UNCHANGED
+	// from CH-07 — that is the proof the swap was a swap (R-CCS-010);
+	// CH-08 widens the HTTP surface but does not touch the
+	// per-participant lifecycle.
+	if err := chat.RegisterResumeRoutes(e, resolver, chatStore); err != nil {
+		return fmt.Errorf("chat.RegisterResumeRoutes: %w", err)
+	}
+
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
 	startErr := startAndWait(e, ":"+cfg.Port)
 
