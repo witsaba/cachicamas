@@ -350,12 +350,53 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 	// otherwise processed, so the terminal chunk itself — which SETS
 	// terminalSeen for the first time, on this same call — never trips
 	// either row.
+	//
+	// Row 2 carries one documented widening beyond the strict OpenAI
+	// streaming spec: OpenRouter (and the Google / Anthropic-with-usage
+	// providers it fronts) emits a usage-enrichment chunk AFTER the
+	// terminal chunk on several routes (notably google/gemini-3.7-flash
+	// and anthropic/claude-* with usage blocks). That enrichment chunk
+	// re-asserts the same finish_reason ("stop") alongside its usage
+	// payload. The strict-spec reading of R-ATS-020 row 2 is to fail the
+	// stream on this duplicate, which here would mean firing
+	// errDuplicateClose, aborting the stream, and discarding the
+	// already-streamed text — the user-visible symptom is a frontend
+	// empty assistant bubble with a trailing `event: error` frame.
+	//
+	// The safe disposition is to accept the duplicate AS A NO-OP when it
+	// carries no NEW information beyond the duplicate finish_reason:
+	// empty (or absent / null) delta.content AND no delta.tool_calls.
+	// The carrier has already seen terminalSeen=true and the completion
+	// event has either been emitted on the terminal chunk itself or is
+	// about to be minted by buildCompletion at the sentinel; passing the
+	// enrichment chunk through silently lets usage arrive via the same
+	// chunk (usage is mapped earlier in this method, ahead of the
+	// terminal-window check) without losing the text already streamed.
+	// Repeated delta.role on the duplicate chunk is benign — wireDelta
+	// has no Role field, so encoding/json drops it — and is also
+	// implicitly accepted by this widening.
+	//
+	// Chunks that duplicate finish_reason WHILE carrying new content (a
+	// non-empty content string, or any tool_calls element) still fail
+	// with errDuplicateClose — only the "duplicate with no new info"
+	// shape is widened. errDeltaAfterClose below is likewise UNCHANGED:
+	// a non-null content key (even an empty "") AFTER terminal still
+	// fires row 1; only the duplicate-finish_reason check is widened.
 	if s.terminalSeen {
+		if choice.FinishReason != nil {
+			// Row 2, narrowed: only the "duplicate with new info" shape
+			// fails. A no-new-info duplicate (OpenRouter usage enrichment)
+			// is absorbed — see comment block above.
+			if len(choice.Delta.ToolCalls) > 0 {
+				return nil, errDuplicateClose
+			}
+			if text, present := contentText(choice.Delta.Content); present && text != "" {
+				return nil, errDuplicateClose
+			}
+			return events, nil
+		}
 		if _, present := contentText(choice.Delta.Content); present {
 			return nil, errDeltaAfterClose
-		}
-		if choice.FinishReason != nil {
-			return nil, errDuplicateClose
 		}
 		// Tool-call elements in the terminal window are an analogous
 		// violation (D4). The terminal chunk itself may legally carry
