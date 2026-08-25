@@ -248,20 +248,81 @@ export async function submitTurn(
 export async function cancelTurn(
   req: ChatCancelRequest,
 ): Promise<ApiResult<null>> {
-  let res: Response;
-  try {
-    res = await stateChangingFetch(fullUrl(`/api/agent/turns/${encodeURIComponent(req.id)}`), {
-      method: "DELETE",
-      keepalive: true,
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      kind: "offline",
-      message: offlineMessage(err),
-    };
-  }
-  return envelopeToResult(res, async () => null);
+	let res: Response;
+	try {
+		res = await stateChangingFetch(fullUrl(`/api/agent/turns/${encodeURIComponent(req.id)}`), {
+			method: "DELETE",
+			keepalive: true,
+		});
+	} catch (err) {
+		return {
+			ok: false,
+			kind: "offline",
+			message: offlineMessage(err),
+		};
+	}
+	return envelopeToResult(res, async () => null);
+}
+
+// ---------------------------------------------------------------------------
+// CH-10 POST /api/agent/turns/:id/permissions/:callID (R-CPM-004, D-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * CH-10 — the closed 2-value vocabulary for permission decisions
+ * (D-12 collapse of Layer 2's 4-value PermissionOutcome). The
+ * HTTP body carries exactly one of these strings; out-of-vocab
+ * values yield 422 validation (S-CPM-013).
+ */
+export type PermissionDecisionOutcome = "allow_once" | "deny";
+
+/**
+ * Submit a permission decision for a parked tool (R-CPM-004).
+ *
+ * The participant's click on the inline `hold` row triggers this
+ * call. The backend writes the verdict into the chat-owned policy
+ * state, then wakes the parked gate via conv.Scheduler().WakeParked
+ * (D-11). On success the parked tool resumes; the wire carries
+ * the resulting `permission.decision.made` event (mirrored locally
+ * by the click — the SSE event closes the hold entry).
+ *
+ * Responses:
+ *   - 200 OK — verdict recorded; WakeParked returned nil.
+ *   - 403 not_found — cross-participant (R-CHS-004.b shape).
+ *   - 404 not_found — unknown callID; WakeParked returned
+ *     ErrStrayDecision (parked entry was already cleared or never
+ *     parked).
+ *   - 409 conflict — second click on the same callID; RecordVerdict
+ *     returned ErrDecisionAlreadyMade (S-CPM-017a.5).
+ *   - 422 validation — outcome outside the closed 2-value vocab.
+ */
+export async function submitPermissionDecision(
+  turnID: string,
+  callID: string,
+  outcome: PermissionDecisionOutcome,
+): Promise<ApiResult<null>> {
+	let res: Response;
+	try {
+		res = await stateChangingFetch(
+			fullUrl(
+				`/api/agent/turns/${encodeURIComponent(turnID)}/permissions/${encodeURIComponent(callID)}`,
+			),
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ outcome }),
+			},
+		);
+	} catch (err) {
+		return {
+			ok: false,
+			kind: "offline",
+			message: offlineMessage(err),
+		};
+	}
+	return envelopeToResult(res, async () => null);
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +350,11 @@ export type ChatOfflineHandler = (message: string) => void;
 // model into 2 chat-side events per call. The reserved variants exist
 // so a future long-running MCP tool can land here without a wire
 // shape change.
+//
+// CH-10 (REQ-12, REQ-13, NFR-CPM-003 wire-fragmentation guard) —
+// two new event names. The lockstep invariant
+// `KNOWN_EVENTS.length === parseTranscript switch arms === eventsource.go wireFrameName switch cases`
+// is verified by S-CPM-022 (chat-api.spec.ts + wire_fragmentation_test.go).
 const KNOWN_EVENTS = [
   "message.start",
   "message.delta",
@@ -299,6 +365,8 @@ const KNOWN_EVENTS = [
   "tool.call.delta",
   "tool.call.end",
   "tool.result",
+  "permission.decision.required",
+  "permission.decision.made",
 ] as const;
 
 type KnownEventName = (typeof KNOWN_EVENTS)[number];

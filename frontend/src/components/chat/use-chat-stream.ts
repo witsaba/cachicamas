@@ -266,6 +266,57 @@ export function useChatStream(
             // shape change that DOES emit them doesn't crash.
             return;
           }
+          // CH-10 (R-CPM-003, D-4) — permission event family.
+          // The "required" event opens a `hold` entry whose
+          // decision starts at "waiting"; the "made" event
+          // morphs the same entry's decision to "allowed" or
+          // "denied". The frontend hold entry's id is the
+          // wire's wireCallId (stable across the lifetime of
+          // the row). The "made" event also suppresses the
+          // matching tool.result entry's rendering for "deny"
+          // (D-8 collapse mirror; Layer 2 emits both
+          // permission_decision_made{deny} AND
+          // tool_end_execution_failure for the same callID,
+          // and the user-facing surface is the hold alone).
+          case "permission.decision.required": {
+            const newId = `hold-${ev.wireCallId}`;
+            state.entries = [
+              ...state.entries,
+              {
+                kind: "hold",
+                id: newId,
+                tool: ev.tool,
+                intent: ev.tool,
+                args: parseArgs(ev.arguments),
+                risk: "",
+                decision: "pending",
+              },
+            ];
+            return;
+          }
+          case "permission.decision.made": {
+            const holdId = `hold-${ev.wireCallId}`;
+            const newDecision: "granted" | "denied" =
+              ev.outcome === "allow_once" ? "granted" : "denied";
+            state.entries = state.entries.map((e) =>
+              e.id === holdId && e.kind === "hold"
+                ? { ...e, decision: newDecision }
+                : e,
+            );
+            // D-8 mirror: on Deny, drop any tool entry for the
+            // same wireCallId that arrived between required and
+            // made. The chat projector suppressed the wire event
+            // (see chat/projection.go D-8 suppression), but a
+            // previously-buffered tool entry from a parallel
+            // emission would still render. Defence in depth.
+            if (newDecision === "denied") {
+              const toolId = `tool-${ev.wireCallId}`;
+              state.entries = state.entries.filter(
+                (e) => !(e.id === toolId && e.kind === "tool"),
+              );
+            }
+            return;
+          }
           case "message.start":
           case "turn.end":
           case "error": {
