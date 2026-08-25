@@ -1,6 +1,10 @@
 // CH-02.1 — the wire vocabulary: the five shapes the projector emits onto,
 // mirroring frontend-chat-layer1's frozen wire contract (chat-types.ts:27-32,
 // :36-43). R-CCP-003, R-CCP-006, R-CCP-007.
+//
+// Wire JSON keys are camelCase to match the frontend-chat-layer1 contract in
+// `frontend/src/lib/chat-types.ts`. Do not add fields without updating the
+// corresponding TS type.
 
 package chat
 
@@ -18,8 +22,8 @@ type WireEvent interface {
 // Index is the archetype's per-message counter (R-CCP-005) — always 0 in a
 // v1 single-message turn, never Layer 2's own per-fragment index.
 type MessageStart struct {
-	MessageID string
-	Index     int
+	MessageID string `json:"messageId"`
+	Index     int    `json:"index"`
 }
 
 func (MessageStart) isWireEvent() {}
@@ -28,8 +32,8 @@ func (MessageStart) isWireEvent() {}
 // Index carries the same archetype-minted meaning as MessageStart's own
 // field (R-CCP-005) — deliberately not Layer 2's own per-fragment idx (D8).
 type MessageDelta struct {
-	Index int
-	Delta string
+	Index int    `json:"index"`
+	Delta string `json:"delta"`
 }
 
 func (MessageDelta) isWireEvent() {}
@@ -39,8 +43,8 @@ func (MessageDelta) isWireEvent() {}
 // run-level reason, and "stop" is truthful at message granularity — the
 // message ended because its text completed.
 type MessageEnd struct {
-	Index        int
-	FinishReason string
+	Index        int    `json:"index"`
+	FinishReason string `json:"finishReason"`
 }
 
 func (MessageEnd) isWireEvent() {}
@@ -49,9 +53,11 @@ func (MessageEnd) isWireEvent() {}
 // run (R-CCP-006). FinishReason is present — derived from Harness.Run's own
 // returned ai.FinishReason (D5) — for a completed run, and absent (a nil
 // pointer) for a cancelled one: absence is the cancellation discriminator
-// and MUST NOT be replaced by a minted "unknown".
+// and MUST NOT be replaced by a minted "unknown". The omitempty tag keeps
+// the cancellation discriminator observable on the wire (a missing key, not
+// `null`) and matches what frontend-chat-layer1 already special-cases.
 type TurnEnd struct {
-	FinishReason *string
+	FinishReason *string `json:"finishReason,omitempty"`
 }
 
 func (TurnEnd) isWireEvent() {}
@@ -62,8 +68,8 @@ func (TurnEnd) isWireEvent() {}
 // fixed, archetype-owned phrases — never provider-authored text (R-CCP-008,
 // D6).
 type Error struct {
-	Kind    string
-	Message string
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
 func (Error) isWireEvent() {}

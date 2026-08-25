@@ -110,27 +110,27 @@ func TestWriteFrame_AllVariants(t *testing.T) {
 		{
 			name: "MessageStart",
 			ev:   chat.MessageStart{MessageID: "msg-1", Index: 0},
-			want: `event: message.start` + "\n" + `data: {"MessageID":"msg-1","Index":0}` + "\n\n",
+			want: `event: message.start` + "\n" + `data: {"messageId":"msg-1","index":0}` + "\n\n",
 		},
 		{
 			name: "MessageDelta",
 			ev:   chat.MessageDelta{Index: 0, Delta: "hi"},
-			want: `event: message.delta` + "\n" + `data: {"Index":0,"Delta":"hi"}` + "\n\n",
+			want: `event: message.delta` + "\n" + `data: {"index":0,"delta":"hi"}` + "\n\n",
 		},
 		{
 			name: "MessageEnd",
 			ev:   chat.MessageEnd{Index: 0, FinishReason: chat.FinishReasonStop},
-			want: `event: message.end` + "\n" + `data: {"Index":0,"FinishReason":"stop"}` + "\n\n",
+			want: `event: message.end` + "\n" + `data: {"index":0,"finishReason":"stop"}` + "\n\n",
 		},
 		{
 			name: "TurnEnd",
 			ev:   chat.TurnEnd{FinishReason: nil},
-			want: `event: turn.end` + "\n" + `data: {"FinishReason":null}` + "\n\n",
+			want: `event: turn.end` + "\n" + `data: {}` + "\n\n",
 		},
 		{
 			name: "Error",
 			ev:   chat.Error{Kind: "server", Message: "boom"},
-			want: `event: error` + "\n" + `data: {"Kind":"server","Message":"boom"}` + "\n\n",
+			want: `event: error` + "\n" + `data: {"kind":"server","message":"boom"}` + "\n\n",
 		},
 	}
 
