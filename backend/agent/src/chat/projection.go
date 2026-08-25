@@ -71,6 +71,59 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 		case agent.EventKindMessageEndText:
 			out <- MessageEnd{Index: msgIndex, FinishReason: FinishReasonStop}
 
+		// CH-09 — RED scaffold #2 (T-02). Five arm stubs for the
+		// Layer-2 tool-event family (EventKindToolStart, Progress,
+		// EndSuccess, EndResultFailure, EndExecutionFailure). The
+		// arms produce placeholder chat-side events — the chat wire
+		// collapses Layer 2's 5-event-per-call bracket model into 2
+		// chat-side events per call (ToolCallStart + ToolResult)
+		// per D-6, with EventKindToolProgress dropped at the chat
+		// wire per NFR-CTS-002. Production arms land in T-04; this
+		// scaffold exists to assert the projector compiles against
+		// the four new WireEvent variants added in T-01.
+		case agent.EventKindToolStart:
+			start, _ := ev.ToolStart()
+			out <- ToolCallStart{
+				WireCallID: start.CallID(),
+				Tool:       start.Name(),
+				Arguments:  string(start.Arguments()),
+			}
+
+		case agent.EventKindToolProgress:
+			// D-6 / NFR-CTS-002 — ToolProgress is DROPPED at the chat
+			// wire (no explicit chat-side event; falls through `default`
+			// arm's "unmapped agent event" log). Scaffold #2's
+			// placeholder is identical to the production posture:
+			// emit nothing on this branch. T-04 keeps this as the
+			// production implementation (verified by S-CTS-009).
+			_ = ev
+
+		case agent.EventKindToolEndSuccess:
+			end, _ := ev.ToolEndSuccess()
+			out <- ToolResult{
+				WireCallID: end.CallID(),
+				Outcome:    agent.ToolOutcomeSuccess.String(),
+				Content:    string(end.Result()),
+			}
+
+		case agent.EventKindToolEndResultFailure:
+			end, _ := ev.ToolEndResultFailure()
+			out <- ToolResult{
+				WireCallID: end.CallID(),
+				Outcome:    agent.ToolOutcomeResultFailure.String(),
+				Content:    string(end.Result()),
+			}
+
+		case agent.EventKindToolEndExecutionFailure:
+			end, _ := ev.ToolEndExecutionFailure()
+			failure, _ := end.Failure()
+			out <- ToolResult{
+				WireCallID:      end.CallID(),
+				Outcome:         agent.ToolOutcomeExecutionFailure.String(),
+				Content:         "",
+				FailureCategory: failure.Category().String(),
+			}
+
 		case agent.EventKindRunEnd:
 			// Held, not projected here: the terminal wire event is built
 			// at the single site below, once Harness.Run's own returned
