@@ -142,13 +142,17 @@ var ErrNilStore = errors.New("chat: Config.Store is required")
 var ErrEmptyParticipantID = errors.New("chat: Config.ParticipantID is required")
 
 // ConversationStore is the port the chat archetype owns (R-CCS-010,
-// additively widened by R-CCS-013). The originally-closed two-method
-// surface is extended by a third method `List`; future widens MUST
-// follow the same additive pattern (R-CCS-013's "extending, not
-// replacing, this declaration" anticipatory clause). CH-07's postgres
-// adapter implements the first two methods against a real database;
-// CH-08 widens it again with `List` for the participant-scoped listing
-// surface (CH-08.2, R-CRI-002).
+// additively widened by R-CCS-013, R-CCS-017). The originally-closed
+// two-method surface is extended by a third method `List` (CH-08,
+// R-CRI-002) and a fourth method `UpdateSummary` (CH-10, R-CCS-017,
+// NFR-CPM-005 forward-only ADD COLUMN nullable affordance). Future
+// widens MUST follow the same additive pattern (R-CCS-013's
+// "extending, not replacing, this declaration" anticipatory clause).
+// CH-07's postgres adapter implements the first two methods against
+// a real database; CH-08 widens it again with `List` for the
+// participant-scoped listing surface (CH-08.2, R-CRI-002); CH-10
+// widens with `UpdateSummary` for the SummarizeConversationTool's
+// mutation target (D-9, R-CCS-017).
 type ConversationStore interface {
 	// Append records exchange for participantID. The store is
 	// responsible for assigning Exchange.Position (insertion order
@@ -174,6 +178,20 @@ type ConversationStore interface {
 	// carried forward) — caller-side mutation cannot corrupt the
 	// in-memory state.
 	List(participantID string) ([]ConversationSummary, error)
+
+	// UpdateSummary writes summary for participantID (R-CCS-017,
+	// D-9). The mutation target for SummarizeConversationTool — the
+	// tool's Run method calls this on the schema `{participantID,
+	// summary}`. The implementation writes the chat_conversations
+	// row's `summary` column (forward-only ADD COLUMN nullable per
+	// NFR-CPM-005 / 0003_summarize.sql) or the in-memory adapter's
+	// equivalent field.
+	//
+	// The method is additive: pre-CH-10 stores never see the call;
+	// CH-10 wires both adapters. A pre-existing row's summary
+	// column is NULL until the first UpdateSummary — the migration
+	// is nullable so an empty value is the legitimate v1 default.
+	UpdateSummary(participantID, summary string) error
 }
 
 // ConversationSummary is the port-owned list projection (R-CCS-014).
@@ -196,10 +214,16 @@ type ConversationSummary struct {
 // locking is sufficient at v1's request rate. The activity map
 // tracks the per-participant LastActivityAt so List can return it
 // alongside TurnCount (R-CCS-013).
+//
+// CH-10 (R-CCS-017, D-9): a third map `summary` tracks the
+// per-participant summary string. The v1 in-memory equivalent of
+// chat_conversations.summary (the postgres sibling lives at
+// chat_conversations.summary, added by 0003_summarize.sql).
 type MemoryConversationStore struct {
 	mu       sync.Mutex
 	m        map[string][]Exchange
 	activity map[string]time.Time
+	summary  map[string]string
 }
 
 // NewMemoryConversationStore returns an empty in-memory store ready
@@ -209,6 +233,7 @@ func NewMemoryConversationStore() *MemoryConversationStore {
 	return &MemoryConversationStore{
 		m:        make(map[string][]Exchange),
 		activity: make(map[string]time.Time),
+		summary:  make(map[string]string),
 	}
 }
 
@@ -324,6 +349,39 @@ func (s *MemoryConversationStore) List(participantID string) ([]ConversationSumm
 		TurnCount:      len(src),
 	})
 	return out, nil
+}
+
+// UpdateSummary writes summary for participantID (R-CCS-017, D-9).
+// The in-memory equivalent of the postgres UPDATE chat_conversations
+// SET summary = $1 path. The map is guarded by s.mu; concurrent
+// UpdateSummary + Append + Load + List on the same store are
+// race-free under -race.
+//
+// The method is additive: pre-CH-10 stores never see the call.
+// CH-10 wires this adapter; the activity map is not bumped here
+// (UpdateSummary is a metadata write, not a turn — the
+// conversation's last activity remains the last Append time).
+func (s *MemoryConversationStore) UpdateSummary(participantID, summary string) error {
+	if participantID == "" {
+		return ErrEmptyParticipantID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.summary[participantID] = summary
+	return nil
+}
+
+// SummaryForTest returns the in-memory store's recorded summary for
+// participantID and whether one was recorded. Test-only surface
+// (production code MUST NOT use this; the wire-side reload reads
+// summaries via ConversationSummary's widened Summary field in
+// T-05a). Lives in the production file so tests can drive it
+// without exposing the underlying map.
+func (s *MemoryConversationStore) SummaryForTest(participantID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	got, ok := s.summary[participantID]
+	return got, ok
 }
 
 // ExchangesToHistory rebuilds a *agent.History from a recorded slice

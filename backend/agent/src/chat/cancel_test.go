@@ -27,7 +27,7 @@ func TestCancel_MidStream(t *testing.T) {
 	provider := agenttest.NewProvider(heldAfterTwoFragmentsScript(t, gate))
 
 	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -90,7 +90,7 @@ func TestCancel_AlreadyFinished(t *testing.T) {
 
 	provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"done"}, ai.FinishReasonStop))
 	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -118,7 +118,7 @@ func TestCancel_ConcurrentWithConsumption(t *testing.T) {
 	gate := agenttest.NewGate()
 	provider := agenttest.NewProvider(heldAfterTwoFragmentsScript(t, gate))
 	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}

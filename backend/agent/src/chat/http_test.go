@@ -137,7 +137,7 @@ func TestHandleOpenTurn_Valid(t *testing.T) {
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -175,7 +175,7 @@ func TestHandleOpenTurn_EmptyPrompt(t *testing.T) {
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -239,7 +239,7 @@ func TestHandleOpenTurn_Inflight409(t *testing.T) {
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -290,7 +290,7 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -341,7 +341,7 @@ func TestIdentityRefusal_401(t *testing.T) {
 	newConv := func(_ string) (*chat.Conversation, error) {
 		factoryCalled = true
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: ""}, newConv) // empty Participant id → refusal
 
@@ -380,7 +380,7 @@ func TestCrossParticipantRefusal_403(t *testing.T) {
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 
 	headerResolver := chat.HeaderParticipantResolver("X-Test-Participant")
@@ -478,7 +478,7 @@ func TestHandleCancelTurn_Unknown(t *testing.T) {
 
 	newConv := func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-http",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	}
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, newConv)
 
@@ -537,6 +537,7 @@ func resumeMountedServer(t *testing.T, resolver chat.IdentityResolver, store cha
 			Store:         chat.NewMemoryConversationStore(),
 			ParticipantID: "test-resume-factory",
 			ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 		})
 	})
 	if err != nil {

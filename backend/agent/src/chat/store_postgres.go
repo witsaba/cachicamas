@@ -589,3 +589,21 @@ func (s *PostgresConversationStore) loadToolResults(ctx context.Context, partici
 	}
 	return out, nil
 }
+
+// UpdateSummary writes summary for participantID (R-CCS-017, D-9).
+//
+// CH-10.1 (T-03a) — STUB: returns nil. The real implementation
+// (UPDATE chat_conversations SET summary = $1) lands in T-05b
+// alongside the 0003_summarize.sql migration (forward-only
+// ADD COLUMN nullable affordance per NFR-CPM-005). The stub keeps
+// the build green and lets the SummarizeConversationTool compile
+// against both adapters while the postgres path is staged.
+func (s *PostgresConversationStore) UpdateSummary(participantID, _ string) error {
+	if participantID == "" {
+		return ErrEmptyParticipantID
+	}
+	// T-05b GREEN replaces this body with the
+	// UPDATE chat_conversations SET summary = $1 ... statement
+	// after the 0003 migration has added the summary column.
+	return nil
+}

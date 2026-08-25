@@ -125,6 +125,7 @@ func RunConversationStoreScenarios(t *testing.T, store chat.ConversationStore) {
 			Store:         store,
 			ParticipantID: "scn-001-participant",
 			ToolSource:    chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 		})
 		if err != nil {
 			t.Fatalf("chat.NewConversation returned %v, want nil", err)

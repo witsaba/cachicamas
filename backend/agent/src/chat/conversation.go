@@ -31,7 +31,7 @@ const SystemPrompt = "You are the cachicamas chat assistant; answer the particip
 var ErrNilProvider = errors.New("chat: Config.Provider is required")
 
 // Config configures a Conversation (design AD-2 + CH-06 D-1, D-2 +
-// CH-09.1 D-1 + R-CTS-001).
+// CH-09.1 D-1 + R-CTS-001 + CH-10.1 D-1 + R-CPM-001).
 type Config struct {
 	// Provider is the model provider every turn streams from. Required.
 	Provider ai.ModelProvider
@@ -70,6 +70,17 @@ type Config struct {
 	// chat.FromAgentRegistry(agent.NewMapRegistry(...)); see
 	// cmd/chat/main.go for the production wire.
 	ToolSource ToolSource
+
+	// PermissionPolicy is the chat-owned port for the permission
+	// policy (CH-10.1, D-1, R-CPM-001). The conversation injects it
+	// into the harness's Turn.PermissionPolicy so Layer 2's gate
+	// (runPermissionGate, AG-10) consults it on every scheduled
+	// tool call. Required: nil is rejected by NewConversation with
+	// ErrNilPermissionPolicy (typed, never panic). Constructed once
+	// at the composition root via
+	// chat.NewDefaultPermissionPolicy(deferToolNames); see
+	// cmd/chat/main.go for the production wire.
+	PermissionPolicy PermissionPolicy
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
@@ -92,7 +103,8 @@ type Conversation struct {
 // NewConversation constructs a Conversation. cfg.Provider is required;
 // cfg.Store is required (R-CCS-001); cfg.ParticipantID is required and
 // non-whitespace (D-1); cfg.ToolSource is required (R-CTS-001,
-// CH-09.1); every other harness seam — including RetryAttempts, left
+// CH-09.1); cfg.PermissionPolicy is required (R-CPM-001, CH-10.1);
+// every other harness seam — including RetryAttempts, left
 // unset so defaultRetryAttempts applies (R-CCP-009) — is left at
 // CH-00's recorded v1 answer. Harness.Shutdown is never called by
 // this package (R-CCP-001): it latches a terminal, one-way refusal,
@@ -111,6 +123,9 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	if cfg.ToolSource == nil {
 		return nil, ErrNilToolSource
 	}
+	if cfg.PermissionPolicy == nil {
+		return nil, ErrNilPermissionPolicy
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -125,13 +140,20 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	// (agentRegistryAdapter or an in-test stub) satisfies both
 	// interfaces and Go's interface assignment accepts the value
 	// without an explicit conversion.
+	//
+	// CH-10.1 (D-1, R-CPM-001): chat.PermissionPolicy is a type alias
+	// of agent.PermissionPolicy; we hand the same value to
+	// harness.Turn.PermissionPolicy. The harness threads it into
+	// Schedule via the per-turn Continuation's field (CH-09.1 D-1
+	// precedent + CH-10.1 widening).
 	return &Conversation{
 		harness: &agent.Harness{
 			Provider: cfg.Provider,
 			System:   SystemPrompt,
 			History:  history,
 			Turn: agent.TurnOptions{
-				Tools: cfg.ToolSource,
+				Tools:           cfg.ToolSource,
+				PermissionPolicy: cfg.PermissionPolicy,
 			},
 		},
 		logger:        logger,
@@ -252,4 +274,22 @@ func (c *Conversation) IsInFlight() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.inFlight
+}
+
+// Scheduler returns the harness-owned *agent.Scheduler the HTTP
+// reverse-channel handler reaches to wake a parked permission gate
+// (R-CPM-001, D-11, R-CPM-004). Method-only — no stored field on
+// Conversation (D-11 option (b)); the harness's own Scheduler field
+// at `agent/harness.go:81` is the single source of truth. The
+// harness constructs a default Scheduler per Run when none was
+// injected (per-Run lazy construction at `agent/harness.go:446-449`),
+// so even a chat composition that doesn't inject a scheduler reaches
+// a live *agent.Scheduler through this accessor.
+//
+// The returned pointer is the same value Layer 2's gate wrote to
+// (when Schedule ran); WakeParked closes the parked channel for the
+// callID whose decision has just been recorded. Chat never mutates
+// the scheduler; this method is a pure pass-through.
+func (c *Conversation) Scheduler() *agent.Scheduler {
+	return c.harness.Scheduler
 }

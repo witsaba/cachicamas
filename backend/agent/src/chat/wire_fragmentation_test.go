@@ -129,6 +129,7 @@ func TestChat_NoToolEvents_NoToolWireFrames(t *testing.T) {
 		Store:         chat.NewMemoryConversationStore(),
 		ParticipantID: "scn-no-tool-frames",
 		ToolSource:    chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("NewConversation returned %v, want nil", err)

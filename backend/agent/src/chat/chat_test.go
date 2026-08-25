@@ -60,7 +60,7 @@ func TestChatHTTP_PostStreamCancelFlow(t *testing.T) {
 
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-chat",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	})
 
 	// POST opens the turn.
@@ -186,7 +186,7 @@ func TestChatHTTP_AlreadyTerminatedGet(t *testing.T) {
 
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: quick, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-chat",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	})
 
 	body, _ := json.Marshal(map[string]string{"id": "t-fast", "prompt": "hi"})
@@ -264,7 +264,7 @@ func TestChatHTTP_ClientDisconnectDoesNotLeakGoroutine(t *testing.T) {
 
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-chat",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	})
 
 	body, _ := json.Marshal(map[string]string{"id": "t-leak", "prompt": "hi"})
@@ -337,7 +337,7 @@ func TestChatHTTP_PostStreamCancelFlow_NaturalCompletion(t *testing.T) {
 
 	srv, _ := mountedServer(t, fixedResolver{ID: "alice"}, func(_ string) (*chat.Conversation, error) {
 		return chat.NewConversation(chat.Config{Provider: agenttest.NewProvider(scriptForOneTurn(t)), Store: chat.NewMemoryConversationStore(), ParticipantID: "test-chat",
-		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)), PermissionPolicy: chat.NewDefaultPermissionPolicy(nil)})
 	})
 
 	body, _ := json.Marshal(map[string]string{"id": "t-natural", "prompt": "hi"})

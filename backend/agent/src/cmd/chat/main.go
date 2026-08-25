@@ -230,9 +230,26 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// BYTE-UNCHANGED from CH-08 except for the new ToolSource line
 	// in chat.NewConversation's Config literal — R-CTS-001 + D-1 +
 	// R-CCS-010 closed-port posture preserved.
-	toolSource := chat.FromAgentRegistry(agent.NewMapRegistry(map[string]agent.Tool{
-		"current_time": chat.NewCurrentTimeTool(time.Now),
-	}))
+	//
+	// CH-10.1 (closes R-15 + R-CPM-001/002): the registry gains a
+	// second tool — summarize_conversation (D-2 G2, S-CTT-101..104).
+	// EffectClassMutate; writes the summary column on
+	// chat_conversations via the 4th port method UpdateSummary
+	// (R-CCS-017). SummarizeConversationTool is per-conversation
+	// (participantID is captured at construction), so the
+	// ToolSource is constructed INSIDE the factory closure —
+	// CH-09's `toolSource` shared-across-conversations pattern
+	// doesn't apply to stateful tools. The factory closure body
+	// gains exactly one line: a PermissionPolicy field on the
+	// Config literal (R-CPM-001 + S-CPM-003 composition-root-only
+	// discipline).
+	//
+	// CH-10.1 (D-2, G7, R-CPM-002): the chat-owned default
+	// permission policy. Defers for tools in deferToolNames; allows
+	// everything else synchronously with AllowOnce. Constructed
+	// once at composition root (S-CPM-003 discipline); the same
+	// value flows into every Conversation.
+	permissionPolicy := chat.NewDefaultPermissionPolicy([]string{"summarize_conversation"})
 
 	// closeStore is invoked AFTER otelShutdown so spans flush
 	// before the pool tears down (design D-E).
@@ -248,12 +265,21 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		if herr != nil {
 			return nil, herr
 		}
+		// CH-10.1: per-conversation ToolSource — the summarizer
+		// captures participantID at construction. CurrentTimeTool
+		// is stateless, so it shares a single instance across
+		// conversations.
+		toolSource := chat.FromAgentRegistry(agent.NewMapRegistry(map[string]agent.Tool{
+			"current_time":          chat.NewCurrentTimeTool(time.Now),
+			"summarize_conversation": chat.NewSummarizeConversationTool(chatStore, participantID),
+		}))
 		return chat.NewConversation(chat.Config{
-			Provider:       provider,
-			Store:          chatStore,
-			ParticipantID:  participantID,
-			InitialHistory: history,
-			ToolSource:     toolSource,
+			Provider:         provider,
+			Store:            chatStore,
+			ParticipantID:    participantID,
+			InitialHistory:   history,
+			ToolSource:       toolSource,
+			PermissionPolicy: permissionPolicy,
 		})
 	}
 

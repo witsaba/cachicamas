@@ -47,6 +47,7 @@ func TestToolSource_NilConfigReturnsErrNilToolSource(t *testing.T) {
 		Store:          chat.NewMemoryConversationStore(),
 		ParticipantID:  "scn-001-nil",
 		ToolSource:     nil,
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	}
 
 	conv, err := chat.NewConversation(cfg)

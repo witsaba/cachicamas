@@ -344,6 +344,7 @@ func TestConversationStore_RecordsTwoTurnsInOrder(t *testing.T) {
 		Store:         store,
 		ParticipantID: "alice",
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -403,6 +404,7 @@ func TestConversationStore_CancelledTurnCarriesPartialText(t *testing.T) {
 		Store:         store,
 		ParticipantID: "alice",
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -466,6 +468,7 @@ func TestConversationStore_FailedTurnAppendsLater(t *testing.T) {
 		Store:         store,
 		ParticipantID: "alice",
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
@@ -521,6 +524,7 @@ func TestConversationStore_LoadSeedsHistoryForThirdTurn(t *testing.T) {
 		Store:         store,
 		ParticipantID: "alice",
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn1-2) returned %v, want nil", err)
@@ -543,6 +547,7 @@ func TestConversationStore_LoadSeedsHistoryForThirdTurn(t *testing.T) {
 		ParticipantID: "alice",
 		InitialHistory: history,
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn3) returned %v, want nil", err)
@@ -626,6 +631,7 @@ func TestConversationStore_IdentifierMintedDuringTurnSurvivesReload(t *testing.T
 		Store:         store,
 		ParticipantID: "alice",
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn1) returned %v, want nil", err)
@@ -669,6 +675,7 @@ func TestConversationStore_IdentifierMintedDuringTurnSurvivesReload(t *testing.T
 		ParticipantID: "alice",
 		InitialHistory: history,
 		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
 	})
 	if err != nil {
 		t.Fatalf("chat.NewConversation (turn2) returned %v, want nil", err)
