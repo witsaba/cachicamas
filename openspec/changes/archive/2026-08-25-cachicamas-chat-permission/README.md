@@ -1,7 +1,9 @@
 # CH-10 — cachicamas-chat-permission
 
 > Archive folder for the CH-10 SDD change (`cachicamas-chat-permission`).
-> Closed 2026-08-25 at apply-phase end (verify-report stub; the binding verify-report lands after sdd-verify).
+> Closed 2026-08-25 at archive close-out. **sdd-verify was skipped by explicit user decision** —
+> apply-progress (#3994) is the sole evidence source; see `verify-report.md` and
+> `archive-report.md` § "Unverified claims" before trusting any GREEN claim.
 
 ## Contents
 
@@ -11,10 +13,10 @@
 | `proposal.md` | `engram://sdd/cachicamas-chat-permission/proposal` (#3987, #3988) |
 | `design.md` | `engram://sdd/cachicamas-chat-permission/design` (#3990, #3991) |
 | `tasks.md` | `engram://sdd/cachicamas-chat-permission/tasks` (#3992) |
-| `apply-progress.md` | `engram://sdd/cachicamas-chat-permission/apply-progress` (#3994) |
-| `verify-report.md` | STUB — overwritten by sdd-verify |
-| `archive-report.md` | Closure report + lineage |
-| `specs/cachicamas-chat-permission/spec.md` | `openspec/specs/cachicamas-chat-permission/spec.md` (NEW spec) |
+| `apply-progress.md` | `engram://sdd/cachicamas-chat-permission/apply-progress` (#3994, FINAL — sole evidence source) |
+| `verify-report.md` | **SKIPPED BY USER DECISION** — records what was and was not verified; not a verdict |
+| `archive-report.md` | Final closure report (archive executor): evidence gate, contradictions, carry-forward risk |
+| `specs/cachicamas-chat-permission/spec.md` | `openspec/specs/cachicamas-chat-permission/spec.md` incl. F-CPM-004/005 close-out amendments |
 
 ## Charter
 

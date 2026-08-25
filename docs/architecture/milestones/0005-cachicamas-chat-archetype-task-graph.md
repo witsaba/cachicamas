@@ -1012,6 +1012,7 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 | **MCP tool sources** | The CH-09 tool-source port — the seam ADR 0009 § D4 attaches to when this archetype or another reaches a business system | ADR 0009 § D4; register row 5 |
 | **Sandboxing of tool execution** | The execution seam Layer 2 already carries (v2 § 6 seam 3); v1's answer is "none", stated | CH-00.1 |
 | **Remembered permission decisions and rule sets** | The CH-10 permission policy port | CH-10's charter |
+| **A permission mode selector** (per-conversation allow-all / allow-none toggle) | The CH-10 permission policy port — `chat.NewDefaultPermissionPolicy(deferToolNames)` is the single construction site a selector would replace | CH-10's charter (row completed at archive close-out 2026-08-25; apply landed only the remembered-decisions row) |
 | **Provider and model selection by the participant** | The composition root's resolution point (CH-04.1); v1 selects one model from the environment | CH-04's charter |
 | **Cost and usage display** | The runtime's accounting seam and the price-table port doc 0004 defines; promoting it to shared Layer 3 code is a separate decision | v2 § 7 G10 |
 | **Conversation branching, renaming, deletion and search** | The CH-06 store port and CH-08.2's listing | CH-08's charter |

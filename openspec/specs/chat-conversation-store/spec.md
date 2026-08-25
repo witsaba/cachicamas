@@ -407,3 +407,53 @@ The defensive-copy semantics from NFR-CCS-004 MUST extend to the two new fields:
 ## Untemporal-invariant register (CH-09 addition)
 
 The D-5 / CH-07-2 / CH-08 records above are preserved here as **absence markers**. The CH-09 amendment is additive only — see the CH-09 amendment header at the top of this file. R-CCS-015 widens `Exchange` with two new fields; R-CCS-016 widens the reload contract; the port's two-method surface (R-CCS-010, extended to N+1 by R-CCS-013) is not replaced. Future widens keep the additive pattern.
+
+---
+
+# CH-10 amendment — `cachicamas-chat-permission`
+
+> **Change**: `cachicamas-chat-permission` · **CH-10** (Wave 3, 11 of 12) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-10--approve-a-tool-call-from-the-browser) (`0005:936-947`)
+> **Amends**: this spec (`chat-conversation-store`) — **additive only**. **R-CCS-001…016 byte-unchanged**; **S-CCS-001…022 byte-unchanged**; **NFR-CCS-001…008 byte-unchanged**. New identifiers: **R-CCS-017**, **R-CCS-018**, **NFR-CCS-009**, **S-CCS-023**, **S-CCS-024**, **S-CCS-025**. Identifier-append-only per CH-07 / CH-08 / CH-09 precedent (`chat-conversation-store/spec.md:9, 14`, plus the three preceding amendment headers at `:14`, `:304-307`, `:361-364`). The widening is **a fourth method on the same port declaration** (R-CCS-017, additive per the R-CCS-013 N+1 precedent) and **one new optional field on `Exchange`** (R-CCS-018, additive per the R-CCS-015 / R-CCS-016 CH-09 precedent). No requirement on the existing port is replaced.
+>
+> **F-CPM-002/003 alignment** (recorded, design-time fixed in `cachicamas-chat-permission/spec.md` § "Spec defect F-CPM-002/003 resolution"): no spec-text changes to existing requirements R-CCS-001…016 are required. R-CCS-010/011/012/013/014/015/016 carry forward byte-clean. The chat projector suppression rule that closes F-CPM-002/003 lives in `chat/projection.go` and `use-chat-stream.ts` per R-CPM-008; this spec's contribution is the persistence widening that makes the persisted `Exchange` carry the per-`wireCallId` decision records.
+
+## ADDED Requirements
+
+### R-CCS-017 — `ConversationStore` widens with a fourth additive method `UpdateSummary`
+
+The `ConversationStore` interface (R-CCS-010, extended to N+1 by R-CCS-013, extended to N+2 here) MUST be widened by adding a fourth method `UpdateSummary(participantID string, summary string) error` to the same declaration. The three existing methods `Append`, `Load`, and `List` MUST remain byte-unchanged. `MemoryConversationStore` (R-CCS-002) and `PostgresConversationStore` (R-CCS-011) MUST both implement `UpdateSummary`. `MemoryConversationStore.UpdateSummary` MUST look up the conversation by `participantID`, store the `summary` string on the `ConversationSummary` projection (R-CCS-014), and return `chat.ErrConversationNotFound` if no conversation is registered under that id (mirrors `Load`'s not-found shape from R-CCS-001 / S-CCS-006). `PostgresConversationStore.UpdateSummary` MUST execute `UPDATE chat_conversations SET summary = $1, updated_at = NOW() WHERE participant_id = $2` against the existing schema. The forward-only migration `backend/agent/src/chat/migrations/0003_summarize.sql` MUST add `summary TEXT` (nullable) to `chat_conversations` (NFR-CCS-006 affordance; an `ADD COLUMN nullable` is the documented forward-only allowance per `openspec/AGENTS.md` "Substrate preservation in `backend/agent`" paragraph on CH-07's `pgx/v5` admission precedent). The widening is **additive** — it does not replace R-CCS-010's two-method surface, R-CCS-013's three-method surface, or R-CCS-015/016's `Exchange` field widenings; future widens MUST follow the same additive pattern. Source of truth for the method shape: `cachicamas-chat-permission/spec.md` R-CPM-006 / Q1 resolution at decision #3983.
+
+### R-CCS-018 — `chat.Exchange` widens with `[]PermissionDecisionRecord`
+
+The `chat.Exchange` struct (`backend/agent/src/chat/store.go:41-50`, already widened by CH-09 to 12 fields with `ToolCalls`/`ToolResults` per R-CCS-015) MUST widen additively with a new field `PermissionDecisions []PermissionDecisionRecord`. `PermissionDecisionRecord` MUST carry `WireCallID string`, `Tool string`, and `Outcome string`. `Outcome` MUST be one of the chat wire's closed 2-value vocabulary `"allow_once" | "deny"` (the D-12 Layer-2 outcome collapse has already happened at the projector per `cachicamas-chat-permission/spec.md` R-CPM-003; persistence only sees the collapsed form, never Layer 2's 4-value vocabulary). The twelve pre-existing fields MUST remain byte-unchanged. The forward-only sibling table `chat_permission_decisions` MUST be created by `backend/agent/src/chat/migrations/0004_permission_decisions.sql`, keyed by `(participant_id, exchange_position, position)` with FK to `chat_exchanges (participant_id, position) ON DELETE CASCADE` (mirrors `chat/migrations/0002_tool_records.sql:60` template). The migration MUST include a `chat_permission_decisions_lookup_idx` index on `(participant_id, exchange_position)` to keep the per-exchange lookup bounded. `MemoryConversationStore.Append` MUST round-trip the new field; `PostgresConversationStore.Append` MUST INSERT sibling-table rows in the same transaction as the `chat_exchanges` INSERT (mirrors CH-09's `chat_tool_calls`/`chat_tool_results` sibling-table transaction at `store_postgres.go:263-303`). Source of truth for the field shape: `cachicamas-chat-permission/spec.md` R-CPM-006.
+
+### NFR-CCS-009 — Defensive copy on `Load` extends to `PermissionDecisions`
+
+The defensive-copy semantics from NFR-CCS-004 (CH-06) and NFR-CCS-008 (CH-09 carry) MUST extend to the new `PermissionDecisions` field: `MemoryConversationStore.Load` (`backend/agent/src/chat/store.go:249-264`) MUST return exchanges whose `PermissionDecisions` slice is byte-equal to the stored slice AND caller-side mutation of any record in the slice MUST NOT corrupt the store's state. The implementation MUST use a `copyPermissionDecisionRecords` helper in the same idiom as `copyToolCallRecords`/`copyToolResultRecords` from CH-09. `PostgresConversationStore.Load` MUST materialise a fresh slice from the `chat_permission_decisions` sibling-table rows; the returned slice is fresh per call (no aliasing of an internal buffer). Carries NFR-CCS-008 / NFR-CCS-004 forward. Mirrors `cachicamas-chat-permission/spec.md` NFR-CPM-004 / S-CPM-023.
+
+## Scenarios
+
+### S-CCS-023 — `UpdateSummary` round-trips through the store; load returns the summary verbatim (Gherkin verbatim, explore #3985)
+
+- Given an in-memory adapter recording no summary under participant `p`
+- When `UpdateSummary(p, "the participant asked about cats")` is called
+- And `Load(p)` is called
+- Then the returned conversation's `ConversationSummary.Summary` (or the `ConversationStore`-level read for the summary DTO) is byte-equal to `"the participant asked about cats"`
+- And a participant `p2` who has never called `UpdateSummary` sees `Load(p2).Summary == ""` (the empty / NULL column path; cross-participant isolation mirrors R-CHS-004.b)
+
+### S-CCS-024 — defensive copy on `Load` extends to `PermissionDecisions` (Gherkin verbatim, explore #3985; mirrors CH-09 S-CCS-020)
+
+- Given an in-memory adapter recording `Exchange{PermissionDecisions: [d1, d2]}` for participant `p` (with `d1.Outcome == "allow_once"`)
+- Then `Load(p)` returns the slice byte-equal to `[d1, d2]`
+- And when the caller mutates the returned `result[0].Outcome = "deny"`, a subsequent `Load(p)` returns the original `[d1, d2]` with `d1.Outcome == "allow_once"` unchanged — caller-side mutation does NOT corrupt the store (NFR-CCS-009 carries NFR-CCS-008 / NFR-CCS-004 forward)
+
+### S-CCS-025 — permission decisions never leak across participants (Gherkin verbatim, explore #3985; mirrors CH-09 S-CCS-022)
+
+- Given a recording under participant `p1` with `PermissionDecisions: [d1]`
+- When `Load("p2")` is called
+- Then `p2`'s slice contains no permission decisions from `p1` (R-CHS-004.b shape preserved)
+- And the postgres cross-process variant is gated `INTEGRATION=1` (CH-07.1 precedent — `S-CCS-021` mirror)
+
+## Untemporal-invariant register (CH-10 addition)
+
+The D-5 / CH-07-2 / CH-08 / CH-09 records above are preserved here as **absence markers**. The CH-10 amendment is additive only — see the CH-10 amendment header at the top of this section. R-CCS-017 widens the port to N+2 methods (not "opens" it; R-CCS-013's N+1 widening is preserved); R-CCS-018 widens `Exchange` with one new field (CH-09's R-CCS-015/016 two-field widening is preserved). The closed port's two-method surface from R-CCS-010 is **not replaced** — every existing requirement, scenario, and NFR from R-CCS-001…016 carries forward byte-clean. Future widens keep the additive pattern.
