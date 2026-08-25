@@ -88,19 +88,42 @@ function nextId(s: { seq: number }, prefix: "u" | "a"): string {
 
 /** Client-minted UUID for the cancellation key. SSR-safe via try/catch. */
 function newTurnId(): string {
-  try {
-    if (
-      typeof globalThis !== "undefined" &&
-      typeof (globalThis as { crypto?: Crypto }).crypto !== "undefined" &&
-      (globalThis as { crypto?: Crypto }).crypto &&
-      typeof (globalThis as { crypto?: Crypto }).crypto!.randomUUID === "function"
-    ) {
-      return (globalThis as { crypto: Crypto }).crypto!.randomUUID();
-    }
-  } catch {
-    // Crypto unavailable — fall through to the time-based id.
-  }
-  return `trn_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+	try {
+		if (
+			typeof globalThis !== "undefined" &&
+			typeof (globalThis as { crypto?: Crypto }).crypto !== "undefined" &&
+			(globalThis as { crypto?: Crypto }).crypto &&
+			typeof (globalThis as { crypto?: Crypto }).crypto!.randomUUID === "function"
+		) {
+			return (globalThis as { crypto: Crypto }).crypto!.randomUUID();
+		}
+	} catch {
+		// Crypto unavailable — fall through to the time-based id.
+	}
+	return `trn_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+}
+
+/**
+ * CH-09 — parseArgs converts the wire's `arguments` string (JSON
+ * object) into the entry's args tuple array. The wire carries the
+ * JSON text verbatim (chat.ToolCallStart.Arguments) per R-CTS-004
+ * / D-3; the transcript entry's args shape is a list of (key,
+ * value) tuples. Malformed JSON yields an empty tuple list; the
+ * tool's state stays "running" until tool.result arrives.
+ */
+function parseArgs(
+	jsonText: string,
+): readonly (readonly [string, string])[] {
+	if (!jsonText) return [];
+	try {
+		const obj = JSON.parse(jsonText) as Record<string, unknown>;
+		if (typeof obj !== "object" || obj === null) return [];
+		return Object.entries(obj).map(
+			([k, v]) => [k, String(v)] as readonly [string, string],
+		);
+	} catch {
+		return [];
+	}
 }
 
 export function useChatStream(
@@ -192,6 +215,55 @@ export function useChatStream(
                 ? { ...e, state: "final" as const }
                 : e,
             );
+            return;
+          }
+          // CH-09 (D-3, D-4, S-CTS-020) — tool.call.start opens a
+          // new "tool" entry; the entry's id is the wire call id so
+          // a later tool.result event can match and close it. v1
+          // does NOT emit tool.call.delta / tool.call.end (NFR-CTS-002
+          // / D-6 collapse); a future long-running MCP tool would
+          // emit them.
+          case "tool.call.start": {
+            const newId = `tool-${ev.wireCallId}`;
+            state.entries = [
+              ...state.entries,
+              {
+                kind: "tool",
+                id: newId,
+                tool: ev.tool,
+                intent: ev.tool,
+                args: parseArgs(ev.arguments),
+                state: "running",
+              },
+            ];
+            return;
+          }
+          case "tool.result": {
+            // CH-09 (D-3, S-CTS-021) — close the matching tool entry.
+            // success / result_failure → state "done"; execution_failure
+            // → state "failed" with the typed failure category.
+            // Provider text on failure MUST NOT leak (R-CCP-008 / D6
+            // mirror) — we carry the typed category, not the raw
+            // provider error.
+            const toolId = `tool-${ev.wireCallId}`;
+            const newState: "done" | "failed" =
+              ev.outcome === "execution_failure" ? "failed" : "done";
+            const resultText =
+              ev.outcome === "execution_failure"
+                ? ev.failureCategory
+                : ev.content;
+            state.entries = state.entries.map((e) =>
+              e.id === toolId && e.kind === "tool"
+                ? { ...e, state: newState, result: resultText }
+                : e,
+            );
+            return;
+          }
+          case "tool.call.delta":
+          case "tool.call.end": {
+            // Reserved variants (NFR-CTS-002 / D-6); v1's chat
+            // projector never emits them. No-op so a future wire
+            // shape change that DOES emit them doesn't crash.
             return;
           }
           case "message.start":

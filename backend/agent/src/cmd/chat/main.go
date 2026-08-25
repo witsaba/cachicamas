@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
@@ -188,13 +189,13 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 
 	resolver := NewResolver([]byte(cfg.AuthSecret), cfg.CookieName)
 
-	// CH-07 (closes R-08): the chat-owned Postgres adapter is the
-	// conversation store. The composition root dials the pool,
-	// pings, runs the chat-owned forward-only migrations, and
-	// constructs the adapter behind the same ConversationStore
-	// port the CH-06 in-memory adapter satisfied. The factory
-	// closure body below is BYTE-UNCHANGED from CH-06 — that is
-	// the proof the swap was a swap (R-CCS-010).
+// CH-07 (closes R-08): the chat-owned Postgres adapter is the
+// conversation store. The composition root dials the pool,
+// pings, runs the chat-owned forward-only migrations, and
+// constructs the adapter behind the same ConversationStore
+// port the CH-06 in-memory adapter satisfied. The factory
+// closure body below is BYTE-UNCHANGED from CH-06 — that is
+// the proof the swap was a swap (R-CCS-010).
 	db, err := sql.Open("pgx", cfg.ChatStoreDSN)
 	if err != nil {
 		return fmt.Errorf("open postgres for chat store: %w", err)
@@ -222,6 +223,17 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		_ = db.Close()
 		return fmt.Errorf("build postgres conversation store: %w", err)
 	}
+	// CH-09.1 (closes R-03, R-09 seam): the chat-owned tool source
+	// port wraps Layer 2's agent.Registry. The first tool is
+	// current_time (D-2) — proves the seam end-to-end with a
+	// fixed-injection clock. The factory closure body below is
+	// BYTE-UNCHANGED from CH-08 except for the new ToolSource line
+	// in chat.NewConversation's Config literal — R-CTS-001 + D-1 +
+	// R-CCS-010 closed-port posture preserved.
+	toolSource := chat.FromAgentRegistry(agent.NewMapRegistry(map[string]agent.Tool{
+		"current_time": chat.NewCurrentTimeTool(time.Now),
+	}))
+
 	// closeStore is invoked AFTER otelShutdown so spans flush
 	// before the pool tears down (design D-E).
 	factory := func(participantID string) (*chat.Conversation, error) {
@@ -241,6 +253,7 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 			Store:          chatStore,
 			ParticipantID:  participantID,
 			InitialHistory: history,
+			ToolSource:     toolSource,
 		})
 	}
 

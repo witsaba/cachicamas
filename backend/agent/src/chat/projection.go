@@ -71,6 +71,69 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 		case agent.EventKindMessageEndText:
 			out <- MessageEnd{Index: msgIndex, FinishReason: FinishReasonStop}
 
+		// CH-09 — Layer 2 tool-event family projection (T-04 GREEN;
+		// R-CTS-004, R-CTS-005, D-3, D-6, NFR-CTS-002). Five arms
+		// project Layer 2's 5-event-per-call tool bracket model:
+		//
+		//   - EventKindToolStart → ToolCallStart (wire id, tool name,
+		//     arguments bytes → string)
+		//   - EventKindToolProgress → DROPPED at the chat wire (D-6
+		//     collapse). No explicit case; falls through the
+		//     switch's default arm's "unmapped agent event" log.
+		//     Keeping NO explicit case is part of the deliberate
+		//     posture (NFR-CTS-002).
+		//   - EventKindToolEndSuccess → ToolResult{Outcome:"success"}
+		//   - EventKindToolEndResultFailure → ToolResult{Outcome:"result_failure"}
+		//   - EventKindToolEndExecutionFailure → ToolResult{Outcome:"execution_failure",
+		//     FailureCategory:failure.Category().String()}; Content is
+		//     empty — no provider text leaks (R-CCP-008 / D6 mirror).
+		//
+		// WireCallID carries the same value byte-for-byte from
+		// Layer 2's start call id to the chat-side ToolResult so
+		// the frontend can correlate ToolCallStart ↔ ToolResult
+		// (S-CTS-010..012).
+		case agent.EventKindToolStart:
+			start, _ := ev.ToolStart()
+			out <- ToolCallStart{
+				WireCallID: start.CallID(),
+				Tool:       start.Name(),
+				Arguments:  string(start.Arguments()),
+			}
+
+		case agent.EventKindToolProgress:
+			// D-6 / NFR-CTS-002 — ToolProgress is DROPPED at the chat
+			// wire. Deliberately no-op: emitting nothing on this
+			// branch is the production posture. The default arm
+			// below still records one "unmapped agent event" log so
+			// an operator can see ToolProgress landed if tracing.
+			_ = ev
+
+		case agent.EventKindToolEndSuccess:
+			end, _ := ev.ToolEndSuccess()
+			out <- ToolResult{
+				WireCallID: end.CallID(),
+				Outcome:    "success",
+				Content:    string(end.Result()),
+			}
+
+		case agent.EventKindToolEndResultFailure:
+			end, _ := ev.ToolEndResultFailure()
+			out <- ToolResult{
+				WireCallID: end.CallID(),
+				Outcome:    "result_failure",
+				Content:    string(end.Result()),
+			}
+
+		case agent.EventKindToolEndExecutionFailure:
+			end, _ := ev.ToolEndExecutionFailure()
+			failure, _ := end.Failure()
+			out <- ToolResult{
+				WireCallID:      end.CallID(),
+				Outcome:         "execution_failure",
+				Content:         "",
+				FailureCategory: failure.Category().String(),
+			}
+
 		case agent.EventKindRunEnd:
 			// Held, not projected here: the terminal wire event is built
 			// at the single site below, once Harness.Run's own returned

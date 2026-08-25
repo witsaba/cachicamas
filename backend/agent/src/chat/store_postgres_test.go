@@ -307,3 +307,85 @@ func TestPostgresConversationStore_CH08Scenarios_PassUnchanged(t *testing.T) {
 
 	RunConversationStoreScenarios(t, store)
 }
+
+// TestPostgresConversationStore_CH09Scenarios (INTEGRATION-gated) —
+// CH-09 S-CCS-021 cross-process round-trip for the new tool-call
+// fields. Appends through one adapter instance, reads back through
+// a separately constructed adapter (mirrors the CH-07.1 pattern
+// already in this file's TestPostgresConversationStore_AppendInsertsRow
+// integration micro-test). Verifies the sibling-table round-trip:
+//
+//   - chat_tool_calls rows are inserted at the right
+//     (participant_id, exchange_position, position) keys.
+//   - chat_tool_results rows are inserted at the same composite
+//     key with the closed outcome enum value.
+//   - Load reconstructs both slices in issuance order.
+//
+// Gated INTEGRATION=1 (postgres cross-process round-trip per
+// R-CCS-021).
+func TestPostgresConversationStore_CH09Scenarios(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (CH-09 S-CCS-021 postgres cross-process round-trip)")
+	}
+
+	dsn := chatPostgresTestDSN()
+
+	store1, closer1, err := chat.NewPostgresConversationStore(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore (writer): %v", err)
+	}
+	t.Cleanup(func() { _ = closer1() })
+
+	const participant = "scn-021-cross-process"
+	ex := chat.Exchange{
+		PromptText:    "what time is it",
+		AssistantText: "12:00",
+		TerminalKind:  chat.TerminalKindCompleted,
+		ToolCalls: []chat.ToolCallRecord{
+			{WireCallID: "c1", Tool: "current_time", Arguments: "{}"},
+			{WireCallID: "c2", Tool: "current_time", Arguments: "{}"},
+		},
+		ToolResults: []chat.ToolResultRecord{
+			{WireCallID: "c1", Tool: "current_time", Outcome: "success", Content: "2026-08-25T12:00:00Z"},
+			{WireCallID: "c2", Tool: "current_time", Outcome: "success", Content: "2026-08-25T12:00:01Z"},
+		},
+	}
+	if err := store1.Append(participant, ex); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+	_ = store1
+
+	// Separately constructed adapter (fresh *sql.DB) — confirms the
+	// round-trip survives connection-pool teardown.
+	store2, closer2, err := chat.NewPostgresConversationStore(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresConversationStore (reader): %v", err)
+	}
+	t.Cleanup(func() { _ = closer2() })
+
+	loaded, err := store2.Load(participant)
+	if err != nil {
+		t.Fatalf("Load returned %v, want nil", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("Load returned %d exchanges, want 1", len(loaded))
+	}
+	got := loaded[0]
+	if len(got.ToolCalls) != 2 {
+		t.Errorf("ToolCalls = %d, want 2 (S-CCS-021)", len(got.ToolCalls))
+	}
+	if len(got.ToolResults) != 2 {
+		t.Errorf("ToolResults = %d, want 2 (S-CCS-021)", len(got.ToolResults))
+	}
+	for i := range ex.ToolCalls {
+		if got.ToolCalls[i].WireCallID != ex.ToolCalls[i].WireCallID {
+			t.Errorf("ToolCalls[%d].WireCallID = %q, want %q", i, got.ToolCalls[i].WireCallID, ex.ToolCalls[i].WireCallID)
+		}
+		if got.ToolResults[i].Outcome != ex.ToolResults[i].Outcome {
+			t.Errorf("ToolResults[%d].Outcome = %q, want %q", i, got.ToolResults[i].Outcome, ex.ToolResults[i].Outcome)
+		}
+		if got.ToolResults[i].Content != ex.ToolResults[i].Content {
+			t.Errorf("ToolResults[%d].Content = %q, want %q", i, got.ToolResults[i].Content, ex.ToolResults[i].Content)
+		}
+	}
+}

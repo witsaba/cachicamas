@@ -355,3 +355,55 @@ The system MUST expose a `ConversationSummary` struct carrying `ConversationID s
 # Untemporal-invariant register (CH-08 addition)
 
 The D-5 / CH-07-2 records above are preserved here as **absence markers**. The CH-08 amendment is additive only — see the CH-08 amendment header at the top of this file. R-CCS-013 widens the port to N+1 methods, not "opens" it; future widens keep the additive pattern.
+
+---
+
+# CH-09 amendment — `cachicamas-chat-tool-source`
+
+> **Change**: `cachicamas-chat-tool-source` · **CH-09** (Wave 3, 10 of 12) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-09--offer-tools-through-a-tool-source-port) (`0005:923-934`)
+> **Amends**: this spec (`chat-conversation-store`) — **additive only**. **R-CCS-001..014 byte-unchanged**; **S-CCS-001..018 byte-unchanged**; **NFR-CCS-001..007 byte-unchanged**. New identifiers: **R-CCS-015**, **R-CCS-016**, **NFR-CCS-008**, **S-CCS-019**, **S-CCS-020**, **S-CCS-021**, **S-CCS-022**. Identifier-append-only per CH-07 / CH-08 precedent (`chat-conversation-store/spec.md:9`, `chat-conversation-store/spec.md:14`). The widening is **two new fields on the existing `Exchange` struct**, not a replacement of R-CCS-010's two-method surface, and not a replacement of R-CCS-007's append-before-`inFlight`-clear ordering.
+
+## ADDED Requirements
+
+### R-CCS-015 — `chat.Exchange` widens with `[]ToolCallRecord` and `[]ToolResultRecord`
+
+The `chat.Exchange` struct (`backend/agent/src/chat/store.go:41-50`) MUST widen additively with two new fields: `ToolCalls []ToolCallRecord` and `ToolResults []ToolResultRecord`. `ToolCallRecord` MUST carry `WireCallID string`, `Tool string`, and `Arguments string`. `ToolResultRecord` MUST carry `WireCallID string`, `Tool string`, `Outcome string` (one of `"success"`, `"result_failure"`, `"execution_failure"` — the closed vocabulary at `backend/agent/src/agent/tool_event.go:227-246`), `Content string`, and `FailureCategory string` (non-empty only when `Outcome == "execution_failure"`, mirroring R-CCP-008 / D6). The eight pre-existing fields MUST remain byte-unchanged (R-CCS-001 / R-CCS-007). The widening is **additive**; future widens follow the same pattern. Source of truth for the field shape: `cachicamas-chat-tool-source/spec.md` `R-CTS-006`.
+
+### R-CCS-016 — Reload replays tool-call records in issuance order; the participant's transcript on reload is byte-equal to the live transcript
+
+A reloaded exchange's `ToolCalls` and `ToolResults` slices MUST carry the records in the same issuance order in which the chat projector (`backend/agent/src/chat/projection.go`) emitted the corresponding `ToolCallStart` / `ToolResult` wire events. The reload surface at `GET /api/agent/conversations/:id` (CH-08.1, R-CRI-001) MUST return these slices intact; the chat page's `useChatStream.reset(entries)` seed MUST render tool entries from them after the assistant said entry (per `cachicamas-chat-tool-source/spec.md` `S-CTS-019`, mirrored as `S-FCL-014`). A re-append preserves them (per R-CCS-001's `Append` contract and `MemoryConversationStore.Append`'s `ex.Position = len(...)` discipline at `store.go:174-181`).
+
+### NFR-CCS-008 — Defensive copy on `Load` extends to the new fields
+
+The defensive-copy semantics from NFR-CCS-004 MUST extend to the two new fields: `MemoryConversationStore.Load` (`store.go:187-197`) MUST return slices whose `ToolCalls` and `ToolResults` are byte-equal to the stored slices AND caller-side mutation of either field MUST NOT corrupt the store's state. `PostgresConversationStore.Load` MUST apply the same defensive-copy discipline when materialising from `chat_tool_calls` + `chat_tool_results` (the sibling tables per `cachicamas-chat-tool-source/spec.md` `R-CTS-006`). Carries NFR-CCS-004 forward; NFR-CCS-006 (forward-only migration) governs the sibling-table migration.
+
+### Scenarios
+
+#### Scenario: S-CCS-019 — a turn with two tool calls round-trips through the store in issuance order (Gherkin verbatim, explore #3952)
+
+- Given a turn whose projection yields two tool calls and two results
+- When `Load(participantID)` reads back
+- Then each `Exchange.ToolCalls` and `Exchange.ToolResults` carries the records in issuance order
+- And a re-append preserves them
+
+#### Scenario: S-CCS-020 — defensive copy on `Load` extends to the new fields (Gherkin verbatim, explore #3952)
+
+- Given an in-memory adapter recording `Exchange{ToolCalls: [c1, c2], ToolResults: [r1, r2]}`
+- When `Load(p)` is called
+- Then the returned slice's `ToolCalls` / `ToolResults` fields are byte-equal to the input AND the caller's later mutation does not corrupt the store (NFR-CCS-008 carries NFR-CCS-004 forward)
+
+#### Scenario: S-CCS-021 — postgres adapter round-trips tool records across processes (Gherkin verbatim, explore #3952; gated `INTEGRATION=1`)
+
+- Given a postgres adapter recording `Exchange{ToolCalls: [...], ToolResults: [...]}`
+- When a separately constructed adapter reads back
+- Then both arrays match the input in order (cross-process round-trip, CH-07.1 precedent)
+
+#### Scenario: S-CCS-022 — tool records never leak across participants (Gherkin verbatim, explore #3952)
+
+- Given a recording under participant `p1` with tool calls
+- When `Load("p2")` is called
+- Then `p2`'s slice contains no tool calls from `p1` (R-CHS-004.b shape preserved)
+
+## Untemporal-invariant register (CH-09 addition)
+
+The D-5 / CH-07-2 / CH-08 records above are preserved here as **absence markers**. The CH-09 amendment is additive only — see the CH-09 amendment header at the top of this file. R-CCS-015 widens `Exchange` with two new fields; R-CCS-016 widens the reload contract; the port's two-method surface (R-CCS-010, extended to N+1 by R-CCS-013) is not replaced. Future widens keep the additive pattern.

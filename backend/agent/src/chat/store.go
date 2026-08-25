@@ -20,7 +20,7 @@ import (
 )
 
 // Exchange is the record ConversationStore.Append persists (D-7,
-// R-CCS-001, R-CCS-006). Eight fields round-trip through the reload
+// R-CCS-001, R-CCS-006). Ten fields round-trip through the reload
 // path: each field maps to a Gherkin scenario the spec enforces.
 // Cutting any field collapses one of those scenarios.
 //
@@ -38,6 +38,23 @@ import (
 //     nil on cancel/failed.
 //   - MessageIDs: MessageStart.MessageID().String() values minted
 //     during the turn (identifier-survival round-trip).
+//
+// CH-09 (R-CTS-006, R-CCS-015): two new fields widen the record
+// additively to carry tool-call records. The eight pre-existing
+// fields are byte-unchanged; identifier-append-only per CH-07 /
+// CH-08 precedent at chat-conversation-store/spec.md:9.
+//
+//   - ToolCalls: port-side projection of the wire's ToolCallDTO —
+//     one record per tool call the model emitted during the turn,
+//     in issuance order. Carries WireCallID, Tool, Arguments
+//     (byte-equal to what the wire emitted). NFR-CCS-008 / S-CTS-019
+//     bind the reload surface.
+//   - ToolResults: port-side projection of the wire's ToolResultDTO
+//     — one record per tool call's outcome (success /
+//     result_failure / execution_failure with a typed category
+//     string). Carries WireCallID, Tool, Outcome, Content,
+//     FailureCategory. Empty Content when Outcome is
+//     execution_failure (no provider text — R-CCP-008 / D6 mirror).
 type Exchange struct {
 	Position        int
 	PromptText      string
@@ -47,6 +64,35 @@ type Exchange struct {
 	FailureCategory ai.FailureCategory
 	FinishReason    *ai.FinishReason
 	MessageIDs      []string
+	ToolCalls       []ToolCallRecord
+	ToolResults     []ToolResultRecord
+}
+
+// ToolCallRecord is the port-side projection of the wire's
+// ToolCallDTO (R-CTS-006, R-CCS-015). It carries the wire call id,
+// tool name, and arguments bytes — sufficient to render "the model
+// called tool X with these arguments" on reload. The struct is
+// the chat package's own projection; the wire's ToolCallDTO lives
+// in the frontend mirror.
+type ToolCallRecord struct {
+	WireCallID string
+	Tool       string
+	Arguments  string
+}
+
+// ToolResultRecord is the port-side projection of the wire's
+// ToolResultDTO (R-CTS-006, R-CCS-015). It carries the outcome enum
+// (closed vocabulary: "success" | "result_failure" |
+// "execution_failure"), the content bytes for success /
+// result_failure outcomes, and a typed failure category string for
+// execution_failure outcomes (no provider text — R-CCP-008 / D6
+// mirror).
+type ToolResultRecord struct {
+	WireCallID      string
+	Tool            string
+	Outcome         string
+	Content         string
+	FailureCategory string
 }
 
 // TerminalKind is the typed outcome carried by Exchange (D-7).
@@ -171,6 +217,14 @@ func NewMemoryConversationStore() *MemoryConversationStore {
 // Append + Load + List on the same store are race-free under -race.
 // The activity map is bumped to time.Now() on every Append so List
 // can return LastActivityAt (R-CCS-013, R-CCS-014).
+//
+// CH-09 (R-CCS-015): the new ToolCalls / ToolResults slices are
+// stored verbatim. The in-memory adapter's defensive copy on Load
+// (NFR-CCS-008 carries NFR-CCS-004 forward) covers caller-side
+// mutation of the new fields; this Append does NOT take a copy of
+// the slices because the caller (the projector) is the slice's
+// owner and never reuses them post-Append. The Load path carries
+// the defensive-copy semantics.
 func (s *MemoryConversationStore) Append(participantID string, ex Exchange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,6 +238,14 @@ func (s *MemoryConversationStore) Append(participantID string, ex Exchange) erro
 // insertion order. A miss returns (nil, ErrConversationNotFound). The
 // returned slice is a defensive copy; mutating it does not mutate
 // the store's own state (NFR-CCS-004).
+//
+// CH-09 (NFR-CCS-008, S-CCS-020): each Exchange's ToolCalls and
+// ToolResults slices are themselves defensive-copied on Load, so
+// caller-side mutation of either slice (or its elements) cannot
+// corrupt the store's state. The slice elements are value types
+// (ToolCallRecord / ToolResultRecord) so a shallow element copy
+// is sufficient; the slice headers need are independent backing
+// arrays.
 func (s *MemoryConversationStore) Load(participantID string) ([]Exchange, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,8 +254,48 @@ func (s *MemoryConversationStore) Load(participantID string) ([]Exchange, error)
 		return nil, ErrConversationNotFound
 	}
 	out := make([]Exchange, len(src))
-	copy(out, src)
+	for i, ex := range src {
+		out[i] = ex
+		out[i].ToolCalls = copyToolCallRecords(ex.ToolCalls)
+		out[i].ToolResults = copyToolResultRecords(ex.ToolResults)
+		out[i].MessageIDs = copyStrings(ex.MessageIDs)
+	}
 	return out, nil
+}
+
+// copyToolCallRecords returns a fresh backing array. Nil-safe: a
+// nil input yields a nil output (the JSONB round-trip in postgres
+// returns nil for empty arrays, and the in-memory adapter must
+// match that surface).
+func copyToolCallRecords(src []ToolCallRecord) []ToolCallRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]ToolCallRecord, len(src))
+	copy(out, src)
+	return out
+}
+
+// copyToolResultRecords is the ToolResult twin of copyToolCallRecords.
+func copyToolResultRecords(src []ToolResultRecord) []ToolResultRecord {
+	if src == nil {
+		return nil
+	}
+	out := make([]ToolResultRecord, len(src))
+	copy(out, src)
+	return out
+}
+
+// copyStrings is the MessageIDs defensive copy helper. Pre-existing
+// in spirit (NFR-CCS-004); extracted so the Load path applies the
+// same idiom to the new fields.
+func copyStrings(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
 }
 
 // List returns the participant-scoped conversation summaries for

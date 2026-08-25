@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
 )
@@ -25,7 +26,8 @@ func TestCancel_MidStream(t *testing.T) {
 	gate := agenttest.NewGate()
 	provider := agenttest.NewProvider(heldAfterTwoFragmentsScript(t, gate))
 
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel"})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -87,7 +89,8 @@ func TestCancel_AlreadyFinished(t *testing.T) {
 	t.Parallel()
 
 	provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"done"}, ai.FinishReasonStop))
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel"})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}
@@ -114,7 +117,8 @@ func TestCancel_ConcurrentWithConsumption(t *testing.T) {
 
 	gate := agenttest.NewGate()
 	provider := agenttest.NewProvider(heldAfterTwoFragmentsScript(t, gate))
-	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel"})
+	conv, err := chat.NewConversation(chat.Config{Provider: provider, Store: chat.NewMemoryConversationStore(), ParticipantID: "test-cancel",
+		ToolSource: chat.FromAgentRegistry(agent.NewMapRegistry(nil))})
 	if err != nil {
 		t.Fatalf("chat.NewConversation returned %v, want nil", err)
 	}

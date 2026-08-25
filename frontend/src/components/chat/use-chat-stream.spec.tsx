@@ -368,3 +368,299 @@ describe("useChatStream (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CH-09 WU-4a (recovery pass) — live-stream tool entry lifecycle.
+//
+// S-CTS-020 / S-CTS-021 / S-CTS-022 were caught as UNTESTED in
+// verify #3974 (production code at use-chat-stream.ts:226-281 was
+// structurally correct, but no covering test asserted the live
+// state transitions). The three scenarios below drive the hook's
+// subscriber with a sequence of typed ChatStreamEvent frames and
+// assert the resulting state.entries surface.
+//
+// Mock pattern: the same vi.mock(~/lib/chat-api) at the top of this
+// file is reused; each test captures onEventCb from the
+// subscribeTurn implementation and dispatches frames by hand.
+// ---------------------------------------------------------------------------
+
+describe("useChatStream live tool lifecycle (S-CTS-020 / S-CTS-021 / S-CTS-022, CH-09)", () => {
+  // Test-local helper: capture the onEvent callback and the
+  // subscribe-returned unsubscribe into a closure the test can
+  // reach without re-deriving from the mock each time.
+  function arrangeLiveStream() {
+    let onEventCb: ((ev: unknown) => void) | null = null;
+    let unsubscribeCount = 0;
+    subscribeTurnMock.mockImplementation(
+      (_url: string, onEvent: (ev: unknown) => void) => {
+        onEventCb = onEvent;
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+    );
+    return {
+      fire(ev: unknown) {
+        (onEventCb as unknown as (ev: unknown) => void)(ev);
+      },
+      unsubscribeCount: () => unsubscribeCount,
+    };
+  }
+
+  it("S-CTS-020: a live tool.call.start mid-turn appends a 'running' tool entry; the assistant stream continues after (no tearing)", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_t1", streamUrl: "/api/agent/turns/trn_t1/events" },
+    });
+    const live = arrangeLiveStream();
+    const handles: HarnessHandles = { state: { value: null } };
+    const { render } = await createDOM();
+    await render(<TestHarness handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("What time is it?");
+    await flush();
+
+    // Drive a message.delta + tool.call.start sequence. The
+    // assistant entry is the in-flight one; the tool entry must
+    // append AFTER it.
+    live.fire({
+      kind: "message.delta",
+      index: 0,
+      delta: "Let me check. ",
+    });
+    live.fire({
+      kind: "tool.call.start",
+      wireCallId: "c1",
+      tool: "current_time",
+      arguments: '{"format":"rfc3339"}',
+    });
+    await flush();
+
+    // The tool entry is appended after the user + assistant entries.
+    const toolEntry = state.entries.find((e) => e.kind === "tool");
+    expect(toolEntry?.kind).toBe("tool");
+    if (toolEntry?.kind === "tool") {
+      expect(toolEntry.state).toBe("running");
+      expect(toolEntry.tool).toBe("current_time");
+      expect(toolEntry.intent).toBe("current_time");
+      // args parsed from the wire-side JSON arguments string
+      // (parseArgs at use-chat-stream.ts:114-127).
+      expect(toolEntry.args).toEqual([["format", "rfc3339"]]);
+      // The entry id is the wire call id bound verbatim — the
+      // subsequent tool.result frame matches on it.
+      expect(toolEntry.id).toBe("tool-c1");
+      // While running, the entry has no result text yet.
+      expect(toolEntry.result).toBeUndefined();
+    }
+
+    // The assistant entry's text is what was streamed BEFORE the
+    // tool entry — both coexist on the wire; no tearing.
+    const assistant = [...state.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat");
+    expect(assistant?.kind).toBe("said");
+    if (assistant?.kind === "said") {
+      expect(assistant.text).toBe("Let me check. ");
+    }
+
+    // A subsequent message.delta MUST continue to accumulate into
+    // the SAME assistant entry (assistantId-keyed delta accumulation
+    // at use-chat-stream.ts:202-209). This is the no-tearing
+    // guarantee that protects the bubble from splitting at the
+    // tool boundary.
+    live.fire({
+      kind: "message.delta",
+      index: 0,
+      delta: "It is 07:17.",
+    });
+    await flush();
+    const assistantAfter = [...state.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat");
+    expect(assistantAfter?.kind).toBe("said");
+    if (assistantAfter?.kind === "said") {
+      expect(assistantAfter.text).toBe("Let me check. It is 07:17.");
+    }
+  });
+
+  it("S-CTS-021: a matching tool.result with outcome 'execution_failure' closes the entry as 'failed'; result carries the typed category, NOT the provider content", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_t2", streamUrl: "/api/agent/turns/trn_t2/events" },
+    });
+    const live = arrangeLiveStream();
+    const handles: HarnessHandles = { state: { value: null } };
+    const { render } = await createDOM();
+    await render(<TestHarness handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("What time is it in UTC?");
+    await flush();
+
+    live.fire({
+      kind: "tool.call.start",
+      wireCallId: "c2",
+      tool: "current_time",
+      arguments: '{"timezone":"UTC"}',
+    });
+    await flush();
+    // After tool.call.start: tool entry is "running".
+    const running = state.entries.find((e) => e.kind === "tool");
+    expect(running?.kind).toBe("tool");
+    if (running?.kind === "tool") {
+      expect(running.state).toBe("running");
+    }
+
+    // A matching tool.result frame closes the entry. The wire
+    // carries BOTH content (provider text — which MUST NOT reach
+    // the entry on failure) and failureCategory (typed envelope —
+    // which DOES reach the entry). The hook is responsible for
+    // collapsing to the typed category only (R-CCP-008 / D6
+    // mirror on the live stream).
+    live.fire({
+      kind: "tool.result",
+      wireCallId: "c2",
+      tool: "current_time",
+      outcome: "execution_failure",
+      content: "internal provider text that must NOT leak",
+      failureCategory: "invalid_argument",
+    });
+    await flush();
+
+    const closed = state.entries.find((e) => e.kind === "tool");
+    expect(closed?.kind).toBe("tool");
+    if (closed?.kind === "tool") {
+      expect(closed.state).toBe("failed");
+      // Typed category reaches the entry.
+      expect(closed.result).toBe("invalid_argument");
+      // Provider text MUST NOT leak.
+      expect(closed.result).not.toBe(
+        "internal provider text that must NOT leak",
+      );
+      expect(closed.result).not.toContain("provider text");
+    }
+  });
+
+  it("S-CTS-021 (success variant triangulation): a matching tool.result with outcome 'success' closes the entry as 'done' with content", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_t2b", streamUrl: "/api/agent/turns/trn_t2b/events" },
+    });
+    const live = arrangeLiveStream();
+    const handles: HarnessHandles = { state: { value: null } };
+    const { render } = await createDOM();
+    await render(<TestHarness handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("ping");
+    await flush();
+
+    live.fire({
+      kind: "tool.call.start",
+      wireCallId: "c3",
+      tool: "current_time",
+      arguments: "{}",
+    });
+    live.fire({
+      kind: "tool.result",
+      wireCallId: "c3",
+      tool: "current_time",
+      outcome: "success",
+      content: "2026-08-25T07:17:00Z",
+      failureCategory: "",
+    });
+    await flush();
+
+    const closed = state.entries.find((e) => e.kind === "tool");
+    expect(closed?.kind).toBe("tool");
+    if (closed?.kind === "tool") {
+      expect(closed.state).toBe("done");
+      expect(closed.result).toBe("2026-08-25T07:17:00Z");
+    }
+  });
+
+  it("S-CTS-022: turn.end{finishReason: 'tool_calls'} does NOT cancel assistantId-keyed delta accumulation — the next message.delta continues into the same assistant entry", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_t3", streamUrl: "/api/agent/turns/trn_t3/events" },
+    });
+    const live = arrangeLiveStream();
+    const handles: HarnessHandles = { state: { value: null } };
+    const { render } = await createDOM();
+    await render(<TestHarness handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("ping");
+    await flush();
+
+    // First wave of deltas + tool roundtrip + turn.end with
+    // finishReason: "tool_calls". The hook's turn.end handler at
+    // use-chat-stream.ts:269-281 sets the assistant entry's state
+    // to "final" but does NOT close the identity — the original
+    // assistantId is still the same.
+    live.fire({ kind: "message.delta", index: 0, delta: "first wave. " });
+    live.fire({
+      kind: "tool.call.start",
+      wireCallId: "c4",
+      tool: "current_time",
+      arguments: "{}",
+    });
+    live.fire({
+      kind: "tool.result",
+      wireCallId: "c4",
+      tool: "current_time",
+      outcome: "success",
+      content: "2026-08-25T07:17:00Z",
+      failureCategory: "",
+    });
+    live.fire({
+      kind: "turn.end",
+      finishReason: "tool_calls",
+    });
+    await flush();
+
+    // After turn.end: assistant state is "final", the original
+    // assistantId is preserved on the entry.
+    const assistantMid = [...state.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat");
+    expect(assistantMid?.kind).toBe("said");
+    if (assistantMid?.kind === "said") {
+      expect(assistantMid.state).toBe("final");
+      expect(assistantMid.text).toBe("first wave. ");
+    }
+
+    // CRITICAL: a subsequent message.delta — the model's
+    // tool-result-aware continuation — MUST accumulate into the
+    // SAME assistant entry. This is the "by construction"
+    // behaviour: delta accumulation at use-chat-stream.ts:202-209
+    // is keyed on the assistantId captured in submit()'s closure,
+    // NOT gated on turn.end or finishReason. A future contributor
+    // adding an early-return on finishReason === "tool_calls"
+    // would silently break this — the test below is the trip.
+    live.fire({
+      kind: "message.delta",
+      index: 0,
+      delta: "second wave after turn.end.",
+    });
+    await flush();
+
+    const assistantFinal = [...state.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat");
+    expect(assistantFinal?.kind).toBe("said");
+    if (assistantFinal?.kind === "said") {
+      // Same id, same entry — proves no new bubble was opened.
+      expect(assistantFinal.id).toBe(assistantMid?.id);
+      // Text accumulated across the turn.end boundary.
+      expect(assistantFinal.text).toBe(
+        "first wave. second wave after turn.end.",
+      );
+    }
+  });
+});

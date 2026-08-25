@@ -145,6 +145,20 @@ describe("chat-types contract surface (REQ-1, REQ-4, REQ-6)", () => {
         case "error":
           labels.push(`error:${ev.error.kind}:${ev.error.message}`);
           break;
+        case "tool.call.start":
+          labels.push(`tool.start:${ev.wireCallId}:${ev.tool}`);
+          break;
+        case "tool.call.delta":
+          labels.push(`tool.delta:${ev.wireCallId}`);
+          break;
+        case "tool.call.end":
+          labels.push(`tool.end:${ev.wireCallId}:${ev.outcome}`);
+          break;
+        case "tool.result":
+          labels.push(
+            `tool.result:${ev.wireCallId}:${ev.tool}:${ev.outcome}`,
+          );
+          break;
         default:
           // assertNever returns never — if a new variant is added
           // to ChatStreamEvent without updating this switch,
@@ -356,6 +370,58 @@ describe("chat recorded SSE transcript (REQ-1, REQ-7)", () => {
       "event: message.end\ndata: {\"index\":0,\"finishReason\":\"stop\"}\n\n";
     const parsed = parseTranscript(raw);
     expect(parsed.map((e) => e.kind)).toEqual(["message.end"]);
+  });
+
+  // CH-09 (S-CTS-013, R-CTS-004) — parseTranscript parses a
+  // tool.call.start frame into a typed variant with the wire's
+  // payload shape (lowercase JSON keys).
+  it("parseTranscript decodes tool.call.start into a typed variant (S-CTS-013)", () => {
+    const raw =
+      'event: tool.call.start\ndata: {"wireCallId":"c1","tool":"current_time","arguments":"{}"}\n\n';
+    const parsed = parseTranscript(raw);
+    expect(parsed).toEqual([
+      {
+        kind: "tool.call.start",
+        wireCallId: "c1",
+        tool: "current_time",
+        arguments: "{}",
+      },
+    ]);
+  });
+
+  // CH-09 (S-CTS-014) — malformed JSON on a tool frame is
+  // silently dropped, mirroring S-1.b for the new event names.
+  it("parseTranscript drops tool.call.start frames with malformed JSON (S-CTS-014)", () => {
+    const raw =
+      "event: tool.call.start\ndata: {not json\n\n" +
+      'event: tool.call.start\ndata: {"wireCallId":"c2","tool":"current_time","arguments":"{}"}\n\n';
+    const parsed = parseTranscript(raw);
+    expect(parsed).toEqual([
+      {
+        kind: "tool.call.start",
+        wireCallId: "c2",
+        tool: "current_time",
+        arguments: "{}",
+      },
+    ]);
+  });
+
+  // CH-09 (R-CTS-004) — tool.result frame decodes the closed
+  // three-value outcome vocabulary.
+  it("parseTranscript decodes tool.result with execution_failure outcome + typed category", () => {
+    const raw =
+      'event: tool.result\ndata: {"wireCallId":"c1","tool":"current_time","outcome":"execution_failure","content":"","failureCategory":"authentication"}\n\n';
+    const parsed = parseTranscript(raw);
+    expect(parsed).toEqual([
+      {
+        kind: "tool.result",
+        wireCallId: "c1",
+        tool: "current_time",
+        outcome: "execution_failure",
+        content: "",
+        failureCategory: "authentication",
+      },
+    ]);
   });
 });
 

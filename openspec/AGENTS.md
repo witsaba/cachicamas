@@ -117,6 +117,23 @@ record — the accessor set is local to `failure.go`. The release is
 scoped to AG-11 only, exact-filename, and does not extend to any later
 milestone without its own recorded delta.
 
+**CH-09** (`cachicamas-chat-tool-source`) is the chat-archetype
+counterpart: the chat package depends on `agent.Registry` by interface
+(`backend/agent/src/agent/tool.go:267-269`) without modifying any of
+the ten substrate files. `chat.ToolSource` wraps the registry inside
+`chat.FromAgentRegistry(agent.Registry) ToolSource`; the harness's
+`TurnOptions.Tools` field receives the same value at conversation
+construction. The substrate guard for the chat side lives at
+`chat/store_substrate_test.go::TestChat_SubstrateUntouched` and runs
+inside `cd backend/agent && make test`. Wire-fragmentation guard
+(S-CTS-024) lives at `chat/wire_fragmentation_test.go` (Go) and
+`chat-api.spec.ts`'s `assertNever` probe (TS). The four CH-09
+`WireEvent` variants (`ToolCallStart`, `ToolResult`, plus the
+reserved-but-unused `ToolCallDelta` / `ToolCallEnd`) are all in
+`chat/wire.go`; the wire-frame switch is at
+`chat/eventsource.go:wireFrameName`; the chat projector arms are at
+`chat/projection.go:project()`.
+
 **CH-07** (`cachicamas-chat-store-adapter`) is the first chat-archetype
 milestone to admit new top-level deps in `backend/agent` — `pgx/v5` and
 `pressly/goose/v3` — via the `ch07_carveout_test.go` carve-out pattern.

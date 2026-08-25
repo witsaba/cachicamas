@@ -13,7 +13,11 @@ import {
   listConversations,
   loadConversation,
 } from "~/lib/chat-api";
-import type { ConversationSummary } from "~/lib/chat-types";
+import type {
+  ConversationSummary,
+  ToolCallDTO,
+  ToolResultDTO,
+} from "~/lib/chat-types";
 import type { TranscriptEntry } from "~/lib/mock/chat";
 import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
@@ -63,8 +67,37 @@ export interface ChatAppProps {
   readonly participantID: string;
 }
 
-function exchangesToEntries(
-  exchanges: readonly { promptText: string; assistantText: string; partial: boolean }[],
+/**
+ * exchangesToEntries rebuilds a transcript from a recorded exchange
+ * slice (CH-08 R-CRI-001 reload surface). The output sequence for
+ * each exchange is:
+ *
+ *   1. said:you {text: promptText, state: final}
+ *   2. said:chat {text: assistantText, state: final|streaming}
+ *   3. tool {tool, intent, args, state, result} — appended AFTER the
+ *      assistant said entry, one per (toolCall, toolResult) pair.
+ *      Success / result_failure outcomes → state "done";
+ *      execution_failure → state "failed" with the typed failure
+ *      category (R-CCP-008 / D6 mirror — no provider text on
+ *      failure).
+ *
+ * The DTO shape carries ToolCalls + ToolResults as optional
+ * readonly arrays; a tool-free turn omits them (the JSON wire
+ * omits the keys entirely per `omitempty`).
+ *
+ * Exported for direct testability of the S-CTS-019 covering test
+ * (CH-09 WU-4a — verify #3974 found the function had no runtime
+ * test). The export is a pure testability seam; the function
+ * signature is unchanged from its prior module-private form.
+ */
+export function exchangesToEntries(
+  exchanges: readonly {
+    promptText: string;
+    assistantText: string;
+    partial: boolean;
+    toolCalls?: readonly ToolCallDTO[];
+    toolResults?: readonly ToolResultDTO[];
+  }[],
 ): TranscriptEntry[] {
   const out: TranscriptEntry[] = [];
   exchanges.forEach((ex, idx) => {
@@ -82,8 +115,60 @@ function exchangesToEntries(
       text: ex.assistantText,
       state: ex.partial ? "streaming" : "final",
     });
+    // CH-09 — tool entries from the reload surface. The reload DTO
+    // carries both slices in issuance order (R-CCS-016); we walk
+    // them in lockstep so each tool call gets a matching result.
+    const calls = ex.toolCalls ?? [];
+    const results = ex.toolResults ?? [];
+    const max = Math.max(calls.length, results.length);
+    for (let i = 0; i < max; i++) {
+      const call = calls[i];
+      const result = results[i];
+      const toolName = call?.tool ?? result?.tool ?? "tool";
+      const wireId = call?.wireCallId ?? result?.wireCallId ?? `r-${idx}-${i}`;
+      let state: "done" | "failed" = "done";
+      let resultText: string | undefined;
+      if (result) {
+        if (result.outcome === "execution_failure") {
+          state = "failed";
+          resultText = result.failureCategory;
+        } else {
+          state = "done";
+          resultText = result.content;
+        }
+      }
+      out.push({
+        kind: "tool",
+        id: `tool-${wireId}-${idx}`,
+        tool: toolName,
+        intent: toolName,
+        args: parseToolArgs(call?.arguments ?? ""),
+        result: resultText,
+        state,
+      });
+    }
   });
   return out;
+}
+
+/**
+ * parseToolArgs converts the tool-call DTO's arguments string
+ * (JSON object) into the entry's args tuple array. Mirrors the
+ * wire-side parseArgs in use-chat-stream.ts.
+ */
+function parseToolArgs(
+  jsonText: string,
+): readonly (readonly [string, string])[] {
+  if (!jsonText) return [];
+  try {
+    const obj = JSON.parse(jsonText) as Record<string, unknown>;
+    if (typeof obj !== "object" || obj === null) return [];
+    return Object.entries(obj).map(
+      ([k, v]) => [k, String(v)] as readonly [string, string],
+    );
+  } catch {
+    return [];
+  }
 }
 
 export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participantID }) => {
