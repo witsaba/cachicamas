@@ -184,3 +184,59 @@ func TestObservability_TurnFailedLogsTypedCategory(t *testing.T) {
 		t.Errorf("level = %v, want ERROR (Fix C: failure logs at error level so an alerting pipeline can route them)", recs[0]["level"])
 	}
 }
+
+// TestObservability_TurnFailedLogsErrorTypeForUncategorisedCause — when the
+// harness returns a non-*ai.Failure error (e.g. a cost-session panic,
+// an interrupted run, an internal harness bug), the projection's typed
+// category branch does not match and the logger falls back to
+// category="uncategorised". The log line must STILL surface the
+// underlying error type and message so an operator can diagnose
+// harness-level failures that never reached openaicompat's typed
+// mapper. This is the Fix C extension that distinguishes harness
+// bugs from upstream failures — the second diagnostic gap the chat
+// observability work was meant to close.
+func TestObservability_TurnFailedLogsErrorTypeForUncategorisedCause(t *testing.T) {
+	t.Parallel()
+
+	logger := newJSONLogger()
+
+	// A Provider with NO scripts forces fake_provider.Stream to
+	// return the wrapped ErrScriptsExhausted error — a plain
+	// fmt.Errorf that is NOT an *ai.Failure. The harness's
+	// failRun returns this error unwrapped (harness.go:433), so
+	// the projection's typed branch (errors.As(&*ai.Failure))
+	// does not match and the uncategorised branch fires.
+	provider := agenttest.NewProvider()
+
+	conv, err := chat.NewConversation(chat.Config{
+		Provider:         provider,
+		Logger:           slog.New(logger),
+		Store:            chat.NewMemoryConversationStore(),
+		ParticipantID:    "obs-bob-uncategorised",
+		ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+	})
+	if err != nil {
+		t.Fatalf("chat.NewConversation returned %v, want nil", err)
+	}
+
+	out, err := conv.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Send returned %v, want nil", err)
+	}
+	drainWire(t, out)
+
+	recs := recordsOfKind(t, logger.buf, "chat turn failed")
+	if len(recs) != 1 {
+		t.Fatalf("chat turn failed records = %d, want exactly 1 (uncategorised branch must still log)", len(recs))
+	}
+	if recs[0]["category"] != "uncategorised" {
+		t.Errorf("category = %v, want %q (uncategorised branch marker)", recs[0]["category"], "uncategorised")
+	}
+	if recs[0]["error_type"] == nil || recs[0]["error_type"] == "" {
+		t.Errorf("error_type = %v, want a non-empty type string so an operator can grep for the failing package", recs[0]["error_type"])
+	}
+	if msg, _ := recs[0]["error_message"].(string); !strings.Contains(msg, "Stream call") || !strings.Contains(msg, "script queue exhausted") {
+		t.Errorf("error_message = %q, want a substring containing the harness's actual cause (Stream call … script queue exhausted)", msg)
+	}
+}

@@ -13,6 +13,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -316,14 +317,23 @@ case agent.EventKindToolStart:
 			}
 			c.logger.LogAttrs(ctx, slog.LevelError, "chat turn failed", attrs...)
 		} else {
-			// Unknown error shape — not an *ai.Failure. Still
-			// emit a log so the operator sees the run terminated;
-			// we deliberately do NOT log err.Error() (cause text
-			// may carry provider body excerpts per the D3 denylist
-			// in ai/openaicompat/trace.go).
+			// Unknown error shape — not an *ai.Failure. The wire
+			// envelope still renders Kind:"server" / Message:"The
+			// model provider is temporarily unavailable." from
+			// terminalWireEvent's own branch, but we need the
+			// underlying cause in the operator logs to distinguish
+			// harness-level bugs from upstream-driven failures
+			// that never went through openaicompat's typed mapper
+			// (e.g. a cost-session failure, an interrupted run).
+			// Log the dynamic type and the cause text. The cause
+			// is the harness's own error, never the user prompt
+			// body, so the D3 denylist on provider body excerpts
+			// does not apply here.
 			c.logger.LogAttrs(ctx, slog.LevelError, "chat turn failed",
 				slog.String("participant_id", c.participantID),
 				slog.String("category", "uncategorised"),
+				slog.String("error_type", fmt.Sprintf("%T", res.err)),
+				slog.String("error_message", res.err.Error()),
 			)
 		}
 	}
