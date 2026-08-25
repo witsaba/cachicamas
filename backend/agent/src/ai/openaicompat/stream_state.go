@@ -236,6 +236,17 @@ type mapperState struct {
 	// (R-ATS-010), read only by buildCompletion at the sentinel.
 	finishReason ai.FinishReason
 
+	// rawFinishReason is choice 0's terminal chunk's raw finish_reason
+	// STRING (not the normalized ai.FinishReason), kept for the
+	// R-ATS-020 row 2 widening check: a later chunk's
+	// finish_reason must equal this raw string to qualify as an
+	// OpenRouter usage-enrichment duplicate (accept-as-no-op). A later
+	// chunk whose finish_reason DIFFERS from this raw string is a real
+	// protocol violation (the provider changed its mind about why it
+	// stopped, which the spec does not allow) and fires
+	// errDuplicateClose regardless of new content.
+	rawFinishReason string
+
 	// terminalSeen is true once choice 0's terminal chunk (a non-null,
 	// gate-accepted finish_reason) has been observed.
 	terminalSeen bool
@@ -384,9 +395,20 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 	// fires row 1; only the duplicate-finish_reason check is widened.
 	if s.terminalSeen {
 		if choice.FinishReason != nil {
-			// Row 2, narrowed: only the "duplicate with new info" shape
-			// fails. A no-new-info duplicate (OpenRouter usage enrichment)
-			// is absorbed — see comment block above.
+			// Row 2, narrowed: only the "duplicate with no new info AND
+			// the same finish_reason" shape is accepted (OpenRouter
+			// usage-enrichment chunks). Any of the following still
+			// fires errDuplicateClose:
+			//   - the duplicate's finish_reason DIFFERS from the one
+			//     we already captured (a real protocol violation — the
+			//     provider changed its mind about why it stopped; the
+			//     OpenAI streaming spec allows exactly one terminal
+			//     chunk per choice);
+			//   - the duplicate carries new tool_calls;
+			//   - the duplicate carries non-empty content.
+			if *choice.FinishReason != s.rawFinishReason {
+				return nil, errDuplicateClose
+			}
 			if len(choice.Delta.ToolCalls) > 0 {
 				return nil, errDuplicateClose
 			}
@@ -414,6 +436,7 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 			return nil, errUnrecognizedFinishReason
 		}
 		s.finishReason = reason
+		s.rawFinishReason = *choice.FinishReason
 		s.terminalSeen = true
 	}
 
