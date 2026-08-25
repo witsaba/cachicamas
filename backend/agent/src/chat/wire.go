@@ -73,6 +73,11 @@ func (Error) isWireEvent() {}
 // call id, tool name, and arguments bytes. Emitted at v1 by the chat
 // projector from Layer 2's EventKindToolStart.
 //
+// JSON tags use lowercase camelCase to match the closed ExchangeDTO
+// precedent at frontend/src/lib/chat-types.ts:152-167 (REQ-7 / D-3
+// closed-union enforcement on the wire): the wire must NOT invent
+// field names beyond what the chat package's port types carry.
+//
 // CH-09 wire projection context (D-3, D-6):
 //
 //   - ToolCallStart, ToolResult — emitted at v1. ToolCallStart
@@ -90,9 +95,9 @@ func (Error) isWireEvent() {}
 // `wireFrameName`'s default branch until T-04 finalizes the four
 // cases — that is the strict-TDD RED scaffold pre-empting the GREEN.
 type ToolCallStart struct {
-	WireCallID string
-	Tool       string
-	Arguments  string
+	WireCallID string `json:"wireCallId"`
+	Tool       string `json:"tool"`
+	Arguments  string `json:"arguments"`
 }
 
 func (ToolCallStart) isWireEvent() {}
@@ -102,8 +107,8 @@ func (ToolCallStart) isWireEvent() {}
 // exists so a future long-running tool can land here without a wire
 // shape change.
 type ToolCallDelta struct {
-	WireCallID string
-	Delta      string
+	WireCallID string `json:"wireCallId"`
+	Delta      string `json:"delta"`
 }
 
 func (ToolCallDelta) isWireEvent() {}
@@ -112,8 +117,8 @@ func (ToolCallDelta) isWireEvent() {}
 // NFR-CTS-002). v1 collapses Layer 2's three ToolEnd* kinds into
 // ToolResult; ToolCallEnd marks the future extension slot.
 type ToolCallEnd struct {
-	WireCallID string
-	Outcome    string
+	WireCallID string `json:"wireCallId"`
+	Outcome    string `json:"outcome"`
 }
 
 func (ToolCallEnd) isWireEvent() {}
@@ -125,11 +130,11 @@ func (ToolCallEnd) isWireEvent() {}
 // provider text leaks, R-CCP-008 / D6 mirror). FailureCategory is
 // non-empty ONLY when Outcome == "execution_failure".
 type ToolResult struct {
-	WireCallID      string
-	Tool            string
-	Outcome         string
-	Content         string
-	FailureCategory string
+	WireCallID      string `json:"wireCallId"`
+	Tool            string `json:"tool"`
+	Outcome         string `json:"outcome"`
+	Content         string `json:"content"`
+	FailureCategory string `json:"failureCategory"`
 }
 
 func (ToolResult) isWireEvent() {}

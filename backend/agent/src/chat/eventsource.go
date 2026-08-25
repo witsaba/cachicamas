@@ -40,6 +40,22 @@ func wireFrameName(ev WireEvent) string {
 		return "turn.end"
 	case Error:
 		return "error"
+	// CH-09 (R-CTS-004, D-3, D-6) — four new wire frame names for
+	// tool-call projection. Lowercase JSON keys on the payload
+	// (chat.WriteFrameForTest serialises via encoding/json); the
+	// frontend mirror at frontend/src/lib/chat-types.ts:212-279
+	// parses the same field names. ToolCallDelta and ToolCallEnd
+	// cases exist for forward-compatibility (NFR-CTS-002: a future
+	// long-running MCP tool can land here without a wire shape
+	// change); v1's projector never emits them.
+	case ToolCallStart:
+		return "tool.call.start"
+	case ToolCallDelta:
+		return "tool.call.delta"
+	case ToolCallEnd:
+		return "tool.call.end"
+	case ToolResult:
+		return "tool.result"
 	default:
 		// Unreachable while WireEvent remains a closed interface; kept
 		// to make the exhaustiveness intentional rather than implicit.

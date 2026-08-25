@@ -71,16 +71,27 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 		case agent.EventKindMessageEndText:
 			out <- MessageEnd{Index: msgIndex, FinishReason: FinishReasonStop}
 
-		// CH-09 — RED scaffold #2 (T-02). Five arm stubs for the
-		// Layer-2 tool-event family (EventKindToolStart, Progress,
-		// EndSuccess, EndResultFailure, EndExecutionFailure). The
-		// arms produce placeholder chat-side events — the chat wire
-		// collapses Layer 2's 5-event-per-call bracket model into 2
-		// chat-side events per call (ToolCallStart + ToolResult)
-		// per D-6, with EventKindToolProgress dropped at the chat
-		// wire per NFR-CTS-002. Production arms land in T-04; this
-		// scaffold exists to assert the projector compiles against
-		// the four new WireEvent variants added in T-01.
+		// CH-09 — Layer 2 tool-event family projection (T-04 GREEN;
+		// R-CTS-004, R-CTS-005, D-3, D-6, NFR-CTS-002). Five arms
+		// project Layer 2's 5-event-per-call tool bracket model:
+		//
+		//   - EventKindToolStart → ToolCallStart (wire id, tool name,
+		//     arguments bytes → string)
+		//   - EventKindToolProgress → DROPPED at the chat wire (D-6
+		//     collapse). No explicit case; falls through the
+		//     switch's default arm's "unmapped agent event" log.
+		//     Keeping NO explicit case is part of the deliberate
+		//     posture (NFR-CTS-002).
+		//   - EventKindToolEndSuccess → ToolResult{Outcome:"success"}
+		//   - EventKindToolEndResultFailure → ToolResult{Outcome:"result_failure"}
+		//   - EventKindToolEndExecutionFailure → ToolResult{Outcome:"execution_failure",
+		//     FailureCategory:failure.Category().String()}; Content is
+		//     empty — no provider text leaks (R-CCP-008 / D6 mirror).
+		//
+		// WireCallID carries the same value byte-for-byte from
+		// Layer 2's start call id to the chat-side ToolResult so
+		// the frontend can correlate ToolCallStart ↔ ToolResult
+		// (S-CTS-010..012).
 		case agent.EventKindToolStart:
 			start, _ := ev.ToolStart()
 			out <- ToolCallStart{
@@ -91,18 +102,17 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 
 		case agent.EventKindToolProgress:
 			// D-6 / NFR-CTS-002 — ToolProgress is DROPPED at the chat
-			// wire (no explicit chat-side event; falls through `default`
-			// arm's "unmapped agent event" log). Scaffold #2's
-			// placeholder is identical to the production posture:
-			// emit nothing on this branch. T-04 keeps this as the
-			// production implementation (verified by S-CTS-009).
+			// wire. Deliberately no-op: emitting nothing on this
+			// branch is the production posture. The default arm
+			// below still records one "unmapped agent event" log so
+			// an operator can see ToolProgress landed if tracing.
 			_ = ev
 
 		case agent.EventKindToolEndSuccess:
 			end, _ := ev.ToolEndSuccess()
 			out <- ToolResult{
 				WireCallID: end.CallID(),
-				Outcome:    agent.ToolOutcomeSuccess.String(),
+				Outcome:    "success",
 				Content:    string(end.Result()),
 			}
 
@@ -110,7 +120,7 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 			end, _ := ev.ToolEndResultFailure()
 			out <- ToolResult{
 				WireCallID: end.CallID(),
-				Outcome:    agent.ToolOutcomeResultFailure.String(),
+				Outcome:    "result_failure",
 				Content:    string(end.Result()),
 			}
 
@@ -119,7 +129,7 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 			failure, _ := end.Failure()
 			out <- ToolResult{
 				WireCallID:      end.CallID(),
-				Outcome:         agent.ToolOutcomeExecutionFailure.String(),
+				Outcome:         "execution_failure",
 				Content:         "",
 				FailureCategory: failure.Category().String(),
 			}
