@@ -377,6 +377,10 @@ services:
       API_TARGET: http://database_administrator:8080
       PUBLIC_API_BASE_URL: /api
       SERVER_API_BASE_URL: http://database_administrator:8080
+      # fix/chat-stack-wiring — the Node server proxies /api/agent/* to
+      # the chat binary (paths forwarded verbatim; see entry.express.tsx).
+      # Runtime env, same injection pattern as API_TARGET above.
+      AGENT_CHAT_TARGET: http://agent_chat:8080
       ORIGIN: ${ORIGIN:-http://localhost:3015}
       # cachicamas-github-login — Auth.js + GitHub OAuth (PR-2)
       AUTH_GITHUB_ID: ${AUTH_GITHUB_ID:?AUTH_GITHUB_ID must be set in .env}

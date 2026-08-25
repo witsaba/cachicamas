@@ -5,7 +5,11 @@
  *
  * Architecture:
  *   - Node http server (no Express, no nginx).
- *   - `/api/*` → reverse proxy to the Go binary (same compose network).
+ *   - `/api/agent/*` → reverse proxy to the Go chat binary (same compose
+ *     network; paths forwarded verbatim — the chat routes already live
+ *     under /api/agent/* on its own Echo server).
+ *   - Other `/api/*` → reverse proxy to the database_administrator Go
+ *     binary (/api stripped except /api/v1/*).
  *   - Static assets (Qwik client chunks) served from `dist/`.
  *   - All other routes → Qwik City SSR (handles prerendered + dynamic).
  *
@@ -40,6 +44,12 @@ const HOST = process.env.HOST ?? "0.0.0.0";
 // at http://database_administrator:8080. Override via env for local dev.
 const API_TARGET =
   process.env.API_TARGET ?? "http://database_administrator:8080";
+// Target for /api/agent/* reverse proxy — the chat binary
+// (backend/agent/src/cmd/chat). In compose it is reachable at
+// http://agent_chat:8080; bare dev (`pnpm dev`) defaults to the compose
+// host mapping (localhost:8090, see AGENT_CHAT_PORT in .env.example).
+const AGENT_CHAT_TARGET =
+  process.env.AGENT_CHAT_TARGET ?? "http://localhost:8090";
 // Where Qwik's static assets (dist/) are at runtime. In the Docker image
 // this is /app/dist (set by Dockerfile).
 const STATIC_ROOT =
@@ -65,34 +75,20 @@ const { router, notFound, staticFile } = createQwikCity({
 });
 
 /**
- * Reverse-proxy a request to the Go binary. The /api prefix is stripped
- * for legacy routes (e.g., /api/organizations → /organizations), but
- * PRESERVED for routes that include /api in their backend path
- * (e.g., /api/v1/identity/signin-callback → /api/v1/identity/signin-callback).
- *
- * Why the exception: the identity callback slice
- * (cachicamas-identity-signin-callback, see ADR 0003) exposes its
- * endpoint under /api/v1/* on the Go side. The Qwik Node SSR can also
- * reach the backend directly via SERVER_API_BASE_URL (compose DNS),
- * but in `pnpm dev` mode the fallback uses the proxy. The proxy
- * therefore forwards /api/v1/* as-is and strips /api only for the
- * legacy routes that the Go binary registers at the root.
- *
- * Uses Node's http.request (no extra deps) to forward the request body
- * and pipe the response back.
+ * Forward a request to an internal Go service. Shared by both proxy
+ * surfaces (database_administrator + agent_chat): rewrites the Host
+ * header, forwards method/headers/body/query verbatim, merges our
+ * security headers on top of the upstream response, pipes the body
+ * (streaming-safe — SSE responses are never buffered) and degrades to
+ * 502 when the upstream is unreachable.
  */
-function proxyToApi(
+function proxyRequest(
   req: import("node:http").IncomingMessage,
   res: import("node:http").ServerResponse,
+  targetOrigin: string,
+  upstreamPath: string,
 ): void {
-  // Path-shape detection: legacy routes (no /api in the backend path)
-  // have /api/* stripped; identity-callback-style routes (backend has
-  // /api/v1/* paths) keep the /api prefix intact.
-  const keepApiPrefix = req.url?.startsWith("/api/v1/") ?? false;
-  const newPath = keepApiPrefix
-    ? (req.url ?? "/")
-    : (req.url?.replace(/^\/api/, "") ?? "/");
-  const target = new URL(newPath, API_TARGET);
+  const target = new URL(upstreamPath, targetOrigin);
 
   const headers = { ...req.headers, host: target.host };
   // Remove the original host header to avoid mismatches.
@@ -128,6 +124,49 @@ function proxyToApi(
     res.end(`Bad gateway: ${err.message}`);
   });
   req.pipe(proxyReq);
+}
+
+/**
+ * Reverse-proxy /api/* to database_administrator. The /api prefix is
+ * stripped for legacy routes (e.g., /api/organizations → /organizations),
+ * but PRESERVED for routes that include /api in their backend path
+ * (e.g., /api/v1/identity/signin-callback → /api/v1/identity/signin-callback).
+ *
+ * Why the exception: the identity callback slice
+ * (cachicamas-identity-signin-callback, see ADR 0003) exposes its
+ * endpoint under /api/v1/* on the Go side. The Qwik Node SSR can also
+ * reach the backend directly via SERVER_API_BASE_URL (compose DNS),
+ * but in `pnpm dev` mode the fallback uses the proxy. The proxy
+ * therefore forwards /api/v1/* as-is and strips /api only for the
+ * legacy routes that the Go binary registers at the root.
+ */
+function proxyToApi(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+): void {
+  // Path-shape detection: legacy routes (no /api in the backend path)
+  // have /api/* stripped; identity-callback-style routes (backend has
+  // /api/v1/* paths) keep the /api prefix intact.
+  const keepApiPrefix = req.url?.startsWith("/api/v1/") ?? false;
+  const newPath = keepApiPrefix
+    ? (req.url ?? "/")
+    : (req.url?.replace(/^\/api/, "") ?? "/");
+  proxyRequest(req, res, API_TARGET, newPath);
+}
+
+/**
+ * Reverse-proxy /api/agent/* to the chat binary. Paths are forwarded
+ * UNCHANGED (method, headers, body and query string verbatim): the chat
+ * HTTP surface registers its routes under /api/agent/* on its own Echo
+ * server (POST /api/agent/turns, GET /api/agent/turns/:id/events SSE,
+ * GET /api/agent/conversations[/:id], POST .../permissions/:callID), so
+ * stripping anything here would 404 at the backend.
+ */
+function proxyToAgentChat(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+): void {
+  proxyRequest(req, res, AGENT_CHAT_TARGET, req.url ?? "/");
 }
 
 /**
@@ -201,7 +240,15 @@ const server = createServer((req, res) => {
   //    For the proxy, the headers are ALSO re-merged into the upstream
   //    response (see proxyToApi) to override any permissive backend.
   setSecurityHeaders(req, res, () => {
-    // 1. /api/* → Go binary reverse proxy.
+    // 1a. /api/agent/* → chat binary reverse proxy. MUST be checked
+    //     BEFORE the generic /api branch — otherwise these requests
+    //     reach database_administrator as /agent/* (prefix-stripped)
+    //     and die with a 404.
+    if (req.url?.startsWith("/api/agent/")) {
+      return proxyToAgentChat(req, res);
+    }
+
+    // 1b. Other /api/* → database_administrator reverse proxy.
     if (req.url?.startsWith("/api/")) {
       return proxyToApi(req, res);
     }
@@ -231,6 +278,7 @@ server.listen(PORT, HOST, () => {
   // lib/log-config.ts and security-response-headers spec REQ-03.
   if (logInternalTarget()) {
     console.log(`[qwik-server] API target: ${API_TARGET}`);
+    console.log(`[qwik-server] agent chat target: ${AGENT_CHAT_TARGET}`);
   }
   console.log(`[qwik-server] static root: ${STATIC_ROOT}`);
 });
