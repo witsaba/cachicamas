@@ -59,11 +59,33 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 	// projector populates on permission_decision_made{deny} and
 	// consults in the tool.result arm to suppress the wire event
 	// for the same wireCallId (the F-CPM-002/003 closure at
-	// design time). In T-02 the set is declared but stays empty
-	// because no projection arm yet populates it; T-04 finalizes
-	// the population rule + the consultation suppression. Declared
-	// above the switch so the consultation site compiles.
+	// design time).
 	deniedSet := map[string]bool{}
+
+	// CH-10 (R-CPM-006): the per-wireCallId tool-name map.
+	// Layer 2's PermissionDecisionRequired carries the tool name;
+	// the matching PermissionDecisionMade does NOT (the payload
+	// is {callID, outcome, modifiedArguments, failure}). The
+	// projector captures the tool name on the required event and
+	// reads it back on the made event so the persisted
+	// PermissionDecisionRecord carries the (R-CPM-006) Tool field.
+	toolByCallID := map[string]string{}
+
+	// CH-10 (R-CPM-007, D-6, F-CPM-001 closure): THREE parallel
+	// accumulators thread state into buildTerminalExchange. CH-09's
+	// F-CPM-001 defect is that `chat/projection.go:208-251`
+	// (`buildTerminalExchange`) returned an Exchange with empty
+	// ToolCalls / ToolResults (the fields are always zero at
+	// production reload). The fix: catch ToolCallStart + ToolResult
+	// + ToolEnd* events into slice state, then thread the slices
+	// into buildTerminalExchange. CH-10 widens with a third
+	// accumulator for permission decisions (the same defect
+	// applies). S-CPM-017 / S-CPM-018 close the gap.
+	var (
+		toolCalls          []ToolCallRecord
+		toolResults        []ToolResultRecord
+		permissionDecisions []PermissionDecisionRecord
+	)
 
 	for ev := range sink {
 		switch ev.Kind() {
@@ -102,8 +124,13 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 		// Layer 2's start call id to the chat-side ToolResult so
 		// the frontend can correlate ToolCallStart ↔ ToolResult
 		// (S-CTS-010..012).
-		case agent.EventKindToolStart:
+case agent.EventKindToolStart:
 			start, _ := ev.ToolStart()
+			toolCalls = append(toolCalls, ToolCallRecord{
+				WireCallID: start.CallID(),
+				Tool:       start.Name(),
+				Arguments:  string(start.Arguments()),
+			})
 			out <- ToolCallStart{
 				WireCallID: start.CallID(),
 				Tool:       start.Name(),
@@ -120,6 +147,11 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 
 		case agent.EventKindToolEndSuccess:
 			end, _ := ev.ToolEndSuccess()
+			toolResults = append(toolResults, ToolResultRecord{
+				WireCallID: end.CallID(),
+				Outcome:    "success",
+				Content:    string(end.Result()),
+			})
 			out <- ToolResult{
 				WireCallID: end.CallID(),
 				Outcome:    "success",
@@ -128,6 +160,11 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 
 		case agent.EventKindToolEndResultFailure:
 			end, _ := ev.ToolEndResultFailure()
+			toolResults = append(toolResults, ToolResultRecord{
+				WireCallID: end.CallID(),
+				Outcome:    "result_failure",
+				Content:    string(end.Result()),
+			})
 			out <- ToolResult{
 				WireCallID: end.CallID(),
 				Outcome:    "result_failure",
@@ -150,6 +187,12 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 				break
 			}
 			failure, _ := end.Failure()
+			toolResults = append(toolResults, ToolResultRecord{
+				WireCallID:      end.CallID(),
+				Outcome:         "execution_failure",
+				Content:         "",
+				FailureCategory: failure.Category().String(),
+			})
 			out <- ToolResult{
 				WireCallID:      end.CallID(),
 				Outcome:         "execution_failure",
@@ -184,12 +227,16 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 		//   - EventKindPermissionResolutionRemembered → DROPPED
 		//     at the chat wire (D-12 collapse: no chat-side
 		//     vocabulary for remembered rules; the closed chat
-	//     surface has no "permission.decision.remembered"
+		//     surface has no "permission.decision.remembered"
 		//     variant). No explicit case; falls through the
 		//     switch's default arm's "unmapped agent event"
 		//     log path. R-CPM-003 / S-CPM-009.
 		case agent.EventKindPermissionDecisionRequired:
 			req, _ := ev.PermissionDecisionRequired()
+			// Capture the tool name so the matching made event
+			// (which doesn't carry Name) can populate the
+			// persistence record's Tool field.
+			toolByCallID[req.CallID()] = req.Name()
 			out <- PermissionDecisionRequired{
 				WireCallID: req.CallID(),
 				Tool:       req.Name(),
@@ -202,6 +249,16 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 			if wireOutcome == "deny" {
 				deniedSet[made.CallID()] = true
 			}
+			// F-CPM-001 closure (CH-10 R-CPM-007): thread the
+			// permission-decision record into the persistence
+			// accumulator so production reload surfaces the
+			// decision (the same defect that left ToolCalls /
+			// ToolResults empty before CH-10's projector fix).
+			permissionDecisions = append(permissionDecisions, PermissionDecisionRecord{
+				WireCallID: made.CallID(),
+				Tool:       toolByCallID[made.CallID()],
+				Outcome:    wireOutcome,
+			})
 			out <- PermissionDecisionMade{
 				WireCallID: made.CallID(),
 				Outcome:    wireOutcome,
@@ -238,7 +295,17 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 	// is taken below. No lock cycles. A subscriber that receives
 	// turn.end and fires a fast reload (CH-08.1) sees the
 	// just-finished exchange.
-	exchange := buildTerminalExchange(prompt, runEnd, haveRunEnd, res, assistantText, messageIDs)
+	//
+	// CH-10 (R-CPM-007, D-6, F-CPM-001 closure): the three parallel
+	// accumulators thread state into buildTerminalExchange.
+	// Without this threading, the persisted Exchange carries
+	// zero ToolCalls / ToolResults / PermissionDecisions — the
+	// reload surface would render an empty transcript for any
+	// turn that included tool or permission activity. The fix
+	// makes the chat projector observably equivalent to the
+	// live wire for reload purposes. S-CPM-017 / S-CPM-018 close
+	// the gap.
+	exchange := buildTerminalExchange(prompt, runEnd, haveRunEnd, res, assistantText, messageIDs, toolCalls, toolResults, permissionDecisions)
 	if err := c.store.Append(c.participantID, exchange); err != nil {
 		c.logger.LogAttrs(ctx, slog.LevelError, "conversation store append failed",
 			slog.String("participant_id", c.participantID),
@@ -314,12 +381,32 @@ func collapseOutcome(o agent.PermissionOutcome) string {
 }
 
 // buildTerminalExchange translates the held run_end + buffered res +
-// accumulators into the eight-field Exchange the store persists (D-7,
-// R-CCS-004, R-CCS-005, R-CCS-006, R-CCS-009). It is package-private
-// — called only from project() above. Position is left at its zero
-// value here; the in-memory adapter (and CH-07's postgres adapter)
-// assigns the insertion index on Append.
-func buildTerminalExchange(prompt string, runEnd agent.RunEnd, haveRunEnd bool, res runResult, assistantText string, messageIDs []string) Exchange {
+// accumulators into the eleven-field Exchange the store persists
+// (D-7, R-CCS-004, R-CCS-005, R-CCS-006, R-CCS-009, R-CTS-006,
+// R-CPM-006). It is package-private — called only from project()
+// above. Position is left at its zero value here; the in-memory
+// adapter (and CH-07's postgres adapter) assigns the insertion
+// index on Append.
+//
+// CH-10 (R-CPM-007, D-6, F-CPM-001 closure): the function gains
+// three accumulator parameters (toolCalls, toolResults,
+// permissionDecisions) — slice state captured during the live
+// projector drain. Without these parameters, Exchange.ToolCalls,
+// Exchange.ToolResults, and Exchange.PermissionDecisions are
+// always zero/nil at production reload (the F-CPM-001 defect;
+// same shape applied to CH-10's new field). Threading the
+// accumulators closes S-CPM-017 / S-CPM-018.
+func buildTerminalExchange(
+	prompt string,
+	runEnd agent.RunEnd,
+	haveRunEnd bool,
+	res runResult,
+	assistantText string,
+	messageIDs []string,
+	toolCalls []ToolCallRecord,
+	toolResults []ToolResultRecord,
+	permissionDecisions []PermissionDecisionRecord,
+) Exchange {
 	kind := TerminalKindCompleted
 	var fin *ai.FinishReason
 	var cat ai.FailureCategory
@@ -349,17 +436,24 @@ func buildTerminalExchange(prompt string, runEnd agent.RunEnd, haveRunEnd bool, 
 
 	// Copy the messageIDs slice so caller-side mutation cannot corrupt
 	// the persisted record. The slice is short (one entry per
-	// message-start in the turn) — the copy is bounded.
+	// message-start in the turn) — the copy is bounded. The
+	// accumulator slices are passed by value (slices are header
+	// values); the store's Load path applies its own defensive
+	// copy (NFR-CCS-004, NFR-CCS-008, NFR-CCS-009 — same shape
+	// for each slice field).
 	ids := make([]string, len(messageIDs))
 	copy(ids, messageIDs)
 
 	return Exchange{
-		PromptText:      prompt,
-		AssistantText:   assistantText,
-		Partial:         partial,
-		TerminalKind:    kind,
-		FailureCategory: cat,
-		FinishReason:    fin,
-		MessageIDs:      ids,
+		PromptText:          prompt,
+		AssistantText:       assistantText,
+		Partial:             partial,
+		TerminalKind:        kind,
+		FailureCategory:     cat,
+		FinishReason:        fin,
+		MessageIDs:          ids,
+		ToolCalls:           toolCalls,
+		ToolResults:         toolResults,
+		PermissionDecisions: permissionDecisions,
 	}
 }
