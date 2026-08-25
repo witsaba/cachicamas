@@ -21,6 +21,8 @@
 -- translates BEFORE persistence; the chat store only sees the
 -- collapsed form.
 
+-- +goose Up
+
 CREATE TABLE chat_permission_decisions (
     participant_id text NOT NULL,
     exchange_position integer NOT NULL,

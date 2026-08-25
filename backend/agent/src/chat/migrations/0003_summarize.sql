@@ -18,4 +18,6 @@
 -- ALTER TABLE chat_conversations ADD COLUMN ... — a NEW column
 -- on the EXISTING table satisfies NFR-CCS-006.
 
+-- +goose Up
+
 ALTER TABLE chat_conversations ADD COLUMN summary TEXT;
