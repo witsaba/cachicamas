@@ -193,3 +193,80 @@ On the Qwik `useVisibleTask$` mount of `chat-app.tsx`, the page MUST issue `GET 
 ### REQ-9 — A reload that catches an in-flight turn MUST NOT claim streaming
 
 On a reload that catches an in-flight turn (the participant reloaded the tab mid-stream), the page MUST render the exchanges recorded before the reload (REQ-8, S-FCL-009). The page MUST NOT claim the turn is still streaming — `Composer`'s `status` MUST resolve to `"idle"` once both GETs return; `turn.status` (the `useChatStream` signal) MUST NOT be set to `"streaming"` on mount. The page MUST NOT auto-open an `EventSource` for the prior conversation id; the next `EventSource` is opened only on the next `submit()` call. The closed `ChatStreamEvent` union (REQ-1, REQ-7) is not widened by this delta — the read-side wire types `ConversationSummaryDTO` and `ExchangeDTO` are new types adjacent to it, never additions to it.
+
+---
+
+# CH-09 amendment — `cachicamas-chat-tool-source`
+
+> **Change**: `cachicamas-chat-tool-source` · **CH-09** (Wave 3, 10 of 12) of [doc 0005](../../../docs/architecture/milestones/0005-cachicamas-chat-archetype-task-graph.md#ch-09--offer-tools-through-a-tool-source-port) (`0005:923-934`)
+> **Amends**: this spec (`frontend-chat-layer1`) — **additive only**. **REQ-1..7 byte-unchanged**. New identifiers: **REQ-8**, **REQ-9**, **REQ-10**, **REQ-11**, **S-FCL-012**, **S-FCL-013**, **S-FCL-014**, **S-FCL-015**, **S-FCL-016**, **S-FCL-017**. Identifier-append-only per CH-08 precedent at the CH-08 amendment header (`frontend-chat-layer1/spec.md:154-157`).
+>
+> **D-7 surfacing (deliberate)** — the closed `ChatStreamEvent` union (REQ-1, REQ-7) is widened by four new variants below. REQ-7's spec text forbids **new fields on existing variants**; CH-09 widens with **new variants on the union, not new fields on existing variants**. Each of REQ-8..11 below carries explicit wording that distinguishes variant-addition from field-addition, so a future reviewer cannot misread the original REQ-7 as forbidding it. The wording is the source-of-truth distinction this amendment records.
+>
+> **RE-7 preserved verbatim** — REQ-7's "closed union" wording at `frontend-chat-layer1/spec.md:83-94` is **not modified**. The widening allowance lives in REQ-8..11's rationale lines, NOT in a modification of REQ-7's text.
+
+## ADDED Requirements
+
+### REQ-8 — `tool.call.start` SSE event
+
+A new SSE event with `event: tool.call.start` MUST be added as a **new variant** on the closed `ChatStreamEvent` union (`frontend/src/lib/chat-types.ts:27-32`). The payload shape MUST be `{ wireCallId: string, tool: string, arguments: string }` — all field names lowercase JSON keys, parallel to the closed `ExchangeDTO` precedent (`chat-types.ts:152-161`). The variant discriminator MUST be `"tool.call.start"`.
+
+**D-7: this requirement adds a new variant on the closed `ChatStreamEvent` union; it does NOT add new fields on existing variants REQ-1..7 enumerate. The "closed union" wording in REQ-7 forbids field additions, not variant additions — see `cachicamas-chat-tool-source/proposal.md` D-7 and `cachicamas-chat-tool-source/explore.md` for the deliberate additive widening. The wire's `wireFrameName` switch at `backend/agent/src/chat/eventsource.go:31-48` and the `parseTranscript` switch at `chat-types.ts:236-272` are extended by this requirement; a new variant without a case is a compile error (S-CTS-007, S-CTS-024).**
+
+#### Scenario: S-FCL-012 — `parseTranscript` parses `tool.call.start` into a typed variant (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-013)
+
+- Given `parseTranscript` reading a `tool.call.start` frame with payload `{"wireCallId":"c1","tool":"current_time","arguments":"{}"}`
+- When the frame is parsed
+- Then the resulting `ChatStreamEvent` is `{kind: "tool.call.start", wireCallId: "c1", tool: "current_time", arguments: "{}"}` (typed and exhaustive)
+
+#### Scenario: S-FCL-013 — a malformed `tool.call.start` JSON is silently dropped (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-014)
+
+- Given a `tool.call.start` frame with malformed JSON
+- When parsed
+- Then the frame is silently dropped (S-1.b mirror at `chat-types.ts:206-210`)
+
+### REQ-9 — `tool.call.delta` SSE event
+
+A new SSE event with `event: tool.call.delta` MUST be added as a **new variant** on the closed `ChatStreamEvent` union. The payload shape MUST be `{ wireCallId: string, delta: string }`. **The variant is reserved for future progress-bearing tools; v1 does not emit this event.** The wire shape (`wireFrameName` case + `parseTranscript` case + `KNOWN_EVENTS` entry at `chat-api.ts:285-291`) MUST exist so a future long-running MCP tool can land here without a wire shape change.
+
+**D-7: new variant, not new field. Reserved-but-unused at v1 per `cachicamas-chat-tool-source/spec.md` NFR-CTS-002 / D-6. A future tool engineer asking for progress has a place to put it; v1 deliberately leaves it empty.**
+
+### REQ-10 — `tool.call.end` SSE event
+
+A new SSE event with `event: tool.call.end` MUST be added as a **new variant** on the closed `ChatStreamEvent` union. The payload shape MUST be `{ wireCallId: string, outcome: string }`. **The variant is reserved; v1 collapses Layer 2's three `ToolEnd*` kinds into `tool.result` (D-6) — `tool.call.end` is therefore not emitted at v1.** The wire shape MUST exist so a future v2 dynamic-source surface has a place to split the bracket from the result.
+
+**D-7: new variant, not new field. Reserved-but-unused at v1 per `cachicamas-chat-tool-source/spec.md` NFR-CTS-002 / D-6.**
+
+### REQ-11 — `tool.result` SSE event
+
+A new SSE event with `event: tool.result` MUST be added as a **new variant** on the closed `ChatStreamEvent` union. The payload shape MUST be `{ wireCallId: string, tool: string, outcome: "success" | "result_failure" | "execution_failure", content: string, failureCategory: string }`. `failureCategory` is non-empty ONLY when `outcome == "execution_failure"` (mirroring R-CCP-008 / D6's "no provider text leaks" rule). At v1 the chat projector collapses Layer 2's three `ToolEnd*` kinds into this single chat-side event (D-6); one transcript entry per tool call (D-4).
+
+**D-7: new variant, not new field. The discriminator value `"tool.result"` is new; no existing REQ-1..7 variant is modified. Mirrors `cachicamas-chat-tool-source/spec.md` R-CTS-004 (`ToolResult` variant) byte-for-byte.**
+
+#### Scenario: S-FCL-014 — `exchangesToEntries` renders tool entries from `ExchangeDTO` (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-019)
+
+- Given an `ExchangeDTO{ToolCalls: [c1], ToolResults: [r1]}`
+- When `exchangesToEntries([exchange])` runs
+- Then the returned array contains exactly one `kind: "tool"` entry with `tool: c1.tool`, `args: parseArgs(c1.arguments)`, `result: r1.content`, `state: "done"` — appended AFTER the assistant said entry
+
+#### Scenario: S-FCL-015 — a live `tool.call.start` SSE frame opens a "running" tool entry (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-020)
+
+- Given a `tool.call.start` SSE frame arriving mid-turn
+- When the page receives it
+- Then a new transcript entry with `kind: "tool"`, `state: "running"`, the tool name and parsed args is appended
+
+#### Scenario: S-FCL-016 — a `tool.result` with `execution_failure` closes the entry as "failed" (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-021)
+
+- Given the matching `tool.result` frame with `outcome: "execution_failure"`
+- When received
+- Then the tool entry's `state` becomes `"failed"` and `result` carries the failure phrase (no provider text — R-CCP-008 / D6 mirror on the wire)
+
+#### Scenario: S-FCL-017 — `finishReason: "tool_calls"` allows the assistant bubble to continue (Gherkin verbatim, explore #3952; mirrors `cachicamas-chat-tool-source/spec.md` S-CTS-022)
+
+- Given a tool call whose model emits `finishReason: "tool_calls"` immediately after `tool.result`
+- When the page receives `turn.end` with `finishReason: "tool_calls"`
+- Then the assistant text bubble that follows the tool entry is allowed to stream and accumulate the model's tool-result-aware text
+
+## Untemporal-invariant register (CH-09 addition)
+
+The D-7 record above is preserved here as a **structural marker**: REQ-7's closed-union wording at `frontend-chat-layer1/spec.md:83-94` is **not modified**; the widening allowance lives in REQ-8..11's rationale lines. The CTS-* scenarios (S-CTS-013, S-CTS-014, S-CTS-019..022) are the source of truth for the S-FCL-012..017 scenarios above; any future amendment MUST update CTS-* first and reference it from S-FCL-*.
