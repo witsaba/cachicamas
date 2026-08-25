@@ -135,18 +135,21 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 			}
 
 		case agent.EventKindToolEndExecutionFailure:
-			// CH-10 RED scaffold #2 (R-CPM-008, D-8) — the
-			// deny-state collapse site. In T-02 the consultation
-			// rule is a placeholder; the deniedSet stays empty
-			// because no projection arm yet populates it. T-04
-			// finalizes the suppression rule: when the prior
-			// event for this wireCallId was
-			// permission_decision_made{deny}, this arm SUPPRESSES
-			// emission. Until T-04 the production projection
-			// still emits the tool.result wire event normally.
+			// CH-10 (R-CPM-008, D-8) — the deny-state collapse
+			// site. When the prior event for this wireCallId
+			// was permission_decision_made{outcome: "deny"},
+			// this arm SUPPRESSES the tool.result wire event
+			// (the hold entry alone carries the user-facing
+			// surface; no tool entry renders). S-CPM-019.
 			end, _ := ev.ToolEndExecutionFailure()
+			if deniedSet[end.CallID()] {
+				// D-8 suppression — the hold entry's
+				// "denied" state already surfaces the
+				// outcome; the tool entry is
+				// intentionally absent on the wire.
+				break
+			}
 			failure, _ := end.Failure()
-			_ = deniedSet // T-04 reads this map; T-02 declares it
 			out <- ToolResult{
 				WireCallID:      end.CallID(),
 				Outcome:         "execution_failure",
@@ -154,33 +157,55 @@ func (c *Conversation) project(ctx context.Context, prompt string, sink <-chan *
 				FailureCategory: failure.Category().String(),
 			}
 
-		// CH-10 (R-CPM-003, D-3) — permission event family projection
-		// RED scaffold #2. Three arms pre-empt T-04's GREEN:
+		// CH-10 (R-CPM-003, D-3, D-12) — permission event family
+		// projection GREEN (closes T-01 RED scaffold). Three arms
+		// project Layer 2's 3-event-per-decision permission model
+		// onto the chat wire's 2-variant closed union:
 		//
-		//   - EventKindPermissionDecisionRequired → PermissionDecisionRequired (placeholder)
-		//   - EventKindPermissionDecisionMade     → PermissionDecisionMade (placeholder;
-		//                                            T-04 also populates deniedSet on Deny)
-		//   - EventKindPermissionResolutionRemembered → DROPPED at the chat wire
-		//                                            (D-12 collapse: no chat-side
-		//                                            vocabulary; falls through the
-		//                                            switch's default arm's
-		//                                            "unmapped agent event" log)
+		//   - EventKindPermissionDecisionRequired → PermissionDecisionRequired
+		//     (R-CPM-003 / S-CPM-007). The wire payload carries
+		//     WireCallID + Tool + Arguments. The frontend
+		//     renders a "waiting" hold entry.
 		//
-		// In T-02 each arm is a no-op placeholder so the projector
-		// compiles and the wireFrameName switch stays exhaustive
-		// once T-04 lands. The strict-TDD RED scaffold pre-empts
-		// the GREEN; S-CPM-007/008/009 close at T-04.
+		//   - EventKindPermissionDecisionMade → PermissionDecisionMade
+		//     (R-CPM-003 / S-CPM-008, D-12 collapse). The chat
+		//     wire's CLOSED 2-value vocabulary
+		//     "allow_once" | "deny" replaces Layer 2's 4-value
+		//     PermissionOutcome: AllowOnce → "allow_once",
+		//     AllowAlways → "allow_once" (D-12 collapse),
+		//     Deny → "deny", ModifyInput → "deny" (D-12
+		//     collapse). The ModifyInput modified arguments
+		//     are dropped at the chat boundary (R-CPM-008 /
+		//     deferred-register row 7). When Layer 2's outcome
+		//     is Deny or ModifyInput, this arm ALSO populates
+		//     deniedSet[wireCallId] (D-8 suppress-on-deny
+		//     preparation).
+		//
+		//   - EventKindPermissionResolutionRemembered → DROPPED
+		//     at the chat wire (D-12 collapse: no chat-side
+		//     vocabulary for remembered rules; the closed chat
+	//     surface has no "permission.decision.remembered"
+		//     variant). No explicit case; falls through the
+		//     switch's default arm's "unmapped agent event"
+		//     log path. R-CPM-003 / S-CPM-009.
 		case agent.EventKindPermissionDecisionRequired:
-			// Placeholder body; T-04 projects this to a real
-			// PermissionDecisionRequired wire event.
-			_ = ev
+			req, _ := ev.PermissionDecisionRequired()
+			out <- PermissionDecisionRequired{
+				WireCallID: req.CallID(),
+				Tool:       req.Name(),
+				Arguments:  string(req.Arguments()),
+			}
 
 		case agent.EventKindPermissionDecisionMade:
-			// Placeholder body; T-04 projects this to a real
-			// PermissionDecisionMade wire event AND populates
-			// deniedSet when Layer 2's outcome is Deny or
-			// ModifyInput (the D-12 chat-side collapse).
-			_ = ev
+			made, _ := ev.PermissionDecisionMade()
+			wireOutcome := collapseOutcome(made.Outcome())
+			if wireOutcome == "deny" {
+				deniedSet[made.CallID()] = true
+			}
+			out <- PermissionDecisionMade{
+				WireCallID: made.CallID(),
+				Outcome:    wireOutcome,
+			}
 
 		case agent.EventKindPermissionResolutionRemembered:
 			// D-12 wire collapse — DROPPED at the chat wire.
@@ -254,6 +279,37 @@ func terminalWireEvent(re agent.RunEnd, haveRunEnd bool, res runResult) WireEven
 		return Error{Kind: "server", Message: phraseFor(failure.Category())}
 	default:
 		return TurnEnd{FinishReason: nil}
+	}
+}
+
+// collapseOutcome translates Layer 2's PermissionOutcome enum to
+// the chat wire's CLOSED 2-value vocabulary (D-12, R-CPM-003).
+//
+//	AllowOnce   → "allow_once"
+//	AllowAlways → "allow_once"   (D-12 collapse — chat does not
+//	                                surface rule persistence)
+//	Deny        → "deny"
+//	ModifyInput → "deny"         (D-12 collapse — chat does not
+//	                                surface modified arguments;
+//	                                modified args are dropped at the
+//	                                chat boundary)
+//
+// Any out-of-vocab value falls back to "deny" (a typed
+// refusal rather than a 4th wire token that would break the
+// closed vocabulary).
+func collapseOutcome(o agent.PermissionOutcome) string {
+	switch o {
+	case agent.PermissionOutcomeAllowOnce, agent.PermissionOutcomeAllowAlways:
+		return "allow_once"
+	case agent.PermissionOutcomeDeny, agent.PermissionOutcomeModifyInput:
+		return "deny"
+	default:
+		// Defensive: PermissionDefer (zero) is never reached
+		// here (decision_made events validate outcome non-zero
+		// at the constructor; permission_protocol.go:202-204).
+		// Treat unknown as deny — closed vocab refuses
+		// surprises.
+		return "deny"
 	}
 }
 
