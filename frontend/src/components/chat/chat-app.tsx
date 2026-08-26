@@ -203,6 +203,19 @@ function parseToolArgs(
 }
 
 export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participantID }) => {
+  // Disable the browser's automatic scroll-position restoration
+  // on refresh. With `history.scrollRestoration = "auto"` (the
+  // default), the browser tries to put the page back where the
+  // user was before F5 — which, for a chat that's mid-scroll
+  // through history, lands the scroll AWAY from the bottom even
+  // after our explicit scroll-to-bottom runs. "manual" keeps
+  // the user's scroll exactly where the chat component puts it.
+  if (typeof window !== "undefined") {
+    if (window.history.scrollRestoration !== "manual") {
+      window.history.scrollRestoration = "manual";
+    }
+  }
+
   const activeSlug = useSignal(AGENTS[0].slug);
   // CH-12 (S-SCROLL-001) — auto-scroll bus. The hook
   // (a) dispatches the `chat:scroll-to-bottom` CustomEvent on
@@ -261,6 +274,35 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
         if (resumed.value.exchanges.length > 0) {
           await turn.reset(exchangesToEntries(resumed.value.exchanges));
         }
+        // Pin the transcript to the bottom EXPLICITLY here, after
+        // the awaited bulk reset. `reset()` itself dispatches
+        // SCROLL_EVENT for the listener to catch — but on a chat
+        // refresh with many entries the listener can fire BEFORE
+        // Qwik has committed the bulk render of the replayed
+        // exchanges, reading a stale scrollHeight and leaving
+        // the scroll mid-conversation. Run the scroll across six
+        // consecutive frames after the awaited reset: that gives
+        // Qwik enough time to commit the bulk, and one of the
+        // six attempts will land against the post-commit layout.
+        // `nextFrame` is hoisted out of the closure so the
+        // TS-inferred type of `resolve` is unambiguously
+        // `() => void` (requestAnimationFrame's callback shape),
+        // not the `PromiseLike` overload that breaks compilation
+        // when the resolve callback is passed directly.
+        const nextFrame = (): Promise<void> =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        for (let i = 0; i < 6; i++) {
+          await nextFrame();
+          await nextFrame();
+          const scrollerEl = scroller.value;
+          if (scrollerEl) {
+            void scrollerEl.offsetHeight;
+            scrollerEl.scrollTo({
+              top: scrollerEl.scrollHeight,
+              behavior: "instant",
+            });
+          }
+        }
         // List — populate the rail with the server-issued
         // conversationID; the rail marks only that row current.
         railState.summaries = [...resumed.value.summaries];
@@ -303,9 +345,7 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // render commit. The rAF inside fires before the new <li> is in the
   // DOM, so `scrollTop = scrollHeight` reads the OLD height and the
   // new content lands below the fold (the scrollbar grows but the
-  // text is hidden). The MutationObserver approach before that
-  // (commit f8b5b56e) orphaned on Qwik resume / re-render swaps of
-  // the transcript <ol> node.
+  // text is hidden).
   //
   // The event-based approach decouples the scroll from Qwik's
   // reactive task lifecycle. The hook dispatches the event from
@@ -320,27 +360,76 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // The signal counter is preserved on the hook's public surface
   // (CH-11) so external observers (tests, analytics) can still
   // react to entry mutations. The actual scroll is event-driven.
+  //
+  // A second auto-scroll mechanism, a `MutationObserver` attached
+  // to the transcript `<ol>`, runs as a SECONDARY path. It catches:
+  //   1. New entries appended through any code path that did NOT
+  //      call `requestScroll` (defence in depth for future hook
+  //      variants).
+  //   2. Streaming `message.delta` text appended to an EXISTING
+  //      `<li>` — Qwik batches the `state.entries.map` write, so
+  //      the SCROLL_EVENT may fire BEFORE the streaming text node
+  //      is in the DOM, missing the height growth.
+  //   3. The browser's default `overflow-anchor: auto` behaviour,
+  //      which silently re-asserts a stale visual position on any
+  //      content append (mitigated by `[overflow-anchor:none]` on
+  //      the `<ol>` above AND backed up here for safety).
+  // The observer fires `scrollToBottom` — the SAME rAF chain the
+  // event listener uses — so a per-character stream coalesces into
+  // one scroll per paint frame.
+  //
+  // Earlier experiments tried a 6-frame brute-force spread inside
+  // this listener (commit 3bfe7fb1), which fixed the chat-on-
+  // refresh case but produced "scrollbar goes crazy" symptoms on
+  // send / stream because six scroll attempts fired inside a
+  // 2-frame window against a still-mutating scrollHeight. The
+  // bulk-replay case now lives in the reload visible-task's own
+  // explicit brute-force spread AFTER `await turn.reset()` —
+  // that's the path that needs the extra cadence. The streaming
+  // / send path here is happy with a single double-rAF + raw
+  // `scrollTop = scrollHeight` (guaranteed-instant across
+  // browsers, no animation races, no scrollIntoView jitter).
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    const handler = () => {
-      // Double rAF: first waits for Qwik's render commit to flush,
-      // second waits for the browser to paint. After both,
-      // scrollHeight reflects the post-commit content reliably.
+    const scrollToBottom = () => {
+      // Double rAF: first lets Qwik's render commit flush,
+      // second lets the browser paint. After both, scrollHeight
+      // reflects the post-commit content reliably.
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
           const scrollerEl = scroller.value;
           if (!scrollerEl) return;
+          void scrollerEl.offsetHeight;
           scrollerEl.scrollTop = scrollerEl.scrollHeight;
-          const last = scrollerEl.querySelector("li:last-child");
-          if (last instanceof HTMLElement) {
-            last.scrollIntoView({ block: "end", behavior: "auto" });
-          }
         });
       });
     };
-    window.addEventListener(SCROLL_EVENT, handler);
-    cleanup(() => window.removeEventListener(SCROLL_EVENT, handler));
+    window.addEventListener(SCROLL_EVENT, scrollToBottom);
+
+    // Catches new <li>s appended to the transcript. `childList`
+    // only — `subtree` + `characterData` would re-fire on every
+    // streamed text node mutation and on every status-dot
+    // re-render, multiplying the scroll attempts inside a
+    // streaming window and producing visible jitter. A new
+    // <li> is the meaningful signal; intermediate text updates
+    // inside an existing <li> are caught by the EVENT listener
+    // (the hook dispatches SCROLL_EVENT on every message.delta).
+    const olElement = scroller.value;
+    let observer: MutationObserver | null = null;
+    if (olElement) {
+      observer = new MutationObserver(() => {
+        scrollToBottom();
+      });
+      observer.observe(olElement, {
+        childList: true,
+      });
+    }
+
+    cleanup(() => {
+      window.removeEventListener(SCROLL_EVENT, scrollToBottom);
+      observer?.disconnect();
+    });
   });
 
   const agent =
@@ -391,14 +480,29 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
                 Agent
               </span>
             </p>
-            <p class="text-ink-soft truncate text-xs">
-              {agent.departmentName} ·{" "}
-              {turn.status === "streaming" ||
-              turn.status === "submitting" ||
-              turn.status === "cancelling"
-                ? "Working now"
-                : agent.statusWord}
-            </p>
+            <div class="mt-0.5 flex items-center gap-2">
+              <span class="text-ink-soft truncate text-xs">
+                {agent.departmentName}
+              </span>
+              <span class="ml-auto">
+                <Status
+                  status={
+                    turn.status === "streaming" ||
+                    turn.status === "submitting" ||
+                    turn.status === "cancelling"
+                      ? "working"
+                      : agent.status
+                  }
+                  word={
+                    turn.status === "streaming" ||
+                    turn.status === "submitting" ||
+                    turn.status === "cancelling"
+                      ? "Working now"
+                      : agent.statusWord
+                  }
+                />
+              </span>
+            </div>
           </div>
         </header>
 
@@ -411,27 +515,18 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
           // the full width of a 1440px screen, which is about twice the length
           // anyone reads comfortably; the composer below is capped to the same
           // column so the two never disagree about where the conversation is.
-          class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
+          //
+          // `[overflow-anchor:none]` opts out of the browser's
+          // scroll-anchoring feature. The default `auto` lets the
+          // browser AUTO-ADJUST `scrollTop` to keep whatever was
+          // visible at the same visual position whenever new
+          // content is appended to the scroller — which silently
+          // undoes `scrollTop = scrollHeight` whenever the user
+          // is scrolled up while a new message or a streaming
+          // delta arrives. Disabling the anchor lets the explicit
+          // scroll-to-bottom in this file actually stick.
+          class="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
         >
-          <li class="pt-5 pb-1">
-            <p class="text-ink-soft text-xs">
-              {agent.tagline}{" "}
-              {agent.tenure ? <>On staff {agent.tenure}.</> : null}{" "}
-              <a
-                href={`/agents/${agent.slug}/`}
-                class="text-brand rounded-sm font-medium hover:underline"
-              >
-                See what {agent.name} can do
-              </a>
-            </p>
-            <p class="pt-2">
-              <Status
-                status={agent.status}
-                word={agent.statusWord}
-                detail={agent.statusDetail}
-              />
-            </p>
-          </li>
           {turn.entries.map((entry) => (
             <TranscriptLine
               key={entry.id}

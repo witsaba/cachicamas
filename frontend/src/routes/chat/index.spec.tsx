@@ -21,6 +21,7 @@ import { $, type QRL } from "@builder.io/qwik";
 import { test, expect, vi } from "vitest";
 import Index, { head } from "./index";
 import type { DocumentHeadValue } from "@builder.io/qwik-city";
+import { AGENTS } from "~/lib/mock/staff";
 
 // `DocumentHead` is a union of a static value and a resolver function; these
 // routes export the static form, so narrow once here rather than at every use.
@@ -162,10 +163,15 @@ test("routes/chat: the page renders at least one transcript slot (the assistant'
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // The lead-in line ("See what ... can do") survives D-3 in the
-  // transcript opening <li> (chat-app.tsx:130-148). The second
-  // status indicator inside it gives the test a stable assertion
-  // anchor.
-  const transcript = screen.querySelector('[data-testid="transcript"]');
-  expect(transcript?.textContent ?? "").toContain("See what");
+  // The transcript still mounts as the chat surface (CH-05.1) and
+  // the agent's status now lives in the page header (chat-app.tsx)
+  // rather than the lead-in <li> that previously opened the
+  // transcript. With the lead-in removed the transcript is empty
+  // until the first exchange; instead assert the header carries the
+  // agent name AND the status word, which together prove the chat
+  // surface is rendering the colleague the page is for.
+  const header = screen.querySelector("header");
+  const headerText = (header as HTMLElement).textContent ?? "";
+  expect(headerText).toContain(AGENTS[0].name);
+  expect(headerText).toContain(AGENTS[0].statusWord);
 });
