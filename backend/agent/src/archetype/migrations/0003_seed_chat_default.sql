@@ -40,6 +40,8 @@
 -- Forward-only. Rollback is `DELETE FROM archetype_configurations
 -- WHERE archetype_kind = 'chat' AND org_id = '__default__'`.
 
+-- +goose Up
+
 INSERT INTO archetype_configurations
     (archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
 VALUES
