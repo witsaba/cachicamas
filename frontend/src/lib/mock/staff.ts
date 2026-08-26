@@ -115,6 +115,14 @@ export const AGENTS: readonly Agent[] = [
     tagline: "The colleague everyone talks to first.",
     summary:
       "Handles the work that has no other home: answering questions, drafting and rewriting, reading a long thread and telling you what it says. When a job belongs to a specialist, the Assistant says so and introduces you.",
+    // statusWord and statusDetail for the Assistant are overridden
+    // at render time by AgentDirectory from the live
+    // /api/chat/assistant/config response (REQ-FADR-001/002).
+    // The values here are a sensible fallback used only when the GET
+    // fails (offline / anon / server) — see AgentDirectory for the
+    // override path. The Agent type's required-field contract is
+    // preserved for the five mock specialists, whose statusWord is
+    // static and final.
     status: "working",
     statusWord: "Working",
     statusDetail: "On staff and answering now.",
