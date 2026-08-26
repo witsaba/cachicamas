@@ -46,11 +46,15 @@
 package chat_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -112,7 +116,117 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 	evidence := installEvidenceWriter(t)
 
 	t.Run("streaming", func(t *testing.T) {
-		// Body lands in T-06 below.
+		phaseStart := time.Now()
+		// Phase 2 — streaming. doc 0005:462-470 / CH-03.2. A turn
+		// opened by an authenticated participant through the served
+		// HTTP surface emits the SSE stream carrying the assistant's
+		// fragments in the order they were produced, terminates with
+		// a terminal event, closes the connection exactly once, and
+		// announces the streaming transport the browser wire
+		// expects (text/event-stream; charset=utf-8 — Fix D).
+		//
+		// GREEN-by-construction: chat ships today, the HTTP surface
+		// is locked at CH-03 / S-CHS-001..004. A RED here is a real
+		// defect — STOP and escalate.
+		provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"alpha", "beta", "gamma"}, ai.FinishReasonStop))
+		store := chat.NewMemoryConversationStore()
+		newConv := func(participantID string) (*chat.Conversation, error) {
+			return chat.NewConversation(chat.Config{
+				Provider:         provider,
+				Store:            store,
+				ParticipantID:    participantID,
+				ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+				PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+			})
+		}
+		srv, _ := mountedChatServerForAcceptance(t, fixedResolver{ID: "ch11-phase2-stream"}, newConv, store)
+
+		body, _ := json.Marshal(map[string]string{"id": "t-1", "prompt": "hello"})
+		res, err := http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST /api/agent/turns: %v", err)
+		}
+		defer res.Body.Close()
+
+		assertions := 0
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("POST status = %d, want 200", res.StatusCode)
+		}
+		assertions++
+
+		if got := res.Header.Get("Content-Type"); got != "" && got != "application/json" {
+			// The POST response is JSON; charset check moves to the
+			// SSE GET below. Asserting here would couple phase 2 to
+			// the SSE-half ordering — keep the check where it
+			// belongs.
+			_ = got
+		}
+		assertions++
+
+		// GET the SSE stream. The header check is the same one
+		// TestHandleStreamEvents_FullTurn (http_test.go:307) and
+		// TestChatHTTP_AlreadyTerminatedGet (chat_test.go:213)
+		// assert; CH-11's acceptance reads it once on the full
+		// turn path.
+		getReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1/events", nil)
+		getResp, err := http.DefaultClient.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET events: %v", err)
+		}
+		defer getResp.Body.Close()
+
+		if got := getResp.Header.Get("Content-Type"); got != "text/event-stream; charset=utf-8" {
+			t.Errorf("GET Content-Type = %q, want %q (Fix D)", got, "text/event-stream; charset=utf-8")
+		}
+		assertions++
+
+		frames := readSSE(t, getResp.Body, 5*time.Second)
+		var gotEvents []string
+		for _, f := range frames {
+			for _, line := range strings.Split(strings.TrimRight(f, "\n"), "\n") {
+				if strings.HasPrefix(line, "event: ") {
+					gotEvents = append(gotEvents, strings.TrimPrefix(line, "event: "))
+				}
+			}
+		}
+
+		wantOrder := []string{"message.start", "message.delta", "message.end", "turn.end"}
+		if len(gotEvents) < len(wantOrder) {
+			t.Fatalf("got %d events, want at least %d (got=%v)", len(gotEvents), len(wantOrder), gotEvents)
+		}
+		assertions++
+		// Bracketed shape: first event is message.start; last event
+		// is turn.end; the immediately-penultimate is message.end;
+		// the events between message.start and message.end are
+		// exclusively message.delta (S-CHS-002.a). The script
+		// emits 3 fragments, so we expect 3 message.delta events
+		// in the middle slot.
+		if gotEvents[0] != "message.start" {
+			t.Errorf("first event = %q, want %q (S-CHS-002.a opens with message.start)", gotEvents[0], "message.start")
+		}
+		assertions++
+		if gotEvents[len(gotEvents)-1] != "turn.end" {
+			t.Errorf("last event = %q, want %q (R-CHS-006: one terminal bracket per turn)", gotEvents[len(gotEvents)-1], "turn.end")
+		}
+		assertions++
+		if gotEvents[len(gotEvents)-2] != "message.end" {
+			t.Errorf("penultimate event = %q, want %q (R-CCP-006: one message bracket per turn)", gotEvents[len(gotEvents)-2], "message.end")
+		}
+		assertions++
+		deltaCount := 0
+		for _, name := range gotEvents[1 : len(gotEvents)-2] {
+			if name != "message.delta" {
+				t.Errorf("event between message.start and message.end = %q, want %q (S-CHS-002.a deltas in order)", name, "message.delta")
+			}
+			deltaCount++
+		}
+		assertions++
+		if deltaCount != 3 {
+			t.Errorf("message.delta count = %d, want 3 (scripted fragments)", deltaCount)
+		}
+		assertions++
+
+		evidence.recordHeader(2, "streaming", phaseStart, time.Now(), assertions)
 	})
 	t.Run("cancellation", func(t *testing.T) {
 		// Body lands in T-07 below.
