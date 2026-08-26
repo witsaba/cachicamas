@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { component$, useSignal } from "@builder.io/qwik";
 import type { Signal } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
+import { SCROLL_EVENT } from "./events";
 
 // Mocked wire-client surface. The factory must be hoisted before
 // the import of the hook resolves, so the module-level `vi.mock`
@@ -100,6 +101,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Reset the globalThis.window binding set by the CH-12 event
+  // dispatch tests (installDispatchSpy) so it doesn't leak into
+  // unrelated test files. The CH-12 describe block reinstalls
+  // globalThis.window per test from each test's own defaultView.
+  delete (globalThis as { window?: unknown }).window;
 });
 
 describe("useChatStream (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
@@ -925,4 +931,228 @@ describe("useChatStream scrollCounter (CH-11 S-SCROLL-001)", () => {
     expect(handles.scrollCounter.value).toBe(beforeSeeded + 1);
     expect(state.entries.length).toBe(2);
   });
+});
+
+// ---------------------------------------------------------------------------
+// CH-12 (S-SCROLL-001) — `chat:scroll-to-bottom` event dispatch.
+//
+// The previous auto-scroll implementation (CH-11) drove the scroll
+// from a Qwik signal counter that the hook bumped on every entry
+// mutation. Qwik re-runs the visible-task in the SAME microtask as
+// the signal change — BEFORE the render commit — so the rAF inside
+// fired before the new <li> was in the DOM. scrollTop = scrollHeight
+// read the OLD height and the new content landed below the fold.
+//
+// CH-12 replaces that with an explicit CustomEvent dispatched from
+// the mutation site (`requestScroll` in use-chat-stream.ts). The
+// chat-app's visible-task listens for the event in plain browser
+// time (no `track`, no reactive race), and runs the scroll inside
+// a double rAF so scrollHeight reflects the post-commit DOM.
+//
+// The three tests below assert the hook dispatches
+// `chat:scroll-to-bottom` on `window` from the three primary
+// mutation paths: submit(), message.delta, and reset().
+//
+// Test setup note: Qwik's `createDOM()` returns a test window
+// whose `dispatchEvent` is undefined (only `addEventListener`,
+// `removeEventListener`, and `CustomEvent` are stubbed). The
+// hook calls `window.dispatchEvent(...)` from every mutation
+// site; the helper guards with `typeof window.dispatchEvent ===
+// "function"` (use-chat-stream.ts:174-177). The test installs a
+// real (callable) dispatchEvent before the action runs so
+// `vi.spyOn` can wrap it and observe the calls.
+// ---------------------------------------------------------------------------
+
+describe("useChatStream chat:scroll-to-bottom event dispatch (CH-12 S-SCROLL-001)", () => {
+  // Test-local helper: capture the onEvent callback from the
+  // subscribeTurn implementation so the test can dispatch SSE
+  // frames by hand. Mirrors the helper in the scrollCounter
+  // describe block above.
+  function arrangeLiveStream() {
+    let onEventCb: ((ev: unknown) => void) | null = null;
+    let unsubscribeCount = 0;
+    subscribeTurnMock.mockImplementation(
+      (_url: string, onEvent: (ev: unknown) => void) => {
+        onEventCb = onEvent;
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+    );
+    return {
+      fire(ev: unknown) {
+        (onEventCb as unknown as (ev: unknown) => void)(ev);
+      },
+      unsubscribeCount: () => unsubscribeCount,
+    };
+  }
+
+  // Install a real `dispatchEvent` on the test window if it's
+  // missing (Qwik's `createDOM()` returns a stub `defaultView`
+  // with no dispatchEvent). The Qwik test platform does NOT
+  // expose `globalThis.window`, so the hook's
+  // `typeof window !== "undefined"` guard would otherwise skip
+  // the dispatch entirely (the hook is environment-agnostic —
+  // production runs in a real browser, the test env doesn't set
+  // `window` globally). Bind `globalThis.window` to the test
+  // window's defaultView so the hook sees it, install a real
+  // dispatchEvent so `vi.spyOn` can wrap it, and return the
+  // spy. The spy records calls even though no listener is
+  // registered (Qwik's test window's addEventListener is a
+  // no-op — we don't need a real listener for these tests; we
+  // just need to observe the dispatch happened).
+  //
+  // IMPORTANT: each test gets its own defaultView (createDOM()
+  // creates one per call), so the helper ALWAYS rebinds
+  // globalThis.window to the current test's defaultView. The
+  // afterEach below restores globalThis.window to undefined so
+  // subsequent test files start clean.
+  function installDispatchSpy(
+    screen: { ownerDocument: { defaultView: unknown } | null },
+  ): ReturnType<typeof vi.spyOn> {
+    const win = screen.ownerDocument?.defaultView as
+      | (Window & { dispatchEvent?: (ev: Event) => boolean })
+      | undefined
+    if (!win) throw new Error("no test window from createDOM()")
+    // ALWAYS rebind globalThis.window to the current test's
+    // defaultView — every test gets its own. Without this, a
+    // second test's hook calls dispatchEvent on the FIRST
+    // test's window, never reaching the second test's spy.
+    ;(globalThis as unknown as { window: unknown }).window = win
+    if (typeof win.dispatchEvent !== "function") {
+      // Install a real (but listener-agnostic) dispatchEvent so
+      // vi.spyOn can wrap it. The defaultView's no-op
+      // addEventListener means no listener ever fires, but we
+      // don't care — these tests assert the dispatch happened,
+      // not that a listener responded.
+      ;(win as unknown as { dispatchEvent: (ev: Event) => boolean }).dispatchEvent =
+        function dispatchEvent(_ev: Event): boolean {
+          return true
+        }
+    }
+    return vi.spyOn(win as Window, "dispatchEvent")
+  }
+
+  it("submit() dispatches chat:scroll-to-bottom on window — twice for the user entry + assistant placeholder push", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_evt_sub", streamUrl: "/api/agent/turns/trn_evt_sub/events" },
+    })
+    subscribeTurnMock.mockReturnValue(() => {})
+    const handles: HarnessHandles = { state: { value: null } }
+    const { render, screen } = await createDOM()
+    await render(<TestHarness handles={handles} />)
+    await flush()
+
+    const spy = installDispatchSpy(screen)
+    await handles.state.value!.submit("hello")
+    await flush()
+
+    // Filter the spy calls to just chat:scroll-to-bottom. The
+    // hook dispatches the event from each entry-mutation site
+    // (requestScroll at use-chat-stream.ts:173-181); submit()
+    // runs two pushes (user entry + assistant placeholder), so
+    // we expect at least 2 scroll events. There may be more
+    // from later paths in submit(); the strict lower bound is 2
+    // (the first two pushes are synchronous inside submit).
+    const scrollEvents = spy.mock.calls.filter(
+      ([ev]: unknown[]) =>
+        (ev as { type?: string } | undefined)?.type === SCROLL_EVENT,
+    )
+    expect(scrollEvents.length).toBeGreaterThanOrEqual(2)
+    expect(handles.state.value!.entries.length).toBe(2)
+  })
+
+  it("a faked message.delta SSE chunk dispatches chat:scroll-to-bottom on window", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_evt_delta", streamUrl: "/api/agent/turns/trn_evt_delta/events" },
+    })
+    const live = arrangeLiveStream()
+    const handles: HarnessHandles = { state: { value: null } }
+    const { render, screen } = await createDOM()
+    await render(<TestHarness handles={handles} />)
+    await flush()
+
+    // Install the dispatch spy BEFORE submit so we observe the
+    // submit-time pushes too (the test then clears them to
+    // isolate the message.delta dispatch below).
+    const spy = installDispatchSpy(screen)
+    spy.mockClear()
+
+    await handles.state.value!.submit("hello")
+    await flush()
+
+    // After submit the spy has at least 2 scroll events (user
+    // + assistant placeholder pushes). Clear before firing the
+    // SSE chunk so we count only the event from message.delta.
+    spy.mockClear()
+
+    live.fire({
+      kind: "message.delta",
+      index: 0,
+      delta: "streaming text ",
+    })
+    await flush()
+
+    const scrollEvents = spy.mock.calls.filter(
+      ([ev]: unknown[]) =>
+        (ev as { type?: string } | undefined)?.type === SCROLL_EVENT,
+    )
+    // One message.delta → one scroll event. The hook's
+    // requestScroll is called exactly once per message.delta
+    // (use-chat-stream.ts:requestScroll call site for the
+    // message.delta case).
+    expect(scrollEvents.length).toBe(1)
+
+    const assistant = [...handles.state.value!.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat")
+    expect(assistant?.kind).toBe("said")
+    if (assistant?.kind === "said") {
+      expect(assistant.text).toBe("streaming text ")
+    }
+  })
+
+  it("reset() dispatches chat:scroll-to-bottom on window", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_evt_reset", streamUrl: "/api/agent/turns/trn_evt_reset/events" },
+    })
+    subscribeTurnMock.mockReturnValue(() => {})
+    const handles: HarnessHandles = { state: { value: null } }
+    const { render, screen } = await createDOM()
+    await render(<TestHarness handles={handles} />)
+    await flush()
+
+    // Spy is installed BEFORE reset() so we capture only the
+    // reset() dispatches (submit is not called in this test).
+    const spy = installDispatchSpy(screen)
+
+    // Empty reset — covers the empty-seed fallback path
+    // (loadMostRecentConversation returning 200 []).
+    await handles.state.value!.reset()
+    await flush()
+    let scrollEvents = spy.mock.calls.filter(
+      ([ev]: unknown[]) =>
+        (ev as { type?: string } | undefined)?.type === SCROLL_EVENT,
+    )
+    expect(scrollEvents.length).toBe(1)
+
+    // Non-empty reset — covers the seeded-transcript path. The
+    // counter (and the event) fires once more so the chat-app's
+    // event listener scrolls to the bottom of the seeded <li>s.
+    spy.mockClear()
+    await handles.state.value!.reset([
+      { kind: "said", id: "u1", who: "you", text: "Hi.", state: "final" },
+      { kind: "said", id: "a1", who: "chat", text: "Hello.", state: "final" },
+    ])
+    await flush()
+    scrollEvents = spy.mock.calls.filter(
+      ([ev]: unknown[]) =>
+        (ev as { type?: string } | undefined)?.type === SCROLL_EVENT,
+    )
+    expect(scrollEvents.length).toBe(1)
+    expect(handles.state.value!.entries.length).toBe(2)
+  })
 });

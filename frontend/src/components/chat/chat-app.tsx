@@ -23,6 +23,7 @@ import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
 import { TranscriptLine } from "./transcript-line";
 import { useChatStream } from "./use-chat-stream";
+import { SCROLL_EVENT } from "./events";
 
 /**
  * Chat — a conversation with one colleague.
@@ -203,12 +204,14 @@ function parseToolArgs(
 
 export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participantID }) => {
   const activeSlug = useSignal(AGENTS[0].slug);
-  // CH-11 (S-SCROLL-001) — auto-scroll bus. The hook increments
-  // this signal on EVERY mutation of `turn.entries`; the
-  // visible-task below tracks it and scrolls to the bottom on
-  // every change. Bypasses the MutationObserver that used to
-  // orphan on Qwik resume / re-render swaps of the transcript
-  // <ol> DOM node.
+  // CH-12 (S-SCROLL-001) — auto-scroll bus. The hook
+  // (a) dispatches the `chat:scroll-to-bottom` CustomEvent on
+  // `window` at every entry mutation site, AND
+  // (b) bumps this counter as a public-API fallback.
+  // The visible-task below listens for the event (decoupled from
+  // Qwik's reactive task lifecycle — see the comment on the
+  // listener below). The signal itself is kept on the hook's
+  // public surface for backward compatibility.
   const scrollCounter = useSignal(0);
   const turn = useChatStream([], scrollCounter);
   const scroller = useSignal<HTMLElement>();
@@ -289,33 +292,55 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // Following an arriving answer to the bottom of a scroller is a browser-only
   // concern by definition; there is no server-side equivalent to fall back to.
   //
-  // CH-11 (S-SCROLL-001) — drive auto-scroll from a Qwik signal counter
-  // instead of a MutationObserver. The hook increments `scrollCounter`
-  // on every entry mutation; this task tracks the counter and scrolls
-  // on every change. Qwik's visible-task re-runs AFTER the render
-  // commit that appended the new <li>, so by the time we read
-  // scrollHeight the new entry is in the DOM. The single rAF forces
-  // the browser to flush layout so scrollHeight reflects the
-  // post-commit height — no setTimeout, no MutationObserver
-  // orphaning, no race against the resume lifecycle.
+  // CH-12 (S-SCROLL-001) — drive auto-scroll from an explicit DOM event
+  // dispatched at the mutation site (use-chat-stream.ts:173-181,
+  // `requestScroll`) instead of a Qwik signal counter / `useVisibleTask$`
+  // tracker.
   //
-  // First mount fires once (counter starts at 0); the mount-data
-  // task above calls `turn.reset(exchanges)` which bumps the
-  // counter and re-runs this task, scrolling to the seeded
-  // transcript's last entry.
+  // Why the previous signal-counter approach (CH-11 / commit 81a24641)
+  // did not work: Qwik re-runs a `useVisibleTask$` that `track`s a
+  // signal in the SAME microtask as the signal change — BEFORE Qwik's
+  // render commit. The rAF inside fires before the new <li> is in the
+  // DOM, so `scrollTop = scrollHeight` reads the OLD height and the
+  // new content lands below the fold (the scrollbar grows but the
+  // text is hidden). The MutationObserver approach before that
+  // (commit f8b5b56e) orphaned on Qwik resume / re-render swaps of
+  // the transcript <ol> node.
+  //
+  // The event-based approach decouples the scroll from Qwik's
+  // reactive task lifecycle. The hook dispatches the event from
+  // plain browser time, AFTER its own mutation. The listener runs
+  // in plain browser time too — there is no `track` to race with
+  // the commit. The double rAF inside the listener is critical:
+  // the first rAF lets Qwik flush its render commit, the second
+  // rAF lets the browser paint, and only then do we read
+  // scrollHeight. By that point the new <li> is in the DOM and
+  // laid out, so the scroll lands.
+  //
+  // The signal counter is preserved on the hook's public surface
+  // (CH-11) so external observers (tests, analytics) can still
+  // react to entry mutations. The actual scroll is event-driven.
   // eslint-disable-next-line qwik/no-use-visible-task
-  useVisibleTask$(({ track }) => {
-    track(() => scrollCounter.value);
+  useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    window.requestAnimationFrame(() => {
-      const scrollerEl = scroller.value;
-      if (!scrollerEl) return;
-      scrollerEl.scrollTop = scrollerEl.scrollHeight;
-      const last = scrollerEl.querySelector("li:last-child");
-      if (last instanceof HTMLElement) {
-        last.scrollIntoView({ block: "end", behavior: "auto" });
-      }
-    });
+    const handler = () => {
+      // Double rAF: first waits for Qwik's render commit to flush,
+      // second waits for the browser to paint. After both,
+      // scrollHeight reflects the post-commit content reliably.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const scrollerEl = scroller.value;
+          if (!scrollerEl) return;
+          scrollerEl.scrollTop = scrollerEl.scrollHeight;
+          const last = scrollerEl.querySelector("li:last-child");
+          if (last instanceof HTMLElement) {
+            last.scrollIntoView({ block: "end", behavior: "auto" });
+          }
+        });
+      });
+    };
+    window.addEventListener(SCROLL_EVENT, handler);
+    cleanup(() => window.removeEventListener(SCROLL_EVENT, handler));
   });
 
   const agent =
