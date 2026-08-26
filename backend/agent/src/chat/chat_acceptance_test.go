@@ -309,7 +309,76 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(3, "cancellation", phaseStart, time.Now(), assertions)
 	})
 	t.Run("failure", func(t *testing.T) {
-		// Body lands in T-08 below.
+		phaseStart := time.Now()
+		// Phase 4 — failure. doc 0005:401-409 / CH-02.3. A
+		// scripted provider that fails after one fragment
+		// terminates the turn as a typed chat.Error{Kind:"server"}
+		// with a non-empty, safe-to-render message; no turn.end
+		// follows it (R-CCP-007, R-CCP-008). A subsequent turn on
+		// the same conversation recovers — closes with turn.end.
+		//
+		// GREEN-by-construction: chat ships today, the typed-
+		// failure shape is locked at CH-02.3 / S-CCP-060..063.
+		// A RED here is a real defect — STOP and escalate.
+		failScript := scriptTextThenFailure(t, false, true, ai.FailureCategoryUnavailable)
+		successScript := scriptTextResponse(t, 1, []string{"recovered"}, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(failScript, successScript)
+
+		conv, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            chat.NewMemoryConversationStore(),
+			ParticipantID:    "ch11-phase4-failure",
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation returned %v, want nil", err)
+		}
+
+		out, err := conv.Send(context.Background(), "hello")
+		if err != nil {
+			t.Fatalf("Send returned %v, want nil", err)
+		}
+		events := drainWire(t, out)
+
+		assertions := 0
+		if len(events) == 0 {
+			t.Fatal("no wire events observed")
+		}
+		terminal := events[len(events)-1]
+		errEvt, ok := terminal.(chat.Error)
+		if !ok {
+			t.Fatalf("terminal event = %#v, want chat.Error (R-CCP-007)", terminal)
+		}
+		assertions++
+		if errEvt.Kind != "server" {
+			t.Errorf("error.Kind = %q, want %q", errEvt.Kind, "server")
+		}
+		assertions++
+		if errEvt.Message == "" {
+			t.Error("error.Message is empty, want a non-empty archetype phrase (R-CCP-008)")
+		}
+		assertions++
+		for _, ev := range events {
+			if _, isTurnEnd := ev.(chat.TurnEnd); isTurnEnd {
+				t.Errorf("a turn.end was projected on a failed run: %#v, want none (R-CCP-007)", ev)
+			}
+		}
+		assertions++
+
+		// Recovery: a second turn on the same conversation
+		// succeeds.
+		out2, err := conv.Send(context.Background(), "try again")
+		if err != nil {
+			t.Fatalf("Send (recovery) returned %v, want nil", err)
+		}
+		events2 := drainWire(t, out2)
+		if !endsWithTurnEnd(events2) {
+			t.Fatalf("recovery turn's terminal event = %#v, want chat.TurnEnd", events2[len(events2)-1])
+		}
+		assertions++
+
+		evidence.recordHeader(4, "failure", phaseStart, time.Now(), assertions)
 	})
 	t.Run("persistence", func(t *testing.T) {
 		// Body lands in T-09 below.
