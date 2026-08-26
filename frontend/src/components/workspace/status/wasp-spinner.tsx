@@ -98,9 +98,12 @@ export const WaspSpinner = component$<WaspSpinnerProps>(
         stroke-width="0.4"
       />
 
-      {/* Compound eyes */}
-      <ellipse cx="14.2" cy="7.5" rx="1.1" ry="1.5" fill="#0a0f1d" />
-      <ellipse cx="17.8" cy="7.5" rx="1.1" ry="1.5" fill="#0a0f1d" />
+      {/* Compound eyes — these ARE the indicator. Same green as the
+          `bg-ok` / `text-ok` cue the original pulsing dot carried, so
+          the wasp reads as a richer version of the same affordance
+          rather than a brand-new colour the eye has to learn. */}
+      <ellipse cx="14.2" cy="7.5" rx="1.4" ry="1.9" fill="#0e7c5a" />
+      <ellipse cx="17.8" cy="7.5" rx="1.4" ry="1.9" fill="#0e7c5a" />
 
       {/* Antennae */}
       <g stroke="#93c5fd" stroke-width="0.6" fill="none" stroke-linecap="round">

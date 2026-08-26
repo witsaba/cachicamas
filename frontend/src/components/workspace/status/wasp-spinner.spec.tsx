@@ -53,6 +53,21 @@ describe("components/workspace/status/wasp-spinner", () => {
     expect(hasStinger).toBe(true);
   });
 
+  it("the compound eyes carry the project's green-dot colour (the eyes ARE the indicator)", async () => {
+    // The wasp IS the working cue, no accompanying word. The eyes are
+    // the visual focal point — same colour the previous `bg-ok` dot
+    // carried (var(--color-ok) = #0e7c5a), so the wasp reads as a
+    // richer, themed version of the same affordance.
+    const { screen, render } = await createDOM();
+    await render(<WaspSpinner />);
+    const svg = screen.querySelector("svg");
+    const ellipses = Array.from(svg?.querySelectorAll("ellipse") ?? []);
+    const greenEyes = ellipses.filter(
+      (e) => e.getAttribute("fill") === "#0e7c5a",
+    );
+    expect(greenEyes.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("forwards class to the root svg (consumer sizing)", async () => {
     const { screen, render } = await createDOM();
     await render(<WaspSpinner class="h-3.5 w-3.5 text-ok" />);
