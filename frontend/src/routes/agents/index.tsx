@@ -6,6 +6,11 @@
  * `Configured` / `Default` status word and the inline `Configure`
  * link on the Assistant card (REQ-FADR-001/002). The five mock
  * specialists stay unchanged.
+ *
+ * "Configured" means the org has a per-org row that shadows the
+ * system default (`is_override=true` in the API response). The
+ * `__default__` seed row is treated as the system default and
+ * surfaces as `assistantConfigured: false` — the user sees "Default".
  */
 import { component$ } from "@builder.io/qwik";
 import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
@@ -16,24 +21,26 @@ import { getAssistantConfig } from "~/lib/api/assistant-config";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
-// `useAssistantConfigured` returns true when the Loader found a
-// persisted row, false when only safe defaults apply, and null when
-// the GET itself failed (anonymous / offline / server). The
-// directory treats null as "no signal" and falls back to the static
-// mock `statusWord`.
-export const useAssistantConfigured = routeLoader$(async () => {
-  const session = await useSession();
-  if (!session || (session as { kind?: string }).kind === "anon") return null;
+// `useAssistantOverride` returns true when the caller's org has
+// persisted a per-org row that shadows the system default. False
+// means the org is running on the seeded default (or the GET
+// failed entirely — anonymous / offline / server). The directory
+// labels the Assistant card "Default" in either false case.
+//
+// Anonymous callers fall through to the `not_found` branch of the
+// GET envelope (the chat handler refuses them with 403), so we
+// don't need a separate session check here.
+export const useAssistantOverride = routeLoader$(async () => {
   const result = await getAssistantConfig();
   if (!result.ok) return null;
-  return true;
+  return result.value.is_override;
 });
 
 export default component$(() => {
   const sessionSig = useSession();
   const signInAction = useSignIn();
   const guard = requireSession(sessionSig.value, "/agents");
-  const assistantConfigured = useAssistantConfigured();
+  const assistantOverride = useAssistantOverride();
 
   if (guard.kind === "anon") {
     return (
@@ -47,11 +54,15 @@ export default component$(() => {
     );
   }
 
-  return (
-    <AgentDirectory
-      assistantConfigured={assistantConfigured.value ?? undefined}
-    />
-  );
+  // `null` from the loader (offline / anon / server) is treated as
+  // "no signal" — the directory falls back to the static mock
+  // statusWord. Otherwise, when the value is defined, we pass it
+  // through: `true` means "Configured" (per-org override),
+  // `false` means "Default" (system default).
+  const assistantConfigured =
+    assistantOverride.value === null ? undefined : assistantOverride.value;
+
+  return <AgentDirectory assistantConfigured={assistantConfigured} />;
 });
 
 export const head: DocumentHead = {

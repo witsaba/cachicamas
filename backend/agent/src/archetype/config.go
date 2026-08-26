@@ -71,6 +71,13 @@ type ArchetypeConfig struct {
 	Version        int           `json:"version"`
 	UpdatedBy      string        `json:"updated_by,omitempty"`
 	UpdatedAt      time.Time     `json:"updated_at"`
+	// IsOverride is true when the config came from a per-org row that
+	// shadows the system default. False when the config came from the
+	// seeded `__default__` row OR from the in-memory fallback (DB
+	// outage). The frontend uses this to decide whether to label the
+	// Assistant card "Configured" (user-customized) or "Default"
+	// (system default).
+	IsOverride bool `json:"is_override"`
 }
 
 // DefaultChatSystemPrompt is the chat archetype's v1 system prompt.
@@ -161,14 +168,36 @@ func (l *PostgresLoader) WithTx(tx *sql.Tx) Loader {
 	return &PostgresLoader{tx: tx}
 }
 
+// DefaultRowOrgID is the sentinel org_id used by the per-archetype
+// system default row (migration 0003_seed_chat_default.sql). The
+// Loader recognises this sentinel and rewrites the returned
+// ArchetypeConfig.OrgID to the caller's orgID — the row itself is
+// shared across all orgs that have not yet customised.
+const DefaultRowOrgID = "__default__"
+
 // LoadByKindAndOrg reads `archetype_configurations` for the supplied
-// (kind, orgID) pair. On a tx-bound Loader the query uses `FOR SHARE`;
-// on a db-bound Loader it uses a plain `SELECT` (no row lock acquired).
+// (kind, orgID) pair. Two-step lookup:
+//   1. SELECT ... WHERE kind = $1 AND org_id = $2 (caller's per-org row)
+//   2. If absent, SELECT ... WHERE kind = $1 AND org_id = '__default__'
+//      (per-archetype system default, seeded by migration 0003)
+//   3. If still absent, return in-memory `DefaultConfig(kind, orgID, ...)`
+//      — this is the LAST-RESORT fallback for a DB outage (REQ-CACS-003:
+//      "if the database for any reason fails, MUST to use hardcoded
+//      default values").
+//
+// On a tx-bound Loader the queries use `FOR SHARE`; on a db-bound
+// Loader they use plain `SELECT`. The IsOverride flag distinguishes
+// "user-customised" (true) from "system default" / "in-memory fallback"
+// (false) so the frontend can label the Assistant card correctly.
 //
 // Behaviour matrix:
-//   - row present     → returns row, found=true,  err=nil
-//   - row absent      → returns safe-default, found=false, err=nil
-//   - query/scan fail → returns zero-value, false, err
+//   - per-org row present  → returns row, found=true,  IsOverride=true
+//   - default row only    → returns row, found=true,  IsOverride=false
+//                            (OrgID is rewritten to the caller's orgID)
+//   - no rows at all       → returns safe-default, found=false,
+//                            IsOverride=false
+//   - DB query/scan fails  → returns safe-default, found=false,
+//                            IsOverride=false (logged at higher layer)
 //
 // The Loader MUST NOT auto-write the safe default. Persistence is the
 // write API layer's responsibility (REQ-CACS-003).
@@ -179,7 +208,36 @@ func (l *PostgresLoader) LoadByKindAndOrg(ctx context.Context, kind ArchetypeKin
 	if strings.TrimSpace(orgID) == "" {
 		return ArchetypeConfig{}, false, errors.New("archetype config loader: orgID must be non-empty")
 	}
-	const baseSelect = `SELECT kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE kind = $1 AND org_id = $2`
+
+	// Step 1: per-org row.
+	if cfg, found, err := l.loadRow(ctx, kind, orgID); err != nil {
+		return ArchetypeConfig{}, false, err
+	} else if found {
+		cfg.IsOverride = true
+		return cfg, true, nil
+	}
+
+	// Step 2: per-archetype system default (sentinel org_id).
+	if cfg, found, err := l.loadRow(ctx, kind, DefaultRowOrgID); err != nil {
+		return ArchetypeConfig{}, false, err
+	} else if found {
+		cfg.OrgID = orgID // rewrite to caller's orgID; the row itself stays at the sentinel
+		cfg.IsOverride = false
+		return cfg, true, nil
+	}
+
+	// Step 3: no rows at all → in-memory fallback (DB up but seed
+	// missing or both rows deleted). Returns found=false so the caller
+	// can distinguish this from the default-row case if needed.
+	known := knownToolNames(ctx)
+	return DefaultConfig(kind, orgID, known), false, nil
+}
+
+// loadRow issues the SELECT for an exact (kind, orgID) pair and
+// decodes the result. Used by LoadByKindAndOrg's two-step lookup.
+// Returns (zero, false, nil) when the row is absent.
+func (l *PostgresLoader) loadRow(ctx context.Context, kind ArchetypeKind, orgID string) (ArchetypeConfig, bool, error) {
+	const baseSelect = `SELECT kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`
 	query := baseSelect
 	if l.tx != nil {
 		query = baseSelect + ` FOR SHARE`
@@ -203,8 +261,7 @@ func (l *PostgresLoader) LoadByKindAndOrg(ctx context.Context, kind ArchetypeKin
 	}
 	if err := row.Scan(&gotKind, &gotOrgID, &gotPrompt, &rawAllowlist, &rawDefers, &gotModel, &gotVersion, &gotUpdatedAt, &gotUpdatedBy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			known := knownToolNames(ctx)
-			return DefaultConfig(kind, orgID, known), false, nil
+			return ArchetypeConfig{}, false, nil
 		}
 		return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: scan row for kind=%q org=%q: %w", kind, orgID, err)
 	}

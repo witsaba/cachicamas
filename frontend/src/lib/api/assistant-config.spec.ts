@@ -36,6 +36,7 @@ const sampleConfig = {
   version: 3,
   updated_by: "user_alice",
   updated_at: "2026-08-26T15:00:00Z",
+  is_override: true,
 };
 
 describe("getAssistantConfig", () => {

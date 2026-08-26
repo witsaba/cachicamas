@@ -54,10 +54,12 @@ func assistantConfigRequiresPostgres(t *testing.T) string {
 	return dsn
 }
 
-// resetAssistantConfigTable truncates archetype_configurations so the
-// suite starts from a clean slate. Mirrors chat's resetChatTables
-// helper; the table lives in the chat schema and is truncated on
-// every integration test that mutates it.
+// resetAssistantConfigTable truncates archetype_configurations and
+// then re-inserts the seeded `__default__` row (migration 0003) so the
+// suite starts from a clean-but-seeded state. Tests that exercise
+// the "no rows at all" path (in-memory fallback) can call
+// truncateAssistantConfigTable directly instead of going through
+// this helper.
 func resetAssistantConfigTable(t *testing.T, dsn string) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
@@ -67,6 +69,34 @@ func resetAssistantConfigTable(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec(`TRUNCATE TABLE archetype_configurations`); err != nil {
 		t.Fatalf("resetAssistantConfigTable: TRUNCATE: %v", err)
+	}
+	// Re-seed the system default row (mirrors migration 0003).
+	if _, err := db.Exec(`
+		INSERT INTO archetype_configurations
+			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+		VALUES
+			('chat', '__default__',
+			 'You are the cachicamas chat assistant; answer the participant in plain, well-formatted text.',
+			 '["current_time", "summarize_conversation"]'::jsonb,
+			 '["summarize_conversation"]'::jsonb,
+			 NULL, 1, now(), 'seed')
+	`); err != nil {
+		t.Fatalf("resetAssistantConfigTable: re-seed default: %v", err)
+	}
+}
+
+// truncateAssistantConfigTable removes ALL rows including the
+// `__default__` seed. Use this for tests that explicitly exercise
+// the "no rows at all → in-memory fallback" path (REQ-CACS-003).
+func truncateAssistantConfigTable(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("truncateAssistantConfigTable: sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`TRUNCATE TABLE archetype_configurations`); err != nil {
+		t.Fatalf("truncateAssistantConfigTable: TRUNCATE: %v", err)
 	}
 }
 
@@ -153,15 +183,19 @@ func Test_Loader_PresentRow(t *testing.T) {
 
 // Test_Loader_AbsentRowReturnsDefaults — REQ-CACS-002 / REQ-CACS-003
 // Scenario "absent row returns defaults and found=false". Given no
-// row for orgID="org-2", when LoadByOrg runs, then it returns the
-// safe-default AssistantConfig, found=false, err=nil, AND no row is
-// inserted.
+// row for orgID="org-2" AND no `__default__` seed row (i.e. DB up
+// but the seed was manually removed — the LAST-RESORT fallback path),
+// when LoadByKindAndOrg runs, then it returns the in-memory safe
+// default, found=false, IsOverride=false, AND no row is inserted.
 //
 // RED at T-01: archetype.DefaultConfig is undefined. GREEN (T-02)
 // adds it.
 func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
-	resetAssistantConfigTable(t, dsn)
+	// truncate (without re-seed) — exercises the "no rows at all"
+	// path that falls back to in-memory defaults (REQ-CACS-003 last
+	// resort).
+	truncateAssistantConfigTable(t, dsn)
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -176,6 +210,9 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("LoadByOrg returned found=true, want false")
+	}
+	if got.IsOverride {
+		t.Errorf("IsOverride = true, want false (in-memory fallback)")
 	}
 	wantDefaults := archetype.DefaultConfig(archetype.KindChat, "org-2", []string{"current_time", "summarize_conversation"})
 	if got.OrgID != wantDefaults.OrgID {
@@ -204,15 +241,101 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	}
 }
 
+// Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow — migration 0003
+// seeds a per-archetype system default row at org_id='__default__'.
+// When no per-org row exists, the Loader must return the default
+// row's content (with OrgID rewritten to the caller's orgID) and
+// IsOverride=false.
+func Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow(t *testing.T) {
+	t.Parallel()
+
+	dsn := assistantConfigRequiresPostgres(t)
+	resetAssistantConfigTable(t, dsn) // re-seeds the default row
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	loader := archetype.NewPostgresLoader(db)
+	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "user_alice")
+	if lerr != nil {
+		t.Fatalf("LoadByKindAndOrg returned err=%v, want nil", lerr)
+	}
+	if !found {
+		t.Fatalf("LoadByKindAndOrg returned found=false, want true (default row exists)")
+	}
+	if got.IsOverride {
+		t.Errorf("IsOverride = true, want false (default row, not per-org)")
+	}
+	if got.OrgID != "user_alice" {
+		t.Errorf("OrgID = %q, want %q (Loader must rewrite default row's sentinel to caller's orgID)", got.OrgID, "user_alice")
+	}
+	if got.SystemPrompt != archetype.DefaultChatSystemPrompt {
+		t.Errorf("SystemPrompt = %q, want %q (default row should match the seeded prompt)", got.SystemPrompt, archetype.DefaultChatSystemPrompt)
+	}
+	if got.Version != 1 {
+		t.Errorf("Version = %d, want 1 (default row seeded at version=1)", got.Version)
+	}
+	if got.UpdatedBy != "seed" {
+		t.Errorf("UpdatedBy = %q, want %q (default row was inserted by the seed)", got.UpdatedBy, "seed")
+	}
+}
+
+// Test_Loader_PerOrgRow_ShadowsDefaultRow — when both the per-org
+// row and the `__default__` row exist, the per-org row wins.
+func Test_Loader_PerOrgRow_ShadowsDefaultRow(t *testing.T) {
+	t.Parallel()
+
+	dsn := assistantConfigRequiresPostgres(t)
+	resetAssistantConfigTable(t, dsn) // default row exists
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Seed a per-org override with different values.
+	seedRow(t, dsn, archetype.ArchetypeConfig{
+		Kind:           archetype.KindChat,
+		OrgID:          "user_alice",
+		SystemPrompt:   "you are org-1's assistant (overridden)",
+		ToolAllowlist:  []string{"current_time", "summarize_conversation"},
+		DeferToolNames: []string{"summarize_conversation"},
+		Version:        5,
+		UpdatedBy:      "user_alice",
+	})
+
+	loader := archetype.NewPostgresLoader(db)
+	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "user_alice")
+	if lerr != nil {
+		t.Fatalf("LoadByKindAndOrg returned err=%v, want nil", lerr)
+	}
+	if !found {
+		t.Fatalf("LoadByKindAndOrg returned found=false, want true")
+	}
+	if !got.IsOverride {
+		t.Errorf("IsOverride = false, want true (per-org row should shadow the default)")
+	}
+	if got.SystemPrompt != "you are org-1's assistant (overridden)" {
+		t.Errorf("SystemPrompt = %q, want the per-org override, not the default", got.SystemPrompt)
+	}
+	if got.Version != 5 {
+		t.Errorf("Version = %d, want 5 (per-org row's version)", got.Version)
+	}
+}
+
 // Test_Loader_DoubleAbsentReadNoSideEffect — REQ-CACS-003 Scenario
 // "read on absent row does not create a row". Two consecutive
-// LoadByOrg calls on an empty table both return found=false and the
-// table remains empty.
+// LoadByKindAndOrg calls on an empty table both return found=false
+// and the table remains empty.
 //
 // RED at T-01.
 func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
-	resetAssistantConfigTable(t, dsn)
+	truncateAssistantConfigTable(t, dsn)
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {

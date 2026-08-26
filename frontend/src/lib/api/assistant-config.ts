@@ -45,6 +45,12 @@ export interface ArchetypeConfig {
   version: number;
   updated_by?: string;
   updated_at?: string;
+  /** `true` when the config came from a per-org row that shadows the
+   * system default. `false` when the config came from the seeded
+   * `__default__` row OR the in-memory fallback. The directory uses
+   * this to label the Assistant card "Configured" (per-org override)
+   * vs "Default" (system default). */
+  is_override: boolean;
 }
 
 /**
