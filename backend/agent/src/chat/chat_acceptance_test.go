@@ -229,7 +229,84 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(2, "streaming", phaseStart, time.Now(), assertions)
 	})
 	t.Run("cancellation", func(t *testing.T) {
-		// Body lands in T-07 below.
+		phaseStart := time.Now()
+		// Phase 3 — cancellation. doc 0005:377-385 / CH-02.2. A
+		// turn held mid-stream at a test gate after two fragments
+		// have arrived is cancelled; the projected stream
+		// terminates exactly once with FinishReason absent (the
+		// cancellation discriminator), and the two fragments
+		// already projected remain in the transcript (R-CCP-006).
+		//
+		// GREEN-by-construction: chat ships today, the
+		// cancellation shape is locked at CH-02.2 / S-CCP-050..055.
+		// A RED here is a real defect — STOP and escalate.
+		gate := agenttest.NewGate()
+		provider := agenttest.NewProvider(heldAfterTwoFragmentsScript(t, gate))
+
+		conv, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            chat.NewMemoryConversationStore(),
+			ParticipantID:    "ch11-phase3-cancel",
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation returned %v, want nil", err)
+		}
+
+		out, err := conv.Send(context.Background(), "hello")
+		if err != nil {
+			t.Fatalf("Send returned %v, want nil", err)
+		}
+		first := readN(t, out, 3) // message.start + 2 deltas
+		<-gate.Reached()
+
+		if outcome := conv.Cancel(); outcome != chat.CancelRequested {
+			t.Errorf("Cancel() = %v, want CancelRequested", outcome)
+		}
+
+		rest := drainWire(t, out)
+		all := append(first, rest...)
+
+		assertions := 0
+		var terminalCount int
+		var deltas []chat.MessageDelta
+		for _, ev := range all {
+			switch e := ev.(type) {
+			case chat.TurnEnd:
+				terminalCount++
+			case chat.Error:
+				terminalCount++
+			case chat.MessageDelta:
+				deltas = append(deltas, e)
+			}
+		}
+		if terminalCount != 1 {
+			t.Errorf("terminal event count = %d, want exactly 1 (R-CCP-006)", terminalCount)
+		}
+		assertions++
+		turnEnd, ok := all[len(all)-1].(chat.TurnEnd)
+		if !ok {
+			t.Fatalf("terminal event = %#v, want chat.TurnEnd", all[len(all)-1])
+		}
+		if turnEnd.FinishReason != nil {
+			t.Errorf("TurnEnd.FinishReason = %q, want absent (nil) on a cancelled turn", *turnEnd.FinishReason)
+		}
+		assertions++
+
+		wantDeltas := []string{"alpha", "beta"}
+		if len(deltas) != len(wantDeltas) {
+			t.Errorf("delta count = %d, want %d (the two already projected before cancellation, unchanged)", len(deltas), len(wantDeltas))
+		}
+		assertions++
+		for i, d := range deltas {
+			if d.Delta != wantDeltas[i] {
+				t.Errorf("delta[%d] = %q, want %q", i, d.Delta, wantDeltas[i])
+			}
+		}
+		assertions++
+
+		evidence.recordHeader(3, "cancellation", phaseStart, time.Now(), assertions)
 	})
 	t.Run("failure", func(t *testing.T) {
 		// Body lands in T-08 below.
