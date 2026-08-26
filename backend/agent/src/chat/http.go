@@ -783,3 +783,82 @@ func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry 
 	api.POST("/turns/:id/permissions/:callID", HandlePermissionDecision(registry))
 	return nil
 }
+
+// HandleGetAssistantConfig is the CH-12.1 GET handler (REQ-CACAPI-001).
+// Reads the org-scoped AssistantConfig via the supplied Loader and
+// returns the JSON-encoded config.
+//
+// v1 scope-key simplification: chat.Identity exposes only ParticipantID;
+// for v1 the AssistantConfig row is keyed by participantID (a
+// single-user workspace maps participant 1:1 to org). The mapping seam
+// `participantID → orgID` is deferred until a multi-org workspace lands;
+// see tasks.md Open disagreements for the carry-over note.
+//
+// Status codes (REQ-CACAPI-001):
+//
+//	200 — config JSON in body (auto-seeded defaults if no row yet)
+//	403 — no identity resolved (anonymous / cookie missing)
+//	500 — Loader returned a non-NoRows error (response body is the
+//	      generic server-error envelope; underlying error string is
+//	      logged, not echoed)
+//
+// The handler does NOT use the package's shared identityMiddleware
+// because the spec mandates 403 (not the existing 401). It calls the
+// resolver directly so the refusal shape is exact.
+func HandleGetAssistantConfig(resolver IdentityResolver, loader Loader) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if resolver == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"assistant config resolver not wired", nil)
+		}
+		if loader == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"assistant config loader not wired", nil)
+		}
+		ident, resolved := resolver.IdentityFromRequest(c.Request().Context(), c.Request())
+		if !resolved || ident == nil {
+			return writeError(c, http.StatusForbidden, "server",
+				"identity not resolved", nil)
+		}
+		participantID := ident.ParticipantID()
+		if participantID == "" {
+			return writeError(c, http.StatusForbidden, "server",
+				"identity missing participant id", nil)
+		}
+
+		cfg, _, lerr := loader.LoadByOrg(c.Request().Context(), participantID)
+		if lerr != nil {
+			// Do not echo the underlying error string in the body
+			// (information leak). The error is logged via the
+			// default slog handler at higher layers; here we
+			// surface a generic envelope.
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to load assistant config", nil)
+		}
+		return c.JSON(http.StatusOK, cfg)
+	}
+}
+
+// RegisterAssistantConfigRoutes wires the AssistantConfig surface
+// (REQ-CACAPI-001) onto e. The GET handler lives at
+// /api/chat/assistant/config (the spec's locked URL — note this is a
+// separate namespace from the existing /api/agent/... tree, by design:
+// the AssistantConfig surface is configuration, not chat wire).
+//
+// The resolver and loader are closure-captured by the handler; the
+// registration function only owns the route mounting.
+func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, loader Loader) error {
+	if e == nil {
+		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil *echo.Echo")
+	}
+	if resolver == nil {
+		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil IdentityResolver")
+	}
+	if loader == nil {
+		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil Loader")
+	}
+
+	g := e.Group("/api/chat")
+	g.GET("/assistant/config", HandleGetAssistantConfig(resolver, loader))
+	return nil
+}
