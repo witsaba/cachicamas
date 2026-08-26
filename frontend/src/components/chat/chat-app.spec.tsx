@@ -109,6 +109,18 @@ describe("components/chat/chat-app (CH-05.1 + CH-08)", () => {
     await render(<ChatApp {...WHO} />);
     expect(screen.querySelector('[data-testid="work-wasp"]')).toBeFalsy();
   });
+
+  it("does not show the 'Working now' word anywhere while idle (the wasp is the sole cue when in flight)", async () => {
+    // The wasp IS the working indicator — there is no accompanying
+    // "Working now" text. This test pins that contract: an idle
+    // chat must never render the word "Working" in the DOM, so a
+    // future refactor that re-adds a label trips the test instead
+    // of silently shipping.
+    const { screen, render } = await createDOM();
+    await render(<ChatApp {...WHO} />);
+    expect(screen.textContent ?? "").not.toContain("Working now");
+    expect(screen.textContent ?? "").not.toMatch(/\bWorking\b/);
+  });
 });
 
 // ---------------------------------------------------------------------------

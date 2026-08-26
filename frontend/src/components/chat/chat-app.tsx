@@ -489,12 +489,13 @@ export const ChatApp = component$<ChatAppProps>(
                   {turn.status === "streaming" ||
                   turn.status === "submitting" ||
                   turn.status === "cancelling" ? (
-                    <span class="inline-flex items-center gap-1.5">
-                      <WaspSpinner class="h-3.5 w-3.5" />
-                      <span class="text-xs font-medium">
-                        <span class="text-ok">Working now</span>
-                      </span>
-                    </span>
+                    // The wasp itself IS the working indicator — it
+                    // replaces both the previous green dot and the
+                    // "Working now" word. The eyes carry the same
+                    // green the dot used to carry, so the visual
+                    // identity carries over; the wings + the
+                    // wings-only animation are the only added motion.
+                    <WaspSpinner class="h-3.5 w-3.5" />
                   ) : (
                     <Status status={agent.status} word={agent.statusWord} />
                   )}
