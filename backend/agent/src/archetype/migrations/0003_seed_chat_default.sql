@@ -45,7 +45,7 @@ INSERT INTO archetype_configurations
 VALUES
     ('chat',
      '__default__',
-     'You are the cachicamas chat assistant; answer the participant in plain, well-formatted text.',
+     'You are the cachicamas chat assistant — answer the participant in plain, well-formatted text.',
      '["current_time", "summarize_conversation"]'::jsonb,
      '["summarize_conversation"]'::jsonb,
      NULL,
