@@ -292,13 +292,19 @@
   vertical-align: -0.125em;
 }
 
-.wasp-wing-left {
+/* Animation is OPT-IN: a parent `wasp-anim` class on the SVG toggles
+   the flap, so the same spinner renders quiet by default and only
+   animates while a turn is in flight. The chat header leans on the
+   opt-in to keep the wasp visible-but-static for on-staff agents
+   whose turn is idle (the wasp replaces the previous green dot +
+   "Working" affordance in that rest state — it just shouldn't move). */
+.wasp-spinner.wasp-anim .wasp-wing-left {
   transform-box: view-box;
   transform-origin: 12px 11px;
   animation: wasp-flap-left 0.35s ease-in-out infinite;
 }
 
-.wasp-wing-right {
+.wasp-spinner.wasp-anim .wasp-wing-right {
   transform-box: view-box;
   transform-origin: 20px 11px;
   animation: wasp-flap-right 0.35s ease-in-out infinite;
