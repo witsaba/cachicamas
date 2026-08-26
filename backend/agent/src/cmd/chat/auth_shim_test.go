@@ -104,14 +104,17 @@ func newAuthedRequest(t *testing.T, cookieValue string) *http.Request {
 // TestAuthShim_ValidCookieResolvesParticipant covers the happy path: a
 // JWE cookie signed with the same AUTH_SECRET + cookieName the shim
 // was constructed with returns a non-nil Identity whose ParticipantID()
-// equals the sub claim.
+// equals the normalized email claim (chat-stack-wiring fix: email is
+// the stable identifier, not the per-session sub UUID that Auth.js
+// v0.41 mints).
 func TestAuthShim_ValidCookieResolvesParticipant(t *testing.T) {
 	t.Parallel()
 
 	resolver := NewResolver([]byte(testAuthSecret), testCookieName)
 	cookie := testEncryptJWECookie(t, []byte(testAuthSecret), testCookieName, authJSCookiePayload{
-		Sub: "participant-42",
-		Exp: time.Now().Add(1 * time.Hour).Unix(),
+		Email: "braejan@proton.me",
+		Sub:   "3ba7f7df-27ab-459e-96da-083b8374b384", // ignored: per-session UUID
+		Exp:   time.Now().Add(1 * time.Hour).Unix(),
 	})
 
 	ident, ok := resolver.IdentityFromRequest(context.Background(), newAuthedRequest(t, cookie))
@@ -122,8 +125,123 @@ func TestAuthShim_ValidCookieResolvesParticipant(t *testing.T) {
 	if ident == nil {
 		t.Fatal("ident = nil, want non-nil")
 	}
-	if got := ident.ParticipantID(); got != "participant-42" {
-		t.Errorf("ParticipantID() = %q, want %q (R-07 sub→participant mapping)", got, "participant-42")
+	if got := ident.ParticipantID(); got != "braejan@proton.me" {
+		t.Errorf("ParticipantID() = %q, want %q (email preferred over sub)", got, "braejan@proton.me")
+	}
+}
+
+// TestAuthShim_EmailNormalizedLowercasesAndTrims covers the
+// case-insensitivity invariant: a cookie whose email claim carries
+// mixed-case letters or surrounding whitespace MUST resolve to the
+// lowercase trimmed form, otherwise "Braejan@Proton.me" and
+// "braejan@proton.me" would land on two different chat_conversations
+// rows (the database_administrator identity.user table is CITEXT, so
+// the participant id has to match the same canonical form before it
+// becomes a foreign key target).
+func TestAuthShim_EmailNormalizedLowercasesAndTrims(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewResolver([]byte(testAuthSecret), testCookieName)
+	cases := []struct {
+		name  string
+		email string
+		want  string
+	}{
+		{"mixed case", "Braejan@Proton.ME", "braejan@proton.me"},
+		{"leading whitespace", "   braejan@proton.me", "braejan@proton.me"},
+		{"trailing whitespace", "braejan@proton.me\n", "braejan@proton.me"},
+		{"surrounding whitespace", "\tbraejan@proton.me \n", "braejan@proton.me"},
+		{"uppercase full localpart", "BRAEJAN@PROTON.ME", "braejan@proton.me"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cookie := testEncryptJWECookie(t, []byte(testAuthSecret), testCookieName, authJSCookiePayload{
+				Email: tc.email,
+				Exp:   time.Now().Add(1 * time.Hour).Unix(),
+			})
+			ident, ok := resolver.IdentityFromRequest(context.Background(), newAuthedRequest(t, cookie))
+			if !ok {
+				t.Fatalf("ok = false for email %q", tc.email)
+			}
+			if got := ident.ParticipantID(); got != tc.want {
+				t.Errorf("ParticipantID() = %q, want %q (normalisation)", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAuthShim_SubUsedWhenEmailEmpty covers the fallback: a cookie
+// minted by an auth flow that doesn't populate an email claim (e.g.
+// credentials provider without one) still resolves to a participant
+// id derived from sub, preserving the previous sub-preferred behaviour
+// for that path. The typical OAuth flow carries email so this branch
+// only matters for the credential-provider edge case.
+func TestAuthShim_SubUsedWhenEmailEmpty(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewResolver([]byte(testAuthSecret), testCookieName)
+	cookie := testEncryptJWECookie(t, []byte(testAuthSecret), testCookieName, authJSCookiePayload{
+		Sub: "credentials-only-participant",
+		Exp: time.Now().Add(1 * time.Hour).Unix(),
+	})
+
+	ident, ok := resolver.IdentityFromRequest(context.Background(), newAuthedRequest(t, cookie))
+
+	if !ok {
+		t.Fatal("ok = false, want true for a sub-only cookie (fallback path)")
+	}
+	if ident == nil {
+		t.Fatal("ident = nil, want non-nil")
+	}
+	if got := ident.ParticipantID(); got != "credentials-only-participant" {
+		t.Errorf("ParticipantID() = %q, want %q (sub fallback)", got, "credentials-only-participant")
+	}
+}
+
+// TestAuthShim_BothClaimsEmptyReturnsNilFalse covers the no-identifier
+// case: a cookie that carries neither email nor sub (a misconfigured
+// or anonymous session) returns (nil, false), which the identity
+// middleware maps to the locked 401 envelope.
+func TestAuthShim_BothClaimsEmptyReturnsNilFalse(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewResolver([]byte(testAuthSecret), testCookieName)
+	cookie := testEncryptJWECookie(t, []byte(testAuthSecret), testCookieName, authJSCookiePayload{
+		Exp: time.Now().Add(1 * time.Hour).Unix(),
+	})
+
+	ident, ok := resolver.IdentityFromRequest(context.Background(), newAuthedRequest(t, cookie))
+
+	if ok {
+		t.Error("ok = true, want false for a cookie with no identifier claim")
+	}
+	if ident != nil {
+		t.Errorf("ident = %v, want nil for a cookie with no identifier claim", ident)
+	}
+}
+
+// TestAuthShim_EmailWhitespaceOnlyReturnsNilFalse covers the
+// normalisation edge case: a cookie whose email claim is whitespace
+// alone (after trimming) must collapse to empty and fall through to
+// sub-or-nil, not produce a participant id of "   ".
+func TestAuthShim_EmailWhitespaceOnlyReturnsNilFalse(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewResolver([]byte(testAuthSecret), testCookieName)
+	cookie := testEncryptJWECookie(t, []byte(testAuthSecret), testCookieName, authJSCookiePayload{
+		Email: "   \t\n  ",
+		Exp:   time.Now().Add(1 * time.Hour).Unix(),
+	})
+
+	ident, ok := resolver.IdentityFromRequest(context.Background(), newAuthedRequest(t, cookie))
+
+	if ok {
+		t.Error("ok = true, want false when email collapses to empty after trim")
+	}
+	if ident != nil {
+		t.Errorf("ident = %v, want nil when email collapses to empty after trim", ident)
 	}
 }
 

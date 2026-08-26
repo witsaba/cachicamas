@@ -237,10 +237,16 @@ func (s *PostgresConversationStore) Append(participantID string, ex Exchange) er
 
 	// 3. Insert the exchange row. message_ids is JSONB-encoded
 	// from the []string field via the driver.
-	var finishReason *string
+	//
+	// finish_reason carries a NOT NULL constraint (0001_init.sql);
+	// an absent FinishReason round-trips as the empty string — the
+	// read path (Load) maps '' back to nil via sql.NullString, so
+	// binding NULL here would violate the constraint instead of
+	// expressing absence (found by the INTEGRATION=1 suite,
+	// 2026-08-25 repair).
+	finishReason := ""
 	if ex.FinishReason != nil {
-		fr := ex.FinishReason.String()
-		finishReason = &fr
+		finishReason = ex.FinishReason.String()
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO chat_exchanges (
@@ -382,7 +388,6 @@ func (s *PostgresConversationStore) List(participantID string) ([]ConversationSu
 		   FROM chat_conversations
 		  WHERE participant_id = $1
 		  ORDER BY updated_at DESC`,
-		participantID,
 		participantID,
 	)
 	if err != nil {

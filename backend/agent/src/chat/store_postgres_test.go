@@ -14,6 +14,7 @@ package chat_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -29,6 +30,25 @@ func chatPostgresTestDSN() string {
 		return v
 	}
 	return "postgres://cachicamas:changeme-local-only@localhost:5432/cachicamas_pg?sslmode=disable"
+}
+
+// resetChatTables truncates every chat-owned table so each
+// INTEGRATION-gated test starts from a clean slate. The suite dials a
+// persistent DSN (not a throwaway database) and runs sequentially — no
+// t.Parallel among the postgres tests — so without this, rows left by
+// earlier or crashed runs leak into later assertions ("Load returned 6
+// exchanges, want 2", found 2026-08-25). One statement handles the FK
+// chain (exchanges → conversations; siblings → exchanges).
+func resetChatTables(t *testing.T) {
+	t.Helper()
+	db, err := sql.Open("pgx", chatPostgresTestDSN())
+	if err != nil {
+		t.Fatalf("resetChatTables: sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`TRUNCATE chat_conversations, chat_exchanges, chat_tool_calls, chat_tool_results, chat_permission_decisions`); err != nil {
+		t.Fatalf("resetChatTables: TRUNCATE: %v", err)
+	}
 }
 
 // TestPostgresConversationStore_StubReturnsNotImplemented is the
@@ -69,6 +89,7 @@ func TestPostgresConversationStore_AppendInsertsRow(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -136,6 +157,7 @@ func TestPostgresConversationStore_AppendPersists(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -181,6 +203,7 @@ func TestPostgresConversationStore_CH06Scenarios_PassUnchanged(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run (the shared scenario helper exercises Append+Load against a real Postgres)")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -199,6 +222,7 @@ func TestPostgresConversationStore_LoadUnknownReturnsErrConversationNotFound(t *
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -258,6 +282,7 @@ func TestPostgresConversationStore_CH08ListScenario(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run (the postgres List path dials a real Postgres)")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -298,6 +323,7 @@ func TestPostgresConversationStore_CH08Scenarios_PassUnchanged(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run (the WU-4 scenario helper extended at S-CCS-015..018 against a real Postgres)")
 	}
+	resetChatTables(t)
 
 	store, closer, err := chat.NewPostgresConversationStore(context.Background(), chatPostgresTestDSN())
 	if err != nil {
@@ -327,6 +353,7 @@ func TestPostgresConversationStore_CH09Scenarios(t *testing.T) {
 	if os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration; set INTEGRATION=1 to run (CH-09 S-CCS-021 postgres cross-process round-trip)")
 	}
+	resetChatTables(t)
 
 	dsn := chatPostgresTestDSN()
 

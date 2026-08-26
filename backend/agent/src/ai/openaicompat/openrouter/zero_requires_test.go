@@ -103,7 +103,18 @@ const goModPath = "../../../../go.mod"
 // (pgpassfile, pgservicefile, puddle/v2, x/sync v0.22.0) — 5 net
 // additions, bringing the total to 37. pressly/goose/v3 lands at
 // WU-3 when runner.go imports it (additional 5 transitives).
-const wantGoModRequireLines = 37
+//
+// 2026-08-25 repair (fix/chat-stack-wiring): CH-07's WU-3 goose
+// landing never actually reached go.mod — migrator/runner.go imported
+// pressly/goose/v3 while every host-side build and test ran under the
+// repo-root go.work, which silently borrowed the module from
+// database_administrator's requirement graph. Only the isolated Docker
+// build (single-module, -mod=readonly) exposed the hole. This change
+// lands the ADR-0010-authorized github.com/pressly/goose/v3 v3.27.1
+// with its transitive closure (mfridman/interpolate,
+// sethvargo/go-retry, uber/multierr — x/text and x/sync were already
+// present): 4 net additions, bringing the total to 41.
+const wantGoModRequireLines = 41
 
 // wantAllowedNonStdlibPrefixes is the exact, ordered
 // allowedNonStdlibPrefixes AI-37 authorises: this module's own path, plus

@@ -236,6 +236,17 @@ type mapperState struct {
 	// (R-ATS-010), read only by buildCompletion at the sentinel.
 	finishReason ai.FinishReason
 
+	// rawFinishReason is choice 0's terminal chunk's raw finish_reason
+	// STRING (not the normalized ai.FinishReason), kept for the
+	// R-ATS-020 row 2 widening check: a later chunk's
+	// finish_reason must equal this raw string to qualify as an
+	// OpenRouter usage-enrichment duplicate (accept-as-no-op). A later
+	// chunk whose finish_reason DIFFERS from this raw string is a real
+	// protocol violation (the provider changed its mind about why it
+	// stopped, which the spec does not allow) and fires
+	// errDuplicateClose regardless of new content.
+	rawFinishReason string
+
 	// terminalSeen is true once choice 0's terminal chunk (a non-null,
 	// gate-accepted finish_reason) has been observed.
 	terminalSeen bool
@@ -350,12 +361,64 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 	// otherwise processed, so the terminal chunk itself — which SETS
 	// terminalSeen for the first time, on this same call — never trips
 	// either row.
+	//
+	// Row 2 carries one documented widening beyond the strict OpenAI
+	// streaming spec: OpenRouter (and the Google / Anthropic-with-usage
+	// providers it fronts) emits a usage-enrichment chunk AFTER the
+	// terminal chunk on several routes (notably google/gemini-3.7-flash
+	// and anthropic/claude-* with usage blocks). That enrichment chunk
+	// re-asserts the same finish_reason ("stop") alongside its usage
+	// payload. The strict-spec reading of R-ATS-020 row 2 is to fail the
+	// stream on this duplicate, which here would mean firing
+	// errDuplicateClose, aborting the stream, and discarding the
+	// already-streamed text — the user-visible symptom is a frontend
+	// empty assistant bubble with a trailing `event: error` frame.
+	//
+	// The safe disposition is to accept the duplicate AS A NO-OP when it
+	// carries no NEW information beyond the duplicate finish_reason:
+	// empty (or absent / null) delta.content AND no delta.tool_calls.
+	// The carrier has already seen terminalSeen=true and the completion
+	// event has either been emitted on the terminal chunk itself or is
+	// about to be minted by buildCompletion at the sentinel; passing the
+	// enrichment chunk through silently lets usage arrive via the same
+	// chunk (usage is mapped earlier in this method, ahead of the
+	// terminal-window check) without losing the text already streamed.
+	// Repeated delta.role on the duplicate chunk is benign — wireDelta
+	// has no Role field, so encoding/json drops it — and is also
+	// implicitly accepted by this widening.
+	//
+	// Chunks that duplicate finish_reason WHILE carrying new content (a
+	// non-empty content string, or any tool_calls element) still fail
+	// with errDuplicateClose — only the "duplicate with no new info"
+	// shape is widened. errDeltaAfterClose below is likewise UNCHANGED:
+	// a non-null content key (even an empty "") AFTER terminal still
+	// fires row 1; only the duplicate-finish_reason check is widened.
 	if s.terminalSeen {
+		if choice.FinishReason != nil {
+			// Row 2, narrowed: only the "duplicate with no new info AND
+			// the same finish_reason" shape is accepted (OpenRouter
+			// usage-enrichment chunks). Any of the following still
+			// fires errDuplicateClose:
+			//   - the duplicate's finish_reason DIFFERS from the one
+			//     we already captured (a real protocol violation — the
+			//     provider changed its mind about why it stopped; the
+			//     OpenAI streaming spec allows exactly one terminal
+			//     chunk per choice);
+			//   - the duplicate carries new tool_calls;
+			//   - the duplicate carries non-empty content.
+			if *choice.FinishReason != s.rawFinishReason {
+				return nil, errDuplicateClose
+			}
+			if len(choice.Delta.ToolCalls) > 0 {
+				return nil, errDuplicateClose
+			}
+			if text, present := contentText(choice.Delta.Content); present && text != "" {
+				return nil, errDuplicateClose
+			}
+			return events, nil
+		}
 		if _, present := contentText(choice.Delta.Content); present {
 			return nil, errDeltaAfterClose
-		}
-		if choice.FinishReason != nil {
-			return nil, errDuplicateClose
 		}
 		// Tool-call elements in the terminal window are an analogous
 		// violation (D4). The terminal chunk itself may legally carry
@@ -373,6 +436,7 @@ func (s *mapperState) applyChunk(chunk wireChunk) ([]ai.Event, error) {
 			return nil, errUnrecognizedFinishReason
 		}
 		s.finishReason = reason
+		s.rawFinishReason = *choice.FinishReason
 		s.terminalSeen = true
 	}
 

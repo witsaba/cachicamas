@@ -304,8 +304,8 @@ func TestHandleStreamEvents_FullTurn(t *testing.T) {
 	}
 defer func() { _ = resp.Body.Close() }()
 
-	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
-		t.Errorf("Content-Type=%q, want text/event-stream", got)
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream; charset=utf-8" {
+		t.Errorf("Content-Type=%q, want text/event-stream; charset=utf-8 (Fix D)", got)
 	}
 	if got := resp.Header.Get("X-Accel-Buffering"); got != "no" {
 		t.Errorf("X-Accel-Buffering=%q, want no", got)
@@ -673,6 +673,58 @@ func TestHandleReloadConversation_Unknown(t *testing.T) {
 
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status=%d, want 404 (R-CRI-001: ErrConversationNotFound → 404 not_found)", res.StatusCode)
+	}
+}
+
+// TestHandleReloadConversation_PercentEncodedID — chat-stack-wiring
+// regression. Echo v5.2.1's c.Param("id") does NOT percent-decode the
+// matched path segment. Pre-CH-08.2 the wire's :id was a UUID (no
+// reserved characters) so the gap was invisible. After the participant
+// id switched to email (chat/auth_shim.go), the @ in braejan@proton.me
+// becomes %40 on the wire and the handler would see literally
+// "braejan%40proton.me", which never matches the cookie-derived
+// "braejan@proton.me" → spurious 403 not_found. The fix decodes at
+// the boundary (url.PathUnescape). This test asserts that an
+// authenticated GET /conversations/braejan%40proton.me returns 200
+// with the recorded exchanges rather than 403.
+func TestHandleReloadConversation_PercentEncodedID(t *testing.T) {
+	t.Parallel()
+
+	store := chat.NewMemoryConversationStore()
+	if err := store.Append("braejan@proton.me", chat.Exchange{PromptText: "hi", AssistantText: "hello"}); err != nil {
+		t.Fatalf("Append returned %v, want nil", err)
+	}
+
+	srv, err := resumeMountedServer(t, chat.HeaderParticipantResolver("X-Test-Participant"), store)
+	if err != nil {
+		t.Fatalf("resumeMountedServer: %v", err)
+	}
+
+	// Wire shape is what the frontend's loadConversation emits:
+	// encodeURIComponent("braejan@proton.me") = "braejan%40proton.me".
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/conversations/braejan%40proton.me", nil)
+	req.Header.Set("X-Test-Participant", "braejan@proton.me")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200 (handler must decode %%40 → @ before participant-id match)", res.StatusCode)
+	}
+	var got []struct {
+		PromptText    string `json:"PromptText"`
+		AssistantText string `json:"AssistantText"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d exchanges, want 1", len(got))
+	}
+	if got[0].PromptText != "hi" {
+		t.Errorf("got[0].PromptText = %q, want hi", got[0].PromptText)
 	}
 }
 

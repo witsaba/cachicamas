@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -116,7 +117,7 @@ func deriveEncryptionKey(authSecret []byte, cookieName string) []byte {
 
 // IdentityFromRequest reads the configured cookie, decrypts the JWE,
 // parses the claims, and returns a chat.Identity whose ParticipantID()
-// is the claims.sub (preferred) or claims.email (fallback).
+// is the claims.email (preferred) or claims.sub (fallback).
 //
 // Returns (nil, false) on:
 //   - missing cookie (the chat middleware writes 401 with kind=server)
@@ -163,19 +164,69 @@ func (r *Resolver) IdentityFromRequest(_ context.Context, req *http.Request) (ch
 		return nil, false
 	}
 
-	// Map sub (preferred) → email (fallback) to a participant id.
-	// sub is the GitHub user ID when minted without an Auth.js database
-	// adapter; email is the email claim. Both are stable for the
-	// session's lifetime.
-	participantID := claims.Sub
+	// Map email (preferred) → sub (fallback) to a participant id.
+	//
+	// Why email is the primary identifier (chat-stack-wiring fix):
+	//
+	//   Auth.js v0.34.3 mints `sub` as the OAuth provider's user id
+	//   (e.g. the GitHub numeric user id). The earlier version of this
+	//   shim preferred `sub` on that basis. @auth/core v0.41.3 (the
+	//   version we ship today) changed the default — `sub` is now a
+	//   fresh crypto.randomUUID() minted on each successful sign-in.
+	//   See frontend/node_modules/@auth/core/lib/utils/providers.js:80
+	//   and the JWT encode path in lib/actions/callback/index.js.
+	//
+	//   That means preferring `sub` rotates the participant id on every
+	//   logout/login — the user returns to an empty conversation list,
+	//   and any historical conversation they had under the previous
+	//   sub-UUID is orphaned in chat_conversations.
+	//
+	//   `email` is the stable per-user identifier Auth.js populates for
+	//   every OAuth provider (GitHub, Google, ...) when the email scope
+	//   is granted — and our GitHub config does grant it
+	//   (frontend/src/routes/plugin@auth.ts:120: scope=repo; the
+	//   default `user:email` scope rides along). Same email from
+	//   GitHub today and Google tomorrow → same participant id →
+	//   same conversations. That's the property we need.
+	//
+	//   The sub-as-UUID behaviour is also why this fix is shim-only:
+	//   the cookie's `sub` is a session-scoped UUID by design and
+	//   stays that way. We derive the stable id here, from the email
+	//   claim, instead of trusting the cookie's `sub`.
+	//
+	// Normalisation (defense in depth): some providers return mixed-
+	// case or whitespace-padded emails. The case-insensitive match the
+	// database_administrator identity.user table uses (CITEXT column,
+	// LookupByEmail) means we must collapse case + trim before the
+	// participant id becomes a Postgres foreign key target, otherwise
+	// "Braejan@Proton.me" and "braejan@proton.me" would resolve to
+	// two different chat_conversations rows.
+	participantID := normalizeParticipantID(claims.Email)
 	if participantID == "" {
-		participantID = claims.Email
+		// Fallback for auth flows that don't carry an email claim
+		// (e.g. credentials provider without one). Behaviour matches
+		// the previous sub-preferred path so a deploy with no email
+		// in the cookie still resolves to a participant id.
+		participantID = claims.Sub
 	}
 	if participantID == "" {
 		return nil, false
 	}
 
 	return jweIdentity{participantID: participantID}, true
+}
+
+// normalizeParticipantID returns the canonical participant identifier
+// form for a claim value: trimmed + lowercased. An all-whitespace
+// input collapses to the empty string so the caller can fall through
+// to the next claim.
+//
+// Cheap enough to call on every request (no allocations after the
+// strings.ToLower internal copy). Lives next to IdentityFromRequest so
+// the rule "trim + lowercase the email claim" has a single source of
+// truth in this package.
+func normalizeParticipantID(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // authJSCookiePayload mirrors the canonical Auth.js JWT claims the shim

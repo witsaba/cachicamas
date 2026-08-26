@@ -26,6 +26,7 @@ import {
   useVisibleTask$,
   type NoSerialize,
   type QRL,
+  type Signal,
 } from "@builder.io/qwik";
 import type { TranscriptEntry } from "~/lib/mock/chat";
 import {
@@ -35,6 +36,7 @@ import {
   type ChatStreamError,
 } from "~/lib/chat-api";
 import type { ChatTurnError } from "~/lib/chat-types";
+import { SCROLL_EVENT } from "./events";
 
 // Union of submitTurn's typed errors (5-kind, with offline) and the
 // stream's narrower event error (4-kind, no offline). The hook
@@ -122,12 +124,86 @@ function parseArgs(
 			([k, v]) => [k, String(v)] as readonly [string, string],
 		);
 	} catch {
+		// Malformed JSON — fall through to the empty tuple list so
+		// the tool entry still renders (state stays "running" until
+		// tool.result arrives).
 		return [];
+	}
+}
+
+/**
+ * CH-12 (S-SCROLL-001) — drive auto-scroll from an explicit DOM
+ * event dispatched at the mutation site, not from a Qwik signal
+ * counter.
+ *
+ * Module-level (NOT a local closure inside `useChatStream`) so
+ * the submit/cancel/reset QRLs can call it without capturing a
+ * non-serialisable function reference. Qwik's QRL optimizer
+ * captures closure variables and serialises them across resume;
+ * a plain `const requestScroll = () => {...}` inside the hook
+ * would fail `_verifySerializable` with
+ * "Captured variable ... can not be serialized because it's a
+ *  function named 'requestScroll'". A module-level helper escapes
+ * the closure-capture pass entirely.
+ *
+ * What this does, in order:
+ *   1. Dispatch `chat:scroll-to-bottom` on `window`. The chat-app's
+ *      visible-task listens for it and runs the actual scroll inside
+ *      a double rAF (so the new <li> is in the DOM and scrollHeight
+ *      reflects the post-commit layout). The event fires AFTER
+ *      Qwik's render commit because the dispatch happens in plain
+ *      browser time, not inside Qwik's reactive task lifecycle —
+ *      the bug with the previous signal-counter approach
+ *      (CH-11 / commit 81a24641) was that Qwik re-ran the
+ *      visible-task in the SAME microtask as the signal change,
+ *      so the rAF inside fired BEFORE the new <li> was in the DOM.
+ *   2. If `scrollCounter` was supplied, bump it too. The counter
+ *      is a public-API fallback for external observers (tests,
+ *      analytics). The actual scroll is event-driven; the counter
+ *      is preserved for backward compatibility with the
+ *      `scrollCounter?` hook signature introduced in CH-11.
+ *
+ * No-op when running under SSR (`typeof window === "undefined"`)
+ * AND when no counter was supplied.
+ *
+ * Safe in test environments where the test window's `dispatchEvent`
+ * is missing — the dispatch call is guarded by
+ * `typeof window.dispatchEvent === "function"`.
+ */
+function requestScroll(scrollCounter: Signal<number> | undefined): void {
+	if (
+		typeof window !== "undefined" &&
+		typeof window.dispatchEvent === "function"
+	) {
+		window.dispatchEvent(new CustomEvent(SCROLL_EVENT));
+	}
+	if (scrollCounter) {
+		scrollCounter.value = scrollCounter.value + 1;
 	}
 }
 
 export function useChatStream(
   initialEntries: ReadonlyArray<TranscriptEntry>,
+  /**
+   * CH-12 (S-SCROLL-001) — auto-scroll bus fallback. The chat-app
+   * owns a `useSignal(0)` counter and passes the signal ref here.
+   * The hook bumps it on EVERY mutation of `state.entries` — kept
+   * as a public-API fallback for external observers (tests,
+   * analytics). The actual scroll is driven by the
+   * `chat:scroll-to-bottom` CustomEvent dispatched at the same
+   * mutation sites (see `requestScroll` at the top of this file);
+   * the chat-app's visible-task listens for the event and scrolls
+   * after Qwik's render commit, so scrollHeight reflects the
+   * post-commit layout reliably (CH-11 / commit 81a24641 re-ran
+   * the visible-task in the SAME microtask as the signal change —
+   * BEFORE the render commit, so the rAF inside fired before the
+   * new <li> was in the DOM).
+   *
+   * Optional so existing call sites stay wired. When omitted,
+   * the counter is simply not advanced; the event dispatch
+   * still runs.
+   */
+  scrollCounter?: Signal<number>,
 ): ChatStreamState {
   const state = useStore<{
     status: "idle" | "submitting" | "streaming" | "cancelling";
@@ -160,16 +236,13 @@ export function useChatStream(
     const turnId = newTurnId();
     state.currentTurnId = turnId;
     state.status = "submitting";
-    // Seed the assistant in-flight entry so the message.delta frames
-    // accumulate into a stable key (chat-app's `key={entry.id}`).
-    const assistantId = nextId(state, "a");
-    state.entries.push({
-      kind: "said",
-      id: assistantId,
-      who: "chat",
-      text: "",
-      state: "streaming",
-    });
+    // Seed entries in display order: user turns are visible above
+    // the assistant's response, so the user entry is pushed FIRST and
+    // the assistant placeholder SECOND. Reversing this order made
+    // the assistant bubble render above the user bubble during the
+    // streaming window (the live render bug); reload from the
+    // server's exchange list renders correctly because the backend
+    // already sorts by position ascending.
     const userId = nextId(state, "u");
     state.entries.push({
       kind: "said",
@@ -178,6 +251,16 @@ export function useChatStream(
       text,
       state: "final",
     });
+    requestScroll(scrollCounter);
+    const assistantId = nextId(state, "a");
+    state.entries.push({
+      kind: "said",
+      id: assistantId,
+      who: "chat",
+      text: "",
+      state: "streaming",
+    });
+    requestScroll(scrollCounter);
 
     const submitResult = await submitTurn({ id: turnId, prompt: text });
     if (!submitResult.ok) {
@@ -186,6 +269,7 @@ export function useChatStream(
       state.entries = state.entries.filter(
         (e) => e.id !== assistantId && e.id !== userId,
       );
+      requestScroll(scrollCounter);
       state.error = submitResult;
       state.currentTurnId = undefined;
       state.status = "idle";
@@ -205,6 +289,7 @@ export function useChatStream(
                 ? { ...e, text: e.text + ev.delta }
                 : e,
             );
+            requestScroll(scrollCounter);
             return;
           }
           case "message.end": {
@@ -215,6 +300,7 @@ export function useChatStream(
                 ? { ...e, state: "final" as const }
                 : e,
             );
+            requestScroll(scrollCounter);
             return;
           }
           // CH-09 (D-3, D-4, S-CTS-020) — tool.call.start opens a
@@ -236,6 +322,7 @@ export function useChatStream(
                 state: "running",
               },
             ];
+            requestScroll(scrollCounter);
             return;
           }
           case "tool.result": {
@@ -257,6 +344,7 @@ export function useChatStream(
                 ? { ...e, state: newState, result: resultText }
                 : e,
             );
+            requestScroll(scrollCounter);
             return;
           }
           case "tool.call.delta":
@@ -292,6 +380,7 @@ export function useChatStream(
                 decision: "pending",
               },
             ];
+            requestScroll(scrollCounter);
             return;
           }
           case "permission.decision.made": {
@@ -303,6 +392,7 @@ export function useChatStream(
                 ? { ...e, decision: newDecision }
                 : e,
             );
+            requestScroll(scrollCounter);
             // D-8 mirror: on Deny, drop any tool entry for the
             // same wireCallId that arrived between required and
             // made. The chat projector suppressed the wire event
@@ -314,6 +404,7 @@ export function useChatStream(
               state.entries = state.entries.filter(
                 (e) => !(e.id === toolId && e.kind === "tool"),
               );
+              requestScroll(scrollCounter);
             }
             return;
           }
@@ -330,6 +421,7 @@ export function useChatStream(
                   ? { ...e, state: "final" as const }
                   : e,
               );
+              requestScroll(scrollCounter);
               const unsubscribe = handle.value?.unsubscribe;
               handle.value = null;
               state.status = "idle";
@@ -347,6 +439,7 @@ export function useChatStream(
                   ? { ...e, state: "final" as const }
                   : e,
               );
+              requestScroll(scrollCounter);
             }
             return;
           }
@@ -364,6 +457,7 @@ export function useChatStream(
         state.error = { kind: "offline", message: msg };
         state.status = "idle";
         state.entries = state.entries.filter((e) => e.id !== assistantId);
+        requestScroll(scrollCounter);
       },
     );
 
@@ -402,6 +496,7 @@ export function useChatStream(
           ? { ...e, state: "final" as const }
           : e,
       );
+      requestScroll(scrollCounter);
     }
     state.status = "idle";
     state.currentTurnId = undefined;
@@ -409,6 +504,7 @@ export function useChatStream(
 
   const reset = $((next?: readonly TranscriptEntry[]) => {
     state.entries = [...(next ?? [])];
+    requestScroll(scrollCounter);
     state.error = undefined;
     state.status = "idle";
     state.currentTurnId = undefined;

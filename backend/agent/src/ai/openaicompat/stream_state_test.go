@@ -9,6 +9,7 @@
 package openaicompat
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cachicamas/backend/agent/src/ai"
@@ -272,5 +273,107 @@ func TestMapperState_TerminalThenDeltaLessAndUsageChunks_ClosesCleanly(t *testin
 	}
 	if completion.Kind() != ai.EventKindCompletion {
 		t.Fatalf("buildCompletion() kind = %v, want EventKindCompletion (S-ATS-032)", completion.Kind())
+	}
+}
+
+// ---------------------------------------------------------------------
+// R-ATS-020 row 2 widening — OpenRouter usage-enrichment chunk after the
+// terminal chunk re-asserts finish_reason ("stop") with no new content.
+// The strict-spec reading fires errDuplicateClose and aborts the stream;
+// the practical disposition is to accept the duplicate as a no-op so the
+// already-streamed text reaches the carrier.
+// ---------------------------------------------------------------------
+
+// TestApplyChunk_DuplicateFinishReasonWithNoNewContent_IsNoOp covers the
+// OpenRouter usage-enrichment shape: a chunk after the terminal chunk
+// that re-asserts finish_reason="stop" alongside an empty content and no
+// tool_calls (and may carry a usage payload) is accepted as a no-op —
+// zero events, zero errors — and terminalSeen stays true.
+//
+// Without the widening this test fires errDuplicateClose and the already-
+// streamed text is discarded by the chat wire surface.
+func TestApplyChunk_DuplicateFinishReasonWithNoNewContent_IsNoOp(t *testing.T) {
+	t.Parallel()
+
+	state := &mapperState{}
+
+	// Establish identity and a text block with one content delta, then
+	// close via the terminal chunk — this is the path OpenRouter's
+	// google/gemini-3.7-flash route takes on the way to its second
+	// closing chunk.
+	if _, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"funciona"},"finish_reason":null}]}`)); err != nil {
+		t.Fatalf("applyChunk(content) error = %v, want nil", err)
+	}
+	if _, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null},"finish_reason":"stop","native_finish_reason":"STOP"}]}`)); err != nil {
+		t.Fatalf("applyChunk(terminal) error = %v, want nil", err)
+	}
+	if !state.terminalSeen {
+		t.Fatal("terminalSeen = false after terminal chunk — fixture premise broken")
+	}
+
+	// Second closing chunk: same finish_reason, empty content, no tool
+	// calls, optional usage. This is the OpenRouter enrichment chunk.
+	duplicate := mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"STOP"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`)
+
+	events, err := state.applyChunk(duplicate)
+	if err != nil {
+		t.Fatalf("applyChunk(duplicate) error = %v, want nil — OpenRouter usage-enrichment chunk with no new content must be a no-op", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("duplicate chunk emitted %d event(s) = %v, want 0 — absorbed, never a delta", len(events), events)
+	}
+	if !state.terminalSeen {
+		t.Error("terminalSeen = false after duplicate chunk — must remain true")
+	}
+
+	// The completion must still build cleanly and carry the usage that
+	// arrived on the enrichment chunk (mapped earlier in applyChunk,
+	// ahead of the terminal-window check).
+	completion, err := state.buildCompletion()
+	if err != nil {
+		t.Fatalf("buildCompletion() error = %v, want nil", err)
+	}
+	if completion.Kind() != ai.EventKindCompletion {
+		t.Fatalf("buildCompletion() kind = %v, want EventKindCompletion", completion.Kind())
+	}
+	if got, ok := completion.Completion(); !ok {
+		t.Fatal("completion.Completion() = (_, false), want a completion payload")
+	} else {
+		u := got.Usage()
+		if n, ok := u.Input.Count(); !ok || n != 3 {
+			t.Errorf("completion usage Input = %s (present=%v), want 3 — enrichment chunk's usage must surface", u.Input, ok)
+		}
+		if n, ok := u.Output.Count(); !ok || n != 5 {
+			t.Errorf("completion usage Output = %s (present=%v), want 5 — enrichment chunk's usage must surface", u.Output, ok)
+		}
+	}
+}
+
+// TestApplyChunk_DuplicateFinishReasonWithNewContent_StillFiresErrDuplicateClose
+// pins the legitimate duplicate-close violation: a chunk AFTER the
+// terminal chunk that re-asserts finish_reason=stop WHILE carrying a new
+// non-empty content string still fires errDuplicateClose. Only the
+// no-new-info duplicate is widened — anything with real new content is
+// the strict-spec violation.
+func TestApplyChunk_DuplicateFinishReasonWithNewContent_StillFiresErrDuplicateClose(t *testing.T) {
+	t.Parallel()
+
+	state := &mapperState{}
+
+	if _, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"uno"},"finish_reason":null}]}`)); err != nil {
+		t.Fatalf("applyChunk(content) error = %v, want nil", err)
+	}
+	if _, err := state.applyChunk(mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)); err != nil {
+		t.Fatalf("applyChunk(terminal) error = %v, want nil", err)
+	}
+
+	dupWithContent := mustChunk(t, `{"id":"r1","model":"m","object":"chat.completion.chunk","created":1700000000,"choices":[{"index":0,"delta":{"content":"more text"},"finish_reason":"stop"}]}`)
+
+	_, err := state.applyChunk(dupWithContent)
+	if err == nil {
+		t.Fatal("applyChunk(duplicate with content) error = nil, want errDuplicateClose — new content alongside a duplicate finish_reason is the strict-spec violation")
+	}
+	if !errors.Is(err, ai.ErrMalformedResponse) {
+		t.Errorf("applyChunk(duplicate with content) error = %v, want errors.Is(err, ai.ErrMalformedResponse) — strict spec preserved for new-info duplicates", err)
 	}
 }

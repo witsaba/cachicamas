@@ -68,10 +68,27 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
-// SSR-vs-browser base URL (mirrors lib/api.ts:133-157 + lib/prompts-api.ts:85-102)
+// SSR-vs-browser base URL.
+//
+// DELIBERATELY DIFFERENT from lib/api.ts / lib/prompts-api.ts: the chat
+// wire paths passed to fullUrl() are ALREADY backend-absolute
+// ("/api/agent/turns", "/api/agent/conversations", and the server-issued
+// streamUrl "/api/agent/turns/:id/events"). The db_admin-oriented clients
+// pass UNPREFIXED paths ("/organizations") and rely on PUBLIC_API_BASE_URL
+// ("= /api") to add the proxy prefix. Reusing that convention here produced
+// "/api/api/agent/..." in the browser (2026-08-25 fix, fix/chat-stack-wiring).
+//
+// Browser: same-origin relative URLs — the Qwik Node server proxies
+// /api/agent/* to the chat service (entry.express.tsx, AGENT_CHAT_TARGET).
+//
+// Node SSR: today no SSR path fetches chat endpoints (every call site is
+// client-guarded), but if one ever does, it must target the chat service
+// directly — SERVER_AGENT_CHAT_BASE_URL (compose: http://agent_chat:8080),
+// falling back to the documented dev port 8090. NEVER SERVER_API_BASE_URL:
+// that points at database_administrator, which does not serve /api/agent/*.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BASE_URL = "http://localhost:8080";
+const DEFAULT_NODE_CHAT_BASE_URL = "http://localhost:8090";
 
 function isNode(): boolean {
   return (
@@ -82,25 +99,21 @@ function isNode(): boolean {
 
 function apiBaseUrl(): string {
   if (isNode()) {
-    const fromEnv = process.env.SERVER_API_BASE_URL;
+    const fromEnv = process.env.SERVER_AGENT_CHAT_BASE_URL;
     return (
-      fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_BASE_URL
+      fromEnv && fromEnv.trim().length > 0
+        ? fromEnv
+        : DEFAULT_NODE_CHAT_BASE_URL
     ).replace(/\/+$/, "");
   }
-  // Browser: Vite-inlined PUBLIC_* env at build time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromEnv = (import.meta as any).env?.PUBLIC_API_BASE_URL as
-    | string
-    | undefined;
-  return (
-    fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_BASE_URL
-  ).replace(/\/+$/, "");
+  // Browser: same origin. The /api/agent prefix in each path is what the
+  // Qwik proxy matches on; adding a base would double-prefix it.
+  return "";
 }
 
-// Build the full URL for a relative path. SSR uses the absolute base
-// URL; browser uses the same base URL (relative paths work too, but
-// we always go absolute to keep the chat client identical to
-// lib/api.ts's serverAwareFetch and lib/prompts-api.ts's safeFetch).
+// Build the full URL for an already-prefixed chat path. Absolute URLs
+// (server-issued stream URLs) pass through untouched; relative paths get
+// the base prepended (empty string in the browser → same-origin request).
 function fullUrl(path: string): string {
   if (path.startsWith("http")) return path;
   return `${apiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
@@ -603,4 +616,77 @@ export async function loadConversation(id: string): Promise<ApiResult<ExchangeDT
     const body = (await res.json()) as ExchangeDTO[];
     return Array.isArray(body) ? body : [];
   });
+}
+
+// ---------------------------------------------------------------------------
+// Fix B — the rail reload path must NOT call loadConversation(<email>).
+//
+// `routes/chat/index.tsx` derives `participantID` from the session, falling
+// back to `session.user.email` when no `user.id` is set. Auth.js issues the
+// `user.id` server-side as a UUID; passing the email into
+// /api/agent/conversations/<email> is refused with 403 not_found (the
+// backend's cross-participant guard compares the URL :id to
+// ident.ParticipantID() — R-CHS-004.b).
+//
+// `loadMostRecentConversation` is the page's mount-time shape: it lists the
+// authenticated participant's conversations, takes the first (most-recent)
+// entry's server-issued conversationID, and reloads that conversation. The
+// server-issued id is what the backend's HandleReloadConversation expects —
+// not the route-level `participantID` prop, which may carry the email.
+// ---------------------------------------------------------------------------
+
+export interface ResumedConversation {
+  /** Server-issued conversation id (the wire's `ConversationSummary.conversationID`). */
+  readonly conversationID: string;
+  /** Recorded exchanges for that conversation, newest last. */
+  readonly exchanges: readonly ExchangeDTO[];
+  /** All summaries returned by the list endpoint (newest first). */
+  readonly summaries: readonly ConversationSummary[];
+}
+
+/**
+ * Compose `list → most-recent → load` (Fix B).
+ *
+ * Resolves with `{ ok: true, value: ResumedConversation }` when the list
+ * returns at least one entry — the seed transcript is the exchanges from
+ * `loadConversation(<serverConversationID>)`, and `summaries` carries the
+ * full rail.
+ *
+ * Resolves with `{ ok: true, value: { summaries, exchanges: [] } }` when
+ * the list returns empty (S-CRI-004: 200 [] is success, not a refusal).
+ *
+ * Resolves with the failure half on any list/load transport error. Network
+ * failures map to `kind: "offline"`; backend envelopes map to their typed
+ * kind (validation / conflict / not_found / server).
+ */
+export async function loadMostRecentConversation(): Promise<
+  ApiResult<ResumedConversation>
+> {
+  const listResult = await listConversations();
+  if (!listResult.ok) {
+    return listResult;
+  }
+  const mostRecent = listResult.value[0];
+  if (!mostRecent) {
+    return {
+      ok: true,
+      value: {
+        conversationID: "",
+        exchanges: [],
+        summaries: listResult.value,
+      },
+    };
+  }
+  const reloadResult = await loadConversation(mostRecent.conversationID);
+  if (!reloadResult.ok) {
+    return reloadResult;
+  }
+  return {
+    ok: true,
+    value: {
+      conversationID: mostRecent.conversationID,
+      exchanges: reloadResult.value,
+      summaries: listResult.value,
+    },
+  };
 }

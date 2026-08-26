@@ -278,6 +278,72 @@ services:
         max-file: "3"
 
   # --------------------------------------------------------------------------
+  # agent_chat — Go chat binary (backend/agent/src/cmd/chat).
+  # Owns the /api/agent/* surface: turns, SSE streams, conversations,
+  # permission decisions. The browser reaches it THROUGH the frontend's
+  # reverse proxy (AGENT_CHAT_TARGET=http://agent_chat:8080 in the
+  # frontend env block); host-side :8090 exists for smoke tests and
+  # bare-dev parity.
+  # --------------------------------------------------------------------------
+  agent_chat:
+    build:
+      context: ./backend/agent
+      dockerfile: Dockerfile
+    image: cachicamas/agent_chat:local
+    container_name: cachicamas-agent-chat
+    restart: unless-stopped
+    environment:
+      # In-container bind port. The host side maps AGENT_CHAT_PORT (8090)
+      # → 8080 so it never collides with db_admin's host :8080 publish.
+      CACHICAMAS_CHAT_PORT: 8080
+      # OpenRouter bearer key (create one at https://openrouter.ai/keys).
+      # Required — loadConfig refuses to start without it.
+      CACHICAMAS_CHAT_PROVIDER_API_KEY: ${CACHICAMAS_CHAT_PROVIDER_API_KEY:?CACHICAMAS_CHAT_PROVIDER_API_KEY is required (OpenRouter key, set it in .env)}
+      # Model slug substituted on every provider request. Must be a
+      # tool-call-capable model (the archetype issues tool calls);
+      # openai/gpt-4o is the local default.
+      CACHICAMAS_CHAT_PROVIDER_MODEL: ${CACHICAMAS_CHAT_PROVIDER_MODEL:-openai/gpt-4o}
+      # Same AUTH_SECRET as frontend/database_administrator (above) —
+      # decrypts the Auth.js JWE session cookie. ≥32 bytes enforced by
+      # loadConfig (fail-fast before any listener binds).
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env (openssl rand -base64 32)}
+      # Database — same queen posture as database_administrator: plain
+      # Postgres with sslmode=disable locally; production should set
+      # require/verify-full in its own env file.
+      CACHICAMAS_CHAT_STORE_DSN: postgres://${QUEEN_USER:-queen}:${QUEEN_PASSWORD:-changeme-queen}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-cachicamas_pg}?sslmode=disable
+      # OTEL — mirrors db_admin.
+      OTEL_SERVICE_NAME: agent_chat
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    ports:
+      - "${AGENT_CHAT_PORT:-8090}:8080"
+    networks:
+      - cachicamas_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      # Disabled on purpose — same reason as database_administrator:
+      # the runtime image is distroless/static (no shell, no wget,
+      # no curl), so a CMD-SHELL test fails with "exec: /bin/sh: no
+      # such file or directory" before the test even runs.
+      #
+      # Verify the service from the host instead (unauthenticated
+      # requests are rejected by the JWE cookie middleware):
+      #   curl -sS -o /dev/null -w '%{http_code}\n' \
+      #     http://localhost:8090/api/agent/conversations
+      #   # → 401
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
   # frontend — Qwik Node SSR (no nginx, single Node process).
   # Multi-stage Dockerfile: node:22-alpine builder + node:22-alpine runner.
   # El Qwik server:
@@ -311,6 +377,10 @@ services:
       API_TARGET: http://database_administrator:8080
       PUBLIC_API_BASE_URL: /api
       SERVER_API_BASE_URL: http://database_administrator:8080
+      # fix/chat-stack-wiring — the Node server proxies /api/agent/* to
+      # the chat binary (paths forwarded verbatim; see entry.express.tsx).
+      # Runtime env, same injection pattern as API_TARGET above.
+      AGENT_CHAT_TARGET: http://agent_chat:8080
       ORIGIN: ${ORIGIN:-http://localhost:3015}
       # cachicamas-github-login — Auth.js + GitHub OAuth (PR-2)
       AUTH_GITHUB_ID: ${AUTH_GITHUB_ID:?AUTH_GITHUB_ID must be set in .env}

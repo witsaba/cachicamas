@@ -10,8 +10,7 @@ import { Status } from "~/components/workspace/status/status";
 import { initialsOf } from "~/lib/initials";
 import { AGENTS, agentBySlug } from "~/lib/mock/staff";
 import {
-  listConversations,
-  loadConversation,
+  loadMostRecentConversation,
 } from "~/lib/chat-api";
 import type {
   ConversationSummary,
@@ -24,6 +23,7 @@ import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
 import { TranscriptLine } from "./transcript-line";
 import { useChatStream } from "./use-chat-stream";
+import { SCROLL_EVENT } from "./events";
 
 /**
  * Chat — a conversation with one colleague.
@@ -204,7 +204,16 @@ function parseToolArgs(
 
 export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participantID }) => {
   const activeSlug = useSignal(AGENTS[0].slug);
-  const turn = useChatStream([]);
+  // CH-12 (S-SCROLL-001) — auto-scroll bus. The hook
+  // (a) dispatches the `chat:scroll-to-bottom` CustomEvent on
+  // `window` at every entry mutation site, AND
+  // (b) bumps this counter as a public-API fallback.
+  // The visible-task below listens for the event (decoupled from
+  // Qwik's reactive task lifecycle — see the comment on the
+  // listener below). The signal itself is kept on the hook's
+  // public surface for backward compatibility.
+  const scrollCounter = useSignal(0);
+  const turn = useChatStream([], scrollCounter);
   const scroller = useSignal<HTMLElement>();
 
   // CH-08 (REQ-8 / REQ-9): mount-time fetch + seed. On first paint
@@ -214,14 +223,27 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // unknown — the mount does not throw, so a transient wire
   // failure leaves the page in its CH-05.1 empty-seed shape
   // rather than a blank-by-error state.
+  //
+  // Fix B (server-issued conversationID): `loadMostRecentConversation`
+  // composes the two resume GETs — list first, then load — so the
+  // reload URL carries the server-issued conversationID, NOT the
+  // route-level `participantID` prop (which falls back to the user's
+  // email when Auth.js issued no `user.id`; the backend refuses
+  // that with 403 not_found, R-CHS-004.b).
   const railState = useStore<{
     summaries: ConversationSummary[];
     loaded: boolean;
     loadError: boolean;
+    selectedId: string;
   }>({
     summaries: [],
     loaded: false,
     loadError: false,
+    // Rail selection id starts as the route prop and is replaced
+    // with the server-issued conversationID once the list resolves.
+    // An empty string keeps the rail unhighlighted until the helper
+    // resolves (no false-positive "current row" on a stale prop).
+    selectedId: "",
   });
 
   // eslint-disable-next-line qwik/no-use-visible-task
@@ -230,21 +252,19 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
     if (typeof window === "undefined") return;
 
     void (async () => {
-      const [listResult, reloadResult] = await Promise.all([
-        listConversations(),
-        loadConversation(participantID),
-      ]);
+      const resumed = await loadMostRecentConversation();
 
-      // Reload — seed the buffer if the participant has recorded
-      // exchanges; a miss or refusal leaves the seed empty.
-      if (reloadResult.ok && reloadResult.value.length > 0) {
-        await turn.reset(exchangesToEntries(reloadResult.value));
-      }
-
-      // List — populate the rail; an offline / 403 / 500 leaves
-      // the rail empty rather than falsely populated.
-      if (listResult.ok) {
-        railState.summaries = listResult.value;
+      if (resumed.ok) {
+        // Reload — seed the buffer if the participant has recorded
+        // exchanges; an empty list (S-CRI-004: 200 []) or no
+        // exchanges leaves the seed empty.
+        if (resumed.value.exchanges.length > 0) {
+          await turn.reset(exchangesToEntries(resumed.value.exchanges));
+        }
+        // List — populate the rail with the server-issued
+        // conversationID; the rail marks only that row current.
+        railState.summaries = [...resumed.value.summaries];
+        railState.selectedId = resumed.value.conversationID;
         railState.loaded = true;
         railState.loadError = false;
       } else {
@@ -271,13 +291,56 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
 
   // Following an arriving answer to the bottom of a scroller is a browser-only
   // concern by definition; there is no server-side equivalent to fall back to.
+  //
+  // CH-12 (S-SCROLL-001) — drive auto-scroll from an explicit DOM event
+  // dispatched at the mutation site (use-chat-stream.ts:173-181,
+  // `requestScroll`) instead of a Qwik signal counter / `useVisibleTask$`
+  // tracker.
+  //
+  // Why the previous signal-counter approach (CH-11 / commit 81a24641)
+  // did not work: Qwik re-runs a `useVisibleTask$` that `track`s a
+  // signal in the SAME microtask as the signal change — BEFORE Qwik's
+  // render commit. The rAF inside fires before the new <li> is in the
+  // DOM, so `scrollTop = scrollHeight` reads the OLD height and the
+  // new content lands below the fold (the scrollbar grows but the
+  // text is hidden). The MutationObserver approach before that
+  // (commit f8b5b56e) orphaned on Qwik resume / re-render swaps of
+  // the transcript <ol> node.
+  //
+  // The event-based approach decouples the scroll from Qwik's
+  // reactive task lifecycle. The hook dispatches the event from
+  // plain browser time, AFTER its own mutation. The listener runs
+  // in plain browser time too — there is no `track` to race with
+  // the commit. The double rAF inside the listener is critical:
+  // the first rAF lets Qwik flush its render commit, the second
+  // rAF lets the browser paint, and only then do we read
+  // scrollHeight. By that point the new <li> is in the DOM and
+  // laid out, so the scroll lands.
+  //
+  // The signal counter is preserved on the hook's public surface
+  // (CH-11) so external observers (tests, analytics) can still
+  // react to entry mutations. The actual scroll is event-driven.
   // eslint-disable-next-line qwik/no-use-visible-task
-  useVisibleTask$(({ track }) => {
-    track(() => turn.entries.length);
-    track(() => turn.entries[turn.entries.length - 1]);
+  useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    const el = scroller.value;
-    if (el) el.scrollTop = el.scrollHeight;
+    const handler = () => {
+      // Double rAF: first waits for Qwik's render commit to flush,
+      // second waits for the browser to paint. After both,
+      // scrollHeight reflects the post-commit content reliably.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const scrollerEl = scroller.value;
+          if (!scrollerEl) return;
+          scrollerEl.scrollTop = scrollerEl.scrollHeight;
+          const last = scrollerEl.querySelector("li:last-child");
+          if (last instanceof HTMLElement) {
+            last.scrollIntoView({ block: "end", behavior: "auto" });
+          }
+        });
+      });
+    };
+    window.addEventListener(SCROLL_EVENT, handler);
+    cleanup(() => window.removeEventListener(SCROLL_EVENT, handler));
   });
 
   const agent =
@@ -300,7 +363,7 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
       >
         <ConversationList
           conversations={railState.summaries}
-          selectedId={participantID}
+          selectedId={railState.selectedId}
           onSelect$={$(async (id: string) => {
             // v1: the rail is informational. The page holds one
             // active conversation; future CH work wires the rail

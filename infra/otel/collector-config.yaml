@@ -241,7 +241,13 @@ service:
   pipelines:
     traces:
       receivers:  [otlp]
-      processors: [memory_limiter, resourcedetection, resource, tail_sampling, batch]
+      # fix/chat-stack-wiring DEBUG: tail_sampling removed temporarily
+      # to confirm whether spans emitted by the OTel SDK at v1.46.0
+      # actually reach the collector — opentelemetry-go#5248 dropped
+      # 9/10 spans on the gRPC path. tail_sampling's probabilistic-
+      # happy at 5% + catch-all at 1% would mask small volumes; removing
+      # it lets every emitted span flow through to Jaeger.
+      processors: [memory_limiter, resourcedetection, resource, batch]
       exporters:  [otlp/jaeger, debug]
     metrics:
       receivers:  [otlp]

@@ -29,6 +29,8 @@
 -- DEFAULT 'builtin'` — a NEW column on a NEW table, satisfies
 -- NFR-CCS-006.
 
+-- +goose Up
+
 CREATE TABLE chat_tool_calls (
     participant_id text NOT NULL,
     exchange_position integer NOT NULL,

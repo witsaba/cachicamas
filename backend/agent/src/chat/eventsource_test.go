@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +60,40 @@ func (w *recordingResponseWriter) WriteHeader(_ int)  {}
 // headers manually before calling writeFrame. The handlers in http.go
 // call writeSSEHeaders before driveStream — tested in http_test.go.
 
+// TestWriteSSEHeaders_ContentType — Fix D. The Content-Type header
+// MUST be `text/event-stream; charset=utf-8` so DevTools' Response
+// viewer decodes UTF-8 multi-byte characters correctly instead of
+// mis-decoding them as windows-1252 and producing mojibake for
+// non-ASCII chat turns. Without the charset parameter the browser
+// falls back to its default encoding, which is windows-1252 in
+// DevTools' Response viewer; the chat page then renders
+// non-ASCII bytes as replacement glyphs.
+func TestWriteSSEHeaders_ContentType(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	chat.WriteSSEHeadersForTest(w)
+
+	got := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(got, "text/event-stream") {
+		t.Errorf("Content-Type = %q, want prefix %q", got, "text/event-stream")
+	}
+	if !strings.Contains(got, "charset=utf-8") {
+		t.Errorf("Content-Type = %q, want substring %q (Fix D: charset prevents DevTools windows-1252 mojibake)", got, "charset=utf-8")
+	}
+
+	// Other headers MUST stay unchanged (R-CHS-002.d).
+	for k, want := range map[string]string{
+		"Cache-Control":     "no-cache",
+		"Connection":        "keep-alive",
+		"X-Accel-Buffering": "no",
+	} {
+		if got := w.Header().Get(k); got != want {
+			t.Errorf("header %q = %q, want %q (Fix D preserves the R-CHS-002.d quartet)", k, got, want)
+		}
+	}
+}
+
 // TestWriteFrame_AllVariants — S-CHS-002.d (wire shape) + R-CHS-002.a.
 // For each WireEvent variant, assert:
 //   - frame is exactly `event: <name>\ndata: <json>\n\n`
@@ -75,27 +110,27 @@ func TestWriteFrame_AllVariants(t *testing.T) {
 		{
 			name: "MessageStart",
 			ev:   chat.MessageStart{MessageID: "msg-1", Index: 0},
-			want: `event: message.start` + "\n" + `data: {"MessageID":"msg-1","Index":0}` + "\n\n",
+			want: `event: message.start` + "\n" + `data: {"messageId":"msg-1","index":0}` + "\n\n",
 		},
 		{
 			name: "MessageDelta",
 			ev:   chat.MessageDelta{Index: 0, Delta: "hi"},
-			want: `event: message.delta` + "\n" + `data: {"Index":0,"Delta":"hi"}` + "\n\n",
+			want: `event: message.delta` + "\n" + `data: {"index":0,"delta":"hi"}` + "\n\n",
 		},
 		{
 			name: "MessageEnd",
 			ev:   chat.MessageEnd{Index: 0, FinishReason: chat.FinishReasonStop},
-			want: `event: message.end` + "\n" + `data: {"Index":0,"FinishReason":"stop"}` + "\n\n",
+			want: `event: message.end` + "\n" + `data: {"index":0,"finishReason":"stop"}` + "\n\n",
 		},
 		{
 			name: "TurnEnd",
 			ev:   chat.TurnEnd{FinishReason: nil},
-			want: `event: turn.end` + "\n" + `data: {"FinishReason":null}` + "\n\n",
+			want: `event: turn.end` + "\n" + `data: {}` + "\n\n",
 		},
 		{
 			name: "Error",
 			ev:   chat.Error{Kind: "server", Message: "boom"},
-			want: `event: error` + "\n" + `data: {"Kind":"server","Message":"boom"}` + "\n\n",
+			want: `event: error` + "\n" + `data: {"kind":"server","message":"boom"}` + "\n\n",
 		},
 	}
 

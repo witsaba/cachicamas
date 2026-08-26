@@ -398,3 +398,341 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
   }
   return body as OrganizationReadModel;
 }
+<<<<<<< Updated upstream
+=======
+
+// ---------------------------------------------------------------------------
+// Workspaces (2026-07-06 PR2-i)
+// ---------------------------------------------------------------------------
+
+/**
+ * PrimaryRepository is the locked wire shape for the primary repo stored
+ * on every workspace. Mirrors `backend/.../src/domain/workspace.go`.
+ */
+export interface PrimaryRepository {
+  github_id: number;
+  full_name: string;
+  owner: string;
+  name: string;
+}
+
+export interface LinkedRepository {
+  id: number;
+  github_id: number;
+  github_full_name: string;
+  github_owner: string;
+  github_name: string;
+  added_at: string;
+}
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  primary_repository: PrimaryRepository;
+  linked_repos_count: number;
+  created_at: string;
+}
+
+export interface WorkspaceDetail {
+  id: number;
+  name: string;
+  primary_repository: PrimaryRepository;
+  linked_repositories: LinkedRepository[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /workspaces (R-WS-002). */
+export async function listWorkspaces(): Promise<
+  ApiResult<{ workspaces: WorkspaceSummary[]; truncated: boolean }>
+> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      workspaces: WorkspaceSummary[];
+      truncated?: boolean;
+    };
+    return {
+      workspaces: body.workspaces ?? [],
+      truncated: body.truncated ?? false,
+    };
+  });
+}
+
+/** GET /workspaces/:id (R-WS-003). */
+export async function getWorkspace(
+  id: number,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as WorkspaceDetail,
+  );
+}
+
+/** GET /workspaces/:id/repositories (R-WS-008). */
+export async function listLinkedRepos(
+  workspaceID: number,
+): Promise<ApiResult<{ repositories: LinkedRepository[] }>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${workspaceID}/repositories`);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as { repositories: LinkedRepository[] };
+    return { repositories: body.repositories ?? [] };
+  });
+}
+
+/**
+ * Input for `addRepoToWorkspace` (R-WS-006).
+ *
+ * Backend validates the github_id against the user's accessible
+ * /user/repos set on the server (T7 in design); the frontend passes
+ * the user's selected repo through verbatim.
+ */
+export interface AddRepoInput {
+  github_id: number;
+  github_full_name: string;
+  github_owner: string;
+  github_name: string;
+}
+
+/** POST /workspaces/:id/repositories (R-WS-006). */
+export async function addRepoToWorkspace(
+  workspaceID: number,
+  repo: AddRepoInput,
+): Promise<ApiResult<LinkedRepository>> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          github_id: repo.github_id,
+          github_full_name: repo.github_full_name,
+          github_owner: repo.github_owner,
+          github_name: repo.github_name,
+        }),
+      },
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as LinkedRepository,
+  );
+}
+
+/** DELETE /workspaces/:id/repositories/:repoId (R-WS-007). */
+export async function removeRepoFromWorkspace(
+  workspaceID: number,
+  repoID: number,
+): Promise<ApiResult<null>> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${apiBaseUrl()}/workspaces/${workspaceID}/repositories/${repoID}`,
+      { method: "DELETE" },
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  // 204 No Content — body is empty; envelopeToResult guards against a
+  // missing body, returning ok: true with null value.
+  return envelopeToResult(res, async () => null);
+}
+
+/** DELETE /workspaces/:id (R-WS-005, soft delete on the backend). */
+export async function deleteWorkspace(id: number): Promise<ApiResult<null>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces/${id}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(res, async () => null);
+}
+
+/**
+ * CreateWorkspaceInput — wire shape for POST /workspaces (R-WS-001).
+ *
+ * The backend validates: name 3..60 chars + primary_repository fields
+ * all required (T7: server-side GitHub accessibility check). The frontend
+ * Zod schema mirrors these rules for client-side early validation.
+ */
+export interface CreateWorkspaceInput {
+  name: string;
+  primaryRepository: PrimaryRepository;
+}
+
+/**
+ * POST /workspaces (R-WS-001).
+ *
+ * Returns ApiResult<WorkspaceDetail>:
+ *   - 201 → ok with the new workspace detail
+ *   - 400 with fields.name → kind=validation
+ *   - 422 with fields.primary_repository → kind=validation (repo not accessible)
+ *   - 409 → kind=server (duplicate name)
+ *   - 401 / 5xx / network → offline/server
+ */
+export async function createWorkspace(
+  input: CreateWorkspaceInput,
+): Promise<ApiResult<WorkspaceDetail>> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: input.name,
+        primary_repository: {
+          github_id: input.primaryRepository.github_id,
+          github_full_name: input.primaryRepository.full_name,
+          github_owner: input.primaryRepository.owner,
+          github_name: input.primaryRepository.name,
+        },
+      }),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  return envelopeToResult(
+    res,
+    async () => (await res.json()) as WorkspaceDetail,
+  );
+}
+
+/**
+ * GitHubRepo is the projection the GitHub proxy returns. Mirrors the
+ * backend `github.Repo` shape (id, full_name, owner_login, name, private,
+ * description, html_url, updated_at, stargazers_count).
+ */
+export interface GitHubRepo {
+  id: number;
+  full_name: string;
+  owner_login: string;
+  name: string;
+  private: boolean;
+  description: string;
+  html_url: string;
+  updated_at: string;
+  stargazers_count: number;
+}
+
+/**
+ * ListGitHubReposOptions — query parameters for GET /github/repos.
+ */
+export interface ListGitHubReposOptions {
+  bustCache?: boolean;
+  page?: number;
+  perPage?: number;
+}
+
+/**
+ * GET /github/repos (R-WS-009).
+ *
+ * Server-side proxy through the backend. The frontend never sees the
+ * OAuth access_token; the backend loads it from identity.account and
+ * calls the GitHub API. Cache is 5-min in-memory per user.
+ *
+ * Returns ApiResult<{ repositories, hasNext }>:
+ *   - 200 → ok with the repos + hasNext
+ *   - 401 github_not_connected → kind=server with reconnect message
+ *   - 502 github_unauthorized / rate_limited / unreachable → kind=server
+ *   - network → kind=offline
+ */
+export async function listGitHubRepos(
+  options: ListGitHubReposOptions = {},
+): Promise<ApiResult<{ repositories: GitHubRepo[]; hasNext: boolean }>> {
+  const params = new URLSearchParams();
+  if (options.bustCache) params.set("bust_cache", "true");
+  if (options.page) params.set("page", String(options.page));
+  if (options.perPage) params.set("per_page", String(options.perPage));
+  const qs = params.toString();
+  const url = `${apiBaseUrl()}/github/repos${qs ? `?${qs}` : ""}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "offline",
+      message: offlineMessage(err),
+    };
+  }
+  // 401 with code=github_not_connected: surface a clear reconnect message.
+  if (res.status === 401) {
+    let code = "";
+    try {
+      const body = (await res.json()) as { error?: string };
+      code = body.error ?? "";
+    } catch {
+      // body not JSON; fall through with empty code.
+    }
+    if (code === "github_not_connected") {
+      return {
+        ok: false,
+        kind: "server",
+        message: "Reconnect GitHub to list repositories.",
+      };
+    }
+  }
+  return envelopeToResult(res, async () => {
+    const body = (await res.json()) as {
+      repositories: GitHubRepo[];
+      has_next?: boolean;
+    };
+    return {
+      repositories: body.repositories ?? [],
+      hasNext: body.has_next ?? false,
+    };
+  });
+}
+>>>>>>> Stashed changes

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/agenttest/tracetest"
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
@@ -395,4 +396,72 @@ func (h *capturingHandler) countFor(kindToken string) int {
 		}
 	}
 	return n
+}
+
+// TestConversation_EmitsChatTurnAndL2Spans — fix/chat-stack-wiring, Step 2+6.
+//
+// Given a chat.Config with a non-nil TracerProvider (the production wiring
+// at cmd/chat/main.go:280-289 passes the OTLP-backed tp installOTelSDK
+// returns), when Conversation.Send drives one browser turn, then:
+//
+//   - The archetype-layer chat.turn span opens (Step 6, ADR 0005 § D3
+//     widening) and ends exactly once — the defer at chat/conversation.go:
+//     turnSpan.End() mirrors L2's R-AGO-007 discipline.
+//   - The harness's own TracerProvider is the SAME recording provider, so
+//     L2's invoke_agent + turn spans are also retained — proves the
+//     TracerProvider field threaded through chat.Config (Step 2, Gap B) is
+//     wired end-to-end.
+//
+// Without the new wiring, both span families land on a noop provider
+// (Harness.TracerProvider defaulted to nil → tracerFromHarness → noop;
+// Send had no archetype-layer span at all).
+func TestConversation_EmitsChatTurnAndL2Spans(t *testing.T) {
+	t.Parallel()
+
+	tp := tracetest.NewProvider()
+	provider := agenttest.NewProvider(scriptTextResponse(t, 1, []string{"hi"}, ai.FinishReasonStop))
+
+	conv, err := chat.NewConversation(chat.Config{
+		Provider:        provider,
+		Store:           chat.NewMemoryConversationStore(),
+		ParticipantID:   "test-conv-trace",
+		ToolSource:      chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		TracerProvider:  tp,
+	})
+	if err != nil {
+		t.Fatalf("chat.NewConversation: %v", err)
+	}
+
+	out, err := conv.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	drainWire(t, out)
+
+	// Two span families must be present:
+	//   * chat.turn (archetype, scope chat)
+	//   * invoke_agent + turn (Layer 2, scope agent)
+	// Count both; the test asserts >= 1 of each kind by name. Exact
+	// cardinalities are L2's own invariant — tested in agent/.
+	spans := tp.Spans()
+	names := make(map[string]int, len(spans))
+	for _, s := range spans {
+		names[s.Name()]++
+	}
+
+	if names["chat.turn"] < 1 {
+		t.Errorf("archetype chat.turn span not emitted; got names=%v", names)
+	}
+	if names["invoke_agent"] < 1 {
+		t.Errorf("L2 invoke_agent span not emitted (TracerProvider did not propagate to Harness); got names=%v", names)
+	}
+	if names["turn"] < 1 {
+		t.Errorf("L2 turn span not emitted; got names=%v", names)
+	}
+
+	// R-AGO-007 mirror: every started span ends exactly once.
+	if err := tp.AssertAllEndedOnce(); err != nil {
+		t.Errorf("span leak or double-end: %v", err)
+	}
 }

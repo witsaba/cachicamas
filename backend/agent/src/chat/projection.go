@@ -12,6 +12,8 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -288,6 +290,54 @@ case agent.EventKindToolStart:
 	}
 
 	res := <-result
+
+	// Fix C (observability): when the run failed, record a
+	// structured log carrying the typed category the wire's `event:
+	// error` frame is about to surface, plus the bounded safe
+	// metadata Failure exposes (raw label, retryable, status class).
+	// Without this log line `docker logs cachicamas-agent-chat` is
+	// silent on upstream provider failures — the chat app's failure
+	// frame is the only signal, and it cannot distinguish upstream
+	// 4xx from upstream 5xx from network timeout from a
+	// classification bug. The typed category is the discriminator;
+	// StatusClass reports the HTTP class when one survived (5xx →
+	// upstream, 0/false → no transport response was in hand).
+	if res.err != nil {
+		var failure *ai.Failure
+		if errors.As(res.err, &failure) {
+			statusClass, haveStatusClass := failure.StatusClass()
+			attrs := []slog.Attr{
+				slog.String("participant_id", c.participantID),
+				slog.String("category", failure.Category().String()),
+				slog.String("vendor_label", failure.RawLabel()),
+				slog.Bool("retryable", failure.Retryable()),
+			}
+			if haveStatusClass {
+				attrs = append(attrs, slog.Int("status_class", statusClass))
+			}
+			c.logger.LogAttrs(ctx, slog.LevelError, "chat turn failed", attrs...)
+		} else {
+			// Unknown error shape — not an *ai.Failure. The wire
+			// envelope still renders Kind:"server" / Message:"The
+			// model provider is temporarily unavailable." from
+			// terminalWireEvent's own branch, but we need the
+			// underlying cause in the operator logs to distinguish
+			// harness-level bugs from upstream-driven failures
+			// that never went through openaicompat's typed mapper
+			// (e.g. a cost-session failure, an interrupted run).
+			// Log the dynamic type and the cause text. The cause
+			// is the harness's own error, never the user prompt
+			// body, so the D3 denylist on provider body excerpts
+			// does not apply here.
+			c.logger.LogAttrs(ctx, slog.LevelError, "chat turn failed",
+				slog.String("participant_id", c.participantID),
+				slog.String("category", "uncategorised"),
+				slog.String("error_type", fmt.Sprintf("%T", res.err)),
+				slog.String("error_message", res.err.Error()),
+			)
+		}
+	}
+
 	out <- terminalWireEvent(runEnd, haveRunEnd, res)
 
 	// CH-06 (R-CCS-008, D-6): append BEFORE clearing inFlight. The

@@ -16,6 +16,8 @@
 --   openspec/specs/chat-conversation-store/spec.md        (NFR-CCS-005/006, R-CCS-011)
 --   docs/architecture/milestones/0005-...md              (CH-07 charter)
 
+-- +goose Up
+
 CREATE TABLE chat_conversations (
     participant_id text PRIMARY KEY,
     created_at     timestamptz NOT NULL DEFAULT now(),
