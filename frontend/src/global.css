@@ -251,6 +251,59 @@
   animation: work-pulse 1.6s var(--ease-work) infinite;
 }
 
+/* =============================================================================
+ * The wasp spinner.
+ *
+ * Replaces the green "Working now" dot in the chat header while the
+ * assistant is streaming, submitting, or cancelling. The body is
+ * static; only the wings flap. CSS-only — no JS loop, no hydration
+ * cost. The animation stops the moment the indicator leaves the DOM,
+ * which is the contract the chat header relies on.
+ *
+ * The `prefers-reduced-motion` block below this section already
+ * zeroes animation duration globally; reduced-motion users see a
+ * static wasp, no further wiring needed.
+ * ========================================================================== */
+
+@keyframes wasp-flap-left {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(35deg);
+  }
+}
+
+@keyframes wasp-flap-right {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-35deg);
+  }
+}
+
+@utility wasp-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+.wasp-wing-left {
+  transform-box: view-box;
+  transform-origin: 12px 11px;
+  animation: wasp-flap-left 0.35s ease-in-out infinite;
+}
+
+.wasp-wing-right {
+  transform-box: view-box;
+  transform-origin: 20px 11px;
+  animation: wasp-flap-right 0.35s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
