@@ -511,10 +511,9 @@ export const ChatApp = component$<ChatAppProps>(
                     // wasp is quiet (visible but still) while the
                     // turn is idle, and only flaps while in flight.
                     <WaspSpinner
-                      class={[
-                        "h-3.5 w-3.5",
-                        isInFlight ? "wasp-anim" : "",
-                      ].join(" ")}
+                      class={["h-14 w-14", isInFlight ? "wasp-anim" : ""].join(
+                        " ",
+                      )}
                     />
                   ) : (
                     <Status status={agent.status} word={agent.statusWord} />
