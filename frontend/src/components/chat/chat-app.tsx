@@ -481,7 +481,7 @@ export const ChatApp = component$<ChatAppProps>(
         </aside>
         <div class="bg-canvas flex min-w-0 flex-1 flex-col">
           {/* who you are talking to */}
-          <header class="border-line bg-surface flex items-center gap-3 border-b px-4 py-2.5">
+          <header class="border-line bg-surface relative flex items-center gap-3 border-b px-4 py-2.5">
             <AgentAvatar agent={agent} size="md" />
             <div class="min-w-0 flex-1">
               <p class="flex items-center gap-2">
@@ -499,7 +499,7 @@ export const ChatApp = component$<ChatAppProps>(
                 <span class="text-ink-soft truncate text-xs">
                   {agent.departmentName}
                 </span>
-                <span class="ml-auto">
+                <span class="pointer-events-none absolute inset-y-0 right-4 flex items-center">
                   {showWasp ? (
                     // The wasp itself IS the working indicator — it
                     // replaces both the previous green dot and the
@@ -510,6 +510,12 @@ export const ChatApp = component$<ChatAppProps>(
                     // `wasp-anim` is opt-in per global.css, so the
                     // wasp is quiet (visible but still) while the
                     // turn is idle, and only flaps while in flight.
+                    //
+                    // Positioned absolutely so the wasp's larger
+                    // height does NOT inflate the header — the header
+                    // keeps its intrinsic height (avatar + py-2.5
+                    // padding) and the wasp overflows above/below by
+                    // a couple of pixels, vertically centered.
                     <WaspSpinner
                       class={["h-14 w-14", isInFlight ? "wasp-anim" : ""].join(
                         " ",
