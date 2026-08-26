@@ -988,8 +988,8 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 - [x] A provider failure reaches the human as a typed error, and the archetype never retries on its own — closed by CH-02.3
 - [x] The frozen browser wire is served: open, stream, cancel — closed by CH-03.1, CH-03.2, CH-03.3
 - [x] Only the participant reaches their conversation — closed by CH-03.4, CH-07.1, CH-08.2 (R-CHS-004.a/b for CH-03; remaining scope-fenced to CH-07/CH-08)
-- [ ] Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2
-- [ ] One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3
+- [x] Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2 (closed by main.go + ambient_authority_test.go, evidence cite at <this-PR-commit>)
+- [x] One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3 (closed by main_test.go TestChatRoot_LiveSmoke + 4 gate-decision tests, recorded run operator-supplied at <this-PR-commit>)
 - [x] The offline literal is retired by a recorded spec amendment, not a silent deletion — closed by CH-05.2
 - [x] Conversations persist behind a port this archetype owns, in tables it owns — closed by CH-06.1, CH-07.1
 - [x] A conversation reloads faithfully and continues the same transcript — closed by CH-06.2, CH-08.1
@@ -1000,8 +1000,8 @@ SDD change: `cachicamas-chat-v1-completion` · Closes: the completion checklist,
 - [x] The frontend renders tool entries from both the live stream and the reload surface, state "done" / "failed" with typed category on execution_failure — closed by CH-09.4 (parseTranscript switch + use-chat-stream handlers + exchangesToEntries extension; F-CHT-9.1 spec defect resolved at design: state "done" matches mock/chat.ts:42 closed union)
 - [x] The substrate invariant (no file under backend/agent/src/agent/ modified) is guarded inside make test, and the wire vocabulary stays in lockstep with parseTranscript — closed by CH-09.5 (TestChat_SubstrateUntouched + TestWire_FrameNameSet_IsClosed; AGENTS.md pointer appended)
 - [x] The model can call a tool and the human can approve or decline it, on the same event stream — closed by CH-10 (chat.PermissionPolicy type alias of agent.PermissionPolicy; POST /api/agent/turns/:id/permissions/:callID reverse-channel; 2 new SSE events permission.decision.required/made; D-8 deny-collapse suppresses matching tool.result; F-CPM-001 projector-accumulator fix threads toolCalls + toolResults + permissionDecisions into buildTerminalExchange; Exchange widens with []PermissionDecisionRecord + sibling table chat_permission_decisions; 4th port method UpdateSummary + 0003 ADD COLUMN summary; 11-arm parseTranscript lockstep)
-- [ ] One deterministic acceptance drives the whole archetype uncached — closed by CH-11
-- [ ] The v1 statement is published, every deferral seam-named, and what Layer 2's seam set got wrong is stated — closed by CH-11
+- [x] One deterministic acceptance drives the whole archetype uncached — closed by CH-11 (closed by chat_acceptance_test.go, evidence at chat_acceptance_evidence.txt at <this-PR-commit>)
+- [x] The v1 statement is published, every deferral seam-named, and what Layer 2's seam set got wrong is stated — closed by CH-11 (closed by docs/architecture/v1/cachicamas-chat-v1-completion.md at <this-PR-commit>)
 
 ## Explicitly deferred until after v1
 
