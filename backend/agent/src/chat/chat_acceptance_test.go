@@ -547,7 +547,104 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(6, "reload", phaseStart, time.Now(), assertions)
 	})
 	t.Run("tool_call", func(t *testing.T) {
-		// Body lands in T-11 below.
+		phaseStart := time.Now()
+		// Phase 7 — tool call. doc 0005:923-934 / CH-09. A tool
+		// source offers one tool the model can call; the model
+		// emits a tool call during the turn; the live stream
+		// carries tool.call.start + tool.result; the reload
+		// surface mirrors the same records in order (R-CTS-004,
+		// R-CCS-015).
+		//
+		// The shape is a two-script provider: script one emits
+		// the tool call (FinishReasonToolCalls) so the harness
+		// re-invokes the provider for the post-tool turn;
+		// script two emits the final assistant text
+		// (FinishReasonStop).
+		//
+		// GREEN-by-construction: chat ships today, the tool-call
+		// wire + reload surface is locked at CH-09 / S-CCS-019..
+		// S-CTS-012. A RED here is a real defect — STOP and
+		// escalate.
+		const toolName = "current_time"
+		script1 := agenttest.ToolCallThenCompletionScript(t, 1, "c1", toolName, `{"now":"2026-08-26T00:00:00Z"}`, ai.FinishReasonToolCalls)
+		script2 := scriptTextResponse(t, 1, []string{"the time is 2026-08-26T00:00:00Z"}, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(script1, script2)
+		store := chat.NewMemoryConversationStore()
+
+		conv, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            store,
+			ParticipantID:    "ch11-phase7-tool",
+			ToolSource:       acceptanceEchoRegistry(t, toolName, agent.EffectClassRead),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation returned %v, want nil", err)
+		}
+
+		out, err := conv.Send(context.Background(), "what time is it")
+		if err != nil {
+			t.Fatalf("Send returned %v, want nil", err)
+		}
+		events := drainWire(t, out)
+
+		assertions := 0
+		var toolCallStarts int
+		var toolResults []chat.ToolResult
+		for _, ev := range events {
+			switch e := ev.(type) {
+			case chat.ToolCallStart:
+				toolCallStarts++
+				if e.Tool != toolName {
+					t.Errorf("ToolCallStart.Tool = %q, want %q", e.Tool, toolName)
+				}
+				if e.WireCallID != "c1" {
+					t.Errorf("ToolCallStart.WireCallID = %q, want %q", e.WireCallID, "c1")
+				}
+			case chat.ToolResult:
+				toolResults = append(toolResults, e)
+				if e.Outcome != "success" {
+					t.Errorf("ToolResult.Outcome = %q, want %q", e.Outcome, "success")
+				}
+			}
+		}
+		if toolCallStarts != 1 {
+			t.Errorf("ToolCallStart count = %d, want 1 (R-CTS-004)", toolCallStarts)
+		}
+		assertions++
+		if len(toolResults) != 1 {
+			t.Errorf("ToolResult count = %d, want 1", len(toolResults))
+		}
+		assertions++
+
+		// Reload surface — Exchange carries the same records in
+		// issuance order.
+		loaded, lerr := store.Load("ch11-phase7-tool")
+		if lerr != nil {
+			t.Fatalf("Load returned %v, want nil", lerr)
+		}
+		if len(loaded) != 1 {
+			t.Fatalf("Load returned %d exchanges, want 1 (turn persists after tool execution)", len(loaded))
+		}
+		ex := loaded[0]
+		if len(ex.ToolCalls) != 1 {
+			t.Errorf("Exchange.ToolCalls = %d, want 1", len(ex.ToolCalls))
+		}
+		assertions++
+		if len(ex.ToolResults) != 1 {
+			t.Errorf("Exchange.ToolResults = %d, want 1", len(ex.ToolResults))
+		}
+		assertions++
+		if ex.ToolCalls[0].Tool != toolName || ex.ToolCalls[0].WireCallID != "c1" {
+			t.Errorf("Exchange.ToolCalls[0] = (%q,%q), want (%q,c1)", ex.ToolCalls[0].Tool, ex.ToolCalls[0].WireCallID, toolName)
+		}
+		assertions++
+		if ex.ToolResults[0].Outcome != "success" {
+			t.Errorf("Exchange.ToolResults[0].Outcome = %q, want %q", ex.ToolResults[0].Outcome, "success")
+		}
+		assertions++
+
+		evidence.recordHeader(7, "tool_call", phaseStart, time.Now(), assertions)
 	})
 	t.Run("approval", func(t *testing.T) {
 		// Body lands in T-12 below.
@@ -787,4 +884,34 @@ func acceptanceMustSend(t *testing.T, conv *chat.Conversation, prompt string) <-
 		t.Fatalf("Send(%q) returned %v, want nil", prompt, err)
 	}
 	return out
+}
+
+// acceptanceEchoTool is an inline chat-package agent.Tool that echoes
+// its arguments bytes as the result Content. Mirrors agent_test's
+// own EchoScriptedTool (agent/scripted_tool_test.go:61) — that helper
+// is unreachable from package chat_test (it lives in package
+// agent_test), so the chat-package acceptance re-implements the
+// minimal shape inline. Tool name and EffectClass are parameterized
+// so phases 7 (current_time) and 8 (also current_time) share the
+// same shape.
+type acceptanceEchoTool struct {
+	toolName string
+	effect   agent.EffectClass
+}
+
+func (e *acceptanceEchoTool) Name() string                  { return e.toolName }
+func (e *acceptanceEchoTool) EffectClass() agent.EffectClass { return e.effect }
+func (e *acceptanceEchoTool) Run(_ context.Context, args []byte, _ agent.PolicySlot) (agent.Result, error) {
+	return agent.Result{Outcome: agent.ToolOutcomeSuccess, Content: args}, nil
+}
+
+// acceptanceEchoRegistry constructs a chat.ToolSource backed by an
+// agent.MapRegistry carrying one echo tool under the given name +
+// effect class. Phase 7 (tool_call) and phase 8 (approval) each
+// construct their own so per-subtest state is hermetic.
+func acceptanceEchoRegistry(t *testing.T, name string, effect agent.EffectClass) chat.ToolSource {
+	t.Helper()
+	return chat.FromAgentRegistry(agent.NewMapRegistry(map[string]agent.Tool{
+		name: &acceptanceEchoTool{toolName: name, effect: effect},
+	}))
 }
