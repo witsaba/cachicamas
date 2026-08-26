@@ -18,7 +18,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { component$ } from "@builder.io/qwik";
+import { component$, useSignal } from "@builder.io/qwik";
+import type { Signal } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 
 // Mocked wire-client surface. The factory must be hoisted before
@@ -48,12 +49,36 @@ interface HarnessHandles {
   state: { value: ChatStreamState | null };
 }
 
+// CH-11 (S-SCROLL-001) — harness with the optional `scrollCounter`
+// signal passed to `useChatStream`. The signal is exposed via the
+// handles so the test can read `.value` directly and assert the
+// counter advances on every entry mutation. The signal is a Qwik
+// Signal — `Signal<number>` types it; no proxying required.
+interface HarnessHandlesWithCounter {
+  state: { value: ChatStreamState | null };
+  scrollCounter: Signal<number>;
+}
+
 // Test harness: renders useChatStream and exposes its state via a
 // mutable ref the test reads. The hook owns all the lifecycle; the
 // harness exposes only the public surface.
 const TestHarness = component$<{ handles: HarnessHandles }>(({ handles }) => {
   const state = useChatStream([]);
   handles.state.value = state;
+  return <div data-testid="harness" />;
+});
+
+// CH-11 — harness variant that owns the scrollCounter signal and
+// passes it to useChatStream. The signal is the test seam: the
+// test reads handles.scrollCounter.value to verify the hook
+// bumped it on every entry mutation.
+const TestHarnessWithCounter = component$<{
+  handles: HarnessHandlesWithCounter;
+}>(({ handles }) => {
+  const scrollCounter = useSignal(0);
+  const state = useChatStream([], scrollCounter);
+  handles.state.value = state;
+  handles.scrollCounter = scrollCounter;
   return <div data-testid="harness" />;
 });
 
@@ -704,5 +729,200 @@ describe("useChatStream live tool lifecycle (S-CTS-020 / S-CTS-021 / S-CTS-022, 
         "first wave. second wave after turn.end.",
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CH-11 (S-SCROLL-001) — scrollCounter signal regression.
+//
+// The previous auto-scroll implementation bound a MutationObserver
+// to the transcript <ol>. Qwik's resume / re-render lifecycle can
+// swap the <ol> DOM node, orphaning the observer — the result
+// was: first mount scrolled correctly (the seeded transcript
+// landed at the bottom), but every subsequent entry arrived
+// silently below the fold.
+//
+// The fix: the hook owns a `useSignal(0)` counter (passed in by
+// the chat-app) and bumps it on EVERY entry mutation. The
+// chat-app's visible-task tracks the counter and scrolls to the
+// bottom on every change. The signal is the source of truth —
+// no DOM observation, no race with the resume lifecycle.
+//
+// The four tests below assert the counter advances on every
+// mutation path the hook has today: submit() (push user +
+// assistant placeholder), message.delta (each frame), reset(),
+// and cancel() (finalize the in-flight entry).
+// ---------------------------------------------------------------------------
+
+describe("useChatStream scrollCounter (CH-11 S-SCROLL-001)", () => {
+  function arrangeLiveStream() {
+    let onEventCb: ((ev: unknown) => void) | null = null;
+    let unsubscribeCount = 0;
+    subscribeTurnMock.mockImplementation(
+      (_url: string, onEvent: (ev: unknown) => void) => {
+        onEventCb = onEvent;
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+    );
+    return {
+      fire(ev: unknown) {
+        (onEventCb as unknown as (ev: unknown) => void)(ev);
+      },
+      unsubscribeCount: () => unsubscribeCount,
+    };
+  }
+
+  it("starts at zero and is exposed via the harness handles", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_init", streamUrl: "/api/agent/turns/trn_init/events" },
+    });
+    subscribeTurnMock.mockReturnValue(() => {});
+    const handles: HarnessHandlesWithCounter = {
+      state: { value: null },
+      scrollCounter: { value: 0 } as unknown as Signal<number>,
+    };
+    const { render } = await createDOM();
+    await render(<TestHarnessWithCounter handles={handles} />);
+    await flush();
+    expect(handles.scrollCounter.value).toBe(0);
+  });
+
+  it("submit() bumps the counter for both the user entry push AND the assistant placeholder push (CH-11 S-SCROLL-001.a)", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_sub", streamUrl: "/api/agent/turns/trn_sub/events" },
+    });
+    subscribeTurnMock.mockReturnValue(() => {});
+    const handles: HarnessHandlesWithCounter = {
+      state: { value: null },
+      scrollCounter: { value: 0 } as unknown as Signal<number>,
+    };
+    const { render } = await createDOM();
+    await render(<TestHarnessWithCounter handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    const before = handles.scrollCounter.value;
+    await state.submit("hello");
+    await flush();
+
+    // submit() pushes the user entry first, then the assistant
+    // placeholder — two synchronous mutations, two bumps. Without
+    // the per-mutation bumps, the chat-app's visible-task would
+    // only see one tracked change (or none, depending on Qwik's
+    // batch) and the assistant placeholder would land below the
+    // fold the moment the user submits.
+    const after = handles.scrollCounter.value;
+    expect(after - before).toBe(2);
+    expect(state.entries.length).toBe(2);
+  });
+
+  it("submitTurn resolving to { ok: false } bumps the counter an additional time (the seeded entries are filtered out)", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: false,
+      kind: "offline",
+      message: "Couldn't reach the chat service. Is docker compose up? (network error)",
+    });
+    subscribeTurnMock.mockReturnValue(() => {});
+    const handles: HarnessHandlesWithCounter = {
+      state: { value: null },
+      scrollCounter: { value: 0 } as unknown as Signal<number>,
+    };
+    const { render } = await createDOM();
+    await render(<TestHarnessWithCounter handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    const before = handles.scrollCounter.value;
+    await state.submit("hello");
+    await flush();
+
+    // Two pushes (user + assistant placeholder) + one filter on
+    // submit-failure = three bumps.
+    const after = handles.scrollCounter.value;
+    expect(after - before).toBe(3);
+    expect(state.entries.length).toBe(0);
+  });
+
+  it("each message.delta bumps the counter (N deltas → N bumps), so the auto-scroll follows streamed text frame-by-frame", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_d", streamUrl: "/api/agent/turns/trn_d/events" },
+    });
+    const live = arrangeLiveStream();
+    const handles: HarnessHandlesWithCounter = {
+      state: { value: null },
+      scrollCounter: { value: 0 } as unknown as Signal<number>,
+    };
+    const { render } = await createDOM();
+    await render(<TestHarnessWithCounter handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("hello");
+    await flush();
+    const baseline = handles.scrollCounter.value;
+
+    const N = 5;
+    for (let i = 0; i < N; i += 1) {
+      live.fire({ kind: "message.delta", index: 0, delta: `d${i} ` });
+    }
+    await flush();
+
+    // submit() pushed 2 entries (user + assistant placeholder),
+    // so the baseline after submit is exactly 2 (when the test
+    // harness starts the counter at 0). Each message.delta adds
+    // 1 more bump. After N deltas: baseline + N.
+    expect(handles.scrollCounter.value).toBe(baseline + N);
+
+    const assistant = [...state.entries]
+      .reverse()
+      .find((e) => e.kind === "said" && e.who === "chat");
+    expect(assistant?.kind).toBe("said");
+    if (assistant?.kind === "said") {
+      expect(assistant.text).toBe("d0 d1 d2 d3 d4 ");
+    }
+  });
+
+  it("reset() bumps the counter once, even when entries.length goes to zero (the reload surface case)", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_r", streamUrl: "/api/agent/turns/trn_r/events" },
+    });
+    subscribeTurnMock.mockReturnValue(() => {});
+    const handles: HarnessHandlesWithCounter = {
+      state: { value: null },
+      scrollCounter: { value: 0 } as unknown as Signal<number>,
+    };
+    const { render } = await createDOM();
+    await render(<TestHarnessWithCounter handles={handles} />);
+    await flush();
+
+    const state = handles.state.value as ChatStreamState;
+    await state.submit("hello");
+    await flush();
+    const before = handles.scrollCounter.value;
+
+    // Empty reset — covers the empty-seed fallback path
+    // (loadMostRecentConversation returning 200 []).
+    await state.reset();
+    await flush();
+    expect(handles.scrollCounter.value).toBe(before + 1);
+    expect(state.entries.length).toBe(0);
+
+    // Non-empty reset — covers the seeded-transcript path. The
+    // counter advances once more so the chat-app's visible-task
+    // scrolls to the bottom of the seeded <li>s.
+    const beforeSeeded = handles.scrollCounter.value;
+    await state.reset([
+      { kind: "said", id: "u1", who: "you", text: "Hi.", state: "final" },
+      { kind: "said", id: "a1", who: "chat", text: "Hello.", state: "final" },
+    ]);
+    await flush();
+    expect(handles.scrollCounter.value).toBe(beforeSeeded + 1);
+    expect(state.entries.length).toBe(2);
   });
 });

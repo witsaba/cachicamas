@@ -26,6 +26,7 @@ import {
   useVisibleTask$,
   type NoSerialize,
   type QRL,
+  type Signal,
 } from "@builder.io/qwik";
 import type { TranscriptEntry } from "~/lib/mock/chat";
 import {
@@ -122,12 +123,55 @@ function parseArgs(
 			([k, v]) => [k, String(v)] as readonly [string, string],
 		);
 	} catch {
+		// Malformed JSON — fall through to the empty tuple list so
+		// the tool entry still renders (state stays "running" until
+		// tool.result arrives).
 		return [];
 	}
 }
 
+/**
+ * CH-11 (S-SCROLL-001) — bump the chat-app's scroll counter.
+ * Module-level (NOT a local closure inside `useChatStream`) so
+ * the submit/cancel/reset QRLs can call it without capturing
+ * a non-serialisable function reference. Qwik's QRL optimizer
+ * captures closure variables and serialises them across resume;
+ * a plain `const bumpScroll = () => {...}` inside the hook
+ * would fail `_verifySerializable` with
+ * "Captured variable ... can not be serialized because it's a
+ *  function named 'bumpScroll'". A module-level helper escapes
+ * the closure-capture pass entirely.
+ *
+ * No-op when the counter is omitted (preserves backward
+ * compatibility for test harnesses that don't drive the scroll
+ * bus).
+ */
+function bumpScroll(scrollCounter: Signal<number> | undefined): void {
+	if (!scrollCounter) return;
+	scrollCounter.value = scrollCounter.value + 1;
+}
+
 export function useChatStream(
   initialEntries: ReadonlyArray<TranscriptEntry>,
+  /**
+   * CH-11 (S-SCROLL-001) — auto-scroll bus. The chat-app owns a
+   * `useSignal(0)` counter and passes the signal ref here. The
+   * hook increments it on EVERY mutation of `state.entries` —
+   * the chat-app's visible-task tracks the counter and scrolls
+   * to the bottom on every change.
+   *
+   * Optional so existing call sites stay wired. When omitted,
+   * bumps are no-ops (the counter is simply not advanced).
+   *
+   * Why a signal instead of a callback: the chat-app's
+   * `useVisibleTask$` can `track(() => scrollCounter.value)`
+   * directly, which Qwik re-runs AFTER the render commit that
+   * appended the new <li>. A callback would force the chat-app
+   * to read the scroller inside the hook's call site — racing
+   * with Qwik's async commit and re-introducing the original
+   * scroll-on-stale-layout bug.
+   */
+  scrollCounter?: Signal<number>,
 ): ChatStreamState {
   const state = useStore<{
     status: "idle" | "submitting" | "streaming" | "cancelling";
@@ -175,6 +219,7 @@ export function useChatStream(
       text,
       state: "final",
     });
+    bumpScroll(scrollCounter);
     const assistantId = nextId(state, "a");
     state.entries.push({
       kind: "said",
@@ -183,6 +228,7 @@ export function useChatStream(
       text: "",
       state: "streaming",
     });
+    bumpScroll(scrollCounter);
 
     const submitResult = await submitTurn({ id: turnId, prompt: text });
     if (!submitResult.ok) {
@@ -191,6 +237,7 @@ export function useChatStream(
       state.entries = state.entries.filter(
         (e) => e.id !== assistantId && e.id !== userId,
       );
+      bumpScroll(scrollCounter);
       state.error = submitResult;
       state.currentTurnId = undefined;
       state.status = "idle";
@@ -210,6 +257,7 @@ export function useChatStream(
                 ? { ...e, text: e.text + ev.delta }
                 : e,
             );
+            bumpScroll(scrollCounter);
             return;
           }
           case "message.end": {
@@ -220,6 +268,7 @@ export function useChatStream(
                 ? { ...e, state: "final" as const }
                 : e,
             );
+            bumpScroll(scrollCounter);
             return;
           }
           // CH-09 (D-3, D-4, S-CTS-020) — tool.call.start opens a
@@ -241,6 +290,7 @@ export function useChatStream(
                 state: "running",
               },
             ];
+            bumpScroll(scrollCounter);
             return;
           }
           case "tool.result": {
@@ -262,6 +312,7 @@ export function useChatStream(
                 ? { ...e, state: newState, result: resultText }
                 : e,
             );
+            bumpScroll(scrollCounter);
             return;
           }
           case "tool.call.delta":
@@ -297,6 +348,7 @@ export function useChatStream(
                 decision: "pending",
               },
             ];
+            bumpScroll(scrollCounter);
             return;
           }
           case "permission.decision.made": {
@@ -308,6 +360,7 @@ export function useChatStream(
                 ? { ...e, decision: newDecision }
                 : e,
             );
+            bumpScroll(scrollCounter);
             // D-8 mirror: on Deny, drop any tool entry for the
             // same wireCallId that arrived between required and
             // made. The chat projector suppressed the wire event
@@ -319,6 +372,7 @@ export function useChatStream(
               state.entries = state.entries.filter(
                 (e) => !(e.id === toolId && e.kind === "tool"),
               );
+              bumpScroll(scrollCounter);
             }
             return;
           }
@@ -335,6 +389,7 @@ export function useChatStream(
                   ? { ...e, state: "final" as const }
                   : e,
               );
+              bumpScroll(scrollCounter);
               const unsubscribe = handle.value?.unsubscribe;
               handle.value = null;
               state.status = "idle";
@@ -352,6 +407,7 @@ export function useChatStream(
                   ? { ...e, state: "final" as const }
                   : e,
               );
+              bumpScroll(scrollCounter);
             }
             return;
           }
@@ -369,6 +425,7 @@ export function useChatStream(
         state.error = { kind: "offline", message: msg };
         state.status = "idle";
         state.entries = state.entries.filter((e) => e.id !== assistantId);
+        bumpScroll(scrollCounter);
       },
     );
 
@@ -407,6 +464,7 @@ export function useChatStream(
           ? { ...e, state: "final" as const }
           : e,
       );
+      bumpScroll(scrollCounter);
     }
     state.status = "idle";
     state.currentTurnId = undefined;
@@ -414,6 +472,7 @@ export function useChatStream(
 
   const reset = $((next?: readonly TranscriptEntry[]) => {
     state.entries = [...(next ?? [])];
+    bumpScroll(scrollCounter);
     state.error = undefined;
     state.status = "idle";
     state.currentTurnId = undefined;
