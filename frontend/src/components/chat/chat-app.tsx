@@ -281,13 +281,30 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
 
   // Following an arriving answer to the bottom of a scroller is a browser-only
   // concern by definition; there is no server-side equivalent to fall back to.
+  //
+  // After reload, this task also has to land the scroller on the
+  // latest entry once the seeded transcript is in `turn.entries`.
+  // The track runs synchronously when `reset()` assigns entries, but
+  // the scroller ref is bound by Qwik's render commit AFTER the
+  // visible-task resumes — so `scroller.value` may still be undefined
+  // on the first invocation. Defer the scroll one frame so the
+  // DOM is committed; retry up to a few frames if Qwik hasn't
+  // resumed the binding yet (rare, but happens on the first paint
+  // of a long seeded transcript).
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ track }) => {
     track(() => turn.entries.length);
     track(() => turn.entries[turn.entries.length - 1]);
     if (typeof window === "undefined") return;
-    const el = scroller.value;
-    if (el) el.scrollTop = el.scrollHeight;
+    const tryScroll = (attemptsLeft: number) => {
+      const el = scroller.value;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      } else if (attemptsLeft > 0) {
+        window.requestAnimationFrame(() => tryScroll(attemptsLeft - 1));
+      }
+    };
+    tryScroll(5);
   });
 
   const agent =

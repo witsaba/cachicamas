@@ -160,16 +160,13 @@ export function useChatStream(
     const turnId = newTurnId();
     state.currentTurnId = turnId;
     state.status = "submitting";
-    // Seed the assistant in-flight entry so the message.delta frames
-    // accumulate into a stable key (chat-app's `key={entry.id}`).
-    const assistantId = nextId(state, "a");
-    state.entries.push({
-      kind: "said",
-      id: assistantId,
-      who: "chat",
-      text: "",
-      state: "streaming",
-    });
+    // Seed entries in display order: user turns are visible above
+    // the assistant's response, so the user entry is pushed FIRST and
+    // the assistant placeholder SECOND. Reversing this order made
+    // the assistant bubble render above the user bubble during the
+    // streaming window (the live render bug); reload from the
+    // server's exchange list renders correctly because the backend
+    // already sorts by position ascending.
     const userId = nextId(state, "u");
     state.entries.push({
       kind: "said",
@@ -177,6 +174,14 @@ export function useChatStream(
       who: "you",
       text,
       state: "final",
+    });
+    const assistantId = nextId(state, "a");
+    state.entries.push({
+      kind: "said",
+      id: assistantId,
+      who: "chat",
+      text: "",
+      state: "streaming",
     });
 
     const submitResult = await submitTurn({ id: turnId, prompt: text });

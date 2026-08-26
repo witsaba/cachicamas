@@ -123,6 +123,48 @@ describe("useChatStream (REQ-1, REQ-2, REQ-4, REQ-5)", () => {
     }
   });
 
+  // Regression trip for the assistant-above-user live-render bug:
+  // submit() pushed the assistant placeholder FIRST and the user entry
+  // SECOND, which made the assistant bubble render above the user's
+  // during the streaming window. Reload-from-server was unaffected
+  // because exchangesToEntries iterates in chronological order. The
+  // live-render path must mirror the same order so the visual matches
+  // what reload shows.
+  it("RED-2b: submit() seeds the user entry BEFORE the assistant placeholder (display order)", async () => {
+    submitTurnMock.mockResolvedValue({
+      ok: true,
+      value: { turnId: "trn_99", streamUrl: "/api/agent/turns/trn_99/events" },
+    });
+    subscribeTurnMock.mockReturnValue(() => {});
+
+    const handles: HarnessHandles = { state: { value: null } };
+    const { render } = await createDOM();
+    await render(<TestHarness handles={handles} />);
+    expect(handles.state.value).not.toBeNull();
+    const state = handles.state.value as ChatStreamState;
+
+    await state.submit("hello world");
+    await flush();
+
+    // After submit, entries must be [user, assistant] in that order.
+    // Otherwise the chat-app's `key={entry.id}` still renders both
+    // bubbles, but the assistant sits visually above the user — the
+    // bug from the live screenshot.
+    expect(state.entries.length).toBe(2);
+    const first = state.entries[0];
+    const second = state.entries[1];
+    expect(first.kind).toBe("said");
+    expect(second.kind).toBe("said");
+    if (first.kind === "said" && second.kind === "said") {
+      expect(first.who).toBe("you");
+      expect(first.text).toBe("hello world");
+      expect(first.state).toBe("final");
+      expect(second.who).toBe("chat");
+      expect(second.text).toBe("");
+      expect(second.state).toBe("streaming");
+    }
+  });
+
   it("RED-3: message.delta accumulates into the in-flight assistant entry (REQ-1 S-1.a)", async () => {
     submitTurnMock.mockResolvedValue({
       ok: true,
