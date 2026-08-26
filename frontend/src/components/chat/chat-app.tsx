@@ -282,48 +282,72 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // Following an arriving answer to the bottom of a scroller is a browser-only
   // concern by definition; there is no server-side equivalent to fall back to.
   //
-  // Both branches of the user's complaint (post-refresh and post-send)
-  // come from the same root cause: the track fires synchronously when
-  // `turn.entries` is replaced, but Qwik's render commit runs ASYNCHRONOUSLY
-  // after that — so `scrollTop = scrollHeight` reads the OLD layout (before
-  // the new <li> is appended) and the new entry sits below the fold.
+  // The previous track-on-entries approach fired Qwik's reactive track
+  // synchronously when `turn.entries` was replaced, but Qwik's render
+  // commit runs ASYNCHRONOUSLY after that — so `scrollTop = scrollHeight`
+  // read the OLD layout (before the new <li> was appended) and the new
+  // entry sat below the fold. A setTimeout(0) defer helped in some
+  // cases but was unreliable across Qwik resume timings.
   //
-  // The fix: defer the scroll to a macrotask (setTimeout 0) AND query
-  // the LAST child of the transcript list directly, so the browser's
-  // own scroll-into-view semantics handle any layout timing on top of
-  // ours. If neither path works (rare — e.g. scroller ref not yet
-  // bound on first mount), retry up to 10 frames. This survives both
-  // the reset-on-mount and the per-delta streaming cases.
+  // The bulletproof pattern: bind a MutationObserver to the transcript
+  // <ol> AFTER the ref is committed. The observer fires AFTER Qwik has
+  // appended the new <li> AND the browser has laid it out — so
+  // scrollHeight reflects the new content and the scroll lands at the
+  // bottom on the same animation frame. The observer stays alive for
+  // the component's lifetime; on cleanup, we disconnect it.
+  //
+  // We also schedule one immediate scroll on first bind so the seeded
+  // transcript (post-reload) lands at the bottom on the first paint
+  // without waiting for the next mutation.
   // eslint-disable-next-line qwik/no-use-visible-task
-  useVisibleTask$(({ track }) => {
-    track(() => turn.entries.length);
-    track(() => turn.entries[turn.entries.length - 1]);
+  useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    const scrollToBottom = (attemptsLeft: number) => {
+    // The ref may not be bound yet on the very first call; poll until
+    // it is, then attach the observer. rAF is the right cadence — the
+    // browser commits the ref on the next animation frame.
+    let observer: MutationObserver | null = null;
+    let attempts = 0;
+    const tryAttach = () => {
       const scrollerEl = scroller.value;
       if (!scrollerEl) {
-        if (attemptsLeft > 0) {
-          window.requestAnimationFrame(() => scrollToBottom(attemptsLeft - 1));
+        if (attempts++ < 20) {
+          window.requestAnimationFrame(tryAttach);
         }
         return;
       }
-      // Two-pass scroll: (1) defer to a macrotask so Qwik's render
-      // commit has run and the new <li> is in the DOM with its
-      // measured height; (2) ALSO call scrollIntoView on the last
-      // child, which is the browser-native "make this visible"
-      // primitive — the container scrolls the minimum distance to
-      // bring the element into view, so a long seeded transcript
-      // ends up at the bottom on the first paint without depending
-      // on measured scrollHeight matching what we expect.
-      window.setTimeout(() => {
+      const scrollToBottom = () => {
         scrollerEl.scrollTop = scrollerEl.scrollHeight;
         const last = scrollerEl.querySelector("li:last-child");
         if (last instanceof HTMLElement) {
           last.scrollIntoView({ block: "end", behavior: "auto" });
         }
-      }, 0);
+      };
+      // Initial scroll for the seeded transcript case (the user
+      // reloads, reset() runs, the observer below would not fire
+      // because no DOM mutation happens — only a track-driven
+      // assignment to state.entries, which Qwik renders on the
+      // next commit). Defer one frame so the commit has run.
+      window.requestAnimationFrame(scrollToBottom);
+      observer = new MutationObserver(() => {
+        // The browser mutates DOM, layout flushes before the
+        // MutationObserver callback runs — so scrollHeight
+        // reflects the new content here, no setTimeout needed.
+        scrollToBottom();
+      });
+      observer.observe(scrollerEl, {
+        childList: true,
+        subtree: true,
+        // characterData fires when the assistant text delta
+        // updates the entry's text via the { ...e, text } spread;
+        // that's a no-op for scrollTop (height didn't change), but
+        // it confirms the observer is alive on every frame.
+        characterData: true,
+      });
     };
-    scrollToBottom(10);
+    tryAttach();
+    cleanup(() => {
+      observer?.disconnect();
+    });
   });
 
   const agent =
