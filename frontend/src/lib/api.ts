@@ -398,8 +398,6 @@ export async function getCurrentOrganization(): Promise<OrganizationReadModel | 
   }
   return body as OrganizationReadModel;
 }
-<<<<<<< Updated upstream
-=======
 
 // ---------------------------------------------------------------------------
 // Workspaces (2026-07-06 PR2-i)
@@ -735,4 +733,3 @@ export async function listGitHubRepos(
     };
   });
 }
->>>>>>> Stashed changes
