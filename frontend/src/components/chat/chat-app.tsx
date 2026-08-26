@@ -391,14 +391,29 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
                 Agent
               </span>
             </p>
-            <p class="text-ink-soft truncate text-xs">
-              {agent.departmentName} ·{" "}
-              {turn.status === "streaming" ||
-              turn.status === "submitting" ||
-              turn.status === "cancelling"
-                ? "Working now"
-                : agent.statusWord}
-            </p>
+            <div class="mt-0.5 flex items-center gap-2">
+              <span class="text-ink-soft truncate text-xs">
+                {agent.departmentName}
+              </span>
+              <span class="ml-auto">
+                <Status
+                  status={
+                    turn.status === "streaming" ||
+                    turn.status === "submitting" ||
+                    turn.status === "cancelling"
+                      ? "working"
+                      : agent.status
+                  }
+                  word={
+                    turn.status === "streaming" ||
+                    turn.status === "submitting" ||
+                    turn.status === "cancelling"
+                      ? "Working now"
+                      : agent.statusWord
+                  }
+                />
+              </span>
+            </div>
           </div>
         </header>
 
@@ -413,25 +428,6 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
           // column so the two never disagree about where the conversation is.
           class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
         >
-          <li class="pt-5 pb-1">
-            <p class="text-ink-soft text-xs">
-              {agent.tagline}{" "}
-              {agent.tenure ? <>On staff {agent.tenure}.</> : null}{" "}
-              <a
-                href={`/agents/${agent.slug}/`}
-                class="text-brand rounded-sm font-medium hover:underline"
-              >
-                See what {agent.name} can do
-              </a>
-            </p>
-            <p class="pt-2">
-              <Status
-                status={agent.status}
-                word={agent.statusWord}
-                detail={agent.statusDetail}
-              />
-            </p>
-          </li>
           {turn.entries.map((entry) => (
             <TranscriptLine
               key={entry.id}
