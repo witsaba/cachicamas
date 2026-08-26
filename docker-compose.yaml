@@ -313,8 +313,8 @@ services:
       CACHICAMAS_CHAT_STORE_DSN: postgres://${QUEEN_USER:-queen}:${QUEEN_PASSWORD:-changeme-queen}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-cachicamas_pg}?sslmode=disable
       # OTEL — mirrors db_admin.
       OTEL_SERVICE_NAME: agent_chat
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
     ports:
       - "${AGENT_CHAT_PORT:-8090}:8080"

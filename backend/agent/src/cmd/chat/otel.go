@@ -23,14 +23,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 // serviceName is the OTel service.name the chat binary reports. Named
@@ -68,10 +71,32 @@ const shutdownFlushDeadline = 5 * time.Second
 // warning on first export attempt and continues as a no-op; the chat
 // binary stays runnable in a dev environment without a collector.
 func installOTelSDK(ctx context.Context) (shutdown func(context.Context) error, err error) {
-	// OTLP/gRPC exporter — picks up OTEL_EXPORTER_OTLP_ENDPOINT etc.
-	exporter, err := otlptracegrpc.New(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("otlptracegrpc.New: %w", err)
+	// OTLP exporter — picks up OTEL_EXPORTER_OTLP_ENDPOINT etc.
+	//
+	// fix/chat-stack-wiring: prefer OTLP/HTTP over OTLP/gRPC because
+	// opentelemetry-go#5248 (dropped spans on the gRPC path at SDK
+	// versions v1.44.0..v1.46.0) silently drops every chat span we
+	// emit, while the HTTP path is unaffected. Selection: if
+	// OTEL_EXPORTER_OTLP_PROTOCOL is explicitly set to "grpc" we
+	// honour it; otherwise we default to "http/protobuf" because the
+	// collector accepts both on :4317 (gRPC) and :4318 (HTTP). The
+	// documented behaviour at infra/otel/collector-config.yaml:42-45
+	// acknowledges the bug and defers runtime validation until the
+	// upstream fix lands; the HTTP workaround sidesteps it.
+	protocol := strings.ToLower(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
+	var exporter sdktrace.SpanExporter
+	switch protocol {
+	case "grpc":
+		exporter, err = otlptracegrpc.New(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("otlptracegrpc.New: %w", err)
+		}
+	default:
+		// http/protobuf or unset
+		exporter, err = otlptracehttp.New(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("otlptracehttp.New: %w", err)
+		}
 	}
 
 	// Resource: service.name + service.version + anything provided by
