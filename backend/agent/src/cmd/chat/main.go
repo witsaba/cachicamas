@@ -376,7 +376,12 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// built once above (right after the migration runner) so it can
 	// be shared between this handler and the per-Conversation
 	// Send-boundary rebuild (see factory closure).
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader); err != nil {
+	// CH-12.3 (PR-3 of cachicamas-assistant-configuration-ui):
+	// build the Writer once, sharing the *sql.DB with the Loader.
+	// Same instance is used by both the GET handler (no — GET uses
+	// the Loader; PUT uses the Writer) and the PUT handler.
+	archetypeWriter := archetype.NewPostgresWriter(db)
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader, archetypeWriter); err != nil {
 		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
 	}
 

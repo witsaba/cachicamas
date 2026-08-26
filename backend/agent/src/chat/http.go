@@ -25,6 +25,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -843,26 +844,174 @@ func HandleGetAssistantConfig(resolver IdentityResolver, loader archetype.Loader
 	}
 }
 
-// RegisterAssistantConfigRoutes wires the AssistantConfig surface
-// (REQ-CACAPI-001) onto e. The GET handler lives at
-// /api/chat/assistant/config (the spec's locked URL — note this is a
-// separate namespace from the existing /api/agent/... tree, by design:
-// the AssistantConfig surface is configuration, not chat wire).
-//
-// The resolver and loader are closure-captured by the handler; the
-// registration function only owns the route mounting.
-func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, loader archetype.Loader) error {
-	if e == nil {
-		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil *echo.Echo")
-	}
-	if resolver == nil {
-		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil IdentityResolver")
-	}
-	if loader == nil {
-		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil archetype.Loader")
-	}
-    
-	g := e.Group("/api/chat")
-	g.GET("/assistant/config", HandleGetAssistantConfig(resolver, loader))
-	return nil
-}
+    // HandlePutAssistantConfig is the CH-12.3 PUT handler
+    // (REQ-CACAPI-002/003, design AD-5). Validates the body, calls
+    // archetype.Writer.WriteConfig, returns the new config on 200 or
+    // the specific error envelope on 400/403/500.
+    //
+    // Body shape (REQ-CACAPI-002):
+    //   {
+    //     "system_prompt":    "<text>",
+    //     "tool_allowlist":   ["<tool>", ...],
+    //     "defer_tool_names": ["<tool>", ...],
+    //     "model":            "<model>" (optional)
+    //   }
+    //
+    // Validation rules (any failure → 400, no Writer call, no audit
+    // log append):
+    //   - system_prompt non-empty after trim
+    //   - system_prompt length ≤ MaxSystemPromptLength
+    //   - system_prompt contains no `<script` or `<iframe` substring
+    //   - tool_allowlist non-empty
+    //   - every name in tool_allowlist ∈ archetype.RegisteredToolNames()
+    //   - defer_tool_names ⊆ tool_allowlist
+    //
+    // Status codes:
+    //   200 — config JSON in body (the new ArchetypeConfig, version bumped)
+    //   400 — body validation failed; specific error envelope
+    //   403 — no identity (anonymous / cookie missing)
+    //   500 — Writer returned an error (response body is the generic
+    //         server-error envelope; underlying error string is NOT echoed)
+    func HandlePutAssistantConfig(resolver IdentityResolver, writer archetype.Writer) echo.HandlerFunc {
+    	return func(c *echo.Context) error {
+    		if resolver == nil {
+    			return writeError(c, http.StatusInternalServerError, "server",
+    				"assistant config resolver not wired", nil)
+    		}
+    		if writer == nil {
+    			return writeError(c, http.StatusInternalServerError, "server",
+    				"assistant config writer not wired", nil)
+    		}
+    		ident, resolved := resolver.IdentityFromRequest(c.Request().Context(), c.Request())
+    		if !resolved || ident == nil {
+    			return writeError(c, http.StatusForbidden, "server",
+    				"identity not resolved", nil)
+    		}
+    		participantID := ident.ParticipantID()
+    		if participantID == "" {
+    			return writeError(c, http.StatusForbidden, "server",
+    				"identity missing participant id", nil)
+    		}
+
+    		var body putAssistantConfigRequest
+    		if err := jsonDecode(c, &body); err != nil {
+    			return writeError(c, http.StatusBadRequest, "validation", err.Error(), nil)
+    		}
+
+    		if verr := validatePutAssistantConfig(body); verr != nil {
+    			return writeError(c, http.StatusBadRequest, "validation", verr.Error(), nil)
+    		}
+
+    		update := archetype.ConfigUpdate{
+    			SystemPrompt:   strings.TrimSpace(body.SystemPrompt),
+    			ToolAllowlist:  append([]string(nil), body.ToolAllowlist...),
+    			DeferToolNames: append([]string(nil), body.DeferToolNames...),
+    		}
+    		cfg, werr := writer.WriteConfig(c.Request().Context(), archetype.KindChat, participantID, update, participantID)
+    		if werr != nil {
+    		// Map the package-level validation sentinels to 400 so a
+    		// defence-in-depth rejection inside WriteConfig surfaces
+    		// with the right status (not 500). Anything else is a
+    		// genuine 500.
+    		switch {
+    		case errors.Is(werr, archetype.ErrSystemPromptEmpty),
+    		errors.Is(werr, archetype.ErrSystemPromptTooLong),
+    		errors.Is(werr, archetype.ErrSystemPromptContainsHTML),
+    		errors.Is(werr, archetype.ErrToolAllowlistEmpty),
+    		errors.Is(werr, archetype.ErrUnknownToolName),
+    		errors.Is(werr, archetype.ErrDeferToolNotInAllowlist):
+    		return writeError(c, http.StatusBadRequest, "validation", werr.Error(), nil)
+    		default:
+    		return writeError(c, http.StatusInternalServerError, "server",
+    		"failed to write assistant config", nil)
+    		}
+    		}
+    		return c.JSON(http.StatusOK, cfg)
+    	}
+    }
+
+    // putAssistantConfigRequest is the JSON shape PUT accepts. Fields
+    // match REQ-CACAPI-002 verbatim; omitempty on Model is the
+    // optional-informational path.
+    type putAssistantConfigRequest struct {
+    	SystemPrompt   string   `json:"system_prompt"`
+    	ToolAllowlist  []string `json:"tool_allowlist"`
+    	DeferToolNames []string `json:"defer_tool_names"`
+    	Model          *string  `json:"model,omitempty"`
+    }
+
+    // validatePutAssistantConfig enforces the PUT body validation
+    // rules (REQ-CACAPI-002/003). Returns nil on a valid body, or one
+    // of the package-level sentinels from the archetype package.
+    func validatePutAssistantConfig(body putAssistantConfigRequest) error {
+    	prompt := strings.TrimSpace(body.SystemPrompt)
+    	if prompt == "" {
+    		return archetype.ErrSystemPromptEmpty
+    	}
+    	if len(prompt) > archetype.MaxSystemPromptLength {
+    		return archetype.ErrSystemPromptTooLong
+    	}
+    	lower := strings.ToLower(prompt)
+    	if strings.Contains(lower, "<script") || strings.Contains(lower, "<iframe") {
+    		return archetype.ErrSystemPromptContainsHTML
+    	}
+    	if len(body.ToolAllowlist) == 0 {
+    		return archetype.ErrToolAllowlistEmpty
+    	}
+    	registered := make(map[string]struct{}, len(archetype.RegisteredToolNames()))
+    	for _, n := range archetype.RegisteredToolNames() {
+    		registered[n] = struct{}{}
+    	}
+    	allow := make(map[string]struct{}, len(body.ToolAllowlist))
+    	for _, n := range body.ToolAllowlist {
+    		allow[n] = struct{}{}
+    		if _, ok := registered[n]; !ok {
+    		return archetype.ErrUnknownToolName
+    		}
+    	}
+    	for _, n := range body.DeferToolNames {
+    		if _, ok := allow[n]; !ok {
+    		return archetype.ErrDeferToolNotInAllowlist
+    		}
+    	}
+    	return nil
+    }
+
+    // jsonDecode decodes the request body. Wrapped in a helper so
+    // the handler stays at one error-mapping site.
+    func jsonDecode(c *echo.Context, dst any) error {
+    	dec := json.NewDecoder(c.Request().Body)
+    	dec.DisallowUnknownFields()
+    	return dec.Decode(dst)
+    }
+
+    // RegisterAssistantConfigRoutes wires the AssistantConfig surface
+    // (REQ-CACAPI-001/002/003) onto e. The handlers live at
+    // /api/chat/assistant/config (the spec's locked URL — note this is a
+    // separate namespace from the existing /api/agent/... tree, by design:
+    // the AssistantConfig surface is configuration, not chat wire).
+    //
+    // The resolver is required. The loader and writer are each
+    // optional independently: passing nil for one registers only the
+    // other handler. The test suite uses this asymmetry to exercise
+    // GET and PUT in isolation.
+    func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, loader archetype.Loader, writer archetype.Writer) error {
+    	if e == nil {
+    		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil *echo.Echo")
+    	}
+    	if resolver == nil {
+    		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil IdentityResolver")
+    	}
+    	if loader == nil && writer == nil {
+    		return errors.New("chat: RegisterAssistantConfigRoutes requires at least one of archetype.Loader / archetype.Writer")
+    	}
+
+    	g := e.Group("/api/chat")
+    	if loader != nil {
+    		g.GET("/assistant/config", HandleGetAssistantConfig(resolver, loader))
+    	}
+    	if writer != nil {
+    		g.PUT("/assistant/config", HandlePutAssistantConfig(resolver, writer))
+    	}
+    	return nil
+    }

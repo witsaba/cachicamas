@@ -318,7 +318,220 @@ func SetRegisteredToolNames(names []string) {
 	}
 }
 
+// RegisteredToolNames returns a copy of the package-level registered
+// tool-name set. Exposed so the write-side handler can validate that
+// a PUT's tool_allowlist only references known tool names
+// (REQ-CACAPI-003). Returns a copy to prevent callers from mutating
+// the package state.
+func RegisteredToolNames() []string {
+	return registeredToolNames()
+}
+
 // knownToolNames is the closure-returning helper used by LoadByKindAndOrg.
 func knownToolNames(_ context.Context) []string {
 	return registeredToolNames()
+}
+
+// ConfigUpdate is the PUT body shape — every field the runtime
+// configures, minus the server-set columns (org_id, version,
+// updated_at, updated_by, kind). The handler validates each field
+// against the package-level sentinels BEFORE calling Writer.WriteConfig;
+// the Writer itself does NOT re-validate (the validation rules are
+// caller-owned). This keeps WriteConfig a pure persistence port
+// with no business logic mixed in.
+type ConfigUpdate struct {
+	SystemPrompt   string
+	ToolAllowlist  []string
+	DeferToolNames []string
+	Model          *string
+}
+
+// Writer is the write port for ArchetypeConfig. The Postgres
+// implementation is the only shipped impl; in-memory fakes can be
+// added for tests by implementing this interface.
+//
+// WriteConfig MUST:
+//   - Validate the ConfigUpdate fields (callers MAY pre-validate,
+//     but the Writer enforces its own invariants — defence in depth).
+//   - UPSERT the (kind, org_id) row, bumping version on every write.
+//   - Append exactly one row to archetype_configurations_log inside
+//     the SAME transaction as the UPSERT — REQ-CACL-002.
+//   - Return the new ArchetypeConfig (with the bumped version and
+//     server-set updated_at/updated_by).
+//
+// On any failure (validation, scan, db error) the transaction is
+// rolled back and no log row is appended.
+type Writer interface {
+	WriteConfig(ctx context.Context, kind ArchetypeKind, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error)
+}
+
+// PostgresWriter is the Postgres-backed implementation of Writer.
+// Holds a *sql.DB (no *sql.Tx — WriteConfig manages its own tx so the
+// caller never has to think about rollback semantics).
+type PostgresWriter struct {
+	db *sql.DB
+}
+
+// NewPostgresWriter returns a Writer that writes through the supplied
+// *sql.DB pool. The pool is the archetype migration runner pool
+// (CACHICAMAS_CHAT_STORE_DSN — same DSN the Loader uses).
+func NewPostgresWriter(db *sql.DB) Writer {
+	return &PostgresWriter{db: db}
+}
+
+// WriteConfig performs the atomic UPSERT + audit-log append. See
+// Writer contract for the full behaviour.
+//
+// Validation enforced here (defence in depth — the handler also
+// validates before calling, but WriteConfig must be safe for direct
+// use):
+//   - SystemPrompt non-empty after trim
+//   - SystemPrompt length <= MaxSystemPromptLength
+//   - SystemPrompt contains no `<script` or `<iframe` substring
+//     (case-insensitive)
+//   - ToolAllowlist non-empty
+//   - DeferToolNames ⊆ ToolAllowlist
+//
+// Tool name existence (Allowlist ⊆ registeredToolNames) is NOT
+// enforced here — that check requires the registered set, which is
+// owned by the composition root. The handler performs it before
+// calling WriteConfig. (Skipping it here keeps WriteConfig a pure
+// persistence port; a caller with a different tool registry can
+// supply its own validation.)
+func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error) {
+	if kind == "" {
+		return ArchetypeConfig{}, ErrUnknownArchetypeKind
+	}
+	if strings.TrimSpace(orgID) == "" {
+		return ArchetypeConfig{}, errors.New("archetype writer: orgID must be non-empty")
+	}
+
+	// Defence-in-depth validation. The handler MUST have validated
+	// before calling, but if a future caller bypasses the handler
+	// we still want the row to be rejected cleanly.
+	prompt := strings.TrimSpace(update.SystemPrompt)
+	if prompt == "" {
+		return ArchetypeConfig{}, ErrSystemPromptEmpty
+	}
+	if len(prompt) > MaxSystemPromptLength {
+		return ArchetypeConfig{}, ErrSystemPromptTooLong
+	}
+	lower := strings.ToLower(prompt)
+	if strings.Contains(lower, "<script") || strings.Contains(lower, "<iframe") {
+		return ArchetypeConfig{}, ErrSystemPromptContainsHTML
+	}
+	if len(update.ToolAllowlist) == 0 {
+		return ArchetypeConfig{}, ErrToolAllowlistEmpty
+	}
+	allow := make(map[string]struct{}, len(update.ToolAllowlist))
+	for _, name := range update.ToolAllowlist {
+		allow[name] = struct{}{}
+	}
+	for _, name := range update.DeferToolNames {
+		if _, ok := allow[name]; !ok {
+			return ArchetypeConfig{}, ErrDeferToolNotInAllowlist
+		}
+	}
+
+	tx, err := w.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: begin tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Read the prior row (if any) for `before` + version source.
+	var beforeJSON []byte
+	var prevVersion int
+	row := tx.QueryRowContext(ctx,
+		`SELECT version, to_jsonb(archetype_configurations) FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2 FOR UPDATE`,
+		string(kind), orgID)
+	var prev []byte
+	if scanErr := row.Scan(&prevVersion, &prev); scanErr != nil && !errors.Is(scanErr, sql.ErrNoRows) {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: read prior row: %w", scanErr)
+	} else if scanErr == nil {
+		beforeJSON = prev
+	}
+
+	newVersion := prevVersion + 1
+	if newVersion < 1 {
+		newVersion = 1
+	}
+
+	// UPSERT the row.
+	allowlistJSON, _ := json.Marshal(update.ToolAllowlist)
+	deferJSON, _ := json.Marshal(update.DeferToolNames)
+	var modelArg any
+	if update.Model != nil {
+		modelArg = *update.Model
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO archetype_configurations
+			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, now(), $8)
+		ON CONFLICT (archetype_kind, org_id) DO UPDATE SET
+			system_prompt    = EXCLUDED.system_prompt,
+			tool_allowlist   = EXCLUDED.tool_allowlist,
+			defer_tool_names = EXCLUDED.defer_tool_names,
+			model            = EXCLUDED.model,
+			version          = EXCLUDED.version,
+			updated_at       = now(),
+			updated_by       = EXCLUDED.updated_by
+	`, string(kind), orgID, prompt, allowlistJSON, deferJSON, modelArg, newVersion, actor); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: upsert config: %w", err)
+	}
+
+	// Build `after` JSON from the just-written values + server-set
+	// updated_at/updated_by (read back so the audit log captures the
+	// canonical row, not a synthesised copy).
+	var written ArchetypeConfig
+	if err := tx.QueryRowContext(ctx, `
+		SELECT archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by
+		FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2
+	`, string(kind), orgID).Scan(
+		&written.Kind, &written.OrgID, &written.SystemPrompt, &allowlistJSON, &deferJSON,
+		&modelArg, &written.Version, &written.UpdatedAt, &written.UpdatedBy,
+	); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: read back row: %w", err)
+	}
+	if err := json.Unmarshal(allowlistJSON, &written.ToolAllowlist); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: decode written allowlist: %w", err)
+	}
+	if err := json.Unmarshal(deferJSON, &written.DeferToolNames); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: decode written defer: %w", err)
+	}
+	if modelArg != nil {
+		s, ok := modelArg.(string)
+		if ok {
+			written.Model = &s
+		}
+	}
+
+	afterJSON, err := json.Marshal(written)
+	if err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: marshal after: %w", err)
+	}
+
+	// Append the audit log row.
+	var beforeArg any
+	if beforeJSON != nil {
+		beforeArg = beforeJSON
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO archetype_configurations_log
+			(archetype_kind, org_id, actor, before, after)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+	`, string(kind), orgID, actor, beforeArg, afterJSON); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: append log: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ArchetypeConfig{}, fmt.Errorf("archetype writer: commit: %w", err)
+	}
+	committed = true
+	return written, nil
 }

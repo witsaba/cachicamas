@@ -88,7 +88,7 @@ func Test_HandleGetAssistantConfig_SignedInOwner(t *testing.T) {
 	resolver := &fakeIdentityResolver{signIn: true, participant: "user_alice"}
 
 	e := echo.New()
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader); err != nil {
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader, nil); err != nil {
 		t.Fatalf("RegisterAssistantConfigRoutes: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func Test_HandleGetAssistantConfig_Anonymous(t *testing.T) {
 	resolver := &fakeIdentityResolver{signIn: false}
 
 	e := echo.New()
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader); err != nil {
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader, nil); err != nil {
 		t.Fatalf("RegisterAssistantConfigRoutes: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func Test_HandleGetAssistantConfig_LoaderError(t *testing.T) {
 	resolver := &fakeIdentityResolver{signIn: true, participant: "user_alice"}
 
 	e := echo.New()
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader); err != nil {
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, loader, nil); err != nil {
 		t.Fatalf("RegisterAssistantConfigRoutes: %v", err)
 	}
 
