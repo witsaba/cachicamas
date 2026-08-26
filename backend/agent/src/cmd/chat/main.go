@@ -335,6 +335,18 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		return fmt.Errorf("chat.RegisterPermissionRoutes: %w", err)
 	}
 
+	// CH-12.1 (PR-1 of cachicamas-assistant-configuration-ui):
+	// wire the AssistantConfig read surface. The Loader is built
+	// from the same *sql.DB the migration runner + chat store use
+	// (single connection pool, single DSN). SetRegisteredToolNames
+	// tells the safe-default factory which tool names exist, so the
+	// first PUT cannot bypass the registry by listing unknown names.
+	chat.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
+	assistantConfigLoader := chat.NewPostgresAssistantConfigLoader(db)
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, assistantConfigLoader); err != nil {
+		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
+	}
+
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
 	startErr := startAndWait(e, ":"+cfg.Port)
 
