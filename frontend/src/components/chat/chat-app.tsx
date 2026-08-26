@@ -282,29 +282,48 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // Following an arriving answer to the bottom of a scroller is a browser-only
   // concern by definition; there is no server-side equivalent to fall back to.
   //
-  // After reload, this task also has to land the scroller on the
-  // latest entry once the seeded transcript is in `turn.entries`.
-  // The track runs synchronously when `reset()` assigns entries, but
-  // the scroller ref is bound by Qwik's render commit AFTER the
-  // visible-task resumes — so `scroller.value` may still be undefined
-  // on the first invocation. Defer the scroll one frame so the
-  // DOM is committed; retry up to a few frames if Qwik hasn't
-  // resumed the binding yet (rare, but happens on the first paint
-  // of a long seeded transcript).
+  // Both branches of the user's complaint (post-refresh and post-send)
+  // come from the same root cause: the track fires synchronously when
+  // `turn.entries` is replaced, but Qwik's render commit runs ASYNCHRONOUSLY
+  // after that — so `scrollTop = scrollHeight` reads the OLD layout (before
+  // the new <li> is appended) and the new entry sits below the fold.
+  //
+  // The fix: defer the scroll to a macrotask (setTimeout 0) AND query
+  // the LAST child of the transcript list directly, so the browser's
+  // own scroll-into-view semantics handle any layout timing on top of
+  // ours. If neither path works (rare — e.g. scroller ref not yet
+  // bound on first mount), retry up to 10 frames. This survives both
+  // the reset-on-mount and the per-delta streaming cases.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ track }) => {
     track(() => turn.entries.length);
     track(() => turn.entries[turn.entries.length - 1]);
     if (typeof window === "undefined") return;
-    const tryScroll = (attemptsLeft: number) => {
-      const el = scroller.value;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      } else if (attemptsLeft > 0) {
-        window.requestAnimationFrame(() => tryScroll(attemptsLeft - 1));
+    const scrollToBottom = (attemptsLeft: number) => {
+      const scrollerEl = scroller.value;
+      if (!scrollerEl) {
+        if (attemptsLeft > 0) {
+          window.requestAnimationFrame(() => scrollToBottom(attemptsLeft - 1));
+        }
+        return;
       }
+      // Two-pass scroll: (1) defer to a macrotask so Qwik's render
+      // commit has run and the new <li> is in the DOM with its
+      // measured height; (2) ALSO call scrollIntoView on the last
+      // child, which is the browser-native "make this visible"
+      // primitive — the container scrolls the minimum distance to
+      // bring the element into view, so a long seeded transcript
+      // ends up at the bottom on the first paint without depending
+      // on measured scrollHeight matching what we expect.
+      window.setTimeout(() => {
+        scrollerEl.scrollTop = scrollerEl.scrollHeight;
+        const last = scrollerEl.querySelector("li:last-child");
+        if (last instanceof HTMLElement) {
+          last.scrollIntoView({ block: "end", behavior: "auto" });
+        }
+      }, 0);
     };
-    tryScroll(5);
+    scrollToBottom(10);
   });
 
   const agent =
