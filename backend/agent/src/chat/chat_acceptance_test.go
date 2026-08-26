@@ -448,7 +448,103 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(5, "persistence", phaseStart, time.Now(), assertions)
 	})
 	t.Run("reload", func(t *testing.T) {
-		// Body lands in T-10 below.
+		phaseStart := time.Now()
+		// Phase 6 — reload. doc 0005:760-764 / CH-06.2 + CH-08.1.
+		// A conversation driven through two turns and then
+		// reloaded through the store port on a fresh conversation
+		// instance continues the same transcript; the third turn's
+		// provider request carries both prior exchanges in their
+		// original order (R-CCS-006, R-CCS-009).
+		//
+		// GREEN-by-construction: chat ships today, the reload
+		// shape is locked at CH-06.2 / CH-08.1 / S-CCS-004 /
+		// S-CRI-001. A RED here is a real defect — STOP and
+		// escalate.
+		store := chat.NewMemoryConversationStore()
+		script1 := scriptTextResponse(t, 1, []string{"first-reply"}, ai.FinishReasonStop)
+		script2 := scriptTextResponse(t, 1, []string{"second-reply"}, ai.FinishReasonStop)
+		script3 := scriptTextResponse(t, 1, []string{"third-reply"}, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(script1, script2, script3)
+
+		conv1, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            store,
+			ParticipantID:    "ch11-phase6-reload",
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation (turn 1) returned %v, want nil", err)
+		}
+		_ = drainWire(t, acceptanceMustSend(t, conv1, "turn-one-prompt"))
+		_ = drainWire(t, acceptanceMustSend(t, conv1, "turn-two-prompt"))
+
+		loaded, lerr := store.Load("ch11-phase6-reload")
+		if lerr != nil {
+			t.Fatalf("Load returned %v, want nil", lerr)
+		}
+		if len(loaded) != 2 {
+			t.Fatalf("Load returned %d exchanges, want 2", len(loaded))
+		}
+
+		hist, herr := chat.ExchangesToHistory(loaded)
+		if herr != nil {
+			t.Fatalf("ExchangesToHistory returned %v, want nil", herr)
+		}
+
+		conv2, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            store,
+			ParticipantID:    "ch11-phase6-reload",
+			InitialHistory:   hist,
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation (turn 2 / reloaded) returned %v, want nil", err)
+		}
+
+		out3 := acceptanceMustSend(t, conv2, "turn-three-prompt")
+		_ = drainWire(t, out3)
+
+		assertions := 0
+		requests := provider.Requests()
+		if len(requests) != 3 {
+			t.Fatalf("provider recorded %d invocation(s), want exactly 3 (two pre-reload, one post-reload)", len(requests))
+		}
+		assertions++
+		third := requests[2]
+		var sawPromptOne, sawReplyOne, sawPromptTwo, sawReplyTwo bool
+		for _, m := range third.Messages() {
+			for _, part := range m.Content() {
+				text, ok := part.Text()
+				if !ok {
+					continue
+				}
+				if m.Role() == ai.RoleUser && text == "turn-one-prompt" {
+					sawPromptOne = true
+				}
+				if m.Role() == ai.RoleAssistant && text == "first-reply" {
+					sawReplyOne = true
+				}
+				if m.Role() == ai.RoleUser && text == "turn-two-prompt" {
+					sawPromptTwo = true
+				}
+				if m.Role() == ai.RoleAssistant && text == "second-reply" {
+					sawReplyTwo = true
+				}
+			}
+		}
+		if !sawPromptOne || !sawReplyOne {
+			t.Errorf("third request missing turn-one user prompt (%v) or assistant reply (%v) — InitialHistory did not seed turn 1", sawPromptOne, sawReplyOne)
+		}
+		assertions++
+		if !sawPromptTwo || !sawReplyTwo {
+			t.Errorf("third request missing turn-two user prompt (%v) or assistant reply (%v) — InitialHistory did not seed turn 2", sawPromptTwo, sawReplyTwo)
+		}
+		assertions++
+
+		evidence.recordHeader(6, "reload", phaseStart, time.Now(), assertions)
 	})
 	t.Run("tool_call", func(t *testing.T) {
 		// Body lands in T-11 below.
@@ -677,4 +773,18 @@ func installEvidenceWriter(t *testing.T) *evidenceWriter {
 	w := newEvidenceWriter()
 	t.Cleanup(func() { w.writeEvidence(t) })
 	return w
+}
+
+// acceptanceMustSend drives one Send on conv and returns the wire
+// event channel; t.Fatal on any error. Used by the per-phase subtests
+// to keep their bodies focused on assertions rather than boilerplate.
+// Named with the package's own prefix to avoid colliding with
+// store_test.go's mustSend (S-CCS-001 micro-test, unrelated).
+func acceptanceMustSend(t *testing.T, conv *chat.Conversation, prompt string) <-chan chat.WireEvent {
+	t.Helper()
+	out, err := conv.Send(context.Background(), prompt)
+	if err != nil {
+		t.Fatalf("Send(%q) returned %v, want nil", prompt, err)
+	}
+	return out
 }
