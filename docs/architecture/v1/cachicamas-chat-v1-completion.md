@@ -19,8 +19,8 @@ ones this PR ticks.
 - **[CH-02.3]** A provider failure reaches the human as a typed error, and the archetype never retries on its own — closed by CH-02.3; `backend/agent/src/chat/errortext.go`:acea1a98.
 - **[CH-03.1, CH-03.2, CH-03.3]** The frozen browser wire is served: open, stream, cancel — closed by CH-03.1, CH-03.2, CH-03.3; `backend/agent/src/chat/http.go`:4fd6fb2f.
 - **[CH-03.4, CH-07.1, CH-08.2]** Only the participant reaches their conversation — closed by CH-03.4, CH-07.1, CH-08.2 (R-CHS-004.a/b for CH-03; remaining scope-fenced to CH-07/CH-08); `backend/agent/src/chat/http.go`:4fd6fb2f and `backend/agent/src/cmd/chat/main.go`:2753d2cf and `backend/agent/src/chat/store.go`:b09a83b7.
-- **[CH-04.1, CH-04.2]** Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2; `backend/agent/src/cmd/chat/main.go`:<this-PR-commit> and `backend/agent/src/chat/ambient_authority_test.go`:7fac9cb2.
-- **[CH-04.3]** One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3; `backend/agent/src/cmd/chat/main_test.go`:<this-PR-commit>.
+- **[CH-04.1, CH-04.2]** Exactly one package reads the environment, installs the observability SDK, and is imported by nothing — closed by CH-04.1, CH-04.2; `backend/agent/src/cmd/chat/main.go`:bb9697bd and `backend/agent/src/chat/ambient_authority_test.go`:7fac9cb2.
+- **[CH-04.3]** One real turn against a live provider is recorded, and the suite stays green without a credential — closed by CH-04.3; `backend/agent/src/cmd/chat/main_test.go`:bb9697bd.
 - **[CH-05.2]** The offline literal is retired by a recorded spec amendment, not a silent deletion — closed by CH-05.2; `docs/product/cachicamas-product-spec.md`:d4a4243c.
 - **[CH-06.1, CH-07.1]** Conversations persist behind a port this archetype owns, in tables it owns — closed by CH-06.1, CH-07.1; `backend/agent/src/chat/store.go`:f5f7e788 and `backend/agent/src/cmd/chat/main.go`:2753d2cf.
 - **[CH-06.2, CH-08.1]** A conversation reloads faithfully and continues the same transcript — closed by CH-06.2, CH-08.1; `backend/agent/src/chat/store.go`:8062dea2 and `backend/agent/src/chat/http.go`:11027e6a.
@@ -31,8 +31,8 @@ ones this PR ticks.
 - **[CH-09.4]** The frontend renders tool entries from both the live stream and the reload surface, state "done" / "failed" with typed category on execution_failure — closed by CH-09.4; `frontend/src/hooks/use-chat-stream.ts`:f7e16622.
 - **[CH-09.5]** The substrate invariant (no file under backend/agent/src/agent/ modified) is guarded inside make test, and the wire vocabulary stays in lockstep with parseTranscript — closed by CH-09.5; `backend/agent/src/chat/ambient_authority_test.go`:8b25cf47.
 - **[CH-10]** The model can call a tool and the human can approve or decline it, on the same event stream — closed by CH-10; `backend/agent/src/chat/permission_policy.go`:601e2230 and `backend/agent/src/chat/http.go`:f59790bf.
-- **[CH-11.1]** One deterministic acceptance drives the whole archetype uncached — closed by CH-11; `backend/agent/src/chat/chat_acceptance_test.go`:<this-PR-commit>.
-- **[CH-11.2]** The v1 statement is published, every deferral seam-named, and what Layer 2's seam set got wrong is stated — closed by CH-11; `docs/architecture/v1/cachicamas-chat-v1-completion.md`:<this-PR-commit>.
+- **[CH-11.1]** One deterministic acceptance drives the whole archetype uncached — closed by CH-11; `backend/agent/src/chat/chat_acceptance_test.go`:bb9697bd.
+- **[CH-11.2]** The v1 statement is published, every deferral seam-named, and what Layer 2's seam set got wrong is stated — closed by CH-11; `docs/architecture/v1/cachicamas-chat-v1-completion.md`:bb9697bd.
 
 ### Layer 2 seams (CH-00.1 inventory)
 
