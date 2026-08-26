@@ -28,6 +28,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -444,6 +445,21 @@ type listConversationsResponse = []conversationSummaryDTO
 // The handler does NOT mutate store state. Reads only; the page's
 // Reload button is offline-only at v1 per the deferred register
 // (doct 0005's "Resumable mid-turn reconnect" row).
+//
+// Path-param decoding (chat-stack-wiring fix):
+//   Echo v5.2.1's c.Param("id") does NOT percent-decode the matched
+//   path segment — verified against the running build by sending
+//   /conversations/braejan%40proton.me and observing the handler
+//   received "braejan%40proton.me" literally, which never matched
+//   the cookie-derived ident.ParticipantID() ("braejan@proton.me")
+//   and produced a spurious 403 not_found. Pre-CH-08.2 the wire's
+//   :id was a UUID with no reserved characters so this was
+//   invisible. After the participant_id switched to email
+//   (chat/auth_shim.go) the @ in the email becomes a percent-encoded
+//   %40 on the wire — every reload would 403 until we decode at the
+//   boundary. Same fix is needed for any future reserved character
+//   in an email localpart (+, ., internationalised), so we apply
+//   url.PathUnescape unconditionally rather than special-casing @.
 func HandleReloadConversation(store ConversationStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ident, _ := getIdentity(c)
@@ -456,10 +472,19 @@ func HandleReloadConversation(store ConversationStore) echo.HandlerFunc {
 			return writeError(c, http.StatusUnauthorized, "server",
 				"identity not resolved", nil)
 		}
-		requestedID := strings.TrimSpace(c.Param("id"))
-		if requestedID == "" {
+		rawID := strings.TrimSpace(c.Param("id"))
+		if rawID == "" {
 			return writeError(c, http.StatusBadRequest, "validation",
 				"id is required", map[string]string{"id": "required"})
+		}
+		// Decode percent-escapes that the router left intact. A
+		// malformed %-sequence returns an error — we treat that as
+		// 400 validation rather than silently coercing the malformed
+		// string into a participant id (which would 403 anyway).
+		requestedID, err := url.PathUnescape(rawID)
+		if err != nil {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"id is malformed", map[string]string{"id": "malformed"})
 		}
 
 		// Cross-participant guard (R-CRI-001 + R-CHS-004.b shape).
