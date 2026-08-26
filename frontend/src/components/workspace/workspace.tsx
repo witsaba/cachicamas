@@ -11,14 +11,9 @@
  *     column takes the whole width. A rail that shrinks to icons is a rail
  *     nobody can read; a rail that disappears is one you can get back.
  *
- * The demonstration strip is deliberately part of the shell rather than a
- * banner a screen can forget to render. Every colleague, conversation and
- * figure in this build is an example, and the product's credibility is the only
- * thing it currently has (PRODUCT.md § Product Principles).
  */
 import { Slot, component$, useSignal, useStyles$ } from "@builder.io/qwik";
 import type { AvatarDropdownSession } from "~/components/avatar-dropdown/avatar-dropdown";
-import { Icon } from "~/components/icon/icon";
 import type { SignInActionLike } from "~/components/sign-in-button/sign-in-button";
 import {
   Sidebar,
@@ -119,20 +114,6 @@ export const Workspace = component$<WorkspaceProps>(
               {COMPANY.name}
             </span>
           </div>
-
-          {/* the honest line */}
-          <p
-            data-testid="demo-strip"
-            class="border-line bg-brand-tint text-ink-mid flex items-center gap-2 border-b px-4 py-1.5 text-xs"
-          >
-            <Icon name="shield" size={14} class="text-brand shrink-0" />
-            <span>
-              <strong class="text-ink font-semibold">
-                Demonstration workspace.
-              </strong>{" "}
-              The colleagues, conversations and figures shown here are examples.
-            </span>
-          </p>
 
           <main
             id="main"

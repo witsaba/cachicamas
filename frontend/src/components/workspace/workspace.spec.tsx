@@ -6,9 +6,8 @@
  * the URL behind it (ADR-0009), and the fact that an anonymous visitor never
  * sees a company rail belonging to nobody.
  *
- * They also pin the two things the shell owns that no screen can forget:
- * exactly one `<main id="main">` for the skip link to land on, and the
- * standing demonstration notice.
+ * They also pin the one thing the shell owns that no screen can forget:
+ * exactly one `<main id="main">` for the skip link to land on.
  */
 import { $, type QRL } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
@@ -112,12 +111,5 @@ describe("components/workspace", () => {
     const screen = await renderShell(null);
     expect(screen.querySelector('[data-testid="workspace-rail"]')).toBeFalsy();
     expect(screen.querySelector('[data-testid="avatar-dropdown"]')).toBeFalsy();
-  });
-
-  it("says once, on every screen, that the data is a demonstration", async () => {
-    const screen = await renderShell();
-    const strip = screen.querySelector('[data-testid="demo-strip"]');
-    expect(strip).toBeTruthy();
-    expect(strip?.textContent).toContain("Demonstration workspace");
   });
 });
