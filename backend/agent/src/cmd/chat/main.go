@@ -37,6 +37,8 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
+	"github.com/cachicamas/backend/agent/src/archetype"
+	archetypeMigrations "github.com/cachicamas/backend/agent/src/archetype/migrations"
 	"github.com/cachicamas/backend/agent/src/chat"
 	"github.com/cachicamas/backend/agent/src/chat/migrations"
 	"github.com/cachicamas/backend/agent/src/chat/migrator"
@@ -222,6 +224,25 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		return fmt.Errorf("apply chat migrations: %w", err)
 	}
 
+	// CH-12.1 (cachicamas-assistant-configuration-ui): apply the
+	// archetype package's forward-only migrations. The chat binary
+	// is the v1 composition root for both the chat archetype AND
+	// the generic archetype storage (which is owned by neither a
+	// specific archetype nor the database_administrator); future
+	// archetype composition roots would call this same runner
+	// against the same DSN. Separate migration table
+	// (`archetype_schema_migrations`) keeps the two namespaces
+	// decoupled at the migration-runner layer.
+	archetypeMigrationProvider, err := migrator.NewProvider(ctx, db, archetypeMigrations.MigrationsFS, "archetype_schema_migrations")
+	if err != nil {
+		_ = db.Close()
+		return fmt.Errorf("build archetype migration provider: %w", err)
+	}
+	if _, err := archetypeMigrationProvider.Up(ctx); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("apply archetype migrations: %w", err)
+	}
+
 	chatStore, closeStore, err := chat.NewPostgresConversationStore(ctx, cfg.ChatStoreDSN)
 	if err != nil {
 		_ = db.Close()
@@ -341,9 +362,9 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// (single connection pool, single DSN). SetRegisteredToolNames
 	// tells the safe-default factory which tool names exist, so the
 	// first PUT cannot bypass the registry by listing unknown names.
-	chat.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
-	assistantConfigLoader := chat.NewPostgresAssistantConfigLoader(db)
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, assistantConfigLoader); err != nil {
+	archetype.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
+	archetypeLoader := archetype.NewPostgresLoader(db)
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader); err != nil {
 		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
 	}
 

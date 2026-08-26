@@ -940,6 +940,17 @@ var chatArchetypeAllowedPrefixes = []string{
 	// structural rationale.
 	modulePath + "/src/agent",            // ADR 0005 § D1 row 3, read as any Layer 3 archetype under ADR 0009 § D2: rows 1–2 are importable
 	modulePath + "/src/ai",               // same row; the vendor adapter subtree carved back out by chatArchetypeForbiddenPrefixes above
+	// CH-12 (cachicamas-assistant-configuration-ui, the AssistantConfig
+	// storage is generic to any Layer 3 archetype — chat is one consumer
+	// of the archetype package, not its owner. The handler
+	// (chat.HandleGetAssistantConfig) closes over an
+	// `archetype.Loader` so the chat binary's composition root owns
+	// the wiring but the storage lives in its own package, alongside
+	// future archetype consumers (coding, support, ...). This widens
+	// the chat archetype's deny-by-default allowlist by exactly one
+	// prefix; the change is admitted in the same PR as the
+	// archetypal-storage refactor.
+	modulePath + "/src/archetype",
 	"go.opentelemetry.io/otel/trace",     // ADR 0005 § D3 (adr:240): tracing API permitted at every layer
 	"go.opentelemetry.io/otel/attribute", // ADR 0005 § D3 (adr:241)
 	"go.opentelemetry.io/otel/codes",     // ADR 0005 § D3 (adr:241)

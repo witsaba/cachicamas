@@ -35,6 +35,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/archetype"
 )
 
 // openTurnRequest is the POST body the client sends. Mirrors
@@ -785,11 +786,14 @@ func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry 
 }
 
 // HandleGetAssistantConfig is the CH-12.1 GET handler (REQ-CACAPI-001).
-// Reads the org-scoped AssistantConfig via the supplied Loader and
-// returns the JSON-encoded config.
+// Reads the org-scoped AssistantConfig via the supplied archetype.Loader
+// and returns the JSON-encoded config. The handler lives in the chat
+// package because the URL namespace (/api/chat/...) is chat-specific,
+// but the storage is generic — the chat archetype is one consumer of
+// the Layer 3 archetype package, not its owner.
 //
 // v1 scope-key simplification: chat.Identity exposes only ParticipantID;
-// for v1 the AssistantConfig row is keyed by participantID (a
+// for v1 the ArchetypeConfig row is keyed by participantID (a
 // single-user workspace maps participant 1:1 to org). The mapping seam
 // `participantID → orgID` is deferred until a multi-org workspace lands;
 // see tasks.md Open disagreements for the carry-over note.
@@ -805,7 +809,7 @@ func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry 
 // The handler does NOT use the package's shared identityMiddleware
 // because the spec mandates 403 (not the existing 401). It calls the
 // resolver directly so the refusal shape is exact.
-func HandleGetAssistantConfig(resolver IdentityResolver, loader Loader) echo.HandlerFunc {
+func HandleGetAssistantConfig(resolver IdentityResolver, loader archetype.Loader) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if resolver == nil {
 			return writeError(c, http.StatusInternalServerError, "server",
@@ -825,8 +829,8 @@ func HandleGetAssistantConfig(resolver IdentityResolver, loader Loader) echo.Han
 			return writeError(c, http.StatusForbidden, "server",
 				"identity missing participant id", nil)
 		}
-
-		cfg, _, lerr := loader.LoadByOrg(c.Request().Context(), participantID)
+    
+		cfg, _, lerr := loader.LoadByKindAndOrg(c.Request().Context(), archetype.KindChat, participantID)
 		if lerr != nil {
 			// Do not echo the underlying error string in the body
 			// (information leak). The error is logged via the
@@ -847,7 +851,7 @@ func HandleGetAssistantConfig(resolver IdentityResolver, loader Loader) echo.Han
 //
 // The resolver and loader are closure-captured by the handler; the
 // registration function only owns the route mounting.
-func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, loader Loader) error {
+func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, loader archetype.Loader) error {
 	if e == nil {
 		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil *echo.Echo")
 	}
@@ -855,9 +859,9 @@ func RegisterAssistantConfigRoutes(e *echo.Echo, resolver IdentityResolver, load
 		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil IdentityResolver")
 	}
 	if loader == nil {
-		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil Loader")
+		return errors.New("chat: RegisterAssistantConfigRoutes requires a non-nil archetype.Loader")
 	}
-
+    
 	g := e.Group("/api/chat")
 	g.GET("/assistant/config", HandleGetAssistantConfig(resolver, loader))
 	return nil

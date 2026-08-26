@@ -13,14 +13,14 @@
 // Test_Validation_SentinelsExist) run without INTEGRATION — they
 // exercise the chat-package in-memory path the Loader composes with.
 //
-// RED state at T-01: this file references chat.AssistantConfig,
-// chat.AssistantConfigLoader, chat.NewPostgresAssistantConfigLoader,
-// chat.DefaultAssistantConfig, chat.Err* sentinels — none of which
+// RED state at T-01: this file references archetype.ArchetypeConfig,
+// archetype.ArchetypeConfigLoader, archetype.NewPostgresLoader,
+// archetype.DefaultConfig, chat.Err* sentinels — none of which
 // exist in the package yet. `go test ./src/chat/...` fails to
 // compile the test binary. That is the documented RED signal. GREEN
 // (T-02) adds the production code; the same `go test` command then
 // compiles and runs the scenarios.
-package chat_test
+package archetype_test
 
 import (
 	"context"
@@ -35,7 +35,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/cachicamas/backend/agent/src/chat"
+	"github.com/cachicamas/backend/agent/src/archetype"
 )
 
 // assistantConfigRequiresPostgres skips the test unless INTEGRATION=1
@@ -54,7 +54,7 @@ func assistantConfigRequiresPostgres(t *testing.T) string {
 	return dsn
 }
 
-// resetAssistantConfigTable truncates chat_assistant_config so the
+// resetAssistantConfigTable truncates archetype_configurations so the
 // suite starts from a clean slate. Mirrors chat's resetChatTables
 // helper; the table lives in the chat schema and is truncated on
 // every integration test that mutates it.
@@ -65,14 +65,14 @@ func resetAssistantConfigTable(t *testing.T, dsn string) {
 		t.Fatalf("resetAssistantConfigTable: sql.Open: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(`TRUNCATE TABLE chat_assistant_config`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE archetype_configurations`); err != nil {
 		t.Fatalf("resetAssistantConfigTable: TRUNCATE: %v", err)
 	}
 }
 
-// seedRow inserts one chat_assistant_config row for the supplied cfg.
+// seedRow inserts one archetype_configurations row for the supplied cfg.
 // Used by Test_Loader_PresentRow and the FOR SHARE writer goroutine.
-func seedRow(t *testing.T, dsn string, cfg chat.AssistantConfig) {
+func seedRow(t *testing.T, dsn string, cfg archetype.ArchetypeConfig) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -86,10 +86,10 @@ func seedRow(t *testing.T, dsn string, cfg chat.AssistantConfig) {
 		model = *cfg.Model
 	}
 	if _, err := db.Exec(`
-		INSERT INTO chat_assistant_config
-			(org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
-		VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, now(), $7)
-	`, cfg.OrgID, cfg.SystemPrompt, allowlist, defers, model, cfg.Version, cfg.UpdatedBy); err != nil {
+		INSERT INTO archetype_configurations
+			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, now(), $8)
+	`, string(cfg.Kind), cfg.OrgID, cfg.SystemPrompt, allowlist, defers, model, cfg.Version, cfg.UpdatedBy); err != nil {
 		t.Fatalf("seedRow: INSERT: %v", err)
 	}
 }
@@ -99,13 +99,14 @@ func seedRow(t *testing.T, dsn string, cfg chat.AssistantConfig) {
 // the loader is called, then it returns the row's fields, found=true,
 // err=nil.
 //
-// RED at T-01: chat.NewPostgresAssistantConfigLoader is undefined;
+// RED at T-01: archetype.NewPostgresLoader is undefined;
 // the test file fails to compile. GREEN (T-02) adds the loader.
 func Test_Loader_PresentRow(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
 	resetAssistantConfigTable(t, dsn)
 
-	seed := chat.AssistantConfig{
+	seed := archetype.ArchetypeConfig{
+		Kind:           archetype.KindChat,
 		OrgID:          "org-1",
 		SystemPrompt:   "you are org-1's assistant",
 		ToolAllowlist:  []string{"current_time", "summarize_conversation"},
@@ -122,8 +123,8 @@ func Test_Loader_PresentRow(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	loader := chat.NewPostgresAssistantConfigLoader(db)
-	got, found, lerr := loader.LoadByOrg(context.Background(), "org-1")
+	loader := archetype.NewPostgresLoader(db)
+	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-1")
 	if lerr != nil {
 		t.Fatalf("LoadByOrg returned err=%v, want nil", lerr)
 	}
@@ -156,7 +157,7 @@ func Test_Loader_PresentRow(t *testing.T) {
 // safe-default AssistantConfig, found=false, err=nil, AND no row is
 // inserted.
 //
-// RED at T-01: chat.DefaultAssistantConfig is undefined. GREEN (T-02)
+// RED at T-01: archetype.DefaultConfig is undefined. GREEN (T-02)
 // adds it.
 func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
@@ -168,15 +169,15 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	loader := chat.NewPostgresAssistantConfigLoader(db)
-	got, found, lerr := loader.LoadByOrg(context.Background(), "org-2")
+	loader := archetype.NewPostgresLoader(db)
+	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-2")
 	if lerr != nil {
 		t.Fatalf("LoadByOrg returned err=%v, want nil", lerr)
 	}
 	if found {
 		t.Fatalf("LoadByOrg returned found=true, want false")
 	}
-	wantDefaults := chat.DefaultAssistantConfig("org-2", []string{"current_time", "summarize_conversation"})
+	wantDefaults := archetype.DefaultConfig(archetype.KindChat, "org-2", []string{"current_time", "summarize_conversation"})
 	if got.OrgID != wantDefaults.OrgID {
 		t.Errorf("OrgID = %q, want %q", got.OrgID, wantDefaults.OrgID)
 	}
@@ -195,11 +196,11 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	// REQ-CACS-003: no row was created on the read path. Assert via
 	// direct SELECT count(*).
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM chat_assistant_config WHERE org_id = $1`, "org-2").Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`, archetype.KindChat, "org-2").Scan(&count); err != nil {
 		t.Fatalf("assert row absent: %v", err)
 	}
 	if count != 0 {
-		t.Errorf("chat_assistant_config row count for org-2 = %d, want 0 (REQ-CACS-003: loader MUST NOT auto-write)", count)
+		t.Errorf("archetype_configurations row count for org-2 = %d, want 0 (REQ-CACS-003: loader MUST NOT auto-write)", count)
 	}
 }
 
@@ -219,13 +220,13 @@ func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	loader := chat.NewPostgresAssistantConfigLoader(db)
+	loader := archetype.NewPostgresLoader(db)
 
-	_, found1, err1 := loader.LoadByOrg(context.Background(), "org-double")
+	_, found1, err1 := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-double")
 	if err1 != nil {
 		t.Fatalf("first LoadByOrg: %v", err1)
 	}
-	_, found2, err2 := loader.LoadByOrg(context.Background(), "org-double")
+	_, found2, err2 := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-double")
 	if err2 != nil {
 		t.Fatalf("second LoadByOrg: %v", err2)
 	}
@@ -234,18 +235,18 @@ func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 	}
 
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM chat_assistant_config`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_kind = $1`, archetype.KindChat).Scan(&count); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
 	if count != 0 {
-		t.Errorf("chat_assistant_config total rows = %d, want 0 (REQ-CACS-003: two reads must not write)", count)
+		t.Errorf("archetype_configurations total rows = %d, want 0 (REQ-CACS-003: two reads must not write)", count)
 	}
 }
 
 // Test_Loader_FORSHARESerialisesWithWriter — REQ-CACS-002 + design
 // §6 forward-only + AD-2 (FOR SHARE row-level lock). Given a row
 // exists and goroutine A holds LoadByOrg inside a tx (SELECT ... FOR
-// SHARE), when goroutine B issues UPDATE chat_assistant_config from
+// SHARE), when goroutine B issues UPDATE archetype_configurations from
 // a separate connection, then B's update blocks until A's tx
 // commits. The serialisation invariant is the only honest verification
 // of FOR SHARE; SELECT alone does not exhibit the blocking behaviour.
@@ -257,14 +258,15 @@ func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 // connection; the test asserts the wall-clock ordering (B's update
 // is blocked until A commits).
 //
-// RED at T-01: chat.NewPostgresAssistantConfigLoader.WithTx is
+// RED at T-01: archetype.NewPostgresLoader.WithTx is
 // undefined. GREEN (T-02) adds the WithTx helper that binds the
 // loader's FOR SHARE query to a caller-provided tx.
 func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
 	resetAssistantConfigTable(t, dsn)
 
-	seed := chat.AssistantConfig{
+	seed := archetype.ArchetypeConfig{
+		Kind:         archetype.KindChat,
 		OrgID:        "org-forshare",
 		SystemPrompt: "before",
 		ToolAllowlist: []string{"current_time"},
@@ -278,7 +280,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 		t.Fatalf("sql.Open A: %v", err)
 	}
 	defer func() { _ = connA.Close() }()
-	loaderA := chat.NewPostgresAssistantConfigLoader(connA)
+	loaderA := archetype.NewPostgresLoader(connA)
 
 	connB, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -287,7 +289,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	defer func() { _ = connB.Close() }()
 
 	var (
-		aCfg            chat.AssistantConfig
+		aCfg            archetype.ArchetypeConfig
 		aFound          bool
 		writerElapsed   time.Duration
 		writerCompleted = make(chan struct{})
@@ -311,7 +313,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 			return
 		}
 		writerStart := time.Now()
-		if _, berr := tx.ExecContext(ctx, `UPDATE chat_assistant_config SET system_prompt = $1 WHERE org_id = $2`, "after", "org-forshare"); berr != nil {
+		if _, berr := tx.ExecContext(ctx, `UPDATE archetype_configurations SET system_prompt = $1 WHERE archetype_kind = $2 AND org_id = $3`, "after", string(archetype.KindChat), "org-forshare"); berr != nil {
 			t.Errorf("UPDATE B: %v", berr)
 			_ = tx.Rollback()
 			close(writerCompleted)
@@ -335,7 +337,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 		t.Fatalf("BeginTx A: %v", err)
 	}
 	txLoader := loaderA.WithTx(txA)
-	aCfg, aFound, err = txLoader.LoadByOrg(holdCtx, "org-forshare")
+	aCfg, aFound, err = txLoader.LoadByKindAndOrg(holdCtx, archetype.KindChat, "org-forshare")
 	if err != nil {
 		t.Fatalf("LoadByOrg (A, tx-bound): %v", err)
 	}
@@ -379,8 +381,8 @@ func Test_Defaults_Pure(t *testing.T) {
 	const org = "org-pure"
 	tools := []string{"current_time", "summarize_conversation"}
 
-	first := chat.DefaultAssistantConfig(org, tools)
-	second := chat.DefaultAssistantConfig(org, tools)
+	first := archetype.DefaultConfig(archetype.KindChat, org, tools)
+	second := archetype.DefaultConfig(archetype.KindChat, org, tools)
 
 	if first.OrgID != second.OrgID {
 		t.Errorf("OrgID drifted: first=%q second=%q", first.OrgID, second.OrgID)
@@ -408,17 +410,17 @@ func Test_Defaults_Pure(t *testing.T) {
 // verified separately by PUT tests in PR-3 (T-13); here we only
 // prove the symbols exist and form a typed discriminated set.
 //
-// RED at T-01: chat.ErrSystemPromptTooLong and the rest are
+// RED at T-01: archetype.ErrSystemPromptTooLong and the rest are
 // undefined.
 func Test_Validation_SentinelsExist(t *testing.T) {
 	t.Parallel()
 	sentinels := []error{
-		chat.ErrSystemPromptTooLong,
-		chat.ErrSystemPromptContainsHTML,
-		chat.ErrUnknownToolName,
-		chat.ErrDeferToolNotInAllowlist,
-		chat.ErrToolAllowlistEmpty,
-		chat.ErrSystemPromptEmpty,
+		archetype.ErrSystemPromptTooLong,
+		archetype.ErrSystemPromptContainsHTML,
+		archetype.ErrUnknownToolName,
+		archetype.ErrDeferToolNotInAllowlist,
+		archetype.ErrToolAllowlistEmpty,
+		archetype.ErrSystemPromptEmpty,
 	}
 	if len(sentinels) != 6 {
 		t.Errorf("expected 6 sentinels, got %d", len(sentinels))
