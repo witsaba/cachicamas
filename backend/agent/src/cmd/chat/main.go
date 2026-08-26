@@ -27,6 +27,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cachicamas/backend/agent/src/agent"
@@ -280,10 +284,27 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 			InitialHistory:   history,
 			ToolSource:       toolSource,
 			PermissionPolicy: permissionPolicy,
+			// fix/chat-stack-wiring Gap B: thread the OTLP TracerProvider
+			// into chat.Config so L2's Harness.Run emits invoke_agent /
+			// turn / execute_tool / compact spans into the same OTLP
+			// pipeline as L1's openaicompat request span and the HTTP
+			// server span the Echo middleware opens above.
+			TracerProvider: otelTP,
 		})
 	}
 
 	e := echo.New()
+	// fix/chat-stack-wiring — Gap A: attach an OTel Echo middleware that
+	// opens a server span per HTTP request. The middleware shape mirrors
+	// database_administrator/src/otel/otel.go:Middleware (returns
+	// echo.MiddlewareFunc, opens span, extracts W3C traceparent from
+	// headers via the configured propagator, calls next, sets status
+	// code + attribute, ends span). Without it every request handler runs
+	// without a parent span — L2's invoke_agent and L1's openaicompat
+	// span become detached roots that share no trace_id, so Jaeger's
+	// per-trace tree never stitches the chat HTTP entry point into the
+	// model provider's request span.
+	e.Use(otelEchoMiddleware(otelTP, serviceName))
 	registry, err := chat.RegisterRoutes(e, resolver, factory)
 	if err != nil {
 		return fmt.Errorf("chat.RegisterRoutes: %w", err)
@@ -385,4 +406,98 @@ func installProductionOTelSDK(ctx context.Context) (func(context.Context) error,
 // the post-listener shutdown path without binding a real port.
 func startEcho(e *echo.Echo, address string) error {
 	return e.Start(address)
+}
+
+// otelEchoMiddleware returns an Echo middleware that opens a server
+// span per HTTP request. The span name follows the "{METHOD} {ROUTE}"
+// convention used by most tracers (otelecho, otelhttp, otelmux). When
+// the route is unknown (404), it falls back to "{METHOD} {PATH}".
+//
+// Trace context is extracted from incoming request headers via the
+// configured propagator (W3C traceparent by default), so upstream
+// callers' trace context stitches onto this span automatically. The
+// span is recorded with SpanKind=Server and the standard http.*
+// attributes plus the response status.
+//
+// The TracerProvider parameter is the one installOTelSDK returns; when
+// nil (tests that bypass OTel entirely), the middleware uses the global
+// tracer, which is noop when no provider was installed — so the
+// middleware is safe to register unconditionally on the production
+// composition root AND on any test that uses run() directly.
+func otelEchoMiddleware(tp trace.TracerProvider, serviceName string) echo.MiddlewareFunc {
+	tracerProvider := tp
+	if tracerProvider == nil {
+		tracerProvider = otel.GetTracerProvider()
+	}
+	tracer := tracerProvider.Tracer(serviceName)
+	propagator := otel.GetTextMapPropagator()
+
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			req := c.Request()
+
+			// Extract any incoming trace context from headers. This is
+			// what makes upstream traces stitch into this span: a
+			// caller passing `traceparent: 00-<span>-<span>-01` lands
+			// the L2/L1 spans emitted downstream as children of the
+			// caller's span, not as detached roots.
+			ctx := propagator.Extract(req.Context(), propagation.HeaderCarrier(req.Header))
+
+			route := c.Path()    // registered template, e.g. "/users/:id"
+			path := req.URL.Path // concrete path, e.g. "/users/42"
+			spanName := req.Method + " " + route
+			if route == "" {
+				spanName = req.Method + " " + path
+			}
+
+			ctx, span := tracer.Start(ctx, spanName,
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(
+					semconv.HTTPRequestMethodKey.String(req.Method),
+					semconv.URLPath(path),
+					semconv.URLScheme(req.URL.Scheme),
+					semconv.UserAgentOriginal(req.UserAgent()),
+					attribute.String("http.route", route),
+				),
+			)
+			defer span.End()
+
+			// Make the span available to downstream handlers via context.
+			c.SetRequest(req.WithContext(ctx))
+
+			err := next(c)
+
+			status := responseStatus(c)
+			span.SetAttributes(semconv.HTTPResponseStatusCode(status))
+			if err != nil {
+				span.RecordError(err)
+			}
+			if status >= 500 {
+				span.SetStatus(codes.Error, errString(err))
+			}
+			return err
+		}
+	}
+}
+
+// responseStatus pulls the status code out of the Echo v5 Response
+// wrapper. Echo v5's Context.Response() returns http.ResponseWriter;
+// the concrete *echo.Response has a Status int field. If we can't
+// unwrap it (e.g. a custom writer), we fall back to 0 (unset).
+func responseStatus(c *echo.Context) int {
+	type statuser interface{ Status() int }
+	if s, ok := c.Response().(statuser); ok {
+		return s.Status()
+	}
+	if r, ok := c.Response().(*echo.Response); ok {
+		return r.Status
+	}
+	return 0
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

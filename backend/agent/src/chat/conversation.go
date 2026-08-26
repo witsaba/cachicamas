@@ -17,6 +17,10 @@ import (
 	"strings"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
 )
@@ -92,6 +96,20 @@ type Config struct {
 	// receiver; production callers leave this nil and rely on
 	// the per-Run lazy default.
 	Scheduler *agent.Scheduler
+
+	// TracerProvider is the OpenTelemetry tracing API tracer
+	// provider (ADR 0005 § D3, adr:240) this Conversation threads
+	// into Layer 2's harness (fix/chat-stack-wiring, Gap B).
+	// Optional: nil leaves the harness's TracerProvider field at
+	// zero, which Harness.Run and Harness.Compact resolve to the
+	// tracing API's own no-op provider (agent/observability.go:
+	// tracerFromHarness). Production wiring at cmd/chat/main.go
+	// passes the same TracerProvider installOTelSDK registered
+	// globally, so L2's invoke_agent + turn + execute_tool +
+	// compact spans land in the OTLP pipeline alongside L1's
+	// openaicompat request span and the HTTP server span the Echo
+	// middleware opens upstream.
+	TracerProvider trace.TracerProvider
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
@@ -107,8 +125,54 @@ type Conversation struct {
 	store         ConversationStore
 	participantID string
 
+	// cfgTracer is the OpenTelemetry TracerProvider this Conversation
+	// received via Config.TracerProvider (Step 2, fix/chat-stack-wiring).
+	// Held as a struct field rather than re-derived from c.harness
+	// because the archetype-layer chat.turn span is opened by this
+	// package's own Send, not by the harness — it is independent of
+	// whatever tracer the harness's L2 spans derive (Layer 2's spans
+	// derive from h.TracerProvider; the archetype-layer span derives
+	// from cfgTracer; in production both are the same value, but the
+	// separation keeps the seam explicit). conversationTracerProvider
+	// (defined below) wraps this with a no-op fallback.
+	cfgTracer trace.TracerProvider
+
 	mu       sync.Mutex
 	inFlight bool
+}
+
+// Chat-side tracer scope — mirrors agent.observability.go's own
+// "github.com/cachicamas/backend/agent/src/agent" pattern. Every
+// span this file opens carries this scope name so a Jaeger search
+// can filter chat-archetype instrumentation from Layer 2/Layer 1.
+const tracerScope = "github.com/cachicamas/backend/agent/src/chat"
+
+// chatTurnSpanName is the constant span name for the archetype-layer
+// span Conversation.Send opens around one browser turn (Step 6, ADR
+// 0005 § D3 widening). Cardinality 1, mirrors openaicompat's own
+// "chat" span name convention.
+const chatTurnSpanName = "chat.turn"
+
+// Attribute keys the chat.turn span carries (ADR 0005 § D3, the
+// archetype-layer extension). Each key is a literal constant
+// spelled exactly once here and referenced from every recording
+// site — never assembled at a call site, mirroring
+// agent/observability.go and ai/openaicompat/trace.go's own
+// attribute-key discipline.
+const (
+	turnIDKey        = "cachicamas.turn.id"
+	participantIDKey = "cachicamas.participant.id"
+	promptBytesKey   = "cachicamas.chat.prompt_bytes"
+)
+
+// conversationTracerProvider resolves cfg.TracerProvider through the
+// API's own no-op fallback (R-AOB-009's Layer 1 precedent, restated
+// for the archetype layer) so a zero-value Config stays inert.
+func conversationTracerProvider(tp trace.TracerProvider) trace.TracerProvider {
+	if tp == nil {
+		return noop.NewTracerProvider()
+	}
+	return tp
 }
 
 // NewConversation constructs a Conversation. cfg.Provider is required;
@@ -164,10 +228,11 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	// (test injection) threads through Conversation.Scheduler().
 	return &Conversation{
 		harness: &agent.Harness{
-			Provider:  cfg.Provider,
-			System:    SystemPrompt,
-			History:   history,
-			Scheduler: cfg.Scheduler,
+			Provider:       cfg.Provider,
+			System:         SystemPrompt,
+			History:        history,
+			Scheduler:      cfg.Scheduler,
+			TracerProvider: conversationTracerProvider(cfg.TracerProvider),
 			Turn: agent.TurnOptions{
 				Tools:            cfg.ToolSource,
 				PermissionPolicy: cfg.PermissionPolicy,
@@ -176,6 +241,7 @@ func NewConversation(cfg Config) (*Conversation, error) {
 		logger:        logger,
 		store:         cfg.Store,
 		participantID: cfg.ParticipantID,
+		cfgTracer:     cfg.TracerProvider,
 	}, nil
 }
 
@@ -228,12 +294,31 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 		slog.Int("prompt_bytes", len(prompt)),
 	)
 
+	// Open the archetype-layer "chat.turn" span (Step 6, ADR 0005 §
+	// D3 widening). Every span L2's Harness.Run and L1's openaicompat
+	// request emit becomes a child of this one in Jaeger, giving the
+	// operator a single trace_id per browser turn to read end-to-end.
+	// The finalizer runs as a `defer` here — never at the individual
+	// return sites below — so every exit path, including the rare
+	// validation rejections above that already returned early, lands
+	// the span exactly once (the L2 harness already follows this
+	// R-AGO-007 discipline; the archetype layer mirrors it).
+	turnCtx, turnSpan := conversationTracerProvider(c.cfgTracer).Tracer(tracerScope).Start(ctx, chatTurnSpanName,
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(
+			attribute.String(turnIDKey, ""),
+			attribute.String(participantIDKey, c.participantID),
+			attribute.Int(promptBytesKey, len(prompt)),
+		),
+	)
+	defer turnSpan.End()
+
 	sink := make(chan *agent.Event)
 	result := make(chan runResult, 1)
 	out := make(chan WireEvent, wireChannelBuffer)
 
 	go func() {
-		_, finish, runErr := c.harness.Run(ctx, msg, sink)
+		_, finish, runErr := c.harness.Run(turnCtx, msg, sink)
 		result <- runResult{finish: finish, err: runErr}
 	}()
 
