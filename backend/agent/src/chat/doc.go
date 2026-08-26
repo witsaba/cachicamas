@@ -90,6 +90,26 @@
 // 7 (TestChatArchetype_ProductionClosure_ImportsOnlyAllowedPrefixes_DenyByDefault)
 // is the transitive closure check that admits Echo's measured deps.
 //
+//   - CH-12 (`cachicamas-assistant-configuration-ui`): the chat
+//     archetype gains a per-Conversation version-aware rebuild of the
+//     harness system prompt. The system prompt is no longer a single
+//     literal at construction time (`SystemPrompt` const below);
+//     instead, the composition root (cmd/chat/main.go) wires an
+//     `archetype.Loader` into chat.Config.AssistantConfigLoader, and
+//     every Conversation holds an `archetype.VersionTracker` that
+//     consults the Loader at the Send boundary (REQ-CCVP-001/002).
+//     On version mismatch the tracker applies the new prompt in
+//     place (no destructive teardown — REQ-CCVP-003: an in-flight
+//     turn is never cancelled by a config change). The
+//     `archetype` package is the generic Layer 3 storage; chat is
+//     one consumer via `archetype.KindChat`. The Loader is
+//     constructed once at composition root and shared between the
+//     GET handler (`/api/chat/assistant/config`) and the per-
+//     Conversation tracker. The chat archetype's deny-by-default
+//     import allowlist widens by exactly one prefix
+//     (`modulePath + "/src/archetype"`) per ADR 0005 § D1 row 3,
+//     recorded in chatArchetypeAllowedPrefixes.
+
 // Composition root (CH-04): backend/agent/src/cmd/chat/main.go reads
 // the environment, installs the OpenTelemetry SDK, constructs the
 // production IdentityResolver shim over `database_administrator`'s

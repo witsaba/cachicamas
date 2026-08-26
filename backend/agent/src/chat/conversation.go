@@ -23,6 +23,7 @@ import (
 
 	"github.com/cachicamas/backend/agent/src/agent"
 	"github.com/cachicamas/backend/agent/src/ai"
+	"github.com/cachicamas/backend/agent/src/archetype"
 )
 
 // SystemPrompt is the archetype's v1 system prompt (R-CCP-002, D13). This is
@@ -110,6 +111,16 @@ type Config struct {
 	// openaicompat request span and the HTTP server span the Echo
 	// middleware opens upstream.
 	TracerProvider trace.TracerProvider
+
+	// AssistantConfigLoader is the Layer 3 archetype storage handle
+	// this Conversation uses for the version-aware system-prompt
+	// rebuild contract (REQ-CCVP-001/002/003, design AD-3).
+	// Optional: nil leaves the Conversation with the chat v1 literal
+	// (`SystemPrompt`) and disables the rebuild mechanism — the
+	// historical v1 behaviour. Set by the chat composition root
+	// (cmd/chat/main.go) to the same `archetype.Loader` the GET
+	// handler uses.
+	AssistantConfigLoader archetype.Loader
 }
 
 // Conversation owns one agent.Harness and one *agent.History, reused across
@@ -136,6 +147,12 @@ type Conversation struct {
 	// separation keeps the seam explicit). conversationTracerProvider
 	// (defined below) wraps this with a no-op fallback.
 	cfgTracer trace.TracerProvider
+
+	// assistantConfigTracker drives the version-aware rebuild contract
+	// (REQ-CCVP-001/002/003, design AD-3). Nil when no AssistantConfigLoader
+	// was supplied in Config — the rebuild is then a no-op and the
+	// Conversation keeps the chat v1 literal `SystemPrompt`.
+	assistantConfigTracker *archetype.VersionTracker
 
 	mu       sync.Mutex
 	inFlight bool
@@ -226,7 +243,7 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	// caller-owned wake handle. nil leaves Harness.Run's per-Run
 	// lazy default (agent/harness.go:446-449); a non-nil value
 	// (test injection) threads through Conversation.Scheduler().
-	return &Conversation{
+	conv := &Conversation{
 		harness: &agent.Harness{
 			Provider:       cfg.Provider,
 			System:         SystemPrompt,
@@ -242,7 +259,41 @@ func NewConversation(cfg Config) (*Conversation, error) {
 		store:         cfg.Store,
 		participantID: cfg.ParticipantID,
 		cfgTracer:     cfg.TracerProvider,
-	}, nil
+	}
+
+	// CH-12 (cachicamas-assistant-configuration-ui, REQ-CCVP-001/002/003,
+	// design AD-3): if a Loader is wired, build the version tracker.
+	// The applyPrompt callback mutates the harness's System field,
+	// which Harness.Run reads on every turn. The tracker's initial
+	// LoadByKindAndOrg call seeds both the recorded version AND the
+	// harness.System prompt (a fresh harness is created above with
+	// System = SystemPrompt; if the Loader has a different prompt
+	// at version 1, the apply fires during NewVersionTracker to
+	// keep the harness in sync).
+	if cfg.AssistantConfigLoader != nil {
+		tracker, trackerErr := archetype.NewVersionTracker(
+			context.Background(),
+			cfg.AssistantConfigLoader,
+			archetype.KindChat,
+			cfg.ParticipantID,
+			func(newPrompt string) {
+				conv.harness.System = newPrompt
+			},
+		)
+		if trackerErr != nil {
+			// A transient Loader hiccup at construction time must
+			// NOT fail NewConversation — the Conversation is
+			// usable; the next Send's ReloadAssistantConfig will
+			// retry. Log so the operator sees the issue.
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "assistant config initial load failed",
+				slog.String("participant_id", cfg.ParticipantID),
+				slog.String("error", trackerErr.Error()),
+			)
+		}
+		conv.assistantConfigTracker = tracker
+	}
+
+	return conv, nil
 }
 
 // Send drives one browser turn — exactly one Harness.Run call (R-CCP-001) —
@@ -293,6 +344,21 @@ func (c *Conversation) Send(ctx context.Context, prompt string) (<-chan WireEven
 		slog.String("participant_id", c.participantID),
 		slog.Int("prompt_bytes", len(prompt)),
 	)
+
+	// CH-12 (cachicamas-assistant-configuration-ui, REQ-CCVP-002):
+	// at the Send boundary, consult the archetype loader and rebuild
+	// the system prompt if a newer version is persisted. NO-OP when
+	// no Loader was wired (chat v1 default stays in place). The
+	// rebuild happens BEFORE Harness.Run so the new prompt is the
+	// one the harness streams this turn. A transient Loader error is
+	// logged and the existing prompt is kept — a turn must not be
+	// aborted by a config-read hiccup (REQ-CCVP-003 in-flight guarantee).
+	if err := c.ReloadAssistantConfig(ctx); err != nil {
+		c.logger.LogAttrs(ctx, slog.LevelWarn, "assistant config reload failed (keeping prior prompt)",
+			slog.String("participant_id", c.participantID),
+			slog.String("error", err.Error()),
+		)
+	}
 
 	// Open the archetype-layer "chat.turn" span (Step 6, ADR 0005 §
 	// D3 widening). Every span L2's Harness.Run and L1's openaicompat
@@ -420,4 +486,45 @@ func (c *Conversation) Scheduler() *agent.Scheduler {
 // chat-package Registry.
 func (c *Conversation) ParticipantIDForTest() string {
 	return c.participantID
+}
+
+// ReloadAssistantConfig consults the archetype.Loader and, on version
+// mismatch with the Conversation's recorded version, rebuilds the
+// harness system prompt. No-op when the Conversation was constructed
+// without an AssistantConfigLoader (i.e. the chat v1 literal stays in
+// place). Returns the Loader error (if any) so the caller can decide
+// how to surface it — Send calls this at the Send boundary and logs
+// the error rather than failing the turn (a transient Loader outage
+// must not tear down an in-flight turn).
+//
+// Safe to call from any goroutine; the underlying VersionTracker is
+// internally serialised.
+func (c *Conversation) ReloadAssistantConfig(ctx context.Context) error {
+	if c.assistantConfigTracker == nil {
+		return nil
+	}
+	if err := c.assistantConfigTracker.Reload(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// LoadedAssistantConfigVersion returns the version the archetype
+// tracker last saw from the Loader. Returns 0 when no Loader was wired
+// (the Conversation is on the chat v1 default).
+//
+// Exposed for tests + observability; production callers should rely
+// on the Send-boundary rebuild, not poll this.
+func (c *Conversation) LoadedAssistantConfigVersion() int {
+	if c.assistantConfigTracker == nil {
+		return 0
+	}
+	return c.assistantConfigTracker.RecordedVersion()
+}
+
+// SystemPromptForTest returns the harness.System string the
+// Conversation is currently driving turns with. Test-only surface
+// (the production path reads System via the harness during Run).
+func (c *Conversation) SystemPromptForTest() string {
+	return c.harness.System
 }

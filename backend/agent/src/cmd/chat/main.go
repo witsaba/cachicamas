@@ -37,6 +37,8 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
+	"github.com/cachicamas/backend/agent/src/archetype"
+	archetypeMigrations "github.com/cachicamas/backend/agent/src/archetype/migrations"
 	"github.com/cachicamas/backend/agent/src/chat"
 	"github.com/cachicamas/backend/agent/src/chat/migrations"
 	"github.com/cachicamas/backend/agent/src/chat/migrator"
@@ -222,6 +224,34 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		return fmt.Errorf("apply chat migrations: %w", err)
 	}
 
+	// CH-12.1 (cachicamas-assistant-configuration-ui): apply the
+	// archetype package's forward-only migrations. The chat binary
+	// is the v1 composition root for both the chat archetype AND
+	// the generic archetype storage (which is owned by neither a
+	// specific archetype nor the database_administrator); future
+	// archetype composition roots would call this same runner
+	// against the same DSN. Separate migration table
+	// (`archetype_schema_migrations`) keeps the two namespaces
+	// decoupled at the migration-runner layer.
+	archetypeMigrationProvider, err := migrator.NewProvider(ctx, db, archetypeMigrations.MigrationsFS, "archetype_schema_migrations")
+	if err != nil {
+		_ = db.Close()
+		return fmt.Errorf("build archetype migration provider: %w", err)
+	}
+	if _, err := archetypeMigrationProvider.Up(ctx); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("apply archetype migrations: %w", err)
+	}
+
+	// CH-12 (cachicamas-assistant-configuration-ui): build the
+	// archetype Loader once at composition root so every Conversation
+	// (per-participant) and the GET handler share the same instance.
+	// SetRegisteredToolNames wires the safe-default factory's
+	// known-tool list — required before any Conversation constructed
+	// from this Loader sees a defaults-build.
+	archetype.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
+	archetypeLoader := archetype.NewPostgresLoader(db)
+
 	chatStore, closeStore, err := chat.NewPostgresConversationStore(ctx, cfg.ChatStoreDSN)
 	if err != nil {
 		_ = db.Close()
@@ -290,6 +320,12 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 			// pipeline as L1's openaicompat request span and the HTTP
 			// server span the Echo middleware opens above.
 			TracerProvider: otelTP,
+			// CH-12 (cachicamas-assistant-configuration-ui, REQ-CCVP-001..003):
+			// the archetype.Loader drives the per-turn system-prompt
+			// rebuild at the Send boundary. Same Loader instance the
+			// GET handler uses (built once at composition root, passed
+			// to RegisterAssistantConfigRoutes above).
+			AssistantConfigLoader: archetypeLoader,
 		})
 	}
 
@@ -333,6 +369,20 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// per-participant lookup seam.
 	if err := chat.RegisterPermissionRoutes(e, resolver, registry); err != nil {
 		return fmt.Errorf("chat.RegisterPermissionRoutes: %w", err)
+	}
+
+	// CH-12.1 (PR-1 of cachicamas-assistant-configuration-ui):
+	// wire the AssistantConfig read surface. archetypeLoader was
+	// built once above (right after the migration runner) so it can
+	// be shared between this handler and the per-Conversation
+	// Send-boundary rebuild (see factory closure).
+	// CH-12.3 (PR-3 of cachicamas-assistant-configuration-ui):
+	// build the Writer once, sharing the *sql.DB with the Loader.
+	// Same instance is used by both the GET handler (no — GET uses
+	// the Loader; PUT uses the Writer) and the PUT handler.
+	archetypeWriter := archetype.NewPostgresWriter(db)
+	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader, archetypeWriter); err != nil {
+		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
 	}
 
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
