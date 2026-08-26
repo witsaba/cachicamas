@@ -46,6 +46,7 @@
 package chat_test
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/cachicamas/backend/agent/src/agent"
+	"github.com/cachicamas/backend/agent/src/agenttest"
+	"github.com/cachicamas/backend/agent/src/ai"
 	"github.com/cachicamas/backend/agent/src/chat"
 )
 
@@ -98,23 +102,138 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 	// added. The subtest bodies land one phase at a time in T-05
 	// through T-12; until then they exit 0 as empty shells so the
 	// preamble compiles and the evidenceWriter hook is exercised.
-	t.Run("conversation", func(t *testing.T) {})
-	t.Run("streaming", func(t *testing.T) {})
-	t.Run("cancellation", func(t *testing.T) {})
-	t.Run("failure", func(t *testing.T) {})
-	t.Run("persistence", func(t *testing.T) {})
-	t.Run("reload", func(t *testing.T) {})
-	t.Run("tool_call", func(t *testing.T) {})
-	t.Run("approval", func(t *testing.T) {})
-
+	//
 	// Doc 0005:1003 — the evidence file is the cited closing node
 	// for the "one deterministic acceptance drives the whole
-	// archetype" requirement. The cleanup hook writes the file at
-	// test exit, after every subtest's per-phase recordHeader has
-	// landed. The hook runs on every invocation (cached or not);
-	// the evidence gate's "uncached=true" footer is set in the
-	// preamble's `go clean -testcache` call above.
-	installEvidenceWriter(t)
+	// archetype" requirement. The cleanup hook (installed BEFORE
+	// the subtests run so the per-phase recordHeader calls have
+	// a writer to push into) writes the file at test exit, after
+	// every subtest's per-phase recordHeader has landed.
+	evidence := installEvidenceWriter(t)
+
+	t.Run("streaming", func(t *testing.T) {
+		// Body lands in T-06 below.
+	})
+	t.Run("cancellation", func(t *testing.T) {
+		// Body lands in T-07 below.
+	})
+	t.Run("failure", func(t *testing.T) {
+		// Body lands in T-08 below.
+	})
+	t.Run("persistence", func(t *testing.T) {
+		// Body lands in T-09 below.
+	})
+	t.Run("reload", func(t *testing.T) {
+		// Body lands in T-10 below.
+	})
+	t.Run("tool_call", func(t *testing.T) {
+		// Body lands in T-11 below.
+	})
+	t.Run("approval", func(t *testing.T) {
+		// Body lands in T-12 below.
+	})
+
+	// Phase 1 — conversation. doc 0005:336 / CH-02.1 acceptance. The
+	// archetype's first behaviour: a conversation drives turns over
+	// the harness and projects its events onto the browser wire. One
+	// prompt driven to completion emits one message.start + three
+	// message.delta + one message.end + one turn.end, with the deltas
+	// landing in provider order and the message index at zero
+	// (S-CCP-040: v1 is single-message-per-turn). The provider
+	// records exactly one invocation; the persisted Exchange carries
+	// the assistant text accumulated from MessageDelta.Fragment()
+	// (R-CCS-004).
+	//
+	// GREEN-by-construction: chat ships today, the conversation
+	// behaviour is locked at CH-02.1 / S-CCP-001..004 / S-CCP-040 /
+	// S-CCP-052. A RED here is a real defect — STOP and escalate.
+	t.Run("conversation", func(t *testing.T) {
+		phaseStart := time.Now()
+
+		fragments := []string{"alpha", "beta", "gamma"}
+		provider := agenttest.NewProvider(scriptTextResponse(t, 1, fragments, ai.FinishReasonStop))
+		conv, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            chat.NewMemoryConversationStore(),
+			ParticipantID:    "ch11-phase1-conv",
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation returned %v, want nil", err)
+		}
+
+		out, err := conv.Send(context.Background(), "hello")
+		if err != nil {
+			t.Fatalf("Send returned %v, want nil", err)
+		}
+		events := drainWire(t, out)
+
+		var starts, ends int
+		var deltaTexts []string
+		var messageIndexesSeen []int
+		for _, ev := range events {
+			switch e := ev.(type) {
+			case chat.MessageStart:
+				starts++
+				messageIndexesSeen = append(messageIndexesSeen, e.Index)
+			case chat.MessageDelta:
+				deltaTexts = append(deltaTexts, e.Delta)
+				messageIndexesSeen = append(messageIndexesSeen, e.Index)
+			case chat.MessageEnd:
+				ends++
+				messageIndexesSeen = append(messageIndexesSeen, e.Index)
+				if e.FinishReason != "stop" {
+					t.Errorf("MessageEnd.FinishReason = %q, want %q", e.FinishReason, "stop")
+				}
+			}
+		}
+
+		assertions := 0
+		if starts != 1 {
+			t.Errorf("message.start count = %d, want 1", starts)
+		}
+		assertions++
+		if ends != 1 {
+			t.Errorf("message.end count = %d, want 1", ends)
+		}
+		assertions++
+		if len(deltaTexts) != len(fragments) {
+			t.Errorf("delta fragments = %v, want %v in provider order", deltaTexts, fragments)
+		} else {
+			for i, want := range fragments {
+				if deltaTexts[i] != want {
+					t.Errorf("delta[%d] = %q, want %q (provider order preserved)", i, deltaTexts[i], want)
+				}
+			}
+		}
+		assertions++
+		for _, idx := range messageIndexesSeen {
+			if idx != 0 {
+				t.Errorf("message index = %d, want 0 for v1's single-message turn (S-CCP-040)", idx)
+			}
+		}
+		assertions++
+
+		if !endsWithTurnEnd(events) {
+			t.Fatalf("terminal event = %#v, want chat.TurnEnd (S-CCP-001: one complete terminal bracket)", events[len(events)-1])
+		}
+		assertions++
+		turnEnd := events[len(events)-1].(chat.TurnEnd)
+		if turnEnd.FinishReason == nil {
+			t.Error("TurnEnd.FinishReason is absent, want present (\"stop\") on a completed turn (S-CCP-052)")
+		} else if *turnEnd.FinishReason != "stop" {
+			t.Errorf("TurnEnd.FinishReason = %q, want %q", *turnEnd.FinishReason, "stop")
+		}
+		assertions++
+
+		if got := len(provider.Requests()); got != 1 {
+			t.Errorf("provider recorded %d invocation(s), want exactly 1", got)
+		}
+		assertions++
+
+		evidence.recordHeader(1, "conversation", phaseStart, time.Now(), assertions)
+	})
 }
 
 // mountedChatServerForAcceptance is CH-11's inline-duplicate of the
