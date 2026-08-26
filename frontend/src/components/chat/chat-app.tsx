@@ -261,6 +261,31 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
         if (resumed.value.exchanges.length > 0) {
           await turn.reset(exchangesToEntries(resumed.value.exchanges));
         }
+        // Pin the transcript to the bottom EXPLICITLY here, after
+        // the awaited bulk reset has had time to flush through
+        // Qwik's render cycle. `reset()` itself dispatches
+        // SCROLL_EVENT for the listener to catch — but on a chat
+        // refresh with many entries the listener's double rAF can
+        // fire BEFORE Qwik has committed the bulk render of the
+        // replayed exchanges, reading a stale scrollHeight and
+        // leaving the scroll mid-conversation. Re-anchoring here,
+        // after the awaited reset plus an extra double rAF so the
+        // browser has painted the bulk-render frame, is the
+        // reliable path for "open the chat on an existing
+        // conversation, show the latest message".
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => r()),
+          ),
+        );
+        const scrollerEl = scroller.value;
+        if (scrollerEl) {
+          void scrollerEl.offsetHeight;
+          scrollerEl.scrollTo({
+            top: scrollerEl.scrollHeight,
+            behavior: "instant",
+          });
+        }
         // List — populate the rail with the server-issued
         // conversationID; the rail marks only that row current.
         railState.summaries = [...resumed.value.summaries];
