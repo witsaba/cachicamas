@@ -303,9 +303,7 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // render commit. The rAF inside fires before the new <li> is in the
   // DOM, so `scrollTop = scrollHeight` reads the OLD height and the
   // new content lands below the fold (the scrollbar grows but the
-  // text is hidden). The MutationObserver approach before that
-  // (commit f8b5b56e) orphaned on Qwik resume / re-render swaps of
-  // the transcript <ol> node.
+  // text is hidden).
   //
   // The event-based approach decouples the scroll from Qwik's
   // reactive task lifecycle. The hook dispatches the event from
@@ -320,10 +318,27 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // The signal counter is preserved on the hook's public surface
   // (CH-11) so external observers (tests, analytics) can still
   // react to entry mutations. The actual scroll is event-driven.
+  //
+  // A second auto-scroll mechanism, a `MutationObserver` attached
+  // to the transcript `<ol>`, runs as a SECONDARY path. It catches:
+  //   1. New entries appended through any code path that did NOT
+  //      call `requestScroll` (defence in depth for future hook
+  //      variants).
+  //   2. Streaming `message.delta` text appended to an EXISTING
+  //      `<li>` — Qwik batches the `state.entries.map` write, so
+  //      the SCROLL_EVENT may fire BEFORE the streaming text node
+  //      is in the DOM, missing the height growth.
+  //   3. The browser's default `overflow-anchor: auto` behaviour,
+  //      which silently re-asserts a stale visual position on any
+  //      content append (mitigated by `[overflow-anchor:none]` on
+  //      the `<ol>` above AND backed up here for safety).
+  // The observer fires `scrollToBottom` — the SAME rAF + scrollTo
+  // sequence the event listener uses — so a per-character stream
+  // coalesces into one scroll per paint frame.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    const handler = () => {
+    const scrollToBottom = () => {
       // Double rAF: first waits for Qwik's render commit to flush,
       // second waits for the browser to paint. After both,
       // scrollHeight reflects the post-commit content reliably.
@@ -331,16 +346,62 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
         window.requestAnimationFrame(() => {
           const scrollerEl = scroller.value;
           if (!scrollerEl) return;
-          scrollerEl.scrollTop = scrollerEl.scrollHeight;
+          // Force a synchronous layout pass so the layout box is
+          // recomputed before we read scrollHeight. Without
+          // this some browsers cache scrollHeight between paints
+          // and return a value from the previous layout — under-
+          // estimating the new content's bottom and landing the
+          // scroll above the latest message.
+          void scrollerEl.offsetHeight;
+          // scrollTo with `behavior: "instant"` is more reliable
+          // than assigning `scrollTop` directly: it is a single
+          // discrete operation that does not animate (we never
+          // want a "scroll to bottom" smooth-tween racing with
+          // further streaming deltas) and it cooperates with
+          // `overflow-anchor: none` (the class on the `<ol>`
+          // above) to keep the user at the bottom even when the
+          // browser's scroll-anchoring would otherwise have
+          // re-asserted a stale visual position.
+          scrollerEl.scrollTo({
+            top: scrollerEl.scrollHeight,
+            behavior: "instant" as ScrollBehavior,
+          });
           const last = scrollerEl.querySelector("li:last-child");
           if (last instanceof HTMLElement) {
-            last.scrollIntoView({ block: "end", behavior: "auto" });
+            last.scrollIntoView({
+              block: "end",
+              behavior: "instant" as ScrollBehavior,
+            });
           }
         });
       });
     };
-    window.addEventListener(SCROLL_EVENT, handler);
-    cleanup(() => window.removeEventListener(SCROLL_EVENT, handler));
+    window.addEventListener(SCROLL_EVENT, scrollToBottom);
+
+    // Catches any DOM mutation in the transcript (added entry,
+    // streamed text inside an existing one, etc.) and re-anchors
+    // the scroller to the bottom. The option set is intentionally
+    // broad — `childList` for new `<li>`, `subtree` + `characterData`
+    // for streaming text into an existing `<li>`. We do NOT
+    // observe `attributes`, since dot colour or status classes
+    // should never move the scroll.
+    const olElement = scroller.value;
+    let observer: MutationObserver | null = null;
+    if (olElement) {
+      observer = new MutationObserver(() => {
+        scrollToBottom();
+      });
+      observer.observe(olElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+
+    cleanup(() => {
+      window.removeEventListener(SCROLL_EVENT, scrollToBottom);
+      observer?.disconnect();
+    });
   });
 
   const agent =
@@ -426,7 +487,17 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
           // the full width of a 1440px screen, which is about twice the length
           // anyone reads comfortably; the composer below is capped to the same
           // column so the two never disagree about where the conversation is.
-          class="min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
+          //
+          // `[overflow-anchor:none]` opts out of the browser's
+          // scroll-anchoring feature. The default `auto` lets the
+          // browser AUTO-ADJUST `scrollTop` to keep whatever was
+          // visible at the same visual position whenever new
+          // content is appended to the scroller — which silently
+          // undoes `scrollTop = scrollHeight` whenever the user
+          // is scrolled up while a new message or a streaming
+          // delta arrives. Disabling the anchor lets the explicit
+          // scroll-to-bottom in this file actually stick.
+          class="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] px-4 pb-2 sm:px-6 [&>li]:mx-auto [&>li]:w-full [&>li]:max-w-2xl"
         >
           {turn.entries.map((entry) => (
             <TranscriptLine
