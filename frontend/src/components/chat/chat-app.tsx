@@ -7,6 +7,7 @@ import {
 } from "@builder.io/qwik";
 import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { Status } from "~/components/workspace/status/status";
+import { WaspSpinner } from "~/components/workspace/status/wasp-spinner";
 import { initialsOf } from "~/lib/initials";
 import { AGENTS, agentBySlug } from "~/lib/mock/staff";
 import { loadMostRecentConversation } from "~/lib/chat-api";
@@ -485,22 +486,18 @@ export const ChatApp = component$<ChatAppProps>(
                   {agent.departmentName}
                 </span>
                 <span class="ml-auto">
-                  <Status
-                    status={
-                      turn.status === "streaming" ||
-                      turn.status === "submitting" ||
-                      turn.status === "cancelling"
-                        ? "working"
-                        : agent.status
-                    }
-                    word={
-                      turn.status === "streaming" ||
-                      turn.status === "submitting" ||
-                      turn.status === "cancelling"
-                        ? "Working now"
-                        : agent.statusWord
-                    }
-                  />
+                  {turn.status === "streaming" ||
+                  turn.status === "submitting" ||
+                  turn.status === "cancelling" ? (
+                    <span class="inline-flex items-center gap-1.5">
+                      <WaspSpinner class="h-3.5 w-3.5" />
+                      <span class="text-xs font-medium">
+                        <span class="text-ok">Working now</span>
+                      </span>
+                    </span>
+                  ) : (
+                    <Status status={agent.status} word={agent.statusWord} />
+                  )}
                 </span>
               </div>
             </div>

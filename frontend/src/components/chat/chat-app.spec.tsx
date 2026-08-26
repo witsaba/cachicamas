@@ -99,6 +99,16 @@ describe("components/chat/chat-app (CH-05.1 + CH-08)", () => {
     expect(input).toBeTruthy();
     expect(input.hasAttribute("disabled")).toBe(false);
   });
+
+  it("does not render the working wasp while the turn is idle", async () => {
+    // The wasp replaces the green dot ONLY while the turn is in
+    // flight (streaming | submitting | cancelling). At rest the
+    // header falls back to <Status /> with the agent's idle
+    // status word — the wasp would be a false-positive cue.
+    const { screen, render } = await createDOM();
+    await render(<ChatApp {...WHO} />);
+    expect(screen.querySelector('[data-testid="work-wasp"]')).toBeFalsy();
+  });
 });
 
 // ---------------------------------------------------------------------------
