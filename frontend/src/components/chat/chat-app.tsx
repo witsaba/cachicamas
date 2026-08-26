@@ -203,6 +203,19 @@ function parseToolArgs(
 }
 
 export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participantID }) => {
+  // Disable the browser's automatic scroll-position restoration
+  // on refresh. With `history.scrollRestoration = "auto"` (the
+  // default), the browser tries to put the page back where the
+  // user was before F5 — which, for a chat that's mid-scroll
+  // through history, lands the scroll AWAY from the bottom even
+  // after our explicit scroll-to-bottom runs. "manual" keeps
+  // the user's scroll exactly where the chat component puts it.
+  if (typeof window !== "undefined") {
+    if (window.history.scrollRestoration !== "manual") {
+      window.history.scrollRestoration = "manual";
+    }
+  }
+
   const activeSlug = useSignal(AGENTS[0].slug);
   // CH-12 (S-SCROLL-001) — auto-scroll bus. The hook
   // (a) dispatches the `chat:scroll-to-bottom` CustomEvent on
@@ -262,29 +275,33 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
           await turn.reset(exchangesToEntries(resumed.value.exchanges));
         }
         // Pin the transcript to the bottom EXPLICITLY here, after
-        // the awaited bulk reset has had time to flush through
-        // Qwik's render cycle. `reset()` itself dispatches
+        // the awaited bulk reset. `reset()` itself dispatches
         // SCROLL_EVENT for the listener to catch — but on a chat
-        // refresh with many entries the listener's double rAF can
-        // fire BEFORE Qwik has committed the bulk render of the
-        // replayed exchanges, reading a stale scrollHeight and
-        // leaving the scroll mid-conversation. Re-anchoring here,
-        // after the awaited reset plus an extra double rAF so the
-        // browser has painted the bulk-render frame, is the
-        // reliable path for "open the chat on an existing
-        // conversation, show the latest message".
-        await new Promise<void>((r) =>
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => r()),
-          ),
-        );
-        const scrollerEl = scroller.value;
-        if (scrollerEl) {
-          void scrollerEl.offsetHeight;
-          scrollerEl.scrollTo({
-            top: scrollerEl.scrollHeight,
-            behavior: "instant",
-          });
+        // refresh with many entries the listener can fire BEFORE
+        // Qwik has committed the bulk render of the replayed
+        // exchanges, reading a stale scrollHeight and leaving
+        // the scroll mid-conversation. Run the scroll across six
+        // consecutive frames after the awaited reset: that gives
+        // Qwik enough time to commit the bulk, and one of the
+        // six attempts will land against the post-commit layout.
+        // `nextFrame` is hoisted out of the closure so the
+        // TS-inferred type of `resolve` is unambiguously
+        // `() => void` (requestAnimationFrame's callback shape),
+        // not the `PromiseLike` overload that breaks compilation
+        // when the resolve callback is passed directly.
+        const nextFrame = (): Promise<void> =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        for (let i = 0; i < 6; i++) {
+          await nextFrame();
+          await nextFrame();
+          const scrollerEl = scroller.value;
+          if (scrollerEl) {
+            void scrollerEl.offsetHeight;
+            scrollerEl.scrollTo({
+              top: scrollerEl.scrollHeight,
+              behavior: "instant",
+            });
+          }
         }
         // List — populate the rail with the server-issued
         // conversationID; the rail marks only that row current.
@@ -360,46 +377,57 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   // The observer fires `scrollToBottom` — the SAME rAF + scrollTo
   // sequence the event listener uses — so a per-character stream
   // coalesces into one scroll per paint frame.
+  //
+  // `scrollToBottom` also runs the scroll across SIX consecutive
+  // rAF callbacks, not just one. Qwik's bulk-render of an N-entry
+  // replay (the chat-on-refresh case) lays the new <li>s out
+  // over more than one frame; running the scroll once after a
+  // single double-rAF can land against an in-progress layout.
+  // Spreading the scrolls across six frames (~100ms at 60Hz)
+  // guarantees we catch the post-commit state for any reasonable
+  // initial-load latency. `behavior: "instant"` keeps each
+  // one a discrete non-animated snap.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
+    let scrollRunId = 0;
     const scrollToBottom = () => {
-      // Double rAF: first waits for Qwik's render commit to flush,
-      // second waits for the browser to paint. After both,
-      // scrollHeight reflects the post-commit content reliably.
-      window.requestAnimationFrame(() => {
+      const runId = ++scrollRunId;
+      // Six frames is ~100ms at 60Hz, which is plenty for any
+      // reasonable Qwik bulk commit. The runId guard cancels any
+      // in-flight scroll when a fresh dispatch / mutation arrives
+      // (so two events close together don't stack into 12 scrolls).
+      for (let i = 0; i < 6; i++) {
         window.requestAnimationFrame(() => {
-          const scrollerEl = scroller.value;
-          if (!scrollerEl) return;
-          // Force a synchronous layout pass so the layout box is
-          // recomputed before we read scrollHeight. Without
-          // this some browsers cache scrollHeight between paints
-          // and return a value from the previous layout — under-
-          // estimating the new content's bottom and landing the
-          // scroll above the latest message.
-          void scrollerEl.offsetHeight;
-          // scrollTo with `behavior: "instant"` is more reliable
-          // than assigning `scrollTop` directly: it is a single
-          // discrete operation that does not animate (we never
-          // want a "scroll to bottom" smooth-tween racing with
-          // further streaming deltas) and it cooperates with
-          // `overflow-anchor: none` (the class on the `<ol>`
-          // above) to keep the user at the bottom even when the
-          // browser's scroll-anchoring would otherwise have
-          // re-asserted a stale visual position.
-          scrollerEl.scrollTo({
-            top: scrollerEl.scrollHeight,
-            behavior: "instant" as ScrollBehavior,
-          });
-          const last = scrollerEl.querySelector("li:last-child");
-          if (last instanceof HTMLElement) {
-            last.scrollIntoView({
-              block: "end",
+          if (runId !== scrollRunId) return;
+          // Wait one extra frame before the actual scroll. The
+          // first rAF in the chain lets Qwik's microtask commit
+          // finish; the second waits for paint. Doing this on
+          // every attempt captures any layout that lands on a
+          // later frame.
+          window.requestAnimationFrame(() => {
+            if (runId !== scrollRunId) return;
+            const scrollerEl = scroller.value;
+            if (!scrollerEl) return;
+            // Force a synchronous layout pass so scrollHeight
+            // is current. Some browsers cache scrollHeight
+            // between paints and would return a value from the
+            // previous layout.
+            void scrollerEl.offsetHeight;
+            scrollerEl.scrollTo({
+              top: scrollerEl.scrollHeight,
               behavior: "instant" as ScrollBehavior,
             });
-          }
+            const last = scrollerEl.querySelector("li:last-child");
+            if (last instanceof HTMLElement) {
+              last.scrollIntoView({
+                block: "end",
+                behavior: "instant" as ScrollBehavior,
+              });
+            }
+          });
         });
-      });
+      }
     };
     window.addEventListener(SCROLL_EVENT, scrollToBottom);
 
