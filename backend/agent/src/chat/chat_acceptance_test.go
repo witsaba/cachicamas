@@ -46,9 +46,14 @@
 package chat_test
 
 import (
+	"net/http/httptest"
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v5"
+
+	"github.com/cachicamas/backend/agent/src/chat"
 )
 
 // TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached is CH-11's
@@ -98,4 +103,46 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 	t.Run("reload", func(t *testing.T) {})
 	t.Run("tool_call", func(t *testing.T) {})
 	t.Run("approval", func(t *testing.T) {})
+}
+
+// mountedChatServerForAcceptance is CH-11's inline-duplicate of the
+// three package-level mount helpers — chat/http_test.go's
+// mountedServer (RegisterRoutes), chat/http_test.go's
+// resumeMountedServer (RegisterRoutes + RegisterResumeRoutes), and
+// chat/http_permission_test.go's mountPermissionRoutes
+// (RegisterPermissionRoutes) — combined into one helper because
+// phases 2 (streaming), 6 (reload), 7 (tool_call) and 8 (approval)
+// need all three route families on a single *echo.Echo. Lives in
+// chat_acceptance_test.go rather than the shared helpers because the
+// CH-11 PR keeps its diff focused on the new test file (D-3:
+// composition changes flow through one path).
+//
+// The factory closure produces a fresh conversation per participant on
+// first use, with the given store as the conversation's persistence
+// port (so the reload + persistence phases observe the same store the
+// the drive-side Send writes to). The resolver is the standard
+// fixedResolver from http_test.go so cross-participant guards behave
+// as the chat package's own tests observe.
+//
+// Returns the httptest.Server and the *chat.Registry so phase 8
+// (approval) can reach into the registry to seed the synthetic
+// turnID/participant pairing the permission handler's OwnerOf +
+// ConversationByTurnID lookups need.
+func mountedChatServerForAcceptance(t *testing.T, resolver chat.IdentityResolver, newConv chat.ConversationFactory, store chat.ConversationStore) (*httptest.Server, *chat.Registry) {
+	t.Helper()
+
+	e := echo.New()
+	registry, err := chat.RegisterRoutes(e, resolver, newConv)
+	if err != nil {
+		t.Fatalf("chat.RegisterRoutes returned %v, want nil", err)
+	}
+	if err := chat.RegisterResumeRoutes(e, resolver, store); err != nil {
+		t.Fatalf("chat.RegisterResumeRoutes returned %v, want nil", err)
+	}
+	if err := chat.RegisterPermissionRoutes(e, resolver, registry); err != nil {
+		t.Fatalf("chat.RegisterPermissionRoutes returned %v, want nil", err)
+	}
+	srv := httptest.NewServer(e)
+	t.Cleanup(srv.Close)
+	return srv, registry
 }
