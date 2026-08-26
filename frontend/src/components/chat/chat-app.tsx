@@ -374,70 +374,47 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
   //      which silently re-asserts a stale visual position on any
   //      content append (mitigated by `[overflow-anchor:none]` on
   //      the `<ol>` above AND backed up here for safety).
-  // The observer fires `scrollToBottom` — the SAME rAF + scrollTo
-  // sequence the event listener uses — so a per-character stream
-  // coalesces into one scroll per paint frame.
+  // The observer fires `scrollToBottom` — the SAME rAF chain the
+  // event listener uses — so a per-character stream coalesces into
+  // one scroll per paint frame.
   //
-  // `scrollToBottom` also runs the scroll across SIX consecutive
-  // rAF callbacks, not just one. Qwik's bulk-render of an N-entry
-  // replay (the chat-on-refresh case) lays the new <li>s out
-  // over more than one frame; running the scroll once after a
-  // single double-rAF can land against an in-progress layout.
-  // Spreading the scrolls across six frames (~100ms at 60Hz)
-  // guarantees we catch the post-commit state for any reasonable
-  // initial-load latency. `behavior: "instant"` keeps each
-  // one a discrete non-animated snap.
+  // Earlier experiments tried a 6-frame brute-force spread inside
+  // this listener (commit 3bfe7fb1), which fixed the chat-on-
+  // refresh case but produced "scrollbar goes crazy" symptoms on
+  // send / stream because six scroll attempts fired inside a
+  // 2-frame window against a still-mutating scrollHeight. The
+  // bulk-replay case now lives in the reload visible-task's own
+  // explicit brute-force spread AFTER `await turn.reset()` —
+  // that's the path that needs the extra cadence. The streaming
+  // / send path here is happy with a single double-rAF + raw
+  // `scrollTop = scrollHeight` (guaranteed-instant across
+  // browsers, no animation races, no scrollIntoView jitter).
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ cleanup }) => {
     if (typeof window === "undefined") return;
-    let scrollRunId = 0;
     const scrollToBottom = () => {
-      const runId = ++scrollRunId;
-      // Six frames is ~100ms at 60Hz, which is plenty for any
-      // reasonable Qwik bulk commit. The runId guard cancels any
-      // in-flight scroll when a fresh dispatch / mutation arrives
-      // (so two events close together don't stack into 12 scrolls).
-      for (let i = 0; i < 6; i++) {
+      // Double rAF: first lets Qwik's render commit flush,
+      // second lets the browser paint. After both, scrollHeight
+      // reflects the post-commit content reliably.
+      window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
-          if (runId !== scrollRunId) return;
-          // Wait one extra frame before the actual scroll. The
-          // first rAF in the chain lets Qwik's microtask commit
-          // finish; the second waits for paint. Doing this on
-          // every attempt captures any layout that lands on a
-          // later frame.
-          window.requestAnimationFrame(() => {
-            if (runId !== scrollRunId) return;
-            const scrollerEl = scroller.value;
-            if (!scrollerEl) return;
-            // Force a synchronous layout pass so scrollHeight
-            // is current. Some browsers cache scrollHeight
-            // between paints and would return a value from the
-            // previous layout.
-            void scrollerEl.offsetHeight;
-            scrollerEl.scrollTo({
-              top: scrollerEl.scrollHeight,
-              behavior: "instant" as ScrollBehavior,
-            });
-            const last = scrollerEl.querySelector("li:last-child");
-            if (last instanceof HTMLElement) {
-              last.scrollIntoView({
-                block: "end",
-                behavior: "instant" as ScrollBehavior,
-              });
-            }
-          });
+          const scrollerEl = scroller.value;
+          if (!scrollerEl) return;
+          void scrollerEl.offsetHeight;
+          scrollerEl.scrollTop = scrollerEl.scrollHeight;
         });
-      }
+      });
     };
     window.addEventListener(SCROLL_EVENT, scrollToBottom);
 
-    // Catches any DOM mutation in the transcript (added entry,
-    // streamed text inside an existing one, etc.) and re-anchors
-    // the scroller to the bottom. The option set is intentionally
-    // broad — `childList` for new `<li>`, `subtree` + `characterData`
-    // for streaming text into an existing `<li>`. We do NOT
-    // observe `attributes`, since dot colour or status classes
-    // should never move the scroll.
+    // Catches new <li>s appended to the transcript. `childList`
+    // only — `subtree` + `characterData` would re-fire on every
+    // streamed text node mutation and on every status-dot
+    // re-render, multiplying the scroll attempts inside a
+    // streaming window and producing visible jitter. A new
+    // <li> is the meaningful signal; intermediate text updates
+    // inside an existing <li> are caught by the EVENT listener
+    // (the hook dispatches SCROLL_EVENT on every message.delta).
     const olElement = scroller.value;
     let observer: MutationObserver | null = null;
     if (olElement) {
@@ -446,8 +423,6 @@ export const ChatApp = component$<ChatAppProps>(({ youName, youEmail, participan
       });
       observer.observe(olElement, {
         childList: true,
-        subtree: true,
-        characterData: true,
       });
     }
 
