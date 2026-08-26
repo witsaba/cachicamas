@@ -381,7 +381,71 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(4, "failure", phaseStart, time.Now(), assertions)
 	})
 	t.Run("persistence", func(t *testing.T) {
-		// Body lands in T-09 below.
+		phaseStart := time.Now()
+		// Phase 5 — persistence. doc 0005:731-736 / CH-06.1. A
+		// conversation driven through two turns on a fresh
+		// store records both exchanges in the order they occurred,
+		// assigned Position: 0 and Position: 1 by the store
+		// adapter (R-CCS-001, R-CCS-008). The append-only invariant
+		// is asserted by the Position sequence — no later entry
+		// rewrites an earlier one.
+		//
+		// GREEN-by-construction: chat ships today, the
+		// append-only invariant is locked at CH-06 / S-CCS-001 /
+		// R-CCS-001..009. A RED here is a real defect — STOP and
+		// escalate.
+		store := chat.NewMemoryConversationStore()
+		script1 := scriptTextResponse(t, 1, []string{"first-reply"}, ai.FinishReasonStop)
+		script2 := scriptTextResponse(t, 1, []string{"second-reply"}, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(script1, script2)
+
+		conv, err := chat.NewConversation(chat.Config{
+			Provider:         provider,
+			Store:            store,
+			ParticipantID:    "ch11-phase5-persist",
+			ToolSource:       chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+			PermissionPolicy: chat.NewDefaultPermissionPolicy(nil),
+		})
+		if err != nil {
+			t.Fatalf("chat.NewConversation returned %v, want nil", err)
+		}
+
+		out1, err := conv.Send(context.Background(), "turn-one-prompt")
+		if err != nil {
+			t.Fatalf("Send turn one returned %v, want nil", err)
+		}
+		_ = drainWire(t, out1)
+
+		out2, err := conv.Send(context.Background(), "turn-two-prompt")
+		if err != nil {
+			t.Fatalf("Send turn two returned %v, want nil", err)
+		}
+		_ = drainWire(t, out2)
+
+		loaded, lerr := store.Load("ch11-phase5-persist")
+		if lerr != nil {
+			t.Fatalf("Load returned %v, want nil", lerr)
+		}
+
+		assertions := 0
+		if len(loaded) != 2 {
+			t.Fatalf("Load returned %d exchanges, want 2", len(loaded))
+		}
+		assertions++
+		if loaded[0].Position != 0 || loaded[1].Position != 1 {
+			t.Errorf("Positions = (%d, %d), want (0, 1) — store-assigned on Append (R-CCS-001)", loaded[0].Position, loaded[1].Position)
+		}
+		assertions++
+		if loaded[0].PromptText != "turn-one-prompt" {
+			t.Errorf("loaded[0].PromptText = %q, want %q", loaded[0].PromptText, "turn-one-prompt")
+		}
+		assertions++
+		if loaded[1].PromptText != "turn-two-prompt" {
+			t.Errorf("loaded[1].PromptText = %q, want %q", loaded[1].PromptText, "turn-two-prompt")
+		}
+		assertions++
+
+		evidence.recordHeader(5, "persistence", phaseStart, time.Now(), assertions)
 	})
 	t.Run("reload", func(t *testing.T) {
 		// Body lands in T-10 below.
