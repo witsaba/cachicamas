@@ -46,10 +46,12 @@
 package chat_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -647,7 +649,123 @@ func TestChatArchetype_AcceptanceDrivesAllCapabilitiesUncached(t *testing.T) {
 		evidence.recordHeader(7, "tool_call", phaseStart, time.Now(), assertions)
 	})
 	t.Run("approval", func(t *testing.T) {
-		// Body lands in T-12 below.
+		phaseStart := time.Now()
+		// Phase 8 — approval. doc 0005:936-947 / CH-10. A
+		// tool call whose permission policy defers the decision
+		// to the human is suspended at the gate; the live stream
+		// carries permission.decision.required naming what the
+		// agent is about to do; the participant submits the
+		// decision through the served permission endpoint
+		// (POST /api/agent/turns/:id/permissions/:callID); the
+		// served endpoint returns 200; the live stream carries
+		// permission.decision.made{outcome:"allow_once"}; the
+		// turn continues, the tool executes, and the tool result
+		// reaches the transcript (R-15 / R-CPM-001..004).
+		//
+		// GREEN-by-construction: chat ships today, the approval
+		// round-trip is locked at CH-10 / S-CPM-010..013.
+		// A RED here is a real defect — STOP and escalate.
+		const toolName = "current_time"
+		script1 := agenttest.ToolCallThenCompletionScript(t, 1, "c1", toolName, `{"now":"2026-08-26T00:00:00Z"}`, ai.FinishReasonToolCalls)
+		script2 := scriptTextResponse(t, 1, []string{"the time is 2026-08-26T00:00:00Z"}, ai.FinishReasonStop)
+		provider := agenttest.NewProvider(script1, script2)
+		store := chat.NewMemoryConversationStore()
+		policy := chat.NewDefaultPermissionPolicy([]string{toolName})
+		newConv := func(participantID string) (*chat.Conversation, error) {
+			return chat.NewConversation(chat.Config{
+				Provider:         provider,
+				Store:            store,
+				ParticipantID:    participantID,
+				ToolSource:       acceptanceEchoRegistry(t, toolName, agent.EffectClassRead),
+				PermissionPolicy: policy,
+				Scheduler:        &agent.Scheduler{},
+			})
+		}
+		srv, _ := mountedChatServerForAcceptance(t, fixedResolver{ID: "ch11-phase8-approval"}, newConv, store)
+
+		// POST opens the turn.
+		body, _ := json.Marshal(map[string]string{"id": "t-1", "prompt": "call current_time"})
+		res, err := http.Post(srv.URL+"/api/agent/turns", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST /api/agent/turns: %v", err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("POST status = %d, want 200", res.StatusCode)
+		}
+
+		// GET subscribes to the SSE stream.
+		getReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/turns/t-1/events", nil)
+		getResp, err := http.DefaultClient.Do(getReq)
+		if err != nil {
+			t.Fatalf("GET events: %v", err)
+		}
+		defer getResp.Body.Close()
+
+		assertions := 0
+		// First read pass: read until permission.decision.required
+		// is observed (the gate's signal that the harness is parked).
+		// readSSEUntilEvent returns false + t.Fatal if the stream
+		// doesn't deliver the target within 5s.
+		events, _ := readSSEUntilEvent(t, getResp.Body, "permission.decision.required", 5*time.Second)
+		var requiredIdx = -1
+		for i, name := range events {
+			if name == "permission.decision.required" {
+				requiredIdx = i
+				break
+			}
+		}
+		if requiredIdx == -1 {
+			t.Fatalf("permission.decision.required not observed in SSE stream (events=%v)", events)
+		}
+		assertions++
+
+		// POST the human's decision (S-CPM-010 happy path).
+		decBody, _ := json.Marshal(map[string]string{"outcome": "allow_once"})
+		decRes, err := http.Post(srv.URL+"/api/agent/turns/t-1/permissions/c1", "application/json", bytes.NewReader(decBody))
+		if err != nil {
+			t.Fatalf("POST permission decision: %v", err)
+		}
+		decRes.Body.Close()
+		if decRes.StatusCode != http.StatusOK {
+			t.Fatalf("POST permission decision status = %d, want 200", decRes.StatusCode)
+		}
+		assertions++
+
+		// Second read pass: read until turn.end arrives (the
+		// turn-end marks the stream's terminal close, after
+		// which the GET handler closes the connection).
+		rest, _ := readSSEUntilEvent(t, getResp.Body, "turn.end", 5*time.Second)
+		events = append(events, rest...)
+
+		// The stream after the wake carries: permission.decision.made +
+		// tool.result + turn.end (and the post-tool assistant text
+		// surfaces as message.* before turn.end).
+		var sawMade, sawToolResult, sawTurnEnd bool
+		for _, name := range events[requiredIdx+1:] {
+			switch name {
+			case "permission.decision.made":
+				sawMade = true
+			case "tool.result":
+				sawToolResult = true
+			case "turn.end":
+				sawTurnEnd = true
+			}
+		}
+		if !sawMade {
+			t.Errorf("permission.decision.made not observed after wake (events=%v)", events)
+		}
+		assertions++
+		if !sawToolResult {
+			t.Errorf("tool.result not observed after wake (events=%v)", events)
+		}
+		assertions++
+		if !sawTurnEnd {
+			t.Errorf("turn.end not observed after wake (events=%v)", events)
+		}
+		assertions++
+
+		evidence.recordHeader(8, "approval", phaseStart, time.Now(), assertions)
 	})
 
 	// Phase 1 — conversation. doc 0005:336 / CH-02.1 acceptance. The
@@ -914,4 +1032,58 @@ func acceptanceEchoRegistry(t *testing.T, name string, effect agent.EffectClass)
 	return chat.FromAgentRegistry(agent.NewMapRegistry(map[string]agent.Tool{
 		name: &acceptanceEchoTool{toolName: name, effect: effect},
 	}))
+}
+
+// readSSEUntilEvent reads SSE frames from r until either a frame
+// carrying an `event: <target>` line is observed (returning the full
+// list of events read so far + a true bool), or the deadline
+// elapses (returning what was read + false). Phase 8 (approval)
+// needs this shape because the stream stays open across the
+// permission suspension — the existing readSSE helper reads until
+// EOF, which never arrives until the test POSTs the decision. The
+// test reads once to find permission.decision.required, POSTs, then
+// reads again for permission.decision.made + tool.result + turn.end.
+func readSSEUntilEvent(t *testing.T, r io.Reader, target string, d time.Duration) (events []string, ok bool) {
+	t.Helper()
+	type outcome struct {
+		events []string
+		ok     bool
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		var events []string
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		var frameBuilder strings.Builder
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				if frameBuilder.Len() > 0 {
+					frame := frameBuilder.String()
+					for _, l := range strings.Split(strings.TrimRight(frame, "\n"), "\n") {
+						if strings.HasPrefix(l, "event: ") {
+							name := strings.TrimPrefix(l, "event: ")
+							events = append(events, name)
+							if name == target {
+								ch <- outcome{events: events, ok: true}
+								return
+							}
+						}
+					}
+					frameBuilder.Reset()
+				}
+				continue
+			}
+			frameBuilder.WriteString(line)
+			frameBuilder.WriteString("\n")
+		}
+		ch <- outcome{events: events, ok: false}
+	}()
+	select {
+	case o := <-ch:
+		return o.events, o.ok
+	case <-time.After(d):
+		t.Fatalf("readSSEUntilEvent: timed out after %s waiting for event %q", d, target)
+		return nil, false
+	}
 }
