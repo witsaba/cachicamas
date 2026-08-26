@@ -163,15 +163,15 @@ test("routes/chat: the page renders at least one transcript slot (the assistant'
   const { default: AuthedIndex } = await import("./index");
   const { screen, render } = await createDOM();
   await render(<AuthedIndex />);
-  // The transcript still mounts as the chat surface (CH-05.1) and
-  // the agent's status now lives in the page header (chat-app.tsx)
-  // rather than the lead-in <li> that previously opened the
-  // transcript. With the lead-in removed the transcript is empty
+  // The transcript still mounts as the chat surface (CH-05.1). With
+  // the lead-in <li> removed (chat-app.tsx), the transcript is empty
   // until the first exchange; instead assert the header carries the
-  // agent name AND the status word, which together prove the chat
-  // surface is rendering the colleague the page is for.
+  // agent name AND the working-state indicator — for on-staff agents
+  // (the AGENTS[0] fallback) that indicator is the wasp, not the
+  // word "Working" (CHAT-12 / PR #205 / PR #206: the wasp replaces
+  // the previous "[dot] Working" affordance in this header).
   const header = screen.querySelector("header");
   const headerText = (header as HTMLElement).textContent ?? "";
   expect(headerText).toContain(AGENTS[0].name);
-  expect(headerText).toContain(AGENTS[0].statusWord);
+  expect(header?.querySelector('[data-testid="work-wasp"]')).toBeTruthy();
 });

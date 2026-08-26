@@ -433,9 +433,23 @@ export const ChatApp = component$<ChatAppProps>(
         observer?.disconnect();
       });
     });
-
     const agent = agentBySlug(activeSlug.value) ?? AGENTS[0];
     const youInitials = initialsOf(youName, youEmail);
+
+    // The wasp replaces the previous "[green dot] Working" affordance
+    // in the chat header. Show it whenever the agent is on staff (their
+    // standing state is "working"), OR whenever a turn is in flight —
+    // for non-working agents the wasp only appears during in-flight
+    // turns and we fall back to <Status /> the rest of the time.
+    // Animation tracks the turn, not the agent: the wings only flap
+    // while a turn is actually in flight, otherwise the wasp is quiet
+    // (visible but still) — same body, same eyes, just no motion.
+    const isInFlight =
+      turn.status === "streaming" ||
+      turn.status === "submitting" ||
+      turn.status === "cancelling";
+    const isOnStaff = agent.status === "working";
+    const showWasp = isInFlight || isOnStaff;
 
     return (
       <div class="flex min-h-0 flex-1">
@@ -486,16 +500,22 @@ export const ChatApp = component$<ChatAppProps>(
                   {agent.departmentName}
                 </span>
                 <span class="ml-auto">
-                  {turn.status === "streaming" ||
-                  turn.status === "submitting" ||
-                  turn.status === "cancelling" ? (
+                  {showWasp ? (
                     // The wasp itself IS the working indicator — it
                     // replaces both the previous green dot and the
                     // "Working now" word. The eyes carry the same
                     // green the dot used to carry, so the visual
                     // identity carries over; the wings + the
                     // wings-only animation are the only added motion.
-                    <WaspSpinner class="h-3.5 w-3.5" />
+                    // `wasp-anim` is opt-in per global.css, so the
+                    // wasp is quiet (visible but still) while the
+                    // turn is idle, and only flaps while in flight.
+                    <WaspSpinner
+                      class={[
+                        "h-3.5 w-3.5",
+                        isInFlight ? "wasp-anim" : "",
+                      ].join(" ")}
+                    />
                   ) : (
                     <Status status={agent.status} word={agent.statusWord} />
                   )}

@@ -100,22 +100,28 @@ describe("components/chat/chat-app (CH-05.1 + CH-08)", () => {
     expect(input.hasAttribute("disabled")).toBe(false);
   });
 
-  it("does not render the working wasp while the turn is idle", async () => {
-    // The wasp replaces the green dot ONLY while the turn is in
-    // flight (streaming | submitting | cancelling). At rest the
-    // header falls back to <Status /> with the agent's idle
-    // status word — the wasp would be a false-positive cue.
+  it("renders the wasp quietly for an on-staff agent while the turn is idle", async () => {
+    // The default fallback agent (AGENTS[0]) is on staff (status:
+    // "working"), so the wasp replaces the previous "[green dot]
+    // Working" indicator in the chat header — visible, but quiet
+    // (no `wasp-anim` class, wings do not flap) when the turn is
+    // idle. The animation only kicks in for in-flight turns; see
+    // `chat-app.tsx` for the derived `showWasp` / `isInFlight`
+    // booleans.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
-    expect(screen.querySelector('[data-testid="work-wasp"]')).toBeFalsy();
+    const wasp = screen.querySelector('[data-testid="work-wasp"]');
+    expect(wasp).toBeTruthy();
+    expect(wasp?.getAttribute("class")).not.toContain("wasp-anim");
   });
 
-  it("does not show the 'Working now' word anywhere while idle (the wasp is the sole cue when in flight)", async () => {
-    // The wasp IS the working indicator — there is no accompanying
-    // "Working now" text. This test pins that contract: an idle
-    // chat must never render the word "Working" in the DOM, so a
-    // future refactor that re-adds a label trips the test instead
-    // of silently shipping.
+  it("does not show the 'Working' word anywhere in the chat header (the wasp is the only working cue)", async () => {
+    // The wasp replaces BOTH the previous green dot and the word
+    // "Working" for on-staff agents — and "Working"/"Working now"
+    // never appears for any other status either (an in-flight turn
+    // with a non-working agent also renders the wasp, no label).
+    // Pin the contract so a future re-introduction of the text
+    // trips the test instead of silently shipping.
     const { screen, render } = await createDOM();
     await render(<ChatApp {...WHO} />);
     expect(screen.textContent ?? "").not.toContain("Working now");
