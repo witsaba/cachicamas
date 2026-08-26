@@ -243,6 +243,15 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 		return fmt.Errorf("apply archetype migrations: %w", err)
 	}
 
+	// CH-12 (cachicamas-assistant-configuration-ui): build the
+	// archetype Loader once at composition root so every Conversation
+	// (per-participant) and the GET handler share the same instance.
+	// SetRegisteredToolNames wires the safe-default factory's
+	// known-tool list — required before any Conversation constructed
+	// from this Loader sees a defaults-build.
+	archetype.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
+	archetypeLoader := archetype.NewPostgresLoader(db)
+
 	chatStore, closeStore, err := chat.NewPostgresConversationStore(ctx, cfg.ChatStoreDSN)
 	if err != nil {
 		_ = db.Close()
@@ -311,6 +320,12 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 			// pipeline as L1's openaicompat request span and the HTTP
 			// server span the Echo middleware opens above.
 			TracerProvider: otelTP,
+			// CH-12 (cachicamas-assistant-configuration-ui, REQ-CCVP-001..003):
+			// the archetype.Loader drives the per-turn system-prompt
+			// rebuild at the Send boundary. Same Loader instance the
+			// GET handler uses (built once at composition root, passed
+			// to RegisterAssistantConfigRoutes above).
+			AssistantConfigLoader: archetypeLoader,
 		})
 	}
 
@@ -357,13 +372,10 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	}
 
 	// CH-12.1 (PR-1 of cachicamas-assistant-configuration-ui):
-	// wire the AssistantConfig read surface. The Loader is built
-	// from the same *sql.DB the migration runner + chat store use
-	// (single connection pool, single DSN). SetRegisteredToolNames
-	// tells the safe-default factory which tool names exist, so the
-	// first PUT cannot bypass the registry by listing unknown names.
-	archetype.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
-	archetypeLoader := archetype.NewPostgresLoader(db)
+	// wire the AssistantConfig read surface. archetypeLoader was
+	// built once above (right after the migration runner) so it can
+	// be shared between this handler and the per-Conversation
+	// Send-boundary rebuild (see factory closure).
 	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader); err != nil {
 		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
 	}

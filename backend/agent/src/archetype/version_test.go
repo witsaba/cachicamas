@@ -77,11 +77,13 @@ func (r *recordingApply) last() string {
 	return r.prompts[len(r.prompts)-1]
 }
 
-// Test_VersionTracker_FirstLoad_RecordsVersion — REQ-CCVP-001 /
-// Scenario "first-load records the version". Given the Loader returns
-// version=3, when the tracker is constructed, then the recorded
-// version is 3.
-func Test_VersionTracker_FirstLoad_RecordsVersion(t *testing.T) {
+// Test_VersionTracker_FirstLoad_RecordsVersionAndApplies —
+// REQ-CCVP-001 / Scenario "first-load records the version". Given the
+// Loader returns version=3 with prompt="first prompt", when the tracker
+// is constructed, then the recorded version is 3 AND applyPrompt is
+// called once with the loaded prompt (the runtime slot is seeded from
+// the persisted config in a single step).
+func Test_VersionTracker_FirstLoad_RecordsVersionAndApplies(t *testing.T) {
 	t.Parallel()
 
 	loader := &fakeVersionedLoader{
@@ -104,10 +106,12 @@ func Test_VersionTracker_FirstLoad_RecordsVersion(t *testing.T) {
 	if got := vt.RecordedVersion(); got != 3 {
 		t.Errorf("RecordedVersion = %d, want 3", got)
 	}
-	// First load records the version but does NOT call applyPrompt —
-	// the prompt is already in place at construction time.
-	if apply.count() != 0 {
-		t.Errorf("applyPrompt called %d time(s) on first load, want 0 (the prompt is set at construction)", apply.count())
+	// First load calls applyPrompt once so the runtime slot is seeded.
+	if apply.count() != 1 {
+		t.Errorf("applyPrompt called %d time(s) on first load, want 1", apply.count())
+	}
+	if got := apply.last(); got != "first prompt" {
+		t.Errorf("last applied prompt = %q, want %q", got, "first prompt")
 	}
 }
 
@@ -145,8 +149,9 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 	if got := vt.RecordedVersion(); got != 4 {
 		t.Errorf("RecordedVersion = %d, want 4", got)
 	}
-	if apply.count() != 1 {
-		t.Errorf("applyPrompt called %d time(s), want 1", apply.count())
+	// 1 initial load + 1 reload-on-mismatch = 2 calls
+	if apply.count() != 2 {
+		t.Errorf("applyPrompt called %d time(s), want 2 (initial + reload-on-mismatch)", apply.count())
 	}
 	if got := apply.last(); got != "second prompt after config change" {
 		t.Errorf("last applied prompt = %q, want %q", got, "second prompt after config change")
@@ -180,8 +185,9 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 	if got := vt.RecordedVersion(); got != 3 {
 		t.Errorf("RecordedVersion = %d, want 3", got)
 	}
-	if apply.count() != 0 {
-		t.Errorf("applyPrompt called %d time(s), want 0 (no change on match)", apply.count())
+	// Initial load fires once; reload-on-match is a no-op.
+	if apply.count() != 1 {
+		t.Errorf("applyPrompt called %d time(s), want 1 (initial only — no change on match)", apply.count())
 	}
 }
 
@@ -203,12 +209,12 @@ func Test_VersionTracker_AbsentRow_DefaultsToVersion1(t *testing.T) {
 	if got := vt.RecordedVersion(); got != 1 {
 		t.Errorf("RecordedVersion = %d, want 1 (defaults are version=1 per design AD-2)", got)
 	}
-	// Reload on still-default config is a no-op.
+	// Initial load fires once (the default prompt); reload on still-default config is a no-op.
 	if err := vt.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload: %v", err)
 	}
-	if apply.count() != 0 {
-		t.Errorf("applyPrompt called %d time(s), want 0 (defaults stay defaults)", apply.count())
+	if apply.count() != 1 {
+		t.Errorf("applyPrompt called %d time(s), want 1 (initial only — defaults stay defaults)", apply.count())
 	}
 }
 

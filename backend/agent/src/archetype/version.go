@@ -39,6 +39,12 @@ type VersionTracker struct {
 // constructed with recordedVersion=0 — Reload will retry on the next
 // call. This keeps runtime construction from failing because of a
 // transient Loader hiccup.
+//
+// On a successful initial load, applyPrompt IS called with the loaded
+// prompt so the runtime slot (e.g. Conversation.harness.System) is
+// in sync with the persisted config from construction. The "no-op on
+// first load" was the v1 contract; v2 fires applyPrompt on first
+// load too so the runtime can be initialised in a single step.
 func NewVersionTracker(ctx context.Context, loader Loader, kind ArchetypeKind, participantID string, applyPrompt func(string)) (*VersionTracker, error) {
 	vt := &VersionTracker{
 		loader:        loader,
@@ -57,6 +63,9 @@ func NewVersionTracker(ctx context.Context, loader Loader, kind ArchetypeKind, p
 		return vt, err
 	}
 	vt.recordedVersion = cfg.Version
+	if applyPrompt != nil {
+		applyPrompt(cfg.SystemPrompt)
+	}
 	return vt, nil
 }
 
