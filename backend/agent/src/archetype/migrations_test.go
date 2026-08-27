@@ -378,3 +378,114 @@ func Test_Migration_0006_RerunIsNoOp(t *testing.T) {
 		t.Errorf("found %d rows with NULL archetype_slug after re-run", nulls)
 	}
 }
+
+// Test_Migration_0007_AddsLogFKAndIndex (T-08 PR-1). Asserts the
+// log table has the archetype_slug NOT NULL column, the FK
+// constraint, and the new index. Spec: archetype-system-storage ST-04.
+func Test_Migration_0007_AddsLogFKAndIndex(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+	resetArchetypeTables(t)
+
+	db, err := sql.Open("pgx", archetypeTestDSN())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	runArchetypeMigrationsUp(t, db)
+
+	// Column NOT NULL.
+	var isNullable string
+	if err := db.QueryRow(`
+		SELECT is_nullable FROM information_schema.columns
+		WHERE table_name = 'archetype_configurations_log' AND column_name = 'archetype_slug'`,
+	).Scan(&isNullable); err != nil {
+		t.Fatalf("query is_nullable: %v", err)
+	}
+	if isNullable != "NO" {
+		t.Errorf("archetype_configurations_log.archetype_slug is_nullable = %q, want NO", isNullable)
+	}
+
+	// FK exists.
+	var fkCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM information_schema.table_constraints
+		WHERE table_name = 'archetype_configurations_log'
+		  AND constraint_type = 'FOREIGN KEY'
+		  AND constraint_name = 'archetype_configurations_log_slug_fkey'`,
+	).Scan(&fkCount); err != nil {
+		t.Fatalf("query FK: %v", err)
+	}
+	if fkCount != 1 {
+		t.Errorf("FK count = %d, want 1", fkCount)
+	}
+
+	// Index exists.
+	var idxCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM pg_indexes
+		WHERE schemaname = 'public'
+		  AND tablename = 'archetype_configurations_log'
+		  AND indexname = 'idx_archetype_configurations_log_slug_org_created'`,
+	).Scan(&idxCount); err != nil {
+		t.Fatalf("query index: %v", err)
+	}
+	if idxCount != 1 {
+		t.Errorf("index count = %d, want 1", idxCount)
+	}
+}
+
+// Test_Migration_0007_BackfillsAssistantForPriorRows (T-08 PR-1).
+// Asserts every prior log row has archetype_slug='assistant' after
+// 0007's DEFAULT + UPDATE backfill. Spec: archetype-system-storage ST-04.
+func Test_Migration_0007_BackfillsAssistantForPriorRows(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+	resetArchetypeTables(t)
+
+	db, err := sql.Open("pgx", archetypeTestDSN())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Apply 0001..0003 manually to set up legacy state.
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+	if err := archetypeMigrations.Run0006IfNeeded(context.Background(), db); err != nil {
+		t.Fatalf("Run0006IfNeeded: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO archetype_configurations_log
+		(archetype_kind, org_id, actor, after, created_at)
+		VALUES
+			('chat', 'org-1', 'alice', '{}'::jsonb, now() - interval '5 minutes'),
+			('chat', '__default__', 'seed', '{}'::jsonb, now() - interval '1 hour')`); err != nil {
+		t.Fatalf("seed log rows: %v", err)
+	}
+
+	// Run 0007 via the goose runner.
+	provider, err := migrator.NewProvider(context.Background(), db, archetypeMigrations.MigrationsFS, "archetype_schema_migrations")
+	if err != nil {
+		t.Fatalf("migrator.NewProvider: %v", err)
+	}
+	if _, err := provider.Up(context.Background()); err != nil {
+		t.Fatalf("provider.Up: %v", err)
+	}
+
+	// Every prior row has archetype_slug='assistant'.
+	var notAssistant int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM archetype_configurations_log
+		WHERE archetype_slug <> 'assistant'`,
+	).Scan(&notAssistant); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if notAssistant != 0 {
+		t.Errorf("found %d log rows not backfilled to 'assistant'", notAssistant)
+	}
+}
