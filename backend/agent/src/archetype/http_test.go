@@ -736,5 +736,348 @@ func Test_HandleListArchetypes_OnlyLoaderRequired(t *testing.T) {
 	}
 }
 
-// (small helper to silence unused-imports when iterating)
-var _ = errors.New
+    // -----------------------------------------------------------------------------
+    // cachicamas-archetype-per-slug-overlay (RED — T-01..T-08) — TDD contract
+    // for the new GET /api/archetypes/:slug handler (REQ-APSO-1..8).
+    //
+    // Eight scenarios per the spec's APSO scenarios:
+    //   - Known slug + no override row → 200 + JSON with parent fields + NO override key
+    //   - Known slug + override row → 200 + JSON WITHOUT override key (strip observable)
+    //   - Unknown slug → 404 + ERR_UNKNOWN_SLUG
+    //   - Anonymous → 403 + standard envelope, loader NOT called
+    //   - Loader error → 500 + server envelope, no info leak
+    //   - Empty slug path → 400 + validation envelope, loader NOT called
+    //   - Registration discipline (loader=nil → new arm NOT mounted)
+    //   - Route ordering: /:slug and /:slug/config/ resolve disjointly
+    //
+    // RED state: these tests reference archetype.HandleGetArchetype, which
+    // does not exist yet. The file fails to compile, which is the canonical
+    // RED for a new exported handler. The Commit-2 GREEN commit adds the
+    // handler + the GET /api/archetypes/:slug route registration.
+    // -----------------------------------------------------------------------------
+
+    // Test_HandleGetArchetype_KnownSlug_200_NoOverride — REQ-APSO-1 +
+    // REQ-APSO-2 / Scenario 2: loader returns a view WITHOUT Override →
+    // 200 + JSON with the parent fields populated + NO override key.
+    func Test_HandleGetArchetype_KnownSlug_200_NoOverride(t *testing.T) {
+    	t.Parallel()
+
+    	now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+    	view := archetype.ArchetypeView{
+    		Slug:        "assistant",
+    		Type:        "system",
+    		DisplayName: "Assistant",
+    		Tagline:     "Your default assistant",
+    		Status:      "active",
+    		CreatedAt:   now,
+    		CreatedBy:   "seed",
+    	}
+    	loader := &fakeCatalogLoader{view: view, found: true}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusOK {
+    		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+    	}
+    	var got archetype.ArchetypeView
+    	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+    		t.Fatalf("decode body: %v", err)
+    	}
+    	if got.Slug != "assistant" {
+    		t.Errorf("Slug = %q, want assistant", got.Slug)
+    	}
+    	if got.Type != "system" {
+    		t.Errorf("Type = %q, want system", got.Type)
+    	}
+    	if got.DisplayName != "Assistant" {
+    		t.Errorf("DisplayName = %q, want Assistant", got.DisplayName)
+    	}
+    	if got.Override != nil {
+    		t.Errorf("Override = %+v, want nil", got.Override)
+    	}
+    	// The wire body MUST NOT contain the override key (even when
+    	// view.Override is nil, the json:"override,omitempty" tag drops it).
+    	if strings.Contains(rec.Body.String(), `"override"`) {
+    		t.Errorf("body contains override key: %s", rec.Body.String())
+    	}
+    	if loader.lastSlug != "assistant" {
+    		t.Errorf("loader called with slug %q, want assistant", loader.lastSlug)
+    	}
+    	if loader.lastOrgID != "user_alice" {
+    		t.Errorf("loader called with orgID %q, want user_alice", loader.lastOrgID)
+    	}
+    }
+
+    // Test_HandleGetArchetype_KnownSlug_WithOverrideRow_StillStripsOverride —
+    // REQ-APSO-2 / Scenario 3: loader returns a view WITH Override
+    // populated → 200 + JSON WITHOUT override key (strip step is
+    // observable even when the underlying view has one).
+    func Test_HandleGetArchetype_KnownSlug_WithOverrideRow_StillStripsOverride(t *testing.T) {
+    	t.Parallel()
+
+    	now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+    	view := archetype.ArchetypeView{
+    		Slug:        "assistant",
+    		Type:        "system",
+    		DisplayName: "Assistant",
+    		Tagline:     "Your default assistant",
+    		Status:      "active",
+    		CreatedAt:   now,
+    		CreatedBy:   "seed",
+    		Override: &archetype.ArchetypeOverride{
+    			SystemPrompt:   "you are the cachicamas assistant",
+    			ToolAllowlist:  []string{"current_time", "summarize_conversation"},
+    			DeferToolNames: []string{"summarize_conversation"},
+    			Version:        4,
+    			UpdatedAt:      now,
+    			UpdatedBy:      "user_alice",
+    		},
+    	}
+    	loader := &fakeCatalogLoader{view: view, found: true}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusOK {
+    		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+    	}
+    	// Strip is the contract: body MUST NOT carry an override key.
+    	if strings.Contains(rec.Body.String(), `"override"`) {
+    		t.Errorf("body contains override key (strip step failed): %s", rec.Body.String())
+    	}
+    	var got map[string]any
+    	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+    		t.Fatalf("decode body: %v", err)
+    	}
+    	if _, ok := got["override"]; ok {
+    		t.Errorf("body has override key: %v", got["override"])
+    	}
+    	if got["slug"] != "assistant" {
+    		t.Errorf("slug = %v, want assistant", got["slug"])
+    	}
+    }
+
+    // Test_HandleGetArchetype_UnknownSlug_404 — REQ-APSO-4 / Scenario 4:
+    // loader returns found=false → 404 + ERR_UNKNOWN_SLUG envelope.
+    func Test_HandleGetArchetype_UnknownSlug_404(t *testing.T) {
+    	t.Parallel()
+
+    	loader := &fakeCatalogLoader{found: false}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/no-such-slug", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusNotFound {
+    		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+    	}
+    	if !strings.Contains(rec.Body.String(), "ERR_UNKNOWN_SLUG") {
+    		t.Errorf("body missing ERR_UNKNOWN_SLUG code: %s", rec.Body.String())
+    	}
+    	if !strings.Contains(rec.Body.String(), "archetype slug is not registered") {
+    		t.Errorf("body missing standard 404 message: %s", rec.Body.String())
+    	}
+    }
+
+    // Test_HandleGetArchetype_Anonymous_403 — REQ-APSO-3 / Scenario 1:
+    // resolver returns (nil, false) → 403 + standard envelope, loader NOT
+    // called.
+    func Test_HandleGetArchetype_Anonymous_403(t *testing.T) {
+    	t.Parallel()
+
+    	loader := &fakeCatalogLoader{}
+    	resolver := &fakeResolver{signIn: false}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusForbidden {
+    		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+    	}
+    	if loader.loads != 0 {
+    		t.Errorf("loader called %d time(s) on anonymous request, want 0", loader.loads)
+    	}
+    	if !strings.Contains(rec.Body.String(), "identity not resolved") {
+    		t.Errorf("body missing standard 403 message: %s", rec.Body.String())
+    	}
+    }
+
+    // Test_HandleGetArchetype_LoaderError_500 — REQ-APSO-5 / Scenario 5:
+    // loader returns err → 500 + server envelope, no info leak (the
+    // underlying error string is NOT echoed in the body).
+    func Test_HandleGetArchetype_LoaderError_500(t *testing.T) {
+    	t.Parallel()
+
+    	loader := &fakeCatalogLoader{err: errors.New("postgres: connection refused")}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusInternalServerError {
+    		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+    	}
+    	if strings.Contains(rec.Body.String(), "postgres") {
+    		t.Errorf("body leaks underlying error (postgres): %s", rec.Body.String())
+    	}
+    	if strings.Contains(rec.Body.String(), "connection refused") {
+    		t.Errorf("body leaks underlying error (connection refused): %s", rec.Body.String())
+    	}
+    	if !strings.Contains(rec.Body.String(), "failed to load archetype config") {
+    		t.Errorf("body missing standard 500 message: %s", rec.Body.String())
+    	}
+    }
+
+    // Test_HandleGetArchetype_EmptySlug_400 — REQ-APSO-8 / Scenario 6: the
+    // slug path parameter is whitespace-only (or otherwise empty after
+    // TrimSpace) → 400 + validation envelope BEFORE the loader is called.
+    func Test_HandleGetArchetype_EmptySlug_400(t *testing.T) {
+    	t.Parallel()
+
+    	loader := &fakeCatalogLoader{view: archetype.ArchetypeView{Slug: "assistant"}, found: true}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	// URL-encode a single space — Echo decodes that to a whitespace
+    	// slug, which the handler trims and rejects as empty.
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/%20", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	if rec.Code != http.StatusBadRequest {
+    		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+    	}
+    	if loader.loads != 0 {
+    		t.Errorf("loader called %d time(s) on empty-slug request, want 0", loader.loads)
+    	}
+    	if !strings.Contains(rec.Body.String(), "missing slug path parameter") {
+    		t.Errorf("body missing standard 400 message: %s", rec.Body.String())
+    	}
+    }
+
+    // Test_HandleGetArchetype_OnlyLoaderRequired — REQ-APSO-6 + REQ-APSO-7 /
+    // Scenario 7 part 1: the new arm MUST require loader != nil. With
+    // loader=nil, the GET /:slug route is NOT mounted (404 returned by
+    // Echo's default not-found handler).
+    func Test_HandleGetArchetype_OnlyLoaderRequired(t *testing.T) {
+    	t.Parallel()
+
+    	// loader=nil, writer=non-nil → only the PUT arm is mounted.
+    	// The new GET /:slug arm MUST NOT be mounted.
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+    	writer := &fakeWriter{}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, nil, writer); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+    	rec := httptest.NewRecorder()
+    	e.ServeHTTP(rec, req)
+
+    	// The GET /:slug arm is intentionally NOT mounted when loader is
+    	// nil — Echo returns 404 (no matching route). Any 5xx would
+    	// indicate the handler ran with a nil loader (bug).
+    	if rec.Code != http.StatusNotFound {
+    		t.Fatalf("status = %d, want 404 (GET /:slug arm must NOT be mounted when loader=nil); body=%s",
+    		rec.Code, rec.Body.String())
+    	}
+    }
+
+    // Test_HandleGetArchetype_RouteOrderingWithConfigArm — REQ-APSO-6
+    // (route ordering): GET /api/archetypes/assistant resolves to the
+    // new per-slug handler (returns 200 + bare view, NO override key);
+    // GET /api/archetypes/assistant/config/ resolves to the per-slug
+    // /config/ handler (returns 200 + view WITH override key). The two
+    // arms do NOT shadow each other (Echo's trie resolves by path
+    // specificity).
+    func Test_HandleGetArchetype_RouteOrderingWithConfigArm(t *testing.T) {
+    	t.Parallel()
+
+    	now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+    	viewWithOverride := archetype.ArchetypeView{
+    		Slug:        "assistant",
+    		Type:        "system",
+    		DisplayName: "Assistant",
+    		Tagline:     "Your default assistant",
+    		Status:      "active",
+    		CreatedAt:   now,
+    		CreatedBy:   "seed",
+    		Override: &archetype.ArchetypeOverride{
+    			SystemPrompt:   "you are the cachicamas assistant",
+    			ToolAllowlist:  []string{"current_time", "summarize_conversation"},
+    			DeferToolNames: []string{"summarize_conversation"},
+    			Version:        4,
+    		UpdatedAt:      now,
+    		UpdatedBy:      "user_alice",
+    		},
+    	}
+    	loader := &fakeCatalogLoader{view: viewWithOverride, found: true}
+    	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+    	e := echo.New()
+    	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+    		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+    	}
+
+    	// GET /api/archetypes/assistant → new arm → 200 + NO override key.
+    	recBare := httptest.NewRecorder()
+    	e.ServeHTTP(recBare, httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil))
+    	if recBare.Code != http.StatusOK {
+    		t.Fatalf("bare arm status = %d, want 200; body=%s", recBare.Code, recBare.Body.String())
+    	}
+    	if strings.Contains(recBare.Body.String(), `"override"`) {
+    		t.Errorf("bare arm response leaked override key: %s", recBare.Body.String())
+    	}
+
+    	// GET /api/archetypes/assistant/config/ → /config/ arm → 200 + override key.
+    	recConfig := httptest.NewRecorder()
+    	e.ServeHTTP(recConfig, httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant/config/", nil))
+    	if recConfig.Code != http.StatusOK {
+    		t.Fatalf("/config/ arm status = %d, want 200; body=%s", recConfig.Code, recConfig.Body.String())
+    	}
+    	if !strings.Contains(recConfig.Body.String(), `"override"`) {
+    		t.Errorf("/config/ arm response missing override key: %s", recConfig.Body.String())
+    	}
+    }
+
+    // (small helper to silence unused-imports when iterating)
+    var _ = errors.New

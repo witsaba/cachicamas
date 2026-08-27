@@ -26,6 +26,7 @@ import {
   archetypeURL,
   archetypesListURL,
   getArchetype,
+  getArchetypeConfigPolymorphic,
   listArchetypesByType,
   putArchetypeConfig,
   type ArchetypeView,
@@ -387,5 +388,151 @@ describe("URL helpers", () => {
     expect(archetypesListURL("system")).toBe("/api/archetypes?type=system");
     expect(archetypesListURL("general")).toBe("/api/archetypes?type=general");
     expect(archetypesListURL("owned")).toBe("/api/archetypes?type=owned");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// cachicamas-archetype-per-slug-overlay (RED — T-09..T-13) — TDD contract for
+// the new getArchetypeConfigPolymorphic(slug) helper and the drift-guard on
+// getArchetype(slug) (REQ-ACAR-1, REQ-ACAR-5, REQ-ACAR-7).
+//
+//   - getArchetypeConfigPolymorphic(slug) MUST hit archetypeConfigURL(slug)
+//     (/api/archetypes/{slug}/config/), NOT archetypeURL(slug)
+//     (/api/archetypes/{slug}). This is the wire-shape contract for the
+//     /config/ endpoint that the adapter rewire locks.
+//   - getArchetypeConfigPolymorphic pass-through: the server response is
+//     returned verbatim (no flattening — the adapter layer in
+//     assistant-config.ts owns that).
+//   - getArchetypeConfigPolymorphic error envelope mapping: 404 → not_found,
+//     403 → not_found (anonymous), preserving the parseResponse mapping
+//     inherited from getJson<T>.
+//   - getArchetype drift guard: getArchetype(slug) MUST still hit
+//     archetypeURL(slug) (parent-overlay consumers rely on this).
+//
+// RED state: the file fails to import `getArchetypeConfigPolymorphic`
+// because the helper does not exist yet — that is the canonical RED for
+// strict TDD. Commit 2 of this change adds the helper and the
+// adapter-rewire GREEN.
+// -----------------------------------------------------------------------------
+
+describe("getArchetypeConfigPolymorphic", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("Test_ArchetypeConfigPolymorphicURL_CallsConfigURLNotBareURL: hits archetypeConfigURL(slug), NOT archetypeURL(slug)", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, assistantView()),
+    );
+
+    await getArchetypeConfigPolymorphic("assistant");
+
+    // MUST hit the /config/ URL — that is the wire contract.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      archetypeConfigURL("assistant"),
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    // MUST NOT hit the bare URL.
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      archetypeURL("assistant"),
+      expect.anything(),
+    );
+  });
+
+  it("Test_ArchetypeConfigPolymorphic_PassesThroughServerResponse: returns the server response verbatim (no flattening, no is_override derivation)", async () => {
+    const view = assistantView({
+      display_name: "Polymorphic /config/ name",
+      tagline: "From the /config/ endpoint",
+      is_override: true,
+      override: {
+        system_prompt: "polymorphic prompt",
+        tool_allowlist: ["current_time"],
+        defer_tool_names: [],
+        model: null,
+        version: 9,
+        updated_at: "2026-08-27T11:00:00Z",
+        updated_by: "user_alice",
+      },
+    });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, view),
+    );
+
+    const result = await getArchetypeConfigPolymorphic("assistant");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Pass-through: server response is returned verbatim. No flattening,
+    // no override-stripping on the client (server keeps the override;
+    // client preserves it).
+    expect(result.value.display_name).toBe("Polymorphic /config/ name");
+    expect(result.value.tagline).toBe("From the /config/ endpoint");
+    expect(result.value.override?.version).toBe(9);
+    expect(result.value.override?.system_prompt).toBe("polymorphic prompt");
+    expect(result.value.override?.updated_by).toBe("user_alice");
+    expect(result.value.is_override).toBe(true);
+  });
+
+  it("Test_ArchetypeConfigPolymorphic_404_MapsToNotFound: HTTP 404 + ERR_UNKNOWN_SLUG → ApiResult.kind='not_found'", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(404, {
+        kind: "not_found",
+        message: "archetype slug is not registered",
+        fields: { code: "ERR_UNKNOWN_SLUG" },
+      }),
+    );
+
+    const result = await getArchetypeConfigPolymorphic("no-such-slug");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("not_found");
+  });
+
+  it("Test_ArchetypeConfigPolymorphic_403_MapsToNotFound: HTTP 403 (anonymous) → ApiResult.kind='not_found'", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(403, {
+        kind: "server",
+        message: "identity not resolved",
+      }),
+    );
+
+    const result = await getArchetypeConfigPolymorphic("assistant");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("not_found");
+  });
+});
+
+describe("getArchetype drift guard", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("Test_GetArchetype_StillCallsBareURL_NoDrift: getArchetype(slug) still hits archetypeURL(slug), NOT archetypeConfigURL(slug)", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, assistantView()),
+    );
+
+    await getArchetype("assistant");
+
+    // Pin: getArchetype(slug) MUST keep hitting the bare URL. The
+    // parent-overlay consumers (use-system-archetype.ts:59,
+    // agents/index.tsx:48) depend on this.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      archetypeURL("assistant"),
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      archetypeConfigURL("assistant"),
+      expect.anything(),
+    );
   });
 });
