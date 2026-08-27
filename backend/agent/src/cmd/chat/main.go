@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -248,6 +249,7 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// from this Loader sees a defaults-build.
 	archetype.SetRegisteredToolNames([]string{"current_time", "summarize_conversation"})
 	archetypeLoader := archetype.NewPostgresLoader(db)
+	archetypeCatalogLoader := archetype.NewCatalogLoader(db)
 
 	chatStore, closeStore, err := chat.NewPostgresConversationStore(ctx, cfg.ChatStoreDSN)
 	if err != nil {
@@ -378,8 +380,20 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// Same instance is used by both the GET handler (no — GET uses
 	// the Loader; PUT uses the Writer) and the PUT handler.
 	archetypeWriter := archetype.NewPostgresWriter(db)
-	if err := chat.RegisterAssistantConfigRoutes(e, resolver, archetypeLoader, archetypeWriter); err != nil {
-		return fmt.Errorf("chat.RegisterAssistantConfigRoutes: %w", err)
+	// PR-2 of cachicamas-archetype-system-foundation (T-20): swap the
+	// route registration from the chat-owned /api/chat/assistant/config
+	// to the polymorphic /api/archetypes/{slug}/config surface. The
+	// CatalogLoader (catalog.go) is the polymorphic read port that joins
+	// parent + child + per-org override in one SELECT; the legacy
+	// kind-keyed Loader is kept for the per-Conversation Send-boundary
+	// rebuild below.
+	//
+	// The chat-package resolver (IdentityResolver) is bridged into the
+	// archetype-package IdentityResolver via a thin closure so the
+	// archetype package stays decoupled from chat.Identity.
+	archetypeResolver := archetypeArchetypeFromChat(resolver)
+	if err := archetype.RegisterArchetypeRoutes(e, archetypeResolver, archetypeCatalogLoader, archetypeWriter); err != nil {
+		return fmt.Errorf("archetype.RegisterArchetypeRoutes: %w", err)
 	}
 
 	logger.Info("chat composition root listening", "address", ":"+cfg.Port)
@@ -547,4 +561,40 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// chatArchetypeIdentityAdapter bridges chat.IdentityResolver into the
+// archetype.IdentityResolver shape. The archetype package does not
+// import the chat package (the wire is decoupled — see
+// cachicamas-archetype-system-foundation/design AD-7); the
+// composition root owns the adapter so the two packages stay
+// independent.
+//
+// The ParticipantID-as-orgID mapping is the v1 simplification locked
+// at the start of cachicamas-assistant-configuration-ui: a
+// single-user workspace maps participant 1:1 to org.
+type chatArchetypeIdentity struct {
+	participantID string
+}
+
+func (a chatArchetypeIdentity) ParticipantID() string { return a.participantID }
+
+type chatArchetypeResolverAdapter struct {
+	resolver chat.IdentityResolver
+}
+
+func (a chatArchetypeResolverAdapter) IdentityFromRequest(ctx context.Context, r *http.Request) (archetype.Identity, bool) {
+	ident, ok := a.resolver.IdentityFromRequest(ctx, r)
+	if !ok || ident == nil {
+		return nil, false
+	}
+	return chatArchetypeIdentity{participantID: ident.ParticipantID()}, true
+}
+
+// archetypeArchetypeFromChat wraps a chat.IdentityResolver into the
+// archetype.IdentityResolver interface. Used by the composition root
+// when wiring RegisterArchetypeRoutes (T-20 of PR-2 of
+// cachicamas-archetype-system-foundation).
+func archetypeArchetypeFromChat(resolver chat.IdentityResolver) archetype.IdentityResolver {
+	return chatArchetypeResolverAdapter{resolver: resolver}
 }
