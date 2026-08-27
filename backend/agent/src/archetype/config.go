@@ -237,7 +237,7 @@ func (l *PostgresLoader) LoadByKindAndOrg(ctx context.Context, kind ArchetypeKin
 // decodes the result. Used by LoadByKindAndOrg's two-step lookup.
 // Returns (zero, false, nil) when the row is absent.
 func (l *PostgresLoader) loadRow(ctx context.Context, kind ArchetypeKind, orgID string) (ArchetypeConfig, bool, error) {
-	const baseSelect = `SELECT kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`
+	const baseSelect = `SELECT archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`
 	query := baseSelect
 	if l.tx != nil {
 		query = baseSelect + ` FOR SHARE`
