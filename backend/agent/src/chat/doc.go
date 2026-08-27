@@ -102,7 +102,7 @@
 //     place (no destructive teardown — REQ-CCVP-003: an in-flight
 //     turn is never cancelled by a config change). The
 //     `archetype` package is the generic Layer 3 storage; chat is
-//     one consumer via `archetype.KindChat`. The Loader is
+//     one consumer via `archetype.AssistantSlug`. The Loader is
 //     constructed once at composition root and shared between the
 //     GET handler (`/api/chat/assistant/config`) and the per-
 //     Conversation tracker. The chat archetype's deny-by-default

@@ -41,7 +41,7 @@ type fakeWriter struct {
 	appends int
 }
 
-func (f *fakeWriter) WriteConfig(_ context.Context, _ archetype.ArchetypeKind, _ string, _ archetype.ConfigUpdate, _ string) (archetype.ArchetypeConfig, error) {
+func (f *fakeWriter) WriteConfig(_ context.Context, _ string, _ string, _ archetype.ConfigUpdate, _ string) (archetype.ArchetypeConfig, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.appends++
@@ -87,7 +87,7 @@ func Test_HandlePutAssistantConfig_ValidPersistsAndIncrementsVersion(t *testing.
 
 	writer := &fakeWriter{
 		result: archetype.ArchetypeConfig{
-			Kind:           archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:          "user_alice",
 			SystemPrompt:   "you are a helpful assistant",
 			ToolAllowlist:  []string{"current_time", "summarize_conversation"},

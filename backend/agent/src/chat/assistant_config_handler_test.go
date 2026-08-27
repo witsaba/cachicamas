@@ -48,7 +48,7 @@ type fakeConfigLoader struct {
 	withErr    error
 }
 
-func (f *fakeConfigLoader) LoadByKindAndOrg(_ context.Context, _ archetype.ArchetypeKind, _ string) (archetype.ArchetypeConfig, bool, error) {
+func (f *fakeConfigLoader) LoadBySlug(_ context.Context, _ string, _ string) (archetype.ArchetypeConfig, bool, error) {
 	return f.withResult, f.withFound, f.withErr
 }
 
@@ -83,7 +83,7 @@ func (i *fakeIdentity) ParticipantID() string { return i.participantID }
 func Test_HandleGetAssistantConfig_SignedInOwner(t *testing.T) {
 	t.Parallel()
 
-	expected := archetype.DefaultConfig(archetype.KindChat, "user_alice", []string{"current_time", "summarize_conversation"})
+	expected := archetype.DefaultConfig(archetype.AssistantSlug, "user_alice", []string{"current_time", "summarize_conversation"})
 	loader := &fakeConfigLoader{withResult: expected, withFound: true}
 	resolver := &fakeIdentityResolver{signIn: true, participant: "user_alice"}
 

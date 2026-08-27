@@ -265,7 +265,7 @@ func NewConversation(cfg Config) (*Conversation, error) {
 	// design AD-3): if a Loader is wired, build the version tracker.
 	// The applyPrompt callback mutates the harness's System field,
 	// which Harness.Run reads on every turn. The tracker's initial
-	// LoadByKindAndOrg call seeds both the recorded version AND the
+	// LoadBySlug call seeds both the recorded version AND the
 	// harness.System prompt (a fresh harness is created above with
 	// System = SystemPrompt; if the Loader has a different prompt
 	// at version 1, the apply fires during NewVersionTracker to
@@ -274,7 +274,7 @@ func NewConversation(cfg Config) (*Conversation, error) {
 		tracker, trackerErr := archetype.NewVersionTracker(
 			context.Background(),
 			cfg.AssistantConfigLoader,
-			archetype.KindChat,
+			archetype.AssistantSlug,
 			cfg.ParticipantID,
 			func(newPrompt string) {
 				conv.harness.System = newPrompt

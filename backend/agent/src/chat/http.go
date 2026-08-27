@@ -831,7 +831,7 @@ func HandleGetAssistantConfig(resolver IdentityResolver, loader archetype.Loader
 				"identity missing participant id", nil)
 		}
     
-		cfg, _, lerr := loader.LoadByKindAndOrg(c.Request().Context(), archetype.KindChat, participantID)
+		cfg, _, lerr := loader.LoadBySlug(c.Request().Context(), archetype.AssistantSlug, participantID)
 		if lerr != nil {
 			// Do not echo the underlying error string in the body
 			// (information leak). The error is logged via the
@@ -907,7 +907,7 @@ func HandleGetAssistantConfig(resolver IdentityResolver, loader archetype.Loader
     			ToolAllowlist:  append([]string(nil), body.ToolAllowlist...),
     			DeferToolNames: append([]string(nil), body.DeferToolNames...),
     		}
-    		cfg, werr := writer.WriteConfig(c.Request().Context(), archetype.KindChat, participantID, update, participantID)
+    		cfg, werr := writer.WriteConfig(c.Request().Context(), archetype.AssistantSlug, participantID, update, participantID)
     		if werr != nil {
     		// Map the package-level validation sentinels to 400 so a
     		// defence-in-depth rejection inside WriteConfig surfaces

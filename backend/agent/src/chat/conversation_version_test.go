@@ -38,7 +38,7 @@ type fakeVersionedLoader struct {
 	err    error
 }
 
-func (f *fakeVersionedLoader) LoadByKindAndOrg(_ context.Context, _ archetype.ArchetypeKind, _ string) (archetype.ArchetypeConfig, bool, error) {
+func (f *fakeVersionedLoader) LoadBySlug(_ context.Context, _ string, _ string) (archetype.ArchetypeConfig, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.result, f.found, f.err
@@ -96,7 +96,7 @@ func Test_Conversation_NewConversation_SetsInitialSystemFromConfig(t *testing.T)
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:           archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:          "test-conv",
 			SystemPrompt:   "initial prompt",
 			ToolAllowlist:  []string{"current_time"},
@@ -139,7 +139,7 @@ func Test_Conversation_ReloadAssistantConfig_VersionMismatch_UpdatesSystem(t *te
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:         archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "test-conv",
 			SystemPrompt: "initial prompt",
 			Version:      3,
@@ -159,7 +159,7 @@ func Test_Conversation_ReloadAssistantConfig_VersionMismatch_UpdatesSystem(t *te
 	}
 
 	loader.withCurrent(archetype.ArchetypeConfig{
-		Kind:         archetype.KindChat,
+		Slug:           archetype.AssistantSlug,
 		OrgID:        "test-conv",
 		SystemPrompt: "second prompt after config change",
 		Version:      4,
@@ -188,7 +188,7 @@ func Test_Conversation_ReloadAssistantConfig_VersionMatch_NoUpdate(t *testing.T)
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:         archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "test-conv",
 			SystemPrompt: "initial prompt",
 			Version:      3,
