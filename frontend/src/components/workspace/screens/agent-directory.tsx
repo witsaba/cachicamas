@@ -9,9 +9,15 @@
  * today — the other five are placeholders until their archetypes ship.
  * The directory must distinguish them so the user doesn't try to
  * configure a card that's read-only. The Assistant card:
- *   - displays `Configured` if the persisted row exists, `Default`
- *     if only safe defaults apply (auto-seeded by the backend's
- *     Loader on absent row).
+ *   - displays `display_name` and `tagline` from the polymorphic
+ *     `/api/archetypes/assistant/` response (T-23 of
+ *     cachicamas-archetype-system-foundation). On the AGENTS fallback
+ *     path the literal's `name`/`tagline` are used.
+ *   - displays `Configured` if the persisted per-org row exists
+ *     (`is_override=true`), `Default` otherwise
+ *     (`is_override=false`). The AGENTS fallback carries
+ *     `is_override=false` so a stale client surfaces "Default" — the
+ *     honest answer when the API was unreachable.
  *   - renders an inline `Configure` link anchored to
  *     `/agents/assistant/#configure` (lands on the ConfigureSection
  *     in the profile page).
@@ -27,33 +33,54 @@ import {
   PAGE_WELL,
   PageHeader,
 } from "~/components/workspace/page-header/page-header";
+import type { ArchetypeView } from "~/lib/api/archetypes";
 import type { Agent } from "~/lib/mock/staff";
 import { AGENTS } from "~/lib/mock/staff";
 
 export interface AgentDirectoryProps {
   /**
    * `true` when the persisted `archetype_configurations` row exists
-   * for the Assistant (the Loader returned `found: true`). When
-   * `false` or `undefined`, the Assistant card shows "Default".
-   * When the GET failed entirely (anonymous, offline, server), the
-   * route loader passes `undefined` and the card falls back to the
-   * static mock `statusWord` — better than hiding the signal
-   * completely.
+   * for the Assistant (`is_override=true` on the polymorphic view).
+   * `false` when the org is on the system default. When the GET
+   * failed entirely AND the AGENTS fallback also produced no signal,
+   * the route loader passes `undefined` and the card falls back to
+   * the static mock — better than hiding the signal completely.
    */
   readonly assistantConfigured?: boolean;
+  /**
+   * The polymorphic view for the Assistant (T-23 of
+   * cachicamas-archetype-system-foundation, PR-2). When present,
+   * the Assistant card uses its `display_name` + `tagline` instead of
+   * the AGENTS literal. Optional so this component stays callable
+   * from tests that mock only the override flag.
+   */
+  readonly assistantView?: ArchetypeView;
 }
 
 export const AgentDirectory = component$<AgentDirectoryProps>(
-  ({ assistantConfigured }) => {
+  ({ assistantConfigured, assistantView }) => {
     // REQ-FADR-002: statusWord is derived from the API response, not
-    // from the static mock. The five mock cards keep their existing
-    // statusWord untouched.
+    // from the static mock. After T-23 the assistant's display name
+    // + tagline also come from the API (the polymorphic view), and
+    // AGENTS[0] is just a fallback for offline / SSR-cache-miss.
+    // The five mock cards keep their existing data untouched.
     const agents: Agent[] = AGENTS.map((agent) => {
       if (agent.slug !== "assistant") return agent;
-      if (assistantConfigured === undefined) return agent;
+      const word =
+        assistantConfigured === undefined
+          ? undefined // let displayStatusWord provide the static fallback
+          : assistantConfigured
+            ? "Configured"
+            : "Default";
+      // The polymorphic view's display_name + tagline take precedence
+      // over the AGENTS literal — the server is authoritative.
+      const name = assistantView?.display_name ?? agent.name;
+      const tagline = assistantView?.tagline ?? agent.tagline;
       return {
         ...agent,
-        statusWord: assistantConfigured ? "Configured" : "Default",
+        name,
+        tagline,
+        statusWord: word,
       };
     });
 

@@ -18,7 +18,7 @@ import {
 import { PAGE_WELL } from "~/components/workspace/page-header/page-header";
 import { count, people } from "~/lib/plural";
 import { Status } from "~/components/workspace/status/status";
-import { type Agent, personById, teamsForAgent } from "~/lib/mock/staff";
+import { type Agent, displayStatusWord, personById, teamsForAgent } from "~/lib/mock/staff";
 
 const CARD =
   "rounded-md border border-line bg-surface p-5 shadow-[var(--shadow-raised)]";
@@ -31,6 +31,10 @@ export interface AgentProfileProps {
 export const AgentProfile = component$<AgentProfileProps>(({ agent }) => {
   const teams = teamsForAgent(agent.slug);
   const hired = agent.status !== "available";
+  // The Assistant's status word is API-derived (REQ-FADR-001/002);
+  // when this profile renders without the API signal (offline /
+  // SSR cache miss), the helper provides a static fallback.
+  const statusWord = displayStatusWord(agent);
 
   return (
     <div class={PAGE_WELL}>
@@ -74,7 +78,7 @@ export const AgentProfile = component$<AgentProfileProps>(({ agent }) => {
           <p class="pt-2">
             <Status
               status={agent.status}
-              word={agent.statusWord}
+              word={statusWord}
               detail={agent.statusDetail}
             />
           </p>

@@ -73,7 +73,7 @@ func resetAssistantConfigTable(t *testing.T, dsn string) {
 	// Re-seed the system default row (mirrors migration 0003).
 	if _, err := db.Exec(`
 		INSERT INTO archetype_configurations
-			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+			(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
 		VALUES
 			('chat', '__default__',
 			 'You are the cachicamas chat assistant; answer the participant in plain, well-formatted text.',
@@ -117,9 +117,9 @@ func seedRow(t *testing.T, dsn string, cfg archetype.ArchetypeConfig) {
 	}
 	if _, err := db.Exec(`
 		INSERT INTO archetype_configurations
-			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+			(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
 		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, now(), $8)
-	`, string(cfg.Kind), cfg.OrgID, cfg.SystemPrompt, allowlist, defers, model, cfg.Version, cfg.UpdatedBy); err != nil {
+	`, string(cfg.Slug), cfg.OrgID, cfg.SystemPrompt, allowlist, defers, model, cfg.Version, cfg.UpdatedBy); err != nil {
 		t.Fatalf("seedRow: INSERT: %v", err)
 	}
 }
@@ -136,7 +136,7 @@ func Test_Loader_PresentRow(t *testing.T) {
 	resetAssistantConfigTable(t, dsn)
 
 	seed := archetype.ArchetypeConfig{
-		Kind:           archetype.KindChat,
+		Slug:           archetype.AssistantSlug,
 		OrgID:          "org-1",
 		SystemPrompt:   "you are org-1's assistant",
 		ToolAllowlist:  []string{"current_time", "summarize_conversation"},
@@ -154,7 +154,7 @@ func Test_Loader_PresentRow(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	loader := archetype.NewPostgresLoader(db)
-	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-1")
+	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "org-1")
 	if lerr != nil {
 		t.Fatalf("LoadByOrg returned err=%v, want nil", lerr)
 	}
@@ -185,7 +185,7 @@ func Test_Loader_PresentRow(t *testing.T) {
 // Scenario "absent row returns defaults and found=false". Given no
 // row for orgID="org-2" AND no `__default__` seed row (i.e. DB up
 // but the seed was manually removed — the LAST-RESORT fallback path),
-// when LoadByKindAndOrg runs, then it returns the in-memory safe
+// when LoadBySlug runs, then it returns the in-memory safe
 // default, found=false, IsOverride=false, AND no row is inserted.
 //
 // RED at T-01: archetype.DefaultConfig is undefined. GREEN (T-02)
@@ -204,7 +204,7 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	loader := archetype.NewPostgresLoader(db)
-	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-2")
+	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "org-2")
 	if lerr != nil {
 		t.Fatalf("LoadByOrg returned err=%v, want nil", lerr)
 	}
@@ -214,7 +214,7 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	if got.IsOverride {
 		t.Errorf("IsOverride = true, want false (in-memory fallback)")
 	}
-	wantDefaults := archetype.DefaultConfig(archetype.KindChat, "org-2", []string{"current_time", "summarize_conversation"})
+	wantDefaults := archetype.DefaultConfig(archetype.AssistantSlug, "org-2", []string{"current_time", "summarize_conversation"})
 	if got.OrgID != wantDefaults.OrgID {
 		t.Errorf("OrgID = %q, want %q", got.OrgID, wantDefaults.OrgID)
 	}
@@ -233,7 +233,7 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 	// REQ-CACS-003: no row was created on the read path. Assert via
 	// direct SELECT count(*).
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`, archetype.KindChat, "org-2").Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_slug = $1 AND org_id = $2`, archetype.AssistantSlug, "org-2").Scan(&count); err != nil {
 		t.Fatalf("assert row absent: %v", err)
 	}
 	if count != 0 {
@@ -259,12 +259,12 @@ func Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	loader := archetype.NewPostgresLoader(db)
-	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "user_alice")
+	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "user_alice")
 	if lerr != nil {
-		t.Fatalf("LoadByKindAndOrg returned err=%v, want nil", lerr)
+		t.Fatalf("LoadBySlug returned err=%v, want nil", lerr)
 	}
 	if !found {
-		t.Fatalf("LoadByKindAndOrg returned found=false, want true (default row exists)")
+		t.Fatalf("LoadBySlug returned found=false, want true (default row exists)")
 	}
 	if got.IsOverride {
 		t.Errorf("IsOverride = true, want false (default row, not per-org)")
@@ -299,7 +299,7 @@ func Test_Loader_PerOrgRow_ShadowsDefaultRow(t *testing.T) {
 
 	// Seed a per-org override with different values.
 	seedRow(t, dsn, archetype.ArchetypeConfig{
-		Kind:           archetype.KindChat,
+		Slug:           archetype.AssistantSlug,
 		OrgID:          "user_alice",
 		SystemPrompt:   "you are org-1's assistant (overridden)",
 		ToolAllowlist:  []string{"current_time", "summarize_conversation"},
@@ -309,12 +309,12 @@ func Test_Loader_PerOrgRow_ShadowsDefaultRow(t *testing.T) {
 	})
 
 	loader := archetype.NewPostgresLoader(db)
-	got, found, lerr := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "user_alice")
+	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "user_alice")
 	if lerr != nil {
-		t.Fatalf("LoadByKindAndOrg returned err=%v, want nil", lerr)
+		t.Fatalf("LoadBySlug returned err=%v, want nil", lerr)
 	}
 	if !found {
-		t.Fatalf("LoadByKindAndOrg returned found=false, want true")
+		t.Fatalf("LoadBySlug returned found=false, want true")
 	}
 	if !got.IsOverride {
 		t.Errorf("IsOverride = false, want true (per-org row should shadow the default)")
@@ -329,7 +329,7 @@ func Test_Loader_PerOrgRow_ShadowsDefaultRow(t *testing.T) {
 
 // Test_Loader_DoubleAbsentReadNoSideEffect — REQ-CACS-003 Scenario
 // "read on absent row does not create a row". Two consecutive
-// LoadByKindAndOrg calls on an empty table both return found=false
+// LoadBySlug calls on an empty table both return found=false
 // and the table remains empty.
 //
 // RED at T-01.
@@ -345,11 +345,11 @@ func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 
 	loader := archetype.NewPostgresLoader(db)
 
-	_, found1, err1 := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-double")
+	_, found1, err1 := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "org-double")
 	if err1 != nil {
 		t.Fatalf("first LoadByOrg: %v", err1)
 	}
-	_, found2, err2 := loader.LoadByKindAndOrg(context.Background(), archetype.KindChat, "org-double")
+	_, found2, err2 := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "org-double")
 	if err2 != nil {
 		t.Fatalf("second LoadByOrg: %v", err2)
 	}
@@ -358,7 +358,7 @@ func Test_Loader_DoubleAbsentReadNoSideEffect(t *testing.T) {
 	}
 
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_kind = $1`, archetype.KindChat).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM archetype_configurations WHERE archetype_slug = $1`, archetype.AssistantSlug).Scan(&count); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
 	if count != 0 {
@@ -389,7 +389,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	resetAssistantConfigTable(t, dsn)
 
 	seed := archetype.ArchetypeConfig{
-		Kind:         archetype.KindChat,
+		Slug:           archetype.AssistantSlug,
 		OrgID:        "org-forshare",
 		SystemPrompt: "before",
 		ToolAllowlist: []string{"current_time"},
@@ -436,7 +436,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 			return
 		}
 		writerStart := time.Now()
-		if _, berr := tx.ExecContext(ctx, `UPDATE archetype_configurations SET system_prompt = $1 WHERE archetype_kind = $2 AND org_id = $3`, "after", string(archetype.KindChat), "org-forshare"); berr != nil {
+		if _, berr := tx.ExecContext(ctx, `UPDATE archetype_configurations SET system_prompt = $1 WHERE archetype_slug = $2 AND org_id = $3`, "after", string(archetype.AssistantSlug), "org-forshare"); berr != nil {
 			t.Errorf("UPDATE B: %v", berr)
 			_ = tx.Rollback()
 			close(writerCompleted)
@@ -460,7 +460,7 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 		t.Fatalf("BeginTx A: %v", err)
 	}
 	txLoader := loaderA.WithTx(txA)
-	aCfg, aFound, err = txLoader.LoadByKindAndOrg(holdCtx, archetype.KindChat, "org-forshare")
+	aCfg, aFound, err = txLoader.LoadBySlug(holdCtx, archetype.AssistantSlug, "org-forshare")
 	if err != nil {
 		t.Fatalf("LoadByOrg (A, tx-bound): %v", err)
 	}
@@ -504,8 +504,8 @@ func Test_Defaults_Pure(t *testing.T) {
 	const org = "org-pure"
 	tools := []string{"current_time", "summarize_conversation"}
 
-	first := archetype.DefaultConfig(archetype.KindChat, org, tools)
-	second := archetype.DefaultConfig(archetype.KindChat, org, tools)
+	first := archetype.DefaultConfig(archetype.AssistantSlug, org, tools)
+	second := archetype.DefaultConfig(archetype.AssistantSlug, org, tools)
 
 	if first.OrgID != second.OrgID {
 		t.Errorf("OrgID drifted: first=%q second=%q", first.OrgID, second.OrgID)

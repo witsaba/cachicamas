@@ -3,7 +3,7 @@
 // cachicamas-assistant-configuration-ui). It is intentionally NOT
 // scoped to a single archetype (e.g. chat, coding). Any archetype
 // in the system reads and writes its own configuration through this
-// package, keyed by (archetype_kind, org_id).
+// package, keyed by (archetype_slug, org_id).
 //
 // Why this lives in its own package (not src/chat/, not src/coding/):
 // the configuration contract is a Layer 3 concern shared by every
@@ -14,13 +14,14 @@
 // the layering explicit: archetypes import this; this does not import
 // any archetype.
 //
-// Composition: a single forward-only migration creates
-// `archetype_configurations` (src/archetype/migrations/0001_archetype_configurations.sql).
-// A composition root that wants to register an archetype calls
-// `archetype.NewPostgresLoader(db)` and routes its archetype-specific
-// HTTP handlers around that loader. The Loader MUST NOT auto-write on
-// absent row (REQ-CACS-003): an absent read returns safe defaults in
-// memory; persistence is the write API's responsibility.
+// Composition: forward-only migrations create
+// `archetypes` (0004), `system_archetypes` (0005),
+// `archetype_configurations` (0001 with PK reshape in 0006), and
+// `archetype_configurations_log` (0002 with FK in 0007). The
+// polymorphic surface (catalog.go) is the canonical read port;
+// config.go's Loader/Writer are the legacy kind-keyed adapters
+// preserved until the wire migrates to /api/archetypes/{slug}/config
+// (PR-2 of cachicamas-archetype-system-foundation).
 package archetype
 
 import (
@@ -33,18 +34,11 @@ import (
 	"time"
 )
 
-// ArchetypeKind names the family of an archetype so the
-// `archetype_configurations` table can hold rows for more than one
-// archetype (chat, coding, future support, ...). Today only KindChat is
-// wired; the type is exported so a future archetype can register
-// without touching this package.
-type ArchetypeKind string
-
-const (
-	// KindChat is the chat archetype (Layer 3, owned by src/chat/).
-	// The Assistant on the /agents page is one instance of KindChat.
-	KindChat ArchetypeKind = "chat"
-)
+// AssistantSlug is the canonical polymorphic identifier for the chat
+// archetype's Assistant. The frontend `AGENTS[0].slug` is mirrored here
+// so the wire and the DB speak the same identifier. Per design AD-2,
+// the constant value "assistant" matches OQ-1.
+const AssistantSlug = "assistant"
 
 // ArchetypeConfig is the persisted configuration row for one
 // (archetype_kind, org_id) pair. Stored in `archetype_configurations`.
@@ -62,15 +56,15 @@ const (
 //     per-archetype version propagation contract.
 //   - UpdatedAt/UpdatedBy: server-set on every successful PUT.
 type ArchetypeConfig struct {
-	Kind           ArchetypeKind `json:"kind"`
-	OrgID          string        `json:"org_id"`
-	SystemPrompt   string        `json:"system_prompt"`
-	ToolAllowlist  []string      `json:"tool_allowlist"`
-	DeferToolNames []string      `json:"defer_tool_names"`
-	Model          *string       `json:"model,omitempty"`
-	Version        int           `json:"version"`
-	UpdatedBy      string        `json:"updated_by,omitempty"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	Slug           string   `json:"slug"`
+	OrgID          string   `json:"org_id"`
+	SystemPrompt   string   `json:"system_prompt"`
+	ToolAllowlist  []string `json:"tool_allowlist"`
+	DeferToolNames []string `json:"defer_tool_names"`
+	Model          *string  `json:"model,omitempty"`
+	Version        int      `json:"version"`
+	UpdatedBy      string   `json:"updated_by,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
 	// IsOverride is true when the config came from a per-org row that
 	// shadows the system default. False when the config came from the
 	// seeded `__default__` row OR from the in-memory fallback (DB
@@ -116,29 +110,31 @@ var (
 	// ErrDeferToolNotInAllowlist is returned when defer_tool_names
 	// contains a name not present in tool_allowlist.
 	ErrDeferToolNotInAllowlist = errors.New("archetype config: defer_tool_names must be a subset of tool_allowlist")
-	// ErrUnknownArchetypeKind is returned when the supplied kind is
-	// not one of the registered ArchetypeKind constants.
-	ErrUnknownArchetypeKind = errors.New("archetype config: unknown archetype kind")
+	// ErrUnknownArchetypeSlug is returned when the supplied slug is
+	// empty or fails validation. Replaces the previous
+	// ErrUnknownArchetypeKind (kind-based) per OQ-1.
+	// (Declared in catalog.go as the canonical sentinel for the
+	// polymorphic surface.)
 )
 
 // Loader is the read port for ArchetypeConfig. The Postgres adapter is
 // the only shipped implementation; in-memory fakes can be added for
 // tests by implementing this interface.
 //
-// LoadByKindAndOrg returns a value (not a pointer) so callers can
+// LoadBySlug returns a value (not a pointer) so callers can
 // compare the returned ArchetypeConfig to a declared-zero-value safely.
-// The safe-default path returns DefaultConfig(kind, orgID, knownTools)
+// The safe-default path returns DefaultConfig(slug, orgID, knownTools)
 // by value, never nil; the absent-row signal is the bool second return.
 type Loader interface {
-	// LoadByKindAndOrg returns the persisted config for the supplied
-	// (kind, orgID) pair. When the row is absent, it returns the
+	// LoadBySlug returns the persisted config for the supplied
+	// (slug, orgID) pair. When the row is absent, it returns the
 	// safe-default config (built from DefaultConfig), found=false, and
 	// MUST NOT auto-write — REQ-CACS-003.
-	LoadByKindAndOrg(ctx context.Context, kind ArchetypeKind, orgID string) (ArchetypeConfig, bool, error)
+	LoadBySlug(ctx context.Context, slug, orgID string) (ArchetypeConfig, bool, error)
 
 	// WithTx returns a Loader that issues its read inside the supplied
 	// transaction. Used by the FOR SHARE serialisation contract (design
-	// AD-2): when caller A holds LoadByKindAndOrg inside a tx,
+	// AD-2): when caller A holds LoadBySlug inside a tx,
 	// concurrent writer B is blocked by Postgres's row-level shared
 	// lock until A commits.
 	WithTx(tx *sql.Tx) Loader
@@ -168,32 +164,35 @@ func (l *PostgresLoader) WithTx(tx *sql.Tx) Loader {
 	return &PostgresLoader{tx: tx}
 }
 
-// DefaultRowOrgID is the sentinel org_id used by the per-archetype
-// system default row (migration 0003_seed_chat_default.sql). The
-// Loader recognises this sentinel and rewrites the returned
-// ArchetypeConfig.OrgID to the caller's orgID — the row itself is
-// shared across all orgs that have not yet customised.
+// DefaultRowOrgID is the legacy sentinel org_id used by the per-archetype
+// system default row in migration 0003_seed_chat_default.sql. Removed
+// per design OQ-2: system defaults now live on system_archetypes (the
+// polymorphic CatalogLoader in catalog.go reads them). Kept as a
+// deprecated constant because tests and old fixtures still reference it.
 const DefaultRowOrgID = "__default__"
 
-// LoadByKindAndOrg reads `archetype_configurations` for the supplied
-// (kind, orgID) pair. Two-step lookup:
-//   1. SELECT ... WHERE kind = $1 AND org_id = $2 (caller's per-org row)
-//   2. If absent, SELECT ... WHERE kind = $1 AND org_id = '__default__'
-//      (per-archetype system default, seeded by migration 0003)
-//   3. If still absent, return in-memory `DefaultConfig(kind, orgID, ...)`
+// LoadBySlug reads `archetype_configurations` for the supplied
+// (slug, orgID) pair. Two-step lookup:
+//   1. SELECT ... WHERE archetype_slug = $1 AND org_id = $2 (caller's per-org row)
+//   2. If absent, return in-memory `DefaultConfig(slug, orgID, ...)`
 //      — this is the LAST-RESORT fallback for a DB outage (REQ-CACS-003:
 //      "if the database for any reason fails, MUST to use hardcoded
 //      default values").
 //
+// The previous __default__ sentinel row path is gone; system defaults
+// live on system_archetypes (per design OQ-2) and this Loader does NOT
+// consult them — the chat binary uses the polymorphic CatalogLoader
+// (catalog.go) for the full join. config.go's Loader is the kind-keyed
+// adapter kept for backwards compatibility until PR-2 retires
+// /api/chat/assistant/config.
+//
 // On a tx-bound Loader the queries use `FOR SHARE`; on a db-bound
 // Loader they use plain `SELECT`. The IsOverride flag distinguishes
-// "user-customised" (true) from "system default" / "in-memory fallback"
-// (false) so the frontend can label the Assistant card correctly.
+// "user-customised" (true) from "in-memory fallback" (false) so the
+// frontend can label the Assistant card correctly.
 //
 // Behaviour matrix:
 //   - per-org row present  → returns row, found=true,  IsOverride=true
-//   - default row only    → returns row, found=true,  IsOverride=false
-//                            (OrgID is rewritten to the caller's orgID)
 //   - no rows at all       → returns safe-default, found=false,
 //                            IsOverride=false
 //   - DB query/scan fails  → returns safe-default, found=false,
@@ -201,50 +200,41 @@ const DefaultRowOrgID = "__default__"
 //
 // The Loader MUST NOT auto-write the safe default. Persistence is the
 // write API layer's responsibility (REQ-CACS-003).
-func (l *PostgresLoader) LoadByKindAndOrg(ctx context.Context, kind ArchetypeKind, orgID string) (ArchetypeConfig, bool, error) {
-	if kind == "" {
-		return ArchetypeConfig{}, false, ErrUnknownArchetypeKind
+func (l *PostgresLoader) LoadBySlug(ctx context.Context, slug, orgID string) (ArchetypeConfig, bool, error) {
+	if slug == "" {
+		return ArchetypeConfig{}, false, ErrUnknownArchetypeSlug
 	}
 	if strings.TrimSpace(orgID) == "" {
 		return ArchetypeConfig{}, false, errors.New("archetype config loader: orgID must be non-empty")
 	}
 
 	// Step 1: per-org row.
-	if cfg, found, err := l.loadRow(ctx, kind, orgID); err != nil {
+	if cfg, found, err := l.loadRow(ctx, slug, orgID); err != nil {
 		return ArchetypeConfig{}, false, err
 	} else if found {
 		cfg.IsOverride = true
 		return cfg, true, nil
 	}
 
-	// Step 2: per-archetype system default (sentinel org_id).
-	if cfg, found, err := l.loadRow(ctx, kind, DefaultRowOrgID); err != nil {
-		return ArchetypeConfig{}, false, err
-	} else if found {
-		cfg.OrgID = orgID // rewrite to caller's orgID; the row itself stays at the sentinel
-		cfg.IsOverride = false
-		return cfg, true, nil
-	}
-
-	// Step 3: no rows at all → in-memory fallback (DB up but seed
-	// missing or both rows deleted). Returns found=false so the caller
-	// can distinguish this from the default-row case if needed.
+	// Step 2: no rows at all → in-memory fallback (DB up but the row
+	// never existed or was deleted). Returns found=false so the caller
+	// can distinguish this from the per-org case if needed.
 	known := knownToolNames(ctx)
-	return DefaultConfig(kind, orgID, known), false, nil
+	return DefaultConfig(slug, orgID, known), false, nil
 }
 
-// loadRow issues the SELECT for an exact (kind, orgID) pair and
-// decodes the result. Used by LoadByKindAndOrg's two-step lookup.
+// loadRow issues the SELECT for an exact (slug, orgID) pair and
+// decodes the result. Used by LoadBySlug's single-step lookup.
 // Returns (zero, false, nil) when the row is absent.
-func (l *PostgresLoader) loadRow(ctx context.Context, kind ArchetypeKind, orgID string) (ArchetypeConfig, bool, error) {
-	const baseSelect = `SELECT archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2`
+func (l *PostgresLoader) loadRow(ctx context.Context, slug, orgID string) (ArchetypeConfig, bool, error) {
+	const baseSelect = `SELECT archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by FROM archetype_configurations WHERE archetype_slug = $1 AND org_id = $2`
 	query := baseSelect
 	if l.tx != nil {
 		query = baseSelect + ` FOR SHARE`
 	}
 	var (
 		row          *sql.Row
-		gotKind      string
+		gotSlug      string
 		gotOrgID     string
 		gotPrompt    string
 		rawAllowlist []byte
@@ -255,32 +245,32 @@ func (l *PostgresLoader) loadRow(ctx context.Context, kind ArchetypeKind, orgID 
 		gotUpdatedBy string
 	)
 	if l.tx != nil {
-		row = l.tx.QueryRowContext(ctx, query, string(kind), orgID)
+		row = l.tx.QueryRowContext(ctx, query, slug, orgID)
 	} else {
-		row = l.db.QueryRowContext(ctx, query, string(kind), orgID)
+		row = l.db.QueryRowContext(ctx, query, slug, orgID)
 	}
-	if err := row.Scan(&gotKind, &gotOrgID, &gotPrompt, &rawAllowlist, &rawDefers, &gotModel, &gotVersion, &gotUpdatedAt, &gotUpdatedBy); err != nil {
+	if err := row.Scan(&gotSlug, &gotOrgID, &gotPrompt, &rawAllowlist, &rawDefers, &gotModel, &gotVersion, &gotUpdatedAt, &gotUpdatedBy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ArchetypeConfig{}, false, nil
 		}
-		return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: scan row for kind=%q org=%q: %w", kind, orgID, err)
+		return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: scan row for slug=%q org=%q: %w", slug, orgID, err)
 	}
 
 	var allowlist []string
 	if len(rawAllowlist) > 0 {
 		if err := json.Unmarshal(rawAllowlist, &allowlist); err != nil {
-			return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: decode tool_allowlist for kind=%q org=%q: %w", kind, orgID, err)
+			return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: decode tool_allowlist for slug=%q org=%q: %w", slug, orgID, err)
 		}
 	}
 	var defers []string
 	if len(rawDefers) > 0 {
 		if err := json.Unmarshal(rawDefers, &defers); err != nil {
-			return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: decode defer_tool_names for kind=%q org=%q: %w", kind, orgID, err)
+			return ArchetypeConfig{}, false, fmt.Errorf("archetype config loader: decode defer_tool_names for slug=%q org=%q: %w", slug, orgID, err)
 		}
 	}
 
 	cfg := ArchetypeConfig{
-		Kind:           ArchetypeKind(gotKind),
+		Slug:           gotSlug,
 		OrgID:          gotOrgID,
 		SystemPrompt:   gotPrompt,
 		ToolAllowlist:  allowlist,
@@ -309,23 +299,18 @@ func (l *PostgresLoader) loadRow(ctx context.Context, kind ArchetypeKind, orgID 
 // archetypes can supply their own default via a switch on `kind`; the
 // loader will pass `known` from the registered tool set of whichever
 // archetype owns the read.
-func DefaultConfig(kind ArchetypeKind, orgID string, knownTools []string) ArchetypeConfig {
+func DefaultConfig(slug, orgID string, knownTools []string) ArchetypeConfig {
 	allowlist := append([]string(nil), knownTools...)
 	defers := append([]string(nil), DefaultDeferToolNames...)
 	prompt := DefaultChatSystemPrompt
-	switch kind {
-	case KindChat:
+	switch slug {
+	case AssistantSlug:
 		prompt = DefaultChatSystemPrompt
 	default:
-		// For future kinds, the composition root must register the
-		// kind's default prompt via SetDefaultPromptForKind before
-		// the Loader serves its first read.
-		if override, ok := defaultPromptsByKind[kind]; ok {
-			prompt = override
-		}
+		prompt = DefaultChatSystemPrompt
 	}
 	return ArchetypeConfig{
-		Kind:           kind,
+		Slug:           slug,
 		OrgID:          orgID,
 		SystemPrompt:   prompt,
 		ToolAllowlist:  allowlist,
@@ -335,19 +320,6 @@ func DefaultConfig(kind ArchetypeKind, orgID string, knownTools []string) Archet
 		UpdatedBy:      "",
 		UpdatedAt:      time.Time{},
 	}
-}
-
-// defaultPromptsByKind holds per-kind default system prompts for
-// future archetypes. The chat kind uses DefaultChatSystemPrompt
-// directly (no entry needed). Set via SetDefaultPromptForKind.
-var defaultPromptsByKind = map[ArchetypeKind]string{}
-
-// SetDefaultPromptForKind registers the default system prompt for a
-// future archetype kind. The chat kind is hardcoded (DefaultChatSystemPrompt)
-// and ignores this registry. Call from the future archetype's
-// composition root at startup.
-func SetDefaultPromptForKind(kind ArchetypeKind, prompt string) {
-	defaultPromptsByKind[kind] = prompt
 }
 
 // knownToolNames returns the registered tool names from the chat
@@ -419,7 +391,7 @@ type ConfigUpdate struct {
 // On any failure (validation, scan, db error) the transaction is
 // rolled back and no log row is appended.
 type Writer interface {
-	WriteConfig(ctx context.Context, kind ArchetypeKind, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error)
+	WriteConfig(ctx context.Context, slug, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error)
 }
 
 // PostgresWriter is the Postgres-backed implementation of Writer.
@@ -455,9 +427,9 @@ func NewPostgresWriter(db *sql.DB) Writer {
 // calling WriteConfig. (Skipping it here keeps WriteConfig a pure
 // persistence port; a caller with a different tool registry can
 // supply its own validation.)
-func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error) {
-	if kind == "" {
-		return ArchetypeConfig{}, ErrUnknownArchetypeKind
+func (w *PostgresWriter) WriteConfig(ctx context.Context, slug, orgID string, update ConfigUpdate, actor string) (ArchetypeConfig, error) {
+	if slug == "" {
+		return ArchetypeConfig{}, ErrUnknownArchetypeSlug
 	}
 	if strings.TrimSpace(orgID) == "" {
 		return ArchetypeConfig{}, errors.New("archetype writer: orgID must be non-empty")
@@ -505,8 +477,8 @@ func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, or
 	var beforeJSON []byte
 	var prevVersion int
 	row := tx.QueryRowContext(ctx,
-		`SELECT version, to_jsonb(archetype_configurations) FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2 FOR UPDATE`,
-		string(kind), orgID)
+		`SELECT version, to_jsonb(archetype_configurations) FROM archetype_configurations WHERE archetype_slug = $1 AND org_id = $2 FOR UPDATE`,
+		slug, orgID)
 	var prev []byte
 	if scanErr := row.Scan(&prevVersion, &prev); scanErr != nil && !errors.Is(scanErr, sql.ErrNoRows) {
 		return ArchetypeConfig{}, fmt.Errorf("archetype writer: read prior row: %w", scanErr)
@@ -528,9 +500,9 @@ func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, or
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO archetype_configurations
-			(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+			(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
 		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, now(), $8)
-		ON CONFLICT (archetype_kind, org_id) DO UPDATE SET
+		ON CONFLICT (archetype_slug, org_id) DO UPDATE SET
 			system_prompt    = EXCLUDED.system_prompt,
 			tool_allowlist   = EXCLUDED.tool_allowlist,
 			defer_tool_names = EXCLUDED.defer_tool_names,
@@ -538,7 +510,7 @@ func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, or
 			version          = EXCLUDED.version,
 			updated_at       = now(),
 			updated_by       = EXCLUDED.updated_by
-	`, string(kind), orgID, prompt, allowlistJSON, deferJSON, modelArg, newVersion, actor); err != nil {
+	`, slug, orgID, prompt, allowlistJSON, deferJSON, modelArg, newVersion, actor); err != nil {
 		return ArchetypeConfig{}, fmt.Errorf("archetype writer: upsert config: %w", err)
 	}
 
@@ -547,10 +519,10 @@ func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, or
 	// canonical row, not a synthesised copy).
 	var written ArchetypeConfig
 	if err := tx.QueryRowContext(ctx, `
-		SELECT archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by
-		FROM archetype_configurations WHERE archetype_kind = $1 AND org_id = $2
-	`, string(kind), orgID).Scan(
-		&written.Kind, &written.OrgID, &written.SystemPrompt, &allowlistJSON, &deferJSON,
+		SELECT archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by
+		FROM archetype_configurations WHERE archetype_slug = $1 AND org_id = $2
+	`, slug, orgID).Scan(
+		&written.Slug, &written.OrgID, &written.SystemPrompt, &allowlistJSON, &deferJSON,
 		&modelArg, &written.Version, &written.UpdatedAt, &written.UpdatedBy,
 	); err != nil {
 		return ArchetypeConfig{}, fmt.Errorf("archetype writer: read back row: %w", err)
@@ -580,9 +552,9 @@ func (w *PostgresWriter) WriteConfig(ctx context.Context, kind ArchetypeKind, or
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO archetype_configurations_log
-			(archetype_kind, org_id, actor, before, after)
+			(archetype_slug, org_id, actor, before, after)
 		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
-	`, string(kind), orgID, actor, beforeArg, afterJSON); err != nil {
+	`, slug, orgID, actor, beforeArg, afterJSON); err != nil {
 		return ArchetypeConfig{}, fmt.Errorf("archetype writer: append log: %w", err)
 	}
 

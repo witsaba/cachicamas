@@ -1,40 +1,43 @@
 /**
  * `/agents` — the staff directory.
  *
- * The route loader fetches the Assistant's persisted config (when
- * the caller is signed in) so the directory can render the
- * `Configured` / `Default` status word and the inline `Configure`
- * link on the Assistant card (REQ-FADR-001/002). The five mock
- * specialists stay unchanged.
+ * T-23 of cachicamas-archetype-system-foundation: the directory's
+ * `useAssistantOverride` loader replaces the legacy ad-hoc
+ * `/api/chat/assistant/config` round-trip with a call to the
+ * polymorphic `/api/archetypes/assistant/` endpoint. The loader now
+ * returns the full ArchetypeView so the AgentDirectory can read
+ * `display_name` + `tagline` + `is_override` from one source.
  *
- * "Configured" means the org has a per-org row that shadows the
- * system default (`is_override=true` in the API response). The
- * `__default__` seed row is treated as the system default and
- * surfaces as `assistantConfigured: false` — the user sees "Default".
+ * "Configured" still means the org has a per-org row that shadows the
+ * system default (`is_override=true`). "Default" means the org is on
+ * the seeded default — the `__default__` row is treated as the system
+ * default and surfaces as `is_override=false`. On a fetch failure
+ * (offline / anon / server) `resolveSystemArchetype` falls back to
+ * the AGENTS-derived synthetic view, so the loader always returns a
+ * view.
+ *
+ * Anonymous callers fall through to the `not_found` branch of the
+ * polymorphic envelope, and the AGENTS fallback kicks in: the
+ * directory always has data to render.
  */
 import { component$ } from "@builder.io/qwik";
 import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
 
 import { SignInRequiredCard } from "~/components/sign-in-required-card/sign-in-required-card";
 import { AgentDirectory } from "~/components/workspace/screens/agent-directory";
-import { getAssistantConfig } from "~/lib/api/assistant-config";
+import type { ArchetypeView } from "~/lib/api/archetypes";
+import { resolveSystemArchetype } from "~/lib/hooks/use-system-archetype";
 import { requireSession } from "~/lib/require-session";
 import { useSession, useSignIn } from "~/routes/plugin@auth";
 
-// `useAssistantOverride` returns true when the caller's org has
-// persisted a per-org row that shadows the system default. False
-// means the org is running on the seeded default (or the GET
-// failed entirely — anonymous / offline / server). The directory
-// labels the Assistant card "Default" in either false case.
-//
-// Anonymous callers fall through to the `not_found` branch of the
-// GET envelope (the chat handler refuses them with 403), so we
-// don't need a separate session check here.
-export const useAssistantOverride = routeLoader$(async () => {
-  const result = await getAssistantConfig();
-  if (!result.ok) return null;
-  return result.value.is_override;
-});
+// `useAssistantOverride` returns the polymorphic ArchetypeView for the
+// assistant. On any failure (offline, anon, server error), the
+// resolver falls back to the AGENTS-derived synthetic view, so the
+// loader's return type is non-null in practice — but the type stays
+// nullable to keep the unknown-slug escape hatch honest.
+export const useAssistantOverride = routeLoader$<ArchetypeView | null>(
+  async () => resolveSystemArchetype("assistant"),
+);
 
 export default component$(() => {
   const sessionSig = useSession();
@@ -54,15 +57,15 @@ export default component$(() => {
     );
   }
 
-  // `null` from the loader (offline / anon / server) is treated as
-  // "no signal" — the directory falls back to the static mock
-  // statusWord. Otherwise, when the value is defined, we pass it
-  // through: `true` means "Configured" (per-org override),
-  // `false` means "Default" (system default).
-  const assistantConfigured =
-    assistantOverride.value === null ? undefined : assistantOverride.value;
+  const view = assistantOverride.value;
+  const assistantConfigured = view ? view.is_override : undefined;
 
-  return <AgentDirectory assistantConfigured={assistantConfigured} />;
+  return (
+    <AgentDirectory
+      assistantConfigured={assistantConfigured}
+      assistantView={view ?? undefined}
+    />
+  );
 });
 
 export const head: DocumentHead = {

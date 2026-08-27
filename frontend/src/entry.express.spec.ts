@@ -168,31 +168,67 @@ describe("routeApiRequest", () => {
   // Order matters: the more specific prefixes MUST be checked before the
   // generic `/api/*` fall-through, otherwise `/api/chat/assistant/config`
   // would be routed to database_administrator and die with a 404.
-  it("/api/agent/turns routes to the agent_chat binary (agent)", () => {
-    expect(routeApiRequest("/api/agent/turns")).toBe("agent");
-  });
+      it("/api/agent/turns routes to the agent_chat binary (agent)", () => {
+        expect(routeApiRequest("/api/agent/turns")).toBe("agent");
+      });
 
-  it("/api/chat/assistant/config routes to the agent_chat binary (chat)", () => {
-    expect(routeApiRequest("/api/chat/assistant/config")).toBe("chat");
-  });
+      it("/api/chat/assistant/config routes to the agent_chat binary (chat)", () => {
+        expect(routeApiRequest("/api/chat/assistant/config")).toBe("chat");
+      });
 
-  it("/api/chat/anything/else also routes to the agent_chat binary (chat)", () => {
-    expect(routeApiRequest("/api/chat/anything/else")).toBe("chat");
-  });
+      it("/api/chat/anything/else also routes to the agent_chat binary (chat)", () => {
+        expect(routeApiRequest("/api/chat/anything/else")).toBe("chat");
+      });
 
-  it("/api/organizations routes to the database_administrator binary (api)", () => {
-    expect(routeApiRequest("/api/organizations")).toBe("api");
-  });
+      it("/api/organizations routes to the database_administrator binary (api)", () => {
+        expect(routeApiRequest("/api/organizations")).toBe("api");
+      });
 
-  it("/api/v1/identity/signin-callback routes to the database_administrator binary (api)", () => {
-    expect(routeApiRequest("/api/v1/identity/signin-callback")).toBe("api");
-  });
+      it("/api/v1/identity/signin-callback routes to the database_administrator binary (api)", () => {
+        expect(routeApiRequest("/api/v1/identity/signin-callback")).toBe("api");
+      });
 
-  it("/some/non/api/path is NOT an API route (null)", () => {
-    expect(routeApiRequest("/some/non/api/path")).toBeNull();
-  });
+      it("/some/non/api/path is NOT an API route (null)", () => {
+        expect(routeApiRequest("/some/non/api/path")).toBeNull();
+      });
 
-  it("an empty URL is NOT an API route (defensive)", () => {
-    expect(routeApiRequest("")).toBeNull();
-  });
-});
+      it("an empty URL is NOT an API route (defensive)", () => {
+        expect(routeApiRequest("")).toBeNull();
+      });
+
+      // T-24 of cachicamas-archetype-system-foundation (PR-2): the
+      // polymorphic /api/archetypes/* tree is hosted on the chat
+      // binary. The new arm MUST be checked BEFORE the `/api/*`
+      // fall-through, otherwise the catch-all would silently route
+      // archetype reads/writes to database_administrator and die
+      // with a 404.
+      it("Test_routeApiRequest_ArchetypesArm_BeforeFallback: /api/archetypes/assistant/config resolves to 'chat'", () => {
+        expect(routeApiRequest("/api/archetypes/assistant/config")).toBe(
+          "chat",
+        );
+      });
+
+      it("Test_routeApiRequest_ArchetypesArm_BeforeFallback: /api/archetypes?type=system resolves to 'chat'", () => {
+        // The directory-list endpoint shares the polymorphic surface.
+        expect(routeApiRequest("/api/archetypes?type=system")).toBe("chat");
+      });
+
+      it("Test_routeApiRequest_ArchetypesArm_AfterChat: /api/chat/... still resolves to 'chat'", () => {
+        // Lock the legacy /api/chat/* arm so the new arm can't
+        // accidentally absorb it.
+        expect(routeApiRequest("/api/chat/assistant/config")).toBe("chat");
+        expect(routeApiRequest("/api/chat/anything/else")).toBe("chat");
+      });
+
+      it("Test_routeApiRequest_ArchetypesArm_AfterChat: /api/archetypes/... does not lose ordering", () => {
+        // The new arm sits AFTER the /api/chat/* arm in the dispatcher
+        // (matches the comment in api-router.ts). Both must continue
+        // to route to the chat binary. This guards against an
+        // accidental re-ordering where /api/chat/* falls into the
+        // /api/archetypes/* branch on a prefix match.
+        expect(routeApiRequest("/api/chat/something/specific")).toBe("chat");
+        expect(routeApiRequest("/api/archetypes/something/specific")).toBe(
+          "chat",
+        );
+      });
+    });

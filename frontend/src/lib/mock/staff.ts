@@ -56,8 +56,19 @@ export interface Agent {
   /** Two or three sentences a manager would read before hiring. */
   readonly summary: string;
   readonly status: AgentStatus;
-  /** The literal word rendered beside the status dot. */
-  readonly statusWord: string;
+  /**
+   * The literal word rendered beside the status dot.
+   *
+   * Optional on the type because the Assistant's status word is
+   * API-derived (REQ-FADR-001/002): the directory gets it from
+   * `/api/archetypes/assistant/` after PR-2 T-23 and the AGENTS
+   * literal does not duplicate that source. The five mock specialists
+   * keep their static statusWord verbatim — they're fictional
+   * placeholders, not user-editable. Renderers MUST go through
+   * `displayStatusWord(agent)` so the missing field gets a generic
+   * fallback instead of `undefined`.
+   */
+  readonly statusWord?: string;
   /** The honest sentence under the word. */
   readonly statusDetail: string;
   /** ISO date the agent joined this company, or null if it has not. */
@@ -115,16 +126,20 @@ export const AGENTS: readonly Agent[] = [
     tagline: "The colleague everyone talks to first.",
     summary:
       "Handles the work that has no other home: answering questions, drafting and rewriting, reading a long thread and telling you what it says. When a job belongs to a specialist, the Assistant says so and introduces you.",
-    // statusWord and statusDetail for the Assistant are overridden
-    // at render time by AgentDirectory from the live
-    // /api/chat/assistant/config response (REQ-FADR-001/002).
-    // The values here are a sensible fallback used only when the GET
-    // fails (offline / anon / server) — see AgentDirectory for the
-    // override path. Until the next archetype ships, the assistant
-    // is the only colleague on the roster, so its statusWord is the
-    // single source the workspace shows.
+    // statusWord for the Assistant is intentionally absent here: it
+    // is API-derived (REQ-FADR-001/002). After T-23 (PR-2 of
+    // cachicamas-archetype-system-foundation), the directory gets it
+    // from the polymorphic /api/archetypes/assistant/ response (or,
+    // when the API fails, the directory's overlay path synthesises
+    // "Default" / "Configured" from `is_override`). Renderers
+    // reading this literal MUST go through `displayStatusWord(agent)`
+    // in this module so a missing field never renders as `undefined`.
+    // The five mock specialists that ship later will carry their own
+    // statusWord verbatim — those are fictional placeholders, not
+    // user-editable. statusDetail stays static: it answers a
+    // different question ("how are they working?") and never needed
+    // an API signal.
     status: "working",
-    statusWord: "Working",
     statusDetail: "On staff and answering now.",
     joined: "2026-01-12",
     tenure: "7 months",
@@ -233,8 +248,31 @@ export const TEAMS: readonly Team[] = [
 ];
 
 /* ---------------------------------------------------------------------------
- * Lookups
+ * Render helpers
  * ------------------------------------------------------------------------ */
+
+/**
+ * displayStatusWord(agent) resolves the status word rendered beside the
+ * status dot. Required because `Agent.statusWord` is now optional —
+ * the Assistant's word is API-derived (see T-23 of
+ * cachicamas-archetype-system-foundation). When the field is absent,
+ * this helper returns a generic fallback derived from `status` so
+ * FrontDesk / AgentProfile / AgentCard never render `undefined`.
+ *
+ * Five mock specialists will carry their own static `statusWord` and
+ * bypass this helper. Until then, the only caller is the assistant
+ * path, where the fallback is "Working" — the same word the AGENTS
+ * literal used pre-T-23.
+ */
+export function displayStatusWord(agent: Agent): string {
+  if (agent.statusWord !== undefined) return agent.statusWord;
+  // The Assistant is the only colleague whose status word is API-
+  // derived. FrontDesk and AgentProfile cannot reach the API, so
+  // they need a static fallback. "Working" matches the pre-T-23
+  // literal and keeps screenshots stable.
+  if (agent.slug === "assistant") return "Working";
+  return "Available";
+}
 
 export const agentBySlug = (slug: string): Agent | undefined =>
   AGENTS.find((a) => a.slug === slug);

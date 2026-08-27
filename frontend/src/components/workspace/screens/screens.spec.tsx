@@ -13,7 +13,7 @@ import { AgentDirectory } from "./agent-directory";
 import { AgentProfile } from "./agent-profile";
 import { OrganizationPanel } from "./organization-panel";
 import { TeamsBoard } from "./teams-board";
-import { AGENTS, ORG_ROLES, PEOPLE, TEAMS, agentBySlug } from "~/lib/mock/staff";
+import { AGENTS, ORG_ROLES, PEOPLE, TEAMS, agentBySlug, displayStatusWord } from "~/lib/mock/staff";
 
 describe("agent directory", () => {
   it("separates who is on staff from who could be", async () => {
@@ -57,7 +57,11 @@ describe("agent directory", () => {
       const card = screen.querySelector(
         `[data-testid="agent-card-${agent.slug}"]`,
       );
-      expect(card?.textContent, agent.slug).toContain(agent.statusWord);
+      // The Assistant's statusWord is API-derived (REQ-FADR-001/002)
+      // and is absent from AGENTS[0]; assert against the rendered
+      // word (`displayStatusWord` is what the card calls) instead
+      // of the raw (optional) field.
+      expect(card?.textContent, agent.slug).toContain(displayStatusWord(agent));
       expect(card?.textContent, agent.slug).toContain("Agent");
     }
   });
@@ -74,7 +78,10 @@ describe("agent profile", () => {
     const text = screen.textContent ?? "";
     expect(screen.querySelector("h1")?.textContent).toContain(agent.name);
     expect(text).toContain(agent.summary);
-    expect(text).toContain(agent.statusWord);
+    // The Assistant's statusWord is API-derived; the profile renders
+    // `displayStatusWord(agent)` so the assertion targets the
+    // rendered word, not the (now optional) raw field.
+    expect(text).toContain(displayStatusWord(agent));
     expect(text).toContain(agent.tenure!);
     for (const skill of agent.skills) expect(text, skill.name).toContain(skill.name);
     for (const tool of agent.tools) expect(text, tool.name).toContain(tool.name);

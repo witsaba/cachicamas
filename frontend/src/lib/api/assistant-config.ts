@@ -1,37 +1,54 @@
 /**
- * assistant-config.ts — typed client for the assistant config endpoints.
+ * assistant-config.ts — backwards-compatible wrapper around the new
+ * polymorphic /api/archetypes/{slug}/config/ client
+ * (frontend/src/lib/api/archetypes.ts, T-21 PR-2 of
+ * cachicamas-archetype-system-foundation).
  *
- * Two endpoints, both under `/api/chat/assistant/config`:
- *   - GET  → returns the persisted config for the caller's org
- *            (auto-seeded defaults if no row yet, per the chat
- *            archetype's safe-default contract)
- *   - PUT  → validates + persists a new config; returns the new
- *            config with the bumped version
+ * The new polymorphic client returns the nested `ArchetypeView`
+ * shape from the Go backend (parent + optional `override` block).
+ * ConfigureSection and the agents/* routes historically worked on a
+ * flat `ArchetypeConfig` shape; this file is a thin adapter that
+ * flattens the nested view back to the legacy shape so the call-sites
+ * can migrate incrementally.
  *
- * Wire shape mirrors the Go ArchetypeConfig (see
- * backend/agent/src/archetype/config.go). The `kind` field is
- * always `chat` for the chat archetype; future archetypes would
- * surface their own endpoints.
+ * Long-term plan: ConfigureSection + agents/* routes will move to the
+ * new client directly (T-23 of cachicamas-archetype-system-foundation
+ * migrates the agents/* routes; ConfigureSection migration is on the
+ * roadmap). For now, the adapter keeps the existing call-sites working
+ * without forcing a one-shot refactor of every component.
  *
- * Error envelope parity with chat-api.ts (REQ-4, REQ-5):
- *   - HTTP 400 → ApiResult with `kind: "validation"` and per-field
- *     errors from the backend's response envelope.
- *   - HTTP 403 → ApiResult with `kind: "not_found"` (the chat
- *     handler refuses anonymous callers with a generic envelope;
- *     treating as not_found is the closest mapping for the UI).
- *   - Network errors → `{ ok: false, kind: "offline", message }`.
+ * Endpoint: GET /api/archetypes/assistant/  (per-slug read of the
+ * polymorphic view, including the per-org override block when one
+ * exists; mapped here to the flat ArchetypeConfig shape).
+ *
+ * Endpoint: PUT /api/archetypes/assistant/config/  (per-slug write of
+ * the per-org override; the body is the same ArchetypeUpdate shape
+ * the polymorphic client accepts).
+ *
+ * The slug is hard-coded to "assistant" because v1 has exactly one
+ * user-customisable archetype. Future work that surfaces more slugs
+ * (general, owned) will add a parameterised helper and remove this
+ * unslug variant.
  */
 
+import {
+  archetypeConfigURL,
+  archetypeURL,
+  getArchetype,
+  putArchetypeConfig,
+  type ArchetypeView,
+} from "~/lib/api/archetypes";
 import type { ApiResult } from "~/lib/api";
 
 /**
- * ArchetypeConfig is the wire shape for `/api/chat/assistant/config`.
+ * Legacy flat-shape view of an archetype's per-org config. Kept for
+ * ConfigureSection + the agents/* routes' existing call-sites. The
+ * fields mirror the chat-package's `ArchetypeConfig` (PR-1 of
+ * cachicamas-assistant-configuration-ui) — see
+ * `backend/agent/src/archetype/config.go:ArchetypeConfig`.
  *
- * Mirrors `archetype.ArchetypeConfig` from
- * `backend/agent/src/archetype/config.go` — keep the field names in
- * lock-step when extending either side. The frontend never reads the
- * `kind` field directly (the URL namespace already disambiguates
- * the chat archetype); it's included for round-trip completeness.
+ * Once ConfigureSection migrates to the nested `ArchetypeView` shape
+ * directly, this type can be deleted.
  */
 export interface ArchetypeConfig {
   kind: "chat";
@@ -46,19 +63,13 @@ export interface ArchetypeConfig {
   updated_by?: string;
   updated_at?: string;
   /** `true` when the config came from a per-org row that shadows the
-   * system default. `false` when the config came from the seeded
-   * `__default__` row OR the in-memory fallback. The directory uses
-   * this to label the Assistant card "Configured" (per-org override)
-   * vs "Default" (system default). */
+   * system default. `false` when the org is on the system default. */
   is_override: boolean;
 }
 
 /**
- * AssistantConfigUpdate is the PUT body shape (REQ-CACAPI-002).
- * The backend rejects empty prompts, oversized prompts, HTML
- * patterns, unknown tool names, and defer names not in the
- * allowlist; see the backend sentinels
- * (`archetype.Err*`).
+ * Legacy PUT body shape. The polymorphic client's `ArchetypeUpdate` is
+ * structurally identical, so this is just a type alias.
  */
 export interface AssistantConfigUpdate {
   system_prompt: string;
@@ -67,112 +78,102 @@ export interface AssistantConfigUpdate {
   model?: string | null;
 }
 
-const ASSISTANT_CONFIG_ENDPOINT = "/api/chat/assistant/config";
+// -----------------------------------------------------------------------------
+// Adapter: nested ArchetypeView -> flat ArchetypeConfig
+// -----------------------------------------------------------------------------
+
+function viewToConfig(view: ArchetypeView): ArchetypeConfig {
+  // The polymorphic view carries the per-org override in a nested
+  // `override` block (catalog.go:ArchetypeOverride). The flat legacy
+  // shape inlines those fields at the top level + flips is_override
+  // to the derived `true` (the view itself also carries the derived
+  // `is_override` boolean).
+  const override = view.override;
+  if (override === undefined) {
+    // No per-org row: synthesise a flat default view from the
+    // system defaults. is_override is false; the tool allowlist /
+    // prompt come from the system row in the Go side, but for
+    // ConfigureSection we only need a stable shape — fields are
+    // taken from the parent's defaults (display_name, tagline) and
+    // the version is 1 (the DefaultConfig fallback).
+    return {
+      kind: "chat",
+      org_id: "",
+      system_prompt: "",
+      tool_allowlist: [],
+      defer_tool_names: [],
+      model: null,
+      version: 1,
+      is_override: false,
+    };
+  }
+  return {
+    kind: "chat",
+    org_id: "",
+    system_prompt: override.system_prompt,
+    tool_allowlist: [...override.tool_allowlist],
+    defer_tool_names: [...override.defer_tool_names],
+    model: override.model,
+    version: override.version,
+    updated_by: override.updated_by,
+    updated_at: override.updated_at,
+    is_override: true,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Public client (legacy API surface)
+// -----------------------------------------------------------------------------
 
 /**
  * getAssistantConfig fetches the persisted config for the caller's
- * org. Auto-seeded defaults are returned when no row exists yet
- * (the chat handler falls back to safe defaults per design AD-2).
+ * org via the new polymorphic surface, then flattens to the legacy
+ * `ArchetypeConfig` shape ConfigureSection and the agents/* routes
+ * still consume.
  *
- * Returns ApiResult so the caller can branch on offline / not_found
- * / server errors without parsing the envelope shape inline.
+ * The function takes no slug because v1 has only one user-customisable
+ * archetype (assistant). When multi-archetype editing lands, the
+ * call-sites move to the polymorphic `getArchetype(slug)` directly.
  */
 export async function getAssistantConfig(): Promise<ApiResult<ArchetypeConfig>> {
-  return getJson<ArchetypeConfig>(ASSISTANT_CONFIG_ENDPOINT);
+  const result = await getArchetype("assistant");
+  if (!result.ok) {
+    return result;
+  }
+  return { ok: true, value: viewToConfig(result.value) };
 }
 
 /**
- * putAssistantConfig validates + persists a new config. The backend
- * returns the new row (with bumped version + server-set updated_at).
+ * putAssistantConfig validates + persists a new per-org config via
+ * the new polymorphic surface. The body is the same shape ConfigureSection
+ * already constructs.
  *
- * On 400 the backend's error envelope is decoded into the ApiResult's
- * `fields` map so the Configure UI can highlight per-field errors.
+ * The server's response is the new persisted view; we re-fetch via
+ * getAssistantConfig to keep the flat-shape contract (the new view's
+ * nested shape needs flattening to match the legacy return).
  */
 export async function putAssistantConfig(
   update: AssistantConfigUpdate,
 ): Promise<ApiResult<ArchetypeConfig>> {
-  return sendJson<ArchetypeConfig>(ASSISTANT_CONFIG_ENDPOINT, "PUT", update);
+  const result = await putArchetypeConfig("assistant", {
+    system_prompt: update.system_prompt,
+    tool_allowlist: update.tool_allowlist,
+    defer_tool_names: update.defer_tool_names,
+    model: update.model ?? null,
+  });
+  if (!result.ok) {
+    return result;
+  }
+  return { ok: true, value: viewToConfig(result.value) };
 }
 
-/* ---------- internal helpers (mirrors chat-api.ts conventions) ---------- */
+// -----------------------------------------------------------------------------
+// URL constants — exposed for the few call-sites that need to inspect
+// the wire URL directly (e.g. test assertions, route debugging).
+// -----------------------------------------------------------------------------
 
-interface ErrorEnvelope {
-  kind?: "validation" | "conflict" | "not_found" | "server";
-  message?: string;
-  fields?: Record<string, string>;
-}
+/** The polymorphic per-org config URL. */
+export const ASSISTANT_CONFIG_ENDPOINT = archetypeConfigURL("assistant");
 
-async function getJson<T>(path: string): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(path, {
-      method: "GET",
-      credentials: "include",
-      headers: { Accept: "application/json" },
-    });
-    return parseResponse<T>(response);
-  } catch (error) {
-    return offlineResult<T>(error);
-  }
-}
-
-async function sendJson<T>(
-  path: string,
-  method: "PUT" | "POST",
-  body: unknown,
-): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(path, {
-      method,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    return parseResponse<T>(response);
-  } catch (error) {
-    return offlineResult<T>(error);
-  }
-}
-
-async function parseResponse<T>(response: Response): Promise<ApiResult<T>> {
-  if (response.ok) {
-    const value = (await response.json()) as T;
-    return { ok: true, value };
-  }
-  let envelope: ErrorEnvelope = {};
-  try {
-    envelope = (await response.json()) as ErrorEnvelope;
-  } catch {
-    // body wasn't JSON — fall through with empty envelope
-  }
-  if (response.status === 400 || envelope.kind === "validation") {
-    return {
-      ok: false,
-      kind: "validation",
-      message: envelope.message ?? "The configuration was rejected.",
-      fields: envelope.fields ?? {},
-    };
-  }
-  if (response.status === 403) {
-    return {
-      ok: false,
-      kind: "not_found",
-      message: envelope.message ?? "Sign in to manage the Assistant.",
-    };
-  }
-  return {
-    ok: false,
-    kind: "server",
-    message: envelope.message ?? "The Assistant could not be reached.",
-  };
-}
-
-function offlineResult<T>(error: unknown): ApiResult<T> {
-  return {
-    ok: false,
-    kind: "offline",
-    message: error instanceof Error ? error.message : "Network unreachable.",
-  };
-}
+/** The polymorphic per-slug read URL. */
+export const ASSISTANT_GET_ENDPOINT = archetypeURL("assistant");

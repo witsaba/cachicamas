@@ -1,14 +1,17 @@
 /**
  * `/agents/[slug]` — one colleague's profile.
  *
- * The slug is resolved in a `routeLoader$` so an unknown one is a real 404
- * rather than a page that renders an empty shell.
+ * T-23 of cachicamas-archetype-system-foundation: the route loader
+ * for `slug === "assistant"` now reads the polymorphic
+ * `/api/archetypes/assistant/config` endpoint (via the legacy
+ * `assistant-config.ts` adapter) instead of the retired
+ * `/api/chat/assistant/config`. Other slugs skip the fetch — the
+ * static mock fields are enough for the staff-directory surface, and
+ * the route still returns a real 404 when the slug is unknown.
  *
- * For `slug === "assistant"`, the route loader also fetches the live
- * AssistantConfig (auto-seeded defaults on first read) so the
- * Configure section on the profile can render with the persisted
- * state. Other slugs skip the fetch — the static mock fields are
- * enough for the staff-directory surface.
+ * The ConfigureSection continues to consume the flat
+ * `ArchetypeConfig` shape via `getAssistantConfig` so its component
+ * migration is decoupled from this route's wire-shape switch.
  */
 import { component$ } from "@builder.io/qwik";
 import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
@@ -33,7 +36,10 @@ export const useAgent = routeLoader$(({ params, status }) => {
 // `useAssistantConfig` returns null when the slug is not "assistant"
 // (the only real archetype today), when the GET fails (anonymous /
 // offline / server), or when the slug doesn't resolve. The page
-// renders without the ConfigureSection in either case.
+// renders without the ConfigureSection in either case. After T-22,
+// the GET goes through the polymorphic client; the legacy flat
+// `ArchetypeConfig` shape is restored by `assistant-config.ts` for
+// downstream consumers.
 export const useAssistantConfig = routeLoader$(async ({ params }) => {
   if (params.slug !== "assistant") {
     return null;

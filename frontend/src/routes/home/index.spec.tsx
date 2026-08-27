@@ -16,7 +16,7 @@ import { createDOM } from "@builder.io/qwik/testing";
 import { $, type QRL } from "@builder.io/qwik";
 import { test, expect, vi } from "vitest";
 import Index from "./index";
-import { AGENTS, TEAMS } from "~/lib/mock/staff";
+import { AGENTS, displayStatusWord, TEAMS } from "~/lib/mock/staff";
 import { CONVERSATIONS } from "~/lib/mock/chat";
 
 vi.mock("~/routes/plugin@auth", () => ({
@@ -97,8 +97,11 @@ test("[routes/home]: shows every colleague on staff, and none that are not", asy
       expect(card, agent.slug).toBeFalsy();
     } else {
       expect(card, agent.slug).toBeTruthy();
-      // The status word, never the dot alone.
-      expect(card?.textContent, agent.slug).toContain(agent.statusWord);
+      // The status word, never the dot alone. The Assistant's
+      // statusWord is API-derived (REQ-FADR-001/002) and is
+      // absent from AGENTS[0]; the front desk uses the static
+      // fallback from `displayStatusWord` instead.
+      expect(card?.textContent, agent.slug).toContain(displayStatusWord(agent));
       // And the species, in a word.
       expect(card?.textContent, agent.slug).toContain("Agent");
     }
