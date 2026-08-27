@@ -389,12 +389,12 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	resetAssistantConfigTable(t, dsn)
 
 	seed := archetype.ArchetypeConfig{
-		Slug:           archetype.AssistantSlug,
-		OrgID:        "org-forshare",
-		SystemPrompt: "before",
+		Slug:          archetype.AssistantSlug,
+		OrgID:         "org-forshare",
+		SystemPrompt:  "before",
 		ToolAllowlist: []string{"current_time"},
-		Version:      1,
-		UpdatedBy:    "user_seed",
+		Version:       1,
+		UpdatedBy:     "user_seed",
 	}
 	seedRow(t, dsn, seed)
 

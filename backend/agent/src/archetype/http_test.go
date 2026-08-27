@@ -42,12 +42,12 @@ import (
 // was installed via withView. The handler never invokes WithTx, but the
 // interface requires it; returning the same fake keeps the suite hermetic.
 type fakeCatalogLoader struct {
-	mu     sync.Mutex
-	view   archetype.ArchetypeView
-	found  bool
-	err    error
-	loads  int
-	lastSlug string
+	mu        sync.Mutex
+	view      archetype.ArchetypeView
+	found     bool
+	err       error
+	loads     int
+	lastSlug  string
 	lastOrgID string
 }
 
@@ -65,12 +65,12 @@ func (f *fakeCatalogLoader) WithTx(_ *sql.Tx) archetype.CatalogLoader { return f
 // fakeWriter implements archetype.Writer. Records every WriteConfig call so
 // the tests can assert the handler called it once and the right body fields.
 type fakeWriter struct {
-	mu      sync.Mutex
-	result  archetype.ArchetypeConfig
-	err     error
-	appends int
-	lastSlug string
-	lastOrgID string
+	mu         sync.Mutex
+	result     archetype.ArchetypeConfig
+	err        error
+	appends    int
+	lastSlug   string
+	lastOrgID  string
 	lastUpdate archetype.ConfigUpdate
 }
 
@@ -110,8 +110,8 @@ func (i *fakeIdentity) ParticipantID() string { return i.orgID }
 // (mirror of the chat-package test's validPutBody).
 func validPutBody() map[string]any {
 	return map[string]any{
-		"system_prompt":   "you are a helpful assistant",
-		"tool_allowlist":  []string{"current_time", "summarize_conversation"},
+		"system_prompt":    "you are a helpful assistant",
+		"tool_allowlist":   []string{"current_time", "summarize_conversation"},
 		"defer_tool_names": []string{"summarize_conversation"},
 	}
 }
@@ -370,9 +370,9 @@ func Test_HandlePutArchetypeConfig_DistinctErrorCodes_PerRule(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name         string
-		mutate       func(b map[string]any)
-		wantCode     string
+		name     string
+		mutate   func(b map[string]any)
+		wantCode string
 	}{
 		{
 			name:     "empty prompt",

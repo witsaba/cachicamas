@@ -398,62 +398,62 @@ func Test_LoadBySlug_TwoOrgs_BothOverride_SystemRowReturnedButPerOrgWins(t *test
 	}
 }
 
-    // Test_LoadBySlug_ParentArchived_PerOrgOverrideReturned (T-11 PR-1,
-    // edge case 2). Even when the parent is terminal (status='archived'
-    // OR archived_at != NULL), an existing per-org override is returned.
-    // Spec: edge case 2 — fixed in PR-2 to honour the per-org
-    // override shadow semantics.
-    //
-    // The Loader's terminal predicate gates ONLY the parent lookup;
-    // the per-org override lookup is unconditional. When the parent is
-    // archived but a per-org row exists, the Loader returns found=true
-    // with the override surfaced.
-    func Test_LoadBySlug_ParentArchived_PerOrgOverrideReturned(t *testing.T) {
-    	dsn := catalogRequiresPostgres(t)
-    	resetCatalogFixtures(t, dsn)
+// Test_LoadBySlug_ParentArchived_PerOrgOverrideReturned (T-11 PR-1,
+// edge case 2). Even when the parent is terminal (status='archived'
+// OR archived_at != NULL), an existing per-org override is returned.
+// Spec: edge case 2 — fixed in PR-2 to honour the per-org
+// override shadow semantics.
+//
+// The Loader's terminal predicate gates ONLY the parent lookup;
+// the per-org override lookup is unconditional. When the parent is
+// archived but a per-org row exists, the Loader returns found=true
+// with the override surfaced.
+func Test_LoadBySlug_ParentArchived_PerOrgOverrideReturned(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
 
-    	db, err := sql.Open("pgx", dsn)
-    	if err != nil {
-    		t.Fatalf("sql.Open: %v", err)
-    	}
-    	defer func() { _ = db.Close() }()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
 
-    	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, archived_at, created_by)
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, archived_at, created_by)
     		VALUES ('assistant', 'system', 'Assistant', 'Default', 'archived', '2026-08-01T00:00:00Z', 'seed')`); err != nil {
-    		t.Fatalf("seed archived parent: %v", err)
-    	}
-    	if _, err := db.Exec(`INSERT INTO system_archetypes (slug, bundle_version, is_critical)
+		t.Fatalf("seed archived parent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO system_archetypes (slug, bundle_version, is_critical)
     		VALUES ('assistant', 'v1', true)`); err != nil {
-    		t.Fatalf("seed child: %v", err)
-    	}
-    	if _, err := db.Exec(`INSERT INTO archetype_configurations
+		t.Fatalf("seed child: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO archetype_configurations
     		(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
     		VALUES ('assistant', 'org-1', 'org-1-archived-prompt', '["current_time"]'::jsonb,
     		        '[]'::jsonb, NULL, 7, now(), 'alice')`); err != nil {
-    		t.Fatalf("seed override: %v", err)
-    	}
+		t.Fatalf("seed override: %v", err)
+	}
 
-    	loader := archetype.NewCatalogLoader(db)
-    	view, found, err := loader.LoadBySlug(context.Background(), "assistant", "org-1")
-    	if err != nil {
-    		t.Fatalf("LoadBySlug: %v", err)
-    	}
-    	if !found {
-    		t.Fatal("LoadBySlug returned found=false; want true (per-org override should shadow archived parent)")
-    	}
-    	if view.Override == nil {
-    		t.Fatal("Override=nil; want per-org override returned despite archived parent")
-    	}
-    	if view.Override.SystemPrompt != "org-1-archived-prompt" {
-    		t.Errorf("Override.SystemPrompt = %q; want %q", view.Override.SystemPrompt, "org-1-archived-prompt")
-    	}
-    	if view.Override.Version != 7 {
-    		t.Errorf("Override.Version = %d; want 7", view.Override.Version)
-    	}
-    	if view.Status != "archived" {
-    		t.Errorf("Status = %q; want archived (diagnostic surfaced from parent)", view.Status)
-    	}
-    	if view.ArchivedAt == nil {
-    		t.Error("ArchivedAt = nil; want set from parent")
-    	}
-    }
+	loader := archetype.NewCatalogLoader(db)
+	view, found, err := loader.LoadBySlug(context.Background(), "assistant", "org-1")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if !found {
+		t.Fatal("LoadBySlug returned found=false; want true (per-org override should shadow archived parent)")
+	}
+	if view.Override == nil {
+		t.Fatal("Override=nil; want per-org override returned despite archived parent")
+	}
+	if view.Override.SystemPrompt != "org-1-archived-prompt" {
+		t.Errorf("Override.SystemPrompt = %q; want %q", view.Override.SystemPrompt, "org-1-archived-prompt")
+	}
+	if view.Override.Version != 7 {
+		t.Errorf("Override.Version = %d; want 7", view.Override.Version)
+	}
+	if view.Status != "archived" {
+		t.Errorf("Status = %q; want archived (diagnostic surfaced from parent)", view.Status)
+	}
+	if view.ArchivedAt == nil {
+		t.Error("ArchivedAt = nil; want set from parent")
+	}
+}

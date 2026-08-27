@@ -15,10 +15,11 @@
 // "system row wins unless the org has customised" semantics.
 //
 // Future-addition seam (R-J):
-//   To add a 'general' or 'owned' child table, add a CREATE TABLE
-//   keyed by (slug) REFERENCES archetypes(slug), add a case to
-//   ArchetypeView.ChildColumns(), and widen the JOIN in
-//   loadBySlugImpl. No interface change required.
+//
+//	To add a 'general' or 'owned' child table, add a CREATE TABLE
+//	keyed by (slug) REFERENCES archetypes(slug), add a case to
+//	ArchetypeView.ChildColumns(), and widen the JOIN in
+//	loadBySlugImpl. No interface change required.
 package archetype
 
 import (
@@ -207,16 +208,16 @@ FOR SHARE OF a, sa, c`
 	}
 	var (
 		gotSlug, gotType, gotDisplay, gotTagline, gotStatus, gotCreatedBy string
-		gotArchivedAt                                                      sql.NullTime
-		gotCreatedAt                                                       time.Time
-		childBundle                                                        sql.NullString
-		childCritical                                                      sql.NullBool
-		overridePrompt                                                     sql.NullString
-		overrideAllowlist, overrideDefers                                  []byte
-		overrideModel                                                      sql.NullString
-		overrideVersion                                                    sql.NullInt64
-		overrideUpdatedAt                                                  sql.NullTime
-		overrideUpdatedBy                                                  sql.NullString
+		gotArchivedAt                                                     sql.NullTime
+		gotCreatedAt                                                      time.Time
+		childBundle                                                       sql.NullString
+		childCritical                                                     sql.NullBool
+		overridePrompt                                                    sql.NullString
+		overrideAllowlist, overrideDefers                                 []byte
+		overrideModel                                                     sql.NullString
+		overrideVersion                                                   sql.NullInt64
+		overrideUpdatedAt                                                 sql.NullTime
+		overrideUpdatedBy                                                 sql.NullString
 	)
 	if err := row.Scan(
 		&gotSlug, &gotType, &gotDisplay, &gotTagline, &gotStatus,
