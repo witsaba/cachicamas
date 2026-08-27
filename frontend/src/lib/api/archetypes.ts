@@ -147,6 +147,24 @@ export async function putArchetypeConfig(
 }
 
 /**
+ * getArchetypeConfigPolymorphic(slug) reads the polymorphic
+ * per-org config block for the supplied slug. This is the
+ * /config/ counterpart of getArchetype(slug): where getArchetype
+ * hits /api/archetypes/{slug} for the parent overlay (no override),
+ * this hits /api/archetypes/{slug}/config/ for the per-org override
+ * block. The legacy adapter at assistant-config.ts flattens the
+ * response to the legacy ArchetypeConfig shape; new code should
+ * prefer this helper over the legacy getAssistantConfig() alias.
+ *
+ * @see REQ-ACAR-1, REQ-ACAR-5
+ */
+export async function getArchetypeConfigPolymorphic(
+  slug: string,
+): Promise<ApiResult<ArchetypeView>> {
+  return getJson<ArchetypeView>(archetypeConfigURL(slug));
+}
+
+/**
  * listArchetypesByType(type) returns the directory list for the
  * supplied type. The backend's handler returns 400 when `type` is
  * missing or unknown; the client surfaces that as a typed

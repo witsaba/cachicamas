@@ -17,9 +17,9 @@
  * roadmap). For now, the adapter keeps the existing call-sites working
  * without forcing a one-shot refactor of every component.
  *
- * Endpoint: GET /api/archetypes/assistant/  (per-slug read of the
- * polymorphic view, including the per-org override block when one
- * exists; mapped here to the flat ArchetypeConfig shape).
+ * Endpoint: GET /api/archetypes/assistant/config/  (per-slug read of
+ * the polymorphic per-org config; mapped here to the flat
+ * ArchetypeConfig shape).
  *
  * Endpoint: PUT /api/archetypes/assistant/config/  (per-slug write of
  * the per-org override; the body is the same ArchetypeUpdate shape
@@ -33,8 +33,7 @@
 
 import {
   archetypeConfigURL,
-  archetypeURL,
-  getArchetype,
+  getArchetypeConfigPolymorphic,
   putArchetypeConfig,
   type ArchetypeView,
 } from "~/lib/api/archetypes";
@@ -126,8 +125,9 @@ function viewToConfig(view: ArchetypeView): ArchetypeConfig {
 // -----------------------------------------------------------------------------
 
 /**
- * getArchetypeConfig fetches the persisted config for the supplied
- * archetype `slug` via the polymorphic surface, then flattens to the
+ * getArchetypeConfig fetches the persisted per-org config for the
+ * supplied archetype `slug` via the polymorphic
+ * /api/archetypes/{slug}/config/ endpoint, then flattens to the
  * legacy `ArchetypeConfig` shape ConfigureSection and the agents/*
  * routes still consume.
  *
@@ -135,11 +135,18 @@ function viewToConfig(view: ArchetypeView): ArchetypeConfig {
  * surfaces the assistant, but the directory list may include general
  * / owned archetypes; the call-sites always know which slug they
  * belong to).
+ *
+ * Wire contract: GET /api/archetypes/{slug}/config/ (the polymorphic
+ * per-org source of truth). The parent-overlay consumer path uses
+ * `getArchetype(slug)` from archetypes.ts which hits
+ * /api/archetypes/{slug} (no override block).
+ *
+ * @see REQ-ACAR-1
  */
 export async function getArchetypeConfig(
   slug: string,
 ): Promise<ApiResult<ArchetypeConfig>> {
-  const result = await getArchetype(slug);
+  const result = await getArchetypeConfigPolymorphic(slug);
   if (!result.ok) {
     return result;
   }

@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { archetypeURL } from "./archetypes";
+import { archetypeConfigURL, archetypeURL } from "./archetypes";
 import type { ArchetypeView } from "./archetypes";
 import {
   getArchetypeConfig,
@@ -128,7 +128,7 @@ describe("getAssistantConfig", () => {
     );
     await getAssistantConfig();
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      archetypeURL("assistant"),
+      archetypeConfigURL("assistant"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
   });

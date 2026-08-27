@@ -123,6 +123,77 @@ func HandleGetArchetypeConfig(resolver IdentityResolver, loader CatalogLoader) e
 }
 
 // -----------------------------------------------------------------------------
+// GET /api/archetypes/{slug}
+// -----------------------------------------------------------------------------
+
+// HandleGetArchetype reads `:slug` from the path, derives orgID
+// from the session, calls the polymorphic CatalogLoader, and
+// returns the ArchetypeView JSON WITH THE OVERRIDE BLOCK STRIPPED.
+// This is the "profile overlay" endpoint — it returns the parent +
+// system-only child columns but does NOT carry the per-org
+// customisation row.
+//
+// Stripping happens inline before serialising so the wire body
+// always matches the parent-view contract documented in
+// `frontend/src/lib/hooks/use-system-archetype.ts:syntheticFallbackView`.
+// Callers that need the per-org override MUST hit /config/
+// (HandleGetArchetypeConfig) instead.
+//
+// Error envelope parity with HandleGetArchetypeConfig:
+//   - anonymous → 403
+//   - found=false → 404 + ERR_UNKNOWN_SLUG
+//   - loader err → 500, no info leak
+//   - empty slug after TrimSpace → 400 (defence in depth)
+//
+// @see REQ-APSO-1..8
+func HandleGetArchetype(resolver IdentityResolver, loader CatalogLoader) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if resolver == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"archetype resolver not wired", nil)
+		}
+		if loader == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"archetype loader not wired", nil)
+		}
+		ident, resolved := resolver.IdentityFromRequest(c.Request().Context(), c.Request())
+		if !resolved || ident == nil {
+			return writeError(c, http.StatusForbidden, "server",
+				"identity not resolved", nil)
+		}
+		orgID := strings.TrimSpace(ident.ParticipantID())
+		if orgID == "" {
+			return writeError(c, http.StatusForbidden, "server",
+				"identity missing participant id", nil)
+		}
+		slug := strings.TrimSpace(c.Param("slug"))
+		if slug == "" {
+			return writeError(c, http.StatusBadRequest, "validation",
+				"missing slug path parameter", nil)
+		}
+		view, found, err := loader.LoadBySlug(c.Request().Context(), slug, orgID)
+		if err != nil {
+			// Defence in depth: do not echo the underlying error string
+			// in the body (information leak). The error is logged at
+			// higher layers via the default slog handler.
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to load archetype config", nil)
+		}
+		if !found {
+			return writeError(c, http.StatusNotFound, "not_found",
+				"archetype slug is not registered", map[string]string{
+					"code": "ERR_UNKNOWN_SLUG",
+				})
+		}
+		// AD-DSN-2: strip the per-org override block inline. The
+		// `json:"override,omitempty"` tag drops the nil pointer so the
+		// wire body NEVER carries an `override` key.
+		view.Override = nil
+		return c.JSON(http.StatusOK, view)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // PUT /api/archetypes/{slug}/config/
 // -----------------------------------------------------------------------------
 
@@ -358,6 +429,10 @@ func RegisterArchetypeRoutes(e *echo.Echo, resolver IdentityResolver, loader Cat
 	if loader != nil {
 		// List arm — registered first per the contract above.
 		g.GET("", HandleListArchetypes(resolver, loader))
+		// Profile-overlay arm: GET /:slug returns the parent view with the
+		// override block stripped (REQ-APSO-1..8). Disjoint path shape
+		// from /:slug/config/ — Echo's trie resolves by specificity.
+		g.GET("/:slug", HandleGetArchetype(resolver, loader))
 		g.GET("/:slug/config/", HandleGetArchetypeConfig(resolver, loader))
 	}
 	if writer != nil {
