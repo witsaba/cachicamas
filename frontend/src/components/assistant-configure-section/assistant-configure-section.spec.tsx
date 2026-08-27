@@ -42,7 +42,7 @@ describe("ConfigureSection", () => {
 
   it("renders all controls bound to the initial config", async () => {
     const { screen, render } = await createDOM();
-    await render(<ConfigureSection initial={initialConfig} />);
+    await render(<ConfigureSection slug="assistant" initial={initialConfig} />);
 
     const textarea = screen.querySelector(
       '[data-testid="configure-system-prompt"]',
@@ -73,7 +73,7 @@ describe("ConfigureSection", () => {
 
   it("textarea has the 4000-char maxLength attribute", async () => {
     const { screen, render } = await createDOM();
-    await render(<ConfigureSection initial={initialConfig} />);
+    await render(<ConfigureSection slug="assistant" initial={initialConfig} />);
 
     const textarea = screen.querySelector(
       '[data-testid="configure-system-prompt"]',
@@ -91,7 +91,7 @@ describe("ConfigureSection", () => {
     });
 
     const { screen, render, userEvent } = await createDOM();
-    await render(<ConfigureSection initial={initialConfig} />);
+    await render(<ConfigureSection slug="assistant" initial={initialConfig} />);
 
     const saveButton = screen.querySelector(
       '[data-testid="configure-save"]',
@@ -115,7 +115,7 @@ describe("ConfigureSection", () => {
     });
 
     const { screen, render, userEvent } = await createDOM();
-    await render(<ConfigureSection initial={initialConfig} />);
+    await render(<ConfigureSection slug="assistant" initial={initialConfig} />);
 
     const saveButton = screen.querySelector(
       '[data-testid="configure-save"]',
