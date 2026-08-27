@@ -26,7 +26,7 @@ import (
 )
 
 // fakeVersionedLoader satisfies archetype.Loader and lets the test
-// control what LoadByKindAndOrg returns per call.
+// control what LoadBySlug returns per call.
 type fakeVersionedLoader struct {
 	mu     sync.Mutex
 	result archetype.ArchetypeConfig
@@ -34,7 +34,7 @@ type fakeVersionedLoader struct {
 	err    error
 }
 
-func (f *fakeVersionedLoader) LoadByKindAndOrg(_ context.Context, _ archetype.ArchetypeKind, _ string) (archetype.ArchetypeConfig, bool, error) {
+func (f *fakeVersionedLoader) LoadBySlug(_ context.Context, _ string, _ string) (archetype.ArchetypeConfig, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.result, f.found, f.err
@@ -88,7 +88,7 @@ func Test_VersionTracker_FirstLoad_RecordsVersionAndApplies(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:           archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:          "user_alice",
 			SystemPrompt:   "first prompt",
 			ToolAllowlist:  []string{"current_time"},
@@ -99,7 +99,7 @@ func Test_VersionTracker_FirstLoad_RecordsVersionAndApplies(t *testing.T) {
 	}
 	apply := &recordingApply{}
 
-	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.KindChat, "user_alice", apply.apply)
+	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
 	if err != nil {
 		t.Fatalf("NewVersionTracker: %v", err)
 	}
@@ -122,7 +122,7 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:         archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,
@@ -131,13 +131,13 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 	}
 	apply := &recordingApply{}
 
-	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.KindChat, "user_alice", apply.apply)
+	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
 	if err != nil {
 		t.Fatalf("NewVersionTracker: %v", err)
 	}
 
 	loader.withCurrent(archetype.ArchetypeConfig{
-		Kind:         archetype.KindChat,
+		Slug:           archetype.AssistantSlug,
 		OrgID:        "user_alice",
 		SystemPrompt: "second prompt after config change",
 		Version:      4,
@@ -165,7 +165,7 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Kind:         archetype.KindChat,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,
@@ -174,7 +174,7 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 	}
 	apply := &recordingApply{}
 
-	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.KindChat, "user_alice", apply.apply)
+	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
 	if err != nil {
 		t.Fatalf("NewVersionTracker: %v", err)
 	}
@@ -197,12 +197,12 @@ func Test_VersionTracker_AbsentRow_DefaultsToVersion1(t *testing.T) {
 	t.Parallel()
 
 	loader := &fakeVersionedLoader{
-		result: archetype.DefaultConfig(archetype.KindChat, "user_alice", []string{"current_time", "summarize_conversation"}),
+		result: archetype.DefaultConfig(archetype.AssistantSlug, "user_alice", []string{"current_time", "summarize_conversation"}),
 		found:  false,
 	}
 	apply := &recordingApply{}
 
-	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.KindChat, "user_alice", apply.apply)
+	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
 	if err != nil {
 		t.Fatalf("NewVersionTracker: %v", err)
 	}
@@ -223,7 +223,7 @@ func Test_VersionTracker_NilLoader_NoOp(t *testing.T) {
 	t.Parallel()
 
 	apply := &recordingApply{}
-	vt, err := archetype.NewVersionTracker(context.Background(), nil, archetype.KindChat, "user_alice", apply.apply)
+	vt, err := archetype.NewVersionTracker(context.Background(), nil, archetype.AssistantSlug, "user_alice", apply.apply)
 	if err != nil {
 		t.Fatalf("NewVersionTracker: %v", err)
 	}

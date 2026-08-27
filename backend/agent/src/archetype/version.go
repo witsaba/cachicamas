@@ -17,7 +17,7 @@ import "context"
 // (NEVER mid-turn — REQ-CCVP-003).
 type VersionTracker struct {
 	loader        Loader
-	kind          ArchetypeKind
+	slug          string
 	participantID string
 
 	// recordedVersion is the version the runtime slot loaded at
@@ -35,7 +35,7 @@ type VersionTracker struct {
 
 // NewVersionTracker loads the current config via loader and seeds the
 // tracker. If loader is nil, the tracker is inert (Reload is a no-op).
-// If the initial LoadByKindAndOrg returns an error, the tracker is
+// If the initial LoadBySlug returns an error, the tracker is
 // constructed with recordedVersion=0 — Reload will retry on the next
 // call. This keeps runtime construction from failing because of a
 // transient Loader hiccup.
@@ -45,17 +45,17 @@ type VersionTracker struct {
 // in sync with the persisted config from construction. The "no-op on
 // first load" was the v1 contract; v2 fires applyPrompt on first
 // load too so the runtime can be initialised in a single step.
-func NewVersionTracker(ctx context.Context, loader Loader, kind ArchetypeKind, participantID string, applyPrompt func(string)) (*VersionTracker, error) {
+func NewVersionTracker(ctx context.Context, loader Loader, slug, participantID string, applyPrompt func(string)) (*VersionTracker, error) {
 	vt := &VersionTracker{
 		loader:        loader,
-		kind:          kind,
+		slug:          slug,
 		participantID: participantID,
 		applyPrompt:   applyPrompt,
 	}
 	if loader == nil {
 		return vt, nil
 	}
-	cfg, _, err := loader.LoadByKindAndOrg(ctx, kind, participantID)
+	cfg, _, err := loader.LoadBySlug(ctx, slug, participantID)
 	if err != nil {
 		// Surface the error so the composition root can log it but
 		// still construct the runtime slot — a missing config row
@@ -78,7 +78,7 @@ func (vt *VersionTracker) Reload(ctx context.Context) error {
 	if vt == nil || vt.loader == nil {
 		return nil
 	}
-	cfg, _, err := vt.loader.LoadByKindAndOrg(ctx, vt.kind, vt.participantID)
+	cfg, _, err := vt.loader.LoadBySlug(ctx, vt.slug, vt.participantID)
 	if err != nil {
 		return err
 	}
