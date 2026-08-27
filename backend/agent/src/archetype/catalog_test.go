@@ -199,3 +199,139 @@ func Test_DefaultConfigView_IsPure(t *testing.T) {
 		t.Errorf("Override.ToolAllowlist lengths differ")
 	}
 }
+
+// Test_LoadBySlug_ParentArchived_ReturnsFoundFalse (T-10 PR-1).
+// status='archived' OR archived_at IS NOT NULL → found=false.
+// The Loader's WHERE clause excludes terminal rows. Spec: LD-03.
+func Test_LoadBySlug_ParentArchived_ReturnsFoundFalse(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Seed an archived parent. No child row, no override — the
+	// terminal predicate is the test's focus.
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, archived_at, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'archived', now(), 'seed')`); err != nil {
+		t.Fatalf("seed archived parent: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	view, found, err := loader.LoadBySlug(context.Background(), "assistant", "org-1")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if found {
+		t.Error("LoadBySlug returned found=true for archived row; want false")
+	}
+	// DefaultConfigView still returns the safe fallback (Override nil
+	// in this case because DefaultConfigView sets it).
+	if view.Override == nil {
+		t.Error("archived row returned nil Override; want DefaultConfigView fallback")
+	}
+}
+
+// Test_LoadBySlug_ToleratesMissingChildTable (T-10 PR-1). A type='general'
+// parent with NO row in system_archetypes returns (parent columns, child=nil,
+// found=true) — Loader does NOT error on the absent join.
+// Spec: LD-01 + LD-05.
+func Test_LoadBySlug_ToleratesMissingChildTable(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('ad-hoc', 'general', 'Ad Hoc', 'One-off', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	view, found, err := loader.LoadBySlug(context.Background(), "ad-hoc", "org-1")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if !found {
+		t.Fatal("LoadBySlug returned found=false; want true (parent row exists)")
+	}
+	if view.Type != "general" {
+		t.Errorf("Type = %q, want general", view.Type)
+	}
+	childRaw, ok := view.ChildColumns()
+	if ok {
+		t.Errorf("ChildColumns = (%v, true); want (nil, false) for missing child table", childRaw)
+	}
+}
+
+// Test_LoadBySlug_ArchivedAtSetButStatusActive_ReturnsFoundFalse
+// (T-10 PR-1). archived_at != NULL alone (with status='active') is
+// still terminal — the Loader's predicate is `status='archived' OR
+// archived_at IS NOT NULL`. Spec: LD-03.
+func Test_LoadBySlug_ArchivedAtSetButStatusActive_ReturnsFoundFalse(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, archived_at, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'active', now(), 'seed')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	_, found, err := loader.LoadBySlug(context.Background(), "assistant", "org-1")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if found {
+		t.Error("LoadBySlug returned found=true; want false (archived_at is terminal)")
+	}
+}
+
+// Test_LoadBySlug_FutureGeneralToleratesMissingChild (T-10 PR-1).
+// The exact LD-05 forward-compat scenario: a type='general' archetype
+// row exists, no general_archetypes child table at all (yet), and the
+// Loader returns parent columns populated with ChildColumns()=(nil,false).
+func Test_LoadBySlug_FutureGeneralToleratesMissingChild(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('ad-hoc', 'general', 'Ad Hoc', 'One-off', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	view, found, err := loader.LoadBySlug(context.Background(), "ad-hoc", "org-1")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if !found {
+		t.Fatal("found = false; want true")
+	}
+	if view.Slug != "ad-hoc" || view.Type != "general" {
+		t.Errorf("Slug=%q Type=%q; want ad-hoc/general", view.Slug, view.Type)
+	}
+	_, ok := view.ChildColumns()
+	if ok {
+		t.Error("ChildColumns ok=true; want false (no general_archetypes child)")
+	}
+}
