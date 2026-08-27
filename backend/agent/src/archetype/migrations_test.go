@@ -252,3 +252,129 @@ func Test_Migration_0005_RestrictBlocksParentDelete(t *testing.T) {
 		t.Fatal("DELETE FROM archetypes with child row succeeded; want FK violation (ON DELETE RESTRICT)")
 	}
 }
+
+// Test_Migration_0006_ReKeyChatToAssistantPreservesRows (T-06 PR-1).
+// Seeds legacy (archetype_kind='chat', org_id=…) rows plus migration
+// 0003's __default__ seed; runs the migrations; asserts every row
+// re-keyed to (archetype_slug='assistant', org_id) with identical
+// system_prompt / tool_allowlist / defer_tool_names content.
+// Spec: archetype-system-storage ST-03.
+func Test_Migration_0006_ReKeyChatToAssistantPreservesRows(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+	resetArchetypeTables(t)
+
+	db, err := sql.Open("pgx", archetypeTestDSN())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Seed the parent + child so the FK in 0006 has a target.
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+
+	// Seed legacy rows on the OLD PK shape.
+	if _, err := db.Exec(`INSERT INTO archetype_configurations
+		(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, version, updated_at, updated_by)
+		VALUES
+			('chat', 'org-1', 'prompt-A', '["current_time"]'::jsonb, '[]'::jsonb, 1, now(), 'seed'),
+			('chat', '__default__', 'prompt-default', '["current_time","summarize_conversation"]'::jsonb, '["summarize_conversation"]'::jsonb, 1, now(), 'seed')`); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+
+	// Apply the wrapper directly (bypasses the goose allowlist).
+	if err := archetypeMigrations.Run0006IfNeeded(context.Background(), db); err != nil {
+		t.Fatalf("Run0006IfNeeded: %v", err)
+	}
+
+	// Read back via the new PK shape.
+	rows, err := db.Query(`SELECT archetype_slug, org_id, system_prompt FROM archetype_configurations ORDER BY org_id`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	type row struct{ slug, orgID, prompt string }
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.slug, &r.orgID, &r.prompt); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows after 0006, want 2", len(got))
+	}
+	for _, r := range got {
+		if r.slug != "assistant" {
+			t.Errorf("archetype_slug = %q, want assistant (re-key 1:1)", r.slug)
+		}
+	}
+	// prompt content preserved verbatim
+	wantPrompts := map[string]string{
+		"org-1":       "prompt-A",
+		"__default__": "prompt-default",
+	}
+	for _, r := range got {
+		if want := wantPrompts[r.orgID]; r.prompt != want {
+			t.Errorf("org=%q prompt = %q, want %q", r.orgID, r.prompt, want)
+		}
+	}
+
+	// The __backup table exists with the pre-migration row count.
+	var backupCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM archetype_configurations__backup`).Scan(&backupCount); err != nil {
+		t.Fatalf("query backup: %v", err)
+	}
+	if backupCount != 2 {
+		t.Errorf("backup table row count = %d, want 2", backupCount)
+	}
+}
+
+// Test_Migration_0006_RerunIsNoOp (T-06 PR-1). Calling the wrapper
+// twice is a no-op — the second invocation sees the recorded row in
+// archetype_schema_migrations and returns nil without re-applying.
+// Spec: archetype-system-storage ST-05.
+func Test_Migration_0006_RerunIsNoOp(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+	resetArchetypeTables(t)
+
+	db, err := sql.Open("pgx", archetypeTestDSN())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Seed parent + one legacy row so 0006 can apply.
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO archetype_configurations
+		(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, version, updated_at, updated_by)
+		VALUES ('chat', 'org-1', 'p', '["a"]'::jsonb, '[]'::jsonb, 1, now(), 'seed')`); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+
+	if err := archetypeMigrations.Run0006IfNeeded(context.Background(), db); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Second call: must not error (idempotent).
+	if err := archetypeMigrations.Run0006IfNeeded(context.Background(), db); err != nil {
+		t.Fatalf("second call (idempotent): %v", err)
+	}
+	// archetype_slug column still NOT NULL on every row.
+	var nulls int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM archetype_configurations WHERE archetype_slug IS NULL`).Scan(&nulls); err != nil {
+		t.Fatalf("count nulls: %v", err)
+	}
+	if nulls != 0 {
+		t.Errorf("found %d rows with NULL archetype_slug after re-run", nulls)
+	}
+}
