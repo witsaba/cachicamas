@@ -15,7 +15,7 @@ import { Icon } from "~/components/icon/icon";
 import { Button } from "~/components/ui/button/button";
 import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { Status } from "~/components/workspace/status/status";
-import type { Agent } from "~/lib/mock/staff";
+import { displayStatusWord, type Agent } from "~/lib/mock/staff";
 
 export interface AgentCardProps {
   readonly agent: Agent;
@@ -31,6 +31,11 @@ export interface AgentCardProps {
 export const AgentCard = component$<AgentCardProps>(
   ({ agent, configureHref }) => {
     const hired = agent.status !== "available";
+    // `Agent.statusWord` is optional after T-23: the Assistant's word
+    // is API-derived (REQ-FADR-001/002). The displayStatusWord helper
+    // provides a static fallback so FrontDesk / AgentProfile (which
+    // cannot reach the API) never render `undefined` next to the dot.
+    const statusWord = displayStatusWord(agent);
     return (
       <article
         data-testid={`agent-card-${agent.slug}`}
@@ -68,7 +73,7 @@ export const AgentCard = component$<AgentCardProps>(
 
         <div class="border-line mt-4 flex items-center justify-between gap-3 border-t pt-3">
           <div class="flex items-center gap-2">
-            <Status status={agent.status} word={agent.statusWord} />
+            <Status status={agent.status} word={statusWord} />
             {configureHref ? (
               <a
                 href={configureHref}

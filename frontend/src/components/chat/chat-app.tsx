@@ -9,7 +9,7 @@ import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { Status } from "~/components/workspace/status/status";
 import { WaspSpinner } from "~/components/workspace/status/wasp-spinner";
 import { initialsOf } from "~/lib/initials";
-import { AGENTS, agentBySlug } from "~/lib/mock/staff";
+import { AGENTS, agentBySlug, displayStatusWord } from "~/lib/mock/staff";
 import { loadMostRecentConversation } from "~/lib/chat-api";
 import type {
   ConversationSummary,
@@ -522,7 +522,7 @@ export const ChatApp = component$<ChatAppProps>(
                       )}
                     />
                   ) : (
-                    <Status status={agent.status} word={agent.statusWord} />
+                    <Status status={agent.status} word={displayStatusWord(agent)} />
                   )}
                 </span>
               </div>

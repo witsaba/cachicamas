@@ -16,6 +16,7 @@ import {
   TEAMS,
   agentBySlug,
   availableAgents,
+  displayStatusWord,
   personById,
   teamsForAgent,
   workingAgents,
@@ -36,7 +37,13 @@ describe("the staff", () => {
 
   it("gives every status a word and a sentence, never a colour alone", () => {
     for (const a of AGENTS) {
-      expect(a.statusWord.length, a.slug).toBeGreaterThan(2);
+      // The Assistant's status word is API-derived (REQ-FADR-001/002)
+      // and is intentionally absent from AGENTS[0] after T-23. Renderers
+      // MUST go through `displayStatusWord` so a missing field never
+      // shows up as `undefined`; the assertion below exercises that
+      // helper, not the raw (optional) field.
+      const word = displayStatusWord(a);
+      expect(word.length, a.slug).toBeGreaterThan(2);
       expect(a.statusDetail.length, a.slug).toBeGreaterThan(10);
     }
   });
@@ -112,6 +119,19 @@ describe("the staff", () => {
     expect(workingAgents().length).toBe(1);
     // Nobody is on the "available" shelf until a second archetype ships.
     expect(availableAgents().length).toBe(0);
+  });
+
+  it("displayStatusWord returns the static word when present", () => {
+    const helper = { ...AGENTS[0], statusWord: "Configured" };
+    expect(displayStatusWord(helper)).toBe("Configured");
+  });
+
+  it("displayStatusWord falls back to 'Working' for the assistant without a statusWord", () => {
+    // AGENTS[0] no longer carries statusWord after T-23 — the directory
+    // derives it from the API. FrontDesk / AgentProfile cannot reach
+    // the API, so the helper provides a stable fallback.
+    expect(AGENTS[0].statusWord).toBeUndefined();
+    expect(displayStatusWord(AGENTS[0])).toBe("Working");
   });
 
   it("resolves a colleague by slug, and nothing by a slug that is not one", () => {

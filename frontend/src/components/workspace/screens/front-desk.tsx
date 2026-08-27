@@ -26,6 +26,7 @@ import {
   PEOPLE,
   TEAMS,
   agentBySlug,
+  displayStatusWord,
   rosterFor,
 } from "~/lib/mock/staff";
 
@@ -86,7 +87,7 @@ export const FrontDesk = component$<FrontDeskProps>(({ name }) => {
                     {agent.tagline}
                   </span>
                   <span class="block pt-2">
-                    <Status status={agent.status} word={agent.statusWord} />
+                    <Status status={agent.status} word={displayStatusWord(agent)} />
                   </span>
                 </span>
               </a>
