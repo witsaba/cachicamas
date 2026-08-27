@@ -41,7 +41,13 @@ import (
 // fakeCatalogLoader implements archetype.CatalogLoader by returning whatever
 // was installed via withView. The handler never invokes WithTx, but the
 // interface requires it; returning the same fake keeps the suite hermetic.
+//
+// ListByType returns the pre-configured listByTypeViews slice (or
+// listByTypeErr) so the list-handler tests can assert against a known
+// shape. The list-handler tests install the slice directly; the
+// per-slug tests do not touch it.
 type fakeCatalogLoader struct {
+<<<<<<< HEAD
 	mu        sync.Mutex
 	view      archetype.ArchetypeView
 	found     bool
@@ -49,6 +55,18 @@ type fakeCatalogLoader struct {
 	loads     int
 	lastSlug  string
 	lastOrgID string
+=======
+	mu              sync.Mutex
+	view            archetype.ArchetypeView
+	found           bool
+	err             error
+	loads           int
+	lastSlug        string
+	lastOrgID       string
+	listByTypeViews []archetype.ArchetypeView
+	listByTypeErr   error
+	listByTypeCalls int
+>>>>>>> 4df1c06477dccb381e9f1ec7c84ac5fda033b742
 }
 
 func (f *fakeCatalogLoader) LoadBySlug(_ context.Context, slug, orgID string) (archetype.ArchetypeView, bool, error) {
@@ -58,6 +76,13 @@ func (f *fakeCatalogLoader) LoadBySlug(_ context.Context, slug, orgID string) (a
 	f.lastSlug = slug
 	f.lastOrgID = orgID
 	return f.view, f.found, f.err
+}
+
+func (f *fakeCatalogLoader) ListByType(_ context.Context, _ string) ([]archetype.ArchetypeView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listByTypeCalls++
+	return f.listByTypeViews, f.listByTypeErr
 }
 
 func (f *fakeCatalogLoader) WithTx(_ *sql.Tx) archetype.CatalogLoader { return f }
@@ -473,6 +498,251 @@ func Test_RegisterArchetypeRoutes_RejectsNilLoaderAndWriter(t *testing.T) {
 	}
 	if err := archetype.RegisterArchetypeRoutes(e, &fakeResolver{signIn: true, orgID: "u"}, nil, nil); err == nil {
 		t.Fatal("expected error when both loader and writer are nil, got nil")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// feat/archetype-list-endpoint (slice 3 — RED) — TDD contract for
+// GET /api/archetypes (the directory list).
+//
+// Five scenarios per the spec's directory-list contract:
+//   - 200 + sorted list of three types (system, general, owned) with
+//     per-org override surfaced on the system one
+//   - 200 + [] when the loader returns an empty list (NOT 404 — empty
+//     directory is a valid state)
+//   - 403 + error envelope on anonymous callers (same shape as the
+//     per-slug arm's auth refusal)
+//   - 500 + server envelope when the loader errors
+//   - the list arm must mount even when the writer is nil
+//     (RegisterArchetypeRoutes(e, resolver, loader, nil) still
+//     exposes GET /api/archetypes)
+//
+// RED state: these tests reference archetype.HandleListArchetypes,
+// which does not exist yet. The file fails to compile, which is the
+// canonical RED for a new exported handler. The slice 4 feat commit
+// adds the handler + the GET /api/archetypes route registration.
+// -----------------------------------------------------------------------------
+
+// Test_HandleListArchetypes_Authed_ReturnsAllTypes — three rows
+// (system, general, owned), per-org override on the system one →
+// 200 + the list shape, with the override surfaced and the list
+// sorted by (type, slug) per the contract.
+func Test_HandleListArchetypes_Authed_ReturnsAllTypes(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+	views := []archetype.ArchetypeView{
+		{
+			Slug:        "general-one",
+			Type:        "general",
+			DisplayName: "General One",
+			Tagline:     "First general archetype",
+			Status:      "active",
+			CreatedAt:   now,
+			CreatedBy:   "seed",
+		},
+		{
+			Slug:        "owned-one",
+			Type:        "owned",
+			DisplayName: "Owned One",
+			Tagline:     "First owned archetype",
+			Status:      "active",
+			CreatedAt:   now,
+			CreatedBy:   "seed",
+		},
+		{
+			Slug:        "assistant",
+			Type:        "system",
+			DisplayName: "Assistant",
+			Tagline:     "Your default assistant",
+			Status:      "active",
+			CreatedAt:   now,
+			CreatedBy:   "seed",
+			Override: &archetype.ArchetypeOverride{
+				SystemPrompt:   "you are the cachicamas assistant",
+				ToolAllowlist:  []string{"current_time", "summarize_conversation"},
+				DeferToolNames: []string{"summarize_conversation"},
+				Version:        4,
+				UpdatedAt:      now,
+				UpdatedBy:      "user_alice",
+			},
+		},
+	}
+	loader := &fakeCatalogLoader{listByTypeViews: views}
+	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// Body is a JSON array (the spec's "re-check" correction — the
+	// original "archetypes" envelope was a misleading example; the
+	// Go side returns []ArchetypeView directly to match the TS
+	// client's getJson<readonly ArchetypeView[]>() return type).
+	var got []archetype.ArchetypeView
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode body: %v; body=%s", err, rec.Body.String())
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3; got=%+v", len(got), got)
+	}
+	// Sorted by (type, slug): general < owned < system.
+	wantOrder := []string{"general-one", "owned-one", "assistant"}
+	for i, want := range wantOrder {
+		if got[i].Slug != want {
+			t.Errorf("got[%d].Slug = %q, want %q", i, got[i].Slug, want)
+		}
+	}
+	// Per-org override surfaced on the system row.
+	assistant := got[2]
+	if assistant.Override == nil {
+		t.Fatal("assistant.Override = nil; want per-org override surfaced")
+	}
+	if assistant.Override.SystemPrompt != "you are the cachicamas assistant" {
+		t.Errorf("assistant.Override.SystemPrompt = %q", assistant.Override.SystemPrompt)
+	}
+	if assistant.Override.Version != 4 {
+		t.Errorf("assistant.Override.Version = %d, want 4", assistant.Override.Version)
+	}
+	if loader.listByTypeCalls != 1 {
+		t.Errorf("ListByType called %d time(s), want 1", loader.listByTypeCalls)
+	}
+}
+
+// Test_HandleListArchetypes_Empty_Returns200AndEmptyArray — loader
+// returns nil/empty → 200 + [] (NOT 404). Empty directory is a
+// valid state; the handler must not mistake "no rows" for "no
+// route".
+func Test_HandleListArchetypes_Empty_Returns200AndEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{listByTypeViews: nil}
+	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := strings.TrimSpace(rec.Body.String())
+	if body != "[]" && body != "null" {
+		t.Errorf("body = %q, want [] or null (empty JSON array)", body)
+	}
+}
+
+// Test_HandleListArchetypes_Anonymous_Returns403 — resolver returns
+// (nil, false) → 403 + error envelope. The Loader MUST NOT be
+// called for anonymous callers (information leak prevention; same
+// shape as the per-slug arm's anonymous refusal).
+func Test_HandleListArchetypes_Anonymous_Returns403(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{listByTypeViews: []archetype.ArchetypeView{}}
+	resolver := &fakeResolver{signIn: false}
+
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if loader.listByTypeCalls != 0 {
+		t.Errorf("ListByType called %d time(s) on anonymous request, want 0", loader.listByTypeCalls)
+	}
+	// Body shape mirrors the per-slug 403 envelope.
+	var env map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode body: %v; body=%s", err, rec.Body.String())
+	}
+	if env["kind"] != "not_found" {
+		t.Errorf("env.kind = %v, want not_found", env["kind"])
+	}
+	if env["message"] == nil || env["message"] == "" {
+		t.Error("env.message missing; want non-empty string")
+	}
+}
+
+// Test_HandleListArchetypes_LoaderError_Returns500 — loader returns
+// a non-nil error → 500 + server envelope. The handler maps
+// Loader errors to 500 (the error string is NOT echoed in the body
+// to prevent information leaks; same discipline as the per-slug
+// arm).
+func Test_HandleListArchetypes_LoaderError_Returns500(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{listByTypeErr: errors.New("postgres exploded")}
+	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode body: %v; body=%s", err, rec.Body.String())
+	}
+	if env["kind"] != "server" {
+		t.Errorf("env.kind = %v, want server", env["kind"])
+	}
+}
+
+// Test_HandleListArchetypes_OnlyLoaderRequired — the list arm must
+// mount even when the writer is nil. The list is read-only; it does
+// not need a Writer. RegisterArchetypeRoutes(e, resolver, loader,
+// nil) must still expose GET /api/archetypes (otherwise the GET
+// surface would be hidden behind the PUT arm's writer
+// availability, which is wrong).
+func Test_HandleListArchetypes_OnlyLoaderRequired(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{listByTypeViews: []archetype.ArchetypeView{}}
+	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+
+	e := echo.New()
+	// Writer is nil — the per-slug PUT arm is skipped, but the
+	// list arm must still register.
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if loader.listByTypeCalls != 1 {
+		t.Errorf("ListByType called %d time(s), want 1", loader.listByTypeCalls)
 	}
 }
 

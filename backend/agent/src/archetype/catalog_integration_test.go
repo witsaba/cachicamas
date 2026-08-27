@@ -248,3 +248,202 @@ func Test_LoadBySlug_WithTx_TxBoundErrorsPropagate(t *testing.T) {
 		t.Errorf("error = context.Canceled; want sql.ErrTxDone or similar tx-bound error")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// feat/archetype-list-endpoint (slice 2) — INTEGRATION-gated scenarios for
+// the ListByType surface.
+//
+// All tests below are gated by INTEGRATION=1. They seed a small directory
+// of parents (system + general + owned, with one archived system) and
+// assert ListByType returns the expected slice — same JOIN shape as
+// LoadBySlug, but the SQL WHERE excludes terminal parents. The
+// contract is documented in catalog.go:CatalogLoader.
+// -----------------------------------------------------------------------------
+
+// resetListFixtures drops the catalog-shape fixture rows for every
+// slug the list tests use. Keeps the directory tests hermetic
+// regardless of leftover state from prior LoadBySlug tests.
+func resetListFixtures(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("resetListFixtures: sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`
+		DELETE FROM archetype_configurations_log
+			WHERE archetype_slug IN ('assistant', 'sun-archived', 'sun-1', 'gen-1', 'own-1');
+		DELETE FROM archetype_configurations
+			WHERE archetype_slug IN ('assistant', 'sun-archived', 'sun-1', 'gen-1', 'own-1');
+		DELETE FROM system_archetypes
+			WHERE slug IN ('assistant', 'sun-archived', 'sun-1', 'gen-1', 'own-1');
+		DELETE FROM archetypes
+			WHERE slug IN ('assistant', 'sun-archived', 'sun-1', 'gen-1', 'own-1');
+	`); err != nil {
+		t.Fatalf("resetListFixtures: DELETE: %v", err)
+	}
+}
+
+// Test_ListByType_AllThreeTypes_ExcludesArchived (slice 2 GREEN).
+// Seeds one parent per type (system, general, owned) plus an
+// archived system parent. ListByType MUST return 3 rows, omitting
+// the archived system (the WHERE clause's terminal predicate).
+func Test_ListByType_AllThreeTypes_ExcludesArchived(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (ListByType WHERE semantics need live Postgres)")
+	}
+	dsn := catalogRequiresPostgres(t)
+	resetListFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Seed: 1 system (active), 1 system (archived, MUST be excluded),
+	// 1 general (active), 1 owned (active).
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES
+			('sun-1', 'system', 'Sun 1', 'system active', 'active', 'seed'),
+			('sun-archived', 'system', 'Sun Archived', 'system archived', 'archived', 'seed'),
+			('gen-1', 'general', 'Gen 1', 'general active', 'active', 'seed'),
+			('own-1', 'owned', 'Own 1', 'owned active', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parents: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	views, err := loader.ListByType(context.Background(), "org-1")
+	if err != nil {
+		t.Fatalf("ListByType: %v", err)
+	}
+	if len(views) != 3 {
+		t.Fatalf("len(views) = %d, want 3; views=%+v", len(views), views)
+	}
+	// Assert the archived slug is NOT present.
+	for _, v := range views {
+		if v.Slug == "sun-archived" {
+			t.Errorf("archived parent %q leaked into list; want it filtered", v.Slug)
+		}
+	}
+	// Assert all three types are represented.
+	seenTypes := make(map[string]bool)
+	for _, v := range views {
+		seenTypes[v.Type] = true
+	}
+	for _, want := range []string{"system", "general", "owned"} {
+		if !seenTypes[want] {
+			t.Errorf("type %q missing from result; seenTypes=%v", want, seenTypes)
+		}
+	}
+}
+
+// Test_ListByType_PerOrgOverrideSurfaced (slice 2 GREEN). Seeds a
+// system parent with a per-org override row. ListByType MUST return
+// the override in the ArchetypeView's Override field (not nil), with
+// the same JSON-decode semantics as LoadBySlug.
+func Test_ListByType_PerOrgOverrideSurfaced(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (per-org override JOIN needs live Postgres)")
+	}
+	dsn := catalogRequiresPostgres(t)
+	resetListFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('sun-1', 'system', 'Sun 1', 'system active', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO system_archetypes (slug, bundle_version, is_critical)
+		VALUES ('sun-1', 'v1', true)`); err != nil {
+		t.Fatalf("seed child: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO archetype_configurations
+		(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+		VALUES ('sun-1', 'org-1', 'org-1-prompt', '["current_time"]'::jsonb,
+		        '[]'::jsonb, NULL, 3, now(), 'alice')`); err != nil {
+		t.Fatalf("seed override: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	views, err := loader.ListByType(context.Background(), "org-1")
+	if err != nil {
+		t.Fatalf("ListByType: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("len(views) = %d, want 1", len(views))
+	}
+	v := views[0]
+	if v.Slug != "sun-1" {
+		t.Errorf("Slug = %q, want sun-1", v.Slug)
+	}
+	if v.Override == nil {
+		t.Fatal("Override = nil; want per-org override surfaced")
+	}
+	if v.Override.SystemPrompt != "org-1-prompt" {
+		t.Errorf("Override.SystemPrompt = %q, want org-1-prompt", v.Override.SystemPrompt)
+	}
+	if v.Override.Version != 3 {
+		t.Errorf("Override.Version = %d, want 3", v.Override.Version)
+	}
+	// Child columns also populated (type='system').
+	child, ok := v.ChildColumns()
+	if !ok {
+		t.Error("ChildColumns = (_, false); want (_, true) for system parent")
+	}
+	if sys, isSys := child.(*archetype.SystemArchetype); !isSys || sys == nil || sys.BundleVersion != "v1" {
+		t.Errorf("ChildColumns = %+v; want *SystemArchetype{BundleVersion:v1}", child)
+	}
+}
+
+// Test_ListByType_StableOrder (slice 2 GREEN). Seeds three rows in
+// random insert order; ListByType MUST return them sorted by
+// (type ASC, slug ASC). The order is part of the wire contract so
+// the frontend can render a stable directory without re-sorting.
+func Test_ListByType_StableOrder(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run (ORDER BY semantics need live Postgres)")
+	}
+	dsn := catalogRequiresPostgres(t)
+	resetListFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Insert deliberately out of ORDER BY order: own first, then
+	// general, then system. The query MUST re-sort.
+	if _, err := db.Exec(`INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES
+			('own-1', 'owned', 'Own 1', 'owned', 'active', 'seed'),
+			('gen-1', 'general', 'Gen 1', 'general', 'active', 'seed'),
+			('sun-1', 'system', 'Sun 1', 'system', 'active', 'seed')`); err != nil {
+		t.Fatalf("seed parents: %v", err)
+	}
+
+	loader := archetype.NewCatalogLoader(db)
+	views, err := loader.ListByType(context.Background(), "org-1")
+	if err != nil {
+		t.Fatalf("ListByType: %v", err)
+	}
+	if len(views) != 3 {
+		t.Fatalf("len(views) = %d, want 3", len(views))
+	}
+	wantOrder := []struct{ slug, typ string }{
+		{"gen-1", "general"},
+		{"own-1", "owned"},
+		{"sun-1", "system"},
+	}
+	for i, want := range wantOrder {
+		if views[i].Type != want.typ || views[i].Slug != want.slug {
+			t.Errorf("views[%d] = (%q, %q); want (%q, %q)", i, views[i].Slug, views[i].Type, want.slug, want.typ)
+		}
+	}
+}

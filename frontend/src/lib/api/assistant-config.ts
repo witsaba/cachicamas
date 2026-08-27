@@ -126,17 +126,20 @@ function viewToConfig(view: ArchetypeView): ArchetypeConfig {
 // -----------------------------------------------------------------------------
 
 /**
- * getAssistantConfig fetches the persisted config for the caller's
- * org via the new polymorphic surface, then flattens to the legacy
- * `ArchetypeConfig` shape ConfigureSection and the agents/* routes
- * still consume.
+ * getArchetypeConfig fetches the persisted config for the supplied
+ * archetype `slug` via the polymorphic surface, then flattens to the
+ * legacy `ArchetypeConfig` shape ConfigureSection and the agents/*
+ * routes still consume.
  *
- * The function takes no slug because v1 has only one user-customisable
- * archetype (assistant). When multi-archetype editing lands, the
- * call-sites move to the polymorphic `getArchetype(slug)` directly.
+ * The slug is required (feat/archetype-list-endpoint: v1 only
+ * surfaces the assistant, but the directory list may include general
+ * / owned archetypes; the call-sites always know which slug they
+ * belong to).
  */
-export async function getAssistantConfig(): Promise<ApiResult<ArchetypeConfig>> {
-  const result = await getArchetype("assistant");
+export async function getArchetypeConfig(
+  slug: string,
+): Promise<ApiResult<ArchetypeConfig>> {
+  const result = await getArchetype(slug);
   if (!result.ok) {
     return result;
   }
@@ -144,18 +147,25 @@ export async function getAssistantConfig(): Promise<ApiResult<ArchetypeConfig>> 
 }
 
 /**
- * putAssistantConfig validates + persists a new per-org config via
- * the new polymorphic surface. The body is the same shape ConfigureSection
- * already constructs.
- *
- * The server's response is the new persisted view; we re-fetch via
- * getAssistantConfig to keep the flat-shape contract (the new view's
- * nested shape needs flattening to match the legacy return).
+ * @deprecated Use `getArchetypeConfig(slug)` — the slug is required.
+ * Kept as a thin alias that hard-codes "assistant" for the v1 default
+ * so any out-of-tree consumer that still expects the no-arg shape
+ * does not break. Will be removed when ConfigureSection is the sole
+ * consumer.
  */
-export async function putAssistantConfig(
+export async function getAssistantConfig(): Promise<ApiResult<ArchetypeConfig>> {
+  return getArchetypeConfig("assistant");
+}
+
+/**
+ * putArchetypeConfig validates + persists a new per-org config for
+ * the supplied `slug` via the polymorphic surface.
+ */
+export async function putArchetypeConfigFlat(
+  slug: string,
   update: AssistantConfigUpdate,
 ): Promise<ApiResult<ArchetypeConfig>> {
-  const result = await putArchetypeConfig("assistant", {
+  const result = await putArchetypeConfig(slug, {
     system_prompt: update.system_prompt,
     tool_allowlist: update.tool_allowlist,
     defer_tool_names: update.defer_tool_names,
@@ -167,13 +177,23 @@ export async function putAssistantConfig(
   return { ok: true, value: viewToConfig(result.value) };
 }
 
+/**
+ * @deprecated Use `putArchetypeConfigFlat(slug, update)`.
+ * Kept as a thin alias that hard-codes "assistant" for the v1 default.
+ * Will be removed when ConfigureSection is the sole consumer.
+ */
+export async function putAssistantConfig(
+  update: AssistantConfigUpdate,
+): Promise<ApiResult<ArchetypeConfig>> {
+  return putArchetypeConfigFlat("assistant", update);
+}
+
 // -----------------------------------------------------------------------------
-// URL constants — exposed for the few call-sites that need to inspect
+// URL helpers — exposed for the few call-sites that need to inspect
 // the wire URL directly (e.g. test assertions, route debugging).
 // -----------------------------------------------------------------------------
 
-/** The polymorphic per-org config URL. */
-export const ASSISTANT_CONFIG_ENDPOINT = archetypeConfigURL("assistant");
-
-/** The polymorphic per-slug read URL. */
-export const ASSISTANT_GET_ENDPOINT = archetypeURL("assistant");
+/** The polymorphic per-org config URL for the supplied slug. */
+export function archetypeConfigURLFor(slug: string): string {
+  return archetypeConfigURL(slug);
+}
