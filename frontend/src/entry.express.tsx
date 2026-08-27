@@ -8,6 +8,9 @@
  *   - `/api/agent/*` → reverse proxy to the Go chat binary (same compose
  *     network; paths forwarded verbatim — the chat routes already live
  *     under /api/agent/* on its own Echo server).
+ *   - `/api/chat/*` → reverse proxy to the Go chat binary (the chat
+ *     binary's assistant config endpoints live here by design — see
+ *     `lib/api-router.ts:routeApiRequest` for the dispatch decision).
  *   - Other `/api/*` → reverse proxy to the database_administrator Go
  *     binary (/api stripped except /api/v1/*).
  *   - Static assets (Qwik client chunks) served from `dist/`.
@@ -37,6 +40,7 @@ import { existsSync, statSync, createReadStream } from "node:fs";
 import render from "./entry.ssr";
 import { setSecurityHeaders, getSecurityHeaders } from "./lib/security-headers";
 import { logInternalTarget } from "./lib/log-config";
+import { routeApiRequest } from "./lib/api-router";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -240,17 +244,28 @@ const server = createServer((req, res) => {
   //    For the proxy, the headers are ALSO re-merged into the upstream
   //    response (see proxyToApi) to override any permissive backend.
   setSecurityHeaders(req, res, () => {
-    // 1a. /api/agent/* → chat binary reverse proxy. MUST be checked
-    //     BEFORE the generic /api branch — otherwise these requests
-    //     reach database_administrator as /agent/* (prefix-stripped)
-    //     and die with a 404.
-    if (req.url?.startsWith("/api/agent/")) {
-      return proxyToAgentChat(req, res);
-    }
-
-    // 1b. Other /api/* → database_administrator reverse proxy.
-    if (req.url?.startsWith("/api/")) {
-      return proxyToApi(req, res);
+    // 1. /api/* dispatch — order matters. The more specific prefixes
+    //    (/api/agent/*, /api/chat/*) MUST be checked before the
+    //    generic /api/* fall-through, otherwise /api/chat/assistant/config
+    //    would be routed to database_administrator (where the /api prefix
+    //    is stripped) and die with a 404.
+    switch (routeApiRequest(req.url ?? "")) {
+      case "agent":
+        // /api/agent/* → chat binary reverse proxy.
+        return proxyToAgentChat(req, res);
+      case "chat":
+        // /api/chat/* → chat binary reverse proxy. The chat binary's
+        // config endpoints live here by design
+        // (backend/agent/.../chat.RegisterAssistantConfigRoutes) — so
+        // we do NOT rename the route, we just route it to the same
+        // upstream as /api/agent/*.
+        return proxyToAgentChat(req, res);
+      case "api":
+        // Other /api/* → database_administrator reverse proxy.
+        return proxyToApi(req, res);
+      case null:
+        // Not an API request — fall through to SSR / static / 404 chain.
+        break;
     }
 
     // 2. Static assets (cache headers, fast path).

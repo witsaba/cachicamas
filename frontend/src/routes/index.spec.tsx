@@ -82,7 +82,7 @@ test("[routes/index]: opens on the product's own moment, mid-conversation", asyn
   const proof = screen.querySelector('[data-testid="hero-proof"]');
   expect(proof).toBeTruthy();
   const text = proof?.textContent ?? "";
-  expect(text).toContain("Finance");
+  expect(text).toContain("Assistant");
   expect(text).toContain("Agent");
   expect(text).toContain("Order 4471 arrived damaged");
   expect(text).toContain("Nothing is sent until a person answers");

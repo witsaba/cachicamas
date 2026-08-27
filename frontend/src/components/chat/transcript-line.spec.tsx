@@ -15,9 +15,9 @@ import type { TranscriptEntry } from "~/lib/mock/chat";
 import { agentBySlug } from "~/lib/mock/staff";
 
 /** Every line belongs to a colleague; the screen renders their real name. */
-const FINANCE = agentBySlug("finance")!;
+const ASSISTANT = agentBySlug("assistant")!;
 const WHO = {
-  agent: FINANCE,
+  agent: ASSISTANT,
   youName: "Ana Rivas",
   youInitials: "AR",
 } as const;
@@ -67,7 +67,7 @@ describe("components/chat/transcript-line", () => {
     );
     expect(
       model.screen.querySelector('[data-testid="line-said-b"]')?.textContent,
-    ).toContain("Finance");
+    ).toContain("Assistant");
   });
 
   it("renders model markdown, and strips what the allowlist forbids", async () => {

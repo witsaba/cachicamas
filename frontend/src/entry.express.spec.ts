@@ -5,6 +5,7 @@ import {
   getSecurityHeaders,
   CSP_DIRECTIVES,
 } from "~/lib/security-headers";
+import { routeApiRequest } from "~/lib/api-router";
 
 /**
  * Mock ServerResponse that records every setHeader call so tests can
@@ -157,5 +158,41 @@ describe("getSecurityHeaders", () => {
     const headers = getSecurityHeaders(req);
     expect(headers["Strict-Transport-Security"]).toBeUndefined();
     expect(headers["X-Frame-Options"]).toBe("DENY");
+  });
+});
+
+describe("routeApiRequest", () => {
+  // The chat binary registers its config endpoint under `/api/chat/*` by
+  // design (see backend/agent/.../chat.RegisterAssistantConfigRoutes), so
+  // both `/api/agent/*` and `/api/chat/*` must proxy to the chat binary.
+  // Order matters: the more specific prefixes MUST be checked before the
+  // generic `/api/*` fall-through, otherwise `/api/chat/assistant/config`
+  // would be routed to database_administrator and die with a 404.
+  it("/api/agent/turns routes to the agent_chat binary (agent)", () => {
+    expect(routeApiRequest("/api/agent/turns")).toBe("agent");
+  });
+
+  it("/api/chat/assistant/config routes to the agent_chat binary (chat)", () => {
+    expect(routeApiRequest("/api/chat/assistant/config")).toBe("chat");
+  });
+
+  it("/api/chat/anything/else also routes to the agent_chat binary (chat)", () => {
+    expect(routeApiRequest("/api/chat/anything/else")).toBe("chat");
+  });
+
+  it("/api/organizations routes to the database_administrator binary (api)", () => {
+    expect(routeApiRequest("/api/organizations")).toBe("api");
+  });
+
+  it("/api/v1/identity/signin-callback routes to the database_administrator binary (api)", () => {
+    expect(routeApiRequest("/api/v1/identity/signin-callback")).toBe("api");
+  });
+
+  it("/some/non/api/path is NOT an API route (null)", () => {
+    expect(routeApiRequest("/some/non/api/path")).toBeNull();
+  });
+
+  it("an empty URL is NOT an API route (defensive)", () => {
+    expect(routeApiRequest("")).toBeNull();
   });
 });

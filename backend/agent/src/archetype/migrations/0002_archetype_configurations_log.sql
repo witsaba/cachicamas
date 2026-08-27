@@ -31,6 +31,8 @@
 -- operator-driven data-retention cycle, never as part of a code
 -- rollback.)
 
+-- +goose Up
+
 CREATE TABLE IF NOT EXISTS archetype_configurations_log (
     id             bigserial    PRIMARY KEY,
     archetype_kind text         NOT NULL,

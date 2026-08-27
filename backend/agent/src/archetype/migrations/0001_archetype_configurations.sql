@@ -35,6 +35,8 @@
 --
 -- Forward-only. Rollback is `DROP TABLE archetype_configurations`.
 
+-- +goose Up
+
 CREATE TABLE IF NOT EXISTS archetype_configurations (
     archetype_kind   text        NOT NULL DEFAULT 'chat',
     org_id           text        NOT NULL,

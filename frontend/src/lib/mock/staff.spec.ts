@@ -68,6 +68,13 @@ describe("the staff", () => {
     expect(new Set(departments).size).toBe(departments.length);
   });
 
+  it("keeps the roster to the one real archetype for now", () => {
+    // Only the assistant is a real archetype; the other five used to be
+    // mock placeholders shown on the FE. Until the next archetype ships,
+    // the roster is exactly one colleague.
+    expect(AGENTS.map((a) => a.slug)).toEqual(["assistant"]);
+  });
+
   it("says what each colleague may use, and what for", () => {
     for (const a of AGENTS) {
       expect(a.tools.length, a.slug).toBeGreaterThan(0);
@@ -101,8 +108,10 @@ describe("the staff", () => {
   it("splits the roster the way the interface splits it", () => {
     expect(workingAgents().every((a) => a.status === "working")).toBe(true);
     expect(availableAgents().every((a) => a.status === "available")).toBe(true);
-    expect(workingAgents().length).toBeGreaterThan(0);
-    expect(availableAgents().length).toBeGreaterThan(0);
+    // Only the assistant is on staff right now.
+    expect(workingAgents().length).toBe(1);
+    // Nobody is on the "available" shelf until a second archetype ships.
+    expect(availableAgents().length).toBe(0);
   });
 
   it("resolves a colleague by slug, and nothing by a slug that is not one", () => {
@@ -112,26 +121,16 @@ describe("the staff", () => {
 });
 
 describe("the teams", () => {
-  it("only contain colleagues and people who exist", () => {
+  it("no team references a slug that does not exist in AGENTS", () => {
+    // The contract: TEAMS is exported for other modules that depend on
+    // the shape, but its entries must stay grounded in the real roster.
+    // If a future team ships with a slug no one has hired yet, this
+    // catches it before the UI shows a ghost avatar.
+    const known = new Set(AGENTS.map((a) => a.slug));
     for (const team of TEAMS) {
-      expect(team.agentSlugs.length + team.personIds.length, team.slug)
-        .toBeGreaterThan(0);
       for (const slug of team.agentSlugs) {
-        expect(agentBySlug(slug), `${team.slug}/${slug}`).toBeTruthy();
+        expect(known.has(slug), `${team.slug}/${slug}`).toBe(true);
       }
-      for (const id of team.personIds) {
-        expect(personById(id), `${team.slug}/${id}`).toBeTruthy();
-      }
-    }
-  });
-
-  it("pair only colleagues who are already on that team", () => {
-    for (const team of TEAMS) {
-      if (!team.pair) continue;
-      for (const slug of team.pair) {
-        expect(team.agentSlugs, team.slug).toContain(slug);
-      }
-      expect(team.pair[0]).not.toBe(team.pair[1]);
     }
   });
 

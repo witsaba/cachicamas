@@ -83,7 +83,7 @@ export const CONVERSATIONS: readonly Conversation[] = [
   {
     id: "c-4471",
     title: "Anything unpaid past 30 days",
-    agentSlug: "finance",
+    agentSlug: "assistant",
     turns: 4,
     age: "12 minutes ago",
     entries: [
@@ -138,7 +138,7 @@ export const CONVERSATIONS: readonly Conversation[] = [
   {
     id: "c-4468",
     title: "Refund for order 4471",
-    agentSlug: "support",
+    agentSlug: "assistant",
     turns: 3,
     age: "Yesterday",
     entries: [
@@ -180,7 +180,7 @@ export const CONVERSATIONS: readonly Conversation[] = [
   {
     id: "c-4465",
     title: "Chasing Northgate",
-    agentSlug: "finance",
+    agentSlug: "assistant",
     turns: 5,
     age: "Tuesday",
     entries: [
@@ -249,7 +249,7 @@ export const CONVERSATIONS: readonly Conversation[] = [
   {
     id: "c-4460",
     title: "Why did the calendar sync stop",
-    agentSlug: "integrations",
+    agentSlug: "assistant",
     turns: 2,
     age: "Monday",
     entries: [
