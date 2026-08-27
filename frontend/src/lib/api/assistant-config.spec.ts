@@ -265,19 +265,18 @@ describe("putAssistantConfig", () => {
     }
   });
 
-      it("returns an offline result on network failure", async () => {
-        mockFetchError("ETIMEDOUT");
-        const result = await putAssistantConfig({
-          system_prompt: "ok",
-          tool_allowlist: ["current_time"],
-          defer_tool_names: [],
-        });
-        expect(result.ok).toBe(false);
-        if (!result.ok) {
-          expect(result.kind).toBe("offline");
-        }
-      });
+  it("returns an offline result on network failure", async () => {
+    mockFetchError("ETIMEDOUT");
+    const result = await putAssistantConfig({
+      system_prompt: "ok",
+      tool_allowlist: ["current_time"],
+      defer_tool_names: [],
     });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kind).toBe("offline");
+    }
+  });
 });
 
 // -----------------------------------------------------------------------------
