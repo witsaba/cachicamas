@@ -157,6 +157,13 @@ func (l *catalogPostgresLoader) loadBySlugImpl(ctx context.Context, slug, orgID 
 	// The single JOIN avoids the two-step lookup that the previous
 	// Loader required.
 	//
+	// The terminal predicate (status='archived' OR archived_at IS NOT
+	// NULL) is NOT applied here — it gates the parent read only,
+	// not the per-org override lookup. We need to know whether the
+	// parent row exists at all (archived or not) so the per-org
+	// override can still be returned when the parent is archived
+	// (edge case 2). The terminal logic is applied in Go below.
+	//
 	// SELECT … FOR SHARE when tx-bound; otherwise plain SELECT.
 	const baseSelect = `
 SELECT
@@ -181,8 +188,7 @@ FROM archetypes a
 LEFT JOIN system_archetypes sa ON sa.slug = a.slug
 LEFT JOIN archetype_configurations c
     ON c.archetype_slug = a.slug AND c.org_id = $2
-WHERE a.slug = $1
-  AND NOT (a.status = 'archived' OR a.archived_at IS NOT NULL)`
+WHERE a.slug = $1`
 
 	query := baseSelect
 	if l.tx != nil {
@@ -199,7 +205,6 @@ FOR SHARE OF a, sa, c`
 	} else {
 		row = l.db.QueryRowContext(ctx, query, args...)
 	}
-
 	var (
 		gotSlug, gotType, gotDisplay, gotTagline, gotStatus, gotCreatedBy string
 		gotArchivedAt                                                      sql.NullTime
@@ -280,6 +285,26 @@ FOR SHARE OF a, sa, c`
 		}
 		ov.UpdatedBy = overrideUpdatedBy.String
 		view.Override = ov
+	}
+
+	// Terminal-state predicate (REQ-CASF-LD-03 + edge case 2). The
+	// terminal signal is `status='archived' OR archived_at IS NOT NULL`.
+	// The Loader's contract:
+	//   - parent is active       → return full view (parent + child + override).
+	//   - parent is archived AND
+	//     no per-org override    → return found=false (LD-03).
+	//   - parent is archived AND
+	//     a per-org override is
+	//     present                → return found=true with the override
+	//                              surfaced. The per-org row shadows the
+	//                              archived parent — edge case 2.
+	//
+	// The terminal predicate gates ONLY the parent's effective state;
+	// the per-org override lookup is unconditional and runs regardless
+	// of parent status (see PR-1 verify WARNING fix).
+	isTerminal := view.Status == "archived" || view.ArchivedAt != nil
+	if isTerminal && view.Override == nil {
+		return ArchetypeView{}, false, nil
 	}
 
 	return view, true, nil
