@@ -55,25 +55,110 @@ export interface AgentDirectoryProps {
    * from tests that mock only the override flag.
    */
   readonly assistantView?: ArchetypeView;
+  /**
+   * The directory list resolved by the `useArchetypeList` route
+   * loader (feat/archetype-list-endpoint, slice 6). When the loader
+   * resolves (200 from the polymorphic GET /api/archetypes handler),
+   * the component renders one card per entry — the directory is the
+   * list. When the loader is absent (offline / 5xx / not authed) or
+   * resolves to an empty list, the component falls back to the
+   * static AGENTS literal so the user still sees the assistant card
+   * + the existing overlay path. The `assistantView` overlay
+   * continues to take precedence over the loader's assistant row
+   * (the per-org customisation surface is authoritative for the
+   * assistant card).
+   */
+  readonly archetypes?: readonly ArchetypeView[];
+}
+
+/**
+ * viewToAgent projects a polymorphic ArchetypeView into the Agent
+ * shape the AgentCard consumes. The status word is derived from
+ * the view's `override` block (REQ-FADR-001/002): present means
+ * the org has a per-org row → "Configured"; absent means the org
+ * is on the system default → "Default". Skills, tools, tenure and
+ * hands-off come from the static AGENTS literal for the assistant
+ * (the polymorphic view does not carry those fields — they belong
+ * to the profile page, not the directory card).
+ */
+function viewToAgent(view: ArchetypeView): Agent {
+  // Find the matching AGENTS literal to inherit the static
+  // fields (skills, tools, etc.) that the view does not carry.
+  // Fall back to a minimal Agent built from the view itself.
+  const literal = AGENTS.find((a) => a.slug === view.slug);
+  if (!literal) {
+    // No static entry — synthesise a minimal Agent from the
+    // view. The directory card renders the agent's name,
+    // tagline, status word, and a "Configure" link. Other
+    // fields (skills, tools, tenure) are blank on the card
+    // for these new kinds.
+    return {
+      slug: view.slug,
+      initials: view.slug.slice(0, 2).toUpperCase(),
+      name: view.display_name,
+      department: "assistant",
+      departmentName: "Front desk",
+      tagline: view.tagline,
+      summary: "",
+      status: view.status === "active" ? "working" : "training",
+      statusWord: view.override !== undefined ? "Configured" : "Default",
+      statusDetail:
+        view.status === "active"
+          ? "On staff and answering now."
+          : "Hired, still being set up.",
+      joined: view.created_at,
+      tenure: null,
+      skills: [],
+      tools: [],
+      handsOff: null,
+      conversationsThisWeek: null,
+    };
+  }
+  // Known slug (e.g. assistant): inherit the static fields,
+  // overlay the view's display_name + tagline + status word.
+  return {
+    ...literal,
+    name: view.display_name,
+    tagline: view.tagline,
+    statusWord: view.override !== undefined ? "Configured" : "Default",
+  };
 }
 
 export const AgentDirectory = component$<AgentDirectoryProps>(
-  ({ assistantConfigured, assistantView }) => {
+  ({ assistantConfigured, assistantView, archetypes }) => {
+    // The directory source: the loader's list when present and
+    // non-empty, otherwise the static AGENTS literal. An empty
+    // loader result is treated as "fall back to the static mock"
+    // — better than an empty directory.
+    const hasList = archetypes !== undefined && archetypes.length > 0;
+    const baseAgents: readonly Agent[] = hasList
+      ? // Map the polymorphic views into Agent shape so the
+        // AgentCard can render them uniformly. The five mock
+        // specialists (when they ship) carry their own static
+        // statusWord verbatim; the loader entries get the
+        // API-derived status word from the view's override
+        // block.
+        (archetypes as readonly ArchetypeView[]).map(viewToAgent)
+      : AGENTS;
     // REQ-FADR-002: statusWord is derived from the API response, not
     // from the static mock. After T-23 the assistant's display name
     // + tagline also come from the API (the polymorphic view), and
     // AGENTS[0] is just a fallback for offline / SSR-cache-miss.
     // The five mock cards keep their existing data untouched.
-    const agents: Agent[] = AGENTS.map((agent) => {
+    const agents: readonly Agent[] = baseAgents.map((agent) => {
       if (agent.slug !== "assistant") return agent;
       const word =
         assistantConfigured === undefined
-          ? undefined // let displayStatusWord provide the static fallback
+          ? agent.statusWord // use the API-derived value from the view, or the literal fallback
           : assistantConfigured
             ? "Configured"
             : "Default";
       // The polymorphic view's display_name + tagline take precedence
-      // over the AGENTS literal — the server is authoritative.
+      // over the AGENTS literal — the server is authoritative. The
+      // `assistantView` overlay (passed in addition to the loader
+      // list) takes precedence over the loader's assistant row —
+      // the per-org customisation surface is the authoritative
+      // signal for the assistant card.
       const name = assistantView?.display_name ?? agent.name;
       const tagline = assistantView?.tagline ?? agent.tagline;
       return {

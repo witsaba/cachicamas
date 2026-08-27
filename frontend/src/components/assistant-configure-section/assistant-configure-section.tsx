@@ -28,14 +28,22 @@
 import { component$, useSignal, useStore, $ } from "@builder.io/qwik";
 
 import {
-  getAssistantConfig,
-  putAssistantConfig,
+  getArchetypeConfig,
+  putArchetypeConfigFlat,
   type ArchetypeConfig,
 } from "~/lib/api/assistant-config";
 
 const MAX_PROMPT_LENGTH = 4000;
 
 interface ConfigureSectionProps {
+  /**
+   * The archetype slug this section edits. The save flow PUTs to
+   * `/api/archetypes/{slug}/config/`. Required — the section is no
+   * longer bound to the assistant by default; the route passes the
+   * slug from the URL param so any archetype in the directory list
+   * is editable.
+   */
+  slug: string;
   /**
    * Initial config the page-level route loader fetched. The
    * ConfigureSection optimistically re-renders against the server's
@@ -47,7 +55,7 @@ interface ConfigureSectionProps {
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export const ConfigureSection = component$<ConfigureSectionProps>(
-  ({ initial }) => {
+  ({ slug, initial }) => {
     // Local editable state mirrors the server config; the textarea,
     // tool toggles, and defer toggle all bind to this.
     const state = useStore({
@@ -81,7 +89,7 @@ export const ConfigureSection = component$<ConfigureSectionProps>(
       status.value = "saving";
       errorMessage.value = "";
 
-      const result = await putAssistantConfig({
+      const result = await putArchetypeConfigFlat(slug, {
         system_prompt: state.systemPrompt,
         tool_allowlist: state.toolAllowlist,
         defer_tool_names: state.deferToolNames,
@@ -107,9 +115,7 @@ export const ConfigureSection = component$<ConfigureSectionProps>(
         // entry pointing at it is invalid (defer ⊆ allowlist) so
         // remove it from the defer set too.
         if (state.deferToolNames.includes(tool)) {
-          state.deferToolNames = state.deferToolNames.filter(
-            (t) => t !== tool,
-          );
+          state.deferToolNames = state.deferToolNames.filter((t) => t !== tool);
         }
       } else {
         state.toolAllowlist = [...state.toolAllowlist, tool];
@@ -161,22 +167,20 @@ export const ConfigureSection = component$<ConfigureSectionProps>(
 
         <fieldset class="mt-6">
           <legend class="text-ink text-sm font-medium">Tools</legend>
-          {(["current_time", "summarize_conversation"] as const).map(
-            (tool) => (
-              <label
-                key={tool}
-                class="mt-2 flex items-center gap-3 text-sm"
-                data-testid={`configure-tool-${tool}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={state.toolAllowlist.includes(tool)}
-                  onChange$={() => toggleTool(tool)}
-                />
-                <span class="text-ink">{tool}</span>
-              </label>
-            ),
-          )}
+          {(["current_time", "summarize_conversation"] as const).map((tool) => (
+            <label
+              key={tool}
+              class="mt-2 flex items-center gap-3 text-sm"
+              data-testid={`configure-tool-${tool}`}
+            >
+              <input
+                type="checkbox"
+                checked={state.toolAllowlist.includes(tool)}
+                onChange$={() => toggleTool(tool)}
+              />
+              <span class="text-ink">{tool}</span>
+            </label>
+          ))}
         </fieldset>
 
         <fieldset class="mt-6">
@@ -241,9 +245,12 @@ export const ConfigureSection = component$<ConfigureSectionProps>(
 );
 
 // Re-export the helper used by route loaders that want to seed the
-// initial config (e.g. agent-profile.tsx).
-export async function loadInitialAssistantConfig(): Promise<ArchetypeConfig> {
-  const result = await getAssistantConfig();
+// initial config (e.g. agent-profile.tsx). Takes a slug so the
+// helper is polymorphic by archetype, not hard-coded to assistant.
+export async function loadInitialArchetypeConfig(
+  slug: string,
+): Promise<ArchetypeConfig> {
+  const result = await getArchetypeConfig(slug);
   if (result.ok) {
     return result.value;
   }
