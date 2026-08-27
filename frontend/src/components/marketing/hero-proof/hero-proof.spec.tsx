@@ -17,7 +17,7 @@ import {
 import { HERO_OPENING, HERO_SCRIPT } from "~/lib/mock/chat";
 import { agentBySlug } from "~/lib/mock/staff";
 
-const FINANCE = agentBySlug("finance")!;
+const ASSISTANT = agentBySlug("assistant")!;
 
 function played(): MockTurnStore {
   const s: MockTurnStore = {
@@ -64,11 +64,11 @@ describe("the hero proof", () => {
 
   it("renders the opening line and the colleague at first paint", async () => {
     const { screen, render } = await createDOM();
-    await render(<HeroProof agent={FINANCE} />);
+    await render(<HeroProof agent={ASSISTANT} />);
     const proof = screen.querySelector('[data-testid="hero-proof"]');
     expect(proof).toBeTruthy();
     const text = proof?.textContent ?? "";
-    expect(text).toContain(FINANCE.name);
+    expect(text).toContain(ASSISTANT.name);
     expect(text).toContain("Agent");
     expect(text).toContain("Order 4471 arrived damaged");
     expect(text).toContain("Nothing is sent until a person answers");
@@ -77,7 +77,7 @@ describe("the hero proof", () => {
   it("reserves the height it will need, so the card does not grow", async () => {
     // Growth under the reader is motion nobody asked for.
     const { screen, render } = await createDOM();
-    await render(<HeroProof agent={FINANCE} />);
+    await render(<HeroProof agent={ASSISTANT} />);
     const list = screen.querySelector('[data-testid="hero-proof"] ol');
     expect(list?.className ?? "").toMatch(/min-h-\[/);
     expect(list?.getAttribute("aria-live")).toBe("polite");

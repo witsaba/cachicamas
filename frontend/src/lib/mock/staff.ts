@@ -120,9 +120,9 @@ export const AGENTS: readonly Agent[] = [
     // /api/chat/assistant/config response (REQ-FADR-001/002).
     // The values here are a sensible fallback used only when the GET
     // fails (offline / anon / server) — see AgentDirectory for the
-    // override path. The Agent type's required-field contract is
-    // preserved for the five mock specialists, whose statusWord is
-    // static and final.
+    // override path. Until the next archetype ships, the assistant
+    // is the only colleague on the roster, so its statusWord is the
+    // single source the workspace shows.
     status: "working",
     statusWord: "Working",
     statusDetail: "On staff and answering now.",
@@ -153,154 +153,12 @@ export const AGENTS: readonly Agent[] = [
     ],
     handsOff: {
       what: "Anything about money, customers, data or code",
+      // Until a specialist archetype ships, the hand-off target is
+      // described in plain language — see AgentProfile's hands-off
+      // rendering for how the missing colleague is phrased.
       to: "the specialist who owns it",
     },
     conversationsThisWeek: 64,
-  },
-  {
-    slug: "finance",
-    initials: "FN",
-    name: "Finance",
-    department: "finance",
-    departmentName: "Operations",
-    tagline: "Keeps the money legible.",
-    summary:
-      "Reconciles what came in against what was invoiced, reviews expenses before they become a surprise, and prepares the month-end close so it takes an afternoon instead of a week. Asks before it sends anything to a supplier or a customer.",
-    status: "working",
-    statusWord: "Working",
-    statusDetail: "On staff and answering now.",
-    joined: "2026-03-02",
-    tenure: "5 months",
-    skills: [
-      { name: "Invoice reconciliation", detail: "Matches payments to invoices and flags what does not line up." },
-      { name: "Expense review", detail: "Reads receipts, applies your policy, questions the outliers." },
-      { name: "Budget against actuals", detail: "Tells you which lines are drifting while there is still time." },
-      { name: "Month-end close", detail: "Assembles the pack and lists what is missing." },
-      { name: "Chasing what is owed", detail: "Drafts the reminder. You decide whether it goes." },
-    ],
-    tools: [
-      { name: "Ledger", purpose: "Reads entries. Proposes corrections for approval." },
-      { name: "Billing", purpose: "Reads invoices. Sends nothing without a decision." },
-      { name: "Bank feed", purpose: "Reads transactions only." },
-    ],
-    handsOff: {
-      what: "Anything that needs a report built from the raw numbers",
-      to: "Database Administrator",
-    },
-    conversationsThisWeek: 31,
-  },
-  {
-    slug: "support",
-    initials: "SP",
-    name: "Support",
-    department: "support",
-    departmentName: "Customer",
-    tagline: "Has read the ticket before you open it.",
-    summary:
-      "Triages what arrives overnight, drafts a first reply in your company's voice, and writes the escalation summary so whoever picks it up is not starting from zero. Nothing reaches a customer until a person says yes.",
-    status: "working",
-    statusWord: "Working",
-    statusDetail: "On staff and answering now.",
-    joined: "2026-04-14",
-    tenure: "4 months",
-    skills: [
-      { name: "First reply drafting", detail: "In your voice, with the account's history already read." },
-      { name: "Ticket triage", detail: "Sorts by what is actually urgent, not by what shouted loudest." },
-      { name: "Escalation summaries", detail: "What happened, what was tried, what the customer wants." },
-      { name: "Policy checks", detail: "Whether a refund or an exception fits the rules you wrote." },
-      { name: "Knowledge base upkeep", detail: "Notices the answer that keeps being retyped." },
-    ],
-    tools: [
-      { name: "Helpdesk", purpose: "Reads and drafts. Sends only on approval." },
-      { name: "Knowledge base", purpose: "Reads, and proposes edits." },
-      { name: "Customer records", purpose: "Reads only." },
-    ],
-    handsOff: { what: "Refunds and credit notes", to: "Finance" },
-    conversationsThisWeek: 88,
-  },
-  {
-    slug: "integrations",
-    initials: "IN",
-    name: "Integrations",
-    department: "integrations",
-    departmentName: "Operations",
-    tagline: "Makes the tools you already pay for talk to each other.",
-    summary:
-      "Connects a new system, maps the fields between it and everything else, and watches the joins afterwards — because the expensive failure is not the one that errors, it is the one that quietly stops syncing.",
-    status: "training",
-    statusWord: "In training",
-    statusDetail: "Hired. Learning your systems this week.",
-    joined: "2026-08-17",
-    tenure: "5 days",
-    skills: [
-      { name: "Connect a new tool", detail: "Walks the setup and tells you what it will be able to see." },
-      { name: "Map fields between systems", detail: "Proposes the mapping and shows you the edge cases first." },
-      { name: "Watch for broken joins", detail: "Notices a sync that stopped, not just one that failed." },
-      { name: "Backfill what went missing", detail: "Fills the gap after an outage, with a dry run first." },
-    ],
-    tools: [
-      { name: "Connectors", purpose: "Configures, with approval for anything that writes." },
-      { name: "Sync monitor", purpose: "Reads and alerts." },
-      { name: "Field mapper", purpose: "Proposes mappings for approval." },
-    ],
-    handsOff: { what: "Anything that changes a table", to: "Database Administrator" },
-    conversationsThisWeek: null,
-  },
-  {
-    slug: "database-administrator",
-    initials: "DB",
-    name: "Database Administrator",
-    department: "data",
-    departmentName: "Platform",
-    tagline: "Owns the tables nobody else may touch.",
-    summary:
-      "Answers questions with real numbers instead of estimates, reviews every change to how your data is shaped, and keeps the backups honest by restoring them. The only colleague allowed to change your data's structure.",
-    status: "available",
-    statusWord: "Available",
-    statusDetail: "Included on the Company plan. Not on your staff yet.",
-    joined: null,
-    tenure: null,
-    skills: [
-      { name: "Answer with real numbers", detail: "Turns a question into a query, and shows you the query." },
-      { name: "Review structural changes", detail: "Nothing reshapes your data without a written plan." },
-      { name: "Keep things fast", detail: "Finds the slow query before your customers do." },
-      { name: "Prove the backups", detail: "Restores them on a schedule, because an untested backup is a rumour." },
-    ],
-    tools: [
-      { name: "Company database", purpose: "Reads freely. Writes only with an approved plan." },
-      { name: "Query console", purpose: "Runs read-only queries." },
-      { name: "Backups", purpose: "Takes and restores, on approval." },
-    ],
-    handsOff: { what: "Application changes", to: "Coding" },
-    conversationsThisWeek: null,
-  },
-  {
-    slug: "coding",
-    initials: "CO",
-    name: "Coding",
-    department: "engineering",
-    departmentName: "Platform",
-    tagline: "Ships the small changes that never reach the roadmap.",
-    summary:
-      "Picks up the fixes that are too small to schedule and too annoying to leave: the copy change, the broken link, the dependency that needs bumping, the test that was skipped. Opens the change for review; a person merges it.",
-    status: "available",
-    statusWord: "Available",
-    statusDetail: "Included on the Company plan. Not on your staff yet.",
-    joined: null,
-    tenure: null,
-    skills: [
-      { name: "Fix small things", detail: "The bug that has an owner but never a free afternoon." },
-      { name: "Review a change", detail: "Reads a colleague's work and says what it would break." },
-      { name: "Keep dependencies current", detail: "One at a time, with the tests run each time." },
-      { name: "Write the skipped tests", detail: "Starting with the code that changed most this quarter." },
-    ],
-    tools: [
-      { name: "Code repository", purpose: "Reads, and opens changes for review. Never merges." },
-      { name: "Test runner", purpose: "Runs and reports." },
-      { name: "Review queue", purpose: "Comments only." },
-    ],
-    handsOff: { what: "Anything touching the shape of your data", to: "Database Administrator" },
-    conversationsThisWeek: null,
   },
 ];
 
@@ -365,30 +223,13 @@ export const ORG_ROLES: readonly OrgRole[] = [
  * ------------------------------------------------------------------------ */
 
 export const TEAMS: readonly Team[] = [
-  {
-    slug: "revenue",
-    name: "Revenue",
-    purpose: "Get paid, and keep the customers who pay.",
-    agentSlugs: ["finance", "support"],
-    personIds: ["ana", "marco"],
-    pair: ["finance", "support"],
-  },
-  {
-    slug: "platform",
-    name: "Platform",
-    purpose: "Keep the data honest and the tools connected.",
-    agentSlugs: ["integrations", "database-administrator", "coding"],
-    personIds: ["priya"],
-    pair: null,
-  },
-  {
-    slug: "front-desk",
-    name: "Front desk",
-    purpose: "Everything that has no other home yet.",
-    agentSlugs: ["assistant"],
-    personIds: ["tom"],
-    pair: null,
-  },
+  // The previous mock carried three teams (revenue, platform, front-desk)
+  // each pointing at the fake specialists. Until a second archetype ships
+  // there is no real team to seed; TEAMS is kept exported as the empty
+  // list so the route surface and downstream lookups (`teamsForAgent`,
+  // `teamBySlug`) stay callable without crashing. The "no team references
+  // a slug that does not exist in AGENTS" guard in staff.spec.ts keeps
+  // future entries honest.
 ];
 
 /* ---------------------------------------------------------------------------
