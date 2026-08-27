@@ -261,15 +261,89 @@ func validatePutArchetypeConfig(body putArchetypeConfigRequest) (string, error) 
 }
 
 // -----------------------------------------------------------------------------
+// GET /api/archetypes (the directory list)
+// -----------------------------------------------------------------------------
+
+// HandleListArchetypes reads orgID from the session, calls
+// CatalogLoader.ListByType, and returns the directory list as a
+// JSON array of ArchetypeView. The handler refuses anonymous
+// callers with 403 (edge case 3 of spec §4); a Loader error maps
+// to 500 (the error string is NOT echoed in the body to prevent
+// information leaks). An empty result is a valid state and returns
+// 200 + [] (NOT 404).
+//
+// The handler is registered at the bare /api/archetypes path
+// (no slug). The response body is the JSON array itself (NOT an
+// `{archetypes: [...]}` envelope) so the TS client's
+// getJson<readonly ArchetypeView[]>() return type matches the
+// Go side byte-for-byte.
+//
+// The `?type=` query parameter is intentionally NOT consulted:
+// the spec's design decision is "all three types, no additional
+// filter" so the loader returns the full directory regardless of
+// the query string. The frontend still sends `?type=system` for
+// documentation; the parameter is accepted and ignored.
+func HandleListArchetypes(resolver IdentityResolver, loader CatalogLoader) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if resolver == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"archetype resolver not wired", nil)
+		}
+		if loader == nil {
+			return writeError(c, http.StatusInternalServerError, "server",
+				"archetype loader not wired", nil)
+		}
+		ident, resolved := resolver.IdentityFromRequest(c.Request().Context(), c.Request())
+		if !resolved || ident == nil {
+			return writeError(c, http.StatusForbidden, "not_found",
+				"anonymous", nil)
+		}
+		orgID := strings.TrimSpace(ident.ParticipantID())
+		if orgID == "" {
+			return writeError(c, http.StatusForbidden, "server",
+				"identity missing participant id", nil)
+		}
+		views, err := loader.ListByType(c.Request().Context(), orgID)
+		if err != nil {
+			// Defence in depth: do not echo the underlying error string
+			// in the body (information leak). The error is logged at
+			// higher layers via the default slog handler.
+			return writeError(c, http.StatusInternalServerError, "server",
+				"failed to list archetypes", nil)
+		}
+		// Always emit a JSON array (never null) so the client can
+		// iterate without a null-check. An empty loader result
+		// becomes `[]` on the wire.
+		if views == nil {
+			views = []ArchetypeView{}
+		}
+		return c.JSON(http.StatusOK, views)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Route registration
 // -----------------------------------------------------------------------------
 
-// RegisterArchetypeRoutes mounts GET + PUT under
-// /api/archetypes/{slug}/config/. The resolver is required. The
-// loader and writer are each optional independently: passing nil for
-// one registers only the other handler. Passing nil for both returns
-// an error (mirrors the chat-package contract; the test in
-// http_test.go locks this).
+// RegisterArchetypeRoutes mounts the polymorphic /api/archetypes
+// surface: the directory list at /api/archetypes (GET, read-only)
+// and the per-slug config at /api/archetypes/{slug}/config/ (GET
+// + PUT). The resolver is required. The loader and writer are
+// each optional independently: passing nil for one registers only
+// the other handler (the list arm needs the loader; the per-slug
+// GET arm needs the loader; the per-slug PUT arm needs the
+// writer). Passing nil for both returns an error (mirrors the
+// chat-package contract; the test in http_test.go locks this).
+//
+// Route order matters: the bare /api/archetypes arm is registered
+// BEFORE the /:slug/config/ arm. Echo's trie-based router matches
+// the more specific path first, so the list arm takes precedence
+// over any slug-style path under the same group. Reversing the
+// order would not actually break the routing (the path shapes are
+// disjoint: `""` vs `/:slug/config/`), but listing the list arm
+// first matches the reader's expectation that "the directory
+// comes before the per-slug drill-down" and matches the order the
+// tests in http_test.go exercise the registration in.
 func RegisterArchetypeRoutes(e *echo.Echo, resolver IdentityResolver, loader CatalogLoader, writer Writer) error {
 	if e == nil {
 		return errors.New("archetype: RegisterArchetypeRoutes requires a non-nil *echo.Echo")
@@ -282,6 +356,8 @@ func RegisterArchetypeRoutes(e *echo.Echo, resolver IdentityResolver, loader Cat
 	}
 	g := e.Group("/api/archetypes")
 	if loader != nil {
+		// List arm — registered first per the contract above.
+		g.GET("", HandleListArchetypes(resolver, loader))
 		g.GET("/:slug/config/", HandleGetArchetypeConfig(resolver, loader))
 	}
 	if writer != nil {
