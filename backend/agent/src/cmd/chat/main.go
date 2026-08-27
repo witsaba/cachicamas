@@ -38,7 +38,6 @@ import (
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat"
 	"github.com/cachicamas/backend/agent/src/ai/openaicompat/openrouter"
 	"github.com/cachicamas/backend/agent/src/archetype"
-	archetypeMigrations "github.com/cachicamas/backend/agent/src/archetype/migrations"
 	"github.com/cachicamas/backend/agent/src/chat"
 	"github.com/cachicamas/backend/agent/src/chat/migrations"
 	"github.com/cachicamas/backend/agent/src/chat/migrator"
@@ -232,15 +231,13 @@ func run(ctx context.Context, getenv func(string) string, otelShutdown func(cont
 	// archetype composition roots would call this same runner
 	// against the same DSN. Separate migration table
 	// (`archetype_schema_migrations`) keeps the two namespaces
-	// decoupled at the migration-runner layer.
-	archetypeMigrationProvider, err := migrator.NewProvider(ctx, db, archetypeMigrations.MigrationsFS, "archetype_schema_migrations")
-	if err != nil {
+	// decoupled at the migration-runner layer. The actual runner
+	// call lives in migrators.go (T-01 PR-1 of
+	// cachicamas-archetype-system-foundation) so main.go stays
+	// under its 350-line budget as the migration count grows.
+	if err := runArchetypeMigrations(ctx, db); err != nil {
 		_ = db.Close()
-		return fmt.Errorf("build archetype migration provider: %w", err)
-	}
-	if _, err := archetypeMigrationProvider.Up(ctx); err != nil {
-		_ = db.Close()
-		return fmt.Errorf("apply archetype migrations: %w", err)
+		return err
 	}
 
 	// CH-12 (cachicamas-assistant-configuration-ui): build the
