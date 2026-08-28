@@ -13,7 +13,7 @@ All 26 CRL-S scenarios are implemented, discharged, and re-verified. Backend unc
 ## Verification commands (run this session)
 
 | # | Command | Result |
-|---|---------|--------|
+| --- | --------- | -------- |
 | 1 | `cd backend/agent && go clean -testcache && go test -race -count=1 ./...` | 16 packages ok; FAIL only in `src/ai` + `src/ai/openaicompat/openrouter` (the 3 documented pre-existing tests) |
 | 2 | `INTEGRATION=1 go test -race ./src/archetype -run Test_FreshDB_Bootstrap_CatalogAndConfigServe` | PASS (0.14s) |
 | 3 | `INTEGRATION=1 go test -race ./src/chat -run Test_PutConfig_NextTurn_ReloadsPrompt` | PASS (0.12s) |
@@ -27,11 +27,11 @@ Pre-existing failures (verified identical to the documented base defects, out of
 ## Per-requirement verdicts
 
 | Requirement | Verdict | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | CRL-R-001 (S-001..009) `?type=` validated filter | COMPLIANT | Handler re-derived at `src/archetype/http.go:382–423`: validates BEFORE data access (loader 0× on invalid), 400 + `{kind:"validation", fields.code:"ERR_UNKNOWN_TYPE"}`, non-empty message, order-preserving subset, `[]` not null. Tests `http_test.go:1242–1430` (commits ae190317 + d5099ec9): unknown/empty/junk arms, per-arm filtering, two-call order stability, archived exclusion, org-override owner/non-owner, literal `[]` body. |
 | CRL-R-002 (S-010, S-011) server-authoritative directory | COMPLIANT | `archetypes.ts:121–125` bare `/api/archetypes` when no arg; `routes/agents/index.tsx` calls `listArchetypes()` (no type), null→explicit error card, []→`agent-directory-empty` empty state; AGENTS fallback removed from `agent-directory.tsx`. Tests: `agent-directory.spec.tsx` + `archetypes.spec.ts` (65721e54, f36f8958). |
 | CRL-R-003 (S-012..016) profile opens any server slug | COMPLIANT | `resolveAgentProfile` three-state loader (ok/unknown/unavailable); `status(404)` emitted ONLY for `kind:"unknown"` (`[slug]/index.tsx:110–114`); config GET failure→null hides ConfigureSection. 5 tests in `[slug]/index.test.tsx` driving the pure loader via mocked `globalThis.fetch` (878caaed + 65721e54). |
-| CRL-R-004 (S-017..019) static fallback removal | COMPLIANT | `use-system-archetype.ts` + spec deleted (−321 lines) in f36f8958. Grep re-run at HEAD: `resolveSystemArchetype|useSystemArchetype|syntheticFallbackView|listArchetypesByType` → zero live references (only doc-comments/test-strings describing prohibited behavior). |
+| CRL-R-004 (S-017..019) static fallback removal | COMPLIANT | `use-system-archetype.ts` + spec deleted (−321 lines) in f36f8958. Grep re-run at HEAD: `resolveSystemArchetype | useSystemArchetype | syntheticFallbackView | listArchetypesByType` → zero live references (only doc-comments/test-strings describing prohibited behavior). |
 | CRL-R-005 (S-020..022) fresh-DB bootstrap | COMPLIANT | `bootstrap_integration_test.go` PASS with DSN (two-boot convergence, GET list contains `assistant` type=system, GET config 200, PUT reflected); skip arm proven. |
 | CRL-R-006 (S-023..026) prompt-only reload evidence | COMPLIANT (see SUGGESTION-1/2) | `conversation_reload_integration_test.go` PASS: v1→A, v2 write→reload→B, version=2, no-op reload keeps B/2. `conversation_version_test.go:263` loader-error: Send continues, prior prompt kept, version unchanged. Send-boundary call confirmed at `conversation.go` (`ReloadAssistantConfig` before Harness.Run). |
 | NFR-CRL-001 backend evidence | COMPLIANT | Command 1 above, uncached. |
