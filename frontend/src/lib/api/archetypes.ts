@@ -31,6 +31,7 @@
  */
 
 import type { ApiResult } from "~/lib/api";
+import { getSsrCookieHeader } from "~/lib/ssr-cookie-context";
 
 // -----------------------------------------------------------------------------
 // Wire types
@@ -196,12 +197,26 @@ interface ErrorEnvelope {
   fields?: Record<string, string>;
 }
 
+function requestURL(path: string): string {
+  if (typeof window !== "undefined") return path;
+
+  const base = (
+    process.env.SERVER_AGENT_CHAT_BASE_URL ?? process.env.AGENT_CHAT_TARGET
+  )?.trim();
+  return base ? `${base.replace(/\/+$/, "")}${path}` : path;
+}
+
+function withSsrCookieHeader(headers: Record<string, string>): HeadersInit {
+  const cookie = getSsrCookieHeader();
+  return cookie ? { ...headers, cookie } : headers;
+}
+
 async function getJson<T>(path: string): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(path, {
+    const response = await fetch(requestURL(path), {
       method: "GET",
       credentials: "include",
-      headers: { Accept: "application/json" },
+      headers: withSsrCookieHeader({ Accept: "application/json" }),
     });
     return parseResponse<T>(response);
   } catch (error) {
@@ -215,13 +230,13 @@ async function sendJson<T>(
   body: unknown,
 ): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(path, {
+    const response = await fetch(requestURL(path), {
       method,
       credentials: "include",
-      headers: {
+      headers: withSsrCookieHeader({
         "Content-Type": "application/json",
         Accept: "application/json",
-      },
+      }),
       body: JSON.stringify(body),
     });
     return parseResponse<T>(response);
