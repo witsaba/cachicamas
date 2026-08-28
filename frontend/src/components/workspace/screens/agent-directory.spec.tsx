@@ -118,8 +118,82 @@ describe("AgentDirectory (feat/archetype-list-endpoint slice 5 — RED)", () => 
     expect(card?.textContent).toContain("From Overlay");
     expect(card?.textContent).toContain("Overlay tagline");
     // The non-assistant card still uses the loader's data.
-    const other = screen.querySelector('[data-testid="agent-card-general-one"]');
-    expect(other).toBeTruthy();
-    expect(other?.textContent).toContain("General One");
-  });
-});
+        const other = screen.querySelector('[data-testid="agent-card-general-one"]');
+        expect(other).toBeTruthy();
+        expect(other?.textContent).toContain("General One");
+      });
+    });
+
+    // ---------------------------------------------------------------------------
+    // cachicamas-agent-catalog-config-reload (S2-R — RED) — the directory becomes
+    // server-authoritative: the route owns list-fetch failure and passes REAL
+    // arrays only, the AGENTS fallback is gone, and the assistant's statusWord
+    // derives from its row's is_override — not the deleted override hook
+    // (CRL-S-010/011, C2/D-ADR-04).
+    //
+    // GREEN contract notes:
+    //   - `archetypes` becomes a REQUIRED prop; `assistantConfigured` and
+    //     `assistantView` are deleted. The legacy props below are passed through
+    //     a cast so they type-check today AND stay meaningful after GREEN (the
+    //     component must simply IGNORE them — the row's is_override wins).
+    //   - the empty list renders an explicit empty state carrying
+    //     data-testid="agent-directory-empty".
+    // ---------------------------------------------------------------------------
+    describe("AgentDirectory (cachicamas-agent-catalog-config-reload S2-R — RED)", () => {
+      it("Test_AgentDirectory_EmptyList_RendersEmptyState: an empty list renders the empty state, NOT AGENTS cards (CRL-S-010)", async () => {
+        // The route handles list-fetch failure and hands the component REAL
+        // arrays only. An empty array therefore means "no archetypes": the
+        // component must render an explicit empty state and never fall back
+        // to the static AGENTS literal.
+        const { screen, render } = await createDOM();
+        await render(<AgentDirectory archetypes={[]} />);
+        expect(
+          screen.querySelector('[data-testid="agent-directory-empty"]'),
+        ).toBeTruthy();
+        expect(
+          screen.querySelectorAll('[data-testid^="agent-card-"]').length,
+        ).toBe(0);
+      });
+
+      it("Test_AgentDirectory_NoAssistantCard_DerivedFromAgents: even with the legacy override-hook props present, no assistant card is derived from AGENTS (CRL-S-011)", async () => {
+        // The deleted override hook (assistantConfigured/assistantView) must
+        // not be able to fabricate an assistant card when the list has none.
+        const { screen, render } = await createDOM();
+        await render(
+          <AgentDirectory
+            {...({
+              archetypes: [],
+              assistantConfigured: true,
+              assistantView: viewFor({ slug: "assistant", display_name: "From Overlay" }),
+            } as unknown as Parameters<typeof AgentDirectory>[0])}
+          />,
+        );
+        expect(
+          screen.querySelector('[data-testid="agent-card-assistant"]'),
+        ).toBeNull();
+        expect(
+          screen.querySelectorAll('[data-testid^="agent-card-"]').length,
+        ).toBe(0);
+      });
+
+      it("Test_AgentDirectory_AssistantStatusWord_FromRowIsOverride: the assistant statusWord derives from its row's is_override, not the deleted override hook (CRL-S-011, C2/D-ADR-04)", async () => {
+            // The row says Default (is_override=false) but the deleted override
+            // hook would claim Configured. The row must win. The tagline is set
+            // explicitly so the "Default" assertion can only match the status word.
+            const { screen, render } = await createDOM();
+            await render(
+              <AgentDirectory
+                {...({
+                  archetypes: [
+                    viewFor({ slug: "assistant", is_override: false, tagline: "Server row tagline" }),
+                  ],
+                  assistantConfigured: true,
+                } as unknown as Parameters<typeof AgentDirectory>[0])}
+              />,
+            );
+        const card = screen.querySelector('[data-testid="agent-card-assistant"]');
+        expect(card).toBeTruthy();
+        expect(card?.textContent).toContain("Default");
+        expect(card?.textContent).not.toContain("Configured");
+      });
+    });
