@@ -24,6 +24,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,10 @@ type fakeCatalogLoader struct {
 	listByTypeViews []archetype.ArchetypeView
 	listByTypeErr   error
 	listByTypeCalls int
+	// listByTypeFn lets a test model the real loader's per-org
+	// projection (an override row only for the owning org) without
+	// mutating the fake between sequential requests.
+	listByTypeFn func(orgID string) []archetype.ArchetypeView
 }
 
 func (f *fakeCatalogLoader) LoadBySlug(_ context.Context, slug, orgID string) (archetype.ArchetypeView, bool, error) {
@@ -68,10 +73,13 @@ func (f *fakeCatalogLoader) LoadBySlug(_ context.Context, slug, orgID string) (a
 	return f.view, f.found, f.err
 }
 
-func (f *fakeCatalogLoader) ListByType(_ context.Context, _ string) ([]archetype.ArchetypeView, error) {
+func (f *fakeCatalogLoader) ListByType(_ context.Context, orgID string) ([]archetype.ArchetypeView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listByTypeCalls++
+	if f.listByTypeFn != nil {
+		return f.listByTypeFn(orgID), f.listByTypeErr
+	}
 	return f.listByTypeViews, f.listByTypeErr
 }
 
@@ -1120,3 +1128,289 @@ func Test_HandleGetArchetype_RouteOrderingWithConfigArm(t *testing.T) {
 
 // (small helper to silence unused-imports when iterating)
 var _ = errors.New
+
+// -----------------------------------------------------------------------------
+// cachicamas-agent-catalog-config-reload (RED — T1.1, slice S1-R) — TDD
+// contract for the optional `?type=` filter on GET /api/archetypes
+// (CRL-R-001, scenarios CRL-S-001..009).
+//
+// Contract:
+//   - Absent `type` → full directory, all three types (R-24 total set)
+//   - Valid `type` ∈ {system, general, owned} → subset projection of the
+//     same loader result, preserving (type ASC, slug ASC) order
+//   - Invalid/empty `type` → 400 + {kind:validation, fields.code:ERR_UNKNOWN_TYPE},
+//     loader NOT called (defence in depth)
+//   - R-24 invariants inherited on every arm: stable order, archived rows
+//     excluded, per-org override projected, empty result → 200 []
+//
+// RED state: the handler ignores ?type= today, so the invalid-filter
+// and filtered-result tests fail while the absent-param test locks the
+// unfiltered behavior it must keep.
+// -----------------------------------------------------------------------------
+
+// typeFilterSeed helpers — compact row constructors for the ?type=
+// contract tests. The fake loader models the real loader's R-24
+// output: rows ordered (type ASC, slug ASC), archived excluded at the
+// WHERE boundary, per-org override attached only for user_alice.
+
+var typeFilterNow = time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+
+func typeFilterRow(slug, typ string, status string) archetype.ArchetypeView {
+	return archetype.ArchetypeView{
+		Slug:        slug,
+		Type:        typ,
+		DisplayName: strings.ToUpper(slug[:1]) + slug[1:],
+		Tagline:     "Row " + slug,
+		Status:      status,
+		CreatedAt:   typeFilterNow,
+		CreatedBy:   "seed",
+	}
+}
+
+func typeFilterViews(orgID string) []archetype.ArchetypeView {
+	views := []archetype.ArchetypeView{
+		typeFilterRow("general-one", "general", "active"),
+		typeFilterRow("general-two", "general", "active"),
+		typeFilterRow("owned-one", "owned", "active"),
+		typeFilterRow("assistant", "system", "active"),
+		typeFilterRow("system-two", "system", "active"),
+	}
+	if orgID == "user_alice" {
+		views[3].Override = &archetype.ArchetypeOverride{
+			SystemPrompt:   "you are the cachicamas assistant",
+			ToolAllowlist:  []string{"current_time", "summarize_conversation"},
+			DeferToolNames: []string{"summarize_conversation"},
+			Version:        4,
+			UpdatedAt:      typeFilterNow,
+			UpdatedBy:      "user_alice",
+		}
+	}
+	return views
+}
+
+// typeFilterSeedRaw includes the archived row the real loader excludes
+// via its WHERE predicate; kept so the archived-exclusion contract
+// has an explicit raw seed to contrast against (CRL-S-007).
+func typeFilterSeedRaw() []archetype.ArchetypeView {
+	archivedAt := typeFilterNow.Add(-24 * time.Hour)
+	archived := typeFilterRow("archived-one", "general", "archived")
+	archived.ArchivedAt = &archivedAt
+	return append([]archetype.ArchetypeView{archived}, typeFilterViews("user_alice")...)
+}
+
+func newTypeFilterServer(t *testing.T, orgID string) (*echo.Echo, *fakeCatalogLoader) {
+	t.Helper()
+	loader := &fakeCatalogLoader{listByTypeFn: typeFilterViews}
+	resolver := &fakeResolver{signIn: true, orgID: orgID}
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+	return e, loader
+}
+
+func decodeListBody(t *testing.T, body []byte) []archetype.ArchetypeView {
+	t.Helper()
+	var got []archetype.ArchetypeView
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode list body: %v; body=%s", err, string(body))
+	}
+	return got
+}
+
+func listSlugs(views []archetype.ArchetypeView) []string {
+	slugs := make([]string, 0, len(views))
+	for _, v := range views {
+		slugs = append(slugs, v.Slug)
+	}
+	return slugs
+}
+
+func assertSlugOrder(t *testing.T, views []archetype.ArchetypeView, want []string) {
+	t.Helper()
+	got := listSlugs(views)
+	if len(got) != len(want) {
+		t.Fatalf("slugs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d].Slug = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Test_HandleListArchetypes_UnknownTypeFilter_Returns400WithCode —
+// CRL-S-004 + CRL-S-005: any ?type= value outside {system, general,
+// owned} (unknown, empty, junk) → 400 + validation envelope with
+// fields.code=ERR_UNKNOWN_TYPE, non-empty message, loader NOT called
+// (the filter is validated before any data access).
+func Test_HandleListArchetypes_UnknownTypeFilter_Returns400WithCode(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{"enterprise", "", "Sys%20Tem"}
+	for _, value := range cases {
+		t.Run("type="+value, func(t *testing.T) {
+			e, loader := newTypeFilterServer(t, "user_alice")
+
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/archetypes?type="+value, nil))
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			var env map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode envelope: %v; body=%s", err, rec.Body.String())
+			}
+			if env["kind"] != "validation" {
+				t.Errorf("env.kind = %v, want validation", env["kind"])
+			}
+			if msg, _ := env["message"].(string); msg == "" {
+				t.Error("env.message missing; want non-empty string")
+			}
+			fields, ok := env["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("env.fields missing or wrong shape: %v", env["fields"])
+			}
+			if fields["code"] != "ERR_UNKNOWN_TYPE" {
+				t.Errorf("fields.code = %v, want ERR_UNKNOWN_TYPE", fields["code"])
+			}
+			if loader.listByTypeCalls != 0 {
+				t.Errorf("ListByType called %d time(s), want 0 for invalid filter", loader.listByTypeCalls)
+			}
+		})
+	}
+}
+
+// Test_HandleListArchetypes_TypeFilter_FiltersListPreservingOrder —
+// CRL-S-002/003/006/007/008: each valid arm returns only that type's
+// rows in (type ASC, slug ASC) order, the archived row never appears,
+// the org-override survives for its owner (and only its owner), and
+// repeated calls are stable.
+func Test_HandleListArchetypes_TypeFilter_FiltersListPreservingOrder(t *testing.T) {
+	t.Parallel()
+
+	e, loader := newTypeFilterServer(t, "user_alice")
+
+	arms := []struct {
+		rawURL    string
+		wantSlugs []string
+	}{
+		{"/api/archetypes?type=system", []string{"assistant", "system-two"}},
+		{"/api/archetypes?type=general", []string{"general-one", "general-two"}},
+		{"/api/archetypes?type=owned", []string{"owned-one"}},
+	}
+	for _, arm := range arms {
+		var first []string
+		for call := 1; call <= 2; call++ {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, arm.rawURL, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200; body=%s", arm.rawURL, rec.Code, rec.Body.String())
+			}
+			got := decodeListBody(t, rec.Body.Bytes())
+			assertSlugOrder(t, got, arm.wantSlugs)
+			order := listSlugs(got)
+			if call == 1 {
+				first = order
+			} else if !slices.Equal(order, first) {
+				t.Errorf("%s call %d order %v differs from call 1 %v", arm.rawURL, call, order, first)
+			}
+			// CRL-S-007: archived row never surfaces on any arm.
+			if slices.Contains(order, "archived-one") {
+				t.Errorf("%s returned archived row archived-one", arm.rawURL)
+			}
+		}
+	}
+
+	// CRL-S-008: owner org sees the override; non-owner does not.
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/archetypes?type=system", nil))
+	for _, row := range decodeListBody(t, rec.Body.Bytes()) {
+		if row.Slug != "assistant" {
+			continue
+		}
+		if row.Override == nil || row.Override.SystemPrompt != "you are the cachicamas assistant" {
+			t.Errorf("owner org assistant row override wrong: %+v", row.Override)
+		}
+	}
+	eB, _ := newTypeFilterServer(t, "user_bob")
+	recB := httptest.NewRecorder()
+	eB.ServeHTTP(recB, httptest.NewRequest(http.MethodGet, "/api/archetypes?type=system", nil))
+	for _, row := range decodeListBody(t, recB.Body.Bytes()) {
+		if row.Slug == "assistant" && row.Override != nil {
+			t.Errorf("non-owner org saw override on assistant row: %+v", row.Override)
+		}
+	}
+	if loader.listByTypeCalls == 0 {
+		t.Error("ListByType never called; filter arms must still read through the loader")
+	}
+}
+
+// Test_HandleListArchetypes_AbsentType_ReturnsAllTypes — CRL-S-001 +
+// CRL-S-006..008: no `type` param → the full directory across all
+// three types (locks R-24's unfiltered total set), archived excluded,
+// override projected for the owner, stable across calls.
+func Test_HandleListArchetypes_AbsentType_ReturnsAllTypes(t *testing.T) {
+	t.Parallel()
+
+	e, _ := newTypeFilterServer(t, "user_alice")
+
+	want := []string{"general-one", "general-two", "owned-one", "assistant", "system-two"}
+	var first []string
+	for call := 1; call <= 2; call++ {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/archetypes", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		got := decodeListBody(t, rec.Body.Bytes())
+		assertSlugOrder(t, got, want)
+		typesSeen := map[string]bool{}
+		for _, row := range got {
+			typesSeen[row.Type] = true
+			if row.Slug == "archived-one" {
+				t.Error("absent arm returned archived row archived-one")
+			}
+		}
+		for _, typ := range []string{"system", "general", "owned"} {
+			if !typesSeen[typ] {
+				t.Errorf("absent arm missing type %q", typ)
+			}
+		}
+		order := listSlugs(got)
+		if call == 1 {
+			first = order
+		} else if !slices.Equal(order, first) {
+			t.Errorf("call %d order %v differs from call 1 %v", call, order, first)
+		}
+	}
+	// Keep the raw-seed helper referenced so the archived-exclusion
+	// contract stays documented in this test block.
+	_ = typeFilterSeedRaw()
+}
+
+// Test_HandleListArchetypes_EmptyFilteredResult_Returns200EmptyArray —
+// CRL-S-009: a valid filter with zero matching rows → 200 + literal []
+// (never 404, never null).
+func Test_HandleListArchetypes_EmptyFilteredResult_Returns200EmptyArray(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{listByTypeViews: []archetype.ArchetypeView{
+		typeFilterRow("assistant", "system", "active"),
+	}}
+	resolver := &fakeResolver{signIn: true, orgID: "user_alice"}
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/archetypes?type=general", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("body = %q, want literal empty array []", body)
+	}
+}
