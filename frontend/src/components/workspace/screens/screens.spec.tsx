@@ -13,56 +13,85 @@ import { AgentDirectory } from "./agent-directory";
 import { AgentProfile } from "./agent-profile";
 import { OrganizationPanel } from "./organization-panel";
 import { TeamsBoard } from "./teams-board";
+import type { ArchetypeView } from "~/lib/api/archetypes";
 import { AGENTS, ORG_ROLES, PEOPLE, TEAMS, agentBySlug, displayStatusWord } from "~/lib/mock/staff";
+
+// The directory is server-authoritative (cachicamas-agent-catalog-config-reload,
+// T5.5): it renders one card per ArchetypeView row the route loader returned.
+// These fixtures stand in for the server list.
+function viewFor(overrides: Partial<ArchetypeView>): ArchetypeView {
+  return {
+    slug: overrides.slug ?? "assistant",
+    type: overrides.type ?? "system",
+    display_name: overrides.display_name ?? "Assistant",
+    tagline: overrides.tagline ?? "Default tagline",
+    status: overrides.status ?? "active",
+    archived_at: overrides.archived_at ?? null,
+    created_at: overrides.created_at ?? "2026-08-27T10:00:00Z",
+    created_by: overrides.created_by ?? "seed",
+    bundle_version: overrides.bundle_version,
+    is_critical: overrides.is_critical,
+    override: overrides.override,
+    is_override: overrides.is_override ?? false,
+  };
+}
+const DIRECTORY_ROWS: readonly ArchetypeView[] = [
+  viewFor({ slug: "assistant", type: "system", display_name: "Assistant" }),
+  viewFor({ slug: "general-one", type: "general", display_name: "General One" }),
+  viewFor({
+    slug: "owned-one",
+    type: "owned",
+    display_name: "Owned One",
+    status: "draft",
+  }),
+];
 
 describe("agent directory", () => {
   it("separates who is on staff from who could be", async () => {
     // A mixed list makes a person read every status word to answer either
     // question; two headed groups answer both at a glance.
     const { screen, render } = await createDOM();
-    await render(<AgentDirectory />);
+    await render(<AgentDirectory archetypes={DIRECTORY_ROWS} />);
     const text = screen.textContent ?? "";
     expect(text).toContain("On staff");
     expect(text).toContain("You could also hire");
-    for (const agent of AGENTS) {
+    for (const row of DIRECTORY_ROWS) {
       expect(
-        screen.querySelector(`[data-testid="agent-card-${agent.slug}"]`),
-        agent.slug,
+        screen.querySelector(`[data-testid="agent-card-${row.slug}"]`),
+        row.slug,
       ).toBeTruthy();
     }
   });
 
   it("offers a conversation only with colleagues who are actually here", async () => {
+    // Every server row projects onto an on-staff card (working or
+    // training — never "available"), so each card carries its chat link.
     const { screen, render } = await createDOM();
-    await render(<AgentDirectory />);
-    for (const agent of AGENTS) {
+    await render(<AgentDirectory archetypes={DIRECTORY_ROWS} />);
+    for (const row of DIRECTORY_ROWS) {
       const card = screen.querySelector(
-        `[data-testid="agent-card-${agent.slug}"]`,
+        `[data-testid="agent-card-${row.slug}"]`,
       );
       const hrefs = Array.from(card?.querySelectorAll("a") ?? []).map((a) =>
         a.getAttribute("href"),
       );
-      if (agent.status === "available") {
-        expect(hrefs, agent.slug).not.toContain(`/chat/?with=${agent.slug}`);
-      } else {
-        expect(hrefs, agent.slug).toContain(`/chat/?with=${agent.slug}`);
-      }
+      expect(hrefs, row.slug).toContain(`/chat/?with=${row.slug}`);
     }
   });
 
   it("puts a status word beside every colleague, never a colour alone", async () => {
     const { screen, render } = await createDOM();
-    await render(<AgentDirectory />);
-    for (const agent of AGENTS) {
+    await render(<AgentDirectory archetypes={DIRECTORY_ROWS} />);
+    for (const row of DIRECTORY_ROWS) {
       const card = screen.querySelector(
-        `[data-testid="agent-card-${agent.slug}"]`,
+        `[data-testid="agent-card-${row.slug}"]`,
       );
-      // The Assistant's statusWord is API-derived (REQ-FADR-001/002)
-      // and is absent from AGENTS[0]; assert against the rendered
-      // word (`displayStatusWord` is what the card calls) instead
-      // of the raw (optional) field.
-      expect(card?.textContent, agent.slug).toContain(displayStatusWord(agent));
-      expect(card?.textContent, agent.slug).toContain("Agent");
+      // The statusWord derives from the row's is_override (C2/D-ADR-04):
+      // "Configured" when the org has a per-org row, "Default" otherwise.
+      expect(card?.textContent, row.slug).toContain(
+        row.is_override ? "Configured" : "Default",
+      );
+      expect(card?.textContent, row.slug).toContain("Agent");
     }
   });
 });

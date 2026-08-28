@@ -349,11 +349,16 @@ func validatePutArchetypeConfig(body putArchetypeConfigRequest) (string, error) 
 // getJson<readonly ArchetypeView[]>() return type matches the
 // Go side byte-for-byte.
 //
-// The `?type=` query parameter is intentionally NOT consulted:
-// the spec's design decision is "all three types, no additional
-// filter" so the loader returns the full directory regardless of
-// the query string. The frontend still sends `?type=system` for
-// documentation; the parameter is accepted and ignored.
+// The optional `?type=` query parameter is validated against the
+// three registered types. Absent → the full directory (all three
+// types, R-24's unfiltered total set). Valid value (system |
+// general | owned) → a subset projection of the same loader
+// result, preserving (type ASC, slug ASC) order, so the R-24
+// invariants (stable ordering, archived exclusion, per-org
+// override projection, 200 []) are inherited unchanged. Any other
+// present value (unknown, empty, junk) → 400 + validation
+// envelope with fields.code=ERR_UNKNOWN_TYPE, and the loader is
+// NOT called (the filter is validated before any data access).
 func HandleListArchetypes(resolver IdentityResolver, loader CatalogLoader) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if resolver == nil {
@@ -374,6 +379,19 @@ func HandleListArchetypes(resolver IdentityResolver, loader CatalogLoader) echo.
 			return writeError(c, http.StatusForbidden, "server",
 				"identity missing participant id", nil)
 		}
+		// Optional ?type= filter: validate BEFORE any data access.
+		wantType, hasType := "", false
+		if raw, present := c.QueryParams()["type"]; present {
+			hasType = true
+			wantType = strings.TrimSpace(strings.Join(raw, ""))
+			switch wantType {
+			case "system", "general", "owned":
+			default:
+				return writeError(c, http.StatusBadRequest, "validation",
+					"unknown type filter: want system, general, or owned",
+					map[string]string{"code": "ERR_UNKNOWN_TYPE"})
+			}
+		}
 		views, err := loader.ListByType(c.Request().Context(), orgID)
 		if err != nil {
 			// Defence in depth: do not echo the underlying error string
@@ -384,9 +402,20 @@ func HandleListArchetypes(resolver IdentityResolver, loader CatalogLoader) echo.
 		}
 		// Always emit a JSON array (never null) so the client can
 		// iterate without a null-check. An empty loader result
-		// becomes `[]` on the wire.
+		// becomes `[]` on the wire. A valid ?type= filter is a subset
+		// projection of the same loader result (never widens it), so
+		// an empty projection is a non-nil `[]`, not an error.
 		if views == nil {
 			views = []ArchetypeView{}
+		}
+		if hasType {
+			subset := make([]ArchetypeView, 0, len(views))
+			for _, v := range views {
+				if v.Type == wantType {
+					subset = append(subset, v)
+				}
+			}
+			views = subset
 		}
 		return c.JSON(http.StatusOK, views)
 	}

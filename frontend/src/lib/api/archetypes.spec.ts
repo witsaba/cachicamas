@@ -5,7 +5,7 @@
  * Round-trips for:
  *   - getArchetype(slug)            (per-profile read)
  *   - putArchetypeConfig(slug, …)   (per-profile write — server response, not request body)
- *   - listArchetypesByType(type)    (directory list)
+ *   - listArchetypes(type?)         (directory list)
  *
  * Error-envelope mapping:
  *   - HTTP 400 + validation envelope → ApiResult.kind="validation"
@@ -21,16 +21,19 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as archetypesModule from "./archetypes";
 import {
   archetypeConfigURL,
   archetypeURL,
   archetypesListURL,
   getArchetype,
   getArchetypeConfigPolymorphic,
-  listArchetypesByType,
+  listArchetypes,
   putArchetypeConfig,
+  type ArchetypeType,
   type ArchetypeView,
 } from "./archetypes";
+import type { ApiResult } from "~/lib/api";
 
 const originalFetch = globalThis.fetch;
 
@@ -309,10 +312,10 @@ describe("putArchetypeConfig", () => {
 });
 
 // -----------------------------------------------------------------------------
-// listArchetypesByType scenarios
+// listArchetypes scenarios
 // -----------------------------------------------------------------------------
 
-describe("listArchetypesByType", () => {
+describe("listArchetypes", () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn();
   });
@@ -325,7 +328,7 @@ describe("listArchetypesByType", () => {
       jsonResponse(200, [assistantView({ is_override: false })]),
     );
 
-    const result = await listArchetypesByType("system");
+    const result = await listArchetypes("system");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(Array.isArray(result.value)).toBe(true);
@@ -337,7 +340,7 @@ describe("listArchetypesByType", () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       jsonResponse(200, []),
     );
-    await listArchetypesByType("system");
+    await listArchetypes("system");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       archetypesListURL("system"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
@@ -348,7 +351,7 @@ describe("listArchetypesByType", () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       jsonResponse(200, []),
     );
-    await listArchetypesByType("system");
+    await listArchetypes("system");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/archetypes?type=system",
       expect.anything(),
@@ -364,7 +367,7 @@ describe("listArchetypesByType", () => {
       }),
     );
 
-    const result = await listArchetypesByType("system");
+    const result = await listArchetypes("system");
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.kind).toBe("validation");
@@ -532,6 +535,67 @@ describe("getArchetype drift guard", () => {
     );
     expect(globalThis.fetch).not.toHaveBeenCalledWith(
       archetypeConfigURL("assistant"),
+      expect.anything(),
+    );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// cachicamas-agent-catalog-config-reload (S2-R — RED) — the directory list
+// client gains an optional type param: `listArchetypes()` with no argument
+// requests the BARE /api/archetypes URL with NO `type` query (the ?type=
+// narrowing guard, CRL-S-010), while `listArchetypes("system")` still sends
+// ?type=system.
+//
+// RED seam: `listArchetypes` is added by the S2-G GREEN commit (the current
+// client only has `listArchetypesByType`). The namespace cast keeps the RED
+// a behavioral assertion failure ("expected a function, got undefined"),
+// not a module-link error.
+// -----------------------------------------------------------------------------
+
+describe("listArchetypes (optional type param)", () => {
+  const listArchetypes = (
+    archetypesModule as unknown as {
+      listArchetypes?: (
+        type?: ArchetypeType,
+      ) => Promise<ApiResult<readonly ArchetypeView[]>>;
+    }
+  ).listArchetypes;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("Test_ListArchetypes_NoArg_BareURL_NoTypeQuery: listArchetypes() requests /api/archetypes with NO type query (CRL-S-010)", async () => {
+    expect(
+      listArchetypes,
+      "listArchetypes is added by the S2-G GREEN commit",
+    ).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, []),
+    );
+
+    const result = await listArchetypes!();
+    expect(result.ok).toBe(true);
+    // The narrowing guard: the unfiltered call MUST NOT send a ?type= query.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/archetypes",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+  });
+
+  it("Test_ListArchetypes_WithArg_StillSendsTypeQuery: listArchetypes('system') still sends ?type=system", async () => {
+    expect(listArchetypes).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, []),
+    );
+
+    await listArchetypes!("system");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/archetypes?type=system",
       expect.anything(),
     );
   });

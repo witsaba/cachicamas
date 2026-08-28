@@ -82,7 +82,16 @@ ALTER TABLE archetype_configurations_log
         ON DELETE RESTRICT;
 
 CREATE INDEX idx_archetype_configurations_log_slug_org_created
-    ON archetype_configurations_log (archetype_slug, org_id, created_at DESC);`
+    ON archetype_configurations_log (archetype_slug, org_id, created_at DESC);
+
+-- Drop the legacy kind column: the slug-based writer inserts rows
+-- without it, and its NOT NULL constraint (no default) would reject
+-- every future write. Mirrors the 0006 reshape of the main
+-- archetype_configurations table, which already dropped
+-- archetype_kind. Dropping the column also auto-drops the
+-- kind-prefixed index from 0002.
+ALTER TABLE archetype_configurations_log
+    DROP COLUMN archetype_kind;`
 
 	// 1. Fresh-DB guard: prerequisite table absent means the goose
 	//    runner has not yet applied migration 0002. Skip cleanly and
