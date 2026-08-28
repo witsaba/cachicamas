@@ -5,7 +5,7 @@
  * Round-trips for:
  *   - getArchetype(slug)            (per-profile read)
  *   - putArchetypeConfig(slug, …)   (per-profile write — server response, not request body)
- *   - listArchetypesByType(type)    (directory list)
+ *   - listArchetypes(type?)         (directory list)
  *
  * Error-envelope mapping:
  *   - HTTP 400 + validation envelope → ApiResult.kind="validation"
@@ -28,7 +28,7 @@ import {
   archetypesListURL,
   getArchetype,
   getArchetypeConfigPolymorphic,
-  listArchetypesByType,
+  listArchetypes,
   putArchetypeConfig,
   type ArchetypeType,
   type ArchetypeView,
@@ -312,10 +312,10 @@ describe("putArchetypeConfig", () => {
 });
 
 // -----------------------------------------------------------------------------
-// listArchetypesByType scenarios
+// listArchetypes scenarios
 // -----------------------------------------------------------------------------
 
-describe("listArchetypesByType", () => {
+describe("listArchetypes", () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn();
   });
@@ -328,7 +328,7 @@ describe("listArchetypesByType", () => {
       jsonResponse(200, [assistantView({ is_override: false })]),
     );
 
-    const result = await listArchetypesByType("system");
+    const result = await listArchetypes("system");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(Array.isArray(result.value)).toBe(true);
@@ -340,7 +340,7 @@ describe("listArchetypesByType", () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       jsonResponse(200, []),
     );
-    await listArchetypesByType("system");
+    await listArchetypes("system");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       archetypesListURL("system"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
@@ -351,7 +351,7 @@ describe("listArchetypesByType", () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       jsonResponse(200, []),
     );
-    await listArchetypesByType("system");
+    await listArchetypes("system");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/archetypes?type=system",
       expect.anything(),
@@ -367,7 +367,7 @@ describe("listArchetypesByType", () => {
       }),
     );
 
-    const result = await listArchetypesByType("system");
+    const result = await listArchetypes("system");
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.kind).toBe("validation");

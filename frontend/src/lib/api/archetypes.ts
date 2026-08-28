@@ -186,13 +186,6 @@ export async function listArchetypes(
   return getJson<readonly ArchetypeView[]>(archetypesListURL(type));
 }
 
-/**
- * @deprecated Renamed to `listArchetypes(type?)` (S2-G T5.2,
- * CRL-S-010). Kept as a thin alias so existing call-sites and the
- * archetypes spec keep working until they migrate.
- */
-export const listArchetypesByType = listArchetypes;
-
 // -----------------------------------------------------------------------------
 // Internal helpers (mirrors assistant-config.ts conventions)
 // -----------------------------------------------------------------------------
