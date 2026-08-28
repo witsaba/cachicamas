@@ -9,11 +9,11 @@
 //
 // Five scenarios from spec #4077:
 //
-//   - Test_VersionTracker_FirstLoad_RecordsVersion
-//   - Test_VersionTracker_VersionMismatch_AppliesNewPrompt
-//   - Test_VersionTracker_VersionMatch_NoRebuild
-//   - Test_VersionTracker_AbsentRow_DefaultsToVersion1
-//   - Test_VersionTracker_NilLoader_NoOp
+//	- Test_VersionTracker_FirstLoad_RecordsVersion
+//	- Test_VersionTracker_VersionMismatch_AppliesNewPrompt
+//	- Test_VersionTracker_VersionMatch_NoRebuild
+//	- Test_VersionTracker_AbsentRow_DefaultsToVersion1
+//	- Test_VersionTracker_NilLoader_NoOp
 package archetype_test
 
 import (
@@ -122,7 +122,7 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Slug:         archetype.AssistantSlug,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,
@@ -137,7 +137,7 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 	}
 
 	loader.withCurrent(archetype.ArchetypeConfig{
-		Slug:         archetype.AssistantSlug,
+		Slug:           archetype.AssistantSlug,
 		OrgID:        "user_alice",
 		SystemPrompt: "second prompt after config change",
 		Version:      4,
@@ -165,7 +165,7 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Slug:         archetype.AssistantSlug,
+			Slug:           archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,

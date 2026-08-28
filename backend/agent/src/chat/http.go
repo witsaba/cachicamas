@@ -72,10 +72,10 @@ type exchangeDTO struct {
 	FinishReason    *string  `json:"finishReason,omitempty"`
 	MessageIDs      []string `json:"messageIDs"`
 	// CH-09 — two new optional fields widen the DTO additively.
-	// The frontend mirror (chat-types.ts) gains the same two
-	// fields; their omission from the wire (a tool-free turn)
-	// is JSON-encoded as missing keys, never null slices — the
-	// optional `omitempty` keeps the wire tidy.
+		// The frontend mirror (chat-types.ts) gains the same two
+		// fields; their omission from the wire (a tool-free turn)
+		// is JSON-encoded as missing keys, never null slices — the
+		// optional `omitempty` keeps the wire tidy.
 	ToolCalls   []toolCallDTO   `json:"toolCalls,omitempty"`
 	ToolResults []toolResultDTO `json:"toolResults,omitempty"`
 }
@@ -447,20 +447,19 @@ type listConversationsResponse = []conversationSummaryDTO
 // (doct 0005's "Resumable mid-turn reconnect" row).
 //
 // Path-param decoding (chat-stack-wiring fix):
-//
-//	Echo v5.2.1's c.Param("id") does NOT percent-decode the matched
-//	path segment — verified against the running build by sending
-//	/conversations/braejan%40proton.me and observing the handler
-//	received "braejan%40proton.me" literally, which never matched
-//	the cookie-derived ident.ParticipantID() ("braejan@proton.me")
-//	and produced a spurious 403 not_found. Pre-CH-08.2 the wire's
-//	:id was a UUID with no reserved characters so this was
-//	invisible. After the participant_id switched to email
-//	(chat/auth_shim.go) the @ in the email becomes a percent-encoded
-//	%40 on the wire — every reload would 403 until we decode at the
-//	boundary. Same fix is needed for any future reserved character
-//	in an email localpart (+, ., internationalised), so we apply
-//	url.PathUnescape unconditionally rather than special-casing @.
+//   Echo v5.2.1's c.Param("id") does NOT percent-decode the matched
+//   path segment — verified against the running build by sending
+//   /conversations/braejan%40proton.me and observing the handler
+//   received "braejan%40proton.me" literally, which never matched
+//   the cookie-derived ident.ParticipantID() ("braejan@proton.me")
+//   and produced a spurious 403 not_found. Pre-CH-08.2 the wire's
+//   :id was a UUID with no reserved characters so this was
+//   invisible. After the participant_id switched to email
+//   (chat/auth_shim.go) the @ in the email becomes a percent-encoded
+//   %40 on the wire — every reload would 403 until we decode at the
+//   boundary. Same fix is needed for any future reserved character
+//   in an email localpart (+, ., internationalised), so we apply
+//   url.PathUnescape unconditionally rather than special-casing @.
 func HandleReloadConversation(store ConversationStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ident, _ := getIdentity(c)
@@ -760,15 +759,15 @@ func recordVerdict(conv *Conversation, callID, outcome string) error {
 //
 // Production wire (from cmd/chat/main.go):
 //
-//	registry, err := chat.RegisterRoutes(e, resolver, factory)
-//	chat.RegisterPermissionRoutes(e, resolver, registry)
+//   registry, err := chat.RegisterRoutes(e, resolver, factory)
+//   chat.RegisterPermissionRoutes(e, resolver, registry)
 //
 // Test wire (mountPermissionRoutes helper):
 //
-//	reg := chat.NewRegistry(testFactory)
-//	reg.conversations[pid] = conv
-//	reg.StoreStream(pid, "T1", nil) // or similar
-//	chat.RegisterPermissionRoutes(e, resolver, reg)
+//   reg := chat.NewRegistry(testFactory)
+//   reg.conversations[pid] = conv
+//   reg.StoreStream(pid, "T1", nil) // or similar
+//   chat.RegisterPermissionRoutes(e, resolver, reg)
 func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry *Registry) error {
 	if e == nil {
 		return errors.New("chat: RegisterPermissionRoutes requires a non-nil *echo.Echo")
@@ -784,3 +783,4 @@ func RegisterPermissionRoutes(e *echo.Echo, resolver IdentityResolver, registry 
 	api.POST("/turns/:id/permissions/:callID", HandlePermissionDecision(registry))
 	return nil
 }
+
