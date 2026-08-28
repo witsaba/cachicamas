@@ -112,9 +112,16 @@ export function archetypeURL(slug: string): string {
   return `/api/archetypes/${encodeURIComponent(slug)}`;
 }
 
-/** URL for the directory list. `type` MUST be one of the locked values. */
-export function archetypesListURL(type: ArchetypeType): string {
-  return `/api/archetypes?type=${encodeURIComponent(type)}`;
+/**
+ * URL for the directory list. Without `type` this is the BARE
+ * /api/archetypes URL with NO type query (the unfiltered cross-type
+ * directory, CRL-S-010); with `type` it narrows to one catalogue.
+ * `type` MUST be one of the locked values when supplied.
+ */
+export function archetypesListURL(type?: ArchetypeType): string {
+  return type === undefined
+    ? "/api/archetypes"
+    : `/api/archetypes?type=${encodeURIComponent(type)}`;
 }
 
 // -----------------------------------------------------------------------------
@@ -165,16 +172,26 @@ export async function getArchetypeConfigPolymorphic(
 }
 
 /**
- * listArchetypesByType(type) returns the directory list for the
- * supplied type. The backend's handler returns 400 when `type` is
- * missing or unknown; the client surfaces that as a typed
- * ApiResult.kind="validation".
+ * listArchetypes(type?) returns the directory list. Called WITHOUT a
+ * type argument it requests the bare /api/archetypes URL with no
+ * `type` query (CRL-S-010) — the full catalogue the staff directory
+ * renders, assistant row included. With a type argument it requests
+ * /api/archetypes?type={type} for a narrowed list. The backend's
+ * handler returns 400 for an unknown type; the client surfaces that
+ * as a typed ApiResult.kind="validation".
  */
-export async function listArchetypesByType(
-  type: ArchetypeType,
+export async function listArchetypes(
+  type?: ArchetypeType,
 ): Promise<ApiResult<readonly ArchetypeView[]>> {
   return getJson<readonly ArchetypeView[]>(archetypesListURL(type));
 }
+
+/**
+ * @deprecated Renamed to `listArchetypes(type?)` (S2-G T5.2,
+ * CRL-S-010). Kept as a thin alias so existing call-sites and the
+ * archetypes spec keep working until they migrate.
+ */
+export const listArchetypesByType = listArchetypes;
 
 // -----------------------------------------------------------------------------
 // Internal helpers (mirrors assistant-config.ts conventions)
