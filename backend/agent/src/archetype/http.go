@@ -164,7 +164,7 @@ func HandleGetArchetype(resolver IdentityResolver, loader CatalogLoader) echo.Ha
 		orgID := strings.TrimSpace(ident.ParticipantID())
 		if orgID == "" {
 			return writeError(c, http.StatusForbidden, "server",
-				"identity missing participant id", nil)
+				"identity not resolved", nil)
 		}
 		slug := strings.TrimSpace(c.Param("slug"))
 		if slug == "" {

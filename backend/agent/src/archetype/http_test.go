@@ -929,6 +929,45 @@ func Test_HandleGetArchetype_Anonymous_403(t *testing.T) {
 	}
 }
 
+// Test_HandleGetArchetype_EmptyParticipantID_403 — REQ-APSO-3: a
+// resolved identity with an empty ParticipantID receives the same standard
+// 403 envelope as an unresolved identity, and the loader is not called.
+func Test_HandleGetArchetype_EmptyParticipantID_403(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeCatalogLoader{}
+	resolver := &fakeResolver{signIn: true, orgID: ""}
+
+	e := echo.New()
+	if err := archetype.RegisterArchetypeRoutes(e, resolver, loader, nil); err != nil {
+		t.Fatalf("RegisterArchetypeRoutes: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archetypes/assistant", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if loader.loads != 0 {
+		t.Errorf("loader called %d time(s) on empty participant identity, want 0", loader.loads)
+	}
+	var envelope struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if envelope.Error != "server" {
+		t.Errorf("error = %q, want server", envelope.Error)
+	}
+	if envelope.Message != "identity not resolved" {
+		t.Errorf("message = %q, want identity not resolved", envelope.Message)
+	}
+}
+
 // Test_HandleGetArchetype_LoaderError_500 — REQ-APSO-5 / Scenario 5:
 // loader returns err → 500 + server envelope, no info leak (the
 // underlying error string is NOT echoed in the body).
