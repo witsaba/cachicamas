@@ -954,14 +954,14 @@ func Test_HandleGetArchetype_EmptyParticipantID_403(t *testing.T) {
 		t.Errorf("loader called %d time(s) on empty participant identity, want 0", loader.loads)
 	}
 	var envelope struct {
-		Error   string `json:"error"`
+		Kind    string `json:"kind"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if envelope.Error != "server" {
-		t.Errorf("error = %q, want server", envelope.Error)
+	if envelope.Kind != "server" {
+		t.Errorf("kind = %q, want server", envelope.Kind)
 	}
 	if envelope.Message != "identity not resolved" {
 		t.Errorf("message = %q, want identity not resolved", envelope.Message)
