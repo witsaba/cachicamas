@@ -34,6 +34,10 @@ import {
   type ArchetypeView,
 } from "./archetypes";
 import type { ApiResult } from "~/lib/api";
+import {
+  clearSsrCookieHeader,
+  setSsrCookieHeader,
+} from "~/lib/ssr-cookie-context";
 
 const originalFetch = globalThis.fetch;
 
@@ -321,6 +325,8 @@ describe("listArchetypes", () => {
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    clearSsrCookieHeader();
+    vi.unstubAllEnvs();
   });
 
   it("resolves with the directory list (one entry for the Assistant)", async () => {
@@ -344,6 +350,42 @@ describe("listArchetypes", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       archetypesListURL("system"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+  });
+
+  it("targets agent-chat directly and forwards the captured cookie during SSR", async () => {
+    vi.stubEnv("SERVER_AGENT_CHAT_BASE_URL", "http://agent-chat:8080/");
+    setSsrCookieHeader("authjs.session-token=signed-in");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, []),
+    );
+
+    await listArchetypes();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://agent-chat:8080/api/archetypes",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "include",
+        headers: expect.objectContaining({
+          Accept: "application/json",
+          cookie: "authjs.session-token=signed-in",
+        }),
+      }),
+    );
+  });
+
+  it("uses the frontend server's existing agent-chat target during SSR", async () => {
+    vi.stubEnv("AGENT_CHAT_TARGET", "http://agent_chat:8080");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(200, []),
+    );
+
+    await listArchetypes();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://agent_chat:8080/api/archetypes",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 
