@@ -1,94 +1,125 @@
 /**
  * `/agents/[slug]` — one colleague's profile.
  *
- * T-23 of cachicamas-archetype-system-foundation: the route loader
- * for `slug === "assistant"` now reads the polymorphic
- * `/api/archetypes/assistant/config` endpoint (via the legacy
- * `assistant-config.ts` adapter) instead of the retired
- * `/api/chat/assistant/config`.
+ * cachicamas-agent-catalog-config-reload (S2-G part 1, T5.4): the route
+ * no longer gates rendering on the static AGENTS literal (`agentBySlug`).
+ * A pure `resolveAgentProfile(slug)` performs the per-slug server loads
+ * and classifies the result into the three-state `AgentProfileResolution`
+ * per D-ADR-03:
  *
- * feat/archetype-list-endpoint (slice 6 — GREEN): the loader now
- * resolves a config for ANY known slug (the
- * `params.slug === "assistant"` gate is dropped). For unknown slugs
- * the loader short-circuits and returns null; the page renders the
- * 404 state via the `agentBySlug` check above. The loader logic is
- * extracted into the pure `loadArchetypeConfigForSlug(slug, agent)`
- * function so the spec at `routes/agents/[slug]/index.test.tsx`
- * can drive it directly without the Qwik City request context
- * that `createDOM()` does not set up.
+ *   - profile GET /api/archetypes/{slug} → 200
+ *       → { kind: "ok", view, config }   (config is null when the config
+ *         GET failed — the profile renders WITHOUT the ConfigureSection,
+ *         no synthesized config — CRL-S-014)
+ *   - profile GET → 404 (slug not registered on the server)
+ *       → { kind: "unknown" } — the page maps this to status(404) + the
+ *         "No such colleague" state (CRL-S-013)
+ *   - profile GET → transient failure (5xx / offline)
+ *       → { kind: "unavailable", message } — an explicit error card, NOT
+ *         a 404, and never a profile fabricated from AGENTS (CRL-S-015)
  *
- * The ConfigureSection continues to consume the flat
- * `ArchetypeConfig` shape via `getAssistantConfig` so its component
- * migration is decoupled from this route's wire-shape switch.
+ * A slug absent from AGENTS but known to the server opens the profile
+ * (CRL-S-012). The ArchetypeView projects into the profile page via the
+ * pure helpers `agentProfileProps` (minimal display props, CRL-S-016)
+ * and `archetypeViewToAgent` (full display Agent, D-ADR-02).
  */
 import { component$ } from "@builder.io/qwik";
-import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
+import {
+  routeLoader$,
+  useLocation,
+  type DocumentHead,
+} from "@builder.io/qwik-city";
 
 import { ConfigureSection } from "~/components/assistant-configure-section/assistant-configure-section";
 import { AgentProfile } from "~/components/workspace/screens/agent-profile";
+import { archetypeViewToAgent } from "~/lib/api/archetype-view";
+import { getArchetype, type ArchetypeView } from "~/lib/api/archetypes";
 import {
   getArchetypeConfig,
   type ArchetypeConfig,
 } from "~/lib/api/assistant-config";
-import { agentBySlug, type Agent } from "~/lib/mock/staff";
 
-export const useAgent = routeLoader$(({ params, status }) => {
-  const agent = agentBySlug(params.slug ?? "");
-  if (!agent) {
-    status(404);
-    return null;
-  }
-  return agent;
-});
+export type AgentProfileResolution =
+  | { kind: "ok"; view: ArchetypeView; config: ArchetypeConfig | null }
+  | { kind: "unknown" }
+  | { kind: "unavailable"; message: string };
 
 /**
- * loadArchetypeConfigForSlug is the pure loader logic that
- * `useAssistantConfig` delegates to. Exported so the spec at
- * `routes/agents/[slug]/index.test.tsx` can drive it directly
- * without a Qwik City request context.
- *
- * Contract (feat/archetype-list-endpoint):
- *   - `agent` is null → return null. The page renders the 404
- *     state via `useAgent`; the loader has nothing to fetch.
- *   - `agent` is set → call `getArchetypeConfig(slug)` (the
- *     polymorphic wrapper). On success, return the flat
- *     `ArchetypeConfig` shape. On any failure (offline / 5xx /
- *     not authed), return null so the page renders the profile
- *     WITHOUT the ConfigureSection.
- *
- * The function does NOT gate on `slug === "assistant"` — any
- * archetype in the directory list resolves its per-org config
- * through the polymorphic surface.
+ * loadArchetypeConfigForSlug fetches the flat `ArchetypeConfig` for the
+ * supplied slug via the legacy adapter. On any failure (offline / 5xx /
+ * not authed) it returns null — the profile renders WITHOUT the
+ * ConfigureSection and no config object is synthesized from the failure
+ * (CRL-S-014). It no longer gates on a static AGENTS entry.
  */
 export async function loadArchetypeConfigForSlug(
   slug: string,
-  agent: Agent | null,
 ): Promise<ArchetypeConfig | null> {
-  if (!agent) {
-    return null;
-  }
   const result = await getArchetypeConfig(slug);
   if (!result.ok) {
     return null;
   }
-  return result.value as ArchetypeConfig;
+  return result.value;
 }
 
-// `useAssistantConfig` delegates to the pure
-// `loadArchetypeConfigForSlug`. The route loader is kept as a
-// thin Qwik City wrapper so the page can call `useAssistantConfig()`
-// inside the component (the pure function is the test surface; the
-// loader is the render surface).
-export const useAssistantConfig = routeLoader$(async ({ params }) => {
+/**
+ * resolveAgentProfile is the pure three-state loader (D-ADR-03) that the
+ * `useAgentProfile` route loader delegates to. Exported so the spec at
+ * `routes/agents/[slug]/index.test.tsx` can drive it directly with a
+ * mocked `globalThis.fetch`, without the Qwik City request context.
+ *
+ *   - profile GET not_found → { kind: "unknown" } (honest 404)
+ *   - profile GET any other failure → { kind: "unavailable", message }
+ *   - profile GET ok → fetch the per-org config; a config failure
+ *     degrades to config:null, never to a fabricated config.
+ */
+export async function resolveAgentProfile(
+  slug: string,
+): Promise<AgentProfileResolution> {
+  const profile = await getArchetype(slug);
+  if (!profile.ok) {
+    if (profile.kind === "not_found") {
+      return { kind: "unknown" };
+    }
+    return { kind: "unavailable", message: profile.message };
+  }
+  const config = await loadArchetypeConfigForSlug(slug);
+  return { kind: "ok", view: profile.value, config };
+}
+
+/** T5.4 task-artifact name; the S2-R spec pins `resolveAgentProfile`. */
+export const loadAgentProfileForSlug = resolveAgentProfile;
+
+/**
+ * agentProfileProps projects the ArchetypeView minimally into the
+ * AgentProfile display props (CRL-S-016, D-ADR-02): name=display_name,
+ * tagline, slug — no extra transformation.
+ */
+export function agentProfileProps(view: ArchetypeView): {
+  name: string;
+  tagline: string;
+  slug: string;
+} {
+  return { name: view.display_name, tagline: view.tagline, slug: view.slug };
+}
+
+// The route loader is the thin Qwik City wrapper: it delegates to the
+// pure `resolveAgentProfile` and maps only kind:"unknown" to a real
+// status(404) — a transient failure must never masquerade as a 404
+// (CRL-S-015).
+export const useAgentProfile = routeLoader$(async ({ params, status }) => {
   const slug = params.slug ?? "";
-  const agent = agentBySlug(slug) ?? null;
-  return loadArchetypeConfigForSlug(slug, agent);
+  const resolution = await resolveAgentProfile(slug);
+  if (resolution.kind === "unknown") {
+    status(404);
+  }
+  return resolution;
 });
 
 export default component$(() => {
-  const agent = useAgent();
-  const assistantConfig = useAssistantConfig();
-  if (!agent.value) {
+  const loc = useLocation();
+  const resolution = useAgentProfile();
+
+  if (resolution.value.kind === "unknown") {
     return (
       <div class="mx-auto w-full max-w-2xl px-4 py-16">
         <h1 class="text-ink text-xl font-semibold">No such colleague</h1>
@@ -105,15 +136,48 @@ export default component$(() => {
       </div>
     );
   }
+
+  // Transient failure (5xx / offline): an explicit error card — never
+  // the 404 state, never a profile fabricated from the static literal.
+  if (resolution.value.kind === "unavailable") {
+    return (
+      <div class="mx-auto w-full max-w-2xl px-4 py-16">
+        <div class="border-line bg-surface rounded-md border p-5 shadow-[var(--shadow-raised)]">
+          <h1 class="text-ink text-xl font-semibold">
+            This profile is unavailable
+          </h1>
+          <p class="text-ink-mid pt-2 text-base">
+            We couldn't reach the server to load this colleague's profile.
+            {resolution.value.message ? ` (${resolution.value.message})` : ""}
+          </p>
+          <p class="pt-3">
+            <a
+              href={loc.url.pathname}
+              class="text-brand rounded-sm font-medium underline"
+            >
+              Try again
+            </a>
+            {" · "}
+            <a
+              href="/agents/"
+              class="text-brand rounded-sm font-medium underline"
+            >
+              Back to the staff directory
+            </a>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { view, config } = resolution.value;
+  const props = agentProfileProps(view);
   return (
     <>
-      <AgentProfile agent={agent.value} />
-      {assistantConfig.value ? (
+      <AgentProfile agent={archetypeViewToAgent(view)} />
+      {config ? (
         <div class="mx-auto w-full max-w-3xl px-4 pb-16">
-          <ConfigureSection
-            slug={agent.value.slug}
-            initial={assistantConfig.value}
-          />
+          <ConfigureSection slug={props.slug} initial={config} />
         </div>
       ) : null}
     </>
@@ -121,9 +185,13 @@ export default component$(() => {
 });
 
 export const head: DocumentHead = ({ resolveValue }) => {
-  const agent = resolveValue(useAgent);
+  const resolution = resolveValue(useAgentProfile);
+  if (resolution.kind !== "ok") {
+    return { title: "Not found — cachicamas", meta: [] };
+  }
+  const props = agentProfileProps(resolution.view);
   return {
-    title: agent ? `${agent.name} — cachicamas` : "Not found — cachicamas",
-    meta: agent ? [{ name: "description", content: agent.tagline }] : [],
+    title: `${props.name} — cachicamas`,
+    meta: [{ name: "description", content: props.tagline }],
   };
 };

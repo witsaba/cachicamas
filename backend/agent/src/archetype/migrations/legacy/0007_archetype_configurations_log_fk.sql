@@ -16,12 +16,17 @@
 --   4. CREATE INDEX idx_archetype_configurations_log_slug_org_created
 --      ON archetype_configurations_log (archetype_slug, org_id, created_at DESC)
 --      — replaces the original kind-prefixed index for query plans that
---      filter by slug. The old kind-index is left in place for backwards
---      compatibility with any historical query plan.
+--      filter by slug.
+--   5. DROP COLUMN archetype_kind — the slug-based writer inserts rows
+--      without it, and its NOT NULL constraint (no default) would reject
+--      every future write. Mirrors the 0006 reshape of the main
+--      archetype_configurations table, which already dropped the column.
+--      Dropping it also auto-drops the kind-prefixed index from 0002,
+--      superseding the earlier backwards-compatibility note below.
 --
--- Forward-only additive (per the chat composition root's allowlist;
+-- Forward-only (per the chat composition root's allowlist;
 -- CREATE TABLE/INDEX/INSERT/ALTER ADD COLUMN/COMMENT ON are all
--- allowed).
+-- allowed; DROP COLUMN matches the precedent already set by 0006).
 
 -- +goose Up
 
@@ -40,3 +45,6 @@ ALTER TABLE archetype_configurations_log
 
 CREATE INDEX idx_archetype_configurations_log_slug_org_created
     ON archetype_configurations_log (archetype_slug, org_id, created_at DESC);
+
+ALTER TABLE archetype_configurations_log
+    DROP COLUMN archetype_kind;

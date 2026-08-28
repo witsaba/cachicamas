@@ -335,6 +335,68 @@ func Test_Migration_0006_ReKeyChatToAssistantPreservesRows(t *testing.T) {
 	}
 }
 
+// Test_Migration_0006_SeedsAssistantBeforeConfigFK reproduces a database with
+// migrations 0001 through 0005 applied: the parent and child tables exist but
+// contain no Assistant seed, while a legacy chat configuration still exists.
+// Migration 0006 must seed the FK target before re-keying the configuration.
+func Test_Migration_0006_SeedsAssistantBeforeConfigFK(t *testing.T) {
+	if os.Getenv("INTEGRATION") != "1" {
+		t.Skip("integration; set INTEGRATION=1 to run")
+	}
+	resetArchetypeTables(t)
+
+	db, err := sql.Open("pgx", archetypeTestDSN())
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`INSERT INTO archetype_configurations
+		(archetype_kind, org_id, system_prompt, tool_allowlist, defer_tool_names, version, updated_at, updated_by)
+		VALUES ('chat', '__default__', 'legacy default prompt', '["current_time"]'::jsonb, '[]'::jsonb, 7, now(), 'seed')`); err != nil {
+		t.Fatalf("seed legacy configuration: %v", err)
+	}
+
+	if err := archetypeMigrations.Run0006IfNeeded(context.Background(), db); err != nil {
+		t.Fatalf("Run0006IfNeeded: %v", err)
+	}
+
+	var parentType string
+	if err := db.QueryRow(`SELECT type FROM archetypes WHERE slug = 'assistant'`).Scan(&parentType); err != nil {
+		t.Fatalf("query Assistant parent: %v", err)
+	}
+	if parentType != "system" {
+		t.Errorf("Assistant parent type = %q, want system", parentType)
+	}
+
+	var bundleVersion string
+	var isCritical bool
+	if err := db.QueryRow(`SELECT bundle_version, is_critical FROM system_archetypes WHERE slug = 'assistant'`).Scan(&bundleVersion, &isCritical); err != nil {
+		t.Fatalf("query Assistant child: %v", err)
+	}
+	if bundleVersion != "v1" || !isCritical {
+		t.Errorf("Assistant child = (%q, %t), want (v1, true)", bundleVersion, isCritical)
+	}
+
+	var slug, prompt string
+	var version int
+	if err := db.QueryRow(`SELECT archetype_slug, system_prompt, version
+		FROM archetype_configurations WHERE org_id = '__default__'`).Scan(&slug, &prompt, &version); err != nil {
+		t.Fatalf("query reshaped configuration: %v", err)
+	}
+	if slug != "assistant" || prompt != "legacy default prompt" || version != 7 {
+		t.Errorf("reshaped configuration = (%q, %q, %d), want (assistant, legacy default prompt, 7)", slug, prompt, version)
+	}
+
+	var backupCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM archetype_configurations__backup`).Scan(&backupCount); err != nil {
+		t.Fatalf("query backup: %v", err)
+	}
+	if backupCount != 1 {
+		t.Errorf("backup row count = %d, want 1", backupCount)
+	}
+}
+
 // Test_Migration_0006_RerunIsNoOp (T-06 PR-1). Calling the wrapper
 // twice is a no-op — the second invocation sees the recorded row in
 // archetype_schema_migrations and returns nil without re-applying.
