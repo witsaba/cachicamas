@@ -20,10 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { archetypeURL } from "./archetypes";
 import type { ArchetypeView } from "./archetypes";
-import {
-  getAssistantConfig,
-  putAssistantConfig,
-} from "./assistant-config";
+import { getAssistantConfig, putAssistantConfig } from "./assistant-config";
 
 const originalFetch = globalThis.fetch;
 
@@ -97,10 +94,17 @@ describe("getAssistantConfig", () => {
 
   it("returns the flattened config from a per-org override view", async () => {
     mockResponseOnce(
-      new Response(JSON.stringify(overrideView({ override: { ...overrideView().override!, version: 3 } })), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify(
+          overrideView({
+            override: { ...overrideView().override!, version: 3 },
+          }),
+        ),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
 
     const result = await getAssistantConfig();
