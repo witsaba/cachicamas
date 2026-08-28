@@ -91,10 +91,12 @@ func freshThrowawayDatabase(t *testing.T, baseDSN string) string {
 		t.Fatalf("freshThrowawayDatabase: ping admin: %v", err)
 	}
 	name := fmt.Sprintf("cachicamas_catalog_boot_test_%d_%d", os.Getpid(), time.Now().UnixNano())
+	// pi-lens-ignore: go-sql-injection
 	if _, err := admin.Exec(fmt.Sprintf(`CREATE DATABASE "%s"`, name)); err != nil {
 		t.Fatalf("freshThrowawayDatabase: CREATE DATABASE %q: %v", name, err)
 	}
 	t.Cleanup(func() {
+		// pi-lens-ignore: go-sql-injection
 		if _, err := admin.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s" WITH (FORCE)`, name)); err != nil {
 			t.Logf("freshThrowawayDatabase: DROP DATABASE %q: %v (leftover may need manual cleanup)", name, err)
 		}

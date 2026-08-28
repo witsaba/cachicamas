@@ -77,10 +77,12 @@ func freshReloadDatabase(t *testing.T, baseDSN string) string {
 		t.Fatalf("freshReloadDatabase: ping admin: %v", err)
 	}
 	name := fmt.Sprintf("cachicamas_chat_reload_test_%d_%d", os.Getpid(), time.Now().UnixNano())
+	// pi-lens-ignore: go-sql-injection
 	if _, err := admin.Exec(fmt.Sprintf(`CREATE DATABASE "%s"`, name)); err != nil {
 		t.Fatalf("freshReloadDatabase: CREATE DATABASE %q: %v", name, err)
 	}
 	t.Cleanup(func() {
+		// pi-lens-ignore: go-sql-injection
 		if _, err := admin.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s" WITH (FORCE)`, name)); err != nil {
 			t.Logf("freshReloadDatabase: DROP DATABASE %q: %v (leftover may need manual cleanup)", name, err)
 		}
