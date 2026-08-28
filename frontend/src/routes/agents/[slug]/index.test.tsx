@@ -1,167 +1,171 @@
 /**
- * `/agents/[slug]` route spec — TDD contract for the polymorphic
- * per-slug loader (feat/archetype-list-endpoint, slice 5 — RED).
+ * `/agents/[slug]` route spec — TDD contract for the server-authoritative
+ * profile load (cachicamas-agent-catalog-config-reload, S2-R — RED).
  *
- * The slice's contract:
- *   - `slug="assistant"` — the loader resolves the per-org
- *     config and the page renders the ConfigureSection.
- *   - `slug="general"` (or any non-assistant slug from the new
- *     list) — the loader ALSO resolves a config (the
- *     `params.slug === "assistant"` gate is dropped). The
- *     ConfigureSection renders.
- *   - unknown slug — `agentBySlug` returns undefined → the page
- *     renders the 404 state ("No such colleague").
- *   - fetch error — the profile renders, but the
- *     ConfigureSection is suppressed.
+ * S2-G target: the route no longer gates rendering on the static AGENTS
+ * literal (`agentBySlug`). A pure `resolveAgentProfile(slug)` performs the
+ * per-slug server loads and classifies the result into the three-state
+ * `AgentProfileResolution`:
  *
- * The current (pre-GREEN) route has two relevant constraints:
- *   1. `useAssistantConfig` gates on `params.slug === "assistant"`,
- *      so non-assistant slugs get a null config even when the
- *      API would resolve them.
- *   2. The route is monolithic: the `routeLoader$` calls are
- *      inline, so there is no extracted loader function to
- *      test in isolation.
+ *   - profile GET /api/archetypes/{slug} → 200
+ *       → { kind: "ok", view, config }   (config is null when the config GET
+ *         failed — profile renders WITHOUT the ConfigureSection, no
+ *         synthesized config — CRL-S-014)
+ *   - profile GET → 404 (slug not registered on the server)
+ *       → { kind: "unknown" } — the page maps this to status(404) + the
+ *         "No such colleague" state (CRL-S-013)
+ *   - profile GET → transient failure (5xx / offline)
+ *       → { kind: "unavailable", message } — an explicit error card, NOT a
+ *         404, and never a profile fabricated from AGENTS (CRL-S-015)
  *
- * The slice 6 GREEN commit extracts the loader logic into a
- * pure `loadArchetypeConfigForSlug(slug, agent)` function
- * exported from `./index` so the test can drive it directly
- * (no Qwik City request context required). The RED state: the
- * test file fails to compile because that exported function
- * does not exist yet.
+ * A slug absent from AGENTS but known to the server MUST open the profile
+ * (CRL-S-012). The fixtures below use "general-specialist", which is not in
+ * AGENTS, so the pre-GREEN AGENTS-gated loader would render a 404.
+ *
+ * The route also projects the ArchetypeView minimally into the AgentProfile
+ * props via a pure `agentProfileProps(view)` helper (CRL-S-016):
+ * name=display_name, tagline, slug — no extra transformation.
+ *
+ * RED seam: both functions are added by the S2-G GREEN commit. The tests
+ * access them through a namespace cast so the RED is a behavioral assertion
+ * failure ("expected a function, got undefined"), not a module-link error
+ * that would mask which scenario failed.
+ *
+ * fetch is mocked at the same globalThis.fetch seam the API client spec
+ * (lib/api/archetypes.spec.ts) uses, so the per-slug URL contract is
+ * asserted against the real client code path.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Agent } from "~/lib/mock/staff";
+import * as routeIndex from "./index";
+import type { ArchetypeView } from "~/lib/api/archetypes";
 
-// The slice 6 GREEN commit exports `loadArchetypeConfigForSlug`
-// as a pure function. The RED state: this import fails to
-// resolve, which is the canonical RED for a new exported
-// function under strict TDD.
-import { loadArchetypeConfigForSlug } from "./index";
+type AgentProfileResolution =
+  | { kind: "ok"; view: ArchetypeView; config: ArchetypeView | null }
+  | { kind: "unknown" }
+  | { kind: "unavailable"; message: string };
 
-// Mock the `assistant-config` module so the loader calls
-// `getArchetypeConfig` (the polymorphic wrapper). The mock is set up
-// in each test via
-// `vi.mocked(getArchetypeConfig).mockResolvedValueOnce(...)`. The
-// legacy aliases `getAssistantConfig` / `putAssistantConfig` are also
-// mocked so the deprecated call-sites stay testable in isolation.
-vi.mock("~/lib/api/assistant-config", () => ({
-  getArchetypeConfig: vi.fn(),
-  putArchetypeConfigFlat: vi.fn(),
-  getAssistantConfig: vi.fn(),
-  putAssistantConfig: vi.fn(),
-}));
-
-import { getArchetypeConfig } from "~/lib/api/assistant-config";
-
-const assistantAgent: Agent = {
-  slug: "assistant",
-  initials: "AS",
-  name: "Assistant",
-  department: "assistant",
-  departmentName: "Front desk",
-  tagline: "The colleague everyone talks to first.",
-  summary: "Handles the work that has no other home.",
-  status: "working",
-  statusDetail: "On staff and answering now.",
-  joined: "2026-01-12",
-  tenure: "7 months",
-  skills: [],
-  tools: [],
-  handsOff: null,
-  conversationsThisWeek: 64,
+// RED seam (S2-G): these exports do not exist yet. The cast turns the
+// missing exports into per-test behavioral failures.
+const routeModule = routeIndex as unknown as {
+  resolveAgentProfile?: (slug: string) => Promise<AgentProfileResolution>;
+  agentProfileProps?: (
+    view: ArchetypeView,
+  ) => { name: string; tagline: string; slug: string };
 };
 
-const generalAgent: Agent = {
-  slug: "general",
-  initials: "GN",
-  name: "General Specialist",
-  department: "finance",
-  departmentName: "Finance",
-  tagline: "A general-purpose specialist",
-  summary: "Handles general work.",
-  status: "working",
-  statusDetail: "On staff and answering now.",
-  joined: "2026-02-01",
-  tenure: "6 months",
-  skills: [],
-  tools: [],
-  handsOff: null,
-  conversationsThisWeek: 12,
-};
+const resolveAgentProfile = routeModule.resolveAgentProfile;
+const agentProfileProps = routeModule.agentProfileProps;
 
-describe("/agents/[slug] loader (feat/archetype-list-endpoint slice 5 — RED)", () => {
+const originalFetch = globalThis.fetch;
+
+/** Not in AGENTS — the pre-GREEN AGENTS-gated loader would 404 this slug. */
+function generalSpecialistView(overrides: Partial<ArchetypeView> = {}): ArchetypeView {
+  return {
+    slug: overrides.slug ?? "general-specialist",
+    type: overrides.type ?? "general",
+    display_name: overrides.display_name ?? "General Specialist",
+    tagline: overrides.tagline ?? "A general-purpose specialist",
+    status: overrides.status ?? "active",
+    archived_at: overrides.archived_at ?? null,
+    created_at: overrides.created_at ?? "2026-08-27T10:00:00Z",
+    created_by: overrides.created_by ?? "seed",
+    is_override: overrides.is_override ?? false,
+    ...overrides,
+  };
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+describe("/agents/[slug] — server-authoritative profile load (S2-R — RED)", () => {
   beforeEach(() => {
-    vi.mocked(getArchetypeConfig).mockReset();
+    globalThis.fetch = vi.fn();
   });
-  it("Test_AgentSlug_AssistantSlug_LoadsConfig: loader resolves the per-org config for slug='assistant'", async () => {
-    vi.mocked(getArchetypeConfig).mockResolvedValueOnce({
-      ok: true,
-      value: {
-        kind: "chat",
-        org_id: "user_alice",
-        system_prompt: "loaded prompt",
-        tool_allowlist: ["current_time"],
-        defer_tool_names: [],
-        version: 4,
-        is_override: true,
-      },
-    });
-    const got = await loadArchetypeConfigForSlug("assistant", assistantAgent);
-    expect(got).not.toBeNull();
-    expect(got?.system_prompt).toBe("loaded prompt");
-    expect(got?.version).toBe(4);
-    // Lock the polymorphic contract: the loader must call the
-    // API with the supplied slug, not a hard-coded "assistant".
-    expect(vi.mocked(getArchetypeConfig)).toHaveBeenCalledWith("assistant");
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
-  it("Test_AgentSlug_GeneralSlug_AlsoLoadsConfig: loader ALSO resolves for slug='general' (the assistant-only gate is dropped) and the API is called with 'general'", async () => {
-    vi.mocked(getArchetypeConfig).mockResolvedValueOnce({
-      ok: true,
-      value: {
-        kind: "chat",
-        org_id: "user_alice",
-        system_prompt: "general prompt",
-        tool_allowlist: ["current_time"],
-        defer_tool_names: [],
-        version: 2,
-        is_override: true,
-      },
-    });
-    const got = await loadArchetypeConfigForSlug("general", generalAgent);
-    // The current code returns null for any slug !== "assistant".
-    // The GREEN commit drops the gate; this assertion documents
-    // the new contract.
-    expect(got).not.toBeNull();
-    expect(got?.system_prompt).toBe("general prompt");
-    // CRITICAL: the API must be called with the actual slug, not
-    // a hard-coded "assistant" — this is the bug the fix closes.
-    expect(vi.mocked(getArchetypeConfig)).toHaveBeenCalledWith("general");
+  it("Test_AgentSlug_ServerKnownSlug_OpensViaPerSlugGet: slug absent from AGENTS opens via the per-slug GET, no 404 (CRL-S-012)", async () => {
+    expect(
+      resolveAgentProfile,
+      "resolveAgentProfile is added by the S2-G GREEN commit",
+    ).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(jsonResponse(200, generalSpecialistView()))
+      .mockResolvedValueOnce(
+        jsonResponse(200, generalSpecialistView({ is_override: true })),
+      );
+
+    const res = await resolveAgentProfile!("general-specialist");
+    // "ok" — NOT the 404 the AGENTS-gated loader produces for a slug that
+    // is not in the static literal.
+    expect(res.kind).toBe("ok");
+    if (res.kind !== "ok") return;
+    expect(res.view.display_name).toBe("General Specialist");
+    // The per-slug GET must be made with the actual slug.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/archetypes/general-specialist",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
   });
 
-  it("Test_AgentSlug_UnknownSlug_404: agent is null → loader returns null (the page renders the 404 state)", async () => {
-    // When the agent is not in the static mock, the loader
-    // short-circuits and returns null. The page component
-    // renders the 404 state because `useAgent()` returns null.
-    const got = await loadArchetypeConfigForSlug("no-such-slug", null);
-    expect(got).toBeNull();
-    // The API must NOT be called for an unknown slug — the
-    // agent lookup short-circuits before any fetch.
-    expect(vi.mocked(getArchetypeConfig)).not.toHaveBeenCalled();
+  it("Test_AgentSlug_UnknownSlug_KindUnknown: server 404 → kind 'unknown' (page maps to status(404) + 'No such colleague', CRL-S-013)", async () => {
+    expect(resolveAgentProfile).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse(404, {
+        kind: "not_found",
+        message: "archetype slug is not registered",
+      }),
+    );
+
+    const res = await resolveAgentProfile!("no-such-slug");
+    expect(res.kind).toBe("unknown");
   });
 
-  it("Test_AgentSlug_FetchError_RendersProfileWithoutConfigureSection: getArchetypeConfig fails → loader returns null", async () => {
-    // The profile is rendered (the agent is known), but the
-    // ConfigureSection is suppressed (the loader returned null
-    // because the API call failed). The user sees the profile
-    // and the section is simply absent.
-    vi.mocked(getArchetypeConfig).mockResolvedValueOnce({
-      ok: false,
-      kind: "server",
-      message: "upstream 500",
+  it("Test_AgentSlug_TransientProfileFailure_KindUnavailable: network failure → kind 'unavailable', not 404, no AGENTS fabrication (CRL-S-015)", async () => {
+    expect(resolveAgentProfile).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error("network unreachable"))
+      .mockRejectedValueOnce(new Error("network unreachable"));
+
+    const res = await resolveAgentProfile!("general-specialist");
+    // Transient failure is a distinct state from "unknown": an explicit
+    // error card, never the 404 page, never a profile fabricated from AGENTS.
+    expect(res.kind).toBe("unavailable");
+    expect((res as { message?: string }).message).toBeTypeOf("string");
+  });
+
+  it("Test_AgentSlug_ConfigGetFailure_ProfileWithoutConfigureSection: config GET failure → kind 'ok' with config null, no synthesized config (CRL-S-014)", async () => {
+    expect(resolveAgentProfile).toBeTypeOf("function");
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(jsonResponse(200, generalSpecialistView()))
+      .mockRejectedValueOnce(new Error("config endpoint down"));
+
+    const res = await resolveAgentProfile!("general-specialist");
+    expect(res.kind).toBe("ok");
+    // The profile still resolves; the ConfigureSection is suppressed and
+    // no config object is synthesized from the failure.
+    expect((res as { config?: unknown }).config).toBeNull();
+  });
+
+  it("Test_AgentSlug_ViewProjectsMinimallyIntoProfileProps: ArchetypeView projects name=display_name, tagline, slug — no extra transformation (CRL-S-016)", () => {
+    expect(
+      agentProfileProps,
+      "agentProfileProps is added by the S2-G GREEN commit",
+    ).toBeTypeOf("function");
+    const view = generalSpecialistView();
+    const props = agentProfileProps!(view);
+    expect(props).toEqual({
+      name: "General Specialist",
+      tagline: view.tagline,
+      slug: "general-specialist",
     });
-    const got = await loadArchetypeConfigForSlug("assistant", assistantAgent);
-    expect(got).toBeNull();
+    // Minimal projection: exactly these three keys, nothing else.
+    expect(Object.keys(props).sort()).toEqual(["name", "slug", "tagline"]);
   });
 });

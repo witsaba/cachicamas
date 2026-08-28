@@ -18,9 +18,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { archetypeURL } from "./archetypes";
+import { archetypeConfigURL, archetypeURL } from "./archetypes";
 import type { ArchetypeView } from "./archetypes";
-import { getAssistantConfig, putAssistantConfig } from "./assistant-config";
+import {
+  getArchetypeConfig,
+  getAssistantConfig,
+  putAssistantConfig,
+} from "./assistant-config";
 
 const originalFetch = globalThis.fetch;
 
@@ -94,17 +98,10 @@ describe("getAssistantConfig", () => {
 
   it("returns the flattened config from a per-org override view", async () => {
     mockResponseOnce(
-      new Response(
-        JSON.stringify(
-          overrideView({
-            override: { ...overrideView().override!, version: 3 },
-          }),
-        ),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
+      new Response(JSON.stringify(overrideView({ override: { ...overrideView().override!, version: 3 } })), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
 
     const result = await getAssistantConfig();
@@ -131,7 +128,7 @@ describe("getAssistantConfig", () => {
     );
     await getAssistantConfig();
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      archetypeURL("assistant"),
+      archetypeConfigURL("assistant"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
   });
@@ -279,5 +276,148 @@ describe("putAssistantConfig", () => {
     if (!result.ok) {
       expect(result.kind).toBe("offline");
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// cachicamas-archetype-per-slug-overlay (RED — T-14..T-18) — TDD contract for
+// the assistant-config.ts adapter rewire (REQ-ACAR-1, REQ-ACAR-2,
+// REQ-ACAR-3, REQ-ACAR-4, REQ-ACAR-6).
+//
+//   - getArchetypeConfig(slug) MUST hit archetypeConfigURL(slug)
+//     (/api/archetypes/{slug}/config/), NOT archetypeURL(slug)
+//     (/api/archetypes/{slug}). This is the wire-shape contract for the
+//     adapter rewire.
+//   - viewToConfig flattens an override block correctly (Scenario 2 of
+//     cachicamas-archetype-config-adapter-rewire).
+//   - viewToConfig synthesises a flat default when no override block
+//     (Scenario 3).
+//   - Error envelope mapping is preserved (404 → not_found, 500 → server).
+//
+// RED state: getArchetypeConfig still routes through the bare URL, so
+// the URL assertion in Test_GetArchetypeConfig_AfterRewire_CallsConfigURL
+// fails. The flattening scenarios fail because the upstream URL change
+// has not happened yet. Commit 2 of this change flips the upstream
+// helper and these scenarios flip GREEN.
+// -----------------------------------------------------------------------------
+
+describe("getArchetypeConfig (rewired to /config/)", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("Test_GetArchetypeConfig_AfterRewire_CallsConfigURL: hits archetypeConfigURL(slug), NOT archetypeURL(slug)", async () => {
+    mockResponseOnce(
+      new Response(JSON.stringify(overrideView()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await getArchetypeConfig("assistant");
+
+    // MUST hit the /config/ URL — that is the wire contract the rewire
+    // locks.
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      archetypeConfigURL("assistant"),
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    // MUST NOT hit the bare URL (the bug the rewire closes).
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      archetypeURL("assistant"),
+      expect.anything(),
+    );
+  });
+
+  it("Test_GetArchetypeConfig_ServerReturnsOverride_FlattensToArchetypeConfig: view with override → flat ArchetypeConfig (REQ-ACAR-2)", async () => {
+    const viewWithOverride: ArchetypeView = {
+      ...overrideView(),
+      override: {
+        system_prompt: "x",
+        tool_allowlist: ["a"],
+        defer_tool_names: ["b"],
+        model: null,
+        version: 3,
+        updated_at: "2026-01-01T00:00:00Z",
+        updated_by: "u",
+      },
+      is_override: true,
+    };
+    mockResponseOnce(
+      new Response(JSON.stringify(viewWithOverride), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await getArchetypeConfig("assistant");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.kind).toBe("chat");
+    expect(result.value.system_prompt).toBe("x");
+    expect(result.value.tool_allowlist).toEqual(["a"]);
+    expect(result.value.defer_tool_names).toEqual(["b"]);
+    expect(result.value.model).toBeNull();
+    expect(result.value.version).toBe(3);
+    expect(result.value.updated_by).toBe("u");
+    expect(result.value.updated_at).toBe("2026-01-01T00:00:00Z");
+    expect(result.value.is_override).toBe(true);
+  });
+
+  it("Test_GetArchetypeConfig_ServerReturnsNoOverride_SynthesisesDefault: view WITHOUT override → flat default ArchetypeConfig (REQ-ACAR-3)", async () => {
+    mockResponseOnce(
+      new Response(JSON.stringify(defaultView()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await getArchetypeConfig("assistant");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.system_prompt).toBe("");
+    expect(result.value.tool_allowlist).toEqual([]);
+    expect(result.value.defer_tool_names).toEqual([]);
+    expect(result.value.model).toBeNull();
+    expect(result.value.version).toBe(1);
+    expect(result.value.is_override).toBe(false);
+    expect(result.value.updated_by).toBeUndefined();
+    expect(result.value.updated_at).toBeUndefined();
+  });
+
+  it("Test_GetArchetypeConfig_404_MapsToNotFound: HTTP 404 + ERR_UNKNOWN_SLUG → ApiResult.kind='not_found'", async () => {
+    mockResponseOnce(
+      new Response(
+        JSON.stringify({
+          kind: "not_found",
+          message: "archetype slug is not registered",
+          fields: { code: "ERR_UNKNOWN_SLUG" },
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await getArchetypeConfig("no-such-slug");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("not_found");
+  });
+
+  it("Test_GetArchetypeConfig_500_MapsToServer: HTTP 500 → ApiResult.kind='server' (no info leak on the client)", async () => {
+    mockResponseOnce(
+      new Response(
+        JSON.stringify({ kind: "server", message: "failed to load archetype config" }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await getArchetypeConfig("assistant");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("server");
   });
 });

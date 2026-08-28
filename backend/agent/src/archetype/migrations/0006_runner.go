@@ -88,6 +88,14 @@ func Run0006IfNeeded(ctx context.Context, db *sql.DB) error {
 
 BEGIN;
 
+INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+    VALUES ('assistant', 'system', 'Assistant', 'Your default assistant', 'active', 'migration-0006')
+    ON CONFLICT (slug) DO NOTHING;
+
+INSERT INTO system_archetypes (slug, bundle_version, is_critical)
+    VALUES ('assistant', 'v1', true)
+    ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE archetype_configurations__backup AS
     SELECT * FROM archetype_configurations;
 

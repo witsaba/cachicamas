@@ -10,6 +10,7 @@
 //	- Test_Conversation_ReloadAssistantConfig_VersionMismatch_UpdatesSystem
 //	- Test_Conversation_ReloadAssistantConfig_VersionMatch_NoUpdate
 //	- Test_Conversation_ReloadAssistantConfig_NoLoader_NoOp
+//	- Test_Conversation_ReloadAssistantConfig_LoaderError_KeepsPrompt (CRL-S-025)
 //
 // RED at T-07: chat.Config has no AssistantConfigLoader field;
 // chat.NewConversation does not consult a Loader; chat.Conversation
@@ -20,6 +21,7 @@ package chat_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 
@@ -245,5 +247,65 @@ func Test_Conversation_ReloadAssistantConfig_NoLoader_NoOp(t *testing.T) {
 	}
 	if got := conv.SystemPromptForTest(); got != chat.SystemPrompt {
 		t.Errorf("SystemPromptForTest = %q, want the chat v1 default %q", got, chat.SystemPrompt)
+	}
+}
+
+// Test_Conversation_ReloadAssistantConfig_LoaderError_KeepsPrompt —
+// REQ-CCVP-003 / CRL-S-025 ("transient loader error keeps the turn
+// alive"). Given the Loader fails at the Send boundary, when
+// ReloadAssistantConfig runs directly it returns the error (so callers
+// can log it), and when Send runs the turn is NOT aborted: Send returns
+// nil error, drains a full scripted turn, and both the system prompt
+// and the recorded version stay pinned at their prior values.
+//
+// Expected GREEN on arrival (asserts the existing Send-boundary
+// behavior at conversation.go:356-361); any RED here is a base defect.
+func Test_Conversation_ReloadAssistantConfig_LoaderError_KeepsPrompt(t *testing.T) {
+	t.Parallel()
+
+	loader := &fakeVersionedLoader{
+		result: archetype.ArchetypeConfig{
+			Slug:         archetype.AssistantSlug,
+			OrgID:        "test-conv",
+			SystemPrompt: "prior prompt",
+			Version:      3,
+		},
+		found: true,
+	}
+	conv, err := chat.NewConversation(chat.Config{
+		Provider:              scriptedProvider(t),
+		Store:                 chat.NewMemoryConversationStore(),
+		ParticipantID:         "test-conv",
+		ToolSource:            chat.FromAgentRegistry(agent.NewMapRegistry(nil)),
+		PermissionPolicy:      chat.NewDefaultPermissionPolicy(nil),
+		AssistantConfigLoader: loader,
+	})
+	if err != nil {
+		t.Fatalf("chat.NewConversation: %v", err)
+	}
+
+	// The loader starts failing AFTER construction (a transient outage
+	// at the Send boundary, not a mis-wired config).
+	loader.mu.Lock()
+	loader.err = errors.New("transient loader outage")
+	loader.mu.Unlock()
+
+	if err := conv.ReloadAssistantConfig(context.Background()); err == nil {
+		t.Fatal("ReloadAssistantConfig returned nil error; want the loader error surfaced")
+	}
+
+	// Send MUST continue despite the reload failure (conversation.go
+	// logs a warn and keeps the prior prompt — REQ-CCVP-003).
+	out, err := conv.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Send returned %v, want nil (a transient loader error must not abort the turn)", err)
+	}
+	drainWire(t, out)
+
+	if got := conv.SystemPromptForTest(); got != "prior prompt" {
+		t.Errorf("SystemPromptForTest = %q, want %q (prior prompt kept)", got, "prior prompt")
+	}
+	if got := conv.LoadedAssistantConfigVersion(); got != 3 {
+		t.Errorf("LoadedAssistantConfigVersion = %d, want 3 (unchanged on loader error)", got)
 	}
 }

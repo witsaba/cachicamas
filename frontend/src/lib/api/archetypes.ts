@@ -112,9 +112,16 @@ export function archetypeURL(slug: string): string {
   return `/api/archetypes/${encodeURIComponent(slug)}`;
 }
 
-/** URL for the directory list. `type` MUST be one of the locked values. */
-export function archetypesListURL(type: ArchetypeType): string {
-  return `/api/archetypes?type=${encodeURIComponent(type)}`;
+/**
+ * URL for the directory list. Without `type` this is the BARE
+ * /api/archetypes URL with NO type query (the unfiltered cross-type
+ * directory, CRL-S-010); with `type` it narrows to one catalogue.
+ * `type` MUST be one of the locked values when supplied.
+ */
+export function archetypesListURL(type?: ArchetypeType): string {
+  return type === undefined
+    ? "/api/archetypes"
+    : `/api/archetypes?type=${encodeURIComponent(type)}`;
 }
 
 // -----------------------------------------------------------------------------
@@ -147,13 +154,34 @@ export async function putArchetypeConfig(
 }
 
 /**
- * listArchetypesByType(type) returns the directory list for the
- * supplied type. The backend's handler returns 400 when `type` is
- * missing or unknown; the client surfaces that as a typed
- * ApiResult.kind="validation".
+ * getArchetypeConfigPolymorphic(slug) reads the polymorphic
+ * per-org config block for the supplied slug. This is the
+ * /config/ counterpart of getArchetype(slug): where getArchetype
+ * hits /api/archetypes/{slug} for the parent overlay (no override),
+ * this hits /api/archetypes/{slug}/config/ for the per-org override
+ * block. The legacy adapter at assistant-config.ts flattens the
+ * response to the legacy ArchetypeConfig shape; new code should
+ * prefer this helper over the legacy getAssistantConfig() alias.
+ *
+ * @see REQ-ACAR-1, REQ-ACAR-5
  */
-export async function listArchetypesByType(
-  type: ArchetypeType,
+export async function getArchetypeConfigPolymorphic(
+  slug: string,
+): Promise<ApiResult<ArchetypeView>> {
+  return getJson<ArchetypeView>(archetypeConfigURL(slug));
+}
+
+/**
+ * listArchetypes(type?) returns the directory list. Called WITHOUT a
+ * type argument it requests the bare /api/archetypes URL with no
+ * `type` query (CRL-S-010) — the full catalogue the staff directory
+ * renders, assistant row included. With a type argument it requests
+ * /api/archetypes?type={type} for a narrowed list. The backend's
+ * handler returns 400 for an unknown type; the client surfaces that
+ * as a typed ApiResult.kind="validation".
+ */
+export async function listArchetypes(
+  type?: ArchetypeType,
 ): Promise<ApiResult<readonly ArchetypeView[]>> {
   return getJson<readonly ArchetypeView[]>(archetypesListURL(type));
 }

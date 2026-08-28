@@ -459,8 +459,6 @@ func Test_LoadBySlug_ParentArchived_PerOrgOverrideReturned(t *testing.T) {
 		t.Error("ArchivedAt = nil; want set from parent")
 	}
 }
-<<<<<<< HEAD
-=======
 
 // -----------------------------------------------------------------------------
 // Non-INTEGRATION contract tests for the ListByType surface
@@ -543,4 +541,3 @@ func Test_ListByType_PassesOrgID(t *testing.T) {
 		t.Errorf("views[0] = %+v, want slug=assistant type=system", got[0])
 	}
 }
->>>>>>> 4df1c06477dccb381e9f1ec7c84ac5fda033b742
