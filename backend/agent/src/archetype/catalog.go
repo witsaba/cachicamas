@@ -50,7 +50,8 @@ type ArchetypeView struct {
 
 	// Per-org override (optional — present iff archetype_configurations
 	// has a row for (archetype_slug, orgID)). nil when no override.
-	Override *ArchetypeOverride `json:"override,omitempty"`
+	Override   *ArchetypeOverride `json:"override,omitempty"`
+	IsOverride bool               `json:"is_override"`
 
 	// Private — holds the system child row when type='system' and the
 	// child was joined. Accessed via ChildColumns() so future kinds
@@ -100,7 +101,10 @@ type ArchetypeOverride struct {
 // ErrUnknownArchetypeSlug replaces ErrUnknownArchetypeKind for the
 // polymorphic-by-slug surface. Used by the handler to map to
 // 404 + ERR_UNKNOWN_SLUG.
-var ErrUnknownArchetypeSlug = errors.New("archetype: unknown slug")
+var (
+	ErrUnknownArchetypeSlug    = errors.New("archetype: unknown slug")
+	ErrArchetypeConfigNotFound = errors.New("archetype: persisted configuration not found")
+)
 
 // CatalogLoader is the polymorphic read port keyed by slug.
 //
@@ -108,9 +112,8 @@ var ErrUnknownArchetypeSlug = errors.New("archetype: unknown slug")
 // it JOINs system_archetypes for child columns; for type='general' /
 // 'owned' it tolerates a missing child table by returning
 // (parent columns, child=nil, found=true). The Loader MUST NOT
-// auto-write on absent row (REQ-CACS-003 inheritance); an absent
-// system row returns DefaultConfigView(slug, orgID, knownTools) and
-// found=false.
+// auto-write on absent rows. Configuration comes from an organization
+// row or the persisted __default__ row; neither is synthesized in memory.
 //
 // ListByType returns the directory list for the supplied orgID:
 // every non-archived parent the caller can see (all three types:
@@ -179,9 +182,10 @@ const archetypeColumnList = `
     c.tool_allowlist,
     c.defer_tool_names,
     c.model,
-    c.version,
-    c.updated_at,
-    c.updated_by`
+	c.version,
+	c.updated_at,
+	c.updated_by,
+	c.org_id`
 
 // scannable is the minimum surface scanArchetypeRow needs from the
 // database/sql read paths. Both *sql.Row and *sql.Rows satisfy it
@@ -213,7 +217,7 @@ func scanArchetypeRow(s scannable) (ArchetypeView, error) {
 		overrideModel                                                     sql.NullString
 		overrideVersion                                                   sql.NullInt64
 		overrideUpdatedAt                                                 sql.NullTime
-		overrideUpdatedBy                                                 sql.NullString
+		overrideUpdatedBy, overrideOrgID                                  sql.NullString
 	)
 	if err := s.Scan(
 		&gotSlug, &gotType, &gotDisplay, &gotTagline, &gotStatus,
@@ -221,6 +225,7 @@ func scanArchetypeRow(s scannable) (ArchetypeView, error) {
 		&childBundle, &childCritical,
 		&overridePrompt, &overrideAllowlist, &overrideDefers,
 		&overrideModel, &overrideVersion, &overrideUpdatedAt, &overrideUpdatedBy,
+		&overrideOrgID,
 	); err != nil {
 		return ArchetypeView{}, err
 	}
@@ -275,6 +280,7 @@ func scanArchetypeRow(s scannable) (ArchetypeView, error) {
 		}
 		ov.UpdatedBy = overrideUpdatedBy.String
 		view.Override = ov
+		view.IsOverride = overrideOrgID.Valid && overrideOrgID.String != DefaultRowOrgID
 	}
 	return view, nil
 }
@@ -307,13 +313,32 @@ SELECT ` + archetypeColumnList + `
 FROM archetypes a
 LEFT JOIN system_archetypes sa ON sa.slug = a.slug
 LEFT JOIN archetype_configurations c
-    ON c.archetype_slug = a.slug AND c.org_id = $2
+    ON c.archetype_slug = a.slug
+   AND c.org_id = COALESCE(
+       (SELECT exact.org_id
+          FROM archetype_configurations exact
+         WHERE exact.archetype_slug = a.slug AND exact.org_id = $2),
+       '` + DefaultRowOrgID + `'
+   )
 WHERE a.slug = $1`
 
+	if l.tx != nil {
+		var lockedOrgID string
+		lockErr := l.tx.QueryRowContext(ctx, `
+SELECT org_id
+FROM archetype_configurations
+WHERE archetype_slug = $1 AND org_id IN ($2, $3)
+ORDER BY (org_id = $2) DESC
+LIMIT 1
+FOR SHARE`, slug, orgID, DefaultRowOrgID).Scan(&lockedOrgID)
+		if lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
+			return ArchetypeView{}, false, fmt.Errorf("archetype loader: lock config row for slug=%q org=%q: %w", slug, orgID, lockErr)
+		}
+	}
 	query := baseSelect
 	if l.tx != nil {
-		query = baseSelect + `
-FOR SHARE OF a, sa, c`
+		query += `
+FOR SHARE OF a`
 	}
 
 	var row *sql.Row
@@ -326,11 +351,7 @@ FOR SHARE OF a, sa, c`
 	view, err := scanArchetypeRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			// No parent row — return the safe-default fallback. This is
-			// the "system catalogue empty" outage path. The Loader MUST
-			// NOT auto-write (REQ-CACS-003).
-			known := RegisteredToolNames()
-			return DefaultConfigView(slug, orgID, known), false, nil
+			return ArchetypeView{}, false, nil
 		}
 		return ArchetypeView{}, false, fmt.Errorf("archetype loader: scan row for slug=%q org=%q: %w", slug, orgID, err)
 	}
@@ -353,6 +374,9 @@ FOR SHARE OF a, sa, c`
 	isTerminal := view.Status == "archived" || view.ArchivedAt != nil
 	if isTerminal && view.Override == nil {
 		return ArchetypeView{}, false, nil
+	}
+	if view.Override == nil {
+		return ArchetypeView{}, false, ErrArchetypeConfigNotFound
 	}
 
 	return view, true, nil
@@ -383,14 +407,31 @@ SELECT ` + archetypeColumnList + `
 FROM archetypes a
 LEFT JOIN system_archetypes sa ON sa.slug = a.slug
 LEFT JOIN archetype_configurations c
-    ON c.archetype_slug = a.slug AND c.org_id = $1
+    ON c.archetype_slug = a.slug
+   AND c.org_id = COALESCE(
+       (SELECT exact.org_id
+          FROM archetype_configurations exact
+         WHERE exact.archetype_slug = a.slug AND exact.org_id = $1),
+       '` + DefaultRowOrgID + `'
+   )
 WHERE a.status <> 'archived' AND a.archived_at IS NULL
 ORDER BY a.type ASC, a.slug ASC`
 
+	if l.tx != nil {
+		if _, lockErr := l.tx.ExecContext(ctx, `
+SELECT c.org_id
+FROM archetype_configurations c
+JOIN archetypes a ON a.slug = c.archetype_slug
+WHERE a.status <> 'archived' AND a.archived_at IS NULL
+  AND c.org_id IN ($1, $2)
+FOR SHARE OF c`, orgID, DefaultRowOrgID); lockErr != nil {
+			return nil, fmt.Errorf("archetype loader: lock list config rows for org=%q: %w", orgID, lockErr)
+		}
+	}
 	query := baseSelect
 	if l.tx != nil {
-		query = baseSelect + `
-FOR SHARE OF a, sa, c`
+		query += `
+FOR SHARE OF a`
 	}
 
 	var rows *sql.Rows
@@ -411,6 +452,9 @@ FOR SHARE OF a, sa, c`
 		if scanErr != nil {
 			return nil, fmt.Errorf("archetype loader: scan list row for org=%q: %w", orgID, scanErr)
 		}
+		if view.Override == nil {
+			return nil, ErrArchetypeConfigNotFound
+		}
 		views = append(views, view)
 	}
 	if err := rows.Err(); err != nil {
@@ -423,30 +467,4 @@ FOR SHARE OF a, sa, c`
 // (slug, orgID) pair. See CatalogLoader contract for behaviour matrix.
 func (l *catalogPostgresLoader) LoadBySlug(ctx context.Context, slug, orgID string) (ArchetypeView, bool, error) {
 	return l.loadBySlugImpl(ctx, slug, orgID)
-}
-
-// DefaultConfigView is the polymorphic-by-slug twin of DefaultConfig
-// (config.go). Pure factory; same input → same output; no I/O.
-// Used by the Loader's absent-row fallback (REQ-CACS-003).
-func DefaultConfigView(slug, orgID string, knownTools []string) ArchetypeView {
-	allowlist := append([]string(nil), knownTools...)
-	defers := append([]string(nil), DefaultDeferToolNames...)
-	prompt := DefaultChatSystemPrompt
-	return ArchetypeView{
-		Slug:        slug,
-		Type:        "system",
-		DisplayName: "Assistant",
-		Tagline:     "Your default assistant",
-		Status:      "active",
-		CreatedBy:   "default",
-		Override: &ArchetypeOverride{
-			SystemPrompt:   prompt,
-			ToolAllowlist:  allowlist,
-			DeferToolNames: defers,
-			Model:          nil,
-			Version:        1,
-			UpdatedBy:      "default",
-			UpdatedAt:      time.Time{},
-		},
-	}
 }

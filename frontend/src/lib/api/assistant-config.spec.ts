@@ -74,8 +74,8 @@ function overrideView(overrides: Partial<ArchetypeView> = {}): ArchetypeView {
 }
 
 function defaultView(): ArchetypeView {
-  // The "system default" case: no per-org override block; the adapter
-  // synthesises a flat ArchetypeConfig with is_override=false.
+  // The system default is persisted under org_id=__default__. The API
+  // returns its configuration block and marks it as non-override.
   return {
     slug: "assistant",
     type: "system",
@@ -88,6 +88,15 @@ function defaultView(): ArchetypeView {
     bundle_version: "v1",
     is_critical: true,
     is_override: false,
+    override: {
+      system_prompt: "database-owned default prompt",
+      tool_allowlist: ["current_time"],
+      defer_tool_names: [],
+      model: null,
+      version: 7,
+      updated_at: "2026-08-26T15:00:00Z",
+      updated_by: "seed",
+    },
   };
 }
 
@@ -133,7 +142,7 @@ describe("getAssistantConfig", () => {
     );
   });
 
-  it("returns the system-default config when no override block is present", async () => {
+  it("returns the persisted system-default config without marking it customized", async () => {
     mockResponseOnce(
       new Response(JSON.stringify(defaultView()), {
         status: 200,
@@ -144,10 +153,10 @@ describe("getAssistantConfig", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.is_override).toBe(false);
-      expect(result.value.system_prompt).toBe("");
-      expect(result.value.tool_allowlist).toEqual([]);
+      expect(result.value.system_prompt).toBe("database-owned default prompt");
+      expect(result.value.tool_allowlist).toEqual(["current_time"]);
       expect(result.value.defer_tool_names).toEqual([]);
-      expect(result.value.version).toBe(1);
+      expect(result.value.version).toBe(7);
     }
   });
 
@@ -365,9 +374,11 @@ describe("getArchetypeConfig (rewired to /config/)", () => {
     expect(result.value.is_override).toBe(true);
   });
 
-  it("Test_GetArchetypeConfig_ServerReturnsNoOverride_SynthesisesDefault: view WITHOUT override → flat default ArchetypeConfig (REQ-ACAR-3)", async () => {
+  it("Test_GetArchetypeConfig_ServerReturnsNoPersistedConfig: view without configuration → server error", async () => {
+    const { override: _missing, ...viewWithoutConfig } = defaultView();
+    void _missing;
     mockResponseOnce(
-      new Response(JSON.stringify(defaultView()), {
+      new Response(JSON.stringify(viewWithoutConfig), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -375,16 +386,10 @@ describe("getArchetypeConfig (rewired to /config/)", () => {
 
     const result = await getArchetypeConfig("assistant");
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.system_prompt).toBe("");
-    expect(result.value.tool_allowlist).toEqual([]);
-    expect(result.value.defer_tool_names).toEqual([]);
-    expect(result.value.model).toBeNull();
-    expect(result.value.version).toBe(1);
-    expect(result.value.is_override).toBe(false);
-    expect(result.value.updated_by).toBeUndefined();
-    expect(result.value.updated_at).toBeUndefined();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("server");
+    expect(result.message).toContain("no persisted configuration");
   });
 
   it("Test_GetArchetypeConfig_404_MapsToNotFound: HTTP 404 + ERR_UNKNOWN_SLUG → ApiResult.kind='not_found'", async () => {

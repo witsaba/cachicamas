@@ -56,10 +56,7 @@ func assistantConfigRequiresPostgres(t *testing.T) string {
 
 // resetAssistantConfigTable truncates archetype_configurations and
 // then re-inserts the seeded `__default__` row (migration 0003) so the
-// suite starts from a clean-but-seeded state. Tests that exercise
-// the "no rows at all" path (in-memory fallback) can call
-// truncateAssistantConfigTable directly instead of going through
-// this helper.
+// suite starts from a clean-but-seeded state.
 func resetAssistantConfigTable(t *testing.T, dsn string) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
@@ -75,7 +72,7 @@ func resetAssistantConfigTable(t *testing.T, dsn string) {
 		INSERT INTO archetype_configurations
 			(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
 		VALUES
-			('chat', '__default__',
+			('assistant', '__default__',
 			 'You are the cachicamas chat assistant; answer the participant in plain, well-formatted text.',
 			 '["current_time", "summarize_conversation"]'::jsonb,
 			 '["summarize_conversation"]'::jsonb,
@@ -86,8 +83,7 @@ func resetAssistantConfigTable(t *testing.T, dsn string) {
 }
 
 // truncateAssistantConfigTable removes ALL rows including the
-// `__default__` seed. Use this for tests that explicitly exercise
-// the "no rows at all → in-memory fallback" path (REQ-CACS-003).
+// `__default__` seed to exercise explicit missing-persistence errors.
 func truncateAssistantConfigTable(t *testing.T, dsn string) {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
@@ -181,16 +177,10 @@ func Test_Loader_PresentRow(t *testing.T) {
 	}
 }
 
-// Test_Loader_AbsentRowReturnsDefaults — REQ-CACS-002 / REQ-CACS-003
-// Scenario "absent row returns defaults and found=false". Given no
-// row for orgID="org-2" AND no `__default__` seed row (i.e. DB up
-// but the seed was manually removed — the LAST-RESORT fallback path),
-// when LoadBySlug runs, then it returns the in-memory safe
-// default, found=false, IsOverride=false, AND no row is inserted.
-//
-// RED at T-01: archetype.DefaultConfig is undefined. GREEN (T-02)
-// adds it.
-func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
+// Test_Loader_MissingDefaultRowReturnsError proves configuration has no
+// in-memory source of truth. When neither the organization row nor the
+// persisted __default__ row exists, the read fails and creates nothing.
+func Test_Loader_MissingDefaultRowReturnsError(t *testing.T) {
 	dsn := assistantConfigRequiresPostgres(t)
 	// truncate (without re-seed) — exercises the "no rows at all"
 	// path that falls back to in-memory defaults (REQ-CACS-003 last
@@ -205,30 +195,14 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 
 	loader := archetype.NewPostgresLoader(db)
 	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "org-2")
-	if lerr != nil {
-		t.Fatalf("LoadByOrg returned err=%v, want nil", lerr)
+	if !errors.Is(lerr, archetype.ErrArchetypeConfigNotFound) {
+		t.Fatalf("LoadBySlug error = %v, want ErrArchetypeConfigNotFound", lerr)
 	}
 	if found {
-		t.Fatalf("LoadByOrg returned found=true, want false")
+		t.Fatalf("LoadBySlug returned found=true, want false")
 	}
-	if got.IsOverride {
-		t.Errorf("IsOverride = true, want false (in-memory fallback)")
-	}
-	wantDefaults := archetype.DefaultConfig(archetype.AssistantSlug, "org-2", []string{"current_time", "summarize_conversation"})
-	if got.OrgID != wantDefaults.OrgID {
-		t.Errorf("OrgID = %q, want %q", got.OrgID, wantDefaults.OrgID)
-	}
-	if got.SystemPrompt != wantDefaults.SystemPrompt {
-		t.Errorf("SystemPrompt = %q, want %q", got.SystemPrompt, wantDefaults.SystemPrompt)
-	}
-	if !reflect.DeepEqual(got.ToolAllowlist, wantDefaults.ToolAllowlist) {
-		t.Errorf("ToolAllowlist = %v, want %v", got.ToolAllowlist, wantDefaults.ToolAllowlist)
-	}
-	if got.Version != wantDefaults.Version {
-		t.Errorf("Version = %d, want %d (defaults are version=1 per design AD-2)", got.Version, wantDefaults.Version)
-	}
-	if got.UpdatedBy != "" {
-		t.Errorf("UpdatedBy = %q, want empty (defaults carry no actor)", got.UpdatedBy)
+	if !reflect.DeepEqual(got, archetype.ArchetypeConfig{}) {
+		t.Errorf("config = %+v, want zero value on missing database truth", got)
 	}
 	// REQ-CACS-003: no row was created on the read path. Assert via
 	// direct SELECT count(*).
@@ -247,8 +221,6 @@ func Test_Loader_AbsentRowReturnsDefaults(t *testing.T) {
 // row's content (with OrgID rewritten to the caller's orgID) and
 // IsOverride=false.
 func Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow(t *testing.T) {
-	t.Parallel()
-
 	dsn := assistantConfigRequiresPostgres(t)
 	resetAssistantConfigTable(t, dsn) // re-seeds the default row
 
@@ -257,6 +229,10 @@ func Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow(t *testing.T) {
 		t.Fatalf("sql.Open: %v", err)
 	}
 	defer func() { _ = db.Close() }()
+	const databasePrompt = "database-owned default prompt"
+	if _, err := db.Exec(`UPDATE archetype_configurations SET system_prompt = $1 WHERE archetype_slug = $2 AND org_id = $3`, databasePrompt, archetype.AssistantSlug, archetype.DefaultRowOrgID); err != nil {
+		t.Fatalf("update default prompt: %v", err)
+	}
 
 	loader := archetype.NewPostgresLoader(db)
 	got, found, lerr := loader.LoadBySlug(context.Background(), archetype.AssistantSlug, "user_alice")
@@ -272,8 +248,8 @@ func Test_Loader_DefaultRow_FallbackWhenNoPerOrgRow(t *testing.T) {
 	if got.OrgID != "user_alice" {
 		t.Errorf("OrgID = %q, want %q (Loader must rewrite default row's sentinel to caller's orgID)", got.OrgID, "user_alice")
 	}
-	if got.SystemPrompt != archetype.DefaultChatSystemPrompt {
-		t.Errorf("SystemPrompt = %q, want %q (default row should match the seeded prompt)", got.SystemPrompt, archetype.DefaultChatSystemPrompt)
+	if got.SystemPrompt != databasePrompt {
+		t.Errorf("SystemPrompt = %q, want persisted default %q", got.SystemPrompt, databasePrompt)
 	}
 	if got.Version != 1 {
 		t.Errorf("Version = %d, want 1 (default row seeded at version=1)", got.Version)
@@ -389,12 +365,12 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	resetAssistantConfigTable(t, dsn)
 
 	seed := archetype.ArchetypeConfig{
-		Slug:           archetype.AssistantSlug,
-		OrgID:        "org-forshare",
-		SystemPrompt: "before",
+		Slug:          archetype.AssistantSlug,
+		OrgID:         "org-forshare",
+		SystemPrompt:  "before",
 		ToolAllowlist: []string{"current_time"},
-		Version:      1,
-		UpdatedBy:    "user_seed",
+		Version:       1,
+		UpdatedBy:     "user_seed",
 	}
 	seedRow(t, dsn, seed)
 
@@ -491,39 +467,6 @@ func Test_Loader_FORSHARESerialisesWithWriter(t *testing.T) {
 	// the time B took to issue its UPDATE after the load returned).
 	if writerElapsed < 100*time.Millisecond {
 		t.Errorf("writerElapsed = %v, want >= 100ms (FOR SHARE did not block B; A committed too quickly or no lock was held)", writerElapsed)
-	}
-}
-
-// Test_Defaults_Pure — design AD-2 + REQ-CACS-003 contract: the
-// in-memory default factory must be a pure function. Same input →
-// same output, no I/O. Runs without INTEGRATION.
-//
-// RED at T-01.
-func Test_Defaults_Pure(t *testing.T) {
-	t.Parallel()
-	const org = "org-pure"
-	tools := []string{"current_time", "summarize_conversation"}
-
-	first := archetype.DefaultConfig(archetype.AssistantSlug, org, tools)
-	second := archetype.DefaultConfig(archetype.AssistantSlug, org, tools)
-
-	if first.OrgID != second.OrgID {
-		t.Errorf("OrgID drifted: first=%q second=%q", first.OrgID, second.OrgID)
-	}
-	if first.SystemPrompt != second.SystemPrompt {
-		t.Errorf("SystemPrompt drifted: first=%q second=%q", first.SystemPrompt, second.SystemPrompt)
-	}
-	if !reflect.DeepEqual(first.ToolAllowlist, second.ToolAllowlist) {
-		t.Errorf("ToolAllowlist drifted: first=%v second=%v", first.ToolAllowlist, second.ToolAllowlist)
-	}
-	if first.Version != second.Version {
-		t.Errorf("Version drifted: first=%d second=%d", first.Version, second.Version)
-	}
-	if first.Version != 1 {
-		t.Errorf("Version = %d, want 1 (defaults are version=1 per design AD-2)", first.Version)
-	}
-	if first.UpdatedBy != "" {
-		t.Errorf("UpdatedBy = %q, want empty (defaults carry no actor)", first.UpdatedBy)
 	}
 }
 
