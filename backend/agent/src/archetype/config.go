@@ -56,35 +56,22 @@ const AssistantSlug = "assistant"
 //     per-archetype version propagation contract.
 //   - UpdatedAt/UpdatedBy: server-set on every successful PUT.
 type ArchetypeConfig struct {
-	Slug           string   `json:"slug"`
-	OrgID          string   `json:"org_id"`
-	SystemPrompt   string   `json:"system_prompt"`
-	ToolAllowlist  []string `json:"tool_allowlist"`
-	DeferToolNames []string `json:"defer_tool_names"`
-	Model          *string  `json:"model,omitempty"`
-	Version        int      `json:"version"`
-	UpdatedBy      string   `json:"updated_by,omitempty"`
+	Slug           string    `json:"slug"`
+	OrgID          string    `json:"org_id"`
+	SystemPrompt   string    `json:"system_prompt"`
+	ToolAllowlist  []string  `json:"tool_allowlist"`
+	DeferToolNames []string  `json:"defer_tool_names"`
+	Model          *string   `json:"model,omitempty"`
+	Version        int       `json:"version"`
+	UpdatedBy      string    `json:"updated_by,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	// IsOverride is true when the config came from a per-org row that
 	// shadows the system default. False when the config came from the
-	// seeded `__default__` row OR from the in-memory fallback (DB
-	// outage). The frontend uses this to decide whether to label the
+	// persisted `__default__` row. The frontend uses this to decide whether to label the
 	// Assistant card "Configured" (user-customized) or "Default"
 	// (system default).
 	IsOverride bool `json:"is_override"`
 }
-
-// DefaultChatSystemPrompt is the chat archetype's v1 system prompt.
-// Kept exported so the chat archetype's loader reuses the literal
-// without copy-paste drift. Future archetypes will define their own
-// default prompts in their composition root.
-const DefaultChatSystemPrompt = "You are the cachicamas chat assistant; answer the participant in plain, well-formatted text."
-
-// DefaultDeferToolNames is the safe-default defer set. Tools whose name
-// appears here require explicit permission approval before each call.
-// `summarize_conversation` mutates chat state, so it is deferred by
-// default in the chat archetype.
-var DefaultDeferToolNames = []string{"summarize_conversation"}
 
 // MaxSystemPromptLength caps the persisted system prompt. Mirrors the
 // 4000-char cap on the front-end Configure section.
@@ -123,13 +110,12 @@ var (
 //
 // LoadBySlug returns a value (not a pointer) so callers can
 // compare the returned ArchetypeConfig to a declared-zero-value safely.
-// The safe-default path returns DefaultConfig(slug, orgID, knownTools)
-// by value, never nil; the absent-row signal is the bool second return.
+// The persisted __default__ row is the only fallback. Missing persistence
+// returns ErrArchetypeConfigNotFound.
 type Loader interface {
 	// LoadBySlug returns the persisted config for the supplied
-	// (slug, orgID) pair. When the row is absent, it returns the
-	// safe-default config (built from DefaultConfig), found=false, and
-	// MUST NOT auto-write — REQ-CACS-003.
+	// (slug, orgID) pair, falling back to the persisted __default__ row.
+	// It never manufactures or auto-writes configuration.
 	LoadBySlug(ctx context.Context, slug, orgID string) (ArchetypeConfig, bool, error)
 
 	// WithTx returns a Loader that issues its read inside the supplied
@@ -164,42 +150,27 @@ func (l *PostgresLoader) WithTx(tx *sql.Tx) Loader {
 	return &PostgresLoader{tx: tx}
 }
 
-// DefaultRowOrgID is the legacy sentinel org_id used by the per-archetype
-// system default row in migration 0003_seed_chat_default.sql. Removed
-// per design OQ-2: system defaults now live on system_archetypes (the
-// polymorphic CatalogLoader in catalog.go reads them). Kept as a
-// deprecated constant because tests and old fixtures still reference it.
+// DefaultRowOrgID identifies the persisted system-default configuration.
 const DefaultRowOrgID = "__default__"
 
 // LoadBySlug reads `archetype_configurations` for the supplied
 // (slug, orgID) pair. Two-step lookup:
-//   1. SELECT ... WHERE archetype_slug = $1 AND org_id = $2 (caller's per-org row)
-//   2. If absent, return in-memory `DefaultConfig(slug, orgID, ...)`
-//      — this is the LAST-RESORT fallback for a DB outage (REQ-CACS-003:
-//      "if the database for any reason fails, MUST to use hardcoded
-//      default values").
-//
-// The previous __default__ sentinel row path is gone; system defaults
-// live on system_archetypes (per design OQ-2) and this Loader does NOT
-// consult them — the chat binary uses the polymorphic CatalogLoader
-// (catalog.go) for the full join. config.go's Loader is the kind-keyed
-// adapter kept for backwards compatibility until PR-2 retires
-// /api/chat/assistant/config.
+//  1. SELECT ... WHERE archetype_slug = $1 AND org_id = $2 (caller's per-org row)
+//  2. If absent, SELECT the persisted __default__ row.
+//  3. If both are absent, return ErrArchetypeConfigNotFound.
 //
 // On a tx-bound Loader the queries use `FOR SHARE`; on a db-bound
 // Loader they use plain `SELECT`. The IsOverride flag distinguishes
-// "user-customised" (true) from "in-memory fallback" (false) so the
+// "user-customised" (true) from the persisted default (false) so the
 // frontend can label the Assistant card correctly.
 //
 // Behaviour matrix:
 //   - per-org row present  → returns row, found=true,  IsOverride=true
-//   - no rows at all       → returns safe-default, found=false,
-//                            IsOverride=false
-//   - DB query/scan fails  → returns safe-default, found=false,
-//                            IsOverride=false (logged at higher layer)
+//   - default row present  → returns row, found=true,  IsOverride=false
+//   - no matching rows     → ErrArchetypeConfigNotFound
+//   - DB query/scan fails  → returns the database error
 //
-// The Loader MUST NOT auto-write the safe default. Persistence is the
-// write API layer's responsibility (REQ-CACS-003).
+// The Loader never auto-writes. Persistence is the only source of truth.
 func (l *PostgresLoader) LoadBySlug(ctx context.Context, slug, orgID string) (ArchetypeConfig, bool, error) {
 	if slug == "" {
 		return ArchetypeConfig{}, false, ErrUnknownArchetypeSlug
@@ -216,11 +187,17 @@ func (l *PostgresLoader) LoadBySlug(ctx context.Context, slug, orgID string) (Ar
 		return cfg, true, nil
 	}
 
-	// Step 2: no rows at all → in-memory fallback (DB up but the row
-	// never existed or was deleted). Returns found=false so the caller
-	// can distinguish this from the per-org case if needed.
-	known := knownToolNames(ctx)
-	return DefaultConfig(slug, orgID, known), false, nil
+	// Step 2: the persisted system default is the only fallback source.
+	cfg, found, err := l.loadRow(ctx, slug, DefaultRowOrgID)
+	if err != nil {
+		return ArchetypeConfig{}, false, err
+	}
+	if !found {
+		return ArchetypeConfig{}, false, ErrArchetypeConfigNotFound
+	}
+	cfg.OrgID = orgID
+	cfg.IsOverride = false
+	return cfg, true, nil
 }
 
 // loadRow issues the SELECT for an exact (slug, orgID) pair and
@@ -286,42 +263,6 @@ func (l *PostgresLoader) loadRow(ctx context.Context, slug, orgID string) (Arche
 	return cfg, true, nil
 }
 
-// DefaultConfig is the safe-default factory (REQ-CACS-003, design
-// AD-2). Pure: same input → same output, no I/O. The `knownTools`
-// argument is the registered tool set supplied by the composition
-// root; the defaults only allow tools that actually exist, so the
-// first PUT cannot bypass the registry check by listing unknown names.
-//
-// Returns a value (not a pointer) so callers — including the Loader's
-// absent-row path — can return it directly without dereferencing.
-//
-// The default system prompt is currently the chat v1 literal. Future
-// archetypes can supply their own default via a switch on `kind`; the
-// loader will pass `known` from the registered tool set of whichever
-// archetype owns the read.
-func DefaultConfig(slug, orgID string, knownTools []string) ArchetypeConfig {
-	allowlist := append([]string(nil), knownTools...)
-	defers := append([]string(nil), DefaultDeferToolNames...)
-	prompt := DefaultChatSystemPrompt
-	switch slug {
-	case AssistantSlug:
-		prompt = DefaultChatSystemPrompt
-	default:
-		prompt = DefaultChatSystemPrompt
-	}
-	return ArchetypeConfig{
-		Slug:           slug,
-		OrgID:          orgID,
-		SystemPrompt:   prompt,
-		ToolAllowlist:  allowlist,
-		DeferToolNames: defers,
-		Model:          nil,
-		Version:        1,
-		UpdatedBy:      "",
-		UpdatedAt:      time.Time{},
-	}
-}
-
 // knownToolNames returns the registered tool names from the chat
 // archetype's tool source. The composition root wires the registry;
 // the helper consults a package-level set when set (set by
@@ -353,11 +294,6 @@ func SetRegisteredToolNames(names []string) {
 // (REQ-CACAPI-003). Returns a copy to prevent callers from mutating
 // the package state.
 func RegisteredToolNames() []string {
-	return registeredToolNames()
-}
-
-// knownToolNames is the closure-returning helper used by LoadByKindAndOrg.
-func knownToolNames(_ context.Context) []string {
 	return registeredToolNames()
 }
 

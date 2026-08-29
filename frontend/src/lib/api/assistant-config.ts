@@ -81,7 +81,7 @@ export interface AssistantConfigUpdate {
 // Adapter: nested ArchetypeView -> flat ArchetypeConfig
 // -----------------------------------------------------------------------------
 
-function viewToConfig(view: ArchetypeView): ArchetypeConfig {
+function viewToConfig(view: ArchetypeView): ArchetypeConfig | undefined {
   // The polymorphic view carries the per-org override in a nested
   // `override` block (catalog.go:ArchetypeOverride). The flat legacy
   // shape inlines those fields at the top level + flips is_override
@@ -89,22 +89,7 @@ function viewToConfig(view: ArchetypeView): ArchetypeConfig {
   // `is_override` boolean).
   const override = view.override;
   if (override === undefined) {
-    // No per-org row: synthesise a flat default view from the
-    // system defaults. is_override is false; the tool allowlist /
-    // prompt come from the system row in the Go side, but for
-    // ConfigureSection we only need a stable shape — fields are
-    // taken from the parent's defaults (display_name, tagline) and
-    // the version is 1 (the DefaultConfig fallback).
-    return {
-      kind: "chat",
-      org_id: "",
-      system_prompt: "",
-      tool_allowlist: [],
-      defer_tool_names: [],
-      model: null,
-      version: 1,
-      is_override: false,
-    };
+    return undefined;
   }
   return {
     kind: "chat",
@@ -116,7 +101,7 @@ function viewToConfig(view: ArchetypeView): ArchetypeConfig {
     version: override.version,
     updated_by: override.updated_by,
     updated_at: override.updated_at,
-    is_override: true,
+    is_override: view.is_override,
   };
 }
 
@@ -150,7 +135,14 @@ export async function getArchetypeConfig(
   if (!result.ok) {
     return result;
   }
-  return { ok: true, value: viewToConfig(result.value) };
+  const config = viewToConfig(result.value);
+  return config
+    ? { ok: true, value: config }
+    : {
+        ok: false,
+        kind: "server",
+        message: "The archetype has no persisted configuration.",
+      };
 }
 
 /**
@@ -181,7 +173,14 @@ export async function putArchetypeConfigFlat(
   if (!result.ok) {
     return result;
   }
-  return { ok: true, value: viewToConfig(result.value) };
+  const config = viewToConfig(result.value);
+  return config
+    ? { ok: true, value: config }
+    : {
+        ok: false,
+        kind: "server",
+        message: "The archetype has no persisted configuration.",
+      };
 }
 
 /**
