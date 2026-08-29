@@ -9,16 +9,17 @@
 //
 // Five scenarios from spec #4077:
 //
-//	- Test_VersionTracker_FirstLoad_RecordsVersion
-//	- Test_VersionTracker_VersionMismatch_AppliesNewPrompt
-//	- Test_VersionTracker_VersionMatch_NoRebuild
-//	- Test_VersionTracker_AbsentRow_DefaultsToVersion1
-//	- Test_VersionTracker_NilLoader_NoOp
+//   - Test_VersionTracker_FirstLoad_RecordsVersion
+//   - Test_VersionTracker_VersionMismatch_AppliesNewPrompt
+//   - Test_VersionTracker_VersionMatch_NoRebuild
+//   - Test_VersionTracker_AbsentRow_DefaultsToVersion1
+//   - Test_VersionTracker_NilLoader_NoOp
 package archetype_test
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 
@@ -122,7 +123,7 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Slug:           archetype.AssistantSlug,
+			Slug:         archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,
@@ -137,7 +138,7 @@ func Test_VersionTracker_VersionMismatch_AppliesNewPrompt(t *testing.T) {
 	}
 
 	loader.withCurrent(archetype.ArchetypeConfig{
-		Slug:           archetype.AssistantSlug,
+		Slug:         archetype.AssistantSlug,
 		OrgID:        "user_alice",
 		SystemPrompt: "second prompt after config change",
 		Version:      4,
@@ -165,7 +166,7 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 
 	loader := &fakeVersionedLoader{
 		result: archetype.ArchetypeConfig{
-			Slug:           archetype.AssistantSlug,
+			Slug:         archetype.AssistantSlug,
 			OrgID:        "user_alice",
 			SystemPrompt: "first prompt",
 			Version:      3,
@@ -191,30 +192,22 @@ func Test_VersionTracker_VersionMatch_NoRebuild(t *testing.T) {
 	}
 }
 
-// Test_VersionTracker_AbsentRow_DefaultsToVersion1 — REQ-CACS-003 +
-// REQ-CCVP-001.
-func Test_VersionTracker_AbsentRow_DefaultsToVersion1(t *testing.T) {
+// Test_VersionTracker_MissingDatabaseConfigFails proves the runtime does
+// not manufacture a prompt or version when persistence has no row.
+func Test_VersionTracker_MissingDatabaseConfigFails(t *testing.T) {
 	t.Parallel()
 
 	loader := &fakeVersionedLoader{
-		result: archetype.DefaultConfig(archetype.AssistantSlug, "user_alice", []string{"current_time", "summarize_conversation"}),
-		found:  false,
+		err: archetype.ErrArchetypeConfigNotFound,
 	}
 	apply := &recordingApply{}
 
-	vt, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
-	if err != nil {
-		t.Fatalf("NewVersionTracker: %v", err)
+	_, err := archetype.NewVersionTracker(context.Background(), loader, archetype.AssistantSlug, "user_alice", apply.apply)
+	if !errors.Is(err, archetype.ErrArchetypeConfigNotFound) {
+		t.Fatalf("NewVersionTracker error = %v, want ErrArchetypeConfigNotFound", err)
 	}
-	if got := vt.RecordedVersion(); got != 1 {
-		t.Errorf("RecordedVersion = %d, want 1 (defaults are version=1 per design AD-2)", got)
-	}
-	// Initial load fires once (the default prompt); reload on still-default config is a no-op.
-	if err := vt.Reload(context.Background()); err != nil {
-		t.Fatalf("Reload: %v", err)
-	}
-	if apply.count() != 1 {
-		t.Errorf("applyPrompt called %d time(s), want 1 (initial only — defaults stay defaults)", apply.count())
+	if apply.count() != 0 {
+		t.Errorf("applyPrompt called %d time(s), want 0", apply.count())
 	}
 }
 

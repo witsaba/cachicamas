@@ -132,9 +132,51 @@ func Test_LoadBySlug_PresentSystemArchetype(t *testing.T) {
 	}
 }
 
-// Test_LoadBySlug_AbsentRow_ReturnsDefaultConfig (T-09 PR-1). Empty
-// table → DefaultConfigView with found=false. Spec: LD-04.
-func Test_LoadBySlug_AbsentRow_ReturnsDefaultConfig(t *testing.T) {
+// Test_LoadBySlug_DefaultRowSuppliesConfiguration proves the persisted
+// __default__ row is the only fallback when an organization has no override.
+func Test_LoadBySlug_DefaultRowSuppliesConfiguration(t *testing.T) {
+	dsn := catalogRequiresPostgres(t)
+	resetCatalogFixtures(t, dsn)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`
+		INSERT INTO archetypes (slug, type, display_name, tagline, status, created_by)
+		VALUES ('assistant', 'system', 'Assistant', 'Default', 'active', 'seed');
+		INSERT INTO system_archetypes (slug, bundle_version, is_critical)
+		VALUES ('assistant', 'v1', true);
+		INSERT INTO archetype_configurations
+			(archetype_slug, org_id, system_prompt, tool_allowlist, defer_tool_names, model, version, updated_at, updated_by)
+		VALUES ('assistant', '__default__', 'database-owned default prompt', '["current_time"]'::jsonb,
+		        '[]'::jsonb, NULL, 7, now(), 'seed')`); err != nil {
+		t.Fatalf("seed database default: %v", err)
+	}
+
+	view, found, err := archetype.NewCatalogLoader(db).LoadBySlug(context.Background(), "assistant", "org-without-override")
+	if err != nil {
+		t.Fatalf("LoadBySlug: %v", err)
+	}
+	if !found {
+		t.Fatal("LoadBySlug returned found=false, want true")
+	}
+	if view.Override == nil {
+		t.Fatal("Override = nil; want persisted default configuration")
+	}
+	if view.Override.SystemPrompt != "database-owned default prompt" {
+		t.Errorf("SystemPrompt = %q, want database-owned default prompt", view.Override.SystemPrompt)
+	}
+	if view.IsOverride {
+		t.Error("IsOverride = true, want false for __default__ row")
+	}
+}
+
+// Test_LoadBySlug_AbsentParentReturnsNotFound keeps an unknown archetype
+// distinct from an archetype whose persisted configuration is missing.
+func Test_LoadBySlug_AbsentParentReturnsNotFound(t *testing.T) {
 	dsn := catalogRequiresPostgres(t)
 	resetCatalogFixtures(t, dsn)
 
@@ -152,8 +194,8 @@ func Test_LoadBySlug_AbsentRow_ReturnsDefaultConfig(t *testing.T) {
 	if found {
 		t.Error("LoadBySlug returned found=true for absent row; want false")
 	}
-	if view.Override == nil {
-		t.Error("absent row returned nil Override; want DefaultConfigView with safe defaults")
+	if view != (archetype.ArchetypeView{}) {
+		t.Errorf("view = %+v, want zero value", view)
 	}
 	// The Loader MUST NOT auto-write — no row should appear after the call.
 	var count int
@@ -179,26 +221,6 @@ func Test_LoadBySlug_UnknownSlug_ReturnsErrUnknownArchetypeSlug(t *testing.T) {
 	_, _, err = loader.LoadBySlug(context.Background(), "", "org-1")
 	if err == nil {
 		t.Fatal("LoadBySlug with empty slug returned nil error; want ErrUnknownArchetypeSlug")
-	}
-}
-
-// Test_DefaultConfigView_IsPure (T-09 PR-1). Two calls with the same
-// inputs return byte-equivalent output; no I/O. Spec: LD-04.
-func Test_DefaultConfigView_IsPure(t *testing.T) {
-	a := archetype.DefaultConfigView("assistant", "org-1", []string{"current_time", "summarize_conversation"})
-	b := archetype.DefaultConfigView("assistant", "org-1", []string{"current_time", "summarize_conversation"})
-
-	if a.Slug != b.Slug || a.Type != b.Type || a.DisplayName != b.DisplayName {
-		t.Errorf("DefaultConfigView not deterministic: a=%+v b=%+v", a, b)
-	}
-	if a.Override == nil || b.Override == nil {
-		t.Fatal("DefaultConfigView returned nil Override on one of two calls")
-	}
-	if a.Override.SystemPrompt != b.Override.SystemPrompt {
-		t.Errorf("Override.SystemPrompt differs: %q vs %q", a.Override.SystemPrompt, b.Override.SystemPrompt)
-	}
-	if len(a.Override.ToolAllowlist) != len(b.Override.ToolAllowlist) {
-		t.Errorf("Override.ToolAllowlist lengths differ")
 	}
 }
 
@@ -230,10 +252,8 @@ func Test_LoadBySlug_ParentArchived_ReturnsFoundFalse(t *testing.T) {
 	if found {
 		t.Error("LoadBySlug returned found=true for archived row; want false")
 	}
-	// DefaultConfigView still returns the safe fallback (Override nil
-	// in this case because DefaultConfigView sets it).
-	if view.Override == nil {
-		t.Error("archived row returned nil Override; want DefaultConfigView fallback")
+	if view != (archetype.ArchetypeView{}) {
+		t.Errorf("archived row returned view %+v, want zero value", view)
 	}
 }
 
