@@ -22,8 +22,8 @@ import { Button } from "~/components/ui/button/button";
 import {
   AgentAvatar,
   PersonAvatar,
-} from "~/components/workspace/avatar/avatar";
-import { renderSanitizedMarkdown } from "~/lib/markdown";
+} from "~/components/marketing/avatar/avatar";
+import { renderSanitizedMarkdown } from "~/lib/markdown/markdown";
 import type { TranscriptEntry } from "~/lib/mock/chat";
 import type { Agent } from "~/lib/mock/staff";
 
@@ -101,7 +101,7 @@ export const TranscriptLine = component$<TranscriptLineProps>((props) => {
           ) : (
             <div
               class="prose-work"
-              // Sanitised at the boundary; the allowlist is in lib/markdown.ts.
+              // Sanitised at the boundary; the allowlist is in lib/markdown/markdown.ts.
               dangerouslySetInnerHTML={renderSanitizedMarkdown(entry.text)}
             />
           )}

@@ -28,7 +28,11 @@ describe("the wordmark", () => {
   it("is never title-cased in shipped source", () => {
     const files = sourceFiles(root);
     // Non-vacuous: a walk that finds nothing proves nothing.
-    expect(files.length).toBeGreaterThan(40);
+    // Post-cleanup baseline: the marketing-only frontend walks ~29 source
+    // files. Any future contributor who doubles the surface by accident will
+    // trip the lower bound; the upper bound is not pinned because the brand
+    // invariant is about the wordmark's shape, not the file count.
+    expect(files.length).toBeGreaterThan(20);
     const offenders: string[] = [];
     for (const rel of files) {
       const source = readFileSync(root + rel, "utf8");

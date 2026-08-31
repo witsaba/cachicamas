@@ -12,7 +12,6 @@
  */
 import { component$, useSignal } from "@builder.io/qwik";
 import { Icon } from "~/components/icon/icon";
-import { Button } from "~/components/ui/button/button";
 import {
   ANNUAL_SAVING,
   COMPARISON,
@@ -138,18 +137,6 @@ export const Pricing = component$(() => {
                     </li>
                   ))}
                 </ul>
-
-                <p class="pt-6">
-                  <Button
-                    as="a"
-                    href="/auth/signin/"
-                    size="md"
-                    variant={plan.recommended ? "primary" : "secondary"}
-                    class="w-full"
-                  >
-                    {plan.cta}
-                  </Button>
-                </p>
               </article>
             );
           })}

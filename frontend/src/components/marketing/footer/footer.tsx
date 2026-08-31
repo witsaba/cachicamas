@@ -29,14 +29,6 @@ export const MarketingFooter = component$(() => (
               Plans
             </a>
           </li>
-          <li>
-            <a
-              href="/auth/signin/"
-              class="text-ink-soft hover:text-ink rounded-sm text-sm"
-            >
-              Sign in
-            </a>
-          </li>
         </ul>
       </nav>
       <p class="text-ink-soft text-sm">

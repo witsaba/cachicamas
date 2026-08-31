@@ -27,7 +27,7 @@ For the complete design, read the [agent stack architecture](docs/architecture/0
 | `backend/agent` | Layered Go module containing the model adapter, portable agent runtime, archetypes, and chat service. |
 | `backend/database_administrator` | Hexagonal Go API for identity, organizations, workspaces, sync jobs, prompts, skills, and database migrations. |
 | `backend/workspace_syncer` | Internal Go service that clones and validates Git workspaces. |
-| `frontend` | Qwik operator interface for authentication, workspaces, agent chat, prompts, and skills. |
+| `frontend` | Marketing-only Qwik landing page (wordmark, hero, staff, how-it-works, hands-off, pricing, Q&A, closing CTA). |
 | PostgreSQL | Persistent storage, with each business system responsible for its own data. |
 | OpenTelemetry + Jaeger | Local telemetry collection and trace exploration. |
 
@@ -53,7 +53,7 @@ src/
 - Docker with Compose v2
 - Go 1.26.6 or later for backend development
 - Node.js 18.17 or later and pnpm 11.8 or later for frontend development
-- GitHub OAuth credentials and an OpenRouter API key for the complete stack
+- An OpenRouter API key and the secrets documented in `.env.example` for the complete stack
 
 ### Run the stack
 
@@ -63,7 +63,7 @@ cd cachicamas
 cp .env.example .env
 ```
 
-Edit `.env` and replace the placeholder credentials. At minimum, configure the OpenRouter key, GitHub OAuth credentials, and generated secrets documented in the file. Then start the services:
+Edit `.env` and replace the placeholder credentials. At minimum, configure the OpenRouter key and the generated secrets documented in the file. Then start the services:
 
 ```bash
 docker compose up -d --build

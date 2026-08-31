@@ -68,15 +68,6 @@ WORKDIR /app
 # deps que se importan dinámicamente (e.g., `undici` para fetch/HttpRequest)
 # y no se bundlean. Las copiamos desde el builder stage (donde pnpm
 # instaló todo el árbol de deps).
-#
-# cachicamas-github-login (PR-2): Auth.js for Qwik imports its peer
-# packages (@auth/core, @panva/hkdf, postgres, jose, oauth4webapi,
-# set-cookie-parser, preact-render-to-string) dynamically in places
-# that Vite can't statically resolve (lazy QRL boundary, ESM graph).
-# We COPY the entire node_modules from the builder (running pnpm with
-# shamefully-hoist=true via .npmrc) so all transitive deps are present
-# at runtime. Image weight is ~+30MB vs. the selective COPY approach;
-# acceptable for the auth-shipping slice.
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copiamos los artefactos del builder.

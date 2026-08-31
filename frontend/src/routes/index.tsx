@@ -19,15 +19,13 @@ import { component$ } from "@builder.io/qwik";
 import { type DocumentHead } from "@builder.io/qwik-city";
 
 import { Icon } from "~/components/icon/icon";
+import { AgentAvatar } from "~/components/marketing/avatar/avatar";
 import { MarketingFooter } from "~/components/marketing/footer/footer";
 import { MarketingHeader } from "~/components/marketing/header/header";
 import { HeroProof } from "~/components/marketing/hero-proof/hero-proof";
 import { Pricing } from "~/components/marketing/pricing/pricing";
-import { SignInButton } from "~/components/sign-in-button/sign-in-button";
 import { Button } from "~/components/ui/button/button";
-import { AgentAvatar } from "~/components/workspace/avatar/avatar";
 import { AGENTS, agentBySlug } from "~/lib/mock/staff";
-import { useSession, useSignIn } from "~/routes/plugin@auth";
 
 const CARD =
   "rounded-lg border border-line bg-surface shadow-[var(--shadow-raised)]";
@@ -52,14 +50,11 @@ const QUESTIONS: readonly { q: string; a: string }[] = [
 ];
 
 export default component$(() => {
-  const session = useSession();
-  const signIn = useSignIn();
-  const authenticated = Boolean(session.value?.user);
   const finance = agentBySlug("finance") ?? AGENTS[0];
 
   return (
     <>
-      <MarketingHeader signIn={signIn} authenticated={authenticated} />
+      <MarketingHeader />
 
       <main id="main">
         {/* ── the offer, and the proof, together ───────────────────────── */}
@@ -77,18 +72,9 @@ export default component$(() => {
               </p>
 
               <div class="flex flex-wrap items-center gap-3 pt-8">
-                {authenticated ? (
-                  <Button as="a" href="/home/" size="lg">
-                    Open your workspace
-                  </Button>
-                ) : (
-                  <SignInButton
-                    signIn={signIn}
-                    label="Start free"
-                    redirectTo="/home"
-                    size="lg"
-                  />
-                )}
+                <Button as="a" href="#plans" size="lg">
+                  See plans
+                </Button>
                 <Button as="a" href="#staff" size="lg" variant="secondary">
                   Meet the specialists
                 </Button>
@@ -366,18 +352,9 @@ export default component$(() => {
                 specialist when you know which job you are short on.
               </p>
             </div>
-            {authenticated ? (
-              <Button as="a" href="/home/" size="lg">
-                Open your workspace
-              </Button>
-            ) : (
-              <SignInButton
-                signIn={signIn}
-                label="Start free"
-                redirectTo="/home"
-                size="lg"
-              />
-            )}
+            <Button as="a" href="#plans" size="lg">
+              See plans
+            </Button>
           </div>
         </section>
       </main>

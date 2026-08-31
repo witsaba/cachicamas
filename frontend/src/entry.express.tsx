@@ -12,7 +12,8 @@
  *     binary's assistant config endpoints live here by design — see
  *     `lib/api-router.ts:routeApiRequest` for the dispatch decision).
  *   - Other `/api/*` → reverse proxy to the database_administrator Go
- *     binary (/api stripped except /api/v1/*).
+ *     binary (/api stripped; the path prefix is otherwise opaque to the
+ *     proxy and forwarded verbatim).
  *   - Static assets (Qwik client chunks) served from `dist/`.
  *   - All other routes → Qwik City SSR (handles prerendered + dynamic).
  *
@@ -131,30 +132,16 @@ function proxyRequest(
 }
 
 /**
- * Reverse-proxy /api/* to database_administrator. The /api prefix is
- * stripped for legacy routes (e.g., /api/organizations → /organizations),
- * but PRESERVED for routes that include /api in their backend path
- * (e.g., /api/v1/identity/signin-callback → /api/v1/identity/signin-callback).
- *
- * Why the exception: the identity callback slice
- * (cachicamas-identity-signin-callback, see ADR 0003) exposes its
- * endpoint under /api/v1/* on the Go side. The Qwik Node SSR can also
- * reach the backend directly via SERVER_API_BASE_URL (compose DNS),
- * but in `pnpm dev` mode the fallback uses the proxy. The proxy
- * therefore forwards /api/v1/* as-is and strips /api only for the
- * legacy routes that the Go binary registers at the root.
+ * Reverse-proxy /api/* to database_administrator. Strip the /api prefix
+ * and forward the rest of the path verbatim — the trimmed frontend has
+ * no live caller that reaches the Go API, so the previous two-shape
+ * memory (strip /api vs keep the rest) collapses to one path.
  */
 function proxyToApi(
   req: import("node:http").IncomingMessage,
   res: import("node:http").ServerResponse,
 ): void {
-  // Path-shape detection: legacy routes (no /api in the backend path)
-  // have /api/* stripped; identity-callback-style routes (backend has
-  // /api/v1/* paths) keep the /api prefix intact.
-  const keepApiPrefix = req.url?.startsWith("/api/v1/") ?? false;
-  const newPath = keepApiPrefix
-    ? (req.url ?? "/")
-    : (req.url?.replace(/^\/api/, "") ?? "/");
+  const newPath = req.url?.replace(/^\/api/, "") ?? "/";
   proxyRequest(req, res, API_TARGET, newPath);
 }
 
