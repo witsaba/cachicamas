@@ -32,10 +32,11 @@ export function routeApiRequest(url: string): ApiRouteTarget {
   // after PR-2 T-19). Returns 'chat' so entry.express.tsx's existing
   // `case "chat"` arm proxies to the same upstream as /api/chat/*.
   // Declared BEFORE the `/api/*` fall-through so a future spec change
-  // that narrows the catch-all (e.g. to /api/v1/*) does not strand
-  // the polymorphic surface. Matches BOTH the bare `/api/archetypes`
-  // (used by the directory list at `/api/archetypes?type=system`) and
-  // the tree under `/api/archetypes/...`.
+  // that narrows the catch-all (e.g. to a versioned prefix) does not
+  // strand the polymorphic surface. Matches BOTH the bare
+  // `/api/archetypes` (used by the directory list at
+  // `/api/archetypes?type=system`) and the tree under
+  // `/api/archetypes/...`.
   if (
     url.startsWith("/api/archetypes/") ||
     url === "/api/archetypes" ||

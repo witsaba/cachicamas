@@ -12,7 +12,8 @@
  *     binary's assistant config endpoints live here by design — see
  *     `lib/api-router.ts:routeApiRequest` for the dispatch decision).
  *   - Other `/api/*` → reverse proxy to the database_administrator Go
- *     binary (/api stripped except /api/v1/*).
+ *     binary (/api stripped; the path prefix is otherwise opaque to the
+ *     proxy and forwarded verbatim).
  *   - Static assets (Qwik client chunks) served from `dist/`.
  *   - All other routes → Qwik City SSR (handles prerendered + dynamic).
  *
@@ -132,9 +133,9 @@ function proxyRequest(
 
 /**
  * Reverse-proxy /api/* to database_administrator. Strip the /api prefix
- * and forward the rest of the path verbatim — the trimmed frontend has no
- * caller that reaches /api/v1/*, so the previous two-shape memory
- * (strip /api vs keep /api) collapses to one path.
+ * and forward the rest of the path verbatim — the trimmed frontend has
+ * no live caller that reaches the Go API, so the previous two-shape
+ * memory (strip /api vs keep the rest) collapses to one path.
  */
 function proxyToApi(
   req: import("node:http").IncomingMessage,
