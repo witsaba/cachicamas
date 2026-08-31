@@ -48,7 +48,7 @@ export const MarketingHeader = component$(() => (
             passed through to the button collides with the variant's own
             `inline-flex`, and Tailwind 4 emits utilities in a fixed order
             in which the variant wins — so the button would stay visible
-            on a phone and quietly crowd the rest of the chrome. */}
+            on a phone and crowd the wordmark. */}
         <span class="hidden sm:block">
           <Button as="a" href="#plans" size="md" variant="secondary">
             See plans
