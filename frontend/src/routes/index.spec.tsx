@@ -14,8 +14,7 @@
  *     Software Development Framework identity is gone.
  */
 import { createDOM } from "@builder.io/qwik/testing";
-import { $, type QRL } from "@builder.io/qwik";
-import { test, expect, vi } from "vitest";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Index, { head } from "./index";
@@ -26,23 +25,6 @@ import { PLANS } from "~/lib/mock/plans";
 // `DocumentHead` is a union of a static value and a resolver function; these
 // routes export the static form, so narrow once here rather than at every use.
 const landingHead = head as DocumentHeadValue;
-
-vi.mock("~/routes/plugin@auth", () => ({
-  useSession: () => ({ value: null }),
-  useSignIn: () => ({
-    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-      (formData: FormData) => unknown
-    >,
-    actionPath: "/auth/signin",
-  }),
-  useSignOut: () => ({
-    submit: $((_fd: FormData) => Promise.resolve()) as QRL<
-      (formData: FormData) => unknown
-    >,
-    actionPath: "/auth/signout",
-  }),
-  onRequest: () => Promise.resolve(),
-}));
 
 const source = readFileSync(
   fileURLToPath(new URL("./index.tsx", import.meta.url)),
@@ -59,17 +41,19 @@ test("[routes/index]: leads with the offer and one primary action", async () => 
   const screen = await renderLanding();
   const h1 = screen.querySelector("h1");
   expect(h1?.textContent).toContain("Hire the specialists");
-  // The action is a real submit into the sign-in flow, not a link to nowhere,
-  // and it is the same affordance the rest of the product uses.
-  const forms = screen.querySelectorAll('form[data-testid="sign-in-button"]');
-  expect(forms.length).toBeGreaterThan(0);
-  const first = forms[0] as HTMLElement;
-  expect(
-    first.querySelector('input[name="providerId"]')?.getAttribute("value"),
-  ).toBe("github");
-  expect(
-    first.querySelector('input[name="redirectTo"]')?.getAttribute("value"),
-  ).toBe("/home");
+  // Marketing-only chrome: the primary action is a static in-page anchor
+  // pointing at the plans section, NOT a sign-in form. A sign-in form
+  // would couple the public page to a deleted auth surface.
+  const plansLinks = screen.querySelectorAll(
+    'a[href="#plans"]:not([href="/auth/signin"])',
+  );
+  expect(plansLinks.length).toBeGreaterThanOrEqual(2);
+  // No form with the GitHub provider input should exist — the page does
+  // not branch on session state and does not call out to an OAuth flow.
+  const signInForms = screen.querySelectorAll(
+    'form input[name="providerId"][value="github"]',
+  );
+  expect(signInForms).toHaveLength(0);
 });
 
 test("[routes/index]: opens on the product's own moment, mid-conversation", async () => {
