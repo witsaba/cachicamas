@@ -147,3 +147,14 @@ test("[routes/index]: has exactly one <main> and one <h1>", async () => {
   expect(screen.querySelectorAll("main").length).toBe(1);
   expect(screen.querySelectorAll("h1").length).toBe(1);
 });
+
+test("[routes/index]: no link on the rendered page points at /auth/", async () => {
+  // Marketing-only contract (FRMO-1/2/3 + design Decision 1): the rendered
+  // landing must not link to any /auth/* path. Any future re-introduction
+  // of a sign-in affordance must surface here as a regression. This is the
+  // gap that the live-curl smoke caught: the footer was cleaned in WU-8 and
+  // the header.spec.tsx already negated /auth/ hrefs, but the pricing card
+  // CTAs still pointed at /auth/signin/ until this fix.
+  const screen = await renderLanding();
+  expect(screen.querySelectorAll('a[href^="/auth/"]')).toHaveLength(0);
+});
