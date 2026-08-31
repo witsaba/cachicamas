@@ -418,39 +418,6 @@ services:
             max-size: "10m"
             max-file: "3"
 
-      # --------------------------------------------------------------------------
-      # mocks-github-oauth — minimal GitHub OAuth simulator for the Playwright
-      # e2e suite (cachicamas-github-login PR-2 T2.20). NOT for production.
-      # The frontend's AUTH_GITHUB_BASE_URL / AUTH_GITHUB_API_BASE_URL env vars
-      # point here in the test profile; production (no override) hits real
-      # github.com.
-      # --------------------------------------------------------------------------
-  mocks-github-oauth:
-        build:
-          context: ./scripts/mocks-github-oauth
-          dockerfile: Dockerfile
-        image: cachicamas/mocks-github-oauth:local
-        container_name: cachicamas-mocks-github-oauth
-        restart: "no"
-        environment:
-          MOCKS_HOST: 0.0.0.0
-          MOCKS_PORT: 3016
-        ports:
-          # Host-side port for browser-driven e2e tests when running
-          # compose WITHOUT the dockerized frontend (e.g., pnpm dev
-          # locally + docker compose up for postgres/db-admin/mocks).
-          - "3016:3016"
-        networks:
-          - cachicamas_network
-        healthcheck:
-          test:
-            - CMD-SHELL
-            - 'node -e "require(\"http\").get(\"http://127.0.0.1:3016/healthz\",r=>process.exit(r.statusCode===200?0:1)).on(\"error\",()=>process.exit(1))"'
-          interval: 10s
-          timeout: 5s
-          retries: 6
-          start_period: 5s
-
   # --------------------------------------------------------------------------
   # workspace_syncer — Go microservice (2026-07-08-workspace-sync-clone).
   # Clones GitHub repos server-side + probes worktrees. Reached only by
