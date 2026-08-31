@@ -27,7 +27,7 @@ For the complete design, read the [agent stack architecture](docs/architecture/0
 | `backend/agent` | Layered Go module containing the model adapter, portable agent runtime, archetypes, and chat service. |
 | `backend/database_administrator` | Hexagonal Go API for identity, organizations, workspaces, sync jobs, prompts, skills, and database migrations. |
 | `backend/workspace_syncer` | Internal Go service that clones and validates Git workspaces. |
-| `frontend` | Qwik operator interface for authentication, workspaces, agent chat, prompts, and skills. |
+| `frontend` | Marketing-only Qwik landing page (wordmark, hero, staff, how-it-works, hands-off, pricing, Q&A, closing CTA). |
 | PostgreSQL | Persistent storage, with each business system responsible for its own data. |
 | OpenTelemetry + Jaeger | Local telemetry collection and trace exploration. |
 

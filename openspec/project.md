@@ -25,7 +25,7 @@
   - Gateway pattern: apps → OTel Collector → Jaeger
 - **Tracing backend**: Jaeger v2 (`jaegertracing/jaeger:2.19.0`)
 - **Orchestration**: docker-compose v2, single-node local dev stack on `cachicamas_network`
-- **Frontend**: `frontend/` directory present (not yet inspected by SDD)
+- **Frontend**: `frontend/` is a Qwik 1.20 marketing-only site (landing at `/` + chrome). Auth, workspace, agents, chat, settings, profile, organization, teams, and ownboarding surfaces are gone; `@auth/qwik` / `@auth/core` / `@panva/hkdf` / `postgres` / `@playwright/test` are no longer dependencies (clean-frontend-keep-only-landing-page).
 
 ## Architecture
 
