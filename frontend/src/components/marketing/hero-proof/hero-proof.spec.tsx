@@ -13,7 +13,7 @@ import { HeroProof } from "./hero-proof";
 import {
   runToEnd,
   type MockTurnStore,
-} from "~/components/chat/use-mock-turn";
+} from "~/components/marketing/use-mock-turn/use-mock-turn";
 import { HERO_OPENING, HERO_SCRIPT } from "~/lib/mock/chat";
 import { agentBySlug } from "~/lib/mock/staff";
 

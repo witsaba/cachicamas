@@ -17,9 +17,9 @@
  * finished, not animated at zero duration.
  */
 import { $, component$, useSignal, useVisibleTask$ } from "@builder.io/qwik";
-import { TranscriptLine } from "~/components/chat/transcript-line";
-import { useMockTurn } from "~/components/chat/use-mock-turn";
-import { AgentAvatar } from "~/components/workspace/avatar/avatar";
+import { AgentAvatar } from "~/components/marketing/avatar/avatar";
+import { TranscriptLine } from "~/components/marketing/transcript-line/transcript-line";
+import { useMockTurn } from "~/components/marketing/use-mock-turn/use-mock-turn";
 import { HERO_OPENING, HERO_SCRIPT } from "~/lib/mock/chat";
 import type { Agent } from "~/lib/mock/staff";
 

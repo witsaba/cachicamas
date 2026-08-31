@@ -19,7 +19,7 @@ import { component$ } from "@builder.io/qwik";
 import { type DocumentHead } from "@builder.io/qwik-city";
 
 import { Icon } from "~/components/icon/icon";
-import { AgentAvatar } from "~/components/marketing/agent-avatar/agent-avatar";
+import { AgentAvatar } from "~/components/marketing/avatar/avatar";
 import { MarketingFooter } from "~/components/marketing/footer/footer";
 import { MarketingHeader } from "~/components/marketing/header/header";
 import { HeroProof } from "~/components/marketing/hero-proof/hero-proof";

@@ -6,10 +6,13 @@
  * That distinction exists because the whole premise of the product is that you
  * work alongside colleagues who are not people, and a directory where the two
  * are indistinguishable would be dishonest in a way no amount of copy fixes.
+ * It is also the reason the rule never travels alone: shape is a signal, not a
+ * statement, so every agent avatar in the product ships with the literal word
+ * "Agent" beside it (see `<SpeciesLabel>` below and PRODUCT.md § Accessibility).
  *
- * Marketing-only re-export: only `AgentAvatar` is kept — `PersonAvatar` lived
- * alongside it but was auth-shaped (it consumed the deleted `safe-avatar-src`
- * helper) and so is gone with the rest of the auth surface.
+ * Department colour identifies; it never ranks and it never means a status.
+ * The department name is always written next to it somewhere on the same
+ * screen.
  */
 import { component$ } from "@builder.io/qwik";
 import type { Agent, Department } from "~/lib/mock/staff";
@@ -72,6 +75,64 @@ export const AgentAvatar = component$<AgentAvatarProps>(
       ].join(" ")}
     >
       {agent.initials}
+    </span>
+  ),
+);
+
+export interface PersonAvatarProps {
+  readonly name: string;
+  readonly initials: string;
+  /** An already-validated image URL, or null. */
+  readonly image?: string | null;
+  readonly size?: AvatarSize;
+}
+
+/** The circle. Never used for an agent. */
+export const PersonAvatar = component$<PersonAvatarProps>(
+  ({ name, initials, image = null, size = "md" }) =>
+    image ? (
+      <img
+        src={image}
+        alt=""
+        width={56}
+        height={56}
+        data-species="person"
+        aria-hidden="true"
+        class={[
+          "border-line inline-block shrink-0 rounded-full border object-cover",
+          BOX[size],
+        ].join(" ")}
+      />
+    ) : (
+      <span
+        data-species="person"
+        data-name={name}
+        aria-hidden="true"
+        class={[
+          "bg-sunken text-ink-mid ring-line inline-flex shrink-0 items-center justify-center rounded-full font-semibold ring-1",
+          BOX[size],
+        ].join(" ")}
+      >
+        {initials}
+      </span>
+    ),
+);
+
+/**
+ * The word that keeps the shape rule honest. Rendered wherever an avatar
+ * appears without its full profile around it.
+ */
+export const SpeciesLabel = component$<{ species: "agent" | "person" }>(
+  ({ species }) => (
+    <span
+      class={[
+        "text-2xs inline-flex items-center rounded-sm border px-1.5 py-px font-semibold tracking-wide uppercase",
+        species === "agent"
+          ? "border-brand/25 bg-brand-tint text-brand"
+          : "border-line bg-sunken text-ink-soft",
+      ].join(" ")}
+    >
+      {species === "agent" ? "Agent" : "Person"}
     </span>
   ),
 );
