@@ -126,16 +126,19 @@ status.
 | 11  | [GHSA-r28c-9q8g-f849](https://github.com/advisories/GHSA-r28c-9q8g-f849)                                                                            | High     | `postcss`         | 8.5.16                                | 8.5.18   | Accepted debt — transitive via `vite`, dev-only                                                                                  |
 
 The production auth-bypass finding that originally motivated this gate
-(`@auth/core` GHSA-7rqj-j65f-68wh) is **not** in the table above — it
-was closed by removal on 2026-08-31 (see Remediation history).
-The gate is wired to fail on any high/critical finding so this baseline
-is enforced rather than silently carried.
+(the auth-core homoglyph advisory `GHSA-7rqj-j65f-68wh`) is **not** in
+the table above — it was closed by removal on 2026-08-31 (see
+Remediation history). The gate is wired to fail on any high/critical
+finding so this baseline is enforced rather than silently carried.
 
 ### Remediation history
 
-**2026-08-31** — `@auth/core`, `@auth/qwik`, `@panva/hkdf`, `postgres`,
-`@playwright/test` and the auth-shaped mocks service are all **removed**
-from the frontend tree by `clean-frontend-keep-only-landing-page`. The
-GHSA-7rqj-j65f-68wh finding is closed by removal, not by version
-bump; the `overrides["@auth/core"]` block in `pnpm-workspace.yaml` is
-gone and `pnpm install` no longer fetches any `@auth/*` package.
+**2026-08-31** — the auth-core libraries (Auth.js for Qwik, Auth.js
+core, the panva HKDF peer), the `postgres` driver, the Playwright
+test runner, and the auth-shaped mocks compose service are all
+**removed** from the frontend tree by
+`clean-frontend-keep-only-landing-page`. The `GHSA-7rqj-j65f-68wh`
+finding is closed by removal, not by version bump; the
+`overrides` block in `pnpm-workspace.yaml` that pinned the
+auth-core version is gone and `pnpm install` no longer fetches any
+Auth.js-shaped package.
