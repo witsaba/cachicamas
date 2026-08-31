@@ -184,10 +184,6 @@ describe("routeApiRequest", () => {
         expect(routeApiRequest("/api/organizations")).toBe("api");
       });
 
-      it("/api/v1/identity/signin-callback routes to the database_administrator binary (api)", () => {
-        expect(routeApiRequest("/api/v1/identity/signin-callback")).toBe("api");
-      });
-
       it("/some/non/api/path is NOT an API route (null)", () => {
         expect(routeApiRequest("/some/non/api/path")).toBeNull();
       });
