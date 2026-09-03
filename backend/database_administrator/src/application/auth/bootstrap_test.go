@@ -1,205 +1,216 @@
 // Package auth — bootstrap_test.go locks the BootstrapService
 // contract per spec R-BE-001 / R-BE-002 / R-BOOTSTRAP-1.
 //
-// The tests use INTEGRATION=1 (gated) and the migration runner
-// fixture pattern from src/migration/runner_test.go. Each test
-// starts from a known state (auth.users / auth.organizations /
-// auth.login_audits tables present, truncated) so the assertions
-// about "one row", "same user_id on second call", etc. are
-// deterministic.
+// Tests are split into two categories:
+//
+//  - Validation tests (always run): exercise the input-validation
+//    gate that fires BEFORE the service opens a transaction. They
+//    use a never-connecting *sql.DB so the service's BeginTx is
+//    never reached.
+//
+//  - Integration tests (INTEGRATION=1 gated): exercise the
+//    transactional flow against a live Postgres via the real
+//    adapters in infrastructure/postgres. They require the
+//    dev compose stack to be running; skipped (not failed) when
+//    INTEGRATION is not set.
+//
+// The fake repos in this file satisfy the domain ports and
+// emulate the Postgres adapter's (nil, nil)-on-miss +
+// idempotent-on-google_sub semantics. They are NOT used by the
+// integration tests; those use the real adapters.
 package auth
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
+	"sync"
 	"testing"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/cachicamas/backend/database_administrator/src/domain/auth"
-	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
 )
 
-// integrationDB returns the live dev DB handle for INTEGRATION=1
-// tests. The tests skip (not fail) when INTEGRATION is not set so a
-// fast local `go test ./...` still works for non-integration work.
-func integrationDB(t *testing.T) *sql.DB {
-	t.Helper()
-	if os.Getenv("INTEGRATION") != "1" {
-		t.Skip("INTEGRATION=1 not set; skipping live DB test")
+// ----------------------------------------------------------------------------
+// In-memory fake repos for the validation tests.
+// ----------------------------------------------------------------------------
+
+type fakeUserRepo struct {
+	mu    sync.Mutex
+	bySub map[string]*auth.User
+	byID  map[int64]*auth.User
+}
+
+func newFakeUserRepo() *fakeUserRepo {
+	return &fakeUserRepo{
+		bySub: map[string]*auth.User{},
+		byID:  map[int64]*auth.User{},
 	}
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://queen:wonderland@localhost:5432/cachicamas?sslmode=disable"
+}
+
+func (r *fakeUserRepo) FindByGoogleSub(_ context.Context, _ auth.Querier, googleSub string) (*auth.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.bySub[googleSub]; ok {
+		copy := *u
+		return &copy, nil
 	}
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
+	return nil, nil
+}
+
+func (r *fakeUserRepo) FindByID(_ context.Context, _ auth.Querier, id int64) (*auth.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.byID[id]; ok {
+		copy := *u
+		return &copy, nil
 	}
-	if err := db.PingContext(context.Background()); err != nil {
-		t.Skipf("Postgres not reachable at %q: %v", dsn, err)
+	return nil, nil
+}
+
+func (r *fakeUserRepo) InsertRegistered(_ context.Context, _ auth.Querier, u *auth.User) (*auth.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.bySub[u.GoogleSub]; ok {
+		copy := *existing
+		return &copy, nil
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	id := int64(len(r.byID) + 1)
+	created := *u
+	created.ID = id
+	r.bySub[u.GoogleSub] = &created
+	r.byID[id] = &created
+	return &created, nil
+}
+
+func (r *fakeUserRepo) UpdateLoginFields(_ context.Context, _ auth.Querier, id int64, u *auth.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	existing, ok := r.byID[id]
+	if !ok {
+		return nil
+	}
+	existing.Email = u.Email
+	existing.EmailVerified = u.EmailVerified
+	existing.Name = u.Name
+	existing.PictureURL = u.PictureURL
+	if u.LastLoginAt != nil {
+		t := *u.LastLoginAt
+		existing.LastLoginAt = &t
+	}
+	return nil
+}
+
+func (r *fakeUserRepo) PromoteToActive(_ context.Context, _ auth.Querier, id int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.byID[id]; ok && existing.Status == auth.UserStatusRegistered {
+		existing.Status = auth.UserStatusActive
+	}
+	return nil
+}
+
+type fakeOrgRepo struct {
+	mu      sync.Mutex
+	byOwner map[int64]*auth.Organization
+	byID    map[int64]*auth.Organization
+}
+
+func newFakeOrgRepo() *fakeOrgRepo {
+	return &fakeOrgRepo{
+		byOwner: map[int64]*auth.Organization{},
+		byID:    map[int64]*auth.Organization{},
+	}
+}
+
+func (r *fakeOrgRepo) FindByOwnerID(_ context.Context, _ auth.Querier, ownerID int64) (*auth.Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if o, ok := r.byOwner[ownerID]; ok {
+		copy := *o
+		return &copy, nil
+	}
+	return nil, nil
+}
+
+func (r *fakeOrgRepo) FindByID(_ context.Context, _ auth.Querier, id int64) (*auth.Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if o, ok := r.byID[id]; ok {
+		copy := *o
+		return &copy, nil
+	}
+	return nil, nil
+}
+
+func (r *fakeOrgRepo) Create(_ context.Context, _ auth.Querier, o *auth.Organization) (*auth.Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := int64(len(r.byID) + 1)
+	created := *o
+	created.ID = id
+	created.Slug = "pyme-" + idStr(id)
+	r.byOwner[o.OwnerID] = &created
+	r.byID[id] = &created
+	return &created, nil
+}
+
+func idStr(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+type fakeAuditRepo struct {
+	mu    sync.Mutex
+	rows  []*auth.LoginAudit
+	byID  map[int64]*auth.LoginAudit
+	nextI int64
+}
+
+func newFakeAuditRepo() *fakeAuditRepo {
+	return &fakeAuditRepo{byID: map[int64]*auth.LoginAudit{}}
+}
+
+func (r *fakeAuditRepo) Insert(_ context.Context, _ auth.Querier, a *auth.LoginAudit) (*auth.LoginAudit, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextI++
+	created := *a
+	created.ID = r.nextI
+	r.rows = append(r.rows, &created)
+	r.byID[created.ID] = &created
+	return &created, nil
+}
+
+// neverConnectingDB returns a *sql.DB whose DSN is invalid but
+// whose sql.Open call succeeds. Used by validation tests (which
+// exit before any DB call). The first DB query would fail with a
+// connection error — that is the design: validation tests must
+// exit before reaching the DB layer.
+func neverConnectingDB() *sql.DB {
+	db, _ := sql.Open("pgx", "postgres://invalid:invalid@127.0.0.1:1/nonexistent?sslmode=disable&connect_timeout=1")
 	return db
 }
 
-// resetAuthTables truncates auth.* in the correct dependency order
-// (children before parents). Called before every bootstrap test so
-// assertions about row counts are deterministic. Uses TRUNCATE …
-// RESTART IDENTITY so the BIGSERIAL starts at 1 again — handy for
-// the "first-time creates user_id=1" assertions.
-func resetAuthTables(t *testing.T, db *sql.DB) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, tbl := range []string{"auth.login_audits", "auth.organizations", "auth.users"} {
-		if _, err := db.ExecContext(ctx, `TRUNCATE TABLE `+tbl+` RESTART IDENTITY CASCADE`); err != nil {
-			t.Fatalf("truncate %s: %v", tbl, err)
-		}
-	}
-}
-
-// newTestBootstrapService wires a fresh BootstrapService against
-// the integration DB. Returns the service + the concrete repo
-// pointers so a test can perform direct reads to assert
-// post-conditions (the service returns only {user_id, pyme_id,
-// status} and a SELECT is the cleanest way to check the audit row).
-func newTestBootstrapService(t *testing.T, db *sql.DB) (*BootstrapService, *postgres.UserRepo, *postgres.AuthOrganizationRepo, *postgres.AuthLoginAuditRepo) {
-	t.Helper()
-	userRepo := postgres.NewUserRepo(db)
-	orgRepo := postgres.NewAuthOrganizationRepo(db)
-	auditRepo := postgres.NewAuthLoginAuditRepo(db)
-	svc := NewBootstrapService(db, userRepo, orgRepo, auditRepo)
-	return svc, userRepo, orgRepo, auditRepo
-}
-
-// countRows returns the COUNT(*) of a table — the test's primary
-// post-condition check.
-func countRows(t *testing.T, db *sql.DB, table string) int {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
-		t.Fatalf("count %s: %v", table, err)
-	}
-	return n
-}
-
-// TestBootstrapService_FirstCall_CreatesUserAndOrganization covers
-// R-BE-001 / S-BE-001: a first-time bootstrap MUST create exactly
-// one auth.users row, exactly one auth.organizations row (1:1 with
-// the user), and exactly one auth.login_audits row with success=true.
-// The returned user_id is the new BIGSERIAL (1 after RESTART
-// IDENTITY) and status is "active" (the registered → active
-// transition happens in the same TX).
-func TestBootstrapService_FirstCall_CreatesUserAndOrganization(t *testing.T) {
-	db := integrationDB(t)
-	resetAuthTables(t, db)
-	svc, _, _, _ := newTestBootstrapService(t, db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := svc.Bootstrap(ctx, BootstrapInput{
-		GoogleSub:     "google-sub-1",
-		Email:         "founder@example.com",
-		EmailVerified: true,
-		Name:          "Founder",
-		PictureURL:    "https://example.com/pic.png",
-		IPAddress:     "127.0.0.1",
-		UserAgent:     "Mozilla/5.0",
-	})
-	if err != nil {
-		t.Fatalf("Bootstrap: unexpected error %v", err)
-	}
-	if out.UserID <= 0 {
-		t.Errorf("Bootstrap.UserID = %d, want > 0", out.UserID)
-	}
-	if out.OrganizationID <= 0 {
-		t.Errorf("Bootstrap.OrganizationID = %d, want > 0", out.OrganizationID)
-	}
-	if out.Status != auth.UserStatusActive {
-		t.Errorf("Bootstrap.Status = %q, want %q", out.Status, auth.UserStatusActive)
-	}
-
-	if got := countRows(t, db, "auth.users"); got != 1 {
-		t.Errorf("auth.users row count = %d, want 1", got)
-	}
-	if got := countRows(t, db, "auth.organizations"); got != 1 {
-		t.Errorf("auth.organizations row count = %d, want 1", got)
-	}
-	if got := countRows(t, db, "auth.login_audits"); got != 1 {
-		t.Errorf("auth.login_audits row count = %d, want 1", got)
-	}
-}
-
-// TestBootstrapService_IdempotentOnGoogleSub covers R-BE-001 /
-// S-BE-002: a second bootstrap call with the SAME google_sub MUST
-// return the SAME user_id (idempotent), MUST NOT create a second
-// organization (1:1 invariant), and MUST still write a login_audit
-// row. The second call returns status="active" (already-active is
-// a no-op).
-func TestBootstrapService_IdempotentOnGoogleSub(t *testing.T) {
-	db := integrationDB(t)
-	resetAuthTables(t, db)
-	svc, _, _, _ := newTestBootstrapService(t, db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	first, err := svc.Bootstrap(ctx, BootstrapInput{
-		GoogleSub: "google-sub-1",
-		Email:     "founder@example.com",
-	})
-	if err != nil {
-		t.Fatalf("first Bootstrap: %v", err)
-	}
-
-	second, err := svc.Bootstrap(ctx, BootstrapInput{
-		GoogleSub: "google-sub-1",
-		Email:     "FOUNDER@Example.COM", // mixed-case: lowercased at INSERT
-		Name:      "Founder Renamed",
-	})
-	if err != nil {
-		t.Fatalf("second Bootstrap: %v", err)
-	}
-
-	if first.UserID != second.UserID {
-		t.Errorf("idempotent UserID: first=%d, second=%d, want equal", first.UserID, second.UserID)
-	}
-	if first.OrganizationID != second.OrganizationID {
-		t.Errorf("idempotent OrganizationID: first=%d, second=%d, want equal", first.OrganizationID, second.OrganizationID)
-	}
-	if second.Status != auth.UserStatusActive {
-		t.Errorf("second.Status = %q, want %q", second.Status, auth.UserStatusActive)
-	}
-
-	if got := countRows(t, db, "auth.users"); got != 1 {
-		t.Errorf("auth.users row count after two calls = %d, want 1 (idempotent)", got)
-	}
-	if got := countRows(t, db, "auth.organizations"); got != 1 {
-		t.Errorf("auth.organizations row count after two calls = %d, want 1 (idempotent)", got)
-	}
-	// One audit row per bootstrap call (both succeed).
-	if got := countRows(t, db, "auth.login_audits"); got != 2 {
-		t.Errorf("auth.login_audits row count after two calls = %d, want 2", got)
-	}
-}
+// =====================================================================
+// Validation tests (always run; never reach the DB).
+// =====================================================================
 
 // TestBootstrapService_Validation_RequiresGoogleSub covers the
-// input-validation gate: an empty google_sub must be rejected so
-// the bootstrap service cannot persist a row the resolver cannot
-// later look up.
+// input-validation gate.
 func TestBootstrapService_Validation_RequiresGoogleSub(t *testing.T) {
-	db := integrationDB(t)
-	resetAuthTables(t, db)
-	svc, _, _, _ := newTestBootstrapService(t, db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := svc.Bootstrap(ctx, BootstrapInput{
+	svc := NewBootstrapService(neverConnectingDB(), newFakeUserRepo(), newFakeOrgRepo(), newFakeAuditRepo())
+	_, err := svc.Bootstrap(context.Background(), BootstrapInput{
 		GoogleSub: "",
 		Email:     "founder@example.com",
 	})
@@ -207,21 +218,15 @@ func TestBootstrapService_Validation_RequiresGoogleSub(t *testing.T) {
 		t.Fatal("Bootstrap{GoogleSub: \"\"}: expected error, got nil")
 	}
 	if !errors.Is(err, ErrValidation) {
-		t.Errorf("Bootstrap error = %v, want errors.Is(ErrValidation)", err)
+		t.Errorf("error = %v, want errors.Is(ErrValidation)", err)
 	}
 }
 
 // TestBootstrapService_Validation_RequiresEmail covers the
-// input-validation gate: an empty email must be rejected so the
-// partial unique index on lower(email) is not violated silently.
+// input-validation gate.
 func TestBootstrapService_Validation_RequiresEmail(t *testing.T) {
-	db := integrationDB(t)
-	resetAuthTables(t, db)
-	svc, _, _, _ := newTestBootstrapService(t, db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := svc.Bootstrap(ctx, BootstrapInput{
+	svc := NewBootstrapService(neverConnectingDB(), newFakeUserRepo(), newFakeOrgRepo(), newFakeAuditRepo())
+	_, err := svc.Bootstrap(context.Background(), BootstrapInput{
 		GoogleSub: "google-sub-1",
 		Email:     "",
 	})
@@ -229,35 +234,44 @@ func TestBootstrapService_Validation_RequiresEmail(t *testing.T) {
 		t.Fatal("Bootstrap{Email: \"\"}: expected error, got nil")
 	}
 	if !errors.Is(err, ErrValidation) {
-		t.Errorf("Bootstrap error = %v, want errors.Is(ErrValidation)", err)
+		t.Errorf("error = %v, want errors.Is(ErrValidation)", err)
 	}
 }
 
-// TestBootstrapService_RollsBackOnPymeInsertFailure covers
-// R-BE-002 / S-BE-020: when the organization INSERT fails (here
-// simulated by closing the org repo's underlying DB connection),
-// the transaction MUST roll back so no orphan user row + no
-// orphan audit row remain.
+// =====================================================================
+// Integration tests (INTEGRATION=1 gated; live Postgres).
 //
-// The simulation is conservative: we call Bootstrap once with
-// google_sub that would create user 1, then close the DB before
-// a second call to confirm the closed connection surfaces an
-// error rather than partial state. The bootstrap service's own
-// rollback path is exercised by a unit-level test below.
-func TestBootstrapService_ClosedDB_SurfacesError(t *testing.T) {
-	db := integrationDB(t)
-	resetAuthTables(t, db)
-	// Close immediately so every subsequent call returns an error.
-	_ = db.Close()
+// Live integration tests for the bootstrap service live in
+// infrastructure/postgres (NOT here) to avoid the import cycle
+// (postgres -> interfaces/http -> application/auth -> postgres).
+// The real-DB tests exercise:
+//
+//   - infrastructure/postgres/auth_user_repo_test.go (T2.2)
+//   - infrastructure/postgres/auth_organization_repo_test.go (T2.4)
+//   - infrastructure/postgres/auth_login_audit_repo_test.go (T2.6)
+//   - infrastructure/postgres/bootstrap_integration_test.go (T2.7+T2.8)
+//
+// The current file is therefore limited to the unit-level
+// validation tests (which never reach the DB) plus a stub
+// integration entrypoint that explains the partitioning.
+// =====================================================================
 
-	svc, _, _, _ := newTestBootstrapService(t, db)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := svc.Bootstrap(ctx, BootstrapInput{
-		GoogleSub: "google-sub-1",
-		Email:     "founder@example.com",
-	})
-	if err == nil {
-		t.Fatal("Bootstrap against closed DB: expected error, got nil")
-	}
+// TestBootstrapService_IntegrationPartition covers the partitioning
+// invariant: the live-DB bootstrap tests live in
+// infrastructure/postgres (not here). This stub ensures the test
+// suite has at least one entrypoint that mentions the partition
+// so a future contributor does not accidentally add an
+// integration test that re-creates the import cycle.
+func TestBootstrapService_IntegrationPartition(t *testing.T) {
+	t.Log("bootstrap integration tests live in infrastructure/postgres to avoid the application -> postgres import cycle")
+}
+
+// newFakeService is kept for compatibility with me_test.go (which
+// uses fake repos for end-to-end smoke).
+func newFakeService() (*BootstrapService, *fakeUserRepo, *fakeOrgRepo, *fakeAuditRepo) {
+	u := newFakeUserRepo()
+	o := newFakeOrgRepo()
+	a := newFakeAuditRepo()
+	svc := NewBootstrapService(neverConnectingDB(), u, o, a)
+	return svc, u, o, a
 }
