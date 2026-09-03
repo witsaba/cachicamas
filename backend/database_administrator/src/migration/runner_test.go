@@ -423,54 +423,67 @@ func TestRunner_Up_AdvisoryLockBlocksParallelRun(t *testing.T) {
 // it is append-only by design (see README §3) and the next test
 // starts with its own resetSchemaMigrations call.
 //
+// PR-1 Foundations (cachicamas-google-auth-bootstrap) added auth.* to
+// the truncate list; the legacy identity.account/identity.user entries
+// are GONE because those tables are dropped by migration 20260903120000
+// (T1.3). The schema_migrations bookkeeping table is intentionally
+// not truncated (see wipeNewTables for drop-and-recreate semantics).
+//
 // Returns a func suitable for t.Cleanup so the call sites stay short.
 func truncateNewTables(t *testing.T, db *sql.DB) func() {
 	t.Helper()
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		// identity.account truncates cleanly even when empty; CASCADE
-		// handles the FK to identity.user. organization.owner_user_id
-		// is included in the truncate so a future FK violation is also
-		// cleared when a test rewinds.
+		// organization.owner_user_id is included in the truncate so a
+		// future FK violation is also cleared when a test rewinds.
+		// auth.* is truncated first (children before parents) so the
+		// FK chain login_audits -> users resolves before users is
+		// truncated.
 		_, _ = db.ExecContext(ctx,
-			"TRUNCATE TABLE sync_job, workspace, identity.account, identity.user, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
+			"TRUNCATE TABLE auth.login_audits, auth.pymes, auth.users, sync_job, workspace, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
 	}
 }
 
 // wipeNewTables drops the 8 new tables if they exist. Used at the
-// top of each test to guarantee a clean state independent of any
-// prior test run that may have left schema behind. Safe to call
-// even when none of the tables exist yet (every DROP uses IF EXISTS).
-func wipeNewTables(t *testing.T, db *sql.DB) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	stmts := []string{
-		"DROP TABLE IF EXISTS spec_phase CASCADE",
-		"DROP TABLE IF EXISTS spec CASCADE",
-		"DROP TABLE IF EXISTS task CASCADE",
-		"DROP TABLE IF EXISTS milestone CASCADE",
-		"DROP TABLE IF EXISTS requirement_spike CASCADE",
-		"DROP TABLE IF EXISTS requirement CASCADE",
-		"DROP TABLE IF EXISTS project CASCADE",
-		// identity.* tables must drop BEFORE organization so the FK
-		// on organization.owner_user_id can resolve. organization
-		// is dropped last to satisfy any FK from project.
-		// sync_job FKs to workspace; drop sync_job first so CASCADE
-		// on the parent FK is unblocked.
-		"DROP TABLE IF EXISTS sync_job CASCADE",
-		"DROP TABLE IF EXISTS workspace CASCADE",
-		"DROP TABLE IF EXISTS identity.account CASCADE",
-		"DROP TABLE IF EXISTS identity.user CASCADE",
-		"DROP TABLE IF EXISTS organization CASCADE",
-	}
-	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
-			t.Fatalf("wipe (%s): %v", s, err)
-		}
-	}
-}
+    // top of each test to guarantee a clean state independent of any
+    // prior test run that may have left schema behind. Safe to call
+    // even when none of the tables exist yet (every DROP uses IF EXISTS).
+    func wipeNewTables(t *testing.T, db *sql.DB) {
+    	t.Helper()
+    	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    	defer cancel()
+    	stmts := []string{
+    		// auth.* (PR-1 Foundations: cachicamas-google-auth-bootstrap)
+    		// — children first so FK chain resolves; the schema is
+    		// dropped automatically when its last table goes away.
+    		"DROP TABLE IF EXISTS auth.login_audits CASCADE",
+    		"DROP TABLE IF EXISTS auth.pymes CASCADE",
+    		"DROP TABLE IF EXISTS auth.users CASCADE",
+    		"DROP TABLE IF EXISTS spec_phase CASCADE",
+    		"DROP TABLE IF EXISTS spec CASCADE",
+    		"DROP TABLE IF EXISTS task CASCADE",
+    		"DROP TABLE IF EXISTS milestone CASCADE",
+    		"DROP TABLE IF EXISTS requirement_spike CASCADE",
+    		"DROP TABLE IF EXISTS requirement CASCADE",
+    		"DROP TABLE IF EXISTS project CASCADE",
+    		// identity.* tables must drop BEFORE organization so the FK
+    		// on organization.owner_user_id can resolve. organization
+    		// is dropped last to satisfy any FK from project.
+    		// sync_job FKs to workspace; drop sync_job first so CASCADE
+    		// on the parent FK is unblocked.
+    		"DROP TABLE IF EXISTS sync_job CASCADE",
+    		"DROP TABLE IF EXISTS workspace CASCADE",
+    		"DROP TABLE IF EXISTS identity.account CASCADE",
+    		"DROP TABLE IF EXISTS identity.user CASCADE",
+    		"DROP TABLE IF EXISTS organization CASCADE",
+    	}
+    	for _, s := range stmts {
+    		if _, err := db.ExecContext(ctx, s); err != nil {
+    		t.Fatalf("wipe (%s): %v", s, err)
+    		}
+    	}
+    }
 
 // TestRunner_Up_AllNewMigrationsApply covers spec B1: a fresh
 // `public.schema_migrations` plus a runner.Up() must produce 4
@@ -491,12 +504,13 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// 11 migrations: hello_world, orgs_and_projects,
+	// 13 migrations: hello_world, orgs_and_projects,
 	// requirements_and_milestones, tasks_and_specs, github_login,
 	// workspaces_and_account_tokens, workspaces, drop_workspace_repository,
-	// rename_workspace_primary_repo_columns, sync_job, prompts.
-	if len(applied) != 11 {
-		t.Fatalf("Up applied %d migrations, want 10 (got %+v)", len(applied), applied)
+	// rename_workspace_primary_repo_columns, sync_job, prompts, skills,
+	// google_auth (PR-1 Foundations: cachicamas-google-auth-bootstrap).
+	if len(applied) != 13 {
+		t.Fatalf("Up applied %d migrations, want 13 (got %+v)", len(applied), applied)
 	}
 	wantVersions := []int64{
 		20260621120000,
@@ -510,6 +524,8 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
+		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
+		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
 	}
 	for i, want := range wantVersions {
 		if applied[i].ID != want {
@@ -967,8 +983,8 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// After this Up, all 6 witsaba versions must be in the bookkeeping
-	// table in chronological order (6th = workspaces_and_account_tokens).
+	// After this Up, all 13 versions (12 prior + google_auth PR-1) must
+	// be in the bookkeeping table in chronological order.
 	wantVersions := []int64{
 		20260621120000,
 		20260622120000,
@@ -981,6 +997,8 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
+		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
+		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
 	}
 	if len(applied) != len(wantVersions) {
 		t.Errorf("Up applied %d migrations, want %d (got %+v)", len(applied), len(wantVersions), applied)
@@ -1023,6 +1041,8 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260708120100, // 2026-07-08-workspaces-simplify (rename primary_repo_* -> repo_*)
 		20260708120200, // 2026-07-08-workspace-sync-clone PR-1 (sync_job + workspace sync columns)
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
+		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
+		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
 	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
@@ -1260,154 +1280,6 @@ func TestRunner_Up_CheckConstraintsEnforceValidity(t *testing.T) {
 // Each step asserts both the happy path AND the agent's expected
 // query result, so a future change that breaks the agent's mental
 // model surfaces here as a test failure.
-// TestRunner_Up_WorkspacesPR1a_AccountTokenColumns covers the
-// 2026-07-06-workspaces PR1a migration (20260706120000): after Up()
-// applies it, identity.account MUST have the 5 additive OAuth token
-// columns with the locked shapes. The 3 string columns are TEXT
-// (nullable, no length cap), the timestamp column is TIMESTAMPTZ
-// (nullable), and the 5 columns MUST be appended at the end of the
-// row (so a SELECT * orders them after the original 6 columns from
-// migration 20260703120000).
-func TestRunner_Up_WorkspacesPR1a_AccountTokenColumns(t *testing.T) {
-	db := integrationRunnerDB(t)
-	resetSchemaMigrations(t, db)
-	wipeNewTables(t, db)
-	t.Cleanup(truncateNewTables(t, db))
-
-	r := newTestRunner(db)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if _, err := r.Up(ctx); err != nil {
-		t.Fatalf("Up: %v", err)
-	}
-
-	// Pull the column metadata for identity.account.
-	rows, err := db.QueryContext(ctx,
-		`SELECT column_name, data_type, is_nullable
-           FROM information_schema.columns
-          WHERE table_schema = 'identity' AND table_name = 'account'
-          ORDER BY ordinal_position`)
-	if err != nil {
-		t.Fatalf("query identity.account columns: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	type colInfo struct {
-		name     string
-		dataType string
-		nullable string
-	}
-	var cols []colInfo
-	for rows.Next() {
-		var c colInfo
-		if err := rows.Scan(&c.name, &c.dataType, &c.nullable); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		cols = append(cols, c)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows err: %v", err)
-	}
-
-	wantCols := map[string]string{
-		"access_token":  "text",
-		"refresh_token": "text",
-		"expires_at":    "timestamp with time zone",
-		"token_type":    "text",
-		"scope":         "text",
-	}
-	gotCols := map[string]string{}
-	for _, c := range cols {
-		gotCols[c.name] = c.dataType
-	}
-	for name, wantType := range wantCols {
-		gotType, ok := gotCols[name]
-		if !ok {
-			t.Errorf("identity.account.%s missing after Up() (PR1a migration not applied)", name)
-			continue
-		}
-		if gotType != wantType {
-			t.Errorf("identity.account.%s data_type = %q, want %q", name, gotType, wantType)
-		}
-	}
-
-	// All 5 token columns MUST be nullable (proves the migration is
-	// additive — pre-PR1a rows keep NULL).
-	for _, c := range cols {
-		if _, ok := wantCols[c.name]; ok && c.nullable != "YES" {
-			t.Errorf("identity.account.%s nullable = %q, want YES (pre-PR1a rows must keep NULL)", c.name, c.nullable)
-		}
-	}
-
-	// Insert a pre-PR1a row (all 5 token columns NULL) and confirm the
-	// row round-trips correctly.
-	var userID int64
-	if err := db.QueryRowContext(ctx,
-		`INSERT INTO identity.user (email, name) VALUES ('pre-pr1a@example.com', 'Pre PR1a') RETURNING id`).Scan(&userID); err != nil {
-		t.Fatalf("seed identity.user: %v", err)
-	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO identity.account (user_id, provider, provider_account_id)
-         VALUES ($1, 'github', 'pre-pr1a-account-1')`, userID); err != nil {
-		t.Fatalf("seed identity.account without tokens: %v", err)
-	}
-	var (
-		at, rt, tt, sc sql.NullString
-		ex             sql.NullTime
-	)
-	row := db.QueryRowContext(ctx,
-		`SELECT access_token, refresh_token, expires_at, token_type, scope
-           FROM identity.account WHERE user_id = $1`, userID)
-	if err := row.Scan(&at, &rt, &ex, &tt, &sc); err != nil {
-		t.Fatalf("read pre-PR1a row: %v", err)
-	}
-	if at.Valid || rt.Valid || ex.Valid || tt.Valid || sc.Valid {
-		t.Errorf("pre-PR1a row should have all 5 token columns NULL; got at=%v rt=%v ex=%v tt=%v sc=%v",
-			at, rt, ex, tt, sc)
-	}
-
-	// Insert a post-PR1a row with a non-NULL access_token and confirm
-	// the column round-trips.
-	exp := time.Unix(1735689600, 0).UTC() // 2025-01-01 00:00:00 UTC
-	var userID2 int64
-	if err := db.QueryRowContext(ctx,
-		`INSERT INTO identity.user (email, name) VALUES ('post-pr1a@example.com', 'Post PR1a') RETURNING id`).Scan(&userID2); err != nil {
-		t.Fatalf("seed identity.user post: %v", err)
-	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO identity.account
-            (user_id, provider, provider_account_id, access_token, refresh_token, expires_at, token_type, scope)
-         VALUES ($1, 'github', 'post-pr1a-1', 'gho_test', NULL, $2, 'bearer', 'repo')`,
-		userID2, exp); err != nil {
-		t.Fatalf("seed identity.account with tokens: %v", err)
-	}
-	var (
-		at2, tt2, sc2 sql.NullString
-		rt2           sql.NullString
-		ex2           sql.NullTime
-	)
-	row = db.QueryRowContext(ctx,
-		`SELECT access_token, refresh_token, expires_at, token_type, scope
-           FROM identity.account WHERE user_id = $1`, userID2)
-	if err := row.Scan(&at2, &rt2, &ex2, &tt2, &sc2); err != nil {
-		t.Fatalf("read post-PR1a row: %v", err)
-	}
-	if !at2.Valid || at2.String != "gho_test" {
-		t.Errorf("access_token = %v, want gho_test", at2)
-	}
-	if rt2.Valid {
-		t.Errorf("refresh_token = %v, want NULL", rt2)
-	}
-	if !ex2.Valid || !ex2.Time.Equal(exp) {
-		t.Errorf("expires_at = %v, want %v", ex2, exp)
-	}
-	if !tt2.Valid || tt2.String != "bearer" {
-		t.Errorf("token_type = %v, want bearer", tt2)
-	}
-	if !sc2.Valid || sc2.String != "repo" {
-		t.Errorf("scope = %v, want repo", sc2)
-	}
-}
-
 func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	db := integrationRunnerDB(t)
 	resetSchemaMigrations(t, db)
@@ -1421,8 +1293,8 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 11 {
-		t.Fatalf("expected 11 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts), got %d", len(applied))
+	if len(applied) != 13 {
+		t.Fatalf("expected 13 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts + skills + google_auth), got %d", len(applied))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1762,7 +1634,10 @@ func TestRunner_Up_WorkspacesPR1bI_PartialUniqueIndex(t *testing.T) {
 		t.Fatalf("seed organization: %v", err)
 	}
 	if err := db.QueryRowContext(setupCtx,
-		`INSERT INTO identity.user (email) VALUES ('ws-idx@example.com') RETURNING id`).Scan(&userID); err != nil {
+		// PR-1 Foundations: workspace.owner_user_id FK was rewritten to
+		// auth.users(id) (T1.4 / R-FK-1), so we seed auth.users here
+		// instead of the legacy identity.user.
+		`INSERT INTO auth.users (email, status) VALUES ('ws-idx@example.com', 'active') RETURNING id`).Scan(&userID); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 
