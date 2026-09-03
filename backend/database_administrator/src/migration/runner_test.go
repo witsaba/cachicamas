@@ -2063,8 +2063,133 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
 	}
 }
 
-// Compile-time check that GooseRunner satisfies domain.Runner once
-// runner.go lands. If the runner omits Up/Status or returns the
-// wrong types, this file will fail to compile — that failure is the
-// RED signal for the domain port.
-var _ domain.Runner = (*GooseRunner)(nil)
+// TestRunner_Up_AuthTablesExist (T1.1 RED — implementation T1.2)
+    // covers spec R-DB-001/003/004 (Engram #4222) and design #4223 AD-7:
+    // after Up() applies the google_auth migration, the `auth` schema MUST
+    // exist with the three locked tables (`auth.users`, `auth.pymes`,
+    // `auth.login_audits`) owned by `queen`. The test asserts presence
+    // via pgx introspection (`to_regclass`), which is the same
+    // information_schema pattern the existing tests use, plus an
+    // ownership check against pg_class.
+    //
+    // RED behaviour: this test MUST FAIL until the migration
+    // `20260903120000_google_auth.sql` lands and is applied by Up().
+    // Before T1.2 the test reports `auth.users / auth.pymes /
+    // auth.login_audits missing after Up()`.
+    //
+    // The test also asserts the legacy `identity.user` and
+    // `identity.account` tables are gone after Up() — covers T1.3's
+    // drop step. That assertion is the migration's atomic guarantee
+    // (AD-3): both FKs (workspace.owner_user_id AND
+    // organization.owner_user_id) MUST have been rewritten before the
+    // DROP TABLE can succeed, so a failure here catches a migration
+    // that drops `identity.user` without rewriting both FKs.
+    func TestRunner_Up_AuthTablesExist(t *testing.T) {
+    	db := integrationRunnerDB(t)
+    	resetSchemaMigrations(t, db)
+    	// Wipe EVERYTHING so Up() can apply a clean migration set; we are
+    	// only asserting on auth.* presence, so any public.* leftover from
+    	// a prior test in the suite is a hazard (it would cause the
+    	// migration to fail with "relation already exists").
+    	wipeNewTables(t, db)
+    	wipeAuthAndIdentityTables(t, db)
+    	t.Cleanup(func() {
+    		wipeNewTables(t, db)
+    		wipeAuthAndIdentityTables(t, db)
+    	})
+
+    	r := newTestRunner(db)
+    	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    	defer cancel()
+    	if _, err := r.Up(ctx); err != nil {
+    		t.Fatalf("Up: %v", err)
+    	}
+
+    	// 1. The `auth` schema MUST exist.
+    	var schemaExists bool
+    	row := db.QueryRowContext(ctx,
+    		`SELECT EXISTS (
+                SELECT 1 FROM information_schema.schemata
+                 WHERE schema_name = 'auth'
+             )`)
+    	if err := row.Scan(&schemaExists); err != nil {
+    		t.Fatalf("query auth schema existence: %v", err)
+    	}
+    	if !schemaExists {
+    		t.Errorf("schema `auth` missing after Up() (R-DB-001 / AD-5)")
+    	}
+
+    	// 2. The three locked tables MUST exist via to_regclass.
+    	wantTables := []string{"auth.users", "auth.pymes", "auth.login_audits"}
+    	for _, name := range wantTables {
+    		var regclass string
+    		row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
+    		if err := row.Scan(&regclass); err != nil {
+    			t.Fatalf("to_regclass(%s): %v", name, err)
+    		}
+    		if regclass == "" {
+    			t.Errorf("%s missing after Up() (to_regclass returned NULL)", name)
+    		}
+    	}
+
+    	// 3. Each table MUST be owned by `queen` (R-DB-001 / spec owner rule).
+    	for _, name := range wantTables {
+    		var owner string
+    		row := db.QueryRowContext(ctx,
+    			`SELECT tableowner FROM pg_tables WHERE schemaname = 'auth' AND tablename = $1`,
+    			strings.TrimPrefix(name, "auth."))
+    		if err := row.Scan(&owner); err != nil {
+    			t.Fatalf("query owner of %s: %v", name, err)
+    		}
+    		if owner != "queen" {
+    			t.Errorf("%s owner = %q, want %q (R-DB-001 ownership rule)", name, owner, "queen")
+    		}
+    	}
+
+    	// 4. The legacy identity tables MUST be gone after Up() (T1.3 / R-DROP-1).
+    	for _, name := range []string{"identity.user", "identity.account"} {
+    		var regclass string
+    		row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
+    		if err := row.Scan(&regclass); err != nil {
+    			t.Fatalf("to_regclass(%s): %v", name, err)
+    		}
+    		if regclass != "" {
+    			t.Errorf("%s still exists after Up(); migration must drop it (R-DROP-1 / T1.3)", name)
+    		}
+    	}
+    }
+
+    // wipeAuthAndIdentityTables is the test-fixture cleanup recipe for the
+    // new auth tables AND the legacy identity tables (so T1.6 can re-use
+    // it). It runs DROP TABLE IF EXISTS in dependency-reversed order so
+    // the FK chain from identity.account -> identity.user can resolve
+    // before either is dropped. Safe to call when none of the tables
+    // exist yet (every DROP is IF EXISTS). Used by T1.1, T1.6, and any
+    // later auth-table test.
+    func wipeAuthAndIdentityTables(t *testing.T, db *sql.DB) {
+    	t.Helper()
+    	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    	defer cancel()
+    	stmts := []string{
+    		// auth.* children first (login_audits may FK to auth.users).
+    		"DROP TABLE IF EXISTS auth.login_audits CASCADE",
+    		"DROP TABLE IF EXISTS auth.pymes CASCADE",
+    		"DROP TABLE IF EXISTS auth.users CASCADE",
+    		// legacy identity.* in the order that satisfies the FK.
+    		"DROP TABLE IF EXISTS identity.account CASCADE",
+    		"DROP TABLE IF EXISTS identity.user CASCADE",
+    	}
+    	for _, s := range stmts {
+    		if _, err := db.ExecContext(ctx, s); err != nil {
+    			t.Fatalf("wipe (%s): %v", s, err)
+    		}
+    	}
+    	// The `auth` schema itself is dropped automatically when its last
+    	// table goes away; we do not need to issue DROP SCHEMA here.
+    }
+
+    // Compile-time check that GooseRunner satisfies domain.Runner once
+    // runner.go lands. If the runner omits Up/Status or returns the
+    // wrong types, this file will fail to compile — that failure is the
+    // RED signal for the domain port.
+    var _ domain.Runner = (*GooseRunner)(nil)
