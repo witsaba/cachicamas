@@ -1046,6 +1046,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
 		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
+		20260903130000, // cachicamas-google-auth-bootstrap PR-2 (created_at immutability trigger on auth.users)
 	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
@@ -1296,8 +1297,8 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 13 {
-		t.Fatalf("expected 13 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts + skills + google_auth), got %d", len(applied))
+	if len(applied) != 14 {
+		t.Fatalf("expected 14 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts + skills + google_auth + user_immutable_created_at), got %d", len(applied))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
