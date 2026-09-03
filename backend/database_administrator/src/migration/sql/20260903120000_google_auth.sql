@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 -- cachicamas-google-auth-bootstrap migration 1 of 1:
---   auth schema + auth.users + auth.pymes + auth.login_audits
+--   auth schema + auth.users + auth.organizations + auth.login_audits
 --   + rewrite workspace.owner_user_id FK (identity.user → auth.users)
 --   + rewrite organization.owner_user_id FK (identity.user → auth.users)
 --   + drop identity.user + identity.account
@@ -12,7 +12,7 @@
 --                          VARCHAR(255) UNIQUE NULL, status state machine,
 --                          created_at / updated_at, soft delete.
 --   R-DB-002 Partial unique on (lower(email)) WHERE deleted_at IS NULL.
---   R-DB-003 auth.pymes   — owner_id FK to auth.users(id) ON DELETE RESTRICT,
+--   R-DB-003 auth.organizations   — owner_id FK to auth.users(id) ON DELETE RESTRICT,
 --                          slug VARCHAR(64) UNIQUE among live rows.
 --   R-DB-004 auth.login_audits — user_id FK to auth.users(id) ON DELETE SET
 --                          NULL (nullable so failed logins still audit),
@@ -77,8 +77,8 @@ COMMENT ON COLUMN auth.users.status IS
 COMMENT ON COLUMN auth.users.created_at IS
     'Registration date = first successful login (R-DB-001 / proposal D-4). Immutable on update (asserted by repo tests; no DB trigger is needed because the column is set ONLY in INSERT paths).';
 
--- ── auth.pymes (R-DB-003) ────────────────────────────────────────────────
-CREATE TABLE auth.pymes (
+-- ── auth.organizations (R-DB-003) ────────────────────────────────────────────────
+CREATE TABLE auth.organizations (
     id          BIGSERIAL    PRIMARY KEY,
     owner_id    BIGINT       NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
     name        VARCHAR(255) NOT NULL,
@@ -87,18 +87,18 @@ CREATE TABLE auth.pymes (
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at  TIMESTAMPTZ
 );
-ALTER TABLE auth.pymes OWNER TO queen;
+ALTER TABLE auth.organizations OWNER TO queen;
 
-CREATE UNIQUE INDEX auth_pymes_slug_live_key
-    ON auth.pymes (slug)
+CREATE UNIQUE INDEX auth_organizations_slug_live_key
+    ON auth.organizations (slug)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX auth_pymes_owner_id_idx ON auth.pymes (owner_id);
+CREATE INDEX auth_organizations_owner_id_idx ON auth.organizations (owner_id);
 
-COMMENT ON TABLE auth.pymes IS
-    'One row per pyme owned by exactly one user (MVP tenancy: 1 Google user = 1 pyme, proposal D-2). owner_id FK RESTRICT prevents pyme deletion when user exists.';
-COMMENT ON COLUMN auth.pymes.owner_id IS
-    'FK to auth.users(id) ON DELETE RESTRICT (R-DB-003). 1:1 with auth.users in the MVP; multi-pyme is a follow-up.';
+COMMENT ON TABLE auth.organizations IS
+    'One row per organization owned by exactly one user (MVP tenancy: 1 Google user = 1 organization, proposal D-2). owner_id FK RESTRICT prevents organization deletion when user exists.';
+COMMENT ON COLUMN auth.organizations.owner_id IS
+    'FK to auth.users(id) ON DELETE RESTRICT (R-DB-003). 1:1 with auth.users in the MVP; multi-organization is a follow-up.';
 
 -- ── auth.login_audits (R-DB-004) ──────────────────────────────────────────
 CREATE TABLE auth.login_audits (
@@ -209,7 +209,7 @@ ALTER TABLE organization
 
 -- 3. Drop auth.* schema in reverse dependency order.
 DROP TABLE IF EXISTS auth.login_audits;
-DROP TABLE IF EXISTS auth.pymes;
+DROP TABLE IF EXISTS auth.organizations;
 DROP TABLE IF EXISTS auth.users;
 DROP SCHEMA IF EXISTS auth;
 -- +goose StatementEnd

@@ -441,7 +441,7 @@ func truncateNewTables(t *testing.T, db *sql.DB) func() {
 		// FK chain login_audits -> users resolves before users is
 		// truncated.
 		_, _ = db.ExecContext(ctx,
-			"TRUNCATE TABLE auth.login_audits, auth.pymes, auth.users, sync_job, workspace, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
+			"TRUNCATE TABLE auth.login_audits, auth.organizations, auth.users, sync_job, workspace, spec_phase, spec, task, milestone, requirement_spike, requirement, project, organization CASCADE")
 	}
 }
 
@@ -458,7 +458,7 @@ func truncateNewTables(t *testing.T, db *sql.DB) func() {
     		// — children first so FK chain resolves; the schema is
     		// dropped automatically when its last table goes away.
     		"DROP TABLE IF EXISTS auth.login_audits CASCADE",
-    		"DROP TABLE IF EXISTS auth.pymes CASCADE",
+    		"DROP TABLE IF EXISTS auth.organizations CASCADE",
     		"DROP TABLE IF EXISTS auth.users CASCADE",
     		"DROP TABLE IF EXISTS spec_phase CASCADE",
     		"DROP TABLE IF EXISTS spec CASCADE",
@@ -1941,7 +1941,7 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
 // TestRunner_Up_AuthTablesExist (T1.1 RED — implementation T1.2)
     // covers spec R-DB-001/003/004 (Engram #4222) and design #4223 AD-7:
     // after Up() applies the google_auth migration, the `auth` schema MUST
-    // exist with the three locked tables (`auth.users`, `auth.pymes`,
+    // exist with the three locked tables (`auth.users`, `auth.organizations`,
     // `auth.login_audits`) owned by `queen`. The test asserts presence
     // via pgx introspection (`to_regclass`), which is the same
     // information_schema pattern the existing tests use, plus an
@@ -1949,7 +1949,7 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
     //
     // RED behaviour: this test MUST FAIL until the migration
     // `20260903120000_google_auth.sql` lands and is applied by Up().
-    // Before T1.2 the test reports `auth.users / auth.pymes /
+    // Before T1.2 the test reports `auth.users / auth.organizations /
     // auth.login_audits missing after Up()`.
     //
     // The test also asserts the legacy `identity.user` and
@@ -1995,7 +1995,7 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
     	}
 
 // 2. The three locked tables MUST exist via to_regclass.
-    		wantTables := []string{"auth.users", "auth.pymes", "auth.login_audits"}
+    		wantTables := []string{"auth.users", "auth.organizations", "auth.login_audits"}
     		for _, name := range wantTables {
     			var regclass sql.NullString
     			row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
@@ -2048,7 +2048,7 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
     	stmts := []string{
     		// auth.* children first (login_audits may FK to auth.users).
     		"DROP TABLE IF EXISTS auth.login_audits CASCADE",
-    		"DROP TABLE IF EXISTS auth.pymes CASCADE",
+    		"DROP TABLE IF EXISTS auth.organizations CASCADE",
     		"DROP TABLE IF EXISTS auth.users CASCADE",
     		// legacy identity.* in the order that satisfies the FK.
     		"DROP TABLE IF EXISTS identity.account CASCADE",
