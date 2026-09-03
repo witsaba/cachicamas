@@ -239,7 +239,24 @@ services:
       # in the workspace_syncer SYNC_CALLBACK_SECRET env. Same
       # placeholder pattern as INTERNAL_SERVICE_TOKEN.
       SYNC_CALLBACK_SECRET: ${SYNC_CALLBACK_SECRET:-changeme-sync-callback-secret-must-be-set-when-syncer-wired}
+      # cachicamas-google-auth-bootstrap PR-4: backend verifies the X-Internal-Secret
+      # header on every /internal/auth/* and /internal/me/* request (constant-time
+      # compare in middleware). AUTH_INTERNAL_SECRET MUST match the frontend value.
+      # GEOIP_DB_PATH is read by the GeoIP enrichment step; when empty the service
+      # silently skips geolocation and logs "geoip disabled (no DB at GEOIP_DB_PATH)"
+      # once at startup.
+      AUTH_INTERNAL_SECRET: ${AUTH_INTERNAL_SECRET:-}
+      GEOIP_DB_PATH: ${GEOIP_DB_PATH:-}
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    # cachicamas-google-auth-bootstrap PR-4: optional GeoIP DB mount.
+    # To enable: drop a GeoLite2-City.mmdb into ./geoip-data/ on the host,
+    # set GEOIP_DB_PATH=/var/lib/geoip/GeoLite2-City.mmdb in .env, and add
+    # the following line below (uncommented). When the host directory is
+    # empty (or GEOIP_DB_PATH is unset) the service still boots and logs
+    # "geoip disabled" once at startup; bootstrap calls proceed with
+    # country_code=NULL and city=NULL.
+    # volumes:
+    #   - ./geoip-data:/var/lib/geoip:ro
     ports:
       - "${SERVICE_PORT:-8080}:8080"
     networks:
