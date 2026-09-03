@@ -2119,44 +2119,44 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
     		t.Errorf("schema `auth` missing after Up() (R-DB-001 / AD-5)")
     	}
 
-    	// 2. The three locked tables MUST exist via to_regclass.
-    	wantTables := []string{"auth.users", "auth.pymes", "auth.login_audits"}
-    	for _, name := range wantTables {
-    		var regclass string
-    		row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
-    		if err := row.Scan(&regclass); err != nil {
+// 2. The three locked tables MUST exist via to_regclass.
+    		wantTables := []string{"auth.users", "auth.pymes", "auth.login_audits"}
+    		for _, name := range wantTables {
+    			var regclass sql.NullString
+    			row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
+    			if err := row.Scan(&regclass); err != nil {
     			t.Fatalf("to_regclass(%s): %v", name, err)
-    		}
-    		if regclass == "" {
+    			}
+    			if !regclass.Valid || regclass.String == "" {
     			t.Errorf("%s missing after Up() (to_regclass returned NULL)", name)
+    			}
     		}
-    	}
 
-    	// 3. Each table MUST be owned by `queen` (R-DB-001 / spec owner rule).
-    	for _, name := range wantTables {
-    		var owner string
-    		row := db.QueryRowContext(ctx,
+    		// 3. Each table MUST be owned by `queen` (R-DB-001 / spec owner rule).
+    		for _, name := range wantTables {
+    			var owner string
+    			row := db.QueryRowContext(ctx,
     			`SELECT tableowner FROM pg_tables WHERE schemaname = 'auth' AND tablename = $1`,
     			strings.TrimPrefix(name, "auth."))
-    		if err := row.Scan(&owner); err != nil {
+    			if err := row.Scan(&owner); err != nil {
     			t.Fatalf("query owner of %s: %v", name, err)
-    		}
-    		if owner != "queen" {
+    			}
+    			if owner != "queen" {
     			t.Errorf("%s owner = %q, want %q (R-DB-001 ownership rule)", name, owner, "queen")
+    			}
     		}
-    	}
 
-    	// 4. The legacy identity tables MUST be gone after Up() (T1.3 / R-DROP-1).
-    	for _, name := range []string{"identity.user", "identity.account"} {
-    		var regclass string
-    		row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
-    		if err := row.Scan(&regclass); err != nil {
+    		// 4. The legacy identity tables MUST be gone after Up() (T1.3 / R-DROP-1).
+    		for _, name := range []string{"identity.user", "identity.account"} {
+    			var regclass sql.NullString
+    			row := db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, name)
+    			if err := row.Scan(&regclass); err != nil {
     			t.Fatalf("to_regclass(%s): %v", name, err)
-    		}
-    		if regclass != "" {
+    			}
+    			if regclass.Valid && regclass.String != "" {
     			t.Errorf("%s still exists after Up(); migration must drop it (R-DROP-1 / T1.3)", name)
+    			}
     		}
-    	}
     }
 
     // wipeAuthAndIdentityTables is the test-fixture cleanup recipe for the
