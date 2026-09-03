@@ -85,6 +85,14 @@ import (
 	// AD-3). ensureAuthSchemaAndUsers MUST be called first so the
 	// auth schema + users table exist.
 	//
+	// The test DB may have a pre-existing workspace table from an
+	// earlier migration cycle whose FK still points at identity.user
+	// (the pre-PR-1 DDL). CREATE TABLE IF NOT EXISTS is a no-op for
+	// an existing table, so the helper explicitly drops and recreates
+	// the workspace_owner_user_id_fkey constraint to point it at
+	// auth.users(id). The DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT
+	// pair is idempotent across runs.
+	//
 	// We do NOT re-create the organization table — that is owned by
 	// the earlier migrations and is created by ensureMigrations in
 	// organization_repo_test.go (shared helper).
@@ -117,6 +125,20 @@ import (
 			)
 		`); err != nil {
 			t.Fatalf("ensure workspace table: %v", err)
+		}
+		// Rewrite the workspace_owner_user_id_fkey to point at
+		// auth.users(id). The pre-PR-1 DDL pointed at identity.user(id)
+		// — that table is dropped by the PR-1 migration, so any
+		// workspace rows left over from before PR-1 (or from a
+		// half-applied migration cycle) still have an FK target that
+		// no longer exists. Drop + recreate is idempotent.
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE workspace DROP CONSTRAINT IF EXISTS workspace_owner_user_id_fkey`); err != nil {
+			t.Fatalf("drop workspace_owner_user_id_fkey: %v", err)
+		}
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE workspace ADD CONSTRAINT workspace_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES auth.users(id) ON DELETE SET NULL`); err != nil {
+			t.Fatalf("add workspace_owner_user_id_fkey (auth.users): %v", err)
 		}
 	if _, err := db.ExecContext(ctx, `
 		CREATE UNIQUE INDEX IF NOT EXISTS workspace_org_name_live_key
