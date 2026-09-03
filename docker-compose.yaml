@@ -239,7 +239,24 @@ services:
       # in the workspace_syncer SYNC_CALLBACK_SECRET env. Same
       # placeholder pattern as INTERNAL_SERVICE_TOKEN.
       SYNC_CALLBACK_SECRET: ${SYNC_CALLBACK_SECRET:-changeme-sync-callback-secret-must-be-set-when-syncer-wired}
+      # cachicamas-google-auth-bootstrap PR-4: backend verifies the X-Internal-Secret
+      # header on every /internal/auth/* and /internal/me/* request (constant-time
+      # compare in middleware). AUTH_INTERNAL_SECRET MUST match the frontend value.
+      # GEOIP_DB_PATH is read by the GeoIP enrichment step; when empty the service
+      # silently skips geolocation and logs "geoip disabled (no DB at GEOIP_DB_PATH)"
+      # once at startup.
+      AUTH_INTERNAL_SECRET: ${AUTH_INTERNAL_SECRET:-}
+      GEOIP_DB_PATH: ${GEOIP_DB_PATH:-}
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=${PROJECT_NAME:-cachicamas},deployment.environment=${SERVICE_ENV:-development}
+    # cachicamas-google-auth-bootstrap PR-4: optional GeoIP DB mount.
+    # To enable: drop a GeoLite2-City.mmdb into ./geoip-data/ on the host,
+    # set GEOIP_DB_PATH=/var/lib/geoip/GeoLite2-City.mmdb in .env, and add
+    # the following line below (uncommented). When the host directory is
+    # empty (or GEOIP_DB_PATH is unset) the service still boots and logs
+    # "geoip disabled" once at startup; bootstrap calls proceed with
+    # country_code=NULL and city=NULL.
+    # volumes:
+    #   - ./geoip-data:/var/lib/geoip:ro
     ports:
       - "${SERVICE_PORT:-8080}:8080"
     networks:
@@ -362,6 +379,14 @@ services:
         PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
         # Origin canónico (canonical/OG tags, CSRF).
         ORIGIN: ${ORIGIN:-http://localhost:3015}
+        # cachicamas-google-auth-bootstrap PR-4: PUBLIC_* prefixed envs are inlined
+        # into the Qwik client bundle at build time. PUBLIC_AUTH_REDIRECT_URI is
+        # the redirect_uri sent to Google; PUBLIC_GO_BACKEND_URL is the internal
+        # http://<backend>:<port> the SSR routes call for /internal/auth/bootstrap
+        # and /internal/me/:user_id (server-side fetch, never browser-reachable).
+        PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5173}
+        PUBLIC_AUTH_REDIRECT_URI: ${PUBLIC_AUTH_REDIRECT_URI:-${PUBLIC_BASE_URL:-http://localhost:5173}/auth/google/callback}
+        PUBLIC_GO_BACKEND_URL: ${PUBLIC_GO_BACKEND_URL:-http://database_administrator:8080}
     image: cachicamas/frontend:local
     container_name: cachicamas-frontend
     restart: unless-stopped
@@ -381,6 +406,19 @@ services:
       # Runtime env, same injection pattern as API_TARGET above.
       AGENT_CHAT_TARGET: http://agent_chat:8080
       ORIGIN: ${ORIGIN:-http://localhost:3015}
+      # cachicamas-google-auth-bootstrap PR-4: Google OAuth + native HMAC session cookie
+      # surface. The frontend drives /auth/google/login, /auth/google/callback, /auth/logout,
+      # and the (app) layout guard server-side. AUTH_GOOGLE_SECRET never reaches the browser
+      # (the code-exchange POST is server-only). AUTH_INTERNAL_SECRET is sent only as the
+      # X-Internal-Secret header on POST /internal/auth/bootstrap and GET /internal/me/:user_id.
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      AUTH_COOKIE_SECRET: ${AUTH_COOKIE_SECRET:-}
+      AUTH_INTERNAL_SECRET: ${AUTH_INTERNAL_SECRET:-}
+      GEOIP_DB_PATH: ${GEOIP_DB_PATH:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5173}
+      PUBLIC_AUTH_REDIRECT_URI: ${PUBLIC_AUTH_REDIRECT_URI:-${PUBLIC_BASE_URL:-http://localhost:5173}/auth/google/callback}
+      PUBLIC_GO_BACKEND_URL: ${PUBLIC_GO_BACKEND_URL:-http://database_administrator:8080}
     ports:
       - "${FRONTEND_PORT:-3015}:3000"
     networks:
