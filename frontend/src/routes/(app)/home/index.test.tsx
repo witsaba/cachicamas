@@ -8,12 +8,8 @@
  * status banner, logout form, "under construction" notice).
  */
 import { describe, expect, test, vi } from "vitest";
-import {
-  HOME_DATA_KEY,
-  loadHomeData,
-  type HomeData,
-} from "./index";
-import type { SessionPayload } from "~/routes/(app)/layout";
+import { HOME_DATA_KEY, loadHomeData, type HomeData } from "./index";
+import type { SessionPayload } from "~/lib/server/session";
 
 function makeSession(overrides: Partial<SessionPayload> = {}): SessionPayload {
   return {
@@ -25,10 +21,12 @@ function makeSession(overrides: Partial<SessionPayload> = {}): SessionPayload {
   };
 }
 
-function makeMeResponse(overrides: Partial<{
-  user: Record<string, unknown>;
-  organization: Record<string, unknown>;
-}> = {}) {
+function makeMeResponse(
+  overrides: Partial<{
+    user: Record<string, unknown>;
+    organization: Record<string, unknown>;
+  }> = {},
+) {
   return {
     user: {
       id: 42,
@@ -117,8 +115,8 @@ describe("loadHomeData", () => {
       backendUrl: "http://b:8080",
       fetchImpl: fetchMock,
     });
-    const call = (fetchMock as unknown as { mock: { calls: unknown[][] } })
-      .mock.calls[0]!;
+    const call = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]!;
     expect(call[0]).toBe("http://b:8080/internal/me/99");
     const init = call[1] as RequestInit;
     const headers = init.headers as Record<string, string>;

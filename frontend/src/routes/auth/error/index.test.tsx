@@ -105,8 +105,13 @@ describe("AuthError component (render smoke)", () => {
     // Qwik City's SSR pipeline — `createDOM` only renders the component
     // body. We assert the head object directly here; the SSR HTML
     // output is verified end-to-end in T3.17.
-    expect(head.title).toBeTruthy();
-    const robotsMeta = head.meta?.find((m) => m.name === "robots");
+    // `head` may be exported as a value or as a function; handle both.
+    const headValue =
+      typeof head === "function" ? (head as unknown as () => unknown)() : head;
+    expect(headValue).toBeTruthy();
+    const robotsMeta = (
+      headValue as { meta?: { name?: string; content?: string }[] }
+    ).meta?.find((m) => m.name === "robots");
     expect(robotsMeta?.content).toContain("noindex");
     expect(robotsMeta?.content).toContain("nofollow");
   });

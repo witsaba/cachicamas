@@ -16,7 +16,7 @@ export interface LogoutInput {
   /** Production wrapper passes `ev.cookie.delete(name, opts)`. */
   clearSessionCookie: (name: string) => void;
   /** 302 helper. */
-  doRedirect: (url: string) => never;
+  doRedirect: (url: string) => unknown;
 }
 
 /**
@@ -24,10 +24,9 @@ export interface LogoutInput {
  * there is no current session, the response clears any stale cookie
  * the browser might still hold and lands on `/`.
  */
-export function handleLogout(input: LogoutInput): never {
+export function handleLogout(input: LogoutInput): unknown {
   input.clearSessionCookie(SESSION_COOKIE_NAME);
-  input.doRedirect("/");
-  throw new Error("unreachable: doRedirect must throw");
+  return input.doRedirect("/");
 }
 
 export const onPost: RequestHandler = (ev) => {

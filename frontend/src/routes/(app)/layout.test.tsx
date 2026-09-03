@@ -13,7 +13,12 @@ import {
   SHARED_MAP_SESSION_KEY,
   type GuardInput,
 } from "./layout";
-import { refreshIfNeeded, signSession, verifySession, type SessionPayload } from "~/lib/server/session";
+import {
+  refreshIfNeeded,
+  signSession,
+  verifySession,
+  type SessionPayload,
+} from "~/lib/server/session";
 
 const NOW_MS = 1_700_000_000_000;
 const TEST_SECRET = "test-cookie-secret-do-not-ship";
@@ -147,7 +152,8 @@ describe("guardLayout", () => {
     expect(outcome.session?.user_id).toBe(42);
     expect(outcome.session?.organization_id).toBe(7);
     expect(input.sharedMap?.get(SHARED_MAP_SESSION_KEY)).toEqual(
-      outcome.session);
+      outcome.session,
+    );
   });
 
   test("valid cookie with >24h life left ⇒ does NOT refresh", async () => {

@@ -43,9 +43,11 @@ export interface LoginInput {
   /**
    * The redirect the handler should throw. Production wrapper passes
    * Qwik's `redirect(302, url)`; tests pass a function that captures the
-   * url and throws a sentinel.
+   * url and throws a sentinel. The return type is `unknown` because
+   * Qwik's `redirect` returns a `RedirectMessage` (which is functionally
+   * `never` at runtime) but TypeScript widens it.
    */
-  doRedirect: (url: string) => never;
+  doRedirect: (url: string) => unknown;
   /** `AUTH_GOOGLE_ID` — set in `.env.example` / docker-compose (PR-4). */
   clientId: string;
   /** `PUBLIC_AUTH_REDIRECT_URI` — must match the Google Cloud console. */
@@ -69,7 +71,7 @@ export interface LoginInput {
  * `isProduction` (dev compose over plain HTTP must NOT set Secure or
  * the browser refuses to round-trip the cookie).
  */
-export function handleLoginGet(input: LoginInput): never {
+export function handleLoginGet(input: LoginInput): unknown {
   if (!input.clientId) {
     throw new Error("AUTH_GOOGLE_ID env is required");
   }
@@ -89,10 +91,7 @@ export function handleLoginGet(input: LoginInput): never {
     redirectUri: input.redirectUri,
     state,
   });
-  input.doRedirect(url.toString());
-  // Unreachable — `doRedirect` throws. The return type is `never` for
-  // callers that statically know this is a terminal handler.
-  throw new Error("unreachable: doRedirect must throw");
+  return input.doRedirect(url.toString());
 }
 
 /**

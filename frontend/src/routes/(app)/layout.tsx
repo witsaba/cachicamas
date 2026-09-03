@@ -34,6 +34,8 @@ import {
 export const SHARED_MAP_SESSION_KEY = "session";
 export const LOGIN_ROUTE = "/auth/google/login";
 
+export type { SessionPayload } from "~/lib/server/session";
+
 export interface GuardInput {
   /** Raw cookie value (e.g. `cachicamas_session`'s `cookie.get(...)?.value`). */
   sessionCookieValue: string | null;
@@ -43,10 +45,7 @@ export interface GuardInput {
     secret: string,
   ) => Promise<SessionPayload | null>;
   /** `signSession` (injected so tests can stub it). */
-  signSession: (
-    payload: SessionPayload,
-    secret: string,
-  ) => Promise<string>;
+  signSession: (payload: SessionPayload, secret: string) => Promise<string>;
   /** `refreshIfNeeded` (injected so tests can stub it). */
   refreshIfNeeded: typeof refreshIfNeeded;
   /** `AUTH_COOKIE_SECRET`. */
@@ -68,7 +67,7 @@ export interface GuardInput {
   /** Shared map for child loaders (Qwik provides this on RequestEvent). */
   sharedMap?: Map<string, unknown>;
   /** 302 helper. */
-  doRedirect: (url: string) => never;
+  doRedirect: (url: string) => unknown;
   /** Current time in ms (test-injectable). */
   nowMs?: () => number;
 }

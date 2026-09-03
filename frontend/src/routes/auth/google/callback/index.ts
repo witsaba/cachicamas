@@ -78,9 +78,9 @@ export interface CallbackInput {
   /** Clears the OAuth state cookie (always called on a successful path). */
   clearStateCookie: () => void;
   /** 302 helper. */
-  doRedirect: (url: string) => never;
+  doRedirect: (url: string) => unknown;
   /** `error(...)` helper for hard 500s that cannot redirect (no path recovery). */
-  doError: (status: number, message: string) => never;
+  doError: (status: number, message: string) => unknown;
   /** `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` / `AUTH_COOKIE_SECRET` / `AUTH_INTERNAL_SECRET`. */
   env: {
     clientId: string;
@@ -138,7 +138,11 @@ export async function handleCallbackGet(
     );
   }
 
-  if (!input.stateCookieValue || !queryState || input.stateCookieValue !== queryState) {
+  if (
+    !input.stateCookieValue ||
+    !queryState ||
+    input.stateCookieValue !== queryState
+  ) {
     return redirectWith(
       input,
       `/auth/error?reason=${"invalid_state" satisfies CallbackErrorReason}`,
@@ -286,7 +290,7 @@ export const onGet: RequestHandler = (ev) => {
       ev.cookie.delete(OAUTH_STATE_COOKIE, { path: "/" });
     },
     doRedirect: (url) => ev.redirect(302, url),
-    doError: (status, message) => ev.error(status, message),
+    doError: (status, message) => ev.error(status as never, message),
     env: {
       clientId: ev.env.get("AUTH_GOOGLE_ID") ?? "",
       clientSecret: ev.env.get("AUTH_GOOGLE_SECRET") ?? "",

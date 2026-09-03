@@ -87,10 +87,7 @@ export default component$(() => {
       <h1 class="text-ink text-3xl font-bold tracking-tight">
         No pudimos iniciar tu sesión
       </h1>
-      <p
-        class="text-ink-mid text-base"
-        data-testid="auth-error-message"
-      >
+      <p class="text-ink-mid text-base" data-testid="auth-error-message">
         Algo salió mal al iniciar la sesión. Inténtalo otra vez.
       </p>
       <a
@@ -105,7 +102,7 @@ export default component$(() => {
 });
 
 export const head: DocumentHead = {
-  title: "Error de inicio de sesión — Cachicamas",
+  title: "error de inicio de sesión — cachicamas",
   meta: [
     {
       name: "robots",

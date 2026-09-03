@@ -67,11 +67,13 @@ function makeInput(overrides: Partial<CallbackInput> = {}): CallbackInput {
  *   - 2nd call: userinfo response
  *   - 3rd call: backend bootstrap response
  */
-function buildFetchMock(opts: {
-  token?: { ok: boolean; body?: unknown };
-  userinfo?: { ok: boolean; body?: unknown };
-  bootstrap?: { ok: boolean; body?: unknown };
-} = {}) {
+function buildFetchMock(
+  opts: {
+    token?: { ok: boolean; body?: unknown };
+    userinfo?: { ok: boolean; body?: unknown };
+    bootstrap?: { ok: boolean; body?: unknown };
+  } = {},
+) {
   const token = {
     ok: opts.token?.ok ?? true,
     body: opts.token?.body ?? { access_token: "tok", token_type: "Bearer" },
@@ -191,9 +193,7 @@ describe("handleCallbackGet", () => {
       },
     });
     await handleCallbackGet(input);
-    expect(captured[0]).toBe(
-      "/auth/error?reason=token_exchange_failed",
-    );
+    expect(captured[0]).toBe("/auth/error?reason=token_exchange_failed");
   });
 
   test("userinfo failure (500) ⇒ /auth/error?reason=userinfo_failed", async () => {
@@ -232,7 +232,7 @@ describe("handleCallbackGet", () => {
           body: { user_id: 1, organization_id: 1, status: "blocked" },
         },
       }),
-      setSessionCookie: (name, _v, _o) => {
+      setSessionCookie: (name) => {
         cookies.push({ name });
       },
       doRedirect: (url) => {

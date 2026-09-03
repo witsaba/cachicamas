@@ -30,7 +30,8 @@ import {
   MeNotFoundError,
   type MeResponse,
 } from "~/lib/server/oauth";
-import { SHARED_MAP_SESSION_KEY, type SessionPayload } from "~/routes/(app)/layout";
+import { SHARED_MAP_SESSION_KEY } from "~/routes/(app)/layout";
+import type { SessionPayload } from "~/lib/server/session";
 
 export interface HomeData {
   session: SessionPayload | null;
@@ -64,9 +65,7 @@ export interface LoadHomeInput {
  *     session references a user the backend doesn't know about);
  *   - /me 5xx or other failure ⇒ returns `{ error: "fetch_failed" }`.
  */
-export async function loadHomeData(
-  input: LoadHomeInput,
-): Promise<HomeData> {
+export async function loadHomeData(input: LoadHomeInput): Promise<HomeData> {
   if (!input.session) {
     return { session: null, me: null, error: null };
   }
@@ -114,8 +113,7 @@ export const onGet: RequestHandler = async (ev) => {
   const data = await loadHomeData({
     session,
     internalSecret: ev.env.get("AUTH_INTERNAL_SECRET") ?? "",
-    backendUrl:
-      ev.env.get("PUBLIC_GO_BACKEND_URL") ?? "http://localhost:8080",
+    backendUrl: ev.env.get("PUBLIC_GO_BACKEND_URL") ?? "http://localhost:8080",
   });
   ev.sharedMap.set(HOME_DATA_KEY, data);
 };
@@ -187,16 +185,13 @@ export default component$(() => {
         >
           {displayName}
         </h1>
-        <p
-          class="text-ink-mid text-base"
-          data-testid="home-email"
-        >
+        <p class="text-ink-mid text-base" data-testid="home-email">
           {me.user.email}
         </p>
         {isInactive && (
           <p
             role="status"
-            class="text-ink-mid mt-3 rounded-md border border-line bg-canvas px-3 py-2 text-sm"
+            class="text-ink-mid border-line bg-canvas mt-3 rounded-md border px-3 py-2 text-sm"
             data-testid="home-inactive-banner"
           >
             Tu cuenta está inactiva. Algunas funciones están deshabilitadas.
@@ -210,9 +205,9 @@ export default component$(() => {
       >
         <h2 class="text-ink text-xl font-semibold">En construcción</h2>
         <p class="text-ink-mid mt-2 text-base">
-          Estás autenticado. El espacio de trabajo de tu organización
-          ({me.organization.name}) está en construcción. Te avisaremos
-          cuando esté listo.
+          Estás autenticado. El espacio de trabajo de tu organización (
+          {me.organization.name}) está en construcción. Te avisaremos cuando
+          esté listo.
         </p>
       </section>
 
