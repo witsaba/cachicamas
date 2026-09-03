@@ -273,3 +273,99 @@ export class BootstrapError extends Error {
     this.name = "BootstrapError";
   }
 }
+
+/**
+ * The /internal/me response shape (PR-2 `interfaces/http/auth_handler.go::Me`).
+ * Note the field name `organization` (not `pyme`) — the table was renamed
+ * in PR #226.
+ */
+export interface MeResponse {
+  user: {
+    id: number;
+    email: string;
+    name: string;
+    picture_url: string;
+    status: string;
+  };
+  organization: {
+    id: number;
+    slug: string;
+    name: string;
+  };
+}
+
+/**
+ * GET /internal/me/:user_id — fetch the user's profile + organization
+ * details from the backend. Server-side only; requires `X-Internal-Secret`.
+ *
+ * Throws on non-2xx. On 404 (unknown user_id), throws `MeNotFoundError`.
+ */
+export async function callBackendMe(opts: {
+  backendUrl: string;
+  internalSecret: string;
+  userId: number;
+  fetchImpl?: typeof fetch;
+}): Promise<MeResponse> {
+  if (!opts.backendUrl) throw new Error("callBackendMe: backendUrl required");
+  if (!opts.internalSecret)
+    throw new Error("callBackendMe: internalSecret required");
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const url = new URL(`/internal/me/${opts.userId}`, opts.backendUrl).toString();
+  const res = await fetchImpl(url, {
+    method: "GET",
+    headers: {
+      "x-internal-secret": opts.internalSecret,
+    },
+  });
+  if (res.status === 404) {
+    throw new MeNotFoundError(`user ${opts.userId} not found`, 404);
+  }
+  if (!res.ok) {
+    throw new MeError(`backend /me returned ${res.status}`, res.status);
+  }
+  const data = (await res.json()) as Record<string, unknown>;
+  const user = data.user as Record<string, unknown> | undefined;
+  const organization = data.organization as Record<string, unknown> | undefined;
+  if (
+    !user ||
+    typeof user.id !== "number" ||
+    typeof user.email !== "string" ||
+    typeof user.status !== "string" ||
+    !organization ||
+    typeof organization.id !== "number" ||
+    typeof organization.name !== "string" ||
+    typeof organization.slug !== "string"
+  ) {
+    throw new MeError("backend /me response missing required fields", 200);
+  }
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      name: typeof user.name === "string" ? user.name : "",
+      picture_url: typeof user.picture_url === "string" ? user.picture_url : "",
+      status: user.status,
+    },
+    organization: {
+      id: organization.id,
+      slug: organization.slug,
+      name: organization.name,
+    },
+  };
+}
+
+export class MeError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = "MeError";
+  }
+}
+
+export class MeNotFoundError extends MeError {
+  constructor(message: string, status: number) {
+    super(message, status);
+    this.name = "MeNotFoundError";
+  }
+}
