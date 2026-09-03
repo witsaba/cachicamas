@@ -32,36 +32,92 @@ import (
 // Workspace-specific test helpers (mirror organization_repo_test.go).
 // ---------------------------------------------------------------------------
 
-// ensureWorkspaceMigrations mirrors the locked DDL from
-// migration/sql/20260706120002_workspaces.sql so the workspace +
-// workspace_repository tables exist for the integration tests. We
-// use CREATE TABLE IF NOT EXISTS so the helper is idempotent.
-//
-// We do NOT re-create the organization / identity / identity.account
-// tables — those are owned by the earlier migrations and the
-// compose-postgres instance is already migrated by the time these
-// tests run (per the existing INTEGRATION=1 contract).
-func ensureWorkspaceMigrations(t *testing.T, db *sql.DB) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS workspace (
-		    id                        BIGSERIAL    PRIMARY KEY,
-		    organization_id           BIGINT       NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
-		    owner_user_id             BIGINT       REFERENCES identity.user(id) ON DELETE SET NULL,
-		    name                      TEXT         NOT NULL,
-		    repo_github_id    BIGINT       NOT NULL,
-		    repo_full_name    TEXT         NOT NULL,
-		    repo_owner        TEXT         NOT NULL,
-		    repo_name         TEXT         NOT NULL,
-		    created_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		    updated_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		    deleted_at                TIMESTAMPTZ
-		)
-	`); err != nil {
-		t.Fatalf("ensure workspace table: %v", err)
+// ensureAuthSchemaAndUsers creates the auth schema + a minimal
+	// auth.users table for the workspace tests. Mirrors the DDL in
+	// migration/sql/20260903120000_google_auth.sql (R-DB-001) — only
+	// the columns needed by the workspace FK constraint are added
+	// (id, email, google_sub, status, timestamps). Full column set
+	// (name, picture_url, etc.) is owned by PR-2 and not needed for
+	// the FK target. Idempotent (CREATE TABLE IF NOT EXISTS).
+	//
+	// It also seeds an auth.users row with id=1 (PR-1's seedOwnerID)
+	// so the workspace.owner_user_id FK target is stable across
+	// tests. The seed is idempotent via ON CONFLICT (id) DO NOTHING.
+	//
+	// PR-1 Foundations (cachicamas-google-auth-bootstrap) replaces
+	// identity.user with auth.users as the FK target for
+	// workspace.owner_user_id (design AD-3). Without this helper,
+	// the workspace CREATE TABLE would fail with
+	// 'relation identity.user does not exist'.
+	func ensureAuthSchemaAndUsers(t *testing.T, db *sql.DB) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stmts := []string{
+			`CREATE SCHEMA IF NOT EXISTS auth`,
+			`CREATE TABLE IF NOT EXISTS auth.users (
+			    id          BIGSERIAL    PRIMARY KEY,
+			    email       VARCHAR(255) NOT NULL,
+			    google_sub  VARCHAR(255) UNIQUE,
+			    status      VARCHAR(32)  NOT NULL DEFAULT 'registered',
+			    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+			    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+			    deleted_at  TIMESTAMPTZ
+			)`,
+			`INSERT INTO auth.users (id, email, google_sub, status)
+			 VALUES (1, 'workspace-seed-owner@example.com', 'workspace-seed-owner-1', 'active')
+			 ON CONFLICT (id) DO NOTHING`,
+		}
+		for _, s := range stmts {
+			if _, err := db.ExecContext(ctx, s); err != nil {
+				t.Fatalf("ensure auth.users (%s): %v", s, err)
+			}
+		}
 	}
+
+	// ensureWorkspaceMigrations mirrors the locked DDL from
+	// migration/sql/20260706120002_workspaces.sql so the workspace
+	// table exists for the integration tests. We use CREATE TABLE IF
+	// NOT EXISTS so the helper is idempotent.
+	//
+	// PR-1 Foundations (cachicamas-google-auth-bootstrap) rewrote
+	// workspace.owner_user_id FK to reference auth.users(id) (design
+	// AD-3). ensureAuthSchemaAndUsers MUST be called first so the
+	// auth schema + users table exist.
+	//
+	// We do NOT re-create the organization table — that is owned by
+	// the earlier migrations and is created by ensureMigrations in
+	// organization_repo_test.go (shared helper).
+	func ensureWorkspaceMigrations(t *testing.T, db *sql.DB) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ensureAuthSchemaAndUsers(t, db)
+		if _, err := db.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS workspace (
+			    id                        BIGSERIAL    PRIMARY KEY,
+			    organization_id           BIGINT       NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+			    owner_user_id             BIGINT       REFERENCES auth.users(id) ON DELETE SET NULL,
+			    name                      TEXT         NOT NULL,
+			    repo_github_id    BIGINT       NOT NULL,
+			    repo_full_name    TEXT         NOT NULL,
+			    repo_owner        TEXT         NOT NULL,
+			    repo_name         TEXT         NOT NULL,
+			    created_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
+			    updated_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
+			    deleted_at                TIMESTAMPTZ,
+			    -- 2026-07-08-workspace-sync-clone PR-1 columns: workspace_repo.go
+			    -- reads + writes last_synced_* + last_sync_job_id via scanWorkspace
+			    -- and MarkSynced. Without these columns the production code
+			    -- panics on Scan with 'column does not exist'.
+			    last_synced_at            TIMESTAMPTZ,
+			    last_synced_commit_sha    TEXT,
+			    default_branch            TEXT,
+			    last_sync_job_id          BIGINT
+			)
+		`); err != nil {
+			t.Fatalf("ensure workspace table: %v", err)
+		}
 	if _, err := db.ExecContext(ctx, `
 		CREATE UNIQUE INDEX IF NOT EXISTS workspace_org_name_live_key
 		    ON workspace (organization_id, name)
