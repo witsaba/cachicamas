@@ -504,13 +504,14 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// 13 migrations: hello_world, orgs_and_projects,
+	// 14 migrations: hello_world, orgs_and_projects,
 	// requirements_and_milestones, tasks_and_specs, github_login,
 	// workspaces_and_account_tokens, workspaces, drop_workspace_repository,
 	// rename_workspace_primary_repo_columns, sync_job, prompts, skills,
-	// google_auth (PR-1 Foundations: cachicamas-google-auth-bootstrap).
-	if len(applied) != 13 {
-		t.Fatalf("Up applied %d migrations, want 13 (got %+v)", len(applied), applied)
+	// google_auth (PR-1 Foundations: cachicamas-google-auth-bootstrap),
+	// user_immutable_created_at (PR-2: BEFORE UPDATE trigger on auth.users).
+	if len(applied) != 14 {
+		t.Fatalf("Up applied %d migrations, want 14 (got %+v)", len(applied), applied)
 	}
 	wantVersions := []int64{
 		20260621120000,
@@ -526,6 +527,7 @@ func TestRunner_Up_AllNewMigrationsApply(t *testing.T) {
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
 		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
+		20260903130000, // cachicamas-google-auth-bootstrap PR-2 (created_at immutability trigger on auth.users)
 	}
 	for i, want := range wantVersions {
 		if applied[i].ID != want {
@@ -983,8 +985,8 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// After this Up, all 13 versions (12 prior + google_auth PR-1) must
-	// be in the bookkeeping table in chronological order.
+	// After this Up, all 14 versions (12 prior + google_auth PR-1 + user_immutable_created_at PR-2)
+	// must be in the bookkeeping table in chronological order.
 	wantVersions := []int64{
 		20260621120000,
 		20260622120000,
@@ -999,6 +1001,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
 		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
+		20260903130000, // cachicamas-google-auth-bootstrap PR-2 (created_at immutability trigger on auth.users)
 	}
 	if len(applied) != len(wantVersions) {
 		t.Errorf("Up applied %d migrations, want %d (got %+v)", len(applied), len(wantVersions), applied)
@@ -1043,6 +1046,7 @@ func TestRunner_Up_LexicographicOrder_AllFourVersions(t *testing.T) {
 		20260715120000, // 2026-07-15-prompt-storage-table (prompt + prompt_revision)
 		20260717120000, // 2026-07-17-skills-foundational (skill + skill_revision)
 		20260903120000, // cachicamas-google-auth-bootstrap PR-1 Foundations (auth.* schema + drop identity.* + FK rewrites)
+		20260903130000, // cachicamas-google-auth-bootstrap PR-2 (created_at immutability trigger on auth.users)
 	}
 	if len(got) != len(wantSet) {
 		t.Errorf("public.schema_migrations has %d rows, want %d (got %v)", len(got), len(wantSet), got)
@@ -1293,8 +1297,8 @@ func TestWitsabaFramework_AgentFirstLifecycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if len(applied) != 13 {
-		t.Fatalf("expected 13 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts + skills + google_auth), got %d", len(applied))
+	if len(applied) != 14 {
+		t.Fatalf("expected 14 migrations applied (hello + orgs/projects/reqs/specs + github_login + workspaces_and_account_tokens + workspaces + drop_workspace_repository + rename_primary_repo_columns + sync_job + prompts + skills + google_auth + user_immutable_created_at), got %d", len(applied))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2063,8 +2067,83 @@ func TestRunner_Up_SyncJob_PartialUniqueIndex(t *testing.T) {
     	// table goes away; we do not need to issue DROP SCHEMA here.
     }
 
-    // Compile-time check that GooseRunner satisfies domain.Runner once
-    // runner.go lands. If the runner omits Up/Status or returns the
-    // wrong types, this file will fail to compile — that failure is the
-    // RED signal for the domain port.
-    var _ domain.Runner = (*GooseRunner)(nil)
+// Compile-time check that GooseRunner satisfies domain.Runner once
+// runner.go lands. If the runner omits Up/Status or returns the
+// wrong types, this file will fail to compile — that failure is the
+// RED signal for the domain port.
+var _ domain.Runner = (*GooseRunner)(nil)
+
+// TestRunner_Up_AuthUsersCreatedAtImmutable covers spec R-DB-001 /
+// S-DB-002 at the database layer: after the migration runs, any
+// UPDATE that tries to modify auth.users.created_at MUST be
+// reverted by the BEFORE UPDATE trigger
+// users_created_at_immutable. The trigger preserves created_at
+// even if the UPDATE statement explicitly sets it.
+//
+// This test guards against two regressions:
+//  1. Someone removes the trigger migration. The trigger would not
+//     exist; UPDATE created_at would actually change the value.
+//  2. Someone changes the trigger to RAISE EXCEPTION instead of
+//     silently reverting. Legitimate UPDATE paths (e.g. the
+//     bootstrap service's UpdateLoginFields) would fail.
+//
+// The test seeds a user, attempts to change created_at, then
+// re-reads and asserts the original timestamp survived.
+func TestRunner_Up_AuthUsersCreatedAtImmutable(t *testing.T) {
+	db := integrationRunnerDB(t)
+	resetSchemaMigrations(t, db)
+	wipeNewTables(t, db)
+	wipeAuthAndIdentityTables(t, db)
+	t.Cleanup(func() {
+		wipeNewTables(t, db)
+		wipeAuthAndIdentityTables(t, db)
+	})
+
+	r := newTestRunner(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := r.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	// Insert one auth.users row at a known created_at so the test
+	// can detect any drift after the UPDATE.
+	var originalCreatedAt time.Time
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO auth.users (email, google_sub, status, created_at)
+         VALUES ('imm@example.com', 'imm-sub-1', 'registered', '2020-01-01T00:00:00Z')
+         RETURNING created_at`,
+	).Scan(&originalCreatedAt); err != nil {
+		t.Fatalf("seed auth.users: %v", err)
+	}
+
+	// Attempt to UPDATE created_at to a different value AND change
+	// the name (a legitimate column). The trigger MUST revert the
+	// created_at change while the name change survives.
+	newName := "renamed"
+	newCreatedAt := time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(ctx,
+		`UPDATE auth.users SET name = $1, created_at = $2 WHERE google_sub = $3`,
+		newName, newCreatedAt, "imm-sub-1",
+	); err != nil {
+		t.Fatalf("UPDATE auth.users: %v", err)
+	}
+
+	var afterCreatedAt time.Time
+	var afterName string
+	if err := db.QueryRowContext(ctx,
+		`SELECT created_at, COALESCE(name, '') FROM auth.users WHERE google_sub = $1`,
+		"imm-sub-1",
+	).Scan(&afterCreatedAt, &afterName); err != nil {
+		t.Fatalf("re-read auth.users: %v", err)
+	}
+
+	if !afterCreatedAt.Equal(originalCreatedAt) {
+		t.Errorf("created_at drifted: original=%v, after=%v (trigger should have reverted)",
+			originalCreatedAt, afterCreatedAt)
+	}
+	if afterName != newName {
+		t.Errorf("name did not change: got %q, want %q (trigger must not block legitimate column updates)",
+			afterName, newName)
+	}
+}

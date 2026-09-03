@@ -29,6 +29,7 @@ import (
 	otelglobal "go.opentelemetry.io/otel"
 
 	"github.com/cachicamas/backend/database_administrator/src/application"
+	authapp "github.com/cachicamas/backend/database_administrator/src/application/auth"
 	"github.com/cachicamas/backend/database_administrator/src/domain"
 	githubinfra "github.com/cachicamas/backend/database_administrator/src/infrastructure/github"
 	"github.com/cachicamas/backend/database_administrator/src/infrastructure/postgres"
@@ -526,6 +527,34 @@ func main() {
 	adminGroup := e.Group("", authChain...)
 	promptHandler.RegisterPromptRoutes(adminGroup)
 	skillHandler.RegisterSkillRoutes(adminGroup)
+
+	// cachicamas-google-auth-bootstrap PR-2: wire the auth.* HTTP
+	// surface (POST /internal/auth/bootstrap, GET /internal/me/:user_id).
+	// The X-Internal-Secret middleware is mounted on /internal/* so
+	// only Qwik (which knows the secret) can reach these endpoints.
+	// AUTH_INTERNAL_SECRET is REQUIRED at startup; missing env crashes
+	// the process (mirrors the AUTH_COOKIE_SECRET / IDENTITY_CALLBACK_SECRET
+	// rules above).
+	authInternalSecret := envString("AUTH_INTERNAL_SECRET", "")
+	if authInternalSecret == "" {
+		slog.Error("AUTH_INTERNAL_SECRET must be set; exiting (cachicamas-google-auth-bootstrap S-BE-061)")
+		os.Exit(1)
+	}
+	if len(authInternalSecret) < 32 {
+		slog.Error("AUTH_INTERNAL_SECRET must be at least 32 raw bytes; exiting",
+			"length", len(authInternalSecret),
+			"hint", "generate with `openssl rand -base64 32`",
+		)
+		os.Exit(1)
+	}
+	authUserRepo := postgres.NewUserRepo(db)
+	authOrgRepo := postgres.NewAuthOrganizationRepo(db)
+	authAuditRepo := postgres.NewAuthLoginAuditRepo(db)
+	authBootstrapService := authapp.NewBootstrapService(db, authUserRepo, authOrgRepo, authAuditRepo)
+	authMeService := authapp.NewMeService(db, authUserRepo, authOrgRepo)
+	authHandler := httpiface.NewAuthHandler(authBootstrapService, authMeService)
+	httpiface.RegisterAuthRoutes(e, authHandler, authInternalSecret)
+	_ = envString("GEOIP_DB_PATH", "") // GEOIP_DB_PATH is read by the future handler; PR-2 only adds the gate.
 
 	port := envString("SERVICE_PORT", defaultServicePort)
 	addr := ":" + port
